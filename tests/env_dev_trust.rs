@@ -1,7 +1,7 @@
 //! U19 env/dev split + trust gate (D-JPK-DEVCOMPOSE1=D, card c9jetpackgates).
 //!
 //! Covers:
-//!   * `jet env` (`jetpack enter`) never runs a project function (regression);
+//!   * `jet env` (`jetpack env`) never runs a project function (regression);
 //!   * project-level `jet dev` (bare, no file — distinct from the shipped
 //!     `jet dev <file.jet>` watch loop) runs `fn dev()` after the U12 no-op
 //!     service wait;
@@ -173,18 +173,18 @@ fn typed_secret_map_captures_metadata_and_read_time_composition() {
     );
 }
 
-/// `jetpack enter` (`jet env`) realizes the declared env and drops into a
+/// `jetpack env` (`jet env`) realizes the declared env and drops into a
 /// shell / runs a one-off command — it must NEVER run a project's own
 /// `fn run()`/`fn dev()` (U19's env/dev split). Regression test: the world's
 /// only way to notice a project function ran is grep the marker it prints.
 #[test]
-fn env_enter_runs_no_project_function() {
-    let proj = Scratch::new("enter-no-fn");
-    let root = Scratch::new("enter-no-fn-root");
-    let home = Scratch::new("enter-no-fn-home");
+fn env_runs_no_project_function() {
+    let proj = Scratch::new("env-no-fn");
+    let root = Scratch::new("env-no-fn-root");
+    let home = Scratch::new("env-no-fn-home");
     write_packageless_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\"); }\n");
     let out = jetpack()
-        .args(["enter", "--no-color", "--", "echo", "entered"])
+        .args(["env", "--no-color", "--", "echo", "entered"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
@@ -327,7 +327,7 @@ fn env_declared_missing_secret_is_e1263() {
     let home = Scratch::new("env-secret-missing-home");
     write_secret_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\"); }\n");
     let out = jetpack()
-        .args(["enter", "--no-color", "--trust", "--", "echo", "entered"])
+        .args(["env", "--no-color", "--trust", "--", "echo", "entered"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
@@ -352,7 +352,7 @@ fn secret_env_beats_foreign_flake_autodetect() {
     write_secret_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\"); }\n");
     fs::write(proj.path.join("flake.nix"), "{ outputs = _: {}; }\n").unwrap();
     let out = jetpack()
-        .args(["enter", "--no-color", "--", "echo", "entered"])
+        .args(["env", "--no-color", "--", "echo", "entered"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)

@@ -70,7 +70,7 @@ fn jet_shared_store_status_does_not_default_to_install() {
     );
     assert!(!stderr.contains("sudo"), "stderr: {stderr}");
     assert!(
-        !stderr.contains("jetpack shared-store install"),
+        !stderr.contains("jetpack hangar shared install"),
         "stderr: {stderr}"
     );
     assert!(legacy_hangar.join("marker").is_file());
@@ -89,7 +89,7 @@ fn bare_jet_outdated_is_a_teaching_error_naming_jet_inspect_outdated() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { default: acme/tools#latest@github }
+    sources: { default: acme/tools@github#latest }
     env.dev: Env.{ packages: [default.greet] }
 }
 "#,
@@ -137,7 +137,7 @@ fn jet_inspect_outdated_dispatches_to_jetpack() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { default: acme/tools#latest@github }
+    sources: { default: acme/tools@github#latest }
     env.dev: Env.{ packages: [default.greet] }
 }
 "#,
@@ -174,9 +174,9 @@ module dev {
 }
 
 #[test]
-fn jet_env_delegates_to_jetpack_enter() {
+fn jet_env_delegates_to_jetpack_env() {
     // Card #955 / D-DEV4 (ratified 2026-06-17): `jet env` is the friendly Scale-2 front door
-    // into the project dev shell — it delegates straight to `jetpack enter`,
+    // into the project dev shell — it delegates straight to `jetpack env`,
     // forwarding flags and the trailing `-- cmd`. (`jet dev` is now reserved for
     // the E2-M4 watch/interpret loop.) Running through the `jet` binary must
     // reach the same composed env with no installed tool or network fallback.

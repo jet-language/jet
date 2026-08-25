@@ -3715,8 +3715,8 @@ the exact resolved selector is written back to the declarative source:
 
 ```jet
 rustc@nixpkgs
-#latest jq@nixpkgs
-#auto omp@releases
+jq@nixpkgs#latest
+omp@releases#auto
 ```
 
 The channel is tracking intent; `.jet/lock` records the exact source that intent
@@ -3726,7 +3726,7 @@ resolved to:
 [[source_channel]]
 name = "default"
 channel = "latest"
-exact = "acme/tool#v1.2.0@github"
+exact = "acme/tool@github#v1.2.0"
 ```
 
 `jetpack update [source]` is the only verb that moves `[[source_channel]]`.

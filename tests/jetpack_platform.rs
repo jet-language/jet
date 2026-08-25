@@ -110,7 +110,7 @@ fn platform_tier_gate_runs_native_package_offline_and_cleans_store() {
     )
     .0;
     let clean = jetpack()
-        .args(["clean", "--no-color", "--yes"])
+        .args(["hangar", "clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root.path)
         .env("PATH", &missing_tools.path)
         .output()

@@ -166,7 +166,7 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
     assert!(stderr2.contains("deduplicated"), "{stderr2}");
 
     let list = jetpack()
-        .args(["list", "--no-color"])
+        .args(["hangar", "list", "--no-color"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .output()
@@ -176,7 +176,7 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
     assert!(listed.contains("hello"), "{listed}");
 
     let list_json = jetpack()
-        .args(["list", "--json", "--no-color"])
+        .args(["hangar", "list", "--json", "--no-color"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .output()

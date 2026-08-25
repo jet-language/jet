@@ -285,13 +285,13 @@ And the written law drifts from the written code: the API rubric documents `Type
 
 The `@` sigil is position-sensitive. Prefix `@` marks compile-time names and
 fact reads (`@config`, `T.@range`, `@build.profile`); infix `@` remains the
-package-reference source separator, `textkit#1.2.0@vendor` and
+package-reference source separator, `textkit@vendor#1.2.0` and
 `target@provider` (D-JPK-REF1, errors E0968/E0979/E1317). D-ONCE-AT1=D
 supersedes B10's former reservation-only framing. A marker written with
 leading `@` is still a teaching error: applied rules use `#`.
 
 ```jet
-deps: { http: "jetlib/http#2.1@vendor" }   // infix: package refs
+deps: { http: "jetlib/http@vendor#2.1" }   // canonical: package refs
 @config :: build.profile                    // prefix: compile-time/fact read
 task :: work@node2                          // infix: package source ref
 ```

@@ -11,16 +11,18 @@ pub(super) fn usage_with_color(color: bool) -> String {
 {title}
 
 {envs}
-  {bin} enter                          enter the project shell described by ./{pack}
-  {bin} enter -- cmd                   run a command in the project shell, then exit
-  {bin} enter -p <pkg>...              add ad-hoc nixpkgs packages, undeclared
-  {bin} enter --flake                  force a foreign flake.nix/devenv.nix shell
-  {bin} run   <package>@<source>       enter a temporary shell with that package
-  {bin} run   <package>@<source> -- cmd run a command in that environment, then exit
-  {bin} run                            enter the shell described by ./{pack}
+  {bin} env                            enter the default project environment
+  {bin} env <name>                     enter the named env.<name> module
+  {bin} env -- cmd                     run a command in the project shell, then exit
+  {bin} env -p <pkg>...                add ad-hoc nixpkgs packages, undeclared
+  {bin} env --prep                     materialize the project environment, do not enter
+  {bin} env --flake                    force a foreign flake.nix/devenv.nix shell
+  {bin} use <package>...               enter a shell with exactly these packages
+  {bin} use <package>... -- cmd        run a command in that environment, then exit
+  {bin} use <package>... --prep        materialize those packages, do not enter
+  {bin} run   <job> [-- args]          run a declared project job
   {bin} dev                            realize the env, then run the project's fn dev()
   {bin} fmt --lang <language> [paths] delegate non-Jet files to env formatter
-  {bin} tool run <ref> [-- cmd]        run a package binary ephemerally (D-JPK-TOOLRUN1)
   {bin} tool install <ref> [--as name] install onto ~/.jet/bin (tools generation)
   {bin} tool list                      list globally installed tools
   {bin} tool uninstall <name>          remove an installed tool from ~/.jet/bin
@@ -45,11 +47,8 @@ pub(super) fn usage_with_color(color: bool) -> String {
 
 {store}
   {bin} doctor [--online]              check hangar, registry, locks, cache, and signing
-  {bin} build [<package>@<source>]     realize a package/environment, don't enter
-  {bin} build -p <member>…             (workspace) build only named members
-  {bin} build --affected[-since <ref>] (workspace) build changed members + dependents
   {bin} test  [-p <member>…]           (workspace) realize/test selected members
-  {bin} list                           show realized packages
+  {bin} hangar list                    show realized packages
   {bin} hangar du                      honest per-object hangar disk usage
   {bin} hangar path                    print the resolved user Hangar path
   {bin} hangar verify [<entry-or-archive>] verify Hangar bytes and signatures
@@ -63,20 +62,20 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} hangar repair <entry> --from <archive.hangar>
                                       quarantine and repair a corrupt object
   {bin} hangar recover                  recover interrupted Hangar/build publication
-  {bin} cache bind <role> <mirror>...  bind ordered host-owned cache mirrors
-  {bin} cache list                     list host-owned cache roles
-  {bin} cache publish <entry> --role <role> --yes
+  {bin} hangar cache bind <role> <mirror>...  bind ordered host-owned cache mirrors
+  {bin} hangar cache list              list host-owned cache roles
+  {bin} hangar cache publish <entry> --role <role> --yes
                                       publish a signed NAR to a write-granted mirror
-  {bin} cache verify <entry> --role <role>
+  {bin} hangar cache verify <entry> --role <role>
                                       verify the first trusted cache hit
-  {bin} cache substitute <entry> --role <role> --to <dir> --yes
+  {bin} hangar cache substitute <entry> --role <role> --to <dir> --yes
                                       restore a verified NAR into a new directory
-  {bin} shared-store install         install the optional shared Hangar broker
-  {bin} shared-store enroll <uid>    grant a user read/write broker access
-  {bin} shared-store status          show shared-store broker configuration
-  {bin} vendor [<dir>]                 write vendored + hash-pinned sources
+  {bin} hangar shared install         install the optional shared Hangar broker
+  {bin} hangar shared enroll <uid>    grant a user read/write broker access
+  {bin} hangar shared status          show shared-store broker configuration
+  {bin} hangar vendor [<dir>]         write vendored + hash-pinned sources
   {bin} audit                          read build provenance (runs nothing)
-  {bin} clean                          collect stale hangar objects + optimize
+  {bin} hangar clean                  collect stale hangar objects + optimize
   {bin} search <query>                 search the local offline package index
   {bin} info <source>.<package>         show local offline package metadata
   {bin} explain <ref>                  show dependency, closure, liveness, and rebuild facts
@@ -144,12 +143,13 @@ pub(super) fn usage_with_color(color: bool) -> String {
   --fixtures <dir>                     read provider output from captured fixtures
   --trust                              skip the trust prompt for this one run
   --scope <user|repo>                  (trust grant) where the grant applies
-  -p <pkg>...                          (enter) ad-hoc nixpkgs packages, not declared anywhere
-  -p <member>                          (build/test/run) exact workspace member; repeatable
-  --affected                           (build/test/run) members with changed input hashes + dependents
-  --affected-since <ref>               (build/test/run) members changed since git ref + dependents
-  --flake                              (enter) force the foreign flake.nix/devenv.nix fallback
-  --pure                               (enter) isolate the shell from the host environment
+  -p <pkg>...                          (env) ad-hoc nixpkgs packages, not declared anywhere
+  -p <member>                          (test/run) exact workspace member; repeatable
+  --affected                           (test/run) members with changed input hashes + dependents
+  --affected-since <ref>               (test/run) members changed since git ref + dependents
+  --flake                              (env) force the foreign flake.nix/devenv.nix fallback
+  --pure                               (env) isolate the shell from the host environment
+  --prep                               (env/use) materialize without entering
   --env <name>                         select one env.<name> module
   --preset <name>                      select one declared environment preset
   --push <ref>                         (image) copy locally or publish through OCI Distribution
@@ -190,17 +190,58 @@ mod tests {
     #[test]
     fn doctor_is_in_canonical_route_registry_and_help() {
         assert!(Syntax::JETPACK_VERBS.contains(&"doctor"));
-        assert!(Syntax::JETPACK_VERBS.contains(&"cache"));
-        assert!(Syntax::JETPACK_VERBS.contains(&"shared-store"));
+        assert!(Syntax::JETPACK_VERBS.contains(&"hangar"));
         assert!(usage_with_color(false).contains("jet doctor [--online]"));
         assert_eq!(RuntimePolicy::verb_policy("doctor", &[]).verb, "doctor");
     }
 
     #[test]
+    fn jetpack_verbs_keep_the_ratified_non_jetos_count() {
+        let jetos_verbs = [
+            Syntax::OS_SUBCOMMAND,
+            Syntax::BRIDGE_SUBCOMMAND,
+            Syntax::SERVICES_SUBCOMMAND,
+            Syntax::SECRETS_SUBCOMMAND,
+            Syntax::IMAGE_SUBCOMMAND,
+            Syntax::USER_SUBCOMMAND,
+        ];
+        let non_jetos = Syntax::JETPACK_VERBS
+            .iter()
+            .filter(|verb| !jetos_verbs.contains(verb))
+            .count();
+        assert_eq!(non_jetos, 24);
+        assert_eq!(Syntax::JETPACK_VERBS.len(), 30);
+        assert!(Syntax::JETPACK_VERBS.contains(&"env"));
+        assert!(Syntax::JETPACK_VERBS.contains(&"use"));
+        assert!(!Syntax::JETPACK_VERBS.contains(&"enter"));
+        assert!(!Syntax::JETPACK_VERBS.contains(&"build"));
+        for retired in ["cache", "shared-store", "vendor", "clean", "list"] {
+            assert!(!Syntax::JETPACK_VERBS.contains(&retired));
+        }
+    }
+
+    #[test]
+    fn hangar_help_groups_store_routes() {
+        let help = usage_with_color(false);
+        for command in [
+            "hangar list",
+            "hangar clean",
+            "hangar vendor",
+            "hangar cache bind",
+            "hangar shared install",
+        ] {
+            assert!(help.contains(command), "missing {command}");
+        }
+    }
+
+    #[test]
     fn tool_is_in_canonical_route_registry_and_help() {
         assert!(Syntax::JETPACK_VERBS.contains(&Syntax::TOOL_SUBCOMMAND));
-        assert!(usage_with_color(false).contains("tool run"));
-        assert!(usage_with_color(false).contains("tool install"));
+        let help = usage_with_color(false);
+        assert!(!help.contains("tool run"));
+        assert!(help.contains("tool install"));
+        assert!(help.contains("env <name>"));
+        assert!(help.contains("use <package>"));
         assert_eq!(
             RuntimePolicy::verb_policy(Syntax::TOOL_SUBCOMMAND, &[]).verb,
             Syntax::TOOL_SUBCOMMAND
@@ -296,6 +337,13 @@ mod tests {
         assert_eq!(parsed.flags.fmt_language.as_deref(), Some("nix"));
         assert!(parsed.flags.fmt_check);
         assert!(parsed.flags.fmt_diff);
+        assert!(parsed.positional.is_empty());
+    }
+
+    #[test]
+    fn parses_prep_flag() {
+        let parsed = parse_args_for("env", &[Syntax::ENV_FLAG_PREP.to_string()]);
+        assert!(parsed.flags.prep);
         assert!(parsed.positional.is_empty());
     }
 
@@ -451,12 +499,12 @@ mod tests {
     }
 
     #[test]
-    fn enter_dash_p_still_collects_nixpkgs_packages() {
+    fn env_dash_p_still_collects_nixpkgs_packages() {
         let args: Vec<String> = ["-p", "nodejs", "ripgrep"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let p = parse_args_for("enter", &args);
+        let p = parse_args_for("env", &args);
         assert_eq!(p.flags.packages, vec!["nodejs", "ripgrep"]);
         assert!(p.flags.workspace_members.is_empty());
     }

@@ -1293,7 +1293,7 @@ fn locked_nix_index_key_for_project(
             "Nix source `{source_name}` has malformed exact revision `{revision}`"
         )));
     }
-    // `#auto NixOS/nixpkgs/nixos-unstable@github` -> `nixos-unstable`. Read the
+    // `NixOS/nixpkgs/nixos-unstable@github#auto` -> `nixos-unstable`. Read the
     // original spelling, not the live upstream: applying the lock rewrites the
     // upstream to `github:NixOS/nixpkgs#<revision>`, which no longer names the
     // channel the index is keyed by.
@@ -3288,9 +3288,9 @@ mod tests {
 
     #[test]
     fn flake_ref_strips_jet_version_selector_only_for_nix() {
-        let nix = classify("rustc#version=1.80.0@nixpkgs").unwrap();
+        let nix = classify("rustc@nixpkgs#version=1.80.0").unwrap();
         assert_eq!(flake_ref(&nix, &empty()), "nixpkgs#rustc");
-        let cran = classify("jsonlite#version=1.9.0@cran").unwrap();
+        let cran = classify("jsonlite@cran#version=1.9.0").unwrap();
         assert_eq!(flake_ref(&cran, &empty()), "cran:jsonlite#version=1.9.0");
     }
 
@@ -3306,17 +3306,17 @@ mod tests {
         };
         for (raw, kind, expected_ref) in [
             (
-                "hello#version=1.0.0@jet-registry",
+                "hello@jet-registry#version=1.0.0",
                 ProviderKind::JetRegistry,
                 "jet-registry:hello#version=1.0.0",
             ),
             (
-                "left-pad#version=1.3.0@npm",
+                "left-pad@npm#version=1.3.0",
                 ProviderKind::Npm,
                 "npm:left-pad#version=1.3.0",
             ),
             (
-                "serde#version=1.0.200@cargo",
+                "serde@cargo#version=1.0.200",
                 ProviderKind::Cargo,
                 "cargo:serde#version=1.0.200",
             ),

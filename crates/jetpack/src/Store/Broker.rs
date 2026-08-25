@@ -227,7 +227,7 @@ fn read_shared_store_config(layout: &BrokerLayout) -> io::Result<Option<SharedSt
 pub fn install_shared_store(_roots: &Roots) -> io::Result<SharedStoreInstallReport> {
     if !is_effective_root() {
         return Err(invalid(
-            "shared-store install requires administrator authority; run `sudo jet shared-store install`",
+            "shared-store install requires administrator authority; run `sudo jetpack hangar shared install`",
         ));
     }
     let layout = admin_broker_layout();
@@ -358,7 +358,7 @@ fn admin_service_unit_text(executable: &Path, config: &SharedStoreConfig) -> Str
     .collect::<Vec<_>>()
     .join(" ");
     format!(
-        "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={} shared-store broker --fd 3\nDynamicUser=yes\nStateDirectory={}\nStateDirectoryMode=0700\nLoadCredential=hangar.key:{}\nEnvironment=JET_SHARED_STORE_TRUST_KEY=%d/hangar.key\nNoNewPrivileges=yes\nPrivateTmp=yes\nPrivateDevices=yes\nProtectSystem=strict\nProtectHome=read-only\nProtectKernelTunables=yes\nProtectKernelModules=yes\nProtectControlGroups=yes\nProtectClock=yes\nProtectProc=invisible\nProcSubset=pid\nLockPersonality=yes\nRestrictNamespaces=yes\nRestrictSUIDSGID=yes\nRestrictRealtime=yes\nMemoryDenyWriteExecute=yes\nCapabilityBoundingSet=\nAmbientCapabilities=\nRestrictAddressFamilies=AF_UNIX\nIPAddressDeny=any\nReadOnlyPaths={}\nUMask=0077\nTimeoutStartSec=120\nReadWritePaths={}\n",
+        "[Unit]\nDescription=Jet shared-store broker request\nRequires=jet-shared-store.socket\n\n[Service]\nType=oneshot\nExecStart={} hangar shared broker --fd 3\nDynamicUser=yes\nStateDirectory={}\nStateDirectoryMode=0700\nLoadCredential=hangar.key:{}\nEnvironment=JET_SHARED_STORE_TRUST_KEY=%d/hangar.key\nNoNewPrivileges=yes\nPrivateTmp=yes\nPrivateDevices=yes\nProtectSystem=strict\nProtectHome=read-only\nProtectKernelTunables=yes\nProtectKernelModules=yes\nProtectControlGroups=yes\nProtectClock=yes\nProtectProc=invisible\nProcSubset=pid\nLockPersonality=yes\nRestrictNamespaces=yes\nRestrictSUIDSGID=yes\nRestrictRealtime=yes\nMemoryDenyWriteExecute=yes\nCapabilityBoundingSet=\nAmbientCapabilities=\nRestrictAddressFamilies=AF_UNIX\nIPAddressDeny=any\nReadOnlyPaths={}\nUMask=0077\nTimeoutStartSec=120\nReadWritePaths={}\n",
         systemd_escape_path(executable),
         state_directories,
         systemd_escape_path(&config.trust_key),

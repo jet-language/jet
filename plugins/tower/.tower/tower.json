@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2196,
-    "rev": 44701,
+    "rev": 44729,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26,7 +26,6 @@
         "radar:e12",
         "radar:e11",
         "radar:e10",
-        "radar:e7",
         "board-ideas",
         "radar-sq"
       ]
@@ -146941,19 +146940,24 @@
     {
       "id": "cldqlgbu",
       "num": 2168,
-      "title": "Choose one command that opens Canvas",
-      "body": "Canvas is now reachable only through `jet dev <file> --target=web` and the `/canvas` route. This card chooses one direct command surface. The result must keep Canvas as a lens on the resident `jet dev` session, not a second compiler or runtime.",
+      "title": "Open the Canvas IDE through `jet dev --canvas`",
+      "body": "Canvas is the Jet IDE and workbench, closer to Unreal Editor than a temporary graph panel. Plain `jet dev` remains terminal-first. Every interactive start teaches the one Canvas command: `jet dev <source> --canvas`. No `jet canvas` alias exists.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Ratify D-CANVAS-CMD1 as the only command that opens Canvas.\n2. Add that command to the canonical CLI registry, help, completions, and man output.\n3. Route it into the existing resident dev session and Canvas service. Do not add a second watch loop.\n4. Keep plain `jet dev` behavior unchanged when Canvas is not requested.\n5. Add command, lifecycle, and error-path coverage. Update the Canvas entry documentation.",
+      "plan": "1. Add `--canvas` to the canonical `jet dev` surface only.\n2. Keep plain interactive dev terminal-first and print one compact Canvas command hint after ready.\n3. Suppress the hint for Canvas sessions, JSON, non-interactive output, and machine consumers.\n4. Open the full Canvas IDE over the same resident dev session, not a second compiler or watcher.\n5. Keep command, help, completions, man output, lifecycle, and diagnostics in one CLI registry.\n6. Prove terminal, Canvas, headless, browser-failure, and repeated-launch paths.",
       "checkSteps": "Run the chosen command on a native hello program. Canvas opens once, edits the same source, and stops cleanly with Ctrl-C.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Owner grilling acceptance terms: Canvas is the Jet IDE; terminal dev teaches the sole `jet dev --canvas` entry every interactive start."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -146967,91 +146971,106 @@
       "criteria": [
         {
           "n": 1,
-          "text": "One canonical CLI form opens Canvas for a checked Jet source, and no alias or second command form remains.",
+          "text": "`jet dev <source> --canvas` is the only Canvas entry command; `jet canvas` and other aliases do not exist.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:09.054Z"
+          "at": "2026-08-25T13:35:16.168Z"
         },
         {
           "n": 2,
-          "text": "The command appears with the same spelling and meaning in help, shell completions, man output, and usage diagnostics.",
+          "text": "Plain interactive `jet dev` remains terminal-first and does not start the Canvas endpoint or browser.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:09.054Z"
+          "at": "2026-08-25T13:35:16.168Z"
         },
         {
           "n": 3,
-          "text": "Canvas attaches to the same resident session, source revision, last-good program, debugger, and `#Persist` state as `jet dev`.",
+          "text": "Every interactive terminal dev start prints one compact hint with the exact command `jet dev <source> --canvas`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:09.054Z"
+          "at": "2026-08-25T13:35:16.168Z"
         },
         {
           "n": 4,
-          "text": "Plain `jet dev` keeps its current terminal loop and does not open or serve Canvas unless the chosen surface requests it.",
+          "text": "The hint is absent from Canvas sessions, JSON, redirected output, non-interactive runs, and machine protocols.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:09.054Z"
+          "at": "2026-08-25T13:35:16.168Z"
         },
         {
           "n": 5,
-          "text": "Ctrl-C, browser close, source-not-found, and browser-launch failure have deterministic exits and clear recovery text.",
+          "text": "Canvas opens as the full Jet IDE/workbench over the same session, revisions, state, debugger, tests, receipts, and last-good program.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:09.054Z"
+          "at": "2026-08-25T13:35:16.168Z"
         },
         {
           "n": 6,
-          "text": "CLI integration tests prove the chosen form and reject every losing spelling from D-CANVAS-CMD1.",
+          "text": "Help, completions, man output, status text, and diagnostics use the same command and description.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:09.054Z"
+          "at": "2026-08-25T13:35:16.168Z"
+        },
+        {
+          "n": 7,
+          "text": "Ctrl-C, browser close, source-not-found, browser-launch failure, and a second Canvas request have deterministic lifecycle behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:35:16.168Z"
         }
       ],
       "refs": [
+        "D-CANVAS-CMD1",
         "D-RUN-SESSION1",
         "D-CANVAS-RAD1"
       ],
       "tags": [
         "canvas",
         "cli",
-        "dev-loop"
+        "ide"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:04.054Z",
-      "updated": "2026-08-24T23:36:41.007Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T13:35:16.168Z",
+      "updatedBy": "Main"
     },
     {
       "id": "cmtyww5f",
       "num": 2169,
-      "title": "Make Canvas target-independent with an automatic local port",
-      "body": "Canvas is a source editor and dev-session lens. It is not a web compilation target. The current route exists only in the web dev host, even though the host already scans `127.0.0.1:8080..=8089` when no port is given. This card separates the Canvas control server from the program target and makes the local endpoint automatic.",
+      "title": "Make the Canvas IDE target-independent with a secure automatic endpoint",
+      "body": "Canvas edits and runs Jet projects across command-line, service, web, native UI, and game work. It is not a web compilation target. The IDE uses a secure automatic loopback endpoint and adapts its panels to checked project capabilities.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Ratify D-CANVAS-TARGET1 for target and endpoint behavior.\n2. Move target-neutral Canvas routes behind a control host that any dev session can start.\n3. Bind loopback only by default and choose an available port without a required flag.\n4. Keep explicit host or port controls expert-only, authenticated, and fail-closed.\n5. Prove native, web, game, and non-runnable library sources open the same source-backed Canvas facts.\n6. Update CLI help and security documentation.",
+      "plan": "1. Start a target-neutral Canvas control host for any checked Jet source.\n2. Bind a free loopback port and create a session secret without requiring target or endpoint flags.\n3. Keep program target and output selection independent from the IDE transport.\n4. Adapt graph, code, diagnostics, terminal, service, preview, and designer panels to checked capabilities.\n5. Expose host, port, transport, output, and target overrides only as named expert controls.\n6. Prove security, collisions, capability changes, target changes, and all supported project kinds.",
       "checkSteps": "Open the same source once as native and once as web. The Canvas graph stays the same while each program uses its own target.",
       "blockedBy": [],
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Owner grilling acceptance terms: Canvas is target-independent, uses a secure automatic endpoint, and adapts IDE panels to checked capabilities."
+        },
+        {
           "at": "2026-08-24",
           "by": "Main",
           "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
@@ -147064,90 +147083,113 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Canvas opens for native, web, game, service, library, and build sources without requiring `--target=web`.",
+          "text": "Canvas opens for command-line, service, web, native UI, game, library, and build projects without `--target=web`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.023Z"
+          "at": "2026-08-25T13:35:18.840Z"
         },
         {
           "n": 2,
-          "text": "The source target still controls program compilation and preview behavior; opening Canvas never changes the target.",
+          "text": "With no endpoint flags, Canvas binds loopback on a free port, creates a session secret, opens the exact URL, and reports it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.023Z"
+          "at": "2026-08-25T13:35:18.840Z"
         },
         {
           "n": 3,
-          "text": "With no endpoint flags, Canvas binds only to loopback, selects an available port, opens the exact URL, and reports it.",
+          "text": "The Canvas endpoint never changes the selected program target, output, execution tier, or preview adapter.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.023Z"
+          "at": "2026-08-25T13:35:18.840Z"
         },
         {
           "n": 4,
-          "text": "An explicit occupied or invalid port fails with one registered diagnostic that names the port and a safe fix.",
+          "text": "Graph, code, diagnostics, and runtime output work for every project; preview and designer panels appear only when checked capabilities support them.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.023Z"
+          "at": "2026-08-25T13:35:18.840Z"
         },
         {
           "n": 5,
-          "text": "Non-loopback exposure requires an explicit expert opt-in and a session secret; default CORS and request checks reject other origins.",
+          "text": "Unsupported panels do not occupy the normal workspace as disabled clutter.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.023Z"
+          "at": "2026-08-25T13:35:18.840Z"
         },
         {
           "n": 6,
-          "text": "Native and web integration tests read and edit the same graph schema through the target-neutral control host.",
+          "text": "Experts can select output, target, host, port, transport, authority, and audit controls through explicit named settings.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.023Z"
+          "at": "2026-08-25T13:35:18.840Z"
+        },
+        {
+          "n": 7,
+          "text": "Non-loopback exposure requires explicit policy and authentication; strict origin and request checks fail closed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:35:18.840Z"
+        },
+        {
+          "n": 8,
+          "text": "Tests cover every project kind, port collision, invalid override, session secret, target switch, capability change, and two IDE clients.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:35:18.840Z"
         }
       ],
       "refs": [
-        "D-CANVAS-RAD1",
-        "D-RUN-SESSION1"
+        "D-CANVAS-TARGET1",
+        "D-CANVAS-RAD1"
       ],
       "tags": [
         "canvas",
-        "cli",
+        "ide",
         "security"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:18.096Z",
-      "updated": "2026-08-24T23:37:29.161Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T13:35:18.840Z",
+      "updatedBy": "Main"
     },
     {
       "id": "cnnczx0n",
       "num": 2170,
-      "title": "Unify Canvas, app preview, and custom dev servers in one session",
-      "body": "A web application can need its own dev server and route policy while Canvas edits the same project. Native and game programs also need Canvas without pretending to be web apps. This card defines one resident session with separate app and tool lenses, plus one visual editor path for web, native, and game work.",
+      "title": "Unify the Canvas IDE, app preview, and custom servers in one session",
+      "body": "Canvas is the project IDE and workbench. Its project browser and run launcher live inside the IDE like Unreal Editor. App servers and Canvas use separate listeners, but every tool view shares one semantic session and one source-transaction history.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Ratify D-CANVAS-SESSION1 for the session and listener topology.\n2. Give the resident dev session one identity, revision stream, last-good program, and transaction log.\n3. Attach the app preview, custom web server, Canvas, debugger, and source editor as lenses on that session.\n4. Keep app routes and ports separate from reserved tool transport. Add an explicit bridge for preview selection and events.\n5. Preserve source truth across graph, visual layout, and text edits.\n6. Exercise reconnect, compile-error, stale-revision, custom-server, and target-switch states.\n7. Present the real browser state matrix for owner acceptance.",
-      "checkSteps": "Open one web app with a custom server and one native app. Check project, preview, graph, code, error, and reconnect states at desktop and narrow widths.",
+      "plan": "1. Give the resident dev session one identity, revision stream, last-good program, state store, debugger, test harness, and receipt stream.\n2. Attach the Canvas IDE, text editor, graph, designer, preview, terminal, debugger, tests, and custom servers as views of that session.\n3. Keep app and Canvas listeners separate so custom routes and middleware remain application-owned.\n4. Put project, output, target, and run selection in the normal IDE workspace. Do not block opening on a transient prelaunch chooser.\n5. Use one source transaction, conflict, undo, recovery, and stale-revision model across every editor surface.\n6. Exercise rebuild failure, reconnect, multiple clients, custom servers, output switches, and target switches.\n7. Present the full IDE state matrix for owner visual acceptance.",
+      "checkSteps": "Open the Canvas IDE for a multi-output project. Check the project launcher, adaptive panels, custom server, output switch, compile error, reconnect, graph edit, text edit, and preview at desktop and narrow widths.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Owner grilling acceptance terms: Canvas is an Unreal-like IDE with an internal output launcher, separate listeners, and one semantic session."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -147161,100 +147203,125 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Canvas, text editing, debugger controls, and app preview report one session id, source revision, generation, and last-good program.",
+          "text": "Canvas opens the full project IDE before an output choice and keeps project and run selection in its normal workspace.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.551Z"
+          "at": "2026-08-25T13:35:21.347Z"
         },
         {
           "n": 2,
-          "text": "A custom web dev server keeps its own host, port, routes, middleware, and reload policy without shadowing Canvas transport routes.",
+          "text": "Multiple valid outputs appear in the IDE project/output launcher, not a transient terminal or prelaunch chooser.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.551Z"
+          "at": "2026-08-25T13:35:21.347Z"
         },
         {
           "n": 3,
-          "text": "Canvas can preview or inspect web, native, and game programs through target-specific adapters without a second source model.",
+          "text": "Canvas, text, graph, designer, preview, terminal, debugger, tests, and custom servers report one session identity and source revision.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.551Z"
+          "at": "2026-08-25T13:35:21.347Z"
         },
         {
           "n": 4,
-          "text": "Graph edits, visual layout edits, and text edits use one transaction history with conflict checks, undo, and stale-revision refusal.",
+          "text": "A custom app server keeps its host, port, routes, middleware, and reload policy on a listener separate from Canvas transport.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.551Z"
+          "at": "2026-08-25T13:35:21.347Z"
         },
         {
           "n": 5,
-          "text": "A failed rebuild keeps the last good preview and graph, shows current diagnostics, and reconnects without losing accepted edits.",
+          "text": "All editor surfaces use one source transaction history with conflict checks, undo, stale-revision refusal, and accepted-revision receipts.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.551Z"
+          "at": "2026-08-25T13:35:21.347Z"
         },
         {
           "n": 6,
-          "text": "Browser scenarios cover default web serving, a custom web server, native preview, game preview, disconnect, reconnect, and two clients.",
+          "text": "A failed rebuild keeps the last good preview and graph while the IDE shows diagnostics for current source.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.551Z"
+          "at": "2026-08-25T13:35:21.347Z"
         },
         {
           "n": 7,
-          "text": "Owner visual acceptance confirms that project, preview, graph, and code views make the active target and connection state clear.",
+          "text": "Disconnect and reconnect preserve accepted edits, selected project context, run configuration, debugger state, and last-good program.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:10.551Z"
+          "at": "2026-08-25T13:35:21.347Z"
+        },
+        {
+          "n": 8,
+          "text": "Browser scenarios cover CLI, service, web, native UI, game, custom server, multiple outputs, two clients, errors, and reconnect.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:35:21.347Z"
+        },
+        {
+          "n": 9,
+          "text": "Owner visual acceptance confirms an Unreal-like IDE model: project, output, preview, graph, code, diagnostics, and run state read as one workbench.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:35:21.347Z"
         }
       ],
       "refs": [
+        "D-CANVAS-SESSION1",
         "D-RUN-SESSION1",
         "D-CANVAS-RAD1",
         "D-NATIVEUI-DEV1"
       ],
       "tags": [
         "canvas",
+        "ide",
         "dev-loop",
         "web-ui"
       ],
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-24T22:55:24.226Z",
-      "updated": "2026-08-24T23:38:04.024Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T13:35:21.347Z",
+      "updatedBy": "Main"
     },
     {
       "id": "co323ahi",
       "num": 2171,
-      "title": "Make the Murmur3 port as readable as C without weaker arithmetic",
-      "body": "The card named a missing `murmur3_x86_64` path. The live port is `examples/features/ports/murmur3_x86_32/run.jet`. Its fixed-width safety is stronger than C, but repeated `wrapping(...)`, manual little-endian loads, and conversions hide the algorithm. The end state must match C readability without making overflow implicit.",
+      "title": "Make modular ports concise through one arithmetic policy",
+      "body": "Fixed-width arithmetic stays checked by default. This card chooses one expert policy system that makes modular algorithms readable without weakening division, shifts, conversions, indexing, or bounds. The Murmur3 x86_32 port is the acceptance case.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
-      "plan": "1. Ratify D-WRAP-SCOPE1 for an explicit, bounded wrapping-arithmetic surface.\n2. Add or reuse type-owned little-endian byte loading and rotation APIs. Do not add algorithm-specific helpers.\n3. Rewrite the x86_32 port with one visible arithmetic policy and ordinary typed operations.\n4. Keep default fixed-width arithmetic trapping everywhere outside the chosen opt-in.\n5. Compare the Jet and reference C versions by algorithm step, source size, and visible safety gates.\n6. Run the published vectors on default `jet run` and AOT.",
+      "plan": "1. Implement the arithmetic policy system ratified by D-WRAP-SCOPE1.\n2. Keep exact Int and checked fixed-width behavior as the zero-ceremony default.\n3. Support checked, wrapping, and saturating expert control with visible scope and inspectable provenance.\n4. Reuse shared Prelude arithmetic operations on every tier.\n5. Add general endian-load and rotation APIs where the Murmur port needs them.\n6. Rewrite the port step for step against the C reference and run all vectors.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Owner grilling rebuilt the ballot around frequency-priced arithmetic policy and nested expert control."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -147268,99 +147335,148 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The card and example consistently name `murmur3_x86_32`; no missing x86_64 path remains in the plan or checks.",
+          "text": "Default Int remains exact, and fixed-width arithmetic traps on overflow outside an explicit selected policy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:11.366Z"
+          "at": "2026-08-25T13:34:11.039Z"
         },
         {
           "n": 2,
-          "text": "Every wrapping operation is covered by one explicit bounded opt-in, and fixed-width arithmetic still traps by default elsewhere.",
+          "text": "The ratified expert policy supports checked, wrapping, and saturating behavior with deterministic scope and precedence.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:11.366Z"
+          "at": "2026-08-25T13:34:11.039Z"
         },
         {
           "n": 3,
-          "text": "Little-endian block reads use a general type-owned Core API with bounds checking and identical meaning on every execution tier.",
+          "text": "Wrapping changes arithmetic overflow only; division by zero, shift counts, conversions, indexing, slices, and bounds stay checked.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:11.366Z"
+          "at": "2026-08-25T13:34:11.039Z"
         },
         {
           "n": 4,
-          "text": "The Jet source follows the C algorithm step for step without repeated conversion noise or per-operation wrapping wrappers.",
+          "text": "Hover, semantic tokens, reflection, and inspect output name the active policy and its source scope.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:11.366Z"
+          "at": "2026-08-25T13:34:11.039Z"
         },
         {
           "n": 5,
-          "text": "A side-by-side review finds no hidden overflow, unchecked indexing, pointer access, host-endian assumption, or `#Unsafe` region.",
+          "text": "All execution tiers call the same Prelude arithmetic rules; no engine re-encodes policy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:11.366Z"
+          "at": "2026-08-25T13:34:11.039Z"
         },
         {
           "n": 6,
-          "text": "All reference vectors, tail lengths zero through three, unaligned input, and nonzero seeds match on default `jet run` and AOT.",
+          "text": "The Murmur3 x86_32 port uses one visible modular policy and general Core endian and rotation APIs.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:11.366Z"
+          "at": "2026-08-25T13:34:11.039Z"
         },
         {
           "n": 7,
-          "text": "The rewritten Jet algorithm is no longer longer than the reference C algorithm after comments and test harnesses are excluded.",
+          "text": "All reference vectors, tail lengths, unaligned input, and nonzero seeds match on default `jet run` and AOT.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:11.366Z"
+          "at": "2026-08-25T13:34:11.039Z"
+        },
+        {
+          "n": 8,
+          "text": "The algorithm body is no longer longer than the reference C body after comments and harness code are excluded.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:34:11.039Z"
+        },
+        {
+          "n": 9,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:42:45.567Z"
+        },
+        {
+          "n": 10,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:42:45.567Z"
+        },
+        {
+          "n": 11,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:42:45.567Z"
+        },
+        {
+          "n": 12,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:42:45.567Z"
         }
       ],
       "refs": [
-        "D-NUMOPS1",
-        "D-INTBIG1"
+        "D-WRAP-SCOPE1"
       ],
       "tags": [
         "numeric",
-        "stdlib",
+        "safety",
         "examples"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:31.706Z",
-      "updated": "2026-08-24T23:14:20.275Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-25T13:42:45.567Z",
+      "updatedBy": "owner"
     },
     {
       "id": "cp3zupnt",
       "num": 2172,
-      "title": "Make fallible signatures read as success plus typed failure",
-      "body": "`fn good() Int String!` means an `Int` success or a `String` failure under the current suffix law. The example name is hard to parse, `String` does not explain a failure domain, and no `Result` word appears. Two owner choices remain: what may wear `!`, and whether the suffix alone makes fallibility clear.",
+      "title": "Make failure implicit by default and typed by expert opt-out",
+      "body": "Jet always preserves one structured Error route, so beginner functions must not repeat `Error!` or propagation `?`. Experts opt out with prefix contracts over `#Error` types. This card implements the complete failure foundation chosen by D-FAILURE-FOUNDATION1.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
-      "plan": "1. Ratify D-ERROR-TYPE1 and D-FALLIBLE-VISIBLE1.\n2. Apply both outcomes to the signature grammar, sema type rules, formatter, and function types.\n3. Replace primitive text failures in teaching examples with a named error type or the ratified equivalent.\n4. Rename `refutable_test_bind.jet` to a plain task-focused name and update all indexes and goldens.\n5. Add teaching diagnostics for invalid error suffixes and confused optional versus fallible signatures.\n6. Prove optional success, typed failure, unions, unit failure, propagation, and deconstruction on all applicable tiers.",
+      "plan": "1. Implement the implicit structured Error route on every function and erase it only after sema proves it unreachable.\n2. Auto-propagate unhandled errors through plain calls. Keep `??` for local handling and `?(text)` for journey context.\n3. Add prefix roles: `?Success`, `!Error`, `!(E1 | E2)`, and `!Never`.\n4. Require `#Error` on custom explicit error types. Apply one declared `Source -> TargetError` conversion automatically.\n5. Expose default, typed, converted, and proven-unreachable routes in hover, reflection, inspect, reports, and receipts.\n6. Use one front-end semantic model and one shared Prelude carrier across AOT, JIT, interpreter, comptime, and web.\n7. Migrate examples and teach the frequency-priced ladder: no beginner syntax, one expert contract, full audit.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Owner grilling replaced the fragmented error questions with one frequency-priced failure foundation."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -147374,83 +147490,99 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A function signature names its success value and failure contract exactly as both ratified ballots require.",
+          "text": "Every function receives the structured Error route by default, and sema records when that route is reachable or proven impossible.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.104Z"
+          "at": "2026-08-25T13:30:32.224Z"
         },
         {
           "n": 2,
-          "text": "The error suffix cannot silently turn an unrelated success type into the failure type; invalid cases get one registered teaching diagnostic.",
+          "text": "A plain fallible call propagates automatically with no postfix `?`; `??` handles locally and `?(text)` adds one journey context note.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.104Z"
+          "at": "2026-08-25T13:30:32.224Z"
         },
         {
           "n": 3,
-          "text": "Optional success and fallible return stay distinct: `?` means absence only, and examples show optional plus fallible together.",
+          "text": "Expert signatures accept `?Success`, `!Error`, `!(E1 | E2)`, and `!Never` with one unambiguous prefix grammar in every type position.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.104Z"
+          "at": "2026-08-25T13:30:32.224Z"
         },
         {
           "n": 4,
-          "text": "The renamed example uses a named failure domain, states the success type, and contains no unexplained `Int String!` teaching line.",
+          "text": "Only Core Error types and named types marked `#Error` may appear after `!`; invalid types get one registered teaching diagnostic.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.104Z"
+          "at": "2026-08-25T13:30:32.224Z"
         },
         {
           "n": 5,
-          "text": "Function declarations, aliases, fields, parameters, function values, unions, and unit-fallible forms use one suffix grammar.",
+          "text": "One unique declared `Source -> TargetError` conversion applies automatically; missing and ambiguous crossings get exact sema diagnostics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.104Z"
+          "at": "2026-08-25T13:30:32.224Z"
         },
         {
           "n": 6,
-          "text": "Default `jet run`, AOT, JIT, and interpreter proofs agree for success, absence, typed failure, propagation, and pattern binding.",
+          "text": "`!Never` rejects every reachable failure and records the proof used to erase the default Error route.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.104Z"
+          "at": "2026-08-25T13:30:32.224Z"
         },
         {
           "n": 7,
-          "text": "The formatter and diagnostics make the success and failure boundary readable without an implicit or hidden carrier.",
+          "text": "Hover, completion, reflection, `jet inspect`, human reports, JSON, and receipts show the effective error contract even when source omits it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.104Z"
+          "at": "2026-08-25T13:30:32.224Z"
+        },
+        {
+          "n": 8,
+          "text": "The default report preserves code, message, causes, context, original error identity, and source journey without string parsing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:30:32.224Z"
+        },
+        {
+          "n": 9,
+          "text": "AOT, JIT, interpreter, comptime, and web use the same shared failure carrier and conversion rules.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:30:32.224Z"
         }
       ],
       "refs": [
-        "D-ERRSUFFIX1",
-        "D-ERRSIGIL1",
-        "D-FAIL-CARRIER1"
+        "D-FAILURE-FOUNDATION1"
       ],
       "tags": [
-        "syntax",
         "errors",
-        "examples"
+        "syntax",
+        "safety"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:42.647Z",
-      "updated": "2026-08-24T23:14:21.047Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-25T13:42:26.707Z",
+      "updatedBy": "owner"
     },
     {
       "id": "cq5blslq",
@@ -147706,19 +147838,26 @@
     {
       "id": "cs2bko2y",
       "num": 2175,
-      "title": "Give build entries a BuildPlan success and BuildError failure",
-      "body": "Six live build entries spell `fn build(b: BuildContext) BuildPlan!`. Under D-ERRSUFFIX1=B, this declares unit success with `BuildPlan` as the error. Each function instead returns a `BuildPlan` and propagates build-operation failures. This card fixes the contract and chooses how the recognized build entry gets its default error type.",
+      "title": "Make build entries return BuildPlan through the implicit Error model",
+      "body": "Live build entries use `BuildPlan!`, which places BuildPlan in the error role under the retired suffix grammar. The current owner ruling removes a build-only default: ordinary build entries return BuildPlan and use the same implicit structured Error route as every function. Experts may declare `!BuildError`.",
       "kind": "bug",
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
-      "plan": "1. Ratify D-BUILD-FAIL1 for the build-entry failure contract.\n2. Make sema check a build entry against `BuildPlan` success and the chosen build error rule.\n3. Give every `BuildContext` failure one named `BuildError` path and preserve explicit custom conversion.\n4. Migrate all build entries, tests, generated templates, docs, and diagnostics.\n5. Reject the old `BuildPlan!` spelling with a focused fix.\n6. Prove successful plans and representative build failures through the programmable-build runner.",
+      "plan": "1. Make the recognized build entry success contract `BuildPlan`.\n2. Route BuildContext failures through the implicit structured Error channel by default.\n3. Let experts declare `!BuildError` or a `#Error` union with ordinary automatic conversions.\n4. Reject `BuildPlan!` and every retired build signature with an exact migration diagnostic.\n5. Migrate all build entries, generated templates, docs, tests, and examples.\n6. Prove valid plans and structured failures through the programmable-build runner.",
       "checkSteps": null,
-      "blockedBy": [],
+      "blockedBy": [
+        "D-FAILURE-FOUNDATION1"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Current owner instruction supersedes the earlier build-only default: build now uses the universal implicit Error route."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -147732,82 +147871,90 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every recognized `fn build` returns `BuildPlan` as its success value and never treats `BuildPlan` as an error type.",
+          "text": "Every recognized `fn build` returns BuildPlan as its success value and never treats BuildPlan as an error type.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.844Z"
+          "at": "2026-08-25T13:30:48.525Z"
         },
         {
           "n": 2,
-          "text": "The default and explicit build error forms match D-BUILD-FAIL1 in declarations, function values, generated templates, and help text.",
+          "text": "The beginner build signature writes `BuildPlan` with no routine Error declaration or propagation marks.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.844Z"
+          "at": "2026-08-25T13:30:48.525Z"
         },
         {
           "n": 3,
-          "text": "`BuildContext` operations propagate one structured `BuildError` with operation, target, source, and cause data.",
+          "text": "BuildContext failures preserve structured BuildError identity inside the implicit Error report.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.844Z"
+          "at": "2026-08-25T13:30:48.525Z"
         },
         {
           "n": 4,
-          "text": "Custom build errors convert through the ordinary declared error-conversion rail; non-build functions receive no build-entry magic.",
+          "text": "An expert build entry may declare `!BuildError` or a `#Error` union, and unique declared conversions apply automatically.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.844Z"
+          "at": "2026-08-25T13:30:48.525Z"
         },
         {
           "n": 5,
-          "text": "The retired `BuildPlan!` form gets a registered diagnostic that shows the exact current build signature.",
+          "text": "Non-build functions use the same failure law; the compiler adds no separate build-only carrier or propagation rule.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.844Z"
+          "at": "2026-08-25T13:30:48.525Z"
         },
         {
           "n": 6,
-          "text": "All build entry examples and test fixtures migrate in one pass, and a corpus check finds no active old signature.",
+          "text": "`BuildPlan!` and other retired build signatures get one registered diagnostic with the exact current form.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.844Z"
+          "at": "2026-08-25T13:30:48.525Z"
         },
         {
           "n": 7,
-          "text": "Programmable-build tests prove a valid plan, a context failure, a custom converted failure, and the same report in human and JSON output.",
+          "text": "All build examples, fixtures, templates, docs, formatter snapshots, and grammars migrate in one pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.844Z"
+          "at": "2026-08-25T13:30:48.525Z"
+        },
+        {
+          "n": 8,
+          "text": "Programmable-build tests prove a valid plan, an implicit structured failure, an explicit BuildError contract, and human/JSON parity.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:30:48.525Z"
         }
       ],
       "refs": [
-        "D-ERRSUFFIX1",
-        "D-CALLABLE-ONE1"
+        "D-FAILURE-FOUNDATION1",
+        "D-BUILD-FAIL1"
       ],
       "tags": [
         "build",
-        "errors",
-        "syntax"
+        "errors"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:55.606Z",
-      "updated": "2026-08-24T23:44:24.813Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T13:30:48.525Z",
+      "updatedBy": "Main"
     },
     {
       "id": "ctrvtgzf",
@@ -148147,19 +148294,24 @@
     {
       "id": "cwf44fqc",
       "num": 2179,
-      "title": "Give durable service receipts clear states and errors",
-      "body": "`ServiceReceipt` currently exposes `.Enqueued`, `.Executed`, `.Retained`, `.DeadLettered`, `.Rejected`, and `.Unavailable`. The names mix queue events, durable state, and failures. The implementation also drifted from D-SERVICE-AUTHORITY1, which named accepted and duplicate receipts. This card chooses one honest receipt and error model.",
+      "title": "Give durable sends one coherent lifecycle and audit model",
+      "body": "A durable send needs one stable identity across acceptance, attempts, delivery, restart, retention, dead letter, and cancellation. This card chooses the complete beginner statement, expert control handle, and durable receipt model.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
-      "plan": "1. Ratify D-SERVICE-RECEIPT2.\n2. Define the receipt identity, delivery state, retention fields, idempotency meaning, and error boundary in Core.\n3. Put policy rejection and unavailable authority on the ratified failure route rather than a misleading success variant when required.\n4. Migrate send, retry, receive, inspect, show, persistence, recovery, and examples.\n5. Keep service semantics in the shared Prelude and adapt every execution tier to it.\n6. Prove crash windows, duplicates, retention expiry, dead letters, rejection, partition, and replay.",
+      "plan": "1. Implement the complete lifecycle ratified by D-SERVICE-RECEIPT2.\n2. Give the common send statement one safe acceptance meaning with no routine receipt handling.\n3. Enforce ownership or consumption of any bound lifecycle value on every path.\n4. Keep lifecycle states separate from retention, attempts, deadlines, idempotency, and failure facts.\n5. Produce signed immutable evidence and an ordered append-only history for expert audit.\n6. Keep rejection and authority failures on the shared Error route.\n7. Prove duplicate identity, restart recovery, cancellation, dead letters, retention, and tier parity.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Owner grilling replaced the mixed receipt enum with complete lifecycle systems and a stable-identity recommendation."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -148173,82 +148325,100 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every receipt variant names a durable fact a caller can act on; no variant name confuses an action with a state.",
+          "text": "The common `orders.send(order)` statement has one safe durable-acceptance meaning and no ignored-result ambiguity.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:16.524Z"
+          "at": "2026-08-25T13:34:12.900Z"
         },
         {
           "n": 2,
-          "text": "Accepted, duplicate, retained, delivered, and dead-letter outcomes follow the exact model ratified in D-SERVICE-RECEIPT2.",
+          "text": "An expert can retain one typed identity for wait, retry, cancellation, status, retention, attempts, receipts, and history.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:16.524Z"
+          "at": "2026-08-25T13:34:12.900Z"
         },
         {
           "n": 3,
-          "text": "Policy rejection, unavailable authority, partition, revocation, and stale generation use one typed failure route with structured causes.",
+          "text": "The compiler rejects every bound lifecycle value that is dropped without a ratified consumption action.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:16.524Z"
+          "at": "2026-08-25T13:34:12.900Z"
         },
         {
           "n": 4,
-          "text": "A receipt has a stable idempotency identity and enough typed fields to retry, inspect retention, and correlate delivery after restart.",
+          "text": "Public states describe lifecycle only; duplicate identity, retention, attempts, deadlines, and idempotency remain typed facts.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:16.524Z"
+          "at": "2026-08-25T13:34:12.900Z"
         },
         {
           "n": 5,
-          "text": "Human show, JSON, persistence, comptime, AOT, JIT, and interpreter use the same variant names, fields, and transitions.",
+          "text": "Duplicate idempotency keys resolve to the same durable identity and conflicting keys fail without creating parallel work.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:16.524Z"
+          "at": "2026-08-25T13:34:12.900Z"
         },
         {
           "n": 6,
-          "text": "The example explains where receipts come from, handles every public state exhaustively, and contains no fallback for impossible hidden variants.",
+          "text": "Rejection, unavailable authority, partition, revocation, and stale generation use the shared structured Error route.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:16.524Z"
+          "at": "2026-08-25T13:34:12.900Z"
         },
         {
           "n": 7,
-          "text": "Tests cover first send, duplicate key, conflicting key, execution, retention, expiry, dead letter, rejection, partition, crash recovery, and retry.",
+          "text": "Experts can obtain a signed immutable snapshot and ordered append-only events tied to one authority generation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:16.524Z"
+          "at": "2026-08-25T13:34:12.900Z"
+        },
+        {
+          "n": 8,
+          "text": "Human, JSON, persistence, comptime, AOT, JIT, interpreter, and recovery use the same states, facts, and transitions.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:34:12.900Z"
+        },
+        {
+          "n": 9,
+          "text": "Tests cover acceptance, duplicate, conflict, delivery, retry, retention, expiry, cancellation, dead letter, partition, crash recovery, and replay.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:34:12.900Z"
         }
       ],
       "refs": [
-        "D-SERVICE-AUTHORITY1",
-        "D-FAIL-MODEL1"
+        "D-SERVICE-RECEIPT2",
+        "D-FAILURE-FOUNDATION1"
       ],
       "tags": [
         "services",
-        "errors",
-        "stdlib"
+        "lifecycle",
+        "audit"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:15.971Z",
-      "updated": "2026-08-24T23:15:27.173Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-25T13:43:26.096Z",
+      "updatedBy": "owner"
     },
     {
       "id": "cxf6x7ap",
@@ -148497,19 +148667,26 @@
     {
       "id": "cz2ys9cb",
       "num": 2182,
-      "title": "Decide whether bare ! may hide the error type",
-      "body": "D-ERRSUFFIX1=B kept bare `!` as shorthand for the default `Err` error. The owner now questions that choice because a declaration can erase the visible failure contract. This card asks whether every fallible declaration must name its error type, while preserving ordinary propagation and conversion.",
-      "kind": "feature",
+      "title": "Migrate failure syntax to implicit Error and prefix expert contracts",
+      "body": "This card performs the clean syntax and corpus migration after D-FAILURE-FOUNDATION1. It retires suffix error types, bare default `!`, and bare postfix propagation `?`. It teaches the implicit beginner route and prefix expert forms without compatibility aliases.",
+      "kind": "task",
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
-      "plan": "1. Ratify D-DEFAULT-ERROR1 as an amendment or confirmation of D-ERRSUFFIX1.\n2. Apply the outcome in declarations, aliases, fields, parameters, function values, lambdas, and generated signatures.\n3. Keep call-site `?`, `??`, and error conversion separate from declaration spelling.\n4. Migrate every active bare declaration if the shorthand retires.\n5. Add a registered diagnostic with the inferred or required error type when possible.\n6. Prove explicit errors, unions, unit failure, optional success, and default conversion on every tier.",
+      "plan": "1. Retire `Success Error!`, bare declaration `!`, and bare postfix propagation `?`.\n2. Migrate optional success to `?Success` and explicit errors to `!Error` or `!(E1 | E2)`.\n3. Remove routine default Error declarations and propagation marks from beginner examples.\n4. Keep `?(text)` as the only postfix question-mark error form.\n5. Add registered diagnostics with exact rewrites and no legacy parser path.\n6. Migrate source, Core declarations, tests, docs, templates, formatter snapshots, and editor grammars in one pass.\n7. Run retirement ratchets and tier-parity examples.",
       "checkSteps": null,
-      "blockedBy": [],
+      "blockedBy": [
+        "D-FAILURE-FOUNDATION1"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "This card now owns the migration slice after the shared failure foundation, not a separate default-error decision."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -148523,81 +148700,89 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every fallible declaration exposes or intentionally defaults its error contract exactly as D-DEFAULT-ERROR1 requires.",
+          "text": "Active source uses prefix `?Success` and `!Error`; no active suffix error type or infix failure spelling remains.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.148Z"
+          "at": "2026-08-25T13:30:49.054Z"
         },
         {
           "n": 2,
-          "text": "Bare `!` is either rejected everywhere or has one narrow documented meaning; no declaration position behaves differently.",
+          "text": "Beginner functions omit the default Error contract, and plain fallible calls omit bare postfix propagation `?`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.148Z"
+          "at": "2026-08-25T13:30:49.054Z"
         },
         {
           "n": 3,
-          "text": "The compiler never type-erases a known error into an uninspectable report solely because the signature used shorthand.",
+          "text": "`?(text)` remains legal only as a journey context form and preserves the original structured cause.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.148Z"
+          "at": "2026-08-25T13:30:49.054Z"
         },
         {
           "n": 4,
-          "text": "Call-site propagation, fallback, context notes, and declared error conversion keep their ratified behavior.",
+          "text": "Bare declaration `!`, suffix `Error!`, and bare call `?` each receive registered diagnostics with exact current rewrites.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.148Z"
+          "at": "2026-08-25T13:30:49.054Z"
         },
         {
           "n": 5,
-          "text": "If bare `!` retires, diagnostics name the source error types and show an explicit replacement without guessing an invalid union.",
+          "text": "The formatter emits only prefix roles and never recreates retired suffix or propagation syntax.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.148Z"
+          "at": "2026-08-25T13:30:49.054Z"
         },
         {
           "n": 6,
-          "text": "The active corpus, docs, examples, generated Core signatures, formatter snapshots, and editor grammars use only the ratified form.",
+          "text": "Examples, Core declarations, aliases, function values, generics, templates, docs, snapshots, and grammars migrate in one cutover.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.148Z"
+          "at": "2026-08-25T13:30:49.054Z"
         },
         {
           "n": 7,
-          "text": "AOT, JIT, interpreter, comptime, and web preserve the same typed failure identity.",
+          "text": "Retirement ratchets find no active old spelling outside deliberate diagnostic fixtures.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.148Z"
+          "at": "2026-08-25T13:30:49.054Z"
+        },
+        {
+          "n": 8,
+          "text": "Default `jet run`, AOT, JIT, interpreter, comptime, and web agree for implicit, typed, optional, converted, contextual, and impossible failures.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:30:49.054Z"
         }
       ],
       "refs": [
-        "D-ERRSUFFIX1",
-        "D-FAIL-UNIT1"
+        "D-FAILURE-FOUNDATION1"
       ],
       "tags": [
-        "syntax",
         "errors",
-        "safety"
+        "migration",
+        "diagnostics"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:39.181Z",
-      "updated": "2026-08-24T23:17:00.060Z",
+      "updated": "2026-08-25T13:30:49.054Z",
       "updatedBy": "Main"
     },
     {
@@ -148886,19 +149071,24 @@
     {
       "id": "c12uacgqe",
       "num": 2185,
-      "title": "Decide whether a declared text head is a marker or type",
-      "body": "`marker Pattern on [.Text]` creates a value that functions accept as the type `Pattern`. The applied value has no `#`, so the declaration reads like a rule while the use reads like a nominal type. This card reopens that boundary and chooses one honest model for checked text heads.",
+      "title": "Make library-defined checked text an honest type",
+      "body": "A checked text type validates domain text, encodes interpolated holes, and prevents plain String from crossing a typed sink. “Text head” is retired user-facing jargon. This card chooses one honest type model with compile-time and runtime parity.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
-      "plan": "1. Ratify D-TEXTHEAD-TYPE1 as an amendment or confirmation of D-BOUND-SINK1.\n2. Give declaration, construction, parameter, reflection, hover, completion, and diagnostics one consistent ontology.\n3. Keep body checking and hole encoding on one registered compile-time path.\n4. Preserve `.raw()` as the audited escape and reject plain String at typed sinks.\n5. Migrate the declared-text examples, library tests, snapshots, docs, and generated grammar.\n6. Prove user libraries can declare and consume the selected form without a parallel sink registry.",
+      "plan": "1. Implement the checked text type model ratified by D-TEXTHEAD-TYPE1.\n2. Use one pure checker for known literals and dynamic construction on every tier.\n3. Encode interpolated holes through the same declared contract.\n4. Preserve nominal typing across functions, modules, collections, generics, reflection, and tooling.\n5. Make dynamic construction validate through the implicit Error route.\n6. Require a reasoned audited or unsafe gate for unchecked raw construction.\n7. Migrate declared-text examples, diagnostics, docs, grammars, and snapshots.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Owner grilling renamed the concept to checked text type and centered one type contract across compile time and runtime."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -148912,82 +149102,136 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The declaration reads as the same kind of thing that `Pattern{...}` constructs and `fn accept(pattern: Pattern)` accepts.",
+          "text": "Public docs, diagnostics, and APIs use “checked text type”; “text head” remains internal jargon only if needed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.766Z"
+          "at": "2026-08-25T13:34:14.460Z"
         },
         {
           "n": 2,
-          "text": "A marker is always applied with `#` to a target, while a type is always named and constructed as a type; the chosen model has no exception.",
+          "text": "The declaration is classified as the same nominal type that literal construction and typed parameters use.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.766Z"
+          "at": "2026-08-25T13:34:14.460Z"
         },
         {
           "n": 3,
-          "text": "Checked body validation, interpolation encoding, typed sink rejection, and `.raw()` use one registered implementation path.",
+          "text": "One pure checker accepts or rejects the same text at compile time and runtime on every execution tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.766Z"
+          "at": "2026-08-25T13:34:14.460Z"
         },
         {
           "n": 4,
-          "text": "Reflection, hover, completion, go-to-definition, rename, and generated docs classify the declaration consistently.",
+          "text": "Every interpolated hole passes through the declared encoder before it enters the domain text.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.766Z"
+          "at": "2026-08-25T13:34:14.460Z"
         },
         {
           "n": 5,
-          "text": "The losing declaration forms are removed in one cutover and receive a focused teaching diagnostic when user-typed.",
+          "text": "Dynamic `Type.from(text)` validates through the shared Error route and preserves a structured check failure.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.766Z"
+          "at": "2026-08-25T13:34:14.460Z"
         },
         {
           "n": 6,
-          "text": "Library-defined SQL-like, regex-like, and identity text heads prove validation, holes, raw escape, imports, generics, and separate modules.",
+          "text": "Unchecked raw construction requires a reasoned audited or unsafe gate and leaves a visible receipt or inspect fact.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.766Z"
+          "at": "2026-08-25T13:34:14.460Z"
         },
         {
           "n": 7,
-          "text": "Comptime, AOT, JIT, interpreter, and web agree on accepted bodies, rejected bodies, encoded holes, and runtime representation.",
+          "text": "Plain String cannot cross a checked text parameter, field, return, collection, or generic boundary without validation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.766Z"
+          "at": "2026-08-25T13:34:14.460Z"
+        },
+        {
+          "n": 8,
+          "text": "Hover, completion, definition, rename, reflection, generated docs, and inspect output classify the type and contract consistently.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:34:14.460Z"
+        },
+        {
+          "n": 9,
+          "text": "SQL-like, pattern-like, selector-like, and identity examples prove literals, holes, dynamic text, imports, generics, raw refusal, and tier parity.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:34:14.460Z"
+        },
+        {
+          "n": 10,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:44:42.643Z"
+        },
+        {
+          "n": 11,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:44:42.643Z"
+        },
+        {
+          "n": 12,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:44:42.643Z"
+        },
+        {
+          "n": 13,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:44:42.643Z"
         }
       ],
       "refs": [
-        "D-BOUND-SINK1",
-        "D-FACTMODEL1"
+        "D-TEXTHEAD-TYPE1",
+        "D-FAILURE-FOUNDATION1"
       ],
       "tags": [
-        "syntax",
-        "markers",
-        "types"
+        "types",
+        "safety",
+        "text"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:51.717Z",
-      "updated": "2026-08-24T23:18:14.499Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-25T13:44:42.643Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c13gfyz5l",
@@ -149134,19 +149378,24 @@
     {
       "id": "c14vk3sif",
       "num": 2187,
-      "title": "Choose the final name for abilities and effects",
-      "body": "Jet already retired `Capability` and `#Caps` through D-AUTHORITY-WORD2=E. The current surface is `Ability`, `Abilities`, and `#Abilities`; effect rows still name effects. The owner now asks whether `FX` is a better final replacement. This card compares the current words with a clean `FX` cutover and other coherent names.",
+      "title": "Price effects vocabulary for beginner and expert use",
+      "body": "Beginners should not write effect or authority lists when sema can infer them. Experts need a short source boundary, first-class authority, structured policy, and complete receipts. This card chooses the source and tooling vocabulary as one system.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
-      "plan": "1. Ratify D-ABILITY-NAME2 as an amendment or confirmation of D-AUTHORITY-WORD2.\n2. Apply one vocabulary to the fact menu, carried value, block marker, diagnostics, CLI, browser reader, manifests, reflection, and docs.\n3. Keep effect rows and granted rights semantically distinct even if the chosen words rhyme.\n4. Remove every retired spelling with no aliases and add exact teaching diagnostics.\n5. Regenerate marker registries, grammars, help, snapshots, examples, and inspect output.\n6. Prove beginner discovery and expert audit queries use the same final terms.",
+      "plan": "1. Implement the vocabulary and authority flow ratified by D-ABILITY-NAME2.\n2. Infer effects for beginner code and request approval only at the application boundary.\n3. Support once and project approval interactively; require declared policy in CI and non-interactive runs.\n4. Give experts lexical narrowing, optional typed handles, explicit effect rows, manifests, and audit controls.\n5. Prevent inner scopes and dependencies from widening outer authority.\n6. Use complete role names in diagnostics, help, policy, JSON, and receipts.\n7. Remove every retired source and tooling spelling without aliases.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Owner grilling chose frequency-priced vocabulary: short expert source, plain beginner and tooling language."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -149160,82 +149409,135 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The fact menu, carried value, scope marker, browser reader, CLI flag, manifest fields, diagnostics, and docs use one ratified vocabulary.",
+          "text": "Beginner functions use effectful Core APIs without routine effect rows or lexical authority markers.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.858Z"
+          "at": "2026-08-25T13:34:17.142Z"
         },
         {
           "n": 2,
-          "text": "The final names make the difference between an effect a function may perform and authority the caller grants clear.",
+          "text": "Sema infers the exact required effects and asks for approval only at the application boundary when policy does not decide.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.858Z"
+          "at": "2026-08-25T13:34:17.142Z"
         },
         {
           "n": 3,
-          "text": "No live user surface contains `Capability`, `Capabilities`, `#Caps`, or any losing spelling from D-ABILITY-NAME2.",
+          "text": "Interactive approval supports once, project scope, and deny; CI and non-interactive runs require declared policy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.858Z"
+          "at": "2026-08-25T13:34:17.142Z"
         },
         {
           "n": 4,
-          "text": "Retired spellings get registered diagnostics with exact replacements and no parser, library, or CLI aliases.",
+          "text": "The ratified expert source boundary supports lexical narrowing and an optional typed Authority handle without widening outer grants.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.858Z"
+          "at": "2026-08-25T13:34:17.142Z"
         },
         {
           "n": 5,
-          "text": "Completion, hover, reflection, `jet explain`, `jet inspect`, JSON reports, and generated docs use the same terms.",
+          "text": "Explicit effect rows can assert or prohibit inferred effects and receive sema diagnostics on disagreement.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.858Z"
+          "at": "2026-08-25T13:34:17.142Z"
         },
         {
           "n": 6,
-          "text": "Examples show a beginner default, a narrow lexical grant, a bound handle, a denied effect, and an expert audit receipt.",
+          "text": "Diagnostics, help, policy, inspect output, JSON, and receipts distinguish required effects, granted effects, denied effects, and authority.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.858Z"
+          "at": "2026-08-25T13:34:17.142Z"
         },
         {
           "n": 7,
-          "text": "Syntax.rs, marker registry, grammars, snapshots, AOT, JIT, interpreter, comptime, and web all use the same selected names.",
+          "text": "Every approval and delegation leaves a source-linked receipt with scope, resource, operation, and authority identity.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.858Z"
+          "at": "2026-08-25T13:34:17.142Z"
+        },
+        {
+          "n": 8,
+          "text": "Retired Capability, Caps, Ability, or losing spellings receive exact diagnostics and have no aliases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:34:17.142Z"
+        },
+        {
+          "n": 9,
+          "text": "AOT, JIT, interpreter, comptime, and web consume the same inferred effects and authority decision.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:34:17.142Z"
+        },
+        {
+          "n": 10,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:44:46.845Z"
+        },
+        {
+          "n": 11,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:44:46.845Z"
+        },
+        {
+          "n": 12,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:44:46.845Z"
+        },
+        {
+          "n": 13,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:44:46.845Z"
         }
       ],
       "refs": [
-        "D-AUTHORITY-WORD2",
-        "D-EFFECT-ROW2"
+        "D-ABILITY-NAME2"
       ],
       "tags": [
-        "syntax",
         "effects",
+        "authority",
         "naming"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:58.324Z",
-      "updated": "2026-08-24T23:18:16.528Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-25T13:44:46.845Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c024o546",
@@ -149327,13 +149629,18 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m10-cli-surface",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "Ready to implement. One owner gate remains but does not block the env and use verbs: what bare jetpack does. Until ruled, bare jetpack keeps printing help and must not enter an environment."
+        },
         {
           "at": "2026-08-25",
           "by": "owner",
@@ -149428,7 +149735,7 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-25T13:17:36.821Z",
-      "updated": "2026-08-25T13:20:15.586Z",
+      "updated": "2026-08-25T13:21:14.522Z",
       "updatedBy": "orchestrator",
       "workOrder": 1
     },
@@ -149441,7 +149748,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m10-cli-surface",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -149506,7 +149813,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T13:17:37.250Z",
-      "updated": "2026-08-25T13:20:01.574Z",
+      "updated": "2026-08-25T13:21:15.052Z",
       "updatedBy": "orchestrator",
       "workOrder": 2
     },
@@ -149679,7 +149986,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m10-cli-surface",
-      "phase": "planning",
+      "phase": "deciding",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -149688,6 +149995,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "Held in deciding: three owner sub-decisions are unresolved, named in the body. Per-tool shim versus one shared dispatcher; what which reports for a shimmed tool; inline prompt versus deferred marker. Highest-risk card in this milestone because it puts jetpack in the execution path of every installed tool."
+        },
         {
           "at": "2026-08-25",
           "by": "owner",
@@ -149755,7 +150067,7 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-25T13:17:38.575Z",
-      "updated": "2026-08-25T13:20:15.057Z",
+      "updated": "2026-08-25T13:21:14.008Z",
       "updatedBy": "orchestrator",
       "workOrder": 8
     },
@@ -149848,7 +150160,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m10-cli-surface",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -149913,7 +150225,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T13:17:39.441Z",
-      "updated": "2026-08-25T13:20:04.124Z",
+      "updated": "2026-08-25T13:21:15.552Z",
       "updatedBy": "orchestrator",
       "workOrder": 3
     }
@@ -205322,196 +205634,68 @@
       "id": "D-WRAP-SCOPE1",
       "cardId": "co323ahi",
       "group": "syntax",
-      "title": "How should fixed-width code opt into wrapping arithmetic?",
-      "gist": "Choose a clear bounded form for intentional wrapping.",
-      "lesson": "Fixed-width Jet arithmetic traps on overflow by default. Hashes and ciphers need modular arithmetic by design. Repeating `wrapping(...)` around every operation is safe but hides the algorithm.",
+      "title": "How should expert code select modular arithmetic?",
+      "gist": "Choose one safe low-friction arithmetic policy system.",
+      "lesson": "Jet exact Int arithmetic does not overflow, and fixed-width arithmetic traps by default. Hashes, checksums, ciphers, codecs, and hardware protocols need modular arithmetic. The expert opt-in should expose that intent once without weakening division, shifts, conversions, indexing, or bounds.",
       "explainer": "",
-      "story": "Ravi ports Murmur3 from C. He wants reviewers to see one explicit modular-arithmetic boundary and then read the published algorithm without wrapper noise.",
-      "inWild": "fn fmix32(value: U32) U32 -> wrapping {\n    h := value\n    h ~|= h >> 16\n    h *= 0x85ebca6b\n    h ~|= h >> 13\n    h *= 0xc2b2ae35\n    h ~| (h >> 16)\n}",
+      "story": "Ravi ports Murmur3. The safe default protects ordinary code. One visible policy boundary lets reviewers compare the modular algorithm with its reference.",
+      "inWild": "#Arithmetic(.Wrapping) fn murmur3(data: [U8], seed: U32) U32 -> {\n    h := seed\n    h *= 0x85ebca6b\n    h ~|= h >> 16\n    h\n}",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "A lexical `wrapping` block",
-          "detail": "`wrapping { ... }` makes fixed-width arithmetic modular inside one visible block. Other code still traps. Reviewers see one bounded policy gate around the whole algorithm.",
-          "technical": "Sema marks fixed-width arithmetic nodes inside the block as wrapping. The mark lowers to the existing shared wrapping Prelude operations on every tier. It does not affect indexing, division, casts, or default `Int`.",
-          "code": "fn fmix32(value: U32) U32 -> wrapping {\n    h := value\n    h *= 0x85ebca6b\n    h ~| (h >> 16)\n}"
+          "name": "Lexical `#Arithmetic` policy",
+          "detail": "Beginner code keeps exact Int and checked fixed-width arithmetic with no annotation. Experts select `.Wrapping`, `.Checked`, or `.Saturating` on a function or block. An inner marker overrides an outer policy.",
+          "technical": "`#Arithmetic(mode)` is a registered marker for functions, methods, and blocks. It changes fixed-width add, subtract, multiply, negate, and power overflow only. Division by zero, shift counts, conversions, indexing, and bounds remain checked. Sema records policy provenance on each operation; all tiers call the same Prelude operation. Innermost scope wins.",
+          "code": "#Arithmetic(.Wrapping) fn murmur3(data: [U8], seed: U32) U32 -> {\n    h := seed\n    h *= 0x85ebca6b\n    #Arithmetic(.Checked) { validate_length(data.len()) }\n    h ~|= h >> 16\n    h\n}"
         },
         {
           "key": "B",
-          "name": "A `Wrapping<T>` value type",
-          "detail": "Code enters modular arithmetic by wrapping a value. Operators on `Wrapping<U32>` wrap until `.raw()` leaves the type. The policy follows values, but conversions surround function and library boundaries.",
-          "technical": "Add a transparent Core wrapper with same-width operators. The wrapper is a distinct static type and must preserve ABI and layout only through explicit conversion.",
-          "code": "fn fmix32(value: U32) U32 -> {\n    h := Wrapping<U32>{value}\n    h *= 0x85ebca6b\n    return (h ~| (h >> 16)).raw()\n}"
+          "name": "Arithmetic policy follows a value type",
+          "detail": "Beginner defaults stay unchanged. Experts convert values to `Modular<U32>` or `Saturating<U32>`, use ordinary operators, then leave through an explicit checked conversion. Policy follows values across helper calls.",
+          "technical": "Core adds transparent policy wrappers with same-width operators and no implicit conversion to or from the base type. Layout, ABI, serialization, and generic bounds remain distinct unless an explicit adapter proves them.",
+          "code": "fn murmur3(data: [U8], seed: U32) U32 -> {\n    h := Modular<U32>.from(seed)\n    h *= 0x85ebca6b\n    h ~|= h >> 16\n    h.raw()\n}"
         },
         {
           "key": "C",
-          "name": "Keep per-operation gates",
-          "detail": "Each operation stays inside `wrapping(...)` or uses a `wrapping_*` method. The policy is exact at each operator. Repetition keeps obscuring arithmetic-heavy algorithms.",
-          "technical": "No change to D-NUMOPS1. Core may add byte-loading helpers, but arithmetic spelling stays per operation.",
-          "code": "h = wrapping(h * U32{0x85ebca6b})\nh = wrapping(h ~| (h >> 16))"
+          "name": "Type-owned policy operations and pipelines",
+          "detail": "Beginner defaults stay unchanged. Experts select policy per operation through `.wrapping_*`, `.checked_*`, and `.saturating_*` methods. Core adds byte and rotation helpers so ports stay readable without a lexical mode.",
+          "technical": "No ambient arithmetic policy exists. Every overflow-sensitive operation names its behavior. Checked and saturating pipelines use the same type-owned APIs. General Core helpers own endian loads and rotations.",
+          "code": "h = h.wrapping_mul(c1)\nh = h.rotate_left(15)\nh = h.wrapping_mul(c2)\nh = h.bit_xor(h >> 16)"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "why": "A keeps the safe default and makes the exceptional policy visible once at the smallest useful algorithm boundary. It removes noise without changing value types or APIs.",
+        "why": "A charges one explicit marker only to the rare modular region. It keeps the algorithm readable, allows nested checked islands, and leaves every unrelated safety check intact.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "The wrapper makes modular policy precise but spreads conversions through parameters, returns, constants, and helper calls."
+            "reason": "Policy-carrying types are precise across helper calls but add conversions at constants, parameters, returns, Core methods, and foreign boundaries."
           },
           {
             "key": "C",
-            "reason": "Per-operation gates are safe but make a standard modular algorithm harder to compare with its reference."
+            "reason": "Per-operation methods give maximum local precision but repeat the same policy across arithmetic-heavy algorithms and obscure reference code."
           }
         ],
-        "tradeoff": "A lexical mode changes the meaning of several operators inside a block. The explicit keyword and tight block boundary make that change reviewable."
+        "tradeoff": "A lexical policy changes several operators inside its visible scope. Source markers, hover, semantic tokens, and inspect output must make the active mode unmistakable."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
-        "base": "The base draft compared a lexical block, a wrapper type, and current per-operation gates. It recommended the block for algorithm readability.",
-        "boilOcean": "The breadth pass also tested wrapping operators, a function marker, and wrap-by-default unsigned integers. Operators add punctuation, markers hide locality, and wrap-by-default breaks the safe numeric law.",
-        "hybrid": "The hybrid pass kept the lexical block and reused existing type-owned wrapping operations underneath. This avoids a second runtime mechanism.",
-        "cooperative": "The cooperative pass strengthened the wrapper type because policy follows values across helper calls. Its conversion noise remains high in ports.",
-        "adversarial": "The adversarial pass tested accidental scope growth, nested policies, division, casts, and generic code. Limiting the block to fixed-width arithmetic repairs the risk."
+        "base": "The base draft compared lexical policy, policy-carrying values, and type-owned operations. It recommended one lexical marker for modular algorithms.",
+        "boilOcean": "The breadth pass also tested new wrapping operators, unsigned wrap-by-default, package-wide modes, and target-machine behavior. Each added punctuation, weakened safety, or made meaning nonlocal.",
+        "hybrid": "The hybrid pass combined the lexical marker with type-owned Core helpers and the existing shared Prelude operations. It adds no second arithmetic engine.",
+        "cooperative": "The cooperative pass strengthened value wrappers for cross-function policy and per-operation methods for exact local review. Their routine conversion and repetition costs remain higher.",
+        "adversarial": "The adversarial pass tested nesting, generic code, division, shifts, conversion, indexing, target differences, and mixed policies. Narrow semantics and innermost precedence contain those risks."
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-24T23:14:20.275Z"
-    },
-    {
-      "id": "D-ERROR-TYPE1",
-      "cardId": "cp3zupnt",
-      "group": "safety",
-      "title": "What types may wear the failure suffix?",
-      "gist": "Choose which values may become declared errors.",
-      "lesson": "The `!` suffix marks an error role. Today even `String!` can fill that role. Plain text is quick, but it gives tools no stable error cases, fields, or recovery contract.",
-      "explainer": "",
-      "story": "Leah calls a parser from an editor. She needs to distinguish bad input from an unsupported feature without parsing a message string.",
-      "inWild": "enum ParseError { Invalid(text: String) Unsupported(feature: String) }\n\nfn parse(text: String) Ast ParseError! -> { … }",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Named error domains",
-          "detail": "A failure type must be a named enum, struct, distinct type, or the built-in default error. Primitive text, numbers, lists, and anonymous records cannot wear `!` directly.",
-          "technical": "The suffix supplies the error role; no new trait is required. Sema rejects primitive and anonymous failure types. Named domains must support the shared report conversion used by the failure carrier.",
-          "code": "enum ParseError { Invalid(text: String) Unsupported(feature: String) }\nfn parse(text: String) Ast ParseError! -> { … }\n\nfn bad() Int String! -> { … }\n// Error: declare a named error domain"
-        },
-        {
-          "key": "B",
-          "name": "Any type may be an error",
-          "detail": "Keep the current rule. `String!` and `Int!` stay legal for small programs. Libraries can expose unstructured errors that tools and callers must interpret by convention.",
-          "technical": "The failure carrier accepts any Jet type. Rendering uses the existing value-to-report path.",
-          "code": "fn parse(text: String) Ast String! -> {\n    return Err(\"invalid input\")\n}"
-        },
-        {
-          "key": "C",
-          "name": "Only declared error types",
-          "detail": "Add an `error` declaration kind. Only that kind and the built-in default error may wear `!`. The role is explicit, but Jet gains a second nominal type declaration mechanism.",
-          "technical": "Parser and I7 gain `error Name { ... }`. Error declarations lower like enums or structs plus generated report support.",
-          "code": "error ParseError {\n    Invalid(text: String)\n    Unsupported(feature: String)\n}\nfn parse(text: String) Ast ParseError! -> { … }"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "why": "A gives callers a stable typed domain without adding a new declaration mechanism. The suffix still states the role, while the named type states the cases and data.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Primitive errors make recovery, documentation, JSON reports, and evolution depend on message text."
-          },
-          {
-            "key": "C",
-            "reason": "A new `error` declaration duplicates enums and structs when the suffix already states the error role."
-          }
-        ],
-        "tradeoff": "Tiny scripts must name an error domain or use the built-in default error instead of returning a raw string."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "reviewPasses": {
-        "base": "The base draft compared unrestricted values, named domains, and a dedicated error declaration. It recommended named domains without a new keyword.",
-        "boilOcean": "The breadth pass also tested an Error trait and automatic string wrapping. A trait adds boilerplate; wrapping preserves an unnamed public contract.",
-        "hybrid": "The hybrid pass combined named domains with generated report conversion. The suffix provides the role, so no new trait or keyword is needed.",
-        "cooperative": "The cooperative pass strengthened raw String errors for short scripts and prototypes. The built-in default error already serves that low-ceremony path.",
-        "adversarial": "The adversarial pass tested private functions, generic errors, distinct strings, and foreign errors. Named types cover each case while keeping public recovery structured."
-      },
-      "checkInstructions": null,
-      "draft": false,
-      "status": "open",
-      "created": "2026-08-24T23:14:20.661Z"
-    },
-    {
-      "id": "D-FALLIBLE-VISIBLE1",
-      "cardId": "cp3zupnt",
-      "group": "syntax",
-      "title": "Does a fallible signature need another result mark?",
-      "gist": "Choose whether typed error suffixes are enough to show fallibility.",
-      "lesson": "A signature such as `Int ParseError!` names a success type and an error type. Adding `?` would reuse the mark for absence and failure. Adding `Result` would expose the internal carrier as a second surface.",
-      "explainer": "",
-      "story": "Omar reviews a payment function. He must tell absence from failure before reading the body or generated docs.",
-      "inWild": "fn find(id: Id) Order? StoreError! -> { … }\n// optional Order success; StoreError failure",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "The error suffix is the result mark",
-          "detail": "Any `ErrorType!` makes the callable fallible. `?` stays absence only. No `Result` wrapper appears in source. Optional success and failure compose without ambiguity.",
-          "technical": "Keep the suffix zone `[Success?] [ErrorUnion!]`. Tooling renders roles as Success, Absent, and Failure fields.",
-          "code": "fn load(id: Id) Order StoreError! -> { … }\nfn find(id: Id) Order? StoreError! -> { … }"
-        },
-        {
-          "key": "B",
-          "name": "Write an explicit Result type",
-          "detail": "Use `Result<Success, Error>` in signatures. The carrier is obvious and familiar. Jet now has wrapper syntax beside `?`, `!`, propagation, and pattern forms.",
-          "technical": "Expose the failure carrier as a public generic type. Optional success becomes `Result<Order?, StoreError>`.",
-          "code": "fn load(id: Id) Result<Order, StoreError> -> { … }\nfn find(id: Id) Result<Order?, StoreError> -> { … }"
-        },
-        {
-          "key": "C",
-          "name": "Mark the success with `?` too",
-          "detail": "Write `Order? StoreError!` for every fallible result, even when Order cannot be absent. This makes fallibility louder but gives `?` two meanings.",
-          "technical": "The parser treats `?` in a return zone as a carrier mark unless absence is also declared through another form. That requires a new way to express optional success.",
-          "code": "fn load(id: Id) Order? StoreError! -> { … }\n// Here `?` means fallible, not absent"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "why": "A keeps one mark per role. `?` means absence, `!` means failure, and their presence together shows both facts without a wrapper.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "An explicit carrier adds a second failure surface and makes the common signature longer without adding information."
-          },
-          {
-            "key": "C",
-            "reason": "Reusing `?` for fallibility destroys the distinction the suffix law was designed to make."
-          }
-        ],
-        "tradeoff": "Readers must learn that a suffixed error type creates the result carrier. Hover and docs must label each role clearly."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "reviewPasses": {
-        "base": "The base draft compared suffix-only signatures with Result and a second question mark. It recommended one mark per role.",
-        "boilOcean": "The breadth pass also tested a `throws` word and a trailing bare marker. Both repeat information already carried by the error suffix.",
-        "hybrid": "The hybrid pass added role labels in hover and docs instead of source punctuation. This strengthens suffix-only reading without another grammar.",
-        "cooperative": "The cooperative pass strengthened explicit Result as familiar to Rust and Swift users. It still duplicates Jet propagation and suffix rules.",
-        "adversarial": "The adversarial pass tested unit failure, optional success, error unions, and function values. The suffix zone stays unambiguous in all four cases."
-      },
-      "checkInstructions": null,
-      "draft": false,
-      "status": "open",
-      "created": "2026-08-24T23:14:21.047Z"
+      "status": "ratified",
+      "created": "2026-08-24T23:14:20.275Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-25"
     },
     {
       "id": "D-RESULT-DECON2",
@@ -205651,66 +205835,68 @@
       "id": "D-SERVICE-RECEIPT2",
       "cardId": "cwf44fqc",
       "group": "stdlib",
-      "title": "What should a durable service send return?",
-      "gist": "Choose clear receipt states and a separate error boundary.",
-      "lesson": "A durable send can be accepted, recognized as a duplicate, retained, delivered, or moved to a dead letter. Policy refusal and unavailable authority are failures, not successful receipts. The current enum mixes all of these.",
+      "title": "What complete lifecycle should a durable send expose?",
+      "gist": "Choose the beginner send and expert delivery audit model.",
+      "lesson": "A durable send outlives one stack frame and may cross retries, restarts, retention, dead letters, and cancellation. An immediate enum mixes operation history with lifecycle state. Jet needs one identity that beginner code can use safely and experts can control and audit.",
       "explainer": "",
-      "story": "Priya submits an order with an idempotency key. After a restart, she uses the receipt id to learn whether Jet accepted, delivered, or retained that exact send.",
-      "inWild": "receipt :: orders.send(order, key: order.id)?\nif receipt == {\n    .Accepted(id) -> record(id)\n    .Duplicate(id) -> reuse(id)\n    .Retained(id, until) -> wait_until(until)\n    .Delivered(id) -> finish(id)\n    .DeadLetter(id) -> inspect(id)\n}",
+      "story": "Priya submits an order. The common statement waits until durable acceptance. The expert path keeps a handle, watches delivery, and proves what happened after a restart.",
+      "inWild": "orders.send(order)\n\ndelivery :: orders.send(order, key: order.id)\ndelivery.wait(.Delivered)\nreceipt :: delivery.receipt()\nevents :: delivery.events()",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Receipt states, failures on `!`",
-          "detail": "Return a `DeliveryReceipt` with `.Accepted`, `.Duplicate`, `.Retained`, `.Delivered`, and `.DeadLetter`. Rejection and unavailability return `DeliveryError!`.",
-          "technical": "Every receipt carries the stable delivery id. Retained also carries its deadline. DeliveryError has Policy, Unavailable, Partitioned, Revoked, and Stale cases with structured context.",
-          "code": "fn send(...) DeliveryReceipt DeliveryError! -> { … }\n\nif receipt == {\n    .Accepted(id) -> record(id)\n    .Duplicate(id) -> reuse(id)\n    .Retained(id, until) -> wait_until(until)\n    .Delivered(id) -> finish(id)\n    .DeadLetter(id) -> inspect(id)\n}"
+          "name": "Authority-owned stable Delivery handle",
+          "detail": "`send` returns a must-use Delivery handle. A bare statement consumes it by waiting for durable acceptance. Binding it enables wait, retry, cancel, status, receipt, and event history. Dropping an unconsumed handle is a compile error.",
+          "technical": "The service authority owns delivery after acceptance; dropping an observed handle never cancels it. Public states are Pending, Accepted, Delivering, Delivered, DeadLettered, and Cancelled. Duplicate idempotency keys return the same identity. Retention, attempts, deadlines, and idempotency are typed facts. Rejection and unavailable authority use the normal Error route. `receipt()` returns a signed immutable snapshot; `events()` returns the ordered append-only lifecycle.",
+          "code": "// common: continue after durable acceptance\norders.send(order)\n\n// expert lifecycle control\ndelivery :: orders.send(order, key: order.id)\ndelivery.wait(.Delivered)\nreceipt :: delivery.receipt()\nevents :: delivery.events()"
         },
         {
           "key": "B",
-          "name": "One enum for states and failures",
-          "detail": "Keep one return enum, but rename the cases to `.Queued`, `.Delivered`, `.Stored`, `.DeadLetter`, `.Denied`, and `.Offline`. Callers handle everything in one table.",
-          "technical": "The function is fallible only for internal faults. Expected policy and availability outcomes stay receipt variants.",
-          "code": "if receipt == {\n    .Queued(id) -> record(id)\n    .Delivered(id) -> finish(id)\n    .Stored(id, until) -> wait_until(until)\n    .DeadLetter(id) -> inspect(id)\n    .Denied(reason) -> reject(reason)\n    .Offline(reason) -> retry(reason)\n}"
+          "name": "Caller-owned linear Delivery task",
+          "detail": "`send` returns a must-use Delivery task owned by the caller. A bare statement waits for acceptance. A bound task must be joined, stored, detached, or cancelled. Dropping it cancels before scope exit.",
+          "technical": "Delivery lifetime follows structured task ownership. Explicit detach transfers ownership to the service authority and produces a durable identity. Receipts and events begin at detach or acceptance. Restart recovery requires a stored or detached handle.",
+          "code": "orders.send(order)\n\ndelivery :: orders.send(order, key: order.id)\ndelivery.detach()\nreceipt :: delivery.receipt()"
         },
         {
           "key": "C",
-          "name": "A receipt struct with status",
-          "detail": "Return one struct with `id`, `status`, `retained_until`, and optional failure detail. The shape is stable for storage, but invalid field combinations become possible.",
-          "technical": "Status is a closed enum. Sema cannot prevent `Delivered` with a retention deadline or `Denied` without failure detail unless constructors stay private.",
-          "code": "struct DeliveryReceipt {\n    id: String\n    status: DeliveryStatus\n    retained_until: Int?\n    failure: DeliveryError?\n}"
+          "name": "Immutable operation receipts with queries",
+          "detail": "A bare send waits for acceptance and returns no retained handle. Expert send returns an immutable receipt for that operation. Later status, retry, cancellation, and history use authority queries by receipt id.",
+          "technical": "Receipt variants describe Accepted, Duplicate, Delivered, Retained, DeadLettered, Cancelled, or rejected operation results. Authority queries reconstruct current state and event history. The receipt is a snapshot, not a live identity.",
+          "code": "orders.send(order)\n\nreceipt :: orders.send_receipt(order, key: order.id)\nstatus :: orders.delivery_status(receipt.id)\nevents :: orders.delivery_events(receipt.id)"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "why": "A separates durable facts from failures and restores the accepted and duplicate states promised by the authority law. Each successful variant has one actionable meaning.",
+        "why": "A makes one stable identity carry the whole durable lifecycle. The common statement is safe and short, while experts get precise control, signed evidence, and restart-safe audit without a second query vocabulary.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "A success enum that contains denial and offline states forces callers to treat failures as normal receipts."
+            "reason": "Caller ownership fits ordinary tasks but makes a durable service operation cancel when an unrelated local scope ends unless explicitly detached."
           },
           {
             "key": "C",
-            "reason": "A wide struct permits meaningless field combinations and weakens exhaustive handling."
+            "reason": "Snapshot receipts are durable evidence but force every later action through a separate authority query keyed by an id."
           }
         ],
-        "tradeoff": "Callers may handle both a typed error rail and receipt states. That split matches the difference between a failed send and an accepted delivery lifecycle."
+        "tradeoff": "A bound Delivery handle is must-use and requires flow checking on every path. That cost applies only when code opts into lifecycle control."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
-        "base": "The base draft separated durable states from policy and availability failures. It recommended a closed receipt enum plus a typed error.",
-        "boilOcean": "The breadth pass tested current names, a status struct, event streams, and opaque receipt handles. The enum and struct remain the only complete immediate-return models.",
-        "hybrid": "The hybrid pass put stable identity on every receipt state and moved only true failures to the error rail. That complete split became option A.",
-        "cooperative": "The cooperative pass strengthened one-enum handling as a single exhaustive table. It still labels failed sends as successful return values.",
-        "adversarial": "The adversarial pass tested crash windows, duplicate keys, conflicting keys, retention expiry, partition, and replay. Stable ids and a separate error domain keep each case honest."
+        "base": "The base draft compared authority-owned handles, caller-owned tasks, and immutable receipt queries. It recommended the authority-owned identity.",
+        "boilOcean": "The breadth pass also tested fire-and-forget unit sends, event streams without identity, synchronous delivery, and hidden global status. Each lost safety, control, or restart correlation.",
+        "hybrid": "The hybrid pass joined a stable handle with signed snapshots and append-only events. The handle controls live work; receipts prove durable history.",
+        "cooperative": "The cooperative pass strengthened linear tasks for structured ownership and receipt queries for simple persistence. Their cancellation and split-vocabulary costs remain larger.",
+        "adversarial": "The adversarial pass tested ignored handles, duplicate keys, rejection, partition, crash windows, retention, cancellation, dead letters, and replay. Must-use flow and authority ownership give each case one rule."
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-24T23:15:27.173Z"
+      "status": "ratified",
+      "created": "2026-08-24T23:15:27.173Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-25"
     },
     {
       "id": "D-TAIL-RETURN1",
@@ -205845,71 +206031,6 @@
       "created": "2026-08-24T23:16:59.372Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-24"
-    },
-    {
-      "id": "D-DEFAULT-ERROR1",
-      "cardId": "cz2ys9cb",
-      "group": "safety",
-      "title": "May a declaration use bare `!`?",
-      "gist": "Choose whether a fallible declaration must name its error type.",
-      "lesson": "Bare `!` currently means the built-in default error. It saves a type name, but the source does not show which failures a caller can inspect. Typed suffixes were adopted to make failure roles visible.",
-      "explainer": "",
-      "story": "Nina reviews a file-writing function. She wants its signature to state whether it fails with IOError, validation errors, or a generic report.",
-      "inWild": "fn save(path: String) IOError! { … }",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Require an explicit error type",
-          "detail": "Every fallible declaration names `Error!`, `IOError!`, or an explicit union. Bare `!` is rejected. Call-site `?` and `??` stay short.",
-          "technical": "Retire bare `!` in every type and signature position. Sema may suggest a unique inferred error type, but it never invents an incomplete union.",
-          "code": "fn save(path: String) IOError! { … }\nfn run() Error! { … }\n\nfn hidden() ! { … }\n// Error: name the error type before `!`"
-        },
-        {
-          "key": "B",
-          "name": "Keep bare `!` as `Error!`",
-          "detail": "Bare `!` remains exact shorthand for the built-in `Error!`, not inference or erasure. Hover expands it. Source stays short for command entry points.",
-          "technical": "The default carrier stores one structured Error report. Known typed errors convert into Error at propagation boundaries.",
-          "code": "fn run() ! { … }\n// exactly the same contract as:\nfn run_explicit() Error! { … }"
-        },
-        {
-          "key": "C",
-          "name": "Infer a closed error union",
-          "detail": "Bare `!` means the compiler infers all reachable error types and exposes the union in tooling. Source is short, but a body edit can change the public function type.",
-          "technical": "Sema computes a closed error row from reachable propagation sites. Public signatures and separate compilation must include the inferred row in their interface hash.",
-          "code": "fn load() ! {\n    parse()?\n    read()?\n}\n// inferred: (ParseError | IOError)!"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "why": "A makes every declared failure contract visible and stable. It preserves short propagation while blocking silent conversion to a generic report.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Exact shorthand is safer than inference, but readers still cannot see the default error type in source."
-          },
-          {
-            "key": "C",
-            "reason": "Body inference lets implementation edits change public API and makes separate compilation depend on hidden reachability."
-          }
-        ],
-        "tradeoff": "Entry points and small scripts write `Error!` instead of one character. That small cost buys an explicit contract."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "reviewPasses": {
-        "base": "The base draft compared explicit errors, exact default shorthand, and inferred unions. It recommended explicit types.",
-        "boilOcean": "The breadth pass also tested `throws`, effect-row errors, and file-level defaults. Each hides or duplicates the suffix contract.",
-        "hybrid": "The hybrid pass kept explicit declarations and left call-site propagation unchanged. There is no need for a source shorthand to keep bodies concise.",
-        "cooperative": "The cooperative pass strengthened bare shorthand as exactly `Error!`, never inference. It remains a hidden source contract.",
-        "adversarial": "The adversarial pass tested command entries, lambdas, aliases, generics, public APIs, and conversion. Explicit types remain stable in every position."
-      },
-      "checkInstructions": null,
-      "draft": false,
-      "status": "open",
-      "created": "2026-08-24T23:17:00.060Z"
     },
     {
       "id": "D-MARKER-SITES1",
@@ -206049,66 +206170,68 @@
       "id": "D-TEXTHEAD-TYPE1",
       "cardId": "c12uacgqe",
       "group": "syntax",
-      "title": "What kind of declaration creates a checked text head?",
-      "gist": "Choose whether a checked text head is a marker, a type, or both.",
-      "lesson": "A checked head is constructed as `Pattern{...}` and accepted as the type `Pattern`. The current declaration starts with `marker`, but users never apply `#Pattern`. The declaration and use should describe the same ontology.",
+      "title": "How should libraries define checked text types?",
+      "gist": "Choose one honest type model for domain-checked text.",
+      "lesson": "SQL, patterns, selectors, paths, and templates can reject invalid literal text and encode interpolated values for their domain. A value such as `Pattern{\"...\"}` is a nominal type, not a marker. Libraries need the same checker at compile time and runtime, plus an audited raw escape.",
       "explainer": "",
-      "story": "Mei publishes a route-pattern library. Users pass Pattern values through functions, collections, and modules like any other nominal type.",
-      "inWild": "#TextHead(check: check_pattern, hole: escape_pattern)\nPattern :: distinct String\n\nfn route(pattern: Pattern) { … }",
+      "story": "Mei publishes a route-pattern library. Users construct Pattern values, pass them through APIs, and cannot accidentally supply an unchecked String.",
+      "inWild": "Pattern :: distinct String\n\nimpl CheckedText for Pattern {\n    fn check(text: String) !PatternError -> …\n    fn encode_hole<T>(value: T) String -> …\n}\n\npattern :: Pattern{\"prefix-{value}\"}\ndynamic :: Pattern.from(user_text)",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "A dedicated checked-text type declaration",
-          "detail": "Add one declaration such as `text Pattern { ... }`. It clearly creates a type and keeps check and hole rules together. Jet gains a special type declaration for one domain.",
-          "technical": "The new I7 keyword creates a nominal String-backed type with typed-head construction, comptime checking, hole encoding, reflection, and audited raw construction.",
-          "code": "text Pattern {\n    check @body\n    hole escape(@value)\n}\nfn route(pattern: Pattern) { … }"
+          "name": "Ordinary nominal type plus CheckedText trait",
+          "detail": "Declare a normal String-backed nominal type. Implement the standard CheckedText trait once. Users get compile-time checked literals, encoded holes, validated dynamic construction, typed sinks, reflection, and an audited raw escape.",
+          "technical": "The same pure `check(text)` function runs at compile time for known literals and at runtime for `Type.from(text)`. `encode_hole` handles each interpolation. Construction returns the nominal type. Raw unchecked construction requires a reasoned audited or unsafe gate. The trait is nameable, hoverable, implementable across modules, and shared across all execution tiers.",
+          "code": "Pattern :: distinct String\n\nimpl CheckedText for Pattern {\n    fn check(text: String) !PatternError -> …\n    fn encode_hole<T>(value: T) String -> …\n}\n\npattern :: Pattern{\"prefix-{value}\"}\ndynamic :: Pattern.from(user_text)\n#Unsafe(\"trusted precompiled pattern\") { Pattern.raw(bytes) }"
         },
         {
           "key": "B",
-          "name": "A marker declaration that mints a type",
-          "detail": "Keep `marker Pattern on [.Text]`. Text is a special marker site that creates a nominal type instead of an applied `#Pattern`. The existing implementation stays, but marker meaning has one exception.",
-          "technical": "D-BOUND-SINK1 stands. The marker registry records the generated text type and constructor. No separate applied marker exists.",
-          "code": "marker Pattern on [.Text] {\n    check @body\n    hole escape(@value)\n}\nfn route(pattern: Pattern) { … }"
+          "name": "Dedicated checked text declaration",
+          "detail": "Use one declaration that creates the nominal type and owns its checker and hole encoder. Library code is compact and focused. Jet gains a declaration kind beside ordinary nominal types and traits.",
+          "technical": "`checked text Name` lowers to a String-backed nominal type plus compiler-known construction hooks. The checker still runs on all tiers, dynamic construction validates, and raw construction needs an audited gate.",
+          "code": "checked text Pattern {\n    check text -> validate_pattern(text)\n    encode_hole value -> escape_pattern(value)\n}\n\npattern :: Pattern{\"prefix-{value}\"}"
         },
         {
           "key": "C",
-          "name": "A normal type with `#TextHead`",
-          "detail": "Declare a normal distinct String type and apply one registered marker that supplies checking and hole encoding. The type is visibly a type, and the marker is visibly applied with `#`.",
-          "technical": "`#TextHead` accepts named comptime check and hole callables on a String-backed distinct type. It synthesizes typed-head construction and `.raw()` under the existing marker and type machinery.",
-          "code": "fn check_pattern(body: String) Error! { … }\nfn escape_pattern(value: String) String -> { … }\n\n#TextHead(check: check_pattern, hole: escape_pattern)\nPattern :: distinct String\n\nfn route(pattern: Pattern) { … }"
+          "name": "Ordinary type plus `#CheckedText` derive",
+          "detail": "Declare a normal String-backed nominal type and apply a marker that names checker and encoder functions. Users get the same construction behavior. Library authors use a derive-style rule instead of a trait impl.",
+          "technical": "`#CheckedText` is a registered type marker. It validates the named callables and synthesizes the CheckedText implementation, dynamic constructor, reflection, and raw gate. Advanced customization requires marker fields or a manual generated impl escape.",
+          "code": "fn check_pattern(text: String) !PatternError -> …\nfn escape_pattern<T>(value: T) String -> …\n\n#CheckedText(check: check_pattern, encode_hole: escape_pattern)\nPattern :: distinct String"
         }
       ],
       "comparisons": [],
-      "rec": "C",
+      "rec": "A",
       "recommendation": {
-        "why": "C makes each surface honest without adding a declaration kind. `Pattern` is an ordinary nominal type, and `#TextHead` is an ordinary applied rule that grants checked construction.",
+        "why": "A says exactly what exists: Pattern is a type with a reusable contract. It needs no special declaration or marker exception, and one pure checker guarantees compile-time and runtime parity.",
         "whyNot": [
           {
-            "key": "A",
-            "reason": "A reads clearly but adds a special declaration mechanism beside ordinary nominal types and applied rules."
+            "key": "B",
+            "reason": "The dedicated form is compact but adds a declaration mechanism for behavior ordinary types and traits can already model."
           },
           {
-            "key": "B",
-            "reason": "B keeps the exact mismatch the owner found: a marker declaration creates a type that is never applied with `#`."
+            "key": "C",
+            "reason": "The derive is concise but pushes advanced control into marker parameters and generated behavior instead of the normal trait seam."
           }
         ],
-        "tradeoff": "The declaration is longer and names two helper callables. Libraries pay that one-time cost so every user sees an ordinary type."
+        "tradeoff": "Library authors write a type declaration and an impl. That one-time expert ceremony keeps every library user on the shortest safe construction path."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
-        "base": "The base draft compared a dedicated type form, the current marker form, and an applied marker on a normal type. It recommended the applied marker.",
-        "boilOcean": "The breadth pass also tested sink registration, expected-type string checking, and compiler-known head names. Each hides construction policy or closes the library surface.",
-        "hybrid": "The hybrid pass combined ordinary distinct types with one applied `#TextHead` rule. This reuses both existing mechanisms without making markers mint types.",
-        "cooperative": "The cooperative pass strengthened the current marker form as compact and already implemented. Its declaration and use still claim different kinds of thing.",
-        "adversarial": "The adversarial pass tested imports, generics, reflection, raw escape, helper visibility, compile-time effects, and runtime layout. The applied marker can specify each contract."
+        "base": "The base draft compared a trait, a dedicated declaration, and a derive marker. It recommended an ordinary type plus a standard trait.",
+        "boilOcean": "The breadth pass also tested sink registries, expected-type string coercion, compiler-owned names, and unchecked wrappers. Each hid the type boundary or closed the library surface.",
+        "hybrid": "The hybrid pass kept the ordinary trait and generated its routine constructors and reflection from the impl. This preserves expert control without user ceremony.",
+        "cooperative": "The cooperative pass strengthened the dedicated form for compact library code and the marker for derivation. Their new syntax and customization seams remain weaker.",
+        "adversarial": "The adversarial pass tested dynamic text, hole types, imports, generics, raw bypass, diagnostics, runtime layout, and tier parity. One pure trait contract covers each case."
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-24T23:18:14.498Z"
+      "status": "ratified",
+      "created": "2026-08-24T23:18:14.498Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-25"
     },
     {
       "id": "D-STATE-HOME1",
@@ -206181,77 +206304,79 @@
       "id": "D-ABILITY-NAME2",
       "cardId": "c14vk3sif",
       "group": "syntax",
-      "title": "What final word should replace capabilities?",
-      "gist": "Choose the final names for granted effects.",
-      "lesson": "Jet already removed `Capability` and `#Caps`. The current public words are `Ability`, `Abilities`, and `#Abilities`. Effect rows describe what code may do; an ability value describes what a caller grants.",
+      "title": "How should Jet price effects vocabulary for beginners and experts?",
+      "gist": "Choose source spelling, plain-language tooling, and authority flow together.",
+      "lesson": "Effects describe what code may do. Authority describes what the application grants. Beginners should not write either list when sema can infer it. Experts need a short lexical boundary, a first-class handle, exact policy, and auditable receipts.",
       "explainer": "",
-      "story": "Kai reads a network function, narrows its grant for one block, and inspects the granted set in a build receipt.",
-      "inWild": "fn fetch() String -[Net]> -> { … }\n\n#Abilities(Net) {\n    fetch()?\n}",
+      "story": "Kai writes a network call with no ceremony. Jet infers the effect and asks at the application boundary. A plugin host later narrows authority and passes a typed handle.",
+      "inWild": "fn fetch() String -> net.get(url)\n\n#FX(Net) { fetch() }\n#FX(grant: FS, Net) { plugin.run(grant) }\n\n$ jet inspect effects\nrequired effects: Net.HTTP.Get\ngranted effects: Net.HTTP.Get\nauthority: project approval",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Keep Ability and `#Abilities`",
-          "detail": "Use `Ability.Net` for the fact menu, `Abilities` for the carried set, and `#Abilities` for a lexical grant. Effect rows keep effect names. The words are plain but longer than FX.",
-          "technical": "Confirm D-AUTHORITY-WORD2=E. Browser uses `.abilities()` and CLI uses `--abilities-json`. No Capability or Caps aliases remain.",
-          "code": "fn fetch() String -[Net]> -> { … }\n#Abilities(Net) { fetch()? }\nfn serve(granted: Abilities) Error! { … }"
+          "name": "Short `#FX` in source, plain words everywhere else",
+          "detail": "Beginner source writes no effect row or marker. Sema infers effects and asks for approval at the application boundary. Experts use short `#FX` scopes and typed Authority handles. Tools use full plain words.",
+          "technical": "`#FX(Net)` narrows a lexical scope. `#FX(grant: FS, Net)` also binds an Authority handle and cannot widen outer authority. Interactive approval supports once or project scope; non-interactive and CI runs require declared policy. Reports use `required_effects`, `granted_effects`, and `authority`. Every grant leaves a receipt. Effect rows remain the explicit expert assertion surface.",
+          "code": "fn fetch() String -> net.get(url)\n\n#FX(Net) { fetch() }\n#FX(grant: FS, Net) { plugin.run(grant) }\n\n// inspect and reports say required effects, granted effects, authority"
         },
         {
           "key": "B",
-          "name": "Use FX and `#FX`",
-          "detail": "Use `FX.Net`, `FXSet`, and `#FX`. The spelling is short and visually matches effect rows. Beginners must learn an abbreviation that is not plain English.",
-          "technical": "Amend D-AUTHORITY-WORD2. Browser uses `.fx()`, CLI uses `--fx-json`, and manifest and report fields use `fx`. FX remains distinct from the effect row type by `FXSet`.",
-          "code": "fn fetch() String -[Net]> -> { … }\n#FX(Net) { fetch()? }\nfn serve(granted: FXSet) Error! { … }"
+          "name": "Use Effects as the one public word",
+          "detail": "Beginner inference and boundary approval stay the same. Experts write `#Effects`, pass an Effects handle, and configure `effects:`. One familiar word covers both requirement and grant.",
+          "technical": "Tools distinguish required, granted, denied, and observed Effects by field names. The same Effects type represents a requested set and a granted handle with role metadata.",
+          "code": "fn fetch() String -> net.get(url)\n#Effects(Net) { fetch() }\n#Effects(grant: FS, Net) { plugin.run(grant) }"
         },
         {
           "key": "C",
-          "name": "Use Effect and `#Effects` everywhere",
-          "detail": "Use `Effect.Net`, `Effects`, and `#Effects`. One familiar word covers declarations and grants. It blurs what code does with what a caller authorizes.",
-          "technical": "The effect vocabulary and authority value share one root name. Tools must label required, granted, denied, and observed effects as separate roles.",
-          "code": "fn fetch() String -[Effect.Net]> -> { … }\n#Effects(Effect.Net) { fetch()? }\nfn serve(granted: Effects) Error! { … }"
+          "name": "Use Authority as the one public word",
+          "detail": "Beginner inference and approval stay the same. Experts write `#Authority`, bind Authority handles, and configure `authority:`. The grant model is clear, but source no longer names the effect relation directly.",
+          "technical": "Effect rows still list Net and FS requirements. `#Authority` supplies or narrows grants. Diagnostics use authority for both scope and value.",
+          "code": "fn fetch() String -> net.get(url)\n#Authority(Net) { fetch() }\n#Authority(grant: FS, Net) { plugin.run(grant) }"
         },
         {
           "key": "D",
-          "name": "Use Right and `#Rights`",
-          "detail": "Use `Right.Net`, `Rights`, and `#Rights` for grants. Effect rows stay unchanged. The distinction is precise, but the word sounds legal and policy-heavy for beginner code.",
-          "technical": "Browser uses `.rights()`, CLI uses `--rights-json`, and manifests use `rights:`. The carried type is Rights.",
-          "code": "fn fetch() String -[Net]> -> { … }\n#Rights(Net) { fetch()? }\nfn serve(granted: Rights) Error! { … }"
+          "name": "Keep Ability and `#Abilities`",
+          "detail": "Beginner inference and approval stay the same. Experts use the existing Ability menu, Abilities value, and `#Abilities` marker. One plain vocabulary remains consistent across source and tools.",
+          "technical": "Confirm D-AUTHORITY-WORD2. Browser and CLI keep abilities names. Reports distinguish required and granted abilities.",
+          "code": "fn fetch() String -> net.get(url)\n#Abilities(Net) { fetch() }\n#Abilities(grant: FS, Net) { plugin.run(grant) }"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "why": "A keeps a plain word and preserves the key distinction: effects describe actions, while abilities describe granted permission to perform them. It also avoids another wide rename.",
+        "why": "A prices words by where they appear. Experts get the short repeated source marker, while beginners and operators read complete terms in prompts, diagnostics, policy, and receipts.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "FX is short, but it is an unexplained abbreviation and `FXSet` adds a different name for the carried value."
+            "reason": "Effects is familiar but makes a requirement and an authority handle look like the same role."
           },
           {
             "key": "C",
-            "reason": "Using Effect for both requirement and grant collapses two roles that diagnostics and audits must keep separate."
+            "reason": "Authority names the grant precisely but makes the frequent lexical source boundary long and indirect."
           },
           {
             "key": "D",
-            "reason": "Rights is precise but adds policy language to the beginner surface and reads like legal authorization."
+            "reason": "Abilities is plain but remains long in expert source and less direct than effects in diagnostics and inspection."
           }
         ],
-        "tradeoff": "`#Abilities` is longer than `#FX`. The extra letters buy an ordinary searchable word with no glossary expansion."
+        "tradeoff": "Source and tooling use different spellings for the same boundary. Generated docs and hover must always expand `#FX` to “granted effects” and link it to Authority."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
-        "base": "The base draft compared Ability, FX, Effect, and Rights. It recommended the current Ability vocabulary because it separates grants from actions.",
-        "boilOcean": "The breadth pass also tested Authority, Grant, Permit, Power, and Access. Each either echoes authentication, names an action, or narrows the model too far.",
-        "hybrid": "The hybrid pass tested FX as short syntax with Ability in prose. It was removed because two names recreate the vocabulary split this card must end.",
-        "cooperative": "The cooperative pass strengthened FX as compact, memorable, and visually close to effect rows. It still requires a glossary and awkward carried-value name.",
-        "adversarial": "The adversarial pass tested search, spoken teaching, diagnostics, browser protocol terms, manifests, and audit reports. Ability stays clear across all surfaces."
+        "base": "The base draft compared frequency-priced FX with uniform Effects, Authority, and Abilities vocabularies. It recommended short source and plain tooling.",
+        "boilOcean": "The breadth pass also tested Rights, Grants, Caps, Permissions, Power, and FX everywhere. Each added policy jargon, revived retired terms, or forced an abbreviation onto beginners.",
+        "hybrid": "The hybrid pass deliberately combines `#FX` for expert source with effects and authority in prose and data. This is frequency pricing, not two semantic mechanisms.",
+        "cooperative": "The cooperative pass strengthened each uniform vocabulary for search and consistency. Their source friction or role confusion remains larger than the naming split.",
+        "adversarial": "The adversarial pass tested first-run prompts, CI, nested scopes, bound handles, manifests, JSON, browser protocol, search, and audit receipts. Explicit role fields keep the split coherent."
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-24T23:18:16.528Z"
+      "status": "ratified",
+      "created": "2026-08-24T23:18:16.528Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-25"
     },
     {
       "id": "D-JPK-SNIXREUSE1",
@@ -206578,6 +206703,73 @@
       "comment": "Realization displays one live aggregate line carrying the current phase with counts, transferred bytes and total bytes, plus one settled row per package as it completes. Byte totals grow honestly as the closure is discovered rather than being fabricated. Output degrades to deterministic plain lines with no terminal, under NO_COLOR, and when piped, and live regions are erased before any diagnostic.",
       "supersededBy": "D-CHANNEL-AUTO1",
       "created": "2026-08-25T13:19:30.267Z",
+      "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-FAILURE-FOUNDATION1",
+      "cardId": "cp3zupnt",
+      "group": "safety",
+      "title": "How should Jet make failure safe without routine ceremony?",
+      "gist": "Choose the complete beginner and expert failure model.",
+      "lesson": "Programs can fail even when authors do not plan for failure. Jet must preserve one structured report without making every function repeat an error type or propagation mark. Experts still need closed error contracts, automatic conversion, and a proof that a function cannot fail.",
+      "explainer": "",
+      "story": "Mara writes a config loader on her first day. It reports useful failures with no ceremony. A library author later narrows the same function to a stable public error domain.",
+      "inWild": "fn load(path: Path) Config -> read(path)?(\"while loading {path}\")\n\n#Error enum LoadError { Missing(Path) Invalid(ParseError) }\npub fn load_strict(path: Path) Config !LoadError -> read(path)\n\nfn find(path: Path) ?Config !LoadError -> …\nfn hash(bytes: [U8]) U32 !Never -> …",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Implicit structured Error, typed expert opt-out",
+          "detail": "Every function has the structured Error route by default. Sema removes it when impossible. Plain calls propagate automatically. Experts use `#Error` types, prefix contracts, unions, declared conversions, and `!Never` without changing the beginner path.",
+          "technical": "Amends D-ERRSUFFIX1, D-FAIL-UNIT1, D-ERRSIGIL1, D-FAIL-CARRIER1, D-FAIL-CONV1, and D-BUILD-FAIL1. Type roles are prefix forms: `?Success`, `!Error`, and `!(E1 | E2)`. Bare postfix propagation `?` retires; `?(text)` keeps journey context. A named type may wear `!` only when marked `#Error` or built into Core as an Error type. One declared `Source -> TargetError` conversion applies automatically. `!Never` requires sema proof that the route is unreachable.",
+          "code": "// beginner: no failure syntax or propagation mark\nfn load(path: Path) Config -> read(path)?(\"while loading {path}\")\n\n// expert: stable typed contract\n#Error enum LoadError { Missing(Path) Invalid(ParseError) }\nimpl IOError -> LoadError\nfn load_strict(path: Path) Config !LoadError -> read(path)\n\n// optional success plus typed failure\nfn find(path: Path) ?Config !LoadError -> …\n\n// proof obligation\nfn hash(bytes: [U8]) U32 !Never -> …"
+        },
+        {
+          "key": "B",
+          "name": "Infer the exact typed error set",
+          "detail": "Beginner source also omits error syntax and propagation marks. Sema infers the concrete closed union from reachable calls. Experts pin or name the inferred set before publishing an API.",
+          "technical": "Function interfaces carry inferred error unions. Hover and inspect show them. Public functions must accept a generated interface change or declare a named `#Error` contract. Body edits can change private function types and dependency hashes.",
+          "code": "fn load(path: Path) Config -> read(path)\n// inferred: Config !(IOError | ParseError)\n\n#Error enum LoadError { IO(IOError) Parse(ParseError) }\npub fn load_strict(path: Path) Config !LoadError -> read(path)"
+        },
+        {
+          "key": "C",
+          "name": "Require explicit typed contracts",
+          "detail": "Every fallible function writes one `#Error` type or union. Plain calls still propagate automatically, but source always states the failure boundary. Tooling can generate the signature.",
+          "technical": "No implicit default Error route exists. Sema rejects a reachable failure when the function has no explicit `!Error` contract. `!Never` remains the explicit infallible form.",
+          "code": "fn load(path: Path) Config !Error -> read(path)\nfn parse(text: String) Ast !ParseError -> …\nfn fetch() Data !(IOError | ParseError) -> …"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A prices friction by frequency. Every program gets structured failure handling automatically, while experts can narrow, convert, inspect, prohibit, and publish exact contracts through the same route.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Exact inference preserves types but lets ordinary body edits change interfaces and rebuild boundaries without a written public choice."
+          },
+          {
+            "key": "C",
+            "reason": "Explicit contracts are stable but charge every function for a failure channel Jet must support regardless."
+          }
+        ],
+        "tradeoff": "Beginner source does not show the default Error route. Hover, diagnostics, receipts, and `jet inspect` must make the route and its proof status fully visible."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared one implicit Error route, exact inferred unions, and mandatory explicit contracts. It recommended the implicit route with typed opt-out.",
+        "boilOcean": "The breadth pass also tested public Result wrappers, a throws keyword, effect-row errors, and optional postfix propagation. Each added a second carrier or repeated default behavior.",
+        "hybrid": "The hybrid pass joined the lowest-friction default with the strongest expert tools: `#Error`, prefix contracts, named unions, automatic declared conversion, and `!Never`.",
+        "cooperative": "The cooperative pass strengthened inferred unions as maximally typed beginner magic and explicit contracts as maximally visible APIs. Their interface churn and routine ceremony remain larger costs.",
+        "adversarial": "The adversarial pass tested public API stability, hidden control flow, conversion ambiguity, optional success, unit failure, and impossible failure. Inspection, sema conversion checks, and `!Never` contain those risks."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-25T13:30:32.597Z",
+      "outcome": "A",
       "ratifiedAt": "2026-08-25"
     }
   ],
@@ -208597,6 +208789,279 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-25T13:44:46.845Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ABILITY-NAME2",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-25T13:44:46.845Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c14vk3sif",
+      "note": "#13 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-25T13:44:46.845Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c14vk3sif",
+      "note": "#12 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-25T13:44:46.845Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c14vk3sif",
+      "note": "#11 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-25T13:44:46.845Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c14vk3sif",
+      "note": "#10 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-25T13:44:42.643Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TEXTHEAD-TYPE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-25T13:44:42.643Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c12uacgqe",
+      "note": "#13 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-25T13:44:42.643Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c12uacgqe",
+      "note": "#12 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-25T13:44:42.643Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c12uacgqe",
+      "note": "#11 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-25T13:44:42.643Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c12uacgqe",
+      "note": "#10 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-25T13:43:26.096Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SERVICE-RECEIPT2",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-25T13:42:45.567Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WRAP-SCOPE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-25T13:42:45.567Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "co323ahi",
+      "note": "#12 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-25T13:42:45.567Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "co323ahi",
+      "note": "#11 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-25T13:42:45.567Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "co323ahi",
+      "note": "#10 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-25T13:42:45.567Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "co323ahi",
+      "note": "#9 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-25T13:42:26.707Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FAILURE-FOUNDATION1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-25T13:35:21.347Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cnnczx0n",
+      "note": "title,kind,phase,tags,refs,needsAcceptance,body,plan,criteria,checkSteps,logEntry"
+    },
+    {
+      "at": "2026-08-25T13:35:18.840Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cmtyww5f",
+      "note": "title,kind,phase,tags,refs,body,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T13:35:16.168Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cldqlgbu",
+      "note": "title,kind,phase,tags,refs,body,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T13:34:17.539Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-ABILITY-NAME2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-08-25T13:34:17.142Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c14vk3sif",
+      "note": "title,kind,tags,refs,body,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T13:34:16.159Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-TEXTHEAD-TYPE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-08-25T13:34:14.460Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c12uacgqe",
+      "note": "title,kind,tags,refs,body,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T13:34:13.896Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-SERVICE-RECEIPT2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-08-25T13:34:12.900Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cwf44fqc",
+      "note": "title,kind,tags,refs,body,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T13:34:11.878Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-WRAP-SCOPE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-08-25T13:34:11.039Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "co323ahi",
+      "note": "title,kind,tags,refs,body,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T13:30:49.054Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cz2ys9cb",
+      "note": "title,kind,tags,refs,blockedBy,body,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T13:30:48.525Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cs2bko2y",
+      "note": "title,kind,tags,refs,blockedBy,body,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T13:30:48.003Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-DEFAULT-ERROR1",
+      "note": "May a declaration use bare `!`?"
+    },
+    {
+      "at": "2026-08-25T13:30:47.633Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-FALLIBLE-VISIBLE1",
+      "note": "Does a fallible signature need another result mark?"
+    },
+    {
+      "at": "2026-08-25T13:30:47.231Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-ERROR-TYPE1",
+      "note": "What types may wear the failure suffix?"
+    },
+    {
+      "at": "2026-08-25T13:30:32.597Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-FAILURE-FOUNDATION1",
+      "note": "How should Jet make failure safe without routine ceremony?"
+    },
+    {
+      "at": "2026-08-25T13:30:32.224Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cp3zupnt",
+      "note": "title,kind,tags,refs,body,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T13:21:15.553Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0h7q2i8",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-25T13:21:15.053Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0gziu7u",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-25T13:21:14.523Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c09vy29f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T13:21:14.008Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c02wcldf",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-08-25T13:20:15.586Z",
       "by": "orchestrator",
@@ -211823,279 +212288,6 @@
       "action": "card.criteria-add",
       "ref": "c0ppv63p",
       "note": "#6 Slice-specific: the behavior this card alone owns — “jetos c"
-    },
-    {
-      "at": "2026-08-24T23:25:27.028Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0ppv63p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:26.660Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0om2gxe",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos o"
-    },
-    {
-      "at": "2026-08-24T23:25:26.298Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0om2gxe",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:25.925Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0nlrm12",
-      "note": "#8 Slice-specific: the behavior this card alone owns — “jet dep"
-    },
-    {
-      "at": "2026-08-24T23:25:25.554Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0nlrm12",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:25.225Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c6q02qhw",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos S"
-    },
-    {
-      "at": "2026-08-24T23:25:24.845Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c6q02qhw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:23:59.721Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c011gydx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:23:59.216Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c144",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:23:58.700Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0zjan5h",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:23:58.194Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0s69hxm",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:23:35.388Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0zjan5h",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-24T23:23:34.597Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0zjan5h",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T23:23:33.881Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0zjan5h",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T23:23:33.156Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0zjan5h",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T23:23:32.611Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0zjan5h",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T23:23:32.226Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0xs3xot",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T23:23:31.833Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0xs3xot",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T23:23:31.151Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0xs3xot",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T23:23:30.483Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c011gydx",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T23:23:29.936Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c011gydx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T23:23:29.576Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c144",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T23:23:29.216Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c144",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T23:23:28.825Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c064zfby",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T23:23:28.461Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0yfdicc",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-24T23:23:28.079Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c025wleh",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T23:23:27.681Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0s69hxm",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-24T23:18:16.528Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ABILITY-NAME2",
-      "note": "What final word should replace capabilities?"
-    },
-    {
-      "at": "2026-08-24T23:18:16.083Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-STATE-HOME1",
-      "note": "Where should a type declare its typestates?"
-    },
-    {
-      "at": "2026-08-24T23:18:14.499Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-TEXTHEAD-TYPE1",
-      "note": "What kind of declaration creates a checked text head?"
-    },
-    {
-      "at": "2026-08-24T23:17:01.459Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-STATE-TERMINAL1",
-      "note": "How should typestate mark a terminal state?"
-    },
-    {
-      "at": "2026-08-24T23:17:00.831Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-MARKER-SITES1",
-      "note": "How should a marker declare its legal sites?"
-    },
-    {
-      "at": "2026-08-24T23:17:00.060Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-DEFAULT-ERROR1",
-      "note": "May a declaration use bare `!`?"
-    },
-    {
-      "at": "2026-08-24T23:16:59.372Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-BUILD-FAIL1",
-      "note": "How should a build entry declare its failure type?"
-    },
-    {
-      "at": "2026-08-24T23:15:27.541Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-TAIL-RETURN1",
-      "note": "When does a function block return its final expression?"
-    },
-    {
-      "at": "2026-08-24T23:15:27.174Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-SERVICE-RECEIPT2",
-      "note": "What should a durable service send return?"
-    },
-    {
-      "at": "2026-08-24T23:15:26.784Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-TRACK-ORIGIN1",
-      "note": "How should code read tracked origin?"
-    },
-    {
-      "at": "2026-08-24T23:14:21.460Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-RESULT-DECON2",
-      "note": "How should a short Result handler fit on one line?"
-    },
-    {
-      "at": "2026-08-24T23:14:21.048Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-FALLIBLE-VISIBLE1",
-      "note": "Does a fallible signature need another result mark?"
     }
   ],
   "nextNum": 368,

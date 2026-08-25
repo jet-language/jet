@@ -1,7 +1,7 @@
 //! `jetpack` package engine tests (Tower card #367 slice 6 split).
 //!
 //! Core package/env mechanics driven through the compiled `jetpack`/`jet`
-//! binaries against offline provider fixtures: doctor, build/list/clean/run,
+//! binaries against offline provider fixtures: doctor, build/hangar list/hangar clean/run,
 //! env add/remove, channel update/outdated, typed sources (copy/prebuilt/
 //! core/bad-adapter), no-nix reporting, bridge-flake, and monorepo/build-cache
 //! behavior. Split out of the former `tests/jetpack.rs`; see
@@ -572,6 +572,7 @@ fn cache_cli_json_uses_shared_report_schema() {
     let mirror = Scratch::new("cache-cli-json-mirror");
     let bind = jetpack()
         .args([
+            "hangar",
             "cache",
             "bind",
             "public",
@@ -597,7 +598,7 @@ fn cache_cli_json_uses_shared_report_schema() {
     assert_eq!(json_string(&bind_report, "role"), "public");
 
     let list = jetpack()
-        .args(["cache", "list", "--json", "--no-color"])
+        .args(["hangar", "cache", "list", "--json", "--no-color"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -614,14 +615,21 @@ fn cache_cli_json_uses_shared_report_schema() {
     assert!(list_stdout.contains("\"bindings\":["));
 
     let repeated = jetpack()
-        .args(["cache", "list", "--json", "--no-color"])
+        .args(["hangar", "cache", "list", "--json", "--no-color"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
     assert_eq!(repeated.stdout, list.stdout);
 
     let missing = jetpack()
-        .args(["cache", "verify", "missing", "--json", "--no-color"])
+        .args([
+            "hangar",
+            "cache",
+            "verify",
+            "missing",
+            "--json",
+            "--no-color",
+        ])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -637,7 +645,15 @@ fn cache_cli_json_uses_shared_report_schema() {
     assert_eq!(json_string(&missing_report, "code"), "E1340");
 
     let remove = jetpack()
-        .args(["cache", "remove", "public", "--yes", "--json", "--no-color"])
+        .args([
+            "hangar",
+            "cache",
+            "remove",
+            "public",
+            "--yes",
+            "--json",
+            "--no-color",
+        ])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -646,6 +662,43 @@ fn cache_cli_json_uses_shared_report_schema() {
         .expect("cache remove JSON report");
     assert_eq!(json_string(&remove_report, "schema"), "jet.report/v1");
     assert_eq!(json_string(&remove_report, "action"), "cache-remove");
+}
+
+#[test]
+fn retired_store_verbs_teach_hangar_routes() {
+    let root = Scratch::new("retired-store-verbs");
+    for (retired, route) in [
+        ("cache", "hangar cache"),
+        ("shared-store", "hangar shared"),
+        ("vendor", "hangar vendor"),
+        ("clean", "hangar clean"),
+        ("list", "hangar list"),
+    ] {
+        let output = jetpack()
+            .args([retired, "--no-color"])
+            .env("JETPACK_ROOT", &root.path)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(2), "{retired}: {stderr}");
+        assert!(stderr.contains("Error [E1354]"), "{retired}: {stderr}");
+        assert!(
+            stderr.contains(&format!("jetpack {route}")),
+            "{retired}: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn hangar_shared_status_stays_read_only() {
+    let root = Scratch::new("hangar-shared-status");
+    let output = jetpack()
+        .args(["hangar", "shared", "status", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("broker is not installed"));
 }
 
 #[test]
@@ -1894,8 +1947,8 @@ checksum = "insta-checksum"
         .iter()
         .any(|todo| { todo.source_path == "Cargo.toml" && todo.message.contains("build script") }));
     for (name, version, provider_ref) in [
-        ("serde", "1.0.200", "serde#version=1.0.200@cargo"),
-        ("cc", "1.0.99", "cc#version=1.0.99&platform=cfg(unix)@cargo"),
+        ("serde", "1.0.200", "serde@cargo#version=1.0.200"),
+        ("cc", "1.0.99", "cc@cargo#version=1.0.99&platform=cfg(unix)"),
     ] {
         assert!(
             plan.emit_pkg_jet()
@@ -1928,7 +1981,7 @@ checksum = "insta-checksum"
     }
     let insta = plan
         .provider_facts
-        .get("insta#version=1.39.0@cargo")
+        .get("insta@cargo#version=1.39.0")
         .expect("real project dev-dependency facts");
     insta
         .validate()
@@ -1948,10 +2001,10 @@ fn cargo_import_keeps_unlocked_target_identity_without_duplicate_selector_facts(
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[target.'cfg(unix)'.dependencies]\ncc = \"1\"\n",
         "",
     );
-    assert_eq!(plan.deps[0].provider_ref, "cc#platform=cfg(unix)@cargo");
+    assert_eq!(plan.deps[0].provider_ref, "cc@cargo#platform=cfg(unix)");
     let facts = plan
         .provider_facts
-        .get("cc#platform=cfg(unix)@cargo")
+        .get("cc@cargo#platform=cfg(unix)")
         .expect("unlocked target provider facts");
     assert!(facts.losses.iter().all(|loss| {
         !loss
@@ -1990,7 +2043,7 @@ fn jet_registry_dependency_roles_features_and_constraints_round_trip() {
     let lock = report
         .lock_record(
             "engine-test",
-            "rolekit#version=1.0.0@jet-registry",
+            "rolekit@jet-registry#version=1.0.0",
             "x86_64-linux",
         )
         .expect("registry provider lock");
@@ -2016,17 +2069,17 @@ fn provider_conformance_nuget_conan_vcpkg_uses_shared_production_carrier() {
         (
             ProviderFamily::NuGet,
             "<package><metadata><id>widget</id><version>1.2.3</version><licenseExpression>MIT</licenseExpression><repository type=\"git\" url=\"https://example.invalid/widget\" /></metadata></package>",
-            "widget#version=1.2.3@nuget",
+            "widget@nuget#version=1.2.3",
         ),
         (
             ProviderFamily::Conan,
             "name = \"widget\"\nversion = \"1.2.3\"\nlicense = \"MIT\"\ndef requirements(self):\n    self.requires(\"zlib/1.3.1\")\n",
-            "widget#version=1.2.3@conan",
+            "widget@conan#version=1.2.3",
         ),
         (
             ProviderFamily::Vcpkg,
             r#"{"name":"widget","version-string":"1.2.3","license":"MIT","dependencies":[{"name":"zlib","version>=":"1.3.0","features":["core"]}],"features":{"tools":["fmt"]}}"#,
-            "widget#version=1.2.3@vcpkg",
+            "widget@vcpkg#version=1.2.3",
         ),
     ];
 
@@ -2090,7 +2143,7 @@ fn provider_conformance_homebrew_github_binary_uses_shared_production_carrier() 
         (
             ProviderFamily::Github,
             github.as_str(),
-            "tool#version=v1.2.3@github",
+            "tool@github#version=v1.2.3",
         ),
         (
             ProviderFamily::Binary,
@@ -2873,7 +2926,7 @@ fn no_nix_projects_external_output_and_build_facts() {
     assert!(provider_facts.facts.contains_key("nix.native.document"));
 
     let entered = jetpack()
-        .args(["enter", "--no-color", "--trust", "--offline", "--fixtures"])
+        .args(["env", "--no-color", "--trust", "--offline", "--fixtures"])
         .arg(&fixtures.path)
         .args([
             "-p",
@@ -3006,7 +3059,7 @@ fn connected_receipt_reaches_lock_and_fails_closed_on_corruption() {
     let orphan_path = root.join("hangar/receipts").join(&orphan_digest);
     fs::write(&orphan_path, orphan_bytes).unwrap();
     let cleaned = jetpack()
-        .args(["clean", "--no-color", "--yes"])
+        .args(["hangar", "clean", "--no-color", "--yes"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .output()
@@ -3041,7 +3094,7 @@ fn list_shows_realized_package() {
         String::from_utf8_lossy(&built.stderr)
     );
     let out = jetpack()
-        .args(["list", "--no-color"])
+        .args(["hangar", "list", "--no-color"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -3082,7 +3135,7 @@ fn disappeared_output_build_fails_without_store_state_and_retries() {
     assert!(stderr.contains("does not exist"), "stderr: {stderr}");
     assert_no_hangar_entry(&root.path, "greet-");
     let listed = jetpack()
-        .args(["list", "--no-color"])
+        .args(["hangar", "list", "--no-color"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -3168,7 +3221,7 @@ fn clean_removes_only_stale_unreferenced_hangar_objects() {
     fs::write(fresh.join("payload"), "fresh bytes").unwrap();
 
     let out = jetpack()
-        .args(["clean", "--no-color", "--yes"])
+        .args(["hangar", "clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -3193,7 +3246,7 @@ fn clean_without_yes_prints_plan_and_does_not_apply_in_non_tty() {
     fs::write(stale.join("payload"), "old bytes").unwrap();
 
     let out = jetpack()
-        .args(["clean", "--no-color"])
+        .args(["hangar", "clean", "--no-color"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -3218,7 +3271,7 @@ fn clean_keeps_lock_reachable_and_legacy_unknown_hangar_objects() {
     write_lock_with_live_output(&project.path, "live", "1.0", &live_hash);
 
     let out = jetpack()
-        .args(["clean", "--no-color", "--yes"])
+        .args(["hangar", "clean", "--no-color", "--yes"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .output()
@@ -3248,7 +3301,7 @@ fn clean_sweeps_orphan_build_scratch_but_keeps_active_scratch() {
     fs::write(active.join("tmp"), "live").unwrap();
 
     let out = jetpack()
-        .args(["clean", "--no-color", "--yes"])
+        .args(["hangar", "clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -3270,7 +3323,7 @@ fn clean_sweeps_preserved_failed_build_scratch() {
     fs::write(failed.join("build.log"), "failed build").unwrap();
 
     let out = jetpack()
-        .args(["clean", "--no-color", "--yes"])
+        .args(["hangar", "clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -3291,7 +3344,7 @@ fn clean_optimizes_duplicate_files_inside_hangar_only() {
     fs::write(second.join("blob"), "same payload").unwrap();
 
     let out = jetpack()
-        .args(["clean", "--no-color", "--yes"])
+        .args(["hangar", "clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -3528,7 +3581,7 @@ fn bad_ref_is_friendly_and_exits_2() {
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("missing a source"), "stderr: {stderr}");
-    assert!(stderr.contains("name#version@source"), "stderr: {stderr}");
+    assert!(stderr.contains("package@source#version"), "stderr: {stderr}");
 }
 
 #[test]
@@ -4193,7 +4246,7 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
     let run = |offline: bool| {
         let mut command = jetpack();
         command
-            .args(["enter", "--no-color", "--trust"])
+            .args(["env", "--no-color", "--trust"])
             .current_dir(&project_dir)
             .env("JETPACK_ROOT", &root_dir)
             .env("PATH", "/usr/bin")
@@ -4527,7 +4580,7 @@ fn channel_update_writes_exact_lock_and_build_uses_it_offline() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { default: acme/tools#latest@github }
+    sources: { default: acme/tools@github#latest }
     env.dev: Env{ packages: [default.greet] }
 }
 "#,
@@ -4595,7 +4648,7 @@ fn channel_build_without_lock_is_e1271() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { default: acme/tools#latest@github }
+    sources: { default: acme/tools@github#latest }
     env.dev: Env{ packages: [default.greet] }
 }
 "#,
@@ -4626,8 +4679,8 @@ fn channel_update_accepts_main_and_semver_mask() {
         r#"
 module dev {
     sources: {
-        trunk: acme/tools#main@github,
-        stable: acme/tools#v0.x@github,
+        trunk: acme/tools@github#main,
+        stable: acme/tools@github#v0.x,
     }
     env.dev: Env{ packages: [trunk.greet, stable.greet] }
 }
@@ -4678,7 +4731,7 @@ fn outdated_reports_newer_channel_without_mutating_lock() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { default: acme/tools#latest@github }
+    sources: { default: acme/tools@github#latest }
     env.dev: Env{ packages: [default.greet] }
 }
 "#,
@@ -4728,7 +4781,7 @@ fn automatic_channel_refresh_writes_lock_and_manifest_without_update() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { automatic: #auto omp@nixpkgs }
+    sources: { automatic: omp@nixpkgs#auto }
     env.dev: Env{ packages: [] }
 }
 "#,
@@ -4756,7 +4809,7 @@ module dev {
     );
     let manifest = fs::read_to_string(proj.join("env.jet")).unwrap();
     assert!(
-        manifest.contains("#auto omp#1.2.3@nixpkgs"),
+        manifest.contains("omp@nixpkgs#auto"),
         "manifest: {manifest}"
     );
 }
@@ -4770,7 +4823,7 @@ fn automatic_channel_refresh_moves_again_after_manifest_writeback() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { automatic: #auto omp@nixpkgs }
+    sources: { automatic: omp@nixpkgs#auto }
     env.dev: Env{ packages: [] }
 }
 "#,
@@ -4799,7 +4852,7 @@ module dev {
     );
     let manifest = fs::read_to_string(proj.join("env.jet")).unwrap();
     assert!(
-        manifest.contains("#auto omp#1.2.4@nixpkgs"),
+        manifest.contains("omp@nixpkgs#auto"),
         "manifest: {manifest}"
     );
 }
@@ -4841,8 +4894,8 @@ fn outdated_labels_pinned_manual_and_automatic_sources() {
 module dev {
     sources: {
         pinned: rustc@nixpkgs,
-        manual: #latest jq@nixpkgs,
-        automatic: #auto omp@nixpkgs,
+        manual: jq@nixpkgs#latest,
+        automatic: omp@nixpkgs#auto,
     }
     env.dev: Env{ packages: [] }
 }
@@ -4949,17 +5002,17 @@ fn unknown_named_source_in_env_is_friendly() {
 }
 
 #[test]
-fn jetpack_enter_runs_command_in_project_env() {
-    // Gap #6 / U §8 (Scale-2): `jetpack enter` is the project-env command — it
+fn jetpack_env_runs_command_in_project_env() {
+    // Gap #6 / U §8 (Scale-2): `jetpack env` is the project-env command — it
     // never takes an explicit ref, it always composes the env declared by the
     // project `env.jet`. The `-- cmd` form runs a one-off command in the
-    // realized env, which is how we prove `enter` put the package on PATH.
-    let (base, proj, root) = core_hello_project("enter");
+    // realized env, which is how we prove `env` put the package on PATH.
+    let (base, proj, root) = core_hello_project("env");
     let output = jetpack()
-        // U19: `enter` trust-gates a project that declares packages; `--trust`
+        // U19: `env` trust-gates a project that declares packages; `--trust`
         // is the one-shot bypass so this test can assert on PATH composition
         // without exercising the interactive prompt.
-        .args(["enter", "--no-color", "--trust", "--", "hello"])
+        .args(["env", "--no-color", "--trust", "--", "hello"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .env("HOME", base.join("home"))
@@ -4991,6 +5044,52 @@ fn jetpack_enter_runs_command_in_project_env() {
         .expect("Store provider facts are lossless");
     assert_eq!(shared.reference, entry.reference);
     assert!(!shared.native_document.is_empty());
+}
+
+#[test]
+fn jetpack_env_propagates_child_exit_status() {
+    let (base, proj, root) = core_hello_project("env-status");
+    let output = jetpack()
+        .args(["env", "--no-color", "--trust", "--", "sh", "-c", "exit 17"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("HOME", base.join("home"))
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(17), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn jetpack_env_prep_materializes_without_entering() {
+    let (base, proj, root) = core_hello_project("env-prep");
+    let prep = jetpack()
+        .args(["env", "--prep", "--no-color", "--trust"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("HOME", base.join("home"))
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        prep.status.success(),
+        "env --prep failed: {}",
+        String::from_utf8_lossy(&prep.stderr)
+    );
+    let enter = jetpack()
+        .args(["env", "--no-color", "--trust", "--", "hello"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("HOME", base.join("home"))
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        enter.status.success(),
+        "entry after prep failed: {}",
+        String::from_utf8_lossy(&enter.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&enter.stdout).trim(), "hello from jet-pkgs");
 }
 
 #[test]
@@ -5114,7 +5213,7 @@ fn enter_dash_p_adds_adhoc_package_with_no_manifest_at_all() {
     let out = Scratch::new("dashp-out");
     write_runnable_fixture(&fixtures.path, &root.path, &out.path);
     let output = jetpack()
-        .args(["enter", "--no-color", "--trust", "--offline", "--fixtures"])
+        .args(["env", "--no-color", "--trust", "--offline", "--fixtures"])
         .arg(&fixtures.path)
         .args(["-p", "greet", "--", "greet"])
         .current_dir(&proj.path)
@@ -5141,7 +5240,7 @@ fn enter_dash_p_merges_with_project_declared_packages() {
     let out = base.join("greet-out");
     write_runnable_fixture(&fixtures, &root, &out);
     let output = jetpack()
-        .args(["enter", "--no-color", "--trust", "--offline", "--fixtures"])
+        .args(["env", "--no-color", "--trust", "--offline", "--fixtures"])
         .arg(&fixtures)
         .args(["-p", "greet", "--", "sh", "-c", "hello && greet"])
         .current_dir(&proj)
@@ -5166,7 +5265,7 @@ fn enter_without_env_jet_or_packages_is_still_nothing_to_do() {
     let root = Scratch::new("nothing-root");
     let proj = Scratch::new("nothing-proj");
     let output = jetpack()
-        .args(["enter", "--no-color"])
+        .args(["env", "--no-color"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .output()
@@ -5187,7 +5286,7 @@ fn enter_flake_detection_ordering_project_env_wins_without_flag() {
     let (base, proj, root) = core_hello_project("flake-ordering");
     fs::write(proj.join("flake.nix"), "this is not valid nix").unwrap();
     let output = jetpack()
-        .args(["enter", "--no-color", "--trust", "--", "hello"])
+        .args(["env", "--no-color", "--trust", "--", "hello"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .env("HOME", base.join("home"))
@@ -5212,7 +5311,7 @@ fn enter_flake_flag_requires_trust_before_native_projection() {
     let (base, proj, root) = core_hello_project("flake-forced");
     fs::write(proj.join("flake.nix"), "{ }").unwrap();
     let output = jetpack()
-        .args(["enter", "--no-color", "--flake"])
+        .args(["env", "--no-color", "--flake"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .env("HOME", base.join("home"))
@@ -5344,7 +5443,7 @@ fn enter_flake_dynamic_projection_reports_e1256_without_nix() {
     )
     .unwrap();
     let output = jetpack()
-        .args(["enter", "--flake", "--trust", "--no-color"])
+        .args(["env", "--flake", "--trust", "--no-color"])
         .current_dir(&project.path)
         .env("PATH", "")
         .output()
@@ -5360,7 +5459,7 @@ fn enter_flake_with_no_foreign_flake_present_is_friendly() {
     let root = Scratch::new("flake-none-root");
     let proj = Scratch::new("flake-none-proj");
     let output = jetpack()
-        .args(["enter", "--no-color", "--flake"])
+        .args(["env", "--no-color", "--flake"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .output()
@@ -5379,7 +5478,7 @@ fn retired_profile_flag_teaches_preset() {
     )
     .unwrap();
     let output = jetpack()
-        .args(["enter", "info", "--profile", "work", "--no-color"])
+        .args(["env", "info", "--profile", "work", "--no-color"])
         .current_dir(&project.path)
         .output()
         .unwrap();
@@ -5401,7 +5500,7 @@ fn retired_environment_flag_teaches_env() {
     )
     .unwrap();
     let output = jetpack()
-        .args(["enter", "info", "--env-profile", "full", "--no-color"])
+        .args(["env", "info", "--env-profile", "full", "--no-color"])
         .current_dir(&project.path)
         .output()
         .unwrap();
@@ -5441,7 +5540,7 @@ module env.full {
     .unwrap();
     fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
     let output = jetpack()
-        .args(["enter", "info", "--json", "--no-color"])
+        .args(["env", "info", "--json", "--no-color"])
         .current_dir(&project.path)
         .env("HOSTNAME", "epoch5-host")
         .env("USER", "epoch5-user")
@@ -5508,7 +5607,7 @@ module env.full {
     );
 
     let full = jetpack()
-        .args(["enter", "info", "--json", "--no-color", "--env", "full"])
+        .args(["env", "info", "--json", "--no-color", "--env", "full"])
         .current_dir(&project.path)
         .env("HOSTNAME", "epoch5-host")
         .env("USER", "epoch5-user")
@@ -5538,7 +5637,7 @@ module env.full {
     );
 
     let missing = jetpack()
-        .args(["enter", "info", "--no-color", "--env", "missing"])
+        .args(["env", "info", "--no-color", "--env", "missing"])
         .current_dir(&project.path)
         .env("HOSTNAME", "epoch5-host")
         .env("USER", "epoch5-user")
@@ -5581,7 +5680,7 @@ fn env_info_json_discloses_reads_and_typed_service_facts_without_starting_proces
     fs::write(project.join("run.jet"), "#Job\nfn lint() {}\n").unwrap();
 
     let output = jetpack()
-        .args(["enter", "info", "--json", "--no-color"])
+        .args(["env", "info", "--json", "--no-color"])
         .current_dir(&project.path)
         .env("HOME", "/test/home")
         .output()
@@ -5746,7 +5845,7 @@ fn env_info_json_discloses_typed_integration_projection() {
     )
     .unwrap();
     let output = jetpack()
-        .args(["enter", "info", "--json", "--no-color"])
+        .args(["env", "info", "--json", "--no-color"])
         .current_dir(&project.path)
         .env("JET_TARGET", "x86_64-linux-darwin")
         .output()
@@ -5837,7 +5936,7 @@ fn enter_requires_a_persisted_cloud_integration_grant() {
     )
     .unwrap();
     let output = jetpack()
-        .args(["enter", "--trust", "--offline", "--no-color", "--", "true"])
+        .args(["env", "--trust", "--offline", "--no-color", "--", "true"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
@@ -5870,7 +5969,7 @@ fn enter_requires_a_persisted_vault_integration_grant() {
     )
     .unwrap();
     let output = jetpack()
-        .args(["enter", "--trust", "--offline", "--no-color", "--", "true"])
+        .args(["env", "--trust", "--offline", "--no-color", "--", "true"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
@@ -5898,7 +5997,7 @@ fn env_info_rejects_unredactable_integration_secret() {
     )
     .unwrap();
     let output = jetpack()
-        .args(["enter", "info", "--no-color"])
+        .args(["env", "info", "--no-color"])
         .current_dir(&project.path)
         .output()
         .unwrap();
@@ -5920,7 +6019,7 @@ fn env_info_rejects_unsupported_apple_integration_target() {
     )
     .unwrap();
     let output = jetpack()
-        .args(["enter", "info", "--no-color"])
+        .args(["env", "info", "--no-color"])
         .current_dir(&project.path)
         .output()
         .unwrap();
@@ -7585,7 +7684,7 @@ fn epoch4_dogfood_portfolio_rebuilds_offline_after_component_loss() {
     );
 
     let entered = jetpack()
-        .args(["enter", "--no-color", "--trust", "--offline", "--", "hello"])
+        .args(["env", "--no-color", "--trust", "--offline", "--", "hello"])
         .current_dir(&project)
         .env("JETPACK_ROOT", &root)
         .env("HOME", base.join("home"))
@@ -7647,7 +7746,7 @@ fn epoch4_dogfood_portfolio_rebuilds_offline_after_component_loss() {
 
     let stale = write_hangar_meta(&root, "epoch4-dogfood-stale", "stale", "1.0", Some(1)).0;
     let clean = jetpack()
-        .args(["clean", "--no-color", "--yes"])
+        .args(["hangar", "clean", "--no-color", "--yes"])
         .env("JETPACK_ROOT", &root)
         .env("PATH", &missing_tools)
         .output()
@@ -8103,7 +8202,7 @@ fn jet_build_never_reports_tampered_output_as_cached() {
 
 #[test]
 fn jet_vendor_writes_pinned_sources() {
-    // T4 / D-BFS1: `jetpack vendor` copies each source-built package and writes a
+    // T4 / D-BFS1: `jetpack hangar vendor` copies each source-built package and writes a
     // `<name>.sha256` pin (the A4 output hash) so a later build is reproducible.
     let (_base, proj, root) = core_hello_project("t4-vendor");
     // Realize first so the hangar has a source-built object.
@@ -8117,7 +8216,7 @@ fn jet_vendor_writes_pinned_sources() {
     assert!(built.status.success());
 
     let out = jetpack()
-        .args(["vendor", "--no-color"])
+        .args(["hangar", "vendor", "--no-color"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .env("PATH", "/usr/bin:/bin")

@@ -1,8 +1,8 @@
-//! Jetpack ref classifier: `name['#'selector]['@'source]` or
+//! Jetpack ref classifier: `name['@'source]['#'selector]` or
 //! `source.package` (D-JPK-REF1=A, D-MONOREF1=A).
 //!
-//! A ref reads like an address: the package first, then its source. `#` pins a
-//! version or channel. Bare `./`, `../`, and `/` paths need no provider word.
+//! A ref reads like an address: the package, its source, then its version or
+//! channel. Bare `./`, `../`, and `/` paths need no provider word.
 //! Examples:
 //!   `fastfetch@nixpkgs`
 //!   `halcyonomega/my-fastfetch-jet-config@github`
@@ -368,6 +368,8 @@ pub enum RefError {
     EmptyHalf(String),
     /// A retired provider-first ref that must be flipped, never reinterpreted.
     ProviderFirst { raw: String, replacement: String },
+    /// A package ref uses one of the retired selector positions.
+    NonCanonical { raw: String, replacement: String },
     /// The `path` provider word retired; local paths are bare.
     PathProviderRetired { raw: String, path: String },
     /// The source suffix is neither a built-in nor a declared named source.
@@ -400,7 +402,9 @@ impl RefError {
     /// The registered diagnostic code for the errors that carry one.
     pub fn code(&self) -> Option<&'static str> {
         match self {
-            RefError::ProviderFirst { .. } | RefError::PathProviderRetired { .. } => Some("E1317"),
+            RefError::ProviderFirst { .. }
+            | RefError::NonCanonical { .. }
+            | RefError::PathProviderRetired { .. } => Some("E1317"),
             RefError::AmbiguousMember { .. } => Some("E1230"),
             RefError::UnknownMember { .. } => Some("E1231"),
             _ => None,
@@ -515,6 +519,14 @@ pub fn classify(raw: &str) -> Result<RefSpec, RefError> {
 pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> {
     let raw = raw.trim();
 
+    let migrated = migrate_persisted_ref(raw);
+    if migrated.canonical != raw {
+        return Err(RefError::NonCanonical {
+            raw: raw.to_string(),
+            replacement: migrated.canonical,
+        });
+    }
+
     if is_bare_path(raw) && !raw.contains(Syntax::REF_PROVIDER_AT) {
         return Ok(RefSpec {
             source: Source::Path,
@@ -523,10 +535,19 @@ pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> 
         });
     }
 
-    if let Some((package, source)) = raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
-        if source.is_empty() || package.is_empty() {
+    if let Some((package, source_with_selector)) = raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
+        if source_with_selector.is_empty() || package.is_empty() {
             return Err(RefError::EmptyHalf(raw.to_string()));
         }
+        let (source, selector) = match source_with_selector
+            .split_once(Syntax::REF_CHANNEL_MARKER)
+        {
+            Some((source, selector)) if !source.is_empty() && !selector.is_empty() => {
+                (source, Some(selector))
+            }
+            Some(_) => return Err(RefError::EmptyHalf(raw.to_string())),
+            None => (source_with_selector, None),
+        };
         let src = match Source::builtin(source) {
             Some(Source::Path) => {
                 return Err(RefError::PathProviderRetired {
@@ -547,9 +568,13 @@ pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> 
                 })
             }
         };
+        let package = selector.map_or_else(
+            || package.to_string(),
+            |selector| format!("{package}{}{selector}", Syntax::REF_CHANNEL_MARKER),
+        );
         return Ok(RefSpec {
             source: src,
-            package: package.to_string(),
+            package,
             raw: raw.to_string(),
         });
     }
@@ -746,7 +771,129 @@ fn is_semver_mask(s: &str) -> bool {
     !series.is_empty() && series.chars().all(|c| c.is_ascii_digit())
 }
 
-/// Split an upstream/source target at `#` when that selector is a channel.
+/// The canonical form of a ref read from a persisted manifest or lock.
+///
+/// This is the one disk migration seam. User input never calls it to accept a
+/// retired spelling; the classifiers compare its result with the input and
+/// report the canonical replacement instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigratedRef {
+    pub canonical: String,
+    pub policy: ChannelPolicy,
+}
+
+fn legacy_policy_prefix(s: &str) -> (Option<ChannelPolicy>, &str) {
+    for (marker, policy) in [
+        (Syntax::REF_CHANNEL_AUTO, ChannelPolicy::Automatic),
+        (Syntax::REF_CHANNEL_LATEST, ChannelPolicy::Manual),
+    ] {
+        let prefix = format!("{}{marker}", Syntax::REF_CHANNEL_MARKER);
+        if let Some(rest) = s.strip_prefix(&prefix) {
+            if rest.chars().next().is_some_and(char::is_whitespace) {
+                return (Some(policy), rest.trim_start());
+            }
+        }
+    }
+    (None, s)
+}
+
+fn policy_for_selector(selector: &str) -> Option<ChannelPolicy> {
+    match selector {
+        Syntax::REF_CHANNEL_AUTO => Some(ChannelPolicy::Automatic),
+        Syntax::REF_CHANNEL_LATEST => Some(ChannelPolicy::Manual),
+        _ if ChannelRef::parse_selector(selector).is_some() => Some(ChannelPolicy::Manual),
+        _ => None,
+    }
+}
+
+fn valid_source_token(source: &str) -> bool {
+    !source.is_empty()
+        && source
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+/// Migrate one persisted ref from the retired selector positions.
+pub fn migrate_persisted_ref(raw: &str) -> MigratedRef {
+    let raw = raw.trim();
+    let (legacy_policy, raw_ref) = legacy_policy_prefix(raw);
+    let Some((left, source_with_selector)) = raw_ref.rsplit_once(Syntax::REF_PROVIDER_AT) else {
+        return MigratedRef {
+            canonical: raw.to_string(),
+            policy: legacy_policy.unwrap_or_default(),
+        };
+    };
+    if left.is_empty() || source_with_selector.is_empty() {
+        return MigratedRef {
+            canonical: raw.to_string(),
+            policy: legacy_policy.unwrap_or_default(),
+        };
+    }
+    let (source, source_selector) = match source_with_selector.split_once(Syntax::REF_CHANNEL_MARKER)
+    {
+        Some((source, selector)) if valid_source_token(source) && !selector.is_empty() => {
+            (source, Some(selector))
+        }
+        Some(_) => {
+            return MigratedRef {
+                canonical: raw.to_string(),
+                policy: legacy_policy.unwrap_or_default(),
+            }
+        }
+        None if valid_source_token(source_with_selector) => (source_with_selector, None),
+        None => {
+            return MigratedRef {
+                canonical: raw.to_string(),
+                policy: legacy_policy.unwrap_or_default(),
+            }
+        }
+    };
+    let (package, target_selector) = match left.rsplit_once(Syntax::REF_CHANNEL_MARKER) {
+        Some((package, selector)) if !package.is_empty() && !selector.is_empty() => {
+            (package, Some(selector))
+        }
+        Some(_) => {
+            return MigratedRef {
+                canonical: raw.to_string(),
+                policy: legacy_policy.unwrap_or_default(),
+            }
+        }
+        None => (left, None),
+    };
+    let selector = source_selector.or(target_selector).or_else(|| {
+        legacy_policy.map(|policy| match policy {
+            ChannelPolicy::Automatic => Syntax::REF_CHANNEL_AUTO,
+            ChannelPolicy::Manual => Syntax::REF_CHANNEL_LATEST,
+            ChannelPolicy::Pinned => "",
+        })
+    });
+    let canonical = match selector {
+        Some(selector) if !selector.is_empty() => format!(
+            "{package}{}{source}{}{selector}",
+            Syntax::REF_PROVIDER_AT,
+            Syntax::REF_CHANNEL_MARKER
+        ),
+        _ => format!("{package}{}{source}", Syntax::REF_PROVIDER_AT),
+    };
+    MigratedRef {
+        canonical,
+        policy: legacy_policy
+            .or_else(|| selector.and_then(policy_for_selector))
+            .unwrap_or_default(),
+    }
+}
+
+/// Return policy encoded in a canonical user ref. Retired prefix input is not
+/// accepted here and therefore returns the pinned default.
+pub fn policy_for_ref(raw: &str) -> ChannelPolicy {
+    raw.trim()
+        .rsplit_once(Syntax::REF_PROVIDER_AT)
+        .and_then(|(_, source)| source.rsplit_once(Syntax::REF_CHANNEL_MARKER))
+        .and_then(|(_, selector)| policy_for_selector(selector))
+        .unwrap_or_default()
+}
+
+/// Split an internal provider-first target at `#` when that selector is a channel.
 /// Exact selectors such as `#v1.2.3` are left untouched.
 pub fn split_channel_ref(s: &str) -> (&str, Option<ChannelRef>) {
     match s.rsplit_once('#') {
@@ -758,55 +905,52 @@ pub fn split_channel_ref(s: &str) -> (&str, Option<ChannelRef>) {
     }
 }
 
-/// Parse the owner-ratified leading policy marker. The marker is intentionally
-/// separate from the existing trailing channel selector so `#auto jq@nixpkgs`
-/// keeps the package/source reading order.
-pub fn split_channel_policy(s: &str) -> (ChannelPolicy, &str) {
-    let s = s.trim();
-    if let Some(rest) = s.strip_prefix(Syntax::REF_CHANNEL_MARKER) {
-        if let Some(rest) = rest.strip_prefix(Syntax::REF_CHANNEL_AUTO) {
-            return (ChannelPolicy::Automatic, rest.trim_start());
-        }
-        if let Some(rest) = rest.strip_prefix(Syntax::REF_CHANNEL_LATEST) {
-            return (ChannelPolicy::Manual, rest.trim_start());
-        }
-    }
-    (ChannelPolicy::Pinned, s)
-}
-
 fn policy_for_upstream(upstream: &str) -> ChannelPolicy {
     split_channel_ref(upstream)
         .1
         .map_or(ChannelPolicy::Pinned, |_| ChannelPolicy::Manual)
 }
 
-/// Classify a `target@provider` source ref or a bare local path.
+/// Classify a `target@provider[#selector]` source ref or a bare local path.
 pub fn classify_provider_ref(raw: &str) -> Result<ProviderRef, RefError> {
     let raw = raw.trim();
-    let (prefix_policy, raw_ref) = split_channel_policy(raw);
-    if is_bare_path(raw_ref) && !raw_ref.contains(Syntax::REF_PROVIDER_AT) {
+    let migrated = migrate_persisted_ref(raw);
+    if migrated.canonical != raw {
+        return Err(RefError::NonCanonical {
+            raw: raw.to_string(),
+            replacement: migrated.canonical,
+        });
+    }
+    if is_bare_path(raw) && !raw.contains(Syntax::REF_PROVIDER_AT) {
         return Ok(ProviderRef {
             provider: Source::Path,
-            target: raw_ref.to_string(),
+            target: raw.to_string(),
             channel: None,
-            policy: prefix_policy,
+            policy: ChannelPolicy::Pinned,
             raw: raw.to_string(),
         });
     }
-    let (target, provider) = match raw_ref.rsplit_once(Syntax::REF_PROVIDER_AT) {
+    let (target, provider_with_selector) = match raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
         Some(parts) => parts,
-        None => return Err(RefError::MissingSeparator(raw_ref.to_string())),
+        None => return Err(RefError::MissingSeparator(raw.to_string())),
     };
-    if provider.is_empty() || target.is_empty() {
-        return Err(RefError::EmptyHalf(raw_ref.to_string()));
+    if provider_with_selector.is_empty() || target.is_empty() {
+        return Err(RefError::EmptyHalf(raw.to_string()));
     }
     if Source::is_builtin(target) {
-        return Err(provider_first(target, provider, raw_ref));
+        return Err(provider_first(target, provider_with_selector, raw));
     }
+    let (provider, selector) = match provider_with_selector.split_once(Syntax::REF_CHANNEL_MARKER) {
+        Some((provider, selector)) if !provider.is_empty() && !selector.is_empty() => {
+            (provider, Some(selector))
+        }
+        Some(_) => return Err(RefError::EmptyHalf(raw.to_string())),
+        None => (provider_with_selector, None),
+    };
     let provider = match Source::builtin(provider) {
         Some(Source::Path) => {
             return Err(RefError::PathProviderRetired {
-                raw: raw_ref.to_string(),
+                raw: raw.to_string(),
                 path: target.to_string(),
             })
         }
@@ -814,23 +958,35 @@ pub fn classify_provider_ref(raw: &str) -> Result<ProviderRef, RefError> {
         None => {
             return Err(RefError::UnknownSource {
                 source: provider.to_string(),
-                raw: raw_ref.to_string(),
+                raw: raw.to_string(),
                 declared: Vec::new(),
             })
         }
     };
-    let (target, channel) = split_channel_ref(target);
-    let policy = if prefix_policy != ChannelPolicy::Pinned {
-        prefix_policy
-    } else if channel.is_some() {
-        ChannelPolicy::Manual
-    } else {
-        ChannelPolicy::Pinned
+    let (target, channel, policy) = match selector {
+        Some(Syntax::REF_CHANNEL_AUTO) => (
+            target.to_string(),
+            Some(ChannelRef::Latest),
+            ChannelPolicy::Automatic,
+        ),
+        Some(Syntax::REF_CHANNEL_LATEST) => (
+            target.to_string(),
+            Some(ChannelRef::Latest),
+            ChannelPolicy::Manual,
+        ),
+        Some(selector) => match ChannelRef::parse_selector(selector) {
+            Some(channel) => (target.to_string(), Some(channel), ChannelPolicy::Manual),
+            None => (
+                format!("{target}{}{selector}", Syntax::REF_CHANNEL_MARKER),
+                None,
+                ChannelPolicy::Pinned,
+            ),
+        },
+        None => (target.to_string(), None, ChannelPolicy::Pinned),
     };
-    let channel = channel.or_else(|| policy.moves().then_some(ChannelRef::Latest));
     Ok(ProviderRef {
         provider,
-        target: target.to_string(),
+        target,
         channel,
         policy,
         raw: raw.to_string(),
@@ -866,14 +1022,14 @@ mod tests {
 
     #[test]
     fn classifies_direct_cran_root_with_exact_version() {
-        let r = classify("jsonlite#version=1.9.0@cran").unwrap();
+        let r = classify("jsonlite@cran#version=1.9.0").unwrap();
         assert_eq!(r.source, Source::Cran);
         assert_eq!(r.package, "jsonlite#version=1.9.0");
     }
 
     #[test]
     fn classifies_direct_luarocks_root_with_exact_version() {
-        let r = classify("luasocket#version=3.1.0-1@luarocks").unwrap();
+        let r = classify("luasocket@luarocks#version=3.1.0-1").unwrap();
         assert_eq!(r.source, Source::LuaRocks);
         assert_eq!(r.package, "luasocket#version=3.1.0-1");
         assert_eq!(ProviderKind::parse("luarocks"), ProviderKind::LuaRocks);
@@ -883,17 +1039,17 @@ mod tests {
     fn classifies_direct_scripting_registry_roots() {
         for (raw, source, provider) in [
             (
-                "rack#version=3.2.0@ruby",
+                "rack@ruby#version=3.2.0",
                 Source::RubyGems,
                 ProviderKind::RubyGems,
             ),
             (
-                "JSON-MaybeXS#version=1.004008@perl",
+                "JSON-MaybeXS@perl#version=1.004008",
                 Source::Cpan,
                 ProviderKind::Cpan,
             ),
             (
-                "monolog/monolog#version=3.9.0@php",
+                "monolog/monolog@php#version=3.9.0",
                 Source::Packagist,
                 ProviderKind::Packagist,
             ),
@@ -908,13 +1064,13 @@ mod tests {
     fn classifies_direct_jet_registry_npm_and_cargo_roots() {
         for (raw, source, provider) in [
             (
-                "hello#version=1.0.0@jet-registry",
+                "hello@jet-registry#version=1.0.0",
                 Source::JetRegistry,
                 ProviderKind::JetRegistry,
             ),
-            ("left-pad#version=1.3.0@npm", Source::Npm, ProviderKind::Npm),
+            ("left-pad@npm#version=1.3.0", Source::Npm, ProviderKind::Npm),
             (
-                "serde#version=1.0.200@cargo",
+                "serde@cargo#version=1.0.200",
                 Source::Cargo,
                 ProviderKind::Cargo,
             ),
@@ -935,7 +1091,7 @@ mod tests {
 
     #[test]
     fn short_name_discards_version_selector() {
-        let spec = classify("omp#18.0.0@releases").unwrap();
+        let spec = classify("omp@releases#18.0.0").unwrap();
         assert_eq!(spec.short_name(), "omp");
     }
 
@@ -991,13 +1147,13 @@ mod tests {
     }
 
     #[test]
-    fn package_ref_keeps_version_before_source() {
+    fn package_ref_keeps_version_after_source() {
         let table = SourceTable::from_decls([(
             "vendor".to_string(),
             "acme/helpers@github".to_string(),
             ProviderKind::Core,
         )]);
-        let r = classify_in("textkit#1.2.0@vendor", &table).unwrap();
+        let r = classify_in("textkit@vendor#1.2.0", &table).unwrap();
         assert_eq!(r.package, "textkit#1.2.0");
         assert_eq!(r.source, Source::Named("vendor".into()));
     }
@@ -1005,25 +1161,25 @@ mod tests {
     #[test]
     fn provider_ref_marks_channel_selectors() {
         assert_eq!(
-            classify_provider_ref("openai/codex#latest@github")
+            classify_provider_ref("openai/codex@github#latest")
                 .unwrap()
                 .channel,
             Some(ChannelRef::Latest)
         );
         assert_eq!(
-            classify_provider_ref("openai/codex#main@github")
+            classify_provider_ref("openai/codex@github#main")
                 .unwrap()
                 .channel,
             Some(ChannelRef::Main)
         );
         assert_eq!(
-            classify_provider_ref("openai/codex#v0.x@github")
+            classify_provider_ref("openai/codex@github#v0.x")
                 .unwrap()
                 .channel,
             Some(ChannelRef::SemverMask("v0.x".to_string()))
         );
         assert_eq!(
-            classify_provider_ref("openai/codex#v0.50.1@github")
+            classify_provider_ref("openai/codex@github#v0.50.1")
                 .unwrap()
                 .channel,
             None
@@ -1182,19 +1338,21 @@ mod tests {
         assert_eq!(pinned.policy, ChannelPolicy::Pinned);
         assert_eq!(pinned.channel, None);
 
-        let manual = classify_provider_ref("#latest jq@nixpkgs").unwrap();
+        let manual = classify_provider_ref("jq@nixpkgs#latest").unwrap();
         assert_eq!(manual.policy, ChannelPolicy::Manual);
         assert_eq!(manual.target, "jq");
         assert_eq!(manual.channel, Some(ChannelRef::Latest));
 
-        let automatic = classify_provider_ref("#auto omp@nixpkgs").unwrap();
+        let automatic = classify_provider_ref("omp@nixpkgs#auto").unwrap();
         assert_eq!(automatic.policy, ChannelPolicy::Automatic);
         assert_eq!(automatic.target, "omp");
         assert_eq!(automatic.channel, Some(ChannelRef::Latest));
 
-        let suffix = classify_provider_ref("omp#auto@nixpkgs").unwrap();
-        assert_eq!(suffix.policy, ChannelPolicy::Pinned);
-        assert_eq!(suffix.channel, None);
+        assert!(matches!(
+            classify_provider_ref(&format!("omp#auto{}nixpkgs", Syntax::REF_PROVIDER_AT)),
+            Err(RefError::NonCanonical { replacement, .. })
+                if replacement == "omp@nixpkgs#auto"
+        ));
     }
 
     #[test]

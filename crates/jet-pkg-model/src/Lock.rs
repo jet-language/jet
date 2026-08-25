@@ -276,7 +276,7 @@ pub struct LockedToolchain {
 }
 
 /// D-JPK-CHANNEL1=A: exact lock for a named source declared with a channel
-/// selector (`owner/repo#latest@github`, `#main`, `#v0.x`). Realize-class
+/// selector (`owner/repo@github#latest`, `#main`, `#v0.x`). Realize-class
 /// commands read `exact`; update-class commands are the only place it moves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockedSourceChannel {
@@ -428,6 +428,10 @@ pub struct LockedBuildContribution {
 // Serialisation
 // ──────────────────────────────────────────────
 
+fn canonical_ref(reference: &str) -> String {
+    crate::RefSpec::migrate_persisted_ref(reference).canonical
+}
+
 pub fn write(lock: &LockFile) -> String {
     let mut out = String::new();
     out.push_str(&format!("version = {}\n", lock.version));
@@ -498,20 +502,20 @@ pub fn write(lock: &LockFile) -> String {
             }
             LockSource::Nix { reference, output } => format!(
                 "{{ nix = \"{}\", output = \"{}\" }}",
-                escape_str(reference),
+                escape_str(&canonical_ref(reference)),
                 escape_str(output)
             ),
             LockSource::Cran { reference, output, source_hash, repository, authority } => format!(
                 "{{ cran = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\", authority = \"{}\" }}",
-                escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority)
+                escape_str(&canonical_ref(reference)), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority)
             ),
             LockSource::LuaRocks { reference, output, source_hash, repository, authority } => format!(
                 "{{ luarocks = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\", authority = \"{}\" }}",
-                escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority)
+                escape_str(&canonical_ref(reference)), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority)
             ),
             LockSource::Registry { registry, reference, output, source_hash, repository, authority, tier, gate_status } => format!(
                 "{{ registry = \"{}\", reference = \"{}\", output = \"{}\", source-hash = \"{}\", repository = \"{}\", authority = \"{}\", tier = \"{}\", gate-status = \"{}\" }}",
-                escape_str(registry), escape_str(reference), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority), escape_str(tier), escape_str(gate_status)
+                escape_str(registry), escape_str(&canonical_ref(reference)), escape_str(output), escape_str(source_hash), escape_str(repository), escape_str(authority), escape_str(tier), escape_str(gate_status)
             ),
             LockSource::Foreign {
                 language,
@@ -520,7 +524,7 @@ pub fn write(lock: &LockFile) -> String {
             } => format!(
                 "{{ foreign = \"{}\", reference = \"{}\", output = \"{}\" }}",
                 escape_str(language.root()),
-                escape_str(reference),
+                escape_str(&canonical_ref(reference)),
                 escape_str(output)
             ),
         };
@@ -631,7 +635,10 @@ pub fn write(lock: &LockFile) -> String {
         out.push_str("[[source_channel]]\n");
         out.push_str(&format!("name = \"{}\"\n", escape_str(&source.name)));
         out.push_str(&format!("channel = \"{}\"\n", escape_str(&source.channel)));
-        out.push_str(&format!("exact = \"{}\"\n", escape_str(&source.exact)));
+        out.push_str(&format!(
+            "exact = \"{}\"\n",
+            escape_str(&canonical_ref(&source.exact))
+        ));
     }
 
     for member in &lock.workspace_members {
@@ -1755,7 +1762,7 @@ impl PartialSourceChannel {
         Some(LockedSourceChannel {
             name: self.name?,
             channel: self.channel?,
-            exact: self.exact?,
+            exact: canonical_ref(&self.exact?),
         })
     }
 }
@@ -1775,11 +1782,14 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
     }
     if let Some(reference) = kv_field(s, "nix") {
         let output = kv_field(s, "output").unwrap_or_default();
-        return Ok(LockSource::Nix { reference, output });
+        return Ok(LockSource::Nix {
+            reference: canonical_ref(&reference),
+            output,
+        });
     }
     if let Some(reference) = kv_field(s, "cran") {
         return Ok(LockSource::Cran {
-            reference,
+            reference: canonical_ref(&reference),
             output: kv_field(s, "output").unwrap_or_default(),
             source_hash: kv_field(s, "source-hash").unwrap_or_default(),
             repository: kv_field(s, "repository").unwrap_or_default(),
@@ -1788,7 +1798,7 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
     }
     if let Some(reference) = kv_field(s, "luarocks") {
         return Ok(LockSource::LuaRocks {
-            reference,
+            reference: canonical_ref(&reference),
             output: kv_field(s, "output").unwrap_or_default(),
             source_hash: kv_field(s, "source-hash").unwrap_or_default(),
             repository: kv_field(s, "repository").unwrap_or_default(),
@@ -1798,7 +1808,7 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
     if let Some(registry) = kv_field(s, "registry") {
         return Ok(LockSource::Registry {
             registry,
-            reference: kv_field(s, "reference").unwrap_or_default(),
+            reference: canonical_ref(&kv_field(s, "reference").unwrap_or_default()),
             output: kv_field(s, "output").unwrap_or_default(),
             source_hash: kv_field(s, "source-hash").unwrap_or_default(),
             repository: kv_field(s, "repository").unwrap_or_default(),
@@ -1816,7 +1826,7 @@ fn parse_source(s: &str) -> Result<LockSource, String> {
             .ok_or_else(|| "foreign source is missing `output`".to_string())?;
         return Ok(LockSource::Foreign {
             language,
-            reference,
+            reference: canonical_ref(&reference),
             output,
         });
     }

@@ -3,13 +3,10 @@ use super::bridge_os_studio::{cmd_bridge, cmd_os, cmd_studio, cmd_user};
 use super::browser::cmd_browser;
 use super::cmd_doctor;
 use super::format::cmd_fmt;
-use super::package_hangar_vendor::{
-    cmd_audit, cmd_cache, cmd_clean, cmd_hangar, cmd_list, cmd_vendor,
-};
+use super::package_hangar_vendor::{cmd_audit, cmd_hangar};
 use super::profile::cmd_profile;
-use super::run_enter_dev::{cmd_dev, cmd_enter, cmd_run};
+use super::run_enter_dev::{cmd_dev, cmd_env, cmd_run, cmd_use};
 use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_service_probe, cmd_services};
-use super::shared_store::cmd_shared_store;
 use super::tool::cmd_tool;
 use super::trust_env_build::{cmd_build, cmd_test, cmd_trust};
 use super::update_search_info::{
@@ -51,6 +48,8 @@ pub(super) struct Flags {
     /// variables. Jetpack's ordinary composed shell remains intentionally
     /// interactive and keeps its existing host-variable behavior.
     pub(super) pure: bool,
+    /// D-VERDICT-2189-1: materialize without entering a shell.
+    pub(super) prep: bool,
     /// D-JPK-IMAGE1: `jet image <name> --push <ref>` — the registry ref to
     /// push to. HTTP(S) references use the native OCI Distribution adapter;
     /// other values are local layout paths.
@@ -134,7 +133,7 @@ pub(super) fn parse_args(args: &[String]) -> Parsed {
     parse_args_for("", args)
 }
 
-/// Verb-aware parse so `-p` means ad-hoc nixpkgs on `enter` and workspace
+/// Verb-aware parse so `-p` means ad-hoc nixpkgs on `env`/`use` and workspace
 /// members on `build`/`test`/`run` (D-JPK-SELECTOR1=C).
 pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
     let workspace_select = matches!(verb, "build" | "test" | "run");
@@ -150,6 +149,7 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
         affected_since: None,
         flake: false,
         pure: false,
+        prep: false,
         push: None,
         adapt: false,
         json: false,
@@ -203,6 +203,7 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
             a if a == Syntax::TRUST_BYPASS_FLAG => flags.trust = true,
             a if a == Syntax::ENV_FLAG_FLAKE => flags.flake = true,
             a if a == Syntax::ENV_FLAG_PURE => flags.pure = true,
+            a if a == Syntax::ENV_FLAG_PREP => flags.prep = true,
             a if a == Syntax::ENV_FLAG_PRESET => {
                 i += 1;
                 if let Some(name) = args.get(i) {
@@ -449,10 +450,38 @@ pub fn main(args: Vec<String>) -> i32 {
         );
         return 2;
     }
+    if before_separator
+        .iter()
+        .any(|a| a == Syntax::ENV_FLAG_PREP_RETIRED)
+    {
+        let theme = Theme::resolve_choice(color);
+        theme.error_coded(
+            "E1353",
+            &format!("`{}` is retired", Syntax::ENV_FLAG_PREP_RETIRED),
+            "Jetpack materialization is an explicit preparation step, not a second command spelling",
+            &format!("use `{}` on `env` or `use`", Syntax::ENV_FLAG_PREP),
+        );
+        return 2;
+    }
+    if let Some((what, why, fix)) = retired_shell_spelling(verb) {
+        let theme = Theme::resolve_choice(color);
+        theme.error_coded("E1353", what, why, fix);
+        return 2;
+    }
     let theme = Theme::resolve_choice(color);
+    if let Some(route) = retired_hangar_route(verb) {
+        theme.error_coded(
+            "E1354",
+            &format!("`{verb}` is retired"),
+            "store commands are grouped under `hangar`; project commands stay at the top level",
+            &format!("run `{}` {route}", Syntax::JETPACK_BINARY_NAME,),
+        );
+        return 2;
+    }
     // Doctor must observe state without repairing or migrating it.
-    let read_only_shared_store_status =
-        verb == "shared-store" && parsed.positional.first().map(String::as_str) == Some("status");
+    let read_only_shared_store_status = verb == "hangar"
+        && parsed.positional.first().map(String::as_str) == Some("shared")
+        && parsed.positional.get(1).map(String::as_str) == Some("status");
     if verb != "doctor" && !read_only_shared_store_status {
         let roots = Store::resolve();
         if let Err(error) = Store::migrate_legacy_hangar(&roots) {
@@ -477,20 +506,16 @@ pub fn main(args: Vec<String>) -> i32 {
     match verb.as_str() {
         "doctor" => cmd_doctor(&theme, &parsed),
         "run" => cmd_run(&theme, &parsed),
-        "enter" => cmd_enter(&theme, &parsed),
+        "env" => cmd_env(&theme, &parsed),
+        "use" => cmd_use(&theme, &parsed),
         "fmt" => cmd_fmt(&theme, &parsed),
         v if v == Syntax::DEV_SUBCOMMAND => cmd_dev(&theme, &parsed),
         v if v == Syntax::CONFIG_SUBCOMMAND => cmd_config(&theme, &parsed),
         v if v == Syntax::TRUST_SUBCOMMAND => cmd_trust(&theme, &parsed),
         "build" => cmd_build(&theme, &parsed),
         "test" => cmd_test(&theme, &parsed),
-        "list" => cmd_list(&theme, &parsed),
         "hangar" => cmd_hangar(&theme, &parsed),
-        "cache" => cmd_cache(&theme, &parsed),
-        "shared-store" => cmd_shared_store(&theme, &parsed),
-        "vendor" => cmd_vendor(&theme, &parsed),
         "audit" => cmd_audit(&theme),
-        "clean" => cmd_clean(&theme, &parsed),
         "add" => cmd_add(&theme, &parsed),
         "remove" => cmd_remove(&theme, &parsed),
         "update" => cmd_update(&theme, &parsed),
@@ -528,5 +553,32 @@ pub fn main(args: Vec<String>) -> i32 {
             );
             2
         }
+    }
+}
+
+fn retired_hangar_route(verb: &str) -> Option<&'static str> {
+    match verb {
+        "list" => Some("hangar list"),
+        "clean" => Some("hangar clean"),
+        "vendor" => Some("hangar vendor"),
+        "cache" => Some("hangar cache"),
+        "shared-store" => Some("hangar shared"),
+        _ => None,
+    }
+}
+
+fn retired_shell_spelling(verb: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    match verb {
+        "enter" => Some((
+            "`jetpack enter` is retired",
+            "the project shell is the `env` verb, which also owns positional module selection",
+            "use `jetpack env [<name>]`",
+        )),
+        "build" => Some((
+            "`jetpack build` is retired",
+            "materialization is an option on the shell verbs",
+            "use `jetpack env --prep` or `jetpack use <package> --prep`",
+        )),
+        _ => None,
     }
 }

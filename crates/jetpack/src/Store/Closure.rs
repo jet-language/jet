@@ -1447,7 +1447,7 @@ pub(super) fn rollback_registration_dir(
 /// the closure journal — not just `meta.json` — so a staleness/GC test can
 /// simulate an old entry without waiting real time. A plain `meta.json`
 /// edit doesn't survive: `recover_closure_journal_graph_unlocked` (run at
-/// the top of every hangar operation, including the `jetpack clean` a test
+/// the top of every hangar operation, including the `jetpack hangar clean` a test
 /// is about to invoke) re-materializes `meta.json` from the journal's
 /// stored record, clobbering any out-of-band file edit first. This instead
 /// re-registers the SAME entry (identical producer record, digests,

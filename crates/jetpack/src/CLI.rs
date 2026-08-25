@@ -1,6 +1,6 @@
 //! Jetpack Phase 1 command dispatch (D-JPK2/9).
 //!
-//! `jetpack run/build/list/clean/add/remove`. Independent from the `jet`
+//! `jetpack run/hangar list/hangar clean/add/remove`. Independent from the `jet`
 //! binary (D-JPK1). All user-facing output flows through `Output::Theme`.
 
 use super::Doctor;

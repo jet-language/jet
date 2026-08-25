@@ -235,14 +235,14 @@ fn check_hangar(roots: &Store::Roots) -> Check {
                 return degraded(
                     "hangar",
                     format!("object `{id}` failed its content digest"),
-                    "remove the corrupt object with `jetpack clean`, then realize it again",
+                    "remove the corrupt object with `jetpack hangar clean`, then realize it again",
                 )
             }
             Err(_) => {
                 return degraded(
                     "hangar",
                     format!("object `{id}` cannot be hashed safely"),
-                    "remove the corrupt object with `jetpack clean`, then realize it again",
+                    "remove the corrupt object with `jetpack hangar clean`, then realize it again",
                 )
             }
         }
@@ -471,7 +471,7 @@ fn check_cache(roots: &Store::Roots) -> Check {
         degraded(
             "cache",
             format!("{stale} object(s) unused for more than 30 days"),
-            "run `jetpack clean` to review and collect stale objects",
+            "run `jetpack hangar clean` to review and collect stale objects",
         )
     }
 }

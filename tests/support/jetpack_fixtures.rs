@@ -523,7 +523,7 @@ pub fn write_fake_vm_tools(bin: &Path, guest_passes: bool) {
 /// Register a real, contract-valid hangar object via the production
 /// `ingest_tree` API.
 ///
-/// Card #420's producer-record refactor made `jetpack clean`/`closure_graph`
+/// Card #420's producer-record refactor made `jetpack hangar clean`/`closure_graph`
 /// fail-closed: every hangar entry it walks must decode a valid
 /// `ProducerRecord` and pass `store_validates_complete_closure` (real content
 /// re-hashed against the recorded digest — see

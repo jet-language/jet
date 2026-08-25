@@ -476,9 +476,10 @@ pub const PACK_LOCK_FILE: &str = "pack.lock";
 /// the canonical channel syntax to the provider's form.
 pub const REF_SEPARATOR: &str = ":";
 
-/// D-CHANNEL-AUTO1=A (owner, 2026-08-24): channel policy markers. `#latest`
-/// is the manual moving tier; `#auto` opts a source into automatic movement.
-/// A source with no marker is pinned.
+/// D-CHANNEL-AUTO1=A (owner, 2026-08-24), amended by
+/// D-VERDICT-2190-1: channel policy markers follow `@source`. `#latest` is
+/// the manual moving tier; `#auto` opts a source into automatic movement. A
+/// source with no marker is pinned.
 pub const REF_CHANNEL_MARKER: &str = "#";
 pub const REF_CHANNEL_LATEST: &str = "latest";
 pub const REF_CHANNEL_MAIN: &str = "main";
@@ -540,16 +541,11 @@ pub const JETPACK_VERBS: &[&str] = &[
     "doctor",
     "fmt",
     "run",
-    "enter",
-    "build",
+    "env",
+    "use",
     "test",
-    "list",
     "hangar",
-    "cache",
-    "shared-store",
-    "vendor",
     "audit",
-    "clean",
     "add",
     "remove",
     "update",
@@ -574,13 +570,19 @@ pub const JETPACK_VERBS: &[&str] = &[
     BROWSER_SUBCOMMAND,
 ];
 
-/// U16 (card c9jetpackgates): `jet env -p <pkg>...` — ad-hoc nixpkgs packages
+/// U16 (card c9jetpackgates): `jetpack env -p <pkg>...` — ad-hoc nixpkgs packages
 /// added to the shell without declaring them in any manifest. Repeatable;
 /// realized once and dropped, same lifecycle as a manifest-declared ref.
 ///
-/// D-JPK-SELECTOR1=C: on `jetpack build` / `test` / `run`, the same `-p`
+/// D-JPK-SELECTOR1=C: on `jetpack test` / `run`, the same `-p`
 /// spelling selects workspace members by exact name (cargo-style, repeatable).
 pub const ENV_FLAG_PACKAGE: &str = "-p";
+
+/// D-VERDICT-2189-1: materialize an environment or ad-hoc package shell
+/// without entering it.
+pub const ENV_FLAG_PREP: &str = "--prep";
+/// D-VERDICT-2189-1: retired spelling; teach the canonical `--prep` form.
+pub const ENV_FLAG_PREP_RETIRED: &str = "--prepare";
 
 /// D-JPK-SELECTOR1=C: compute workspace members whose input hashes differ from
 /// the recorded action-cache baseline, always including dependents.
@@ -626,7 +628,7 @@ pub const DEV_SUBCOMMAND: &str = "dev";
 /// that env (its first activation of an untrusted env prompts through the
 /// D-JPK-GRANTCMD1 trust law), and leaving it deactivates. The hook is opt-in:
 /// nothing runs on `cd` until the user adds it. These are engine subverbs of
-/// `jet env`, so they route through `jetpack enter` (D-JPK-DISPATCH1) exactly
+/// `jet env`, so they route through `jetpack env` (D-JPK-DISPATCH1) exactly
 /// like the bare `jet env` shell-entry does.
 pub const ENV_HOOK_VERB: &str = "hook";
 /// D-ENVHOOK1=A: the hook's private per-prompt callback — realizes the nearest
@@ -689,15 +691,13 @@ pub const SERVICES_SUBCOMMAND: &str = "services";
 pub const IMAGE_SUBCOMMAND: &str = "image";
 pub const IMAGE_FLAG_PUSH: &str = "--push";
 
-/// D-JPK-TOOLRUN1=A: unified `jetpack tool run|install|list|uninstall` noun —
-/// ephemeral package-binary execution and persistent global PATH installs.
+/// D-JPK-TOOLRUN1=A: the `jetpack tool` noun keeps persistent global PATH
+/// management; ephemeral package execution is the `jetpack use` verb.
 pub const TOOL_SUBCOMMAND: &str = "tool";
-pub const TOOL_VERB_RUN: &str = "run";
 pub const TOOL_VERB_INSTALL: &str = "install";
 pub const TOOL_VERB_LIST: &str = "list";
 pub const TOOL_VERB_UNINSTALL: &str = "uninstall";
 pub const TOOL_VERBS: &[&str] = &[
-    TOOL_VERB_RUN,
     TOOL_VERB_INSTALL,
     TOOL_VERB_LIST,
     TOOL_VERB_UNINSTALL,

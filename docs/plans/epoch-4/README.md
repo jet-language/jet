@@ -211,5 +211,5 @@ Network registries are not contacted by default. Local `file://` registries are
 always checked; pass `--online` to probe HTTP(S) endpoints, or `--offline` to
 force the offline-safe report. `--json` emits the same ordered checks for tools.
 Healthy, degraded, and broken reports exit 0, 1, and 2. Follow each printed fix;
-`jetpack clean` handles stale Hangar/cache objects, while `jet registry keygen`
+`jetpack hangar clean` handles stale Hangar/cache objects, while `jet registry keygen`
 creates the publishing key.

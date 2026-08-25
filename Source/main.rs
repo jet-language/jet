@@ -571,7 +571,7 @@ fn looks_like_jet_source(arg: &str) -> bool {
 ///
 /// Top-level `jet run tool@nixpkgs` is not a Jet source compile; it is the
 /// package-engine path, with the ratified `<package>@<source>` CLI spelling. Lower it
-/// to `jetpack run tool@nixpkgs -- tool`, preserving the offline fixture flags
+/// to `jetpack use tool@nixpkgs -- tool`, preserving the offline fixture flags
 /// used by the same provider path and forwarding user args after `--`.
 fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Option<i32> {
     let (package, source) = target.rsplit_once(jet::Syntax::REF_PROVIDER_AT)?;
@@ -580,7 +580,7 @@ fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Opt
     }
 
     let before_sep = sep.map_or(raw, |i| &raw[..i]);
-    let mut fwd = vec!["run".to_string(), target.to_string()];
+    let mut fwd = vec!["use".to_string(), target.to_string()];
     let mut command_args = Vec::new();
     let mut saw_run = false;
     let mut saw_target = false;
@@ -634,7 +634,7 @@ fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Opt
     }
     Some(EngineDispatch::dispatch(
         jet::Syntax::JETPACK_BINARY_NAME,
-        "run",
+        "use",
         &fwd,
     ))
 }
@@ -2241,7 +2241,7 @@ fn main() {
         }
         "env" => {
             // Scale-2 front door (U §8, D-DEV4): `jet env` maps to `jetpack
-            // enter`, forwarding flags and any trailing `-- cmd`.
+            // env`, forwarding flags and any trailing `-- cmd`.
             // D-JPK-DISPATCH1=B (A1): execs the `jetpack` engine binary by
             // name — never linked in-process — so the compiler binary stays
             // standalone-checkable (deleting `jetpack` still leaves `jet
@@ -2250,7 +2250,7 @@ fn main() {
             if let Some(pos) = fwd.iter().position(|a| a == "env") {
                 fwd.remove(pos);
             }
-            fwd.insert(0, "enter".to_string());
+            fwd.insert(0, "env".to_string());
             exit(EngineDispatch::dispatch(
                 jet::Syntax::JETPACK_BINARY_NAME,
                 "env",

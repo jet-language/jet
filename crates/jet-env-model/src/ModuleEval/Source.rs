@@ -271,12 +271,18 @@ fn profile_provider_label(source: &Source, source_name: &str, table: &SourceTabl
 /// Convert the source table's provider-first upstream back to the shared
 /// package-reference shape before extracting selector facts. The table keeps
 /// `provider:target` so the resolver can pass it to its native backend; the
-/// shared carrier uses `target#selector@provider` so identity and selectors
+/// shared carrier uses `target@provider#selector` so identity and selectors
 /// remain parseable and comparable.
 fn provider_reference_from_upstream(upstream: &str, provider: &str) -> String {
     upstream
         .split_once(Syntax::REF_SEPARATOR)
-        .map(|(_, target)| format!("{target}{}{provider}", Syntax::REF_PROVIDER_AT))
+        .map(|(_, target)| {
+            RefSpec::migrate_persisted_ref(&format!(
+                "{target}{}{provider}",
+                Syntax::REF_PROVIDER_AT
+            ))
+            .canonical
+        })
         .unwrap_or_else(|| upstream.to_string())
 }
 
@@ -304,11 +310,27 @@ fn is_external_provider(provider: &str) -> bool {
 }
 
 fn classify_profile_ref(raw: &str, table: &SourceTable) -> Result<RefSpec::RefSpec, String> {
-    if let Some((package, source)) = raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
+    let migrated = RefSpec::migrate_persisted_ref(raw);
+    if migrated.canonical != raw {
+        return Err(format!(
+            "non-canonical package ref; write `{}`",
+            migrated.canonical
+        ));
+    }
+    if let Some((package, source_with_selector)) = raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
+        let (source, selector) = source_with_selector
+            .split_once(Syntax::REF_CHANNEL_MARKER)
+            .map_or((source_with_selector, None), |(source, selector)| {
+                (source, Some(selector))
+            });
         if source == Syntax::DEFAULT_SOURCE {
+            let package = selector.map_or_else(
+                || package.to_string(),
+                |selector| format!("{package}{}{selector}", Syntax::REF_CHANNEL_MARKER),
+            );
             return Ok(RefSpec::RefSpec {
                 source: RefSpec::Source::Nixpkgs,
-                package: package.to_string(),
+                package,
                 raw: raw.to_string(),
             });
         }

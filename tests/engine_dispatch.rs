@@ -229,7 +229,7 @@ fn typo_of_engine_verb_still_suggests_it() {
 
 /// The real, co-built `jetpack` binary must satisfy its own handshake (a
 /// same-toolchain `jet env` never hits E1227/E1228). This doesn't drive an
-/// actual shell (no TTY, no manifest) so `jetpack enter` fails for its own
+/// actual shell (no TTY, no manifest) so `jetpack env` fails for its own
 /// reasons — the point is that dispatch gets past the handshake cleanly.
 #[test]
 fn real_engine_pair_passes_handshake() {

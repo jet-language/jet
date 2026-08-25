@@ -241,7 +241,7 @@ source node.
 Packages, package/user generations, running processes, builds, toolchains, Systems, and Fleets create automatic closure roots. Manual roots cover only external consumers:
 
 ```text
-$ jet hangar register-external-root backup-sdk ripgrep#2.0.17@nixpkgs --expires-in 12w --yes # NEW: D-JPK-MANUALROOT1
+$ jet hangar register-external-root backup-sdk ripgrep@nixpkgs#2.0.17 --expires-in 12w --yes # NEW: D-JPK-MANUALROOT1
 Plan external root
   + backup-sdk
     closure objects: 3
@@ -250,7 +250,7 @@ Plan external root
 Created external root `backup-sdk` at etag 1.1.
 
 $ jet hangar list-external-roots
-backup-sdk  ripgrep#2.0.17@nixpkgs  expires in 12 weeks  etag 1.1
+backup-sdk  ripgrep@nixpkgs#2.0.17  expires in 12 weeks  etag 1.1
 
 $ jet hangar unregister-external-root backup-sdk --etag 1.1 --yes
 Removed external root `backup-sdk`.
@@ -606,7 +606,7 @@ deps: .{
     wire: "3.1"
     weirdctl: Pkg.adapt(
         name: "weirdctl"
-        source: "acme/weirdctl#8a31c9d@github"
+        source: "acme/weirdctl@github#8a31c9d"
         recipe: Recipe.cmake
     )
 }

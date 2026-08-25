@@ -299,6 +299,10 @@ fn ui_snapshots() {
         let jetpack_retired_environment_flag = src
             .lines()
             .any(|line| line.trim() == "// @jetpack_retired_environment_flag");
+        // Card #2195 / E1354: retired store roots teach their `hangar` route.
+        let jetpack_retired_store_verbs = src
+            .lines()
+            .any(|line| line.trim() == "// @jetpack_retired_store_verbs");
         let retired_gate_flag = src
             .lines()
             .any(|line| line.trim() == "// @retired_gate_flag");
@@ -369,6 +373,8 @@ fn ui_snapshots() {
             run_jetpack_hangar_digest_mismatch_snapshot()
         } else if jetpack_retired_environment_flag {
             run_jetpack_retired_environment_flag_snapshot()
+        } else if jetpack_retired_store_verbs {
+            run_jetpack_retired_store_verbs_snapshot()
         } else if retired_gate_flag {
             run_retired_gate_flag_snapshot(&file_arg)
         } else if let Some(spec) = complexity_cli.as_deref() {
@@ -804,6 +810,32 @@ fn run_jetpack_retired_environment_flag_snapshot() -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stderr).expect("Jetpack diagnostic is UTF-8")
+}
+
+fn run_jetpack_retired_store_verbs_snapshot() -> String {
+    let scratch = unique_tmp("jet_ui_retired_store_verbs");
+    let root = scratch.join("root");
+    let project = scratch.join("project");
+    fs::create_dir_all(&project).unwrap();
+    let mut rendered = String::new();
+    for verb in ["cache", "shared-store", "vendor", "clean", "list"] {
+        let output = Command::new(jetpack_bin())
+            .args([verb, "--no-color"])
+            .current_dir(&project)
+            .env("JETPACK_ROOT", &root)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run real jetpack retired store-verb diagnostic fixture");
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "retired store verb must fail: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        rendered.push_str(&String::from_utf8(output.stderr).expect("Jetpack diagnostic is UTF-8"));
+    }
+    let _ = fs::remove_dir_all(&scratch);
+    rendered
 }
 
 fn run_jetpack_hangar_digest_mismatch_snapshot() -> String {

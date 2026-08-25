@@ -713,12 +713,12 @@ fn nix_import_emits_exact_refs_and_retains_native_facts() {
         "flake.lock",
         r#"{"name":"app","version":"1.0.0","source":"nixpkgs","packages":[{"name":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","buildInputs":["openssl"],"system":"x86_64-linux","license":"BSD-3-Clause"}]}"#,
     );
-    assert_eq!(plan.deps[0].provider_ref, "ripgrep#version=14.1.1@nixpkgs");
+    assert_eq!(plan.deps[0].provider_ref, "ripgrep@nixpkgs#version=14.1.1");
     assert_eq!(plan.deps[0].locked_version, "14.1.1");
     assert!(plan
         .emit_pkg_jet()
-        .contains("ripgrep: ripgrep#version=14.1.1@nixpkgs"));
-    let facts = &plan.provider_facts["ripgrep#version=14.1.1@nixpkgs"];
+        .contains("ripgrep: ripgrep@nixpkgs#version=14.1.1"));
+    let facts = &plan.provider_facts["ripgrep@nixpkgs#version=14.1.1"];
     facts.validate().expect("exact Nix import is lossless");
     assert_eq!(facts.native_format, "flake-facts.json");
     assert!(facts.native_document.contains("drvPath"));
@@ -753,7 +753,7 @@ fn nix_import_reports_malformed_package_facts_without_generating_them() {
         "flake.lock",
         r#"{"name":"app","version":"1.0.0","packages":[{"name":"broken","version":"1.0.0","drvPath":1,"buildInputs":false}]}"#,
     );
-    let facts = &plan.provider_facts["broken#version=1.0.0@nixpkgs"];
+    let facts = &plan.provider_facts["broken@nixpkgs#version=1.0.0"];
     assert!(facts
         .losses
         .iter()
@@ -764,7 +764,7 @@ fn nix_import_reports_malformed_package_facts_without_generating_them() {
         .any(|loss| loss.reason.contains("buildInputs")));
     assert!(!plan
         .emit_pkg_jet()
-        .contains("broken: broken#version=1.0.0@nixpkgs"));
+        .contains("broken: broken@nixpkgs#version=1.0.0"));
 }
 
 #[test]
@@ -774,10 +774,10 @@ fn cargo_import_preserves_locked_versions() {
         "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\n",
     );
     assert_eq!(plan.deps[0].locked_version, "1.0.200");
-    assert_eq!(plan.deps[0].provider_ref, "serde#version=1.0.200@cargo");
+    assert_eq!(plan.deps[0].provider_ref, "serde@cargo#version=1.0.200");
     assert!(plan
         .emit_pkg_jet()
-        .contains("serde: serde#version=1.0.200@cargo"));
+        .contains("serde: serde@cargo#version=1.0.200"));
     assert!(plan.provider_facts["serde#version=1.0.200@cargo"]
         .validate()
         .is_ok());
@@ -807,10 +807,10 @@ fn npm_import_emits_exact_provider_refs_and_retains_requests() {
     let plan = jetpack::MigrationImport::import_npm(
         r#"{"name":"web","version":"1.0.0","dependencies":{"vite":"5.4.0"}}"#,
     );
-    assert_eq!(plan.deps[0].provider_ref, "vite#version=5.4.0@npm");
+    assert_eq!(plan.deps[0].provider_ref, "vite@npm#version=5.4.0");
     assert_eq!(plan.deps[0].locked_version, "5.4.0");
-    assert!(plan.emit_pkg_jet().contains("vite: vite#version=5.4.0@npm"));
-    assert!(plan.provider_facts["vite#version=5.4.0@npm"]
+    assert!(plan.emit_pkg_jet().contains("vite: vite@npm#version=5.4.0"));
+    assert!(plan.provider_facts["vite@npm#version=5.4.0"]
         .validate()
         .is_ok());
 }
@@ -974,7 +974,7 @@ fn provider_report_round_trips_through_lock_and_explain() {
         .expect("shared provider facts JSON");
     assert_eq!(round_trip, shared);
     let lock = report
-        .lock_record("app", "web#1.0.0@npm", "any")
+        .lock_record("app", "web@npm#1.0.0", "any")
         .expect("provider semantic lock");
     assert_eq!(lock.identity.exact, "web#version=1.0.0@npm");
     let digest = shared.digest();
@@ -1092,7 +1092,7 @@ fn homebrew_conformance_retains_bottle_source_and_hook_facts() {
         .contains_key("provider.homebrew.hook.test"));
     let shared = report.shared_facts();
     let lock = report
-        .lock_record("app", "jq#1.7.1@homebrew", "x86_64-linux")
+        .lock_record("app", "jq@homebrew#1.7.1", "x86_64-linux")
         .expect("Homebrew provider lock");
     let locked = jetpack::ProviderFacts::from_json(
         lock.future_fields
@@ -1137,7 +1137,7 @@ fn github_conformance_retains_release_assets_source_and_status() {
         .contains_key("provider.github.asset.tool-linux.browser_download_url"));
     let shared = report.shared_facts();
     let lock = report
-        .lock_record("app", "tool#v1.2.3@github", "x86_64-linux")
+        .lock_record("app", "tool@github#v1.2.3", "x86_64-linux")
         .expect("GitHub provider lock");
     let locked = jetpack::ProviderFacts::from_json(
         lock.future_fields

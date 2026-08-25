@@ -6,7 +6,12 @@
 use super::ProviderGraph::{normalize_provider_document, ProviderFamily};
 use super::JSON::{self, JSONValue};
 use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
+use jet_pkg_model::{RefSpec, Syntax};
 use std::collections::BTreeMap;
+
+fn canonical_package_ref(reference: &str) -> String {
+    RefSpec::migrate_persisted_ref(reference).canonical
+}
 
 fn source_path_for_finding(source: &str, fallback: &str) -> String {
     if !fallback.trim().is_empty()
@@ -206,7 +211,7 @@ impl ImportPlan {
                 // migration finding instead of becoming runtime dependencies.
                 continue;
             }
-            let provider_ref = facts.qualified_reference();
+            let provider_ref = canonical_package_ref(&facts.qualified_reference());
             out.push_str(&format!("    {}: {},\n", dep.name, provider_ref));
         }
         out.push_str("}\n");
@@ -295,7 +300,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
         && !report.facts.version.is_empty()
         && report.facts.version != "set"
     {
-        report.shared_facts().qualified_reference()
+        canonical_package_ref(&report.shared_facts().qualified_reference())
     } else {
         format!("{name}@nix")
     };
@@ -470,7 +475,7 @@ fn nix_import_package(value: &JSONValue) -> Option<(String, String, String, Opti
                 .unwrap_or(raw)
                 .to_string();
             let reference = if raw.contains('@') || raw.contains('#') {
-                raw.to_string()
+                canonical_package_ref(raw)
             } else {
                 format!("{raw}@nixpkgs")
             };
@@ -494,16 +499,20 @@ fn nix_import_package(value: &JSONValue) -> Option<(String, String, String, Opti
     };
     let name = name.trim().to_string();
     let provider_ref = if let Some(reference) = reference {
-        reference
+        canonical_package_ref(&reference)
     } else {
         let authority = source.clone().unwrap_or_else(|| "nixpkgs".to_string());
         let selector = version
             .as_ref()
-            .map(|value| format!("#version={value}"))
-            .or_else(|| revision.as_ref().map(|value| format!("#revision={value}")))
-            .or_else(|| digest.as_ref().map(|value| format!("#digest={value}")))
+            .map(|value| format!("version={value}"))
+            .or_else(|| revision.as_ref().map(|value| format!("revision={value}")))
+            .or_else(|| digest.as_ref().map(|value| format!("digest={value}")))
             .unwrap_or_default();
-        format!("{name}{selector}@{authority}")
+        if selector.is_empty() {
+            format!("{name}@{authority}")
+        } else {
+            format!("{name}@{authority}{}{selector}", Syntax::REF_CHANNEL_MARKER)
+        }
     };
     let selector_facts = ProviderFacts::for_reference("nix", &provider_ref);
     let locked = if !selector_facts.selector.version.is_empty() {
@@ -538,7 +547,10 @@ pub fn import_cargo(cargo_toml: &str, cargo_lock: &str) -> ImportPlan {
         .unwrap_or_else(|| "0.1.0".to_string());
     let root_reference = match (source_name, source_version) {
         (Some(name), Some(version)) if !name.is_empty() && !version.is_empty() => {
-            format!("{name}#version={version}@cargo")
+            format!(
+                "{name}@cargo{}version={version}",
+                Syntax::REF_CHANNEL_MARKER
+            )
         }
         _ => format!("{name}@cargo"),
     };
@@ -573,10 +585,18 @@ pub fn import_cargo(cargo_toml: &str, cargo_lock: &str) -> ImportPlan {
             let provider_ref = if locked.is_empty() {
                 platform
                     .as_deref()
-                    .map(|platform| format!("{dep}#platform={platform}@cargo"))
+                    .map(|platform| {
+                        format!(
+                            "{dep}@cargo{}platform={platform}",
+                            Syntax::REF_CHANNEL_MARKER
+                        )
+                    })
                     .unwrap_or_else(|| format!("{dep}@cargo"))
             } else {
-                format!("{dep}#version={locked}{platform_selector}@cargo")
+                format!(
+                    "{dep}@cargo{}version={locked}{platform_selector}",
+                    Syntax::REF_CHANNEL_MARKER
+                )
             };
             plan.deps.push(ImportedDep {
                 name: dep.clone(),
@@ -693,7 +713,10 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
     let root_reference = if source_name.is_empty() || source_version.is_empty() {
         format!("{name}@npm")
     } else {
-        format!("{name}#version={version}@npm")
+        format!(
+            "{name}@npm{}version={version}",
+            Syntax::REF_CHANNEL_MARKER
+        )
     };
     plan.packages.push(ImportedPackage {
         name: name.clone(),
@@ -720,7 +743,12 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
             let exact = requested.as_deref().and_then(exact_npm_version);
             let provider_ref = exact
                 .as_deref()
-                .map(|version| format!("{name}#version={version}@npm"))
+                .map(|version| {
+                    format!(
+                        "{name}@npm{}version={version}",
+                        Syntax::REF_CHANNEL_MARKER
+                    )
+                })
                 .unwrap_or_else(|| format!("{name}@npm"));
             plan.deps.push(ImportedDep {
                 name: name.clone(),
@@ -875,11 +903,17 @@ pub fn import_swiftpm(name: &str, revision: &str) -> ImportPlan {
     });
     plan.deps.push(ImportedDep {
         name: name.to_string(),
-        provider_ref: format!("{name}#revision={revision}@swiftpm"),
+        provider_ref: format!(
+            "{name}@swiftpm{}revision={revision}",
+            Syntax::REF_CHANNEL_MARKER
+        ),
         locked_version: revision.to_string(),
         dev: false,
     });
-    let provider_ref = format!("{name}#revision={revision}@swiftpm");
+    let provider_ref = format!(
+        "{name}@swiftpm{}revision={revision}",
+        Syntax::REF_CHANNEL_MARKER
+    );
     let mut facts = ProviderFacts::for_reference("swiftpm", &provider_ref);
     facts.set_resolved_source(&format!("swiftpm:{name}@{revision}"));
     facts.set_native_document("Package.resolved", &provider_ref);
@@ -1121,7 +1155,7 @@ mod tests {
             "[package]\nname = \"app\" # package name\nversion = \"1.0.0\" # package version\n",
             "",
         );
-        assert!(plan.provider_facts.contains_key("app#version=1.0.0@cargo"));
+        assert!(plan.provider_facts.contains_key("app@cargo#version=1.0.0"));
         assert!(plan
             .todos
             .iter()
@@ -1134,11 +1168,11 @@ mod tests {
             "flake.lock",
             r#"{"name":"app","version":"1.0.0","source":"nixpkgs","packages":[{"name":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv"}]}"#,
         );
-        let facts = &plan.provider_facts["ripgrep#version=14.1.1@nixpkgs"];
+        let facts = &plan.provider_facts["ripgrep@nixpkgs#version=14.1.1"];
         facts.validate().expect("exact Nix import is lossless");
         assert!(plan
             .emit_pkg_jet()
-            .contains("ripgrep: ripgrep#version=14.1.1@nixpkgs"));
+            .contains("ripgrep: ripgrep@nixpkgs#version=14.1.1"));
         assert!(facts.native_document.contains("drvPath"));
         assert!(facts.facts.contains_key("provider.nix.import.drvPath"));
     }

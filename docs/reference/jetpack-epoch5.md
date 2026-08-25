@@ -341,7 +341,7 @@ external consumer needs to retain an existing closure. The command never
 realizes or downloads the reference.
 
 ```text
-jet hangar register-external-root backup-sdk ripgrep#2.0.17@nixpkgs \
+jet hangar register-external-root backup-sdk ripgrep@nixpkgs#2.0.17 \
     --expires-in 12w --yes
 jet hangar list-external-roots
 jet hangar unregister-external-root backup-sdk --etag 1.1 --yes

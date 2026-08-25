@@ -221,7 +221,7 @@ module env.dev {
     packages: [
         Pkg.adapt(
             name: "weirdctl",
-            source: "acme/weirdctl#8a31c9d@github",
+            source: "acme/weirdctl@github#8a31c9d",
             deps: [default.cmake, default.ninja],
             recipe: Recipe.build(steps: [
                 .exec(tool: "cmake", args: ["-S", ".", "-B", "build"]),

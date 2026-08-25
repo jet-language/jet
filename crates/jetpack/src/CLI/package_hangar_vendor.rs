@@ -1,11 +1,12 @@
 use super::parse::Parsed;
+use super::shared_store::cmd_shared_store;
 use crate::Output::{self, Theme};
 use crate::Store::{self, Roots};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// `jetpack list` — show realized store entries.
+/// `jetpack hangar list` — show realized store entries.
 pub(super) fn cmd_list(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let entries = match Store::list_checked(&roots) {
@@ -93,7 +94,7 @@ pub(super) fn cmd_list(theme: &Theme, parsed: &Parsed) -> i32 {
     0
 }
 
-/// `jetpack cache` — host-owned role bindings and signed NAR transfers.
+/// `jetpack hangar cache` — host-owned role bindings and signed NAR transfers.
 /// Repository state can request roles, but only this host config chooses
 /// mirrors, trust keys, credentials, and write authority.
 pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
@@ -110,7 +111,7 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                     theme,
                     parsed,
                     "`cache bind` needs a role and mirror",
-                    "jet cache bind public /absolute/cache",
+                    "jetpack hangar cache bind public /absolute/cache",
                 );
             };
             let mirrors = parsed.positional[2..].to_vec();
@@ -119,7 +120,7 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                     theme,
                     parsed,
                     "`cache bind` needs at least one mirror",
-                    "jet cache bind public /absolute/cache",
+                    "jetpack hangar cache bind public /absolute/cache",
                 );
             }
             if !cache_confirm_apply(theme, parsed, "cache-bind") {
@@ -188,7 +189,7 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                     theme,
                     parsed,
                     "`cache remove` needs a role",
-                    "jet cache remove public --yes",
+                    "jetpack hangar cache remove public --yes",
                 );
             };
             if !cache_confirm_apply(theme, parsed, "cache-remove") {
@@ -239,7 +240,7 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                     theme,
                     parsed,
                     "cache transfer needs an entry, reference, or output digest",
-                    "jet cache verify <entry> --role public",
+                    "jetpack hangar cache verify <entry> --role public",
                 );
             };
             let role = parsed.flags.cache_role.as_deref().unwrap_or("public");
@@ -267,7 +268,7 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                             theme,
                             parsed,
                             "`cache substitute` needs `--to <directory>`",
-                            "jet cache substitute <entry> --role public --to /tmp/output --yes",
+                            "jetpack hangar cache substitute <entry> --role public --to /tmp/output --yes",
                         );
                     };
                     if !cache_confirm_apply(theme, parsed, "substitute") {
@@ -287,7 +288,7 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
             theme,
             parsed,
             &format!("`cache {action}` is not a cache command"),
-            "jet cache bind|list|remove|publish|verify|substitute",
+            "jetpack hangar cache bind|list|remove|publish|verify|substitute",
         ),
     }
 }
@@ -352,6 +353,12 @@ fn cache_usage(theme: &Theme, parsed: &Parsed, what: &str, fix: &str) -> i32 {
     )
 }
 
+fn hangar_nested(parsed: &Parsed) -> Parsed {
+    let mut nested = parsed.clone();
+    nested.positional.remove(0);
+    nested
+}
+
 /// `jetpack hangar du` — honest root-inclusive closure disk usage (U22 / D-JPK-GC1).
 /// Source-built objects are counted like any other, so `du` never hides them.
 ///
@@ -364,6 +371,11 @@ fn cache_usage(theme: &Theme, parsed: &Parsed, what: &str, fix: &str) -> i32 {
 pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
     let sub = parsed.positional.first().map(String::as_str);
     match sub {
+        Some("list") => cmd_list(theme, &hangar_nested(parsed)),
+        Some("clean") => cmd_clean(theme, &hangar_nested(parsed)),
+        Some("vendor") => cmd_vendor(theme, &hangar_nested(parsed)),
+        Some("cache") => cmd_cache(theme, &hangar_nested(parsed)),
+        Some("shared") => cmd_shared_store(theme, &hangar_nested(parsed)),
         Some("path") => {
             let path = Store::resolve().hangar_dir();
             if parsed.flags.json {
@@ -503,7 +515,7 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
                 parsed,
                 "E1340",
                 &format!("`hangar {other}` is not a hangar command"),
-                "hangar subcommands: `path`, `du`, `ingest`, `verify`, `export`, `import`, `dump`, `restore`, `copy`, `sign`, `repair`, `referrers`, `recover`, `register-external-root`, `list-external-roots`, `unregister-external-root`.",
+                "hangar subcommands: `path`, `du`, `list`, `clean`, `vendor`, `cache`, `shared`, `ingest`, `verify`, `export`, `import`, `dump`, `restore`, `copy`, `sign`, `repair`, `referrers`, `recover`, `register-external-root`, `list-external-roots`, `unregister-external-root`.",
                 "run `jetpack hangar path`.",
             )
         }
@@ -752,7 +764,7 @@ fn report_external_root_error(
             "E1340",
             "could not retain that external root",
             &format!("no Hangar entry matches `{reference}`."),
-            "run `jetpack list` and use the exact package reference.",
+            "run `jetpack hangar list` and use the exact package reference.",
         ),
         Store::ExternalRootError::Store(error) => hangar_report_error(
             theme,
@@ -1072,7 +1084,7 @@ fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {
             "E1340",
             &format!("no hangar object `{target}`"),
             "verify only checks realized hangar records.",
-            "run `jetpack list` to see ids.",
+            "run `jetpack hangar list` to see ids.",
         );
     };
     match Store::verify_archive(&roots, &entry.id, parsed.flags.archive_key.as_deref()) {
@@ -1458,7 +1470,7 @@ fn human_bytes(n: u64) -> String {
     }
 }
 
-/// `jetpack vendor [<dir>]` — write vendored + hash-pinned sources for every
+/// `jetpack hangar vendor [<dir>]` — write vendored + hash-pinned sources for every
 /// source-built hangar object (D-BFS1 / T4). Each object's realized tree is
 /// copied into `<dir>/<name>/` and a `<dir>/<name>.sha256` records the A4 output
 /// hash, so a later build is reproducible offline from pinned sources.
@@ -1625,7 +1637,7 @@ fn copy_dir(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()>
     Ok(())
 }
 
-/// `jetpack clean` — collect stale hangar objects and optimize owned bytes.
+/// `jetpack hangar clean` — collect stale hangar objects and optimize owned bytes.
 pub(super) fn cmd_clean(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     match Store::clean_plan(&roots) {

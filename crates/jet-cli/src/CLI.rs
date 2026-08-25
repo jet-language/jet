@@ -554,7 +554,7 @@ const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "exec", usage: "exec --workspace <dir> [--exec <path>] [--read <path>] [--write <path>] -- <program> [args]", summary: "Execute one command in an authority-bound workspace", handler: HandlerKey::Exec, also_canonical_top_level: false },
 ];
 // D-ENVHOOK1=A / D-ENV-FILES1=A / D-ENV-PROFILE1=C: these are the shipped
-// `jetpack enter` subverbs exposed through Jet's environment front door. `env`
+// `jetpack env` subverbs exposed through Jet's environment front door. `env`
 // stays non-exhaustive because `export` is a private callback used by the shell
 // hook and must continue downstream.
 const ENV_ACTIONS: &[NestedCommandSpec] = &[

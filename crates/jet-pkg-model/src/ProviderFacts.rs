@@ -1007,7 +1007,7 @@ impl ProviderFacts {
     }
 }
 
-/// Accept both Jet refs (`target#selector@provider`) and provider records that
+/// Accept both Jet refs (`target@provider#selector`) and provider records that
 /// already use the normalized form (`target@provider#selector`).
 fn split_reference_selector(reference: &str) -> (String, Option<String>) {
     let Some((prefix, suffix)) = reference.split_once('#') else {
@@ -1203,7 +1203,7 @@ mod tests {
 
     #[test]
     fn provider_facts_round_trip_identity_provenance_and_native_bytes() {
-        let mut facts = ProviderFacts::for_reference("npm", "left-pad#2.0.17@npm");
+        let mut facts = ProviderFacts::for_reference("npm", "left-pad@npm#2.0.17");
         facts.set_resolved_source("npm:left-pad@2.0.17");
         facts.set_native_document("package.json", "{\"name\":\"left-pad\"}\n");
         facts.add_fact(
@@ -1275,7 +1275,7 @@ mod tests {
         );
         alias.validate().expect("named source authority is valid");
 
-        let conflict = ProviderFacts::for_reference("npm", "left-pad#1.0.0@cargo");
+        let conflict = ProviderFacts::for_reference("npm", "left-pad@cargo#1.0.0");
         assert!(conflict.conflicts.iter().any(|item| item.key == "provider"));
         assert!(conflict.validate().is_err());
     }
@@ -1302,7 +1302,7 @@ mod tests {
 
     #[test]
     fn conflicting_native_documents_are_reported() {
-        let mut facts = ProviderFacts::for_reference("npm", "left-pad#1.0.0@npm");
+        let mut facts = ProviderFacts::for_reference("npm", "left-pad@npm#1.0.0");
         facts.set_native_document("package.json", "one");
         facts.set_native_document("package.json", "two");
         assert!(facts

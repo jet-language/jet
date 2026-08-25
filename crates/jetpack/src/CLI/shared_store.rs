@@ -2,7 +2,7 @@ use super::parse::Parsed;
 use crate::Output::Theme;
 use crate::Store;
 
-/// `jet shared-store install|enroll|broker` — optional authenticated shared store.
+/// `jetpack hangar shared install|enroll|broker` — optional authenticated shared store.
 pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
     match parsed
         .positional
@@ -90,7 +90,7 @@ pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
                 theme.error(
                     "shared-store enrollment needs a uid",
                     "no user id was supplied",
-                    "run `jet shared-store enroll <uid>` as the administrator.",
+                    "run `jetpack hangar shared enroll <uid>` as the administrator.",
                 );
                 return 2;
             };
@@ -104,7 +104,7 @@ pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
                 theme.error(
                     "shared-store enrollment has an unknown argument",
                     "enrollment accepts one uid and optional `--read-only`",
-                    "run `jet shared-store enroll <uid> [--read-only]`.",
+                    "run `jetpack hangar shared enroll <uid> [--read-only]`.",
                 );
                 return 2;
             }
@@ -128,9 +128,9 @@ pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         other => {
             theme.error(
-                &format!("`shared-store {other}` is not a command"),
+                &format!("`hangar shared {other}` is not a command"),
                 "the shared-store commands are `install`, `enroll`, `status`, and the socket-activated `broker` entrypoint.",
-                "run `jet shared-store install`.",
+                "run `jetpack hangar shared install`.",
             );
             2
         }

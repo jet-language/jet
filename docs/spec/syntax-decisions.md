@@ -4447,7 +4447,7 @@ manifest, `.jet/`, or any ecosystem file — forever.
 **D-JPK-REF1=A / U6 / U9 / D-JPK-OSHOST1 — Email-order refs**
 *(ratified 2026-07-23, card #733; amends U6, U9, and D-JPK-OSHOST1)*:
 package refs use `name['#'version-or-channel]['@'source]`. Thus the CLI uses
-`fastfetch@nixpkgs`, a named source uses `textkit#1.2.0@vendor`, and a source
+`fastfetch@nixpkgs`, a named source uses `textkit@vendor#1.2.0`, and a source
 value uses `target@provider`, such as `acme/helpers@github`. Local `./`, `../`,
 and `/` paths are bare; the `path` provider word retires. An old
 `provider@target` ref is a teaching error with the flipped spelling. The parser
@@ -4468,8 +4468,8 @@ tiers retain their visible policy marker when writeback records the exact pin:
 
 ```jet
 rustc@nixpkgs
-#latest jq@nixpkgs
-#auto omp@releases
+jq@nixpkgs#latest
+omp@releases#auto
 ```
 
 `#pin` is not a spelling in this ruling. The marker is checked on source
@@ -5511,7 +5511,7 @@ This boundary changes proof ownership and claim scope only; it does not weaken
 D-JPK-SANDBOX2's safe defaults or permit an unproved isolation label.
 
 **D-JPK-MULTIUSER1=D — optional verifying shared-store broker**: per-user,
-rootless operation remains the default. `jetpack shared-store install` opts an
+rootless operation remains the default. `jetpack hangar shared install` opts an
 administrator into a socket-activated transient broker. The broker re-verifies
 digest, signature, and provenance in its own privilege domain, never evaluates
 user source, builds under ephemeral sandboxed identities, and promotes objects
@@ -6057,23 +6057,6 @@ binaries select the first program word before ordinary CLI parsing. Dev tiers
 expose bare/`.Dev`/`.Ship` jobs; release binaries expose `.Ship` only;
 `.Internal` remains code/scheduler-only. Release builds report stripped jobs
 with the `#Job(.Ship)` fix.
-
-**D-JPK-TOOLRUN1=A — unified `jetpack tool` noun**: `jetpack tool run <ref>`
-executes a package binary ephemerally across all providers (generalizing the
-nix-only `jetpack run pkg@nixpkgs` bridge); `jetpack tool install <ref>`
-adds it to the user's default generation (D-JPK-PROFILE1) and projects its
-bins onto PATH as its own generation; `jetpack tool list`/`uninstall`
-manage them. A name collision with a project-local job (D-JPK-TASKRUN1)
-is a checked error naming both.
-
-*Shipped 2026-07-12 (card #477)*: `jetpack tool run|install|list|uninstall`
-CLI surface. Built-in providers (`nixpkgs`/`github`/bare paths) realize through
-the existing hangar path; recognized external prefixes (`npm`/`pypi`/`cargo`/…)
-emit E1298 (JPK-TOOL-PROVIDER) instead of silent skip. `tool install` writes
-real symlinks under `~/.jet/bin` plus generation metadata at
-`~/.jet/tools/generations/<n>/` (profile `"tools"`) — a minimal isolated
-install until the shared D-JPK-PROFILE1 `jet profile` front door is the
-caller. Bin/`#Job fn` collision is E1297 (JPK-TOOL-COLLIDE).
 
 **D-JPK-PKGOVERRIDE1=B — keyed override record inside `overlay`**: a
 package's version/flags/env/patch overrides live under one

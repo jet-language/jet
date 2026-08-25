@@ -1,8 +1,6 @@
-//! D-JPK-TOOLRUN1=A: `jetpack tool run|install|list|uninstall`.
+//! D-JPK-TOOLRUN1=A: `jetpack tool install|list|uninstall`.
 //!
-//! Ephemeral `tool run` realizes a ref through every built-in provider and
-//! execs its binary once (nothing stays on PATH). Persistent `tool install`
-//! projects bins into `~/.jet/bin` with per-install generation metadata under
+//! Persistent `tool install` projects bins into `~/.jet/bin` with per-install generation metadata under
 //! `~/.jet/tools/` — a minimal isolated install until the shared
 //! D-JPK-PROFILE1 `jet profile` surface is the front door. A bin name that
 //! collides with a project `#Job fn` is E1297 (JPK-TOOL-COLLIDE).
@@ -18,7 +16,6 @@ use super::ProfileDispatch;
 use crate::Output::Theme;
 use crate::RefSpec::{self, ChannelPolicy, ProviderKind};
 use crate::RuntimePolicy;
-use crate::Shell;
 use crate::Store;
 use crate::Syntax;
 use crate::JSON;
@@ -33,7 +30,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// `jetpack tool <verb> …`
 pub(super) fn cmd_tool(theme: &Theme, parsed: &Parsed) -> i32 {
     match parsed.positional.first().map(String::as_str) {
-        Some(v) if v == Syntax::TOOL_VERB_RUN => tool_run(theme, parsed),
+        Some("run") => {
+            theme.error_coded(
+                "E1353",
+                "`jetpack tool run` is retired",
+                "one mechanism owns ephemeral package shells and commands",
+                "use `jetpack use <package> -- <command>`",
+            );
+            2
+        }
         Some(v) if v == Syntax::TOOL_VERB_INSTALL => tool_install(theme, parsed),
         Some(v) if v == Syntax::TOOL_VERB_LIST => tool_list(theme),
         Some(v) if v == Syntax::TOOL_VERB_UNINSTALL => tool_uninstall(theme, parsed),
@@ -44,7 +49,7 @@ pub(super) fn cmd_tool(theme: &Theme, parsed: &Parsed) -> i32 {
                     "`jetpack tool` verbs are: {}.",
                     Syntax::TOOL_VERBS.join(", ")
                 ),
-                "try `jetpack tool run <ref>`, `jetpack tool install <ref>`, `jetpack tool list`, or `jetpack tool uninstall <name>`.",
+                "try `jetpack tool install <ref>`, `jetpack tool list`, or `jetpack tool uninstall <name>`.",
             );
             2
         }
@@ -52,10 +57,10 @@ pub(super) fn cmd_tool(theme: &Theme, parsed: &Parsed) -> i32 {
             theme.error(
                 "`jetpack tool` needs a verb",
                 &format!(
-                    "verbs are: {} — ephemeral run or persistent PATH install (D-JPK-TOOLRUN1).",
+                    "verbs are: {} — persistent PATH management.",
                     Syntax::TOOL_VERBS.join(", ")
                 ),
-                "try `jetpack tool run ripgrep@nixpkgs -- rg --version`.",
+                "try `jetpack use ripgrep -- rg --version`.",
             );
             2
         }
@@ -357,50 +362,6 @@ pub(super) fn update_user_tools(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
-fn tool_run(theme: &Theme, parsed: &Parsed) -> i32 {
-    let Some(raw) = parsed.positional.get(1) else {
-        theme.error(
-            "`jetpack tool run` needs a package ref",
-            "ephemeral tool execution realizes one `package@source` ref and runs its binary once — nothing is left on PATH.",
-            "try `jetpack tool run ripgrep@nixpkgs -- rg --version`.",
-        );
-        return 2;
-    };
-    if let Some(code) = reject_unavailable_provider(theme, raw) {
-        return code;
-    }
-    let Ok(spec) = classify_or_report(theme, raw) else {
-        return 2;
-    };
-    let roots = Store::resolve();
-    let plan = RunPlan {
-        project_root: std::env::current_dir().unwrap_or_default(),
-        refs: vec![spec.clone()],
-        adapters: Vec::new(),
-        table: cwd_table(),
-        label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
-        prompt_path: ModuleEval::PromptPathMode::default(),
-        prompt_strip: ModuleEval::PromptStripMode::default(),
-        dev_services: Vec::new(),
-        secrets: Vec::new(),
-        environment: ModuleEval::EnvironmentFacts::default(),
-    };
-    let env = match compose_env_scoped(theme, &roots, &parsed.flags, &plan, RealizeScope::UserProfile) {
-        Ok(env) => env,
-        Err(code) => return code,
-    };
-    let program = match &parsed.command {
-        Some(cmd) if !cmd.is_empty() => cmd.clone(),
-        _ => vec![spec.short_name().to_string()],
-    };
-    theme.status(&format!(
-        "tool run {} -> {} (ephemeral)",
-        theme.bold(&spec.raw),
-        theme.bold(program.first().map(String::as_str).unwrap_or("?"))
-    ));
-    Shell::run_command(&env, &program)
-}
-
 fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(raw) = parsed.positional.get(1) else {
         theme.error(
@@ -410,11 +371,11 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 2;
     };
-    let (channel_policy, raw_ref) = RefSpec::split_channel_policy(raw);
-    if let Some(code) = reject_unavailable_provider(theme, raw_ref) {
+    let channel_policy = RefSpec::policy_for_ref(raw);
+    if let Some(code) = reject_unavailable_provider(theme, raw) {
         return code;
     }
-    let Ok(spec) = classify_or_report(theme, raw_ref) else {
+    let Ok(spec) = classify_or_report(theme, raw) else {
         return 2;
     };
     let as_name = parsed.flags.as_name.as_deref();
@@ -446,7 +407,7 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
         theme.error(
             &format!("`{}` has no bin directory to install", spec.raw),
             "tool install projects package binaries onto PATH; this realization produced no `bin/`.",
-            "pick a package that ships executables, or use `jetpack tool run` for a one-shot.",
+            "pick a package that ships executables, or use `jetpack use <package> -- <command>` for a one-shot.",
         );
         return 2;
     };
@@ -467,7 +428,7 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
             theme.error(
                 &format!("`{}` ships no executables under bin/", spec.raw),
                 "tool install needs at least one executable to project onto `~/.jet/bin`.",
-                "use `jetpack tool run` for a one-shot, or pick a different package.",
+                "use `jetpack use <package> -- <command>` for a one-shot, or pick a different package.",
             );
             return 2;
         }
@@ -588,7 +549,7 @@ fn tool_uninstall(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
-fn reject_unavailable_provider(theme: &Theme, raw: &str) -> Option<i32> {
+pub(super) fn reject_unavailable_provider(theme: &Theme, raw: &str) -> Option<i32> {
     let source = raw.rsplit_once(Syntax::REF_PROVIDER_AT).map(|(_, s)| s)?;
     if !Syntax::TOOL_EXTERNAL_PROVIDERS.contains(&source) {
         return None;
@@ -597,7 +558,7 @@ fn reject_unavailable_provider(theme: &Theme, raw: &str) -> Option<i32> {
         Syntax::TOOL_DIAG_PROVIDER,
         &format!("tool provider `{source}` isn't available yet"),
         &format!(
-            "D-JPK-TOOLRUN1 runs tools across providers, but `…@{source}` has no hangar realization path yet (JPK-TOOL-PROVIDER). Built-in providers that work today: nixpkgs, github, and bare local paths."
+            "the package shell spans built-in providers, but `…@{source}` has no hangar realization path yet (JPK-TOOL-PROVIDER). Built-in providers that work today: nixpkgs, github, and bare local paths."
         ),
         &format!(
             "use a built-in ref (`…@nixpkgs`, `…@github`, or a bare local path), or wait for the `{source}` provider to land."
@@ -616,10 +577,10 @@ fn report_collide(theme: &Theme, bin: &str, job: &str, path: &Path, raw: &str) {
         Syntax::TOOL_DIAG_COLLIDE,
         &format!("`{bin}` is already a job in {rel}"),
         &format!(
-            "the project job `{job}` wins in this directory, so the global tool would be shadowed here (JPK-TOOL-COLLIDE / D-JPK-TOOLRUN1)."
+            "the project job `{job}` wins in this directory, so the global tool would be shadowed here (JPK-TOOL-COLLIDE)."
         ),
         &format!(
-            "install under a different bin name  ->  jetpack tool install {raw} {} <other>\n     or just run it once                  ->  jetpack tool run {raw}",
+            "install under a different bin name  ->  jetpack tool install {raw} {} <other>\n     or just run it once                  ->  jetpack use {raw} -- <command>",
             Syntax::TOOL_FLAG_AS
         ),
     );
@@ -781,19 +742,27 @@ fn source_policy_from_marker(marker: &str) -> Result<ChannelPolicy, String> {
 }
 
 fn tool_manifest_ref(raw: &str, policy: ChannelPolicy) -> String {
-    match policy {
-        ChannelPolicy::Pinned => raw.to_string(),
-        ChannelPolicy::Manual => format!("#latest {raw}"),
-        ChannelPolicy::Automatic => format!("#auto {raw}"),
+    let canonical = RefSpec::migrate_persisted_ref(raw).canonical;
+    let has_selector = canonical
+        .rsplit_once(Syntax::REF_PROVIDER_AT)
+        .is_some_and(|(_, source)| source.contains(Syntax::REF_CHANNEL_MARKER));
+    if policy == ChannelPolicy::Pinned || has_selector {
+        return canonical;
     }
+    let marker = match policy {
+        ChannelPolicy::Pinned => return canonical,
+        ChannelPolicy::Manual => Syntax::REF_CHANNEL_LATEST,
+        ChannelPolicy::Automatic => Syntax::REF_CHANNEL_AUTO,
+    };
+    format!("{canonical}{}{marker}", Syntax::REF_CHANNEL_MARKER)
 }
 
-fn source_manifest_ref(upstream: &str, policy: ChannelPolicy) -> String {
-    let exact = upstream
+fn source_manifest_ref(upstream: &str, _policy: ChannelPolicy) -> String {
+    let reference = upstream
         .split_once(Syntax::REF_SEPARATOR)
         .map(|(provider, target)| format!("{target}@{provider}"))
         .unwrap_or_else(|| upstream.to_string());
-    tool_manifest_ref(&exact, policy)
+    RefSpec::migrate_persisted_ref(&reference).canonical
 }
 
 fn source_table_from_manifest(manifest: &ToolManifest) -> RefSpec::SourceTable {
@@ -939,10 +908,16 @@ fn parse_tool_manifest(text: &str) -> Result<ToolManifest, String> {
             return Err(format!("duplicate user-tools source `{name}`"));
         }
         let upstream = bounded_json_string(source, "upstream")?;
-        let raw = bounded_json_string(source, "raw")?;
+        let migrated = RefSpec::migrate_persisted_ref(&bounded_json_string(source, "raw")?);
+        let raw = migrated.canonical;
         let provider_name = bounded_json_string(source, "provider")?;
         let provider = manifest_provider(&provider_name)?;
-        let policy = source_policy_from_marker(json_field_string(source, "policy")?)?;
+        let declared_policy = source_policy_from_marker(json_field_string(source, "policy")?)?;
+        let policy = if declared_policy == ChannelPolicy::Pinned {
+            migrated.policy
+        } else {
+            declared_policy
+        };
         sources.push(ManifestSource {
             name,
             upstream,
@@ -975,18 +950,25 @@ fn parse_tool_manifest(text: &str) -> Result<ToolManifest, String> {
         if name.is_empty() || !tool_names.insert(name.clone()) {
             return Err(format!("duplicate or empty user-tools tool `{name}`"));
         }
-        let reference = bounded_json_string(tool, "reference")?;
-        let resolved = bounded_json_string(tool, "resolved")?;
+        let reference_migration = RefSpec::migrate_persisted_ref(
+            &bounded_json_string(tool, "reference")?,
+        );
+        let reference = reference_migration.canonical;
+        let resolved = RefSpec::migrate_persisted_ref(&bounded_json_string(tool, "resolved")?)
+            .canonical;
         if resolved.is_empty() {
             return Err(format!(
                 "user-tools tool `{name}` has no resolved reference"
             ));
         }
-        let tier = bounded_json_string(tool, "tier")?;
+        let mut tier = bounded_json_string(tool, "tier")?;
         if !matches!(tier.as_str(), "pinned" | "#latest" | "#auto") {
             return Err(format!(
                 "user-tools tool `{name}` has unknown tier `{tier}`"
             ));
+        }
+        if tier == "pinned" && reference_migration.policy != ChannelPolicy::Pinned {
+            tier = tool_policy_marker(reference_migration.policy).to_string();
         }
         let tool_bins = json_bounded_string_array(tool, "bins", 255)?;
         let members = json_bounded_string_array(tool, "members", 255)?;
@@ -1035,12 +1017,13 @@ fn format_tool_manifest(manifest: &ToolManifest) -> String {
     let source_text = sources
         .iter()
         .map(|source| {
+            let raw = RefSpec::migrate_persisted_ref(&source.raw).canonical;
             format!(
                 "    {{\"name\":{},\"policy\":{},\"provider\":{},\"raw\":{},\"upstream\":{}}}",
                 JSON::quote(&source.name),
                 JSON::quote(tool_policy_marker(source.policy)),
                 JSON::quote(source.provider.label()),
-                JSON::quote(&source.raw),
+                JSON::quote(&raw),
                 JSON::quote(&source.upstream),
             )
         })
@@ -1049,13 +1032,15 @@ fn format_tool_manifest(manifest: &ToolManifest) -> String {
     let tool_text = tools
         .iter()
         .map(|tool| {
+            let reference = RefSpec::migrate_persisted_ref(&tool.reference).canonical;
+            let resolved = RefSpec::migrate_persisted_ref(&tool.resolved).canonical;
             format!(
                 "    {{\"bins\":{},\"members\":{},\"name\":{},\"reference\":{},\"resolved\":{},\"tier\":{}}}",
                 json_string_array_text(&tool.bins),
                 json_string_array_text(&tool.members),
                 JSON::quote(&tool.name),
-                JSON::quote(&tool.reference),
-                JSON::quote(&tool.resolved),
+                JSON::quote(&reference),
+                JSON::quote(&resolved),
                 JSON::quote(&tool.tier),
             )
         })
@@ -1105,7 +1090,7 @@ fn build_tool_manifest_generation(theme: &Theme, parsed: &Parsed) -> io::Result<
         let mut tools = Vec::with_capacity(manifest.tools.len());
         let mut leases = Vec::with_capacity(manifest.tools.len());
         for entry in &manifest.tools {
-            let (_policy, raw) = RefSpec::split_channel_policy(&entry.resolved);
+            let raw = entry.resolved.as_str();
             if let Some(code) = reject_unavailable_provider(theme, raw) {
                 return Err(io::Error::other(format!(
                     "tool manifest entry `{}` rejected with exit code {code}",
@@ -1279,10 +1264,15 @@ fn refresh_manifest_tool_pins(manifest: &mut ToolManifest, table: &RefSpec::Sour
             continue;
         }
         for tool in &mut manifest.tools {
-            let (_policy, resolved) = RefSpec::split_channel_policy(&tool.resolved);
-            let Some((package, source)) = resolved.rsplit_once(Syntax::REF_PROVIDER_AT) else {
+            let Some((package, source_with_selector)) =
+                tool.resolved.rsplit_once(Syntax::REF_PROVIDER_AT)
+            else {
                 continue;
             };
+            let source = source_with_selector
+                .split_once(Syntax::REF_CHANNEL_MARKER)
+                .map(|(source, _)| source)
+                .unwrap_or(source_with_selector);
             if source != name {
                 continue;
             }
@@ -1291,9 +1281,9 @@ fn refresh_manifest_tool_pins(manifest: &mut ToolManifest, table: &RefSpec::Sour
                 .map(|(package, _)| package)
                 .unwrap_or(package);
             tool.resolved = format!(
-                "{package}{}{selector}{}{name}",
-                Syntax::REF_CHANNEL_MARKER,
-                Syntax::REF_PROVIDER_AT
+                "{package}{}{name}{}{selector}",
+                Syntax::REF_PROVIDER_AT,
+                Syntax::REF_CHANNEL_MARKER
             );
         }
     }

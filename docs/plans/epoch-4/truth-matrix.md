@@ -63,7 +63,7 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #479 | live | `crates/jetpack/src/Doctor.rs` | Read-only local health diagnosis only; no repair or broad registry-availability claim. |
 | #361 | live | `crates/jetpack/src/Output.rs` | Hybrid CLI output surface (D-FE-CLI1): color/plan symbols, NO_COLOR, -y apply, live-region erase; not package-manager parity. |
 | #476 | live | `examples/features/devloop/job_runner.jet` | Jet-owned `#Job` entry dispatch (D-JPK-TASKRUN1) across AOT and interpreter tiers; Jetpack retains bridge coverage, not feature ownership; not scheduling or remote run. |
-| #477 | live | `crates/jetpack/src/CLI/tool.rs` | On-demand `jetpack tool` run/install for built-in providers (D-JPK-TOOLRUN1); external-provider realization (E1298) not yet live. |
+| #477 | live | `crates/jetpack/src/CLI/tool.rs` | Persistent `jetpack tool` install/list/uninstall for built-in providers; ephemeral package shells use `jetpack use`; external-provider realization (E1298) not yet live. |
 | #478 | live | `crates/jetpack/src/CLI/run_enter_dev.rs` | Monorepo `--filter`/`-p` package selection (D-JPK-SELECTOR1) for local dev/run; narrow workspace-local selector only. |
 | #359 | live | `crates/jetpack/src/Shell.rs` | Hybrid bash/zsh/fish prompt only: live env, path, git, command lifecycle, Ctrl-G, strip, and NO_COLOR. Regression 33e2df42d pins the real PTY git branch; no general shell-runtime claim. |
 | #419 | live | `tests/build_graph.rs`, `crates/jetpack/src/Recipe.rs` | One BuildPlan IR plus complete ActionKey: recipe lowering, action kinds, dependency outputs, env allowlist, helper versions, exact source, and FrontEndCompletion gate. Regression 0e3c158db; Store ingest remains #393. |

@@ -1,7 +1,6 @@
-//! D-JPK-TOOLRUN1 (card #477): `jetpack tool run|install|list|uninstall`.
+//! D-JPK-TOOLRUN1 (card #477): `jetpack tool install|list|uninstall`.
 //!
-//! Ephemeral `tool run` realizes a ref through a built-in provider and execs
-//! its binary once (nothing stays on PATH). Persistent `tool install`
+//! Ephemeral package shells use `jetpack use`. Persistent `tool install`
 //! projects bins onto `~/.jet/bin` with generation metadata. A bin name that
 //! collides with a project `#Job fn` is E1297 (JPK-TOOL-COLLIDE); an
 //! external provider prefix with no hangar realization path is E1298
@@ -167,73 +166,151 @@ fn json_meta_field(metadata: &str, key: &str) -> String {
 }
 
 #[test]
-fn tool_help_lists_run_install_list_uninstall() {
+fn tool_help_lists_install_list_uninstall_and_shell_verbs() {
     let output = jetpack().args(["help"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("tool run"), "stdout: {stdout}");
+    assert!(!stdout.contains("tool run"), "stdout: {stdout}");
     assert!(stdout.contains("tool install"), "stdout: {stdout}");
     assert!(stdout.contains("tool list"), "stdout: {stdout}");
     assert!(stdout.contains("tool uninstall"), "stdout: {stdout}");
+    assert!(stdout.contains("env <name>"), "stdout: {stdout}");
+    assert!(stdout.contains("use <package>"), "stdout: {stdout}");
 }
 
 #[test]
-fn tool_run_ephemeral_execs_builtin_provider_fixture() {
-    let root = Scratch::new("tool-run-root");
-    let proj = Scratch::new("tool-run-proj");
-    let fixtures = Scratch::new("tool-run-fx");
+fn retired_tool_run_has_teaching_diagnostic() {
+    let output = jetpack()
+        .args(["tool", "run", "greet@nixpkgs", "--no-color"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_jetos_stderr_snapshot(
+        "tool_run_retired",
+        &String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+#[test]
+fn use_ephemeral_execs_inside_and_outside_project_without_path_projection() {
+    let root = Scratch::new("use-root");
+    let project = Scratch::new("use-project");
+    let outside = Scratch::new("use-outside");
+    let fixtures = Scratch::new("use-fx");
     write_tool_bin_fixture(
         &root.path,
         &fixtures.path,
         "greet",
         "greet",
-        "#!/bin/sh\necho hello from tool run\n",
+        "#!/bin/sh\necho hello from jetpack use\n",
     );
-    let home = Scratch::new("tool-run-home");
-    let output = jetpack()
+    // An invalid project manifest proves `use` does not read the cwd project
+    // plan or lock while realizing the explicitly named package.
+    fs::write(project.join("env.jet"), "this is not a project environment\n").unwrap();
+    let home = Scratch::new("use-home");
+    for cwd in [&project.path, &outside.path] {
+        let output = jetpack()
+            .args([
+                "use",
+                "greet",
+                "--no-color",
+                "--offline",
+                "--fixtures",
+                "--",
+                "greet",
+            ])
+            .arg(&fixtures.path)
+            .current_dir(cwd)
+            .env("JETPACK_ROOT", &root.path)
+            .env("HOME", &home.path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "cwd={}: stderr: {}",
+            cwd.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "hello from jetpack use"
+        );
+    }
+    // `use` is ephemeral: it does not publish a tool profile or PATH bin.
+    assert!(
+        !home.join(".jet/bin").join(physical_bin("greet")).exists(),
+        "use must not leave PATH projection"
+    );
+    assert!(!home.join(".jet/tools/profile.json").exists());
+}
+
+#[test]
+fn use_prep_materializes_then_entry_reuses_the_package() {
+    let root = Scratch::new("use-prep-root");
+    let project = Scratch::new("use-prep-project");
+    let fixtures = Scratch::new("use-prep-fx");
+    let home = Scratch::new("use-prep-home");
+    write_tool_bin_fixture(
+        &root.path,
+        &fixtures.path,
+        "greet",
+        "greet",
+        "#!/bin/sh\necho prepared greet\n",
+    );
+    let prep = jetpack()
         .args([
-            "tool",
-            "run",
-            "greet@nixpkgs",
+            "use",
+            "greet",
+            "--prep",
             "--no-color",
             "--offline",
             "--fixtures",
         ])
         .arg(&fixtures.path)
-        .current_dir(&proj.path)
+        .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
         .output()
         .unwrap();
     assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        prep.status.success(),
+        "use --prep failed: {}",
+        String::from_utf8_lossy(&prep.stderr)
     );
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout).trim(),
-        "hello from tool run"
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(prep.stdout.is_empty(), "prep must not enter a shell");
+
+    let entry = jetpack()
+        .args([
+            "use",
+            "greet",
+            "--no-color",
+            "--offline",
+            "--fixtures",
+            "--",
+            "greet",
+        ])
+        .arg(&fixtures.path)
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
     assert!(
-        stderr.contains("ephemeral"),
-        "stderr should mark ephemeral: {stderr}"
+        entry.status.success(),
+        "entry after use --prep failed: {}",
+        String::from_utf8_lossy(&entry.stderr)
     );
-    // Nothing projected onto ~/.jet/bin for a one-shot run.
-    assert!(
-        !home.join(".jet/bin").join(physical_bin("greet")).exists(),
-        "tool run must not leave PATH projection"
-    );
+    assert_eq!(String::from_utf8_lossy(&entry.stdout).trim(), "prepared greet");
 }
 
 #[test]
-fn tool_run_unavailable_provider_is_e1298_not_silent() {
+fn use_unavailable_provider_is_e1298_not_silent() {
     // D-JPK-REF1 keeps the package first even for a provider that is gated.
     let root = Scratch::new("tool-prov-root");
     let proj = Scratch::new("tool-prov-proj");
     let home = Scratch::new("tool-prov-home");
     let output = jetpack()
-        .args(["tool", "run", "prettier@npm", "--no-color"])
+        .args(["use", "prettier@npm", "--no-color"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
@@ -351,7 +428,7 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
     );
 
     let cleaned = jetpack()
-        .args(["clean", "--no-color", "--yes"])
+        .args(["hangar", "clean", "--no-color", "--yes"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
@@ -464,7 +541,7 @@ fn native_omp_recipe_admits_hangar_projects_and_rolls_back() {
             .output()
             .unwrap()
     };
-    let first = install("#auto omp@releases");
+    let first = install("omp@releases#auto");
     assert!(
         first.status.success(),
         "first native install failed: {}",

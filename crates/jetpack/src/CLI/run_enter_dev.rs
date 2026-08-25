@@ -2,14 +2,15 @@ use super::package_hangar_vendor::auto_clean_after_success;
 use super::parse::Parsed;
 use super::realize::{
     apply_locked_channels, classify_or_report, load_project_plan_with_selections, project_env_root,
-    RunPlan,
+    RealizeScope, RunPlan,
 };
 use super::services_secrets_config::{
     find_jet_binary, find_project_entry, has_dev_or_run_entry, list_project_jobs,
     project_job_declared, project_job_metadata, run_lifecycle_hooks, run_lifecycle_hooks_clean,
     run_lifecycle_hooks_silent, validate_declared_secrets, wait_for_services_ready,
 };
-use super::trust_env_build::{compose_env, validate_integration_facts};
+use super::tool::reject_unavailable_provider;
+use super::trust_env_build::{compose_env, compose_env_scoped, validate_integration_facts};
 use super::workspace_sources::{
     cwd_table, load_workspace_for_source, workspace_root_snapshot_or_exit,
 };
@@ -1407,8 +1408,8 @@ fn run_visible_command(theme: &Theme, env: &Env, refs: &[RefSpec::RefSpec], cmd:
     Shell::run_command(env, cmd)
 }
 
-/// `jetpack enter [-- cmd]` — realize the project environment and drop into its
-/// shell (Scale-2; U §8). Unlike `run`, `enter` is project-scoped: it never
+/// `jetpack env [<name>] [-- cmd]` — realize the project environment and drop into its
+/// shell (Scale-2; U §8). Unlike `run`, `env` is project-scoped: it never
 /// takes an explicit ref, it always composes the env declared by the project
 /// `env.jet`. The `-- cmd` form runs a one-off command in that env, then exits.
 ///
@@ -1417,9 +1418,29 @@ fn run_visible_command(theme: &Theme, env: &Env, refs: &[RefSpec::RefSpec], cmd:
 /// (and the absence of any declared `env.*` module otherwise triggers) a
 /// foreign `flake.nix`/`devenv.nix` fallback that uses Jetpack's bounded native
 /// projection instead of composing a second shell model.
-pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn cmd_env(theme: &Theme, parsed: &Parsed) -> i32 {
+    let Some(module) = parsed.positional.first() else {
+        return cmd_env_project(theme, parsed);
+    };
+    if matches!(
+        module.as_str(),
+        Syntax::ENV_HOOK_VERB
+            | Syntax::ENV_EXPORT_VERB
+            | Syntax::ENV_TEST_VERB
+            | Syntax::ENV_SYNC_VERB
+            | Syntax::ENV_INFO_VERB
+    ) {
+        return cmd_env_project(theme, parsed);
+    }
+    let mut routed = parsed.clone();
+    routed.flags.environment = Some(module.clone());
+    routed.positional.clear();
+    cmd_env_project(theme, &routed)
+}
+
+fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     // D-ENVHOOK1=A: `jet env hook <shell>` / `jet env export <shell>` route
-    // through `jetpack enter` (D-JPK-DISPATCH1) as reserved first-positional
+    // through `jetpack env` (D-JPK-DISPATCH1) as reserved first-positional
     // subverbs of `jet env`. The bare `jet env` shell-entry (no positional, or
     // a `-p`/`--flake`/`-- cmd` form) is untouched.
     match parsed.positional.first().map(String::as_str) {
@@ -1545,6 +1566,10 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(env) => env,
         Err(code) => return code,
     };
+    if parsed.flags.prep {
+        auto_clean_after_success(theme, &roots);
+        return 0;
+    }
     let entry = find_project_entry(&project_dir);
     if let Err(code) = run_lifecycle_hooks(
         theme,
@@ -1561,6 +1586,83 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
 
     let code = match &parsed.command {
         Some(cmd) if !cmd.is_empty() => Shell::run_command(&env, cmd),
+        _ => Shell::enter(theme, &env, ShellKind::detect()),
+    };
+    if code == 0 {
+        auto_clean_after_success(theme, &roots);
+    }
+    code
+}
+
+/// `jetpack use <package>... [-- cmd]` — realize exactly the named refs in the
+/// user profile. This path deliberately has no project source table or project
+/// lock context; a user tool is independent of the directory where it runs.
+pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
+    if parsed.positional.is_empty() {
+        theme.error_coded(
+            "E1340",
+            "`jetpack use` needs at least one package",
+            "the `use` verb builds an ephemeral shell from exactly the packages named after it",
+            "try `jetpack use ripgrep`, or add `--` followed by a command",
+        );
+        return 2;
+    }
+
+    let mut refs = Vec::with_capacity(parsed.positional.len());
+    for raw in &parsed.positional {
+        if let Some(code) = reject_unavailable_provider(theme, raw) {
+            return code;
+        }
+        let canonical = if raw.contains(Syntax::REF_PROVIDER_AT)
+            || RefSpec::is_bare_path(raw)
+        {
+            raw.clone()
+        } else {
+            format!(
+                "{}{}{}",
+                raw,
+                Syntax::REF_PROVIDER_AT,
+                Syntax::REF_SOURCE_NIXPKGS
+            )
+        };
+        match RefSpec::classify(&canonical) {
+            Ok(spec) => refs.push(spec),
+            Err(error) => {
+                crate::Output::ref_error(theme, &error);
+                return 2;
+            }
+        }
+    }
+
+    let roots = Store::resolve();
+    let plan = RunPlan {
+        project_root: std::env::current_dir().unwrap_or_default(),
+        refs,
+        adapters: Vec::new(),
+        table: RefSpec::SourceTable::empty(),
+        label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
+        prompt_path: ModuleEval::PromptPathMode::default(),
+        prompt_strip: ModuleEval::PromptStripMode::default(),
+        dev_services: Vec::new(),
+        secrets: Vec::new(),
+        environment: ModuleEval::EnvironmentFacts::default(),
+    };
+    let env = match compose_env_scoped(
+        theme,
+        &roots,
+        &parsed.flags,
+        &plan,
+        RealizeScope::UserProfile,
+    ) {
+        Ok(env) => env,
+        Err(code) => return code,
+    };
+    if parsed.flags.prep {
+        auto_clean_after_success(theme, &roots);
+        return 0;
+    }
+    let code = match &parsed.command {
+        Some(command) if !command.is_empty() => Shell::run_command(&env, command),
         _ => Shell::enter(theme, &env, ShellKind::detect()),
     };
     if code == 0 {

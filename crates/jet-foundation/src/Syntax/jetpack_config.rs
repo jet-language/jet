@@ -650,9 +650,10 @@ pub const PROMPT_PATH_FULL: &str = "Full";
 pub const PROMPT_STRIP_ON: &str = "On";
 pub const PROMPT_STRIP_OFF: &str = "Off";
 
-/// D-JPK-REF1=A (ratified 2026-07-23, card #733; amends U6/U9): package refs
-/// use `name['#'version-or-channel]['@'source]`; source values use
-/// `target@provider`; local `./`, `../`, and `/` paths are bare.
+/// D-JPK-REF1=A (ratified 2026-07-23, card #733; amends U6/U9), amended by
+/// D-VERDICT-2190-1: package refs use `name['@'source]['#'version-or-channel]`;
+/// source values use `target@provider`; local `./`, `../`, and `/` paths are
+/// bare.
 pub const TYPE_PKG: &str = "Pkg";
 pub const REF_PROVIDER_AT: &str = "@";
 

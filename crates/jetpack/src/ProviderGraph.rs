@@ -5771,7 +5771,7 @@ mod tests {
         report.validate().expect("lossless provider report");
         let shared = report.shared_facts();
         let lock = report
-            .lock_record("app", "web#1.0.0@npm", "any")
+            .lock_record("app", "web@npm#1.0.0", "any")
             .expect("canonical provider lock");
         let locked = ProviderFacts::from_json(
             lock.future_fields
@@ -5780,7 +5780,7 @@ mod tests {
         )
         .expect("locked provider facts JSON");
         assert_eq!(locked, shared);
-        assert_eq!(lock.rationales[0].source_ref, "web#1.0.0@npm".to_string());
+        assert_eq!(lock.rationales[0].source_ref, "web@npm#1.0.0".to_string());
     }
 
     #[test]
@@ -6014,7 +6014,7 @@ version = "1.0.0" # package version
             .iter()
             .any(|line| line == "native json: retained"));
         let locked = report
-            .lock_record("app", "ripgrep#version=14.1.1@nix", "x86_64-linux")
+            .lock_record("app", "ripgrep@nix#version=14.1.1", "x86_64-linux")
             .expect("Nix provider lock uses the shared carrier");
         let locked_facts = ProviderFacts::from_json(
             locked

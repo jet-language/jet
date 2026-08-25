@@ -9,6 +9,7 @@ use std::path::Path;
 
 use crate::Comptime::CtValue;
 use crate::AST::CtKey;
+use crate::Syntax;
 use jet_pkg_model::ProviderFacts::ProviderFacts;
 
 const MAX_RESOLVER_NODES: usize = 100_000;
@@ -1678,10 +1679,14 @@ fn versioned_package(package: &str, version: Option<&str>) -> String {
     let Some((name, source)) = package.rsplit_once('@') else {
         return package.to_string();
     };
-    if name.contains("#version=") {
+    if name.contains("#version=") || source.contains(Syntax::REF_CHANNEL_MARKER) {
         package.to_string()
     } else {
-        format!("{name}#version={version}@{source}")
+        format!(
+            "{name}{}{source}{}{version}",
+            Syntax::REF_PROVIDER_AT,
+            Syntax::REF_CHANNEL_MARKER
+        )
     }
 }
 
@@ -3477,7 +3482,7 @@ mod tests {
         assert_eq!(expansion.applied, vec!["Rust"]);
         assert!(expansion
             .packages
-            .contains(&"rustc#version=1.78@nixpkgs".to_string()));
+            .contains(&"rustc@nixpkgs#version=1.78".to_string()));
         assert!(expansion
             .packages
             .contains(&"rust-analyzer@nixpkgs".to_string()));
@@ -3489,7 +3494,7 @@ mod tests {
             .unwrap();
         assert!(rust_projection
             .included
-            .contains(&"rustc#version=1.78@nixpkgs".to_string()));
+            .contains(&"rustc@nixpkgs#version=1.78".to_string()));
         assert!(rust_projection
             .changed
             .contains(&"channel=Stable".to_string()));

@@ -199,7 +199,7 @@ fn cmd_add_adapt(theme: &Theme, raw: &str) -> i32 {
                     "E1270",
                     "adapter draft needs source bytes",
                     "`<pkg>@nixpkgs` names a package in an index, not an upstream source tree.",
-                    "use the package's source URL with `source: owner/repo#rev@github` or `source: \"./vendor/pkg\"`.",
+                    "use the package's source URL with `source: owner/repo@github#rev` or `source: \"./vendor/pkg\"`.",
                 );
                 return 2;
             }

@@ -617,7 +617,7 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
     match err {
         RefError::MissingSeparator(raw) => theme.error(
             &format!("`{raw}` is missing a source"),
-            "Jet refs are written `name#version@source`; `#version` is optional.",
+            "Jet refs are written `package@source#version`; `#version` is optional.",
             &format!("try `{example}` or `owner/repo@github`."),
         ),
         RefError::EmptyHalf(raw) => theme.error(
@@ -630,6 +630,12 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
             &format!("`{raw}` puts the provider first"),
             "D-JPK-REF1 puts the package or target before `@` and the source after it.",
             &format!("put the package or target first: write `{replacement}`."),
+        ),
+        RefError::NonCanonical { raw, replacement } => theme.error_coded(
+            "E1317",
+            &format!("`{raw}` uses a retired package-ref order"),
+            "D-VERDICT-2190-1 puts the version or policy after `@source`.",
+            &format!("write `{replacement}`."),
         ),
         RefError::PathProviderRetired { raw, path } => theme.error_coded(
             "E1317",

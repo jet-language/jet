@@ -160,11 +160,11 @@ pub const RETIREMENTS: &[Retirement] = &[
     },
     Retirement {
         id: "package-ref-order",
-        retired: "provider@target",
-        canonical: "target@provider",
+        retired: "provider@target / target#version@provider",
+        canonical: "target@provider#version",
         kind: RetirementKind::Semantic,
-        decision: "D-JPK-REF1",
-        since: "2026-06-18",
+        decision: "D-VERDICT-2190-1",
+        since: "2026-08-25",
         code: Some("E1317"),
     },
     Retirement {

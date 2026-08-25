@@ -1042,8 +1042,12 @@ fn manifest_channel_ref(exact: &str, policy: RefSpec::ChannelPolicy) -> String {
         .unwrap_or_else(|| exact.to_string());
     match policy {
         RefSpec::ChannelPolicy::Pinned => exact,
-        RefSpec::ChannelPolicy::Manual => format!("#{} {exact}", Syntax::REF_CHANNEL_LATEST),
-        RefSpec::ChannelPolicy::Automatic => format!("#{} {exact}", Syntax::REF_CHANNEL_AUTO),
+        RefSpec::ChannelPolicy::Manual => {
+            format!("{exact}{}{}", Syntax::REF_CHANNEL_MARKER, Syntax::REF_CHANNEL_LATEST)
+        }
+        RefSpec::ChannelPolicy::Automatic => {
+            format!("{exact}{}{}", Syntax::REF_CHANNEL_MARKER, Syntax::REF_CHANNEL_AUTO)
+        }
     }
 }
 
