@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2196,
-    "rev": 44729,
+    "rev": 44753,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19,15 +19,15 @@
         "radar-remaining",
         "radar-frozen",
         "radar:e4",
-        "radar:e9",
         "radar:e3",
         "radar:e6",
         "radar:e8",
-        "radar:e12",
-        "radar:e11",
-        "radar:e10",
         "board-ideas",
-        "radar-sq"
+        "radar-sq",
+        "radar:e7",
+        "radar:e10",
+        "radar:e9",
+        "radar:e12"
       ]
     },
     "completionCursor": "2026-08-25T10:57:05.785Z"
@@ -146057,19 +146057,30 @@
     {
       "id": "c00s3cle",
       "num": 2157,
-      "title": "Signed nixpkgs channel index pipeline",
-      "body": "Generate, differentially verify, measure, sign, publish, refresh and retain an immutable index mapping channel revision plus attrpath plus system to version, named outputs, derivation path and store path.\n\nThis is the evaluation half. The index producer may run Nix off-device against channel and Hydra data; that is build infrastructure, not a user dependency. The user machine must never need nix.\n\nSee docs/audits/jetpack-native-nixpkgs-2026-08-24.md step 2.",
+      "title": "Signed Jetpack package catalog pipeline",
+      "body": "Generate, verify, sign, publish, refresh, and retain an immutable Jetpack package catalog. Nixpkgs is one temporary upstream migration source, not the public package source name. Records map a pinned upstream revision, system, and attr to exact derivation and output identities, then publish them as `package@jetpack`. Jetpack verifies and realizes every product request.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m09-native-nixpkgs-dogfood",
       "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "blockedBy: none\n1. Evaluate selected nixpkgs revisions off-device and collect exact derivation, output, dependency, and cache facts.\n2. Convert those facts into deterministic `@jetpack` catalog records with upstream provenance.\n3. Sign and publish immutable per-system targets and a retained channel manifest.\n4. Verify signatures, freshness, systems, duplicates, ambiguity, and cache closure identity on the client.\n5. Publish coverage and nativeization reports that distinguish native, imported, local-fallback, and missing packages.\n6. Keep product resolution and realization entirely in Jetpack.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Planning prerequisites are explicit: blockedBy none."
+        },
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Owner ruling: the public source is `jetpack`; nixpkgs is migration provenance only."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -146115,15 +146126,27 @@
           "verifiedBy": null,
           "evidence": "evidence: coverage test at NixIndex.rs:2717; per-system coverage output is implemented at NixIndex.rs:2399.",
           "at": "2026-08-24T21:10:13.122Z"
+        },
+        {
+          "n": 6,
+          "text": "Published package records use the `jetpack` source: bare `ripgrep` and `ripgrep@jetpack` resolve identically, while nixpkgs remains upstream provenance only.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T14:07:32.366Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "D-JPK-NIXINDEX1",
+        "D-JPK-SNIXREUSE1"
+      ],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T12:08:41.716Z",
-      "updated": "2026-08-25T01:20:57.028Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-25T14:07:57.865Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c01fm9ou",
@@ -146437,73 +146460,149 @@
     {
       "id": "c087yjjx",
       "num": 2162,
-      "title": "Native Nix evaluator conformance program",
-      "body": "Decide the Snix reuse and licence posture, expand the bounded evaluator against a whole-nixpkgs differential corpus, and publish measured coverage and unsupported semantics.\n\njet-nix-eval today is a bounded projection, not a nixpkgs evaluator: the root environment injects pkgs as a symbolic namespace (crates/jet-nix-eval/src/Evaluator.rs:1154-1197) and selecting an unknown attribute converts it to a package-name string (Evaluator.rs:1878-1928), so pkgs.fd becomes the identity fd and no nixpkgs function runs. Dynamic derivations and import-from-derivation are explicitly skipped (lib.rs:207-218). The bridge_flake_*_without_nix tests therefore prove shape translation, not evaluation, and must not be read as nixpkgs coverage.\n\nThis is the long fidelity program and the only path that covers overlays and custom flakes. See docs/audits/jetpack-native-nixpkgs-2026-08-24.md step 7.",
+      "title": "Phase out Nix through Jetpack imports with a local fallback",
+      "body": "Jetpack is the package source and the final package engine. Bare refs mean `@jetpack`. The common path uses native recipes or the signed imported catalog. On a local catalog miss, Jetpack may invoke an installed Nix once against exact locks, import the closed graph, and use only Jetpack afterward. Snix and Tvix are excluded completely.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m09-native-nixpkgs-dogfood",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "1. Rename the built-in package source to `jetpack`; canonicalize bare package refs to `package@jetpack`.\n2. Retire `@nixpkgs` with a teaching diagnostic that rewrites to `@jetpack` while preserving nixpkgs provenance in locks and receipts.\n3. Resolve native Jetpackages, signed imported records, and verified cache closures before considering any fallback.\n4. On a true miss, discover local Nix, bind it to an exact executable identity and version, and evaluate only the locked nixpkgs attr and system.\n5. Convert the evaluated derivation graph into a Jetpack compatibility recipe, lock, loss report, and proof.\n6. Use Jetpack for fetch, cache admission, source build, sandbox, Hangar storage, execution, rollback, and every later run.\n7. Disable fallback in offline mode. Require explicit policy in CI and non-interactive runs.\n8. Reject Snix and Tvix crates, source, protocols, binaries, services, and vendor copies. Use upstream Nix only as the temporary compatibility tool and differential oracle.\n9. Publish migration coverage and nativeization status so the Nix-backed set can only shrink.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Owner ruling: Jetpack is the source; bare refs default to @jetpack; local Nix is an import-on-miss fallback; Snix and Tvix are excluded."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "An owner decision records the Snix and Tvix reuse and licence posture",
+          "text": "No Snix or Tvix crate, code, vendor copy, protocol, binary, service, build input, or runtime dependency exists in Jet or Jetpack.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T12:08:53.423Z"
+          "at": "2026-08-25T14:06:56.830Z"
         },
         {
           "n": 2,
-          "text": "Per-revision differential counts against Nix are published for the evaluated corpus",
+          "text": "The canonical package source is `jetpack`: `ripgrep` and `ripgrep@jetpack` resolve to the same locked identity.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T12:08:53.800Z"
+          "at": "2026-08-25T14:06:56.830Z"
         },
         {
           "n": 3,
-          "text": "Every attr the index covers for this repository evaluates to the same derivation and output identity as Nix",
+          "text": "`@nixpkgs` is retired as a public source spelling and gets an exact rewrite to `@jetpack`; nixpkgs remains provenance in locks and receipts.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T12:08:54.161Z"
+          "at": "2026-08-25T14:06:56.830Z"
         },
         {
           "n": 4,
-          "text": "Overlays and custom flakes are admitted only when their evaluated graph and closure agree with Nix",
+          "text": "Resolution checks native Jetpackage recipes, signed imported catalog records, and verified cache closures before any local Nix call.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T12:08:54.522Z"
+          "at": "2026-08-25T14:06:56.830Z"
         },
         {
           "n": 5,
-          "text": "Index-only limitation claims are removed from user-facing text only where evaluation genuinely covers the surface",
+          "text": "A package unavailable from Jetpack can fall back to an installed local Nix executable on an interactive local machine.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T12:08:54.894Z"
+          "at": "2026-08-25T14:06:56.830Z"
+        },
+        {
+          "n": 6,
+          "text": "Local Nix fallback uses an exact executable identity, version, nixpkgs revision, system, attr, and lock; ambient unpinned nixpkgs is never accepted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T14:06:56.830Z"
+        },
+        {
+          "n": 7,
+          "text": "The fallback imports the closed derivation graph, selected outputs, dependencies, sources, hashes, losses, and proof into Jetpack-owned state.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T14:06:56.830Z"
+        },
+        {
+          "n": 8,
+          "text": "After a successful import, the same locked package runs, builds, and restores through Jetpack without another Nix invocation.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T14:06:56.830Z"
+        },
+        {
+          "n": 9,
+          "text": "Offline mode never shells out. CI and non-interactive fallback require explicit policy and leave a machine-readable receipt.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T14:06:56.830Z"
+        },
+        {
+          "n": 10,
+          "text": "Jetpack alone owns cache admission, NAR verification, builds, sandboxing, Hangar storage, execution, profiles, rollback, and audit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T14:06:56.830Z"
+        },
+        {
+          "n": 11,
+          "text": "A missing local Nix executable or rejected evaluation gives a precise error and does not create a partial package record.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T14:06:56.830Z"
+        },
+        {
+          "n": 12,
+          "text": "Coverage reports separate native recipes, centrally imported recipes, local imports, not-yet-imported packages, and nativeization progress.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T14:06:56.830Z"
         }
       ],
-      "refs": [],
-      "tags": [],
+      "refs": [
+        "D-JPK-SNIXREUSE1",
+        "D-JPK-NIXINDEX1"
+      ],
+      "tags": [
+        "jetpack",
+        "migration",
+        "nix-compat"
+      ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T12:08:53.050Z",
-      "updated": "2026-08-25T00:12:18.721Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-25T14:06:56.830Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0aaqsem",
@@ -206381,65 +206480,69 @@
     {
       "id": "D-JPK-SNIXREUSE1",
       "cardId": "c087yjjx",
-      "group": "other",
-      "title": "Snix and Tvix reuse and licence posture for the native evaluator",
-      "gist": "Choose how far Jet may reuse Snix and Tvix code while building its own Nix evaluator.",
-      "lesson": "Jet needs to evaluate nixpkgs without Nix installed. Snix and Tvix already do this well, but their evaluator crates are GPL-3.0. Linking that code into Jet would put Jet own compiler under GPL terms. Both projects grant MIT only for protocol definitions. So the choice is whether Jet writes its own evaluator, or accepts a licence boundary.",
+      "group": "tooling",
+      "title": "How should Jetpack phase out Nix while keeping a local fallback?",
+      "gist": "Choose how Jetpack imports missing packages without Snix or Tvix.",
+      "lesson": "Jetpack should own package selection, builds, caches, storage, and execution. Nix remains useful only as a temporary translator for packages Jetpack has not imported yet. The package source is named `jetpack`: a bare package ref means `package@jetpack`.",
       "explainer": "The signed index (card #2157) covers a fixed set of attributes. Overlays and custom flakes need real evaluation, so this choice decides the long path.",
-      "story": "Nate wants jetpack to replace Nix. Jetpack must work out which store path an attribute like ripgrep names, which is what a Nix evaluator does. Snix solves this already, but its licence would reach into Jet. Nate must say whether Jet writes this itself or takes the licence cost.",
-      "inWild": "# What a Nix evaluator has to work out\n$ jetpack enter\n  jet  resolving ripgrep@default …\n# Jet must turn the name `ripgrep` into an exact store path\n# before it can fetch a single byte:\n#   /nix/store/<hash>-ripgrep-15.2.0\n# The signed index answers this for a fixed set of names.\n# Overlays and custom flakes need real evaluation.",
+      "story": "Ana runs a package that Jetpack already knows and sees no compatibility work. She later asks for an uncovered package. Jetpack uses her local Nix once, imports the evaluated build graph, then uses Jetpack on later runs.",
+      "inWild": "$ jetpack use ripgrep\n  resolve  ripgrep@jetpack\n  ready    signed Jetpack package\n\n$ jetpack use uncommon-tool\n  resolve  uncommon-tool@jetpack\n  miss     package is not in Jetpack\n  fallback local Nix · pinned nixpkgs revision\n  import   closed build graph into Jetpack\n  ready    uncommon-tool@jetpack",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Reference only: no Snix or Tvix code in Jet (recommended)",
-          "detail": "No Snix or Tvix crate enters the dependency graph, the vendor tree, or the build. Conformance runs a separately licensed Snix binary off device and compares derivation and output identity. Protocol-buffer definitions are reused only where the exact file carries an MIT grant. This keeps Jet's licence posture unchanged and satisfies I6, and it extends the ratified D-JPK-NIXENGINE1=D posture to Snix by name. Cost: Jet writes every builtin, and reaching whole-nixpkgs fidelity is measured in engineering years rather than months.",
-          "code": "# Option A: Snix stays outside Jet\n$ jetpack enter          # Jet own evaluator, one binary, one licence\n$ jet nix conformance    # compares against a Snix binary run off device\n  evaluated 12403 attrs  agree 12211  differ 192  unsupported 0"
+          "name": "Jetpack first, local Nix import on a miss",
+          "detail": "Bare refs and `@jetpack` use the Jetpack catalog first. If a package is missing and local Nix is available, Jetpack evaluates that exact pinned package once, imports its closed build graph, and then realizes it through Jetpack. No Snix or Tvix code or binary is used.",
+          "technical": "Amends D-JPK-REF1: `name` canonicalizes to `name@jetpack`; `@nixpkgs` retires with a fix to `@jetpack`. Resolution checks native recipes, the signed catalog, and verified caches before local Nix.\n\nFallback uses an exact Nix executable, version, nixpkgs revision, system, and attr. It imports the closed graph, hashes, losses, and proof into a Jetpack recipe and lock. Jetpack owns all later work. Offline mode never shells out. CI needs explicit policy. No Snix or Tvix artifact enters Jet.",
+          "code": "// both refs mean the same source\nripgrep\nripgrep@jetpack\n\n$ jetpack use uncommon-tool\n  miss     uncommon-tool@jetpack\n  fallback /run/current-system/sw/bin/nix 2.35.2\n  pin      nixpkgs b5aa0f… · x86_64-linux\n  import   drv graph + outputs + hashes\n  ready    uncommon-tool@jetpack\n\n$ jetpack use uncommon-tool\n  ready    locked Jetpack import · no Nix call"
         },
         {
           "key": "B",
-          "name": "Separate GPL package boundary",
-          "detail": "Jet ships an optional component built from Snix crates and invokes it as a subprocess, never linking it. That component carries GPL-3.0 notices and its own distribution terms. Jet's own crates stay unaffected. This buys real nixpkgs fidelity quickly. Cost: a second artifact to build, sign, publish and support per platform, a licence review before first release, and a user-visible split where full fidelity needs an extra download. It also weakens the single-binary promise.",
-          "code": "# Option B: a second, separately licensed component\n$ jetpack enter          # Jet own evaluator for the common path\n$ jetpack install nix-eval-gpl   # extra download for full fidelity\n  note: this component is distributed under GPL-3.0"
+          "name": "Published Jetpack catalog only",
+          "detail": "Bare refs still mean `@jetpack`, and Snix/Tvix remain absent. Only centrally imported, signed packages are available. A local catalog miss fails and waits for the next catalog publication.",
+          "technical": "Jet-owned infrastructure may use Nix to generate the signed catalog. User machines never invoke Nix. Unsupported refs get one request path and exact coverage report. Jetpack owns every product operation.",
+          "code": "$ jetpack use uncommon-tool\n  error    uncommon-tool@jetpack is not in the signed catalog\n  fix      request it or add a native Jetpackage recipe"
         },
         {
           "key": "C",
-          "name": "Accept GPL for Jet's Nix surface",
-          "detail": "Fastest route to fidelity and the least code Jet has to own. It breaks I6, which forbids new external dependencies in compiler seam crates without owner approval, and it puts GPL terms on a part of Jet that users compile against. Recorded so the ballot is honest about the full range; not recommended.",
-          "code": "# Option C: Jet Nix surface becomes GPL-3.0\n$ jetpack enter          # links Snix directly, full fidelity today\n  note: jetpack Nix support is distributed under GPL-3.0"
+          "name": "Jet-owned native Nix translation only",
+          "detail": "Bare refs mean `@jetpack`, and no external evaluator runs locally or centrally. Jet expands its clean-room translator until it can evaluate the required nixpkgs and configuration corpus.",
+          "technical": "`jet-nix-eval` implements every admitted Nix semantic and lowers the result into Jetpack. Unsupported semantics fail closed. Snix/Tvix and installed Nix are never invoked.",
+          "code": "$ jetpack use uncommon-tool\n  evaluate native Nix compatibility\n  import   closed graph into Jetpack\n  ready    uncommon-tool@jetpack"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
-        "option": "A",
-        "why": "It is the only option that keeps Jet one binary under one licence, and it matches the already ratified D-JPK-NIXENGINE1=D posture of shipping no Tvix code.",
-        "tradeoff": "Jet pays for fidelity in engineering time, and whole-nixpkgs coverage arrives slowly rather than at once.",
+        "why": "A makes Jetpack the default and final system while preserving a practical escape hatch for the shrinking set of missing packages. It avoids a permanent Nix engine and every Snix/Tvix licence boundary.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "Option B buys real nixpkgs fidelity sooner, but it costs a second artifact to build, sign, publish and support per platform, plus a licence review, and it breaks the single-binary promise."
+            "reason": "The central catalog keeps user machines clean but blocks immediately when its published coverage misses a package."
           },
           {
             "key": "C",
-            "reason": "Option C is fastest and the least code to own, but it breaks I6 and puts GPL-3.0 terms on a part of Jet that users compile against."
+            "reason": "A full clean-room evaluator removes the temporary Nix tool but rebuilds the system Jetpack is trying to retire."
           }
-        ]
+        ],
+        "tradeoff": "A missing package may invoke installed Nix once on a local machine. The command must announce that fallback, use exact pins, record a proof, and never make Nix part of later realization."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
-        "base": "Snix and Tvix both publish GPL-3.0 evaluator crates with an MIT carve-out limited to protocol-buffer definitions, verified against Snix commit 6e990352dd1fe25248a9b47ca61e5b90cc829faf and the Tvix repository README.",
-        "boilOcean": "A full in-house evaluator covering every nixpkgs builtin, import-from-derivation, and dynamic derivations is the largest possible scope. Option A accepts it deliberately and stages it behind the signed index so users are never blocked waiting for it.",
-        "hybrid": "Option B is the hybrid: Jet's own evaluator for the common path and a GPL component for the long tail. It is viable but doubles the artifacts Jet must ship and support.",
-        "cooperative": "Snix states that its APIs are unstable and that it lacks tooling to guarantee compatibility, so even a licence-clean reuse would track a moving target.",
-        "adversarial": "The strongest case against option A is that Jet may never reach parity and the index becomes a permanent limitation. The mitigation is the published per-revision differential count, which makes any shortfall visible instead of hidden."
+        "base": "The base draft compared local one-time import, central-only publication, and a full native translator. It recommended local import after a Jetpack miss.",
+        "boilOcean": "The breadth pass also tested Snix linking, a GPL subprocess, live Nix delegation on every run, and source-to-source translation. The owner rejected Snix/Tvix, and repeated delegation would never phase Nix out.",
+        "hybrid": "The hybrid pass combines the signed central catalog for the common path with local Nix only for uncovered packages. Every successful fallback enlarges Jetpack state instead of creating a permanent parallel path.",
+        "cooperative": "The cooperative pass strengthened central-only publication for reproducibility and native translation for complete independence. Their coverage delay and engineering cost remain larger than a pinned one-time fallback.",
+        "adversarial": "The adversarial pass tested ambient channels, changed Nix versions, offline use, CI, malicious outputs, repeated fallback, and source-name drift. Exact locks, visible receipts, policy gates, and import-once reuse contain those risks."
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-25T00:12:18.721Z"
+      "status": "ratified",
+      "created": "2026-08-25T00:12:18.721Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-25"
     },
     {
       "id": "D-JPK-NIXINDEX1",
@@ -208789,6 +208892,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-25T14:07:57.865Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00s3cle",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-08-25T14:07:32.366Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#6 Published package records use the `jetpack` source: bare `ri"
+    },
+    {
+      "at": "2026-08-25T14:07:31.917Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00s3cle",
+      "note": "title,body,plan,refs,logEntry"
+    },
+    {
+      "at": "2026-08-25T14:06:56.830Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c087yjjx",
+      "note": "title,kind,track,epoch,phase,priority,tags,refs,body,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T14:06:47.380Z",
+      "by": "Main",
+      "action": "decision.ratify",
+      "ref": "D-JPK-SNIXREUSE1",
+      "note": "A (by Main, quoting owner: \"I want you to ensure jetpack can shell out to nix on a local machine in case the pacakges are not available already via jetpack. also, for the \"source\" of jet packages, dont call it jetpackages, call it jetpack. ripgrep@jetpack or if none is provided, default is jetpack ripgrep -> ripgrep@jetpack\")"
+    },
+    {
+      "at": "2026-08-25T14:06:39.005Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-JPK-SNIXREUSE1",
+      "note": "marked ready"
+    },
     {
       "at": "2026-08-25T13:44:46.845Z",
       "by": "owner",
@@ -212246,48 +212391,6 @@
       "action": "card.criteria-add",
       "ref": "c0svh6c4",
       "note": "#6 Slice-specific: the behavior this card alone owns — “jetos l"
-    },
-    {
-      "at": "2026-08-24T23:25:29.195Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0svh6c4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:28.799Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rvu7rz",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos h"
-    },
-    {
-      "at": "2026-08-24T23:25:28.445Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0rvu7rz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:28.099Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qs8j6u",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos i"
-    },
-    {
-      "at": "2026-08-24T23:25:27.748Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0qs8j6u",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:27.396Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ppv63p",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos c"
     }
   ],
   "nextNum": 368,
