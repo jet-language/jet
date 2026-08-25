@@ -76,7 +76,11 @@ fn run_rootless_projection_child() {
     let lease = snapshot_lease(&roots, &entry).unwrap();
     let env = crate::Shell::Env {
         bin_dirs: Vec::new(),
-        vars: std::collections::BTreeMap::new(),
+        // The no-store harness stages its Nix-linked namespace helpers outside
+        // `/nix/store`; keep those libraries available to the clean child.
+        vars: std::env::var("LD_LIBRARY_PATH")
+            .map(|value| std::collections::BTreeMap::from([("LD_LIBRARY_PATH".into(), value)]))
+            .unwrap_or_default(),
         unset_vars: Vec::new(),
         refs: vec![entry.reference.clone()],
         label: "nix-projection-test".into(),
@@ -447,7 +451,7 @@ fn admit_signed_closure(roots: &Roots) -> AdmittedNixClosure {
     fs::create_dir_all(source.join("leaf")).unwrap();
     fs::write(
         source.join("root/bin/rg"),
-        b"#!/bin/sh\ntest -f /nix/store/11111111111111111111111111111111-leaf/leaf/payload\n",
+        b"#!/bin/sh\ntest -f /nix/store/11111111111111111111111111111111-leaf/payload\n",
     )
     .unwrap();
     #[cfg(unix)]

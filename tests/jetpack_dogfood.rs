@@ -7,7 +7,7 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use jet_env_model::ModuleEval;
 use jetpack::Lock::{self, LockSource};
@@ -197,8 +197,11 @@ fn jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures() {
 
     let online = summaries.get("online").expect("online summary");
     let offline = summaries.get("offline").expect("offline summary");
-    assert_ne!(online.pid, offline.pid, "offline run reused online process");
-    assert_ne!(offline.pid, u64::from(std::process::id()));
+    assert_ne!(
+        online.jetpack_pid, offline.jetpack_pid,
+        "offline run reused online Jetpack process"
+    );
+    assert_ne!(offline.jetpack_pid, u64::from(std::process::id()));
     assert_eq!(
         probe_identity(&online.probe),
         probe_identity(&offline.probe)
@@ -341,17 +344,24 @@ fn run_phase(
     mode: &str,
 ) {
     let offline = mode == "offline";
-    fs::write(scratch.pid_path(mode), std::process::id().to_string())
-        .expect("save phase process identity");
-    let probe = enter_command(repo, jetpack, scratch, offline)
+    let mut probe_command = enter_command(repo, jetpack, scratch, offline);
+    probe_command
         .arg("--")
         .arg(test_binary)
         .args(["--exact", "jetpack_dogfood_probe_child", "--nocapture"])
-        .output()
-        .expect("run projected command probe");
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let probe_process = probe_command.spawn().expect("run projected command probe");
+    let jetpack_pid = probe_process.id();
+    let probe = probe_process
+        .wait_with_output()
+        .expect("collect projected command probe");
     assert_success("projected command probe", &probe);
     let probe_json = extract_probe_json(&probe);
     assert_projected_paths(&probe_json, scratch, contract);
+
+    fs::write(scratch.jetpack_pid_path(mode), jetpack_pid.to_string())
+        .expect("save Jetpack process identity");
 
     let build = enter_command(repo, jetpack, scratch, offline)
         .args(["--", "cargo", "build", "--locked", "--bin", "jet"])
@@ -677,13 +687,13 @@ fn walk_physical_nodes(
 fn read_phase_summary(scratch: &DogfoodScratch, mode: &str) -> PhaseSummary {
     let probe_text = fs::read_to_string(scratch.probe_path(mode)).expect("read probe evidence");
     let du_text = fs::read_to_string(scratch.du_path(mode)).expect("read du evidence");
-    let pid = fs::read_to_string(scratch.pid_path(mode))
-        .expect("read phase process identity")
+    let jetpack_pid = fs::read_to_string(scratch.jetpack_pid_path(mode))
+        .expect("read Jetpack process identity")
         .trim()
         .parse()
-        .expect("phase process identity is a pid");
+        .expect("Jetpack process identity is a pid");
     PhaseSummary {
-        pid,
+        jetpack_pid,
         probe: jetpack::JSON::parse(probe_text.trim()).expect("parse probe evidence"),
         du: jetpack::JSON::parse(du_text.trim()).expect("parse du evidence"),
     }
@@ -861,7 +871,7 @@ impl DogfoodScratch {
         self.root.join(format!("dogfood-{mode}.du.json"))
     }
 
-    fn pid_path(&self, mode: &str) -> PathBuf {
+    fn jetpack_pid_path(&self, mode: &str) -> PathBuf {
         self.root.join(format!("dogfood-{mode}.pid"))
     }
 }
@@ -876,7 +886,7 @@ impl Drop for DogfoodScratch {
 
 #[derive(Debug, PartialEq)]
 struct PhaseSummary {
-    pid: u64,
+    jetpack_pid: u64,
     probe: JSONValue,
     du: JSONValue,
 }

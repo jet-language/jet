@@ -274,8 +274,13 @@ impl NixIndexCacheServer {
         let basename = store_path
             .strip_prefix("/nix/store/")
             .expect("test store path prefix");
-        self.count(&format!("/{}.narinfo", &basename[..32]))
-            + self.count(&format!("/nar/{}.nar", &basename[33..]))
+        let nar_path = match store_path {
+            ROOT_PATH => "/nar/root.nar",
+            LIB_PATH => "/nar/lib.nar",
+            RUNTIME_PATH => "/nar/runtime.nar",
+            _ => return self.count(&format!("/{}.narinfo", &basename[..32])),
+        };
+        self.count(&format!("/{}.narinfo", &basename[..32])) + self.count(nar_path)
     }
 }
 
