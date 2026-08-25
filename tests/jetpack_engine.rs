@@ -4216,6 +4216,7 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
             let output = run(phase.starts_with("offline-"));
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("DBG {phase} stderr: {stderr}");
             match phase.as_str() {
                 "online-initial" | "offline-reuse" | "online-repair" => {
                     assert!(

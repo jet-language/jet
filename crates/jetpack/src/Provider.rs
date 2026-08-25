@@ -992,6 +992,15 @@ pub(crate) fn record_nix_lock_after_store(
     roots: &super::Store::Roots,
     entry: &super::Store::StoreEntry,
 ) -> Result<super::Store::StoreEntry, ProviderError> {
+    eprintln!("DBG record_nix_lock_after_store");
+    eprintln!(
+        "DBG lock gate ref={:?} hash={:?} source={:?} recipe={:?} expected={:?}",
+        entry.reference,
+        entry.envelope.output_hash,
+        entry.cache_identity.source_fingerprint,
+        entry.cache_identity.recipe_fingerprint,
+        SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes())
+    );
     let Some(project) = ctx.project_dir.filter(|path| path.is_dir()) else {
         return Ok(entry.clone());
     };
