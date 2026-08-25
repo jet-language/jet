@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2203,
-    "rev": 45062,
+    "nextNum": 2208,
+    "rev": 45111,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30,7 +30,7 @@
         "radar:e3"
       ]
     },
-    "completionCursor": "2026-08-25T21:25:09.720Z"
+    "completionCursor": "2026-08-25T23:06:26.710Z"
   },
   "epochs": [
     {
@@ -2842,6 +2842,15 @@
       "criteria": [],
       "status": "open",
       "created": "2026-08-25T13:15:36.718Z"
+    },
+    {
+      "id": "e10-m08-ui-case-law",
+      "epochId": "e10",
+      "title": "M08 · One case law for every user-facing surface",
+      "goal": "Every string a user reads obeys one written case law, chosen by the owner and enforced by a test. Measured starting point 2026-08-25: diagnostic what-lines are 283 lowercase against 235 uppercase, why-lines 367 against 405, jetpack help is 86 lowercase and 0 uppercase while jet help is 0 lowercase and 109 uppercase. There is no convention today, which is why the output reads as unmanaged.",
+      "criteria": [],
+      "status": "open",
+      "created": "2026-08-25T23:11:06.891Z"
     }
   ],
   "cards": [
@@ -151532,6 +151541,380 @@
       "updated": "2026-08-25T20:20:50.040Z",
       "updatedBy": "owner",
       "workOrder": 4
+    },
+    {
+      "id": "c0lrmc2p",
+      "num": 2203,
+      "title": "Ratify one case law for every user-facing surface",
+      "body": "OWNER DIRECTIVE 2026-08-25: everything a user reads in a UI area is Title Case. Code stays PascalCase. Some diagnostic sentences are better in sentence case. The owner called the current output sloppy, childish and unprofessional.\n\nMEASURED STARTING POINT, all counted from the shipped tree:\n\n| surface | lowercase | uppercase |\n| --- | --- | --- |\n| diagnostic what-line (854 rows) | 283 | 235 |\n| diagnostic why-line | 367 | 405 |\n| jetpack --help descriptions | 86 | 0 |\n| jet --help summaries | 0 | 109 |\n| jetpack help section headers | 8 | 0 |\n\nTHE REAL DEFECT IS NOT LOWERCASE, IT IS THE ABSENCE OF A RULE. Diagnostics are split roughly evenly, and the two binaries use opposite conventions for the same kind of text. That is why it reads as unmanaged.\n\nThis card holds the owner ballots and records the ratified law. It writes no code. The application cards depend on it.\n\nSURFACE CLASSES that need a ruling, each with a different argument:\n- Command and flag summaries in help\n- Section headers in help\n- Diagnostic what-line, the one-line statement of the problem\n- Diagnostic why-line and fix-line, which are prose sentences\n- Status and progress lines such as resolving, realizing, installed\n- Table headers and column labels\n- Interactive labels: TUI, Canvas and Studio buttons, menus, tabs\n- Prompts and confirmations\n- Machine output: JSON field names and values, which must NOT change\n\nOUT OF SCOPE, deliberately: identifiers in code, PascalCase type names, file paths, package refs, environment variable names, JSON keys, and any string a machine parses.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e10",
+      "milestoneId": "e10-m08-ui-case-law",
+      "phase": "deciding",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "Two owner ballots minted: D-CASE-CHROME1 for labels, headers, summaries and buttons; D-CASE-PROSE1 for the three diagnostic lines. Application cards 2204 to 2207 are blocked on this card and must cite the ratified law rather than restate it."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An owner-ratified case law names, for every surface class, exactly which case applies",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:11:53.617Z"
+        },
+        {
+          "n": 2,
+          "text": "The law distinguishes UI chrome from prose sentences, and says which diagnostic lines are prose",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:11:53.983Z"
+        },
+        {
+          "n": 3,
+          "text": "The law states explicitly which strings are excluded because a machine parses them",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:11:54.352Z"
+        },
+        {
+          "n": 4,
+          "text": "The law is written where implementers will find it, not only in a decision record",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:11:54.701Z"
+        },
+        {
+          "n": 5,
+          "text": "Every application card in this milestone cites the ratified law rather than restating it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:11:55.059Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": true,
+      "created": "2026-08-25T23:11:53.234Z",
+      "updated": "2026-08-25T23:13:48.911Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 1
+    },
+    {
+      "id": "c0w7rdo4",
+      "num": 2204,
+      "title": "Apply the case law to all 854 diagnostics",
+      "body": "Depends on the ratified case law card.\n\nMEASURED: 854 diagnostic rows in `crates/jet-codegen/src/Prelude/Diagnostics.jet`. The what-line starts lowercase in 283 and uppercase in 235; the why-line 367 against 405. Every diagnostic also has a UI snapshot, so this change is large and mechanical but every row must be reviewed, not swept.\n\nWHY A BLIND SWEEP FAILS HERE: many what-lines begin with an identifier, a keyword, a sigil, or a quoted code fragment. `\\`--offline\\` forbids network access` must not become `\\`--Offline\\` Forbids Network Access`. Code fragments, flags, paths, refs and type names keep their own case wherever they appear inside prose. A regex that uppercases the first letter of every string will corrupt hundreds of rows.\n\nSCOPE: the what, why and fix columns of every row, plus every affected UI snapshot re-blessed, plus any diagnostic text built at runtime rather than read from the table.\n\nINVARIANT I4: a diagnostic is a product with a registered code, what, why and fix, and a snapshot. No row may lose its snapshot in this change.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e10",
+      "milestoneId": "e10-m08-ui-case-law",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [
+        "c0lrmc2p"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every one of the 854 diagnostic rows obeys the ratified law, verified by a check that reads the table rather than by inspection",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:11:57.568Z"
+        },
+        {
+          "n": 2,
+          "text": "Identifiers, flags, paths, refs, keywords and quoted code keep their own case wherever they appear inside diagnostic prose",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:11:58.636Z"
+        },
+        {
+          "n": 3,
+          "text": "Diagnostic text built at runtime obeys the same law as text read from the table",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:11:59.708Z"
+        },
+        {
+          "n": 4,
+          "text": "Every affected UI snapshot is re-blessed and the diagnostic suite passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:00.515Z"
+        },
+        {
+          "n": 5,
+          "text": "No diagnostic loses its registered code, what, why, fix, or snapshot",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:01.944Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T23:11:56.042Z",
+      "updated": "2026-08-25T23:12:23.918Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 2
+    },
+    {
+      "id": "c0qzh7vn",
+      "num": 2205,
+      "title": "Apply the case law to both CLI help surfaces",
+      "body": "Depends on the ratified case law card.\n\nMEASURED: `jetpack --help` descriptions are 86 lowercase and 0 uppercase. `jet --help` summaries are 0 lowercase and 109 uppercase. The two binaries disagree about the same kind of text. Section headers in jetpack help are all lowercase: environments, manifest, store, machines, trust, refs, components, flags.\n\nSCOPE: command summaries, flag descriptions, section headers, usage lines and did-you-mean text in BOTH binaries, plus `jet self`, `jetpack hangar`, `jetpack tool`, `jetpack profile` and every nested help route.\n\nTRAP: `crates/jetpack/src/CLI/usage_tests.rs` asserts exact help strings and will fail until updated. That is the guard working; update the assertions, do not weaken them.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e10",
+      "milestoneId": "e10-m08-ui-case-law",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [
+        "c0lrmc2p"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Command summaries, flag descriptions and section headers in both binaries obey the ratified law",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:05.527Z"
+        },
+        {
+          "n": 2,
+          "text": "Nested help routes obey it too, including self, hangar, tool and profile",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:06.740Z"
+        },
+        {
+          "n": 3,
+          "text": "Command names, flags, paths and refs inside help text keep their own case",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:07.125Z"
+        },
+        {
+          "n": 4,
+          "text": "Usage assertions are updated to the new strings rather than relaxed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:08.215Z"
+        },
+        {
+          "n": 5,
+          "text": "Both binaries print the same case for the same kind of text, verified by a check that compares them",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:09.776Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T23:12:04.433Z",
+      "updated": "2026-08-25T23:12:24.451Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 3
+    },
+    {
+      "id": "c0nlb95c",
+      "num": 2206,
+      "title": "Apply the case law to interactive and status surfaces",
+      "body": "Depends on the ratified case law card.\n\nSCOPE: status and progress lines such as the resolving and realizing rows and the installed confirmation; prompts and confirmations including the trust prompt and the download confirmation; table headers and column labels including `jetpack hangar du` and `list`; and every interactive label in the TUI, Canvas and Studio, meaning buttons, menus, tabs and panel titles.\n\nMEASURED EXAMPLES: the Canvas toolbar currently reads Fit graph, Code, Split, Graph, Review, Undo, Redo, Align, Distribute, Tidy, Check, Run, Start debug, Search, Developer. Status lines read `resolving ripgrep@default …` and `installed omp 18.0.4`.\n\nTRAP: progress lines are assembled from fragments at runtime, so the case must be correct in the fragment rather than patched at the end. Machine output must not change: JSON field names and values are parsed and are excluded by the law.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e10",
+      "milestoneId": "e10-m08-ui-case-law",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [
+        "c0lrmc2p"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Status and progress lines obey the ratified law, including lines assembled from runtime fragments",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:12.191Z"
+        },
+        {
+          "n": 2,
+          "text": "Prompts and confirmations obey it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:13.632Z"
+        },
+        {
+          "n": 3,
+          "text": "Table headers and column labels obey it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:14.211Z"
+        },
+        {
+          "n": 4,
+          "text": "TUI, Canvas and Studio buttons, menus, tabs and panel titles obey it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:15.596Z"
+        },
+        {
+          "n": 5,
+          "text": "Machine output is byte-identical before and after, proven by comparing JSON from every machine door",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:16.764Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T23:12:10.758Z",
+      "updated": "2026-08-25T23:12:24.984Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 4
+    },
+    {
+      "id": "c0vet6tl",
+      "num": 2207,
+      "title": "Enforce the case law with a test that fails on violation",
+      "body": "Depends on the ratified case law card.\n\nWithout enforcement this decays within weeks, exactly as the current 50/50 split shows: someone once tried, and drift ate it.\n\nWHAT TO BUILD: a check that reads every user-facing string from its source of truth and fails when one violates the law. It must cover the diagnostic table, both help surfaces, status and prompt text, and interactive labels. It must understand the exclusions so it does not flag an identifier, a flag, a path, a ref, a keyword or a JSON key.\n\nTRAP: a checker that only inspects the first character is useless for title case, which is a per-word rule with a closed list of words that stay lowercase. Decide that list from the ratified law and encode it once.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e10",
+      "milestoneId": "e10-m08-ui-case-law",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [
+        "c0lrmc2p"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A check reads every user-facing string from its source of truth and fails when one violates the ratified law",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:18.390Z"
+        },
+        {
+          "n": 2,
+          "text": "The check understands the exclusions and does not flag identifiers, flags, paths, refs, keywords or JSON keys",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:18.888Z"
+        },
+        {
+          "n": 3,
+          "text": "The check encodes the small-word list once, from the ratified law, rather than per call site",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:19.450Z"
+        },
+        {
+          "n": 4,
+          "text": "Adding a new violating string fails the check, proven by adding one temporarily",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:19.821Z"
+        },
+        {
+          "n": 5,
+          "text": "The check runs in the same gate that blesses diagnostic snapshots",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T23:12:20.196Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T23:12:17.762Z",
+      "updated": "2026-08-25T23:12:25.541Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 5
     }
   ],
   "decisions": [
@@ -208335,6 +208718,130 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-25T23:03:31.625Z"
+    },
+    {
+      "id": "D-CASE-CHROME1",
+      "cardId": "c0lrmc2p",
+      "group": "other",
+      "title": "What case Jet uses for UI chrome",
+      "gist": "Choose the case for labels, headers, summaries and buttons.",
+      "lesson": "Jet prints two kinds of text. Chrome is a label: a command summary, a section header, a column heading, a button. Prose is a sentence that explains something. This choice covers chrome only. Today there is no rule at all, so the same kind of label appears in three different cases depending on which file it lives in, and the output reads as unmanaged.",
+      "explainer": "Prose sentences inside diagnostics are decided separately, in D-CASE-PROSE1.",
+      "story": "Nate runs a command, reads the help, hits an error, and opens the Canvas. Every one of those surfaces labels things differently today. He wants them to look like one product built by people who care.",
+      "inWild": "# The same kind of text, three different cases, all shipping today\n\n$ jetpack --help\nenvironments:                          # header, lowercase\n  jetpack env    enter the default project environment    # summary, lowercase\n\n$ jet --help\n  jet build [args]    Create a native executable          # summary, uppercase\n\n# Canvas toolbar\nFit graph | Start debug | Developer                       # sentence case",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Title Case for all chrome (recommended)",
+          "detail": "Every label capitalises each significant word: command summaries, section headers, column headings, buttons, menus, tabs and panel titles. Small words such as a, an, the, of, to, in, for, and, or stay lowercase unless they begin the label. Identifiers, flags, paths, refs and type names always keep their own case wherever they appear. Cost: title case needs a small-word list and a rule for hyphenates, so the checker is more than a first-character test, and long summaries read as heavier than sentence case.",
+          "code": "environments:  ->  Environments:\n  jetpack env    Enter The Default Project Environment\n  jet build      Create A Native Executable\nCanvas:  Fit Graph | Start Debug | Developer"
+        },
+        {
+          "key": "B",
+          "name": "Sentence case for all chrome",
+          "detail": "Capitalise only the first word, plus anything that is a proper noun or an identifier. One rule, trivially checkable, and it matches what most modern tooling does. Cost: it is what Jet half-does today, so it will feel like no change was made, and it does not read as deliberate the way title case does.",
+          "code": "environments:  ->  Environments:\n  jetpack env    Enter the default project environment\n  jet build      Create a native executable"
+        },
+        {
+          "key": "C",
+          "name": "Title Case for headers and buttons, sentence case for summaries",
+          "detail": "Short chrome that acts as a label gets Title Case; a summary that is really a description gets sentence case. Follows the shape of the text rather than its location. Cost: a per-string judgement about whether something is a label or a description, which is exactly the kind of judgement that produced the current 50/50 split.",
+          "code": "Environments:                  # header, Title Case\n  jetpack env    Enter the default project environment\nCanvas:  Fit Graph | Start Debug"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "It is the only option that visibly changes every surface, which is what the owner asked for, and one rule applied everywhere is enforceable.",
+        "tradeoff": "Title case needs a small-word list and hyphenation rule, so the enforcement check is more work than a first-character test.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Sentence case is easier to enforce, but it is close to what half the tree already does, so the result would not look deliberate."
+          },
+          {
+            "key": "C",
+            "reason": "Splitting by label versus description is defensible in isolation, but it needs a per-string judgement and that judgement drifting is exactly how the current split happened."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "Counted in the shipped tree: jetpack help descriptions are 86 lowercase and 0 uppercase, jet help summaries are 0 lowercase and 109 uppercase, and all 8 jetpack section headers are lowercase.",
+        "boilOcean": "The largest version would restyle every string including machine output and log lines. Machine output is parsed and must stay byte-identical, so it is excluded under every option.",
+        "hybrid": "Option C is the hybrid. It is rejected not because it is wrong but because it needs a judgement per string, and unenforceable judgement is what produced today's inconsistency.",
+        "cooperative": "Existing labels in the Canvas toolbar are already close to title case, so that surface moves least.",
+        "adversarial": "The strongest case against title case is that long command summaries read heavily. The mitigation is shortening summaries, which is worth doing anyway, rather than choosing a weaker rule."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-25T23:13:27.860Z"
+    },
+    {
+      "id": "D-CASE-PROSE1",
+      "cardId": "c0lrmc2p",
+      "group": "other",
+      "title": "What case a diagnostic uses for its three lines",
+      "gist": "Choose the case for the problem line, the why line and the fix line.",
+      "lesson": "Every Jet diagnostic prints three parts: a one-line statement of the problem, a why, and a fix. The why and the fix are sentences. The problem line is arguable: it reads like a headline but it is written like a sentence. Today none of this is decided, so across 854 diagnostics the problem line starts lowercase 283 times and uppercase 235 times.",
+      "explainer": "The owner said some diagnostic sentences are better in sentence case, so this is separated from chrome.",
+      "story": "Ana hits an error. The first line tells her what went wrong, and two more tell her why and what to do. She should not be able to tell which developer wrote which diagnostic.",
+      "inWild": "# Two shipped diagnostics, opposite conventions\n\nError [E1276]: `--offline` forbids network access\n Why: `ripgrep@default` is not in the hangar and --offline forbids fetching.\n Fix: drop `--offline`, or realize the object before going offline.\n\nError [E2604]: Integrity check failed for `jq` `1.8.2`\n Why: The cached artifact failed race-safe pre-consumer revalidation.\n Fix: Re-run `jet store fetch` after `jet clean`.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Sentence case for all three lines (recommended)",
+          "detail": "The problem line, the why and the fix each capitalise only their first word, plus proper nouns and identifiers. They are sentences and they read as sentences. A line that begins with an identifier, a flag or a quoted code fragment keeps that fragment's own case and does not get force-capitalised. Cost: the problem line stays visually similar to today for the 235 rows that already start uppercase, so the improvement there is consistency rather than appearance.",
+          "code": "Error [E1276]: `--offline` forbids network access\n Why: `ripgrep@default` is not in the hangar.\n Fix: Drop `--offline`, or realize the object first."
+        },
+        {
+          "key": "B",
+          "name": "Title Case the problem line, sentence case the why and fix",
+          "detail": "Treats the problem line as a headline, matching the chrome rule, while the explanation stays prose. Makes the first line scan quickly in a wall of build output. Cost: a headline that begins with a flag or an identifier looks broken, and roughly a third of the 854 rows begin with exactly that.",
+          "code": "Error [E1276]: `--offline` Forbids Network Access\n Why: `ripgrep@default` is not in the hangar.\n Fix: Drop `--offline`, or realize the object first."
+        },
+        {
+          "key": "C",
+          "name": "Title Case all three lines",
+          "detail": "Maximum consistency with the chrome rule and the most visually deliberate. Cost: it makes explanatory prose hard to read, and it mangles any sentence containing a path, a flag or a type name, which most diagnostics do.",
+          "code": "Error [E1276]: `--offline` Forbids Network Access\n Why: `ripgrep@default` Is Not In The Hangar.\n Fix: Drop `--offline`, Or Realize The Object First."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "All three lines are sentences, and roughly a third of them begin with an identifier or a flag that must keep its own case.",
+        "tradeoff": "The problem line will not look as visually distinct as a Title Case headline would.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A Title Case headline scans well, but a large share of problem lines begin with a flag, an identifier or a quoted fragment, and those look broken when title-cased."
+          },
+          {
+            "key": "C",
+            "reason": "Title casing explanatory prose harms readability and mangles the paths, flags and type names that appear in most why and fix lines."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "Counted across 854 diagnostic rows: the what-line starts lowercase 283 times and uppercase 235 times; the why-line 367 against 405. Every row also carries a UI snapshot, so any change re-blesses hundreds of snapshots.",
+        "boilOcean": "The largest version would rewrite the wording of every diagnostic, not just its case. That is a separate and much larger piece of work and must not be smuggled into a case change.",
+        "hybrid": "Option B is the hybrid between chrome and prose. It is rejected on the measured share of rows that begin with a code fragment.",
+        "cooperative": "Rust, Elm and Swift all use sentence case for diagnostic prose, so option A is also the least surprising to anyone arriving from another toolchain.",
+        "adversarial": "The strongest case for option B is that an error headline is chrome, not prose, and the owner explicitly wants chrome in Title Case. The counter is that the line is a full clause with a subject and a verb, which is a sentence regardless of where it sits."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-25T23:13:36.768Z"
     }
   ],
   "questions": [
@@ -210380,6 +210887,349 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-25T23:13:48.911Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0lrmc2p",
+      "note": "phase,logEntry,needsAcceptance"
+    },
+    {
+      "at": "2026-08-25T23:13:36.768Z",
+      "by": "orchestrator",
+      "action": "decision.add",
+      "ref": "D-CASE-PROSE1",
+      "note": "What case a diagnostic uses for its three lines"
+    },
+    {
+      "at": "2026-08-25T23:13:27.860Z",
+      "by": "orchestrator",
+      "action": "decision.add",
+      "ref": "D-CASE-CHROME1",
+      "note": "What case Jet uses for UI chrome"
+    },
+    {
+      "at": "2026-08-25T23:12:25.542Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0vet6tl",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T23:12:24.984Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0nlb95c",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T23:12:24.451Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0qzh7vn",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T23:12:23.919Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0w7rdo4",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T23:12:23.384Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0lrmc2p",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T23:12:22.846Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0vet6tl",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-25T23:12:22.313Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0nlb95c",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-25T23:12:21.787Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0qzh7vn",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-25T23:12:21.244Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0w7rdo4",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-25T23:12:20.713Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0vet6tl",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-25T23:12:20.196Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vet6tl",
+      "note": "#5 The check runs in the same gate that blesses diagnostic snap"
+    },
+    {
+      "at": "2026-08-25T23:12:19.821Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vet6tl",
+      "note": "#4 Adding a new violating string fails the check, proven by add"
+    },
+    {
+      "at": "2026-08-25T23:12:19.450Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vet6tl",
+      "note": "#3 The check encodes the small-word list once, from the ratifie"
+    },
+    {
+      "at": "2026-08-25T23:12:18.888Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vet6tl",
+      "note": "#2 The check understands the exclusions and does not flag ident"
+    },
+    {
+      "at": "2026-08-25T23:12:18.390Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vet6tl",
+      "note": "#1 A check reads every user-facing string from its source of tr"
+    },
+    {
+      "at": "2026-08-25T23:12:17.762Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0vet6tl",
+      "note": "Enforce the case law with a test that fails on violation"
+    },
+    {
+      "at": "2026-08-25T23:12:17.290Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0nlb95c",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-25T23:12:16.764Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nlb95c",
+      "note": "#5 Machine output is byte-identical before and after, proven by"
+    },
+    {
+      "at": "2026-08-25T23:12:15.596Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nlb95c",
+      "note": "#4 TUI, Canvas and Studio buttons, menus, tabs and panel titles"
+    },
+    {
+      "at": "2026-08-25T23:12:14.211Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nlb95c",
+      "note": "#3 Table headers and column labels obey it"
+    },
+    {
+      "at": "2026-08-25T23:12:13.632Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nlb95c",
+      "note": "#2 Prompts and confirmations obey it"
+    },
+    {
+      "at": "2026-08-25T23:12:12.192Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nlb95c",
+      "note": "#1 Status and progress lines obey the ratified law, including l"
+    },
+    {
+      "at": "2026-08-25T23:12:10.759Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0nlb95c",
+      "note": "Apply the case law to interactive and status surfaces"
+    },
+    {
+      "at": "2026-08-25T23:12:10.311Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0qzh7vn",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-25T23:12:09.776Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0qzh7vn",
+      "note": "#5 Both binaries print the same case for the same kind of text,"
+    },
+    {
+      "at": "2026-08-25T23:12:08.215Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0qzh7vn",
+      "note": "#4 Usage assertions are updated to the new strings rather than "
+    },
+    {
+      "at": "2026-08-25T23:12:07.125Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0qzh7vn",
+      "note": "#3 Command names, flags, paths and refs inside help text keep t"
+    },
+    {
+      "at": "2026-08-25T23:12:06.740Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0qzh7vn",
+      "note": "#2 Nested help routes obey it too, including self, hangar, tool"
+    },
+    {
+      "at": "2026-08-25T23:12:05.528Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0qzh7vn",
+      "note": "#1 Command summaries, flag descriptions and section headers in "
+    },
+    {
+      "at": "2026-08-25T23:12:04.434Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0qzh7vn",
+      "note": "Apply the case law to both CLI help surfaces"
+    },
+    {
+      "at": "2026-08-25T23:12:03.297Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0w7rdo4",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-25T23:12:01.944Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0w7rdo4",
+      "note": "#5 No diagnostic loses its registered code, what, why, fix, or "
+    },
+    {
+      "at": "2026-08-25T23:12:00.516Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0w7rdo4",
+      "note": "#4 Every affected UI snapshot is re-blessed and the diagnostic "
+    },
+    {
+      "at": "2026-08-25T23:11:59.708Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0w7rdo4",
+      "note": "#3 Diagnostic text built at runtime obeys the same law as text "
+    },
+    {
+      "at": "2026-08-25T23:11:58.636Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0w7rdo4",
+      "note": "#2 Identifiers, flags, paths, refs, keywords and quoted code ke"
+    },
+    {
+      "at": "2026-08-25T23:11:57.568Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0w7rdo4",
+      "note": "#1 Every one of the 854 diagnostic rows obeys the ratified law,"
+    },
+    {
+      "at": "2026-08-25T23:11:56.043Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0w7rdo4",
+      "note": "Apply the case law to all 854 diagnostics"
+    },
+    {
+      "at": "2026-08-25T23:11:55.566Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0lrmc2p",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-25T23:11:55.059Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0lrmc2p",
+      "note": "#5 Every application card in this milestone cites the ratified "
+    },
+    {
+      "at": "2026-08-25T23:11:54.701Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0lrmc2p",
+      "note": "#4 The law is written where implementers will find it, not only"
+    },
+    {
+      "at": "2026-08-25T23:11:54.352Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0lrmc2p",
+      "note": "#3 The law states explicitly which strings are excluded because"
+    },
+    {
+      "at": "2026-08-25T23:11:53.984Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0lrmc2p",
+      "note": "#2 The law distinguishes UI chrome from prose sentences, and sa"
+    },
+    {
+      "at": "2026-08-25T23:11:53.617Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0lrmc2p",
+      "note": "#1 An owner-ratified case law names, for every surface class, e"
+    },
+    {
+      "at": "2026-08-25T23:11:53.234Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0lrmc2p",
+      "note": "Ratify one case law for every user-facing surface"
+    },
+    {
+      "at": "2026-08-25T23:11:06.892Z",
+      "by": "orchestrator",
+      "action": "milestone.add",
+      "ref": "e10-m08-ui-case-law",
+      "note": "M08 · One case law for every user-facing surface"
+    },
+    {
+      "at": "2026-08-25T23:06:26.710Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-25T23:06:26.710Z"
+    },
     {
       "at": "2026-08-25T23:03:34.988Z",
       "by": "orchestrator",
@@ -213536,349 +214386,6 @@
       "action": "card.update",
       "ref": "c01fm9ou",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-25T01:20:08.471Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01fm9ou",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-25T01:20:08.127Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01fm9ou",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-25T01:20:07.760Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01fm9ou",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-25T01:20:07.406Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01fm9ou",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-25T01:20:06.690Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01fm9ou",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-25T00:24:56.239Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-25T00:24:56.239Z"
-    },
-    {
-      "at": "2026-08-25T00:20:23.067Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-TAIL-RETURN1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-25T00:20:23.067Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "cxf6x7ap",
-      "note": "#11 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-25T00:20:23.067Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "cxf6x7ap",
-      "note": "#10 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-25T00:20:23.067Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "cxf6x7ap",
-      "note": "#9 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-25T00:20:23.067Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "cxf6x7ap",
-      "note": "#8 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-25T00:14:09.020Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-STATE-HOME1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-25T00:14:09.020Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c13gfyz5l",
-      "note": "#11 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-25T00:14:09.020Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c13gfyz5l",
-      "note": "#10 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-25T00:14:09.020Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c13gfyz5l",
-      "note": "#9 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-25T00:14:09.020Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c13gfyz5l",
-      "note": "#8 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-25T00:12:18.721Z",
-      "by": "orchestrator",
-      "action": "decision.add",
-      "ref": "D-JPK-SNIXREUSE1",
-      "note": "Snix and Tvix reuse and licence posture for the native evaluator"
-    },
-    {
-      "at": "2026-08-25T00:10:31.968Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0ebieja",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-25T00:10:31.197Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0xs3xot",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-25T00:10:30.181Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0xs3xot",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-25T00:09:06.468Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-25T00:09:06.468Z"
-    },
-    {
-      "at": "2026-08-25T00:02:22.687Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0ebieja",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T23:46:47.418Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-STATE-TERMINAL1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-24T23:46:47.418Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c11y6itr6",
-      "note": "#11 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-24T23:46:47.418Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c11y6itr6",
-      "note": "#10 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-24T23:46:47.418Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c11y6itr6",
-      "note": "#9 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-24T23:46:47.418Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c11y6itr6",
-      "note": "#8 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-24T23:46:25.020Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-MARKER-SITES1",
-      "note": "B"
-    },
-    {
-      "at": "2026-08-24T23:46:25.020Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c10086k5d",
-      "note": "#11 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-24T23:46:25.020Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c10086k5d",
-      "note": "#10 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-24T23:46:25.020Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c10086k5d",
-      "note": "#9 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-24T23:46:25.020Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c10086k5d",
-      "note": "#8 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-24T23:44:24.813Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-BUILD-FAIL1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-24T23:42:49.730Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-TRACK-ORIGIN1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-24T23:42:49.730Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "cv62zydw",
-      "note": "#10 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-24T23:42:49.730Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "cv62zydw",
-      "note": "#9 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-24T23:42:49.730Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "cv62zydw",
-      "note": "#8 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-24T23:42:49.730Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "cv62zydw",
-      "note": "#7 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-24T23:39:54.882Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-RESULT-DECON2",
-      "note": "B"
-    },
-    {
-      "at": "2026-08-24T23:39:54.882Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "cq5blslq",
-      "note": "#11 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-24T23:39:54.882Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "cq5blslq",
-      "note": "#10 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-24T23:39:54.881Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "cq5blslq",
-      "note": "#9 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-24T23:39:54.881Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "cq5blslq",
-      "note": "#8 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-24T23:38:04.024Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CANVAS-SESSION1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-24T23:37:29.161Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CANVAS-TARGET1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-24T23:36:41.007Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CANVAS-CMD1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-24T23:27:45.346Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0wwqqt2",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:44.772Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0wwqqt2",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T23:27:44.372Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0wwqqt2",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
