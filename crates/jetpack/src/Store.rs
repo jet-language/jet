@@ -1241,6 +1241,12 @@ pub struct CacheLease {
     /// snapshot or a verified Hangar object. Shell consumers use this only
     /// inside a rootless namespace.
     nix_store_projection: Vec<(String, PathBuf)>,
+    /// Verified output roots accepted by `stable_path`: primary output uses
+    /// the private snapshot; named secondary outputs use their leased Hangar
+    /// object (or its stable fd view on Linux).
+    leased_output_roots: Vec<(PathBuf, PathBuf)>,
+    bin_output_root: Option<PathBuf>,
+    projected_bin_root: Option<PathBuf>,
     #[cfg(target_os = "linux")]
     nix_projection_bindings: Vec<NixProjectionBinding>,
     _wrapper_dir_handle: Option<fs::File>,
@@ -1354,7 +1360,7 @@ impl CacheLease {
         {
             let _ = file;
             let bin = self.bin_relative.as_ref()?;
-            Some(self.snapshot_root.join(bin).join(name))
+            Some(self.projected_bin_root.as_ref()?.join(bin).join(name))
         }
     }
 
@@ -1367,20 +1373,31 @@ impl CacheLease {
             .iter()
             .any(|(member, _)| member == name)
             .then(|| {
-                self.bin_relative
+                self.projected_bin_root
                     .as_ref()
-                    .map(|bin| self.snapshot_root.join(bin).join(name))
+                    .and_then(|root| self.bin_relative.as_ref().map(|bin| root.join(bin)))
+                    .map(|bin| bin.join(name))
             })?
     }
 
     pub fn stable_path(&self, path: &str) -> std::io::Result<PathBuf> {
         self.require_consumable()?;
-        let relative = Path::new(path).strip_prefix(&self.out).map_err(|_| {
-            std::io::Error::other(format!(
-                "consumer path `{path}` escapes leased output `{}`",
-                self.out.display()
-            ))
-        })?;
+        let path = Path::new(path);
+        let (output_root, lease_root, relative) = self
+            .leased_output_roots
+            .iter()
+            .find_map(|(output_root, lease_root)| {
+                path.strip_prefix(output_root)
+                    .ok()
+                    .map(|relative| (output_root, lease_root, relative))
+            })
+            .ok_or_else(|| {
+                std::io::Error::other(format!(
+                    "consumer path `{}` escapes leased output `{}`",
+                    path.display(),
+                    self.out.display()
+                ))
+            })?;
         if relative
             .components()
             .any(|component| matches!(component, std::path::Component::ParentDir))
@@ -1389,16 +1406,20 @@ impl CacheLease {
                 "leased consumer path contains parent traversal",
             ));
         }
-        if let Some((_, file)) = self.files.iter().find(|(member, _)| member == relative) {
-            #[cfg(target_os = "linux")]
-            {
-                use std::os::fd::AsRawFd as _;
-                return Ok(PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())));
+        if output_root == &self.out {
+            if let Some((_, file)) = self.files.iter().find(|(member, _)| member == relative) {
+                #[cfg(target_os = "linux")]
+                {
+                    use std::os::fd::AsRawFd as _;
+                    return Ok(PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())));
+                }
+                #[cfg(not(target_os = "linux"))]
+                let _ = file;
             }
-            #[cfg(not(target_os = "linux"))]
-            let _ = file;
         }
-        if relative.parent() == self.bin_relative.as_deref() {
+        if self.bin_output_root.as_ref() == Some(output_root)
+            && relative.parent() == self.bin_relative.as_deref()
+        {
             if let Some((_, file)) = self
                 .executables
                 .iter()
@@ -1413,7 +1434,7 @@ impl CacheLease {
                 let _ = file;
             }
         }
-        Ok(self.snapshot_root.join(relative))
+        Ok(lease_root.join(relative))
     }
 
     /// Revalidate immediately before handing paths to a child consumer. The
@@ -1760,6 +1781,9 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
             },
             wrapper_root: None,
             nix_store_projection: Vec::new(),
+            leased_output_roots: Vec::new(),
+            bin_output_root: None,
+            projected_bin_root: None,
             #[cfg(target_os = "linux")]
             nix_projection_bindings: Vec::new(),
             _wrapper_dir_handle: None,
@@ -1781,17 +1805,23 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         .map_err(std::io::Error::other)?;
     let mut files = Vec::new();
     open_snapshot_files(&snapshot_root, &snapshot_root, &mut files)?;
-    let bin_relative = (!entry.bin.is_empty())
-        .then(|| {
-            Path::new(&entry.bin)
-                .strip_prefix(&entry.out)
-                .ok()
-                .map(PathBuf::from)
-        })
-        .flatten();
-    let executables = open_snapshot_executables(&snapshot_root, bin_relative.as_deref())?;
-    let wrappers = create_exec_wrappers(&snapshot_root, &executables)?;
     let projections = nix_store_projection_for_entry(roots, entry, &snapshot_root)?;
+    let mut output_sources = vec![(PathBuf::from(&entry.out), snapshot_root.clone())];
+    let mut seen_output_digests = BTreeSet::from([entry.envelope.output_hash.clone()]);
+    for digest in entry.named_outputs.values() {
+        if !seen_output_digests.insert(digest.clone()) {
+            continue;
+        }
+        let source = projections
+            .iter()
+            .find(|projection| projection.digest == *digest)
+            .map(|projection| projection.source.clone())
+            .unwrap_or(hangar_projection_object(roots, digest, "named output")?);
+        output_sources.push((
+            roots.hangar_dir().join(OBJECTS_DIR).join(digest),
+            source,
+        ));
+    }
     #[cfg(target_os = "linux")]
     let (nix_store_projection, nix_projection_bindings) = open_nix_projection_sources(projections)?;
     #[cfg(not(target_os = "linux"))]
@@ -1799,6 +1829,59 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         .into_iter()
         .map(|projection| (projection.logical, projection.source))
         .collect();
+    let leased_output_roots = output_sources
+        .iter()
+        .map(|(output_root, source)| {
+            let lease_root = if source == &snapshot_root {
+                snapshot_root.clone()
+            } else {
+                #[cfg(target_os = "linux")]
+                {
+                    use std::os::fd::AsRawFd as _;
+                    let binding = nix_projection_bindings
+                        .iter()
+                        .find(|binding| binding.source == *source)
+                        .ok_or_else(|| {
+                            std::io::Error::other(format!(
+                                "named output `{}` has no stable lease handle",
+                                output_root.display()
+                            ))
+                        })?;
+                    PathBuf::from(format!(
+                        "/proc/self/fd/{}",
+                        binding.handle.as_raw_fd()
+                    ))
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    source.clone()
+                }
+            };
+            Ok((output_root.clone(), lease_root))
+        })
+        .collect::<std::io::Result<Vec<_>>>()?;
+    let (bin_output_root, bin_relative, projected_bin_root) = if entry.bin.is_empty() {
+        (None, None, None)
+    } else {
+        let bin = Path::new(&entry.bin);
+        output_sources
+            .iter()
+            .find_map(|(output_root, source)| {
+                bin.strip_prefix(output_root).ok().map(|relative| {
+                    (
+                        Some(output_root.clone()),
+                        Some(relative.to_path_buf()),
+                        Some(source.clone()),
+                    )
+                })
+            })
+            .unwrap_or((None, None, None))
+    };
+    let executables = open_snapshot_executables(
+        projected_bin_root.as_deref().unwrap_or(&snapshot_root),
+        bin_relative.as_deref(),
+    )?;
+    let wrappers = create_exec_wrappers(&snapshot_root, &executables)?;
     Ok(CacheLease {
         files,
         executables,
@@ -1813,6 +1896,9 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         status: ConsumptionStatus::Consumable,
         wrapper_root: wrappers.as_ref().map(|wrapper| wrapper.root.clone()),
         nix_store_projection,
+        leased_output_roots,
+        bin_output_root,
+        projected_bin_root,
         #[cfg(target_os = "linux")]
         nix_projection_bindings,
         _wrapper_dir_handle: wrappers.map(|wrapper| wrapper.directory),

@@ -218,11 +218,11 @@ fn nix_projection_command(
     program: &str,
     rest: &[String],
 ) -> Result<Option<NixProjection>, NixProjectionError> {
-    let mut projections = std::collections::BTreeMap::new();
+    let mut projections = std::collections::BTreeMap::<String, PathBuf>::new();
     for lease in &env.cache_leases {
         for (logical, source) in lease.nix_store_projection() {
             if let Some(existing) = projections.get(logical) {
-                if existing != source {
+                if !same_projection_source(existing, source) {
                     return Err(NixProjectionError::invalid(format!(
                         "conflicting `/nix/store` projection for `{logical}`"
                     )));
@@ -233,6 +233,14 @@ fn nix_projection_command(
         }
     }
     if projections.is_empty() {
+        return Ok(None);
+    }
+    if !env
+        .cache_leases
+        .iter()
+        .any(|lease| lease.projected_executable(program).is_some())
+        && !Path::new(program).starts_with("/nix/store")
+    {
         return Ok(None);
     }
     if !Path::new("/proc/self/fd").is_dir() {
@@ -424,6 +432,15 @@ fi
         keepers,
         scratch,
     }))
+}
+
+#[cfg(target_os = "linux")]
+fn same_projection_source(left: &Path, right: &Path) -> bool {
+    left == right
+        || std::fs::canonicalize(left)
+            .ok()
+            .zip(std::fs::canonicalize(right).ok())
+            .is_some_and(|(left, right)| left == right)
 }
 
 #[cfg(target_os = "linux")]

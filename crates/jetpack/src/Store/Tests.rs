@@ -1048,7 +1048,7 @@ mod tests {
     }
 
     #[test]
-    fn nix_store_projection_maps_each_verified_named_output() {
+    fn nix_multi_output_lease_projects_binary_from_non_primary_output() {
         let (roots, _g) = temp_roots();
         let snapshot = roots.root.join("lease-snapshot");
         fs::create_dir_all(snapshot.join("bin")).unwrap();
@@ -1057,7 +1057,8 @@ mod tests {
         let out_digest = crate::Envelope::try_output_hash_of(&snapshot.to_string_lossy()).unwrap();
 
         let dev = roots.root.join("external-dev-output");
-        fs::write(&dev, "dev").unwrap();
+        fs::create_dir_all(dev.join("bin")).unwrap();
+        fs::write(dev.join("bin/tool"), "dev").unwrap();
         seal_local_output(&dev).unwrap();
         let dev_digest = crate::Envelope::try_output_hash_of(&dev.to_string_lossy()).unwrap();
         let dev_object = project_external_output_unlocked(&roots, &dev, &dev_digest).unwrap();
@@ -1090,7 +1091,10 @@ mod tests {
             version: "1".into(),
             reference: "projection@nixpkgs".into(),
             out: snapshot.to_string_lossy().into_owned(),
-            bin: snapshot.join("bin").to_string_lossy().into_owned(),
+            bin: Path::new(&dev_object)
+                .join("bin")
+                .to_string_lossy()
+                .into_owned(),
             rlib: String::new(),
             envelope: crate::Envelope::Envelope::for_output(
                 &snapshot.to_string_lossy(),
@@ -1123,15 +1127,24 @@ mod tests {
             "Nix runtime projection must never source bytes from the host store"
         );
 
+        let lease = snapshot_lease(&roots, &entry).unwrap();
+        assert_eq!(
+            fs::read_to_string(
+                lease
+                    .stable_path(&Path::new(&entry.bin).join("tool").to_string_lossy())
+                    .unwrap()
+            )
+            .unwrap(),
+            "dev"
+        );
+        assert!(lease.projected_executable("tool").is_some());
+        lease.validate().unwrap();
+
         #[cfg(target_os = "linux")]
-        {
-            let lease = snapshot_lease(&roots, &entry).unwrap();
-            assert!(lease
-                .nix_store_projection()
-                .iter()
-                .all(|(_, source)| source.starts_with("/proc/self/fd/")));
-            lease.validate().unwrap();
-        }
+        assert!(lease
+            .nix_store_projection()
+            .iter()
+            .all(|(_, source)| source.starts_with("/proc/self/fd/")));
     }
 
     #[test]
