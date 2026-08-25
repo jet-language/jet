@@ -1,6 +1,6 @@
 use super::super::{
-    CLICommandBinding, ConstAttr, ConstDef, Diagnostic, Field, Func, Parser, Span, Syntax, TokKind,
-    TraitMethodSig,
+    CLICommandBinding, ConstAttr, ConstDef, Diagnostic, Expr, Field, Func, Parser, Span, Syntax,
+    TokKind, TraitMethodSig,
 };
 
 impl<'a> Parser<'a> {
@@ -370,18 +370,35 @@ impl<'a> Parser<'a> {
         Ok(attrs)
     }
 
-    /// D-SHAPE-OUTPUT-CALLABLE1: an Output is an ordinary typed immutable
-    /// top-level value; no wrapper declaration or string symbol path.
+    /// D-SHAPE-OUTPUT-CALLABLE1 / D-BIND-BARE1: an Output is a bare immutable
+    /// top-level binding whose typed constructor carries `Output`.
     pub(in crate::Parser) fn output_def(&mut self) -> Result<ConstDef, Diagnostic> {
         let start = self.peek().span.start;
         let (name, name_span) = self.expect_ident("for the Output name")?;
-        self.expect(TokKind::Colon, "after the Output name")?;
-        let (ty, _) = self.type_()?;
-        self.expect(TokKind::ColonColon, "after `Output`")?;
-        let value = self.expr()?;
-        self.expect(TokKind::Semi, "after an Output value")?;
+        self.expect(TokKind::ColonColon, "after the Output name")?;
+        let (type_name, type_span) = self.expect_ident("for the Output constructor")?;
+        if type_name != Syntax::TYPE_OUTPUT {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!("expected `{}` in an Output constructor", Syntax::TYPE_OUTPUT),
+                "the Output kind carries its closed sum type".to_string(),
+                format!("write `{}`.<Kind>{{ ... }}", Syntax::TYPE_OUTPUT),
+                Some(type_span),
+            ));
+        }
+        self.expect(TokKind::Dot, "between `Output` and its kind")?;
+        let (variant, variant_span) = self.expect_ident("for the Output kind")?;
+        let (args, end) = self.enum_lit_named_fields()?;
+        let value = Expr::EnumLit {
+            type_name,
+            variant,
+            variant_span: Some(variant_span),
+            args,
+            leading_dot: false,
+            span: Span::new(type_span.start, end),
+        };
         Ok(ConstDef {
-            span: Span::new(start, self.prev_end()),
+            span: Span::new(start, end),
             name,
             name_span,
             value,
@@ -390,7 +407,7 @@ impl<'a> Parser<'a> {
             rust_kind: crate::AST::RustConstKind::Const,
             is_comptime: false,
             ct: None,
-            ty: Some(ty),
+            ty: Some(crate::AST::Type::Named(Syntax::TYPE_OUTPUT.to_string())),
             is_persist: false,
             persist_span: None,
             mutable: false,

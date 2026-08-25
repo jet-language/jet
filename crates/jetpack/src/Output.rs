@@ -1262,6 +1262,26 @@ mod tests {
         assert_eq!(progress.render(), "40 B / ?");
     }
 
+    #[test]
+    fn aggregate_progress_renders_phase_counts_and_truthful_bytes() {
+        let theme = Theme { color: false };
+        assert_eq!(
+            theme.render_aggregate_progress(
+                "admitting",
+                2,
+                3,
+                31,
+                48,
+                Some(340_000_000),
+                Some(1_200_000_000),
+            ),
+            "admitting    31/48 objects  340 MB / 1.2 GB"
+        );
+        assert!(theme
+            .render_aggregate_progress("resolving", 0, 2, 0, 0, Some(0), None)
+            .ends_with("0 B / ?"));
+    }
+
     // -- Tier 1: ready rows / summary --
 
     #[test]

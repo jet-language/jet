@@ -1,7 +1,8 @@
 # Jet — Zed
 
 Zed dev extension: generated Tree-sitter lexical highlighting plus `jet self lsp`
-for diagnostics, completion, hover, go-to-definition, rename, semantic tokens
+for diagnostics, completion, hover, go-to-definition, rename, formatting
+(full/range/on-type), semantic tokens
 (full/range/delta), inlay hints, quick-fixes, document symbols, document
 links, code lenses, folding, selection ranges, call hierarchy, and type
 hierarchy.
@@ -10,7 +11,7 @@ hierarchy.
 
 | Area | Jet LSP 3.17 behavior |
 |---|---|
-| Documents | Incremental UTF-16 range sync, stale-version rejection, diagnostics, full/range formatting, quick fixes |
+| Documents | Incremental UTF-16 range sync, stale-version rejection, diagnostics, full/range/on-type formatting, quick fixes |
 | Completion | Context-aware items, snippets, auto-import edits, signature help |
 | Navigation | Hover, definition, references, prepare-rename/rename, document and workspace symbols across workspace folders |
 | Structure | Folding, occurrence highlights, selection ranges, document links, run/test code lenses |

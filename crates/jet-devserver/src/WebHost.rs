@@ -525,8 +525,10 @@ impl DevStatus {
 
 pub struct WebHost {
     listener: Mutex<Option<TcpListener>>,
+    application_listener: Mutex<Option<TcpListener>>,
     status: Arc<DevStatus>,
     debug_sessions: Arc<crate::Canvas::DebugSessions>,
+    session: Arc<crate::ResidentDevSession>,
     canvas_file: String,
 }
 
@@ -537,23 +539,75 @@ impl WebHost {
             .local_addr()
             .map(|address| address.port())
             .unwrap_or(*PORT_RANGE.start());
+        let application_listener = bind_application_server()?;
+        let application_port = application_listener
+            .local_addr()
+            .map(|address| address.port())
+            .unwrap_or(0);
         let status = Arc::new(DevStatus::new(file, verbose));
         status.set_port(bound_port);
         Ok(Self {
             listener: Mutex::new(Some(listener)),
+            application_listener: Mutex::new(Some(application_listener)),
             status,
             debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
+            session: Arc::new(crate::ResidentDevSession::new(
+                file,
+                bound_port,
+                application_port,
+            )),
             canvas_file: file.to_string(),
         })
     }
 
     pub fn start(&self) {
+        self.start_inner(true);
+    }
+
+    /// Start the HTTP/Canvas plane without taking terminal input. The native
+    /// `jet dev --canvas` watcher owns its stdin and Ctrl-C lifecycle; both
+    /// surfaces still share this one host and session.
+    pub fn start_canvas(&self) {
+        self.start_inner(false);
+    }
+
+    pub fn canvas_url(&self) -> String {
+        format!("http://localhost:{}/canvas", self.status.port())
+    }
+
+    fn start_inner(&self, terminal_controls: bool) {
         let listener = self.listener.lock().unwrap().take();
         if let Some(listener) = listener {
             let status = Arc::clone(&self.status);
             let debug_sessions = Arc::clone(&self.debug_sessions);
+            let session = Arc::clone(&self.session);
             let canvas_file = self.canvas_file.clone();
-            thread::spawn(move || serve_forever(listener, status, debug_sessions, canvas_file));
+            thread::spawn(move || {
+                serve_forever(
+                    listener,
+                    status,
+                    debug_sessions,
+                    session,
+                    canvas_file,
+                    ListenerKind::Canvas,
+                )
+            });
+        }
+        if let Some(listener) = self.application_listener.lock().unwrap().take() {
+            let status = Arc::clone(&self.status);
+            let debug_sessions = Arc::clone(&self.debug_sessions);
+            let session = Arc::clone(&self.session);
+            let canvas_file = self.canvas_file.clone();
+            thread::spawn(move || {
+                serve_forever(
+                    listener,
+                    status,
+                    debug_sessions,
+                    session,
+                    canvas_file,
+                    ListenerKind::Application,
+                )
+            });
         }
         {
             let status = Arc::clone(&self.status);
@@ -563,33 +617,59 @@ impl WebHost {
                 status.expire_clients();
             });
         }
-        if !self.status.pin {
+        if terminal_controls && !self.status.pin {
             println!(
-                "serving http://localhost:{} — watching {} … (Ctrl-C to stop)",
+                "serving Canvas http://localhost:{} — app preview http://localhost:{} — watching {} … (Ctrl-C to stop)",
                 self.status.port(),
+                self.session_application_port(),
                 self.canvas_file
             );
             println!("Canvas: http://localhost:{}/canvas", self.status.port());
+            println!(
+                "App preview: http://localhost:{}/",
+                self.session_application_port()
+            );
         }
-        start_terminal_controls(Arc::clone(&self.status));
+        if terminal_controls {
+            start_terminal_controls(Arc::clone(&self.status));
+        }
         self.status.activate();
     }
 
     pub fn mark_building(&self) {
         self.status.mark_building();
+        self.session.mark_building();
     }
 
     pub fn mark_ready(&self, elapsed_ms: u128, is_rebuild: bool) {
         self.status.mark_ready(elapsed_ms, is_rebuild);
+        if let Ok(source) = fs::read_to_string(&self.canvas_file) {
+            let revision = crate::Canvas::source_revision(&source);
+            self.session.observe_source(&revision);
+            self.session.mark_last_good(
+                &revision,
+                &format!("web-build-{}", self.status.version.load(Ordering::SeqCst)),
+            );
+        }
+        self.session.mark_ready();
     }
 
     pub fn mark_error(&self, code: String, diagnostic: String, is_rebuild: bool) {
-        self.status.mark_error(code, diagnostic, is_rebuild);
+        self.status.mark_error(code.clone(), diagnostic.clone(), is_rebuild);
+        self.session.mark_error(&code, &diagnostic);
     }
 
     pub fn exit_code(&self) -> Option<i32> {
         let code = self.status.exit_code.load(Ordering::SeqCst);
         (code != 0).then_some(code as i32)
+    }
+
+    fn session_application_port(&self) -> u16 {
+        let json = self.session.json();
+        json.split_once("\"application\":{\"host\":\"127.0.0.1\",\"port\":")
+            .and_then(|(_, tail)| tail.split_once(',').map(|(port, _)| port))
+            .and_then(|port| port.parse().ok())
+            .unwrap_or(0)
     }
 }
 
@@ -801,21 +881,42 @@ fn bind_dev_server(port: Option<u16>) -> Result<TcpListener, String> {
     ))
 }
 
+fn bind_application_server() -> Result<TcpListener, String> {
+    TcpListener::bind(("127.0.0.1", 0))
+        .map_err(|error| format!("error: couldn't start the application listener: {error}"))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ListenerKind {
+    Canvas,
+    Application,
+}
+
 /// Accept connections forever, one thread per connection (a dev tool serving
 /// a handful of small files has no need for a worker pool).
 fn serve_forever(
     listener: TcpListener,
     status: Arc<DevStatus>,
     debug_sessions: Arc<crate::Canvas::DebugSessions>,
+    session: Arc<crate::ResidentDevSession>,
     canvas_file: String,
+    listener_kind: ListenerKind,
 ) {
     for stream in listener.incoming() {
         if let Ok(stream) = stream {
             let status = Arc::clone(&status);
             let debug_sessions = Arc::clone(&debug_sessions);
+            let session = Arc::clone(&session);
             let canvas_file = canvas_file.clone();
             thread::spawn(move || {
-                let _ = handle_connection(stream, &status, &debug_sessions, &canvas_file);
+                let _ = handle_connection(
+                    stream,
+                    &status,
+                    &debug_sessions,
+                    &session,
+                    &canvas_file,
+                    listener_kind,
+                );
             });
         }
     }
@@ -827,7 +928,9 @@ fn handle_connection(
     stream: TcpStream,
     status: &DevStatus,
     debug_sessions: &crate::Canvas::DebugSessions,
+    session: &crate::ResidentDevSession,
     canvas_file: &str,
+    listener_kind: ListenerKind,
 ) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let Some(request) = Request::read(&mut reader)? else {
@@ -849,6 +952,51 @@ fn handle_connection(
     }
 
     let path = target.split('?').next().unwrap_or("/");
+    if let Some(client) = query_param(target, "client_id") {
+        session.note_client(&client);
+    }
+    if listener_kind == ListenerKind::Application && !is_application_control_path(path) {
+        if method != "GET" {
+            return method_not_allowed(&mut stream);
+        }
+        let started = Instant::now();
+        let nonce = status
+            .browser_relay
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|relay| relay.nonce().to_string())
+            .unwrap_or_default();
+        let code = serve_static(&mut stream, path, &nonce)?;
+        status.log_request(method, path, code, started.elapsed());
+        return Ok(());
+    }
+    if path == "/__jet_canvas/session" || path == "/canvas/session" || path == "/panel/session" {
+        let client = query_param(target, "client_id").unwrap_or_default();
+        if !client.is_empty() {
+            session.note_client(&client);
+        }
+        if method == "GET" {
+            let body = session_response(session);
+            return write_response(
+                &mut stream,
+                "200 OK",
+                "application/json; charset=utf-8",
+                body.as_bytes(),
+            );
+        }
+        if method != "POST" {
+            return method_not_allowed(&mut stream);
+        }
+        let request = String::from_utf8_lossy(&body);
+        session.select_output(&request);
+        return write_response(
+            &mut stream,
+            "200 OK",
+            "application/json; charset=utf-8",
+            session_response(session).as_bytes(),
+        );
+    }
     if path == "/__jet_canvas/live" {
         if method != "GET" {
             return method_not_allowed(&mut stream);
@@ -1256,6 +1404,59 @@ fn method_not_allowed(stream: &mut TcpStream) -> std::io::Result<()> {
         "text/plain; charset=utf-8",
         b"method not allowed",
     )
+}
+
+fn is_application_control_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/__jet_dev_status"
+            | "/__jet_dev_version"
+            | "/__jet_dev_disconnect"
+            | "/__jet_perf_browser"
+    )
+}
+
+fn session_response(session: &crate::ResidentDevSession) -> String {
+    format!(
+        "{{\"protocol\":\"jet.canvas.session\",\"schema_version\":1,\"session\":{}}}",
+        session.json()
+    )
+}
+
+fn with_session(body: String, session: &crate::ResidentDevSession) -> String {
+    let marker = "\"canvas\":{";
+    let Some(index) = body.find(marker) else {
+        return body;
+    };
+    let insert_at = index + marker.len();
+    let mut decorated = String::with_capacity(body.len() + session.json().len() + 16);
+    decorated.push_str(&body[..insert_at]);
+    decorated.push_str("\"session\":");
+    decorated.push_str(&session.json());
+    decorated.push(',');
+    decorated.push_str(&body[insert_at..]);
+    decorated
+}
+
+fn current_revision_for_request(canvas_file: &str, request: &str) -> String {
+    let source_path = jet_foundation::JSON::parse_json(request)
+        .ok()
+        .and_then(|value| match value {
+            jet_foundation::JSON::JSONValue::Object(object) => object
+                .get("source_id")
+                .and_then(|value| match value {
+                    jet_foundation::JSON::JSONValue::String(source_id) => Some(source_id.clone()),
+                    _ => None,
+                }),
+            _ => None,
+        })
+        .and_then(|source_id| {
+            crate::Canvas::project_path_for_source_id(Path::new(canvas_file), &source_id)
+        })
+        .unwrap_or_else(|| PathBuf::from(canvas_file));
+    fs::read_to_string(source_path)
+        .map(|source| crate::Canvas::source_revision(&source))
+        .unwrap_or_default()
 }
 
 /// Serve one file out of `build/`, injecting the live-reload script into

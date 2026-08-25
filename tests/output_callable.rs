@@ -23,7 +23,7 @@ fn checked_bundle(
 
 #[test]
 fn parser_retains_typed_output_function_reference() {
-    let source = "app: Output :: .Executable.{ name: \"demo\", entry: run }\nfn run() {}\n";
+    let source = "app :: Output.Executable{ name: \"demo\", entry: run }\nfn run() {}\n";
     let (tokens, lex) = jet::Lexer::lex(source);
     assert!(lex.is_empty(), "{lex:#?}");
     let program = jet::Parser::parse(&tokens).expect("Output syntax parses");
@@ -50,7 +50,7 @@ fn sema_resolves_sole_executable_entry_before_codegen() {
     let file = dir.join("run.jet");
     std::fs::write(
         &file,
-        "app: Output :: .Executable.{ name: \"demo\", entry: start }\nfn start() {}\n",
+        "app :: Output.Executable{ name: \"demo\", entry: start }\nfn start() {}\n",
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
@@ -76,7 +76,7 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
     let file = dir.join("run.jet");
     std::fs::write(
         &file,
-        "app: Output :: .Executable.{ name: \"demo\", entry: start }\nfn start() {}\n",
+        "app :: Output.Executable{ name: \"demo\", entry: start }\nfn start() {}\n",
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
@@ -107,12 +107,12 @@ fn resident_jit_hot_swap_session() {
         return;
     }
     let v1 = checked_bundle(
-        "app: Output :: .Executable.{ name: \"demo\", entry: start }\nfn start() { print(\"v1\") }\n",
+        "app :: Output.Executable{ name: \"demo\", entry: start }\nfn start() { print(\"v1\") }\n",
         "jet_output_resident_v1",
         jet::Sema::CompileMode::Run,
     );
     let v2 = checked_bundle(
-        "app: Output :: .Executable.{ name: \"demo\", entry: start }\nfn start() ! { return Err(\"selected boom\") }\n",
+        "app :: Output.Executable{ name: \"demo\", entry: start }\nfn start() ! { return Err(\"selected boom\") }\n",
         "jet_output_resident_v2",
         jet::Sema::CompileMode::Run,
     );
@@ -138,7 +138,7 @@ fn qualified_entry_keeps_one_definition_and_effect_identity() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "use \"helper\"\napp: Output :: .Executable.{ name: \"demo\", entry: helper.start };\n",
+        "use \"helper\"\napp :: Output.Executable{ name: \"demo\", entry: helper.start }\n",
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
@@ -186,35 +186,35 @@ fn runnable_contracts_and_selection_fail_in_sema() {
     }
 
     assert!(codes(
-        "app: Output :: .Executable.{ name: \"demo\", entry: \"start\" }\nfn start() {}\n",
+        "app :: Output.Executable{ name: \"demo\", entry: \"start\" }\nfn start() {}\n",
         jet::Sema::CompileMode::Check,
     )
     .contains(&"E1321".to_string()));
     assert!(codes(
-        "api: Output :: .Service.{ name: \"api\", entry: serve }\nfn serve(port: Int) {}\n",
+        "api :: Output.Service{ name: \"api\", entry: serve }\nfn serve(port: Int) {}\n",
         jet::Sema::CompileMode::Check,
     )
     .contains(&"E1321".to_string()));
     assert!(codes(
-        "release: Output :: .Check.{ name: \"release\", entry: verify }\nfn verify() Int -> { return 1 }\n",
+        "release :: Output.Check{ name: \"release\", entry: verify }\nfn verify() Int -> { return 1 }\n",
         jet::Sema::CompileMode::Check,
     )
     .contains(&"E1321".to_string()));
     assert!(codes(
-        "app: Output :: .Executable.{ name: \"demo\", entry: start }\n#Unsafe(\"raw boundary\") fn start() {}\n",
+        "app :: Output.Executable{ name: \"demo\", entry: start }\n#Unsafe(\"raw boundary\") fn start() {}\n",
         jet::Sema::CompileMode::Check,
     )
     .contains(&"E1321".to_string()));
     let ambiguity = codes(
-        "one: Output :: .Executable.{ name: \"one\", entry: first }\ntwo: Output :: .Executable.{ name: \"two\", entry: second }\nfn first() {}\nfn second() {}\n",
+        "one :: Output.Executable{ name: \"one\", entry: first }\ntwo :: Output.Executable{ name: \"two\", entry: second }\nfn first() {}\nfn second() {}\n",
         jet::Sema::CompileMode::Run,
     );
     assert_eq!(ambiguity.iter().filter(|code| *code == "E1321").count(), 1);
     assert!(ambiguity.contains(&"E0101".to_string()), "{ambiguity:?}");
 
     for source in [
-        "lib: Output :: .Library.{ name: \"lib\" };\n",
-        "api: Output :: .Service.{ name: \"api\", entry: serve }\nfn serve() {}\n",
+        "lib :: Output.Library{ name: \"lib\" }\n",
+        "api :: Output.Service{ name: \"api\", entry: serve }\nfn serve() {}\n",
     ] {
         let no_entry = codes(source, jet::Sema::CompileMode::Run);
         assert!(no_entry.contains(&"E0101".to_string()), "{no_entry:?}");
@@ -225,7 +225,7 @@ fn runnable_contracts_and_selection_fail_in_sema() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "release: Output :: .Check.{ name: \"release\", entry: verify }\nfn verify() {}\n",
+        "release :: Output.Check{ name: \"release\", entry: verify }\nfn verify() {}\n",
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
@@ -239,9 +239,9 @@ fn runnable_contracts_and_selection_fail_in_sema() {
     );
 
     for source in [
-        "app: Output :: .Executable.{ name: \"app\", entry: start };\ndefaults: .{ run: missing };\nfn start() {}\n",
-        "app: Output :: .Executable.{ name: \"app\", entry: start };\ndefaults: .{ run: missing };\nfn start() {}\nfn run() {}\n",
-        "app: Output :: .Executable.{ name: \"app\", entry: start };\napi: Output :: .Service.{ name: \"api\", entry: serve };\ndefaults: .{ run: api };\nfn start() {}\nfn serve() {}\n",
+        "app :: Output.Executable{ name: \"app\", entry: start }\ndefaults: .{ run: missing };\nfn start() {}\n",
+        "app :: Output.Executable{ name: \"app\", entry: start }\ndefaults: .{ run: missing };\nfn start() {}\nfn run() {}\n",
+        "app :: Output.Executable{ name: \"app\", entry: start }\napi :: Output.Service{ name: \"api\", entry: serve }\ndefaults: .{ run: api };\nfn start() {}\nfn serve() {}\n",
     ] {
         let stale_default = codes(source, jet::Sema::CompileMode::Run);
         assert!(
@@ -269,19 +269,19 @@ fn invalid_output_selection_stops_in_jet_before_codegen() {
         assert!(!stderr.contains("rustc rejected"), "{stderr}");
     }
 
-    reject("lib: Output :: .Library.{ name: \"lib\" };\n", &[], "E0101");
+    reject("lib :: Output.Library{ name: \"lib\" }\n", &[], "E0101");
     reject(
-        "api: Output :: .Service.{ name: \"api\", entry: serve };\nfn serve() {}\n",
+        "api :: Output.Service{ name: \"api\", entry: serve }\nfn serve() {}\n",
         &[],
         "E0101",
     );
     reject(
-        "release: Output :: .Check.{ name: \"release\", entry: verify };\nfn verify() {}\n",
+        "release :: Output.Check{ name: \"release\", entry: verify }\nfn verify() {}\n",
         &["--output", "release"],
         "E1321",
     );
     reject(
-        "app: Output :: .Executable.{ name: \"app\", entry: start };\ndefaults: .{ run: missing };\nfn start() {}\nfn run() {}\n",
+        "app :: Output.Executable{ name: \"app\", entry: start }\ndefaults: .{ run: missing };\nfn start() {}\nfn run() {}\n",
         &[],
         "E1321",
     );
@@ -290,7 +290,7 @@ fn invalid_output_selection_stops_in_jet_before_codegen() {
 #[test]
 fn checked_default_selects_one_of_multiple_executables() {
     let bundle = checked_bundle(
-        "one: Output :: .Executable.{ name: \"one\", entry: first };\ntwo: Output :: .Executable.{ name: \"two\", entry: second };\ndefaults: .{ run: two };\nfn first() { print(\"first\") }\nfn second() { print(\"second\") }\n",
+        "one :: Output.Executable{ name: \"one\", entry: first }\ntwo :: Output.Executable{ name: \"two\", entry: second }\ndefaults: .{ run: two };\nfn first() { print(\"first\") }\nfn second() { print(\"second\") }\n",
         "jet_output_checked_default",
         jet::Sema::CompileMode::Run,
     );
@@ -329,7 +329,7 @@ fn explicit_service_address_reaches_tir_and_real_cli_runtime() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "app: Output :: .Executable.{ name: \"app\", entry: launch };\napi: Output :: .Service.{ name: \"api\", entry: serve };\nfn launch() { print(\"app\") }\nfn serve() { print(\"service\") }\n",
+        "app :: Output.Executable{ name: \"app\", entry: launch }\napi :: Output.Service{ name: \"api\", entry: serve }\nfn launch() { print(\"app\") }\nfn serve() { print(\"service\") }\n",
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
@@ -362,7 +362,7 @@ fn service_edge_emits_one_structured_report_record() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "api: Output :: .Service.{ name: \"api\", entry: serve }\nfn serve() ! { return Err(\"service unavailable\", code: \"SVC503\") }\n",
+        "api :: Output.Service{ name: \"api\", entry: serve }\nfn serve() ! { return Err(\"service unavailable\", code: \"SVC503\") }\n",
     )
     .unwrap();
 
@@ -401,7 +401,7 @@ fn check_outputs_are_plural_real_test_harness_entries_without_test_blocks() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "unit: Output :: .Check.{ name: \"unit\", entry: verify_unit };\nrelease: Output :: .Check.{ name: \"release\", entry: verify_release };\nfn verify_unit() {}\nfn verify_release() ! { return Err(\"release blocked\") }\n",
+        "unit :: Output.Check{ name: \"unit\", entry: verify_unit }\nrelease :: Output.Check{ name: \"release\", entry: verify_release }\nfn verify_unit() {}\nfn verify_release() ! { return Err(\"release blocked\") }\n",
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
@@ -441,7 +441,7 @@ fn renamed_entry_is_not_recovered_from_a_stale_lock() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "use \"helper\"\napp: Output :: .Executable.{ name: \"demo\", entry: helper.start };\n",
+        "use \"helper\"\napp :: Output.Executable{ name: \"demo\", entry: helper.start }\n",
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
@@ -462,7 +462,7 @@ fn typed_executable_output_reuses_the_checked_cli_schema() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "#CLI\nstruct Args { value: Int }\n\napp: Output :: .Executable.{ name: \"demo\", entry: launch };\n\nfn launch(args: Args) { print(args.value) }\n",
+        "#CLI\nstruct Args { value: Int }\n\napp :: Output.Executable{ name: \"demo\", entry: launch }\n\nfn launch(args: Args) { print(args.value) }\n",
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
@@ -491,7 +491,7 @@ fn compiled_imported_typed_fallible_entry_uses_its_defining_module() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "use \"helper\"\napp: Output :: .Executable.{ name: \"demo\", entry: helper.launch };\n",
+        "use \"helper\"\napp :: Output.Executable{ name: \"demo\", entry: helper.launch }\n",
     )
     .unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))

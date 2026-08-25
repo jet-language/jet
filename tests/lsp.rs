@@ -226,6 +226,10 @@ const LSP_CAPABILITY_COVERAGE: &[(&str, &str)] = &[
         "documentRangeFormattingProvider",
         "lsp_formatting_and_range_formatting_return_edits",
     ),
+    (
+        "documentOnTypeFormattingProvider",
+        "lsp_on_type_formatting_returns_brace_edits",
+    ),
     ("codeActionProvider", "lsp_teaching_autocorrect_let_to_val"),
     ("completionProvider", "lsp_completion_returns_items"),
     (
@@ -1698,6 +1702,54 @@ fn lsp_formatting_and_range_formatting_return_edits() {
                     uri
                 ),
                 expect_contains: Some(vec!["\"newText\"".to_string(), "\"range\"".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
+fn lsp_on_type_formatting_returns_brace_edits() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = "fn run() {\n statement }\n";
+    let uri = "file:///tmp/lsp_on_type_formatting_test.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec![
+                    "documentOnTypeFormattingProvider".to_string(),
+                    "moreTriggerCharacter".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/onTypeFormatting","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":1,"character":0}},"ch":"\n","options":{{"tabSize":4,"insertSpaces":true}}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"newText\":\"    \"".to_string(),
+                    "\"newText\":\"\\n\"".to_string(),
+                    "\"range\"".to_string(),
+                ]),
             },
             TranscriptStep::Send {
                 msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),

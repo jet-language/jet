@@ -3832,9 +3832,9 @@ editor-navigation rules; it is never a string lookup and `.jet/lock` cannot
 rescue a stale source reference.
 
 ```jet
-cli: Output :: .Executable{ name: "todo", entry: launch };
-api: Output :: .Service{ name: "todo-api", entry: serve };
-release: Output :: .Check{ name: "release", entry: verify_release };
+cli :: Output.Executable{ name: "todo", entry: launch }
+api :: Output.Service{ name: "todo-api", entry: serve }
+release :: Output.Check{ name: "release", entry: verify_release }
 
 fn launch() {}
 fn serve() ! {}

@@ -8,8 +8,11 @@ use std::path::{Path, PathBuf};
 pub mod BrowserTrace;
 pub mod Canvas;
 pub mod LiveInspect;
+pub mod Session;
 pub mod WatchService;
 pub mod WebHost;
+
+pub use Session::ResidentDevSession;
 
 pub use WatchService::{
     any_stamp_changed, within_budget, ChangeKind, HotReplaceTxn, InvalidationReceipt, PersistEntry,

@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2198,
-    "rev": 44859,
+    "rev": 44886,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -146072,18 +146072,28 @@
       "id": "c00s3cle",
       "num": 2157,
       "title": "Signed Jetpack package catalog pipeline",
-      "body": "Generate, verify, sign, publish, refresh, and retain an immutable Jetpack package catalog. Nixpkgs is one temporary upstream migration source, not the public package source name. Records map a pinned upstream revision, system, and attr to exact derivation and output identities, then publish them as `package@jetpack`. Jetpack verifies and realizes every product request.",
+      "body": "OWNER RULING 2026-08-25: no key ceremony for now. Jetpack gets a local, unofficial package source that needs no keys and carries no signing guarantee, so the owner can use jetpack locally today. Official signed publication waits until there is a real registry.\n\nWHAT THIS MEANS\n\nTwo trust tiers, and the difference must be visible rather than silent:\n\n1. OFFICIAL (signed). A published catalog with an Ed25519 signature, an immutable publication point, and a client that rejects forged, stale, cross-system, duplicate and ambiguous records. This is the eventual default. Its key ceremony, publication URL, rotation procedure and operator are DEFERRED and remain owner-gated.\n\n2. LOCAL / UNOFFICIAL (unsigned). A catalog the user generates on their own machine from published nixpkgs channel artifacts. No keys, no signature, no publication endpoint. Usable immediately. Jetpack must state plainly that records from this source are unverified.\n\nHARD SAFETY RULES, non-negotiable:\n\n- The unsigned tier is EXPLICIT OPT-IN. It is never the default, and a missing or invalid signature on an official source must never silently fall back to unsigned.\n- Provenance is recorded. A package realized from an unsigned catalog is marked unverified in the lock and in the Hangar receipt, so a later audit can tell exactly which objects lack a signature chain.\n- The signed path keeps every rejection it has today. Adding an unsigned tier must not remove or soften one check on the signed tier; the forged, stale, cross-system, duplicate and ambiguous record rejections all stay and stay tested.\n- The user can see which tier is in play without reading a config file.\n\nWHY THIS IS SAFE ENOUGH TODAY: the bytes are still content-addressed and still verified against the upstream Nix cache signature during admission. What the unsigned tier gives up is the guarantee that the NAME to STORE PATH mapping came from a trusted publisher. That is a real loss and the diagnostics must say so, not hide it.\n\nWHAT ALREADY EXISTS: the generator is `crates/jetpack/src/bin/jetpack-nix-index.rs` with `generate`, `manifest` and `verify-differential`. A working local feed lives at `target-nixfeed/feed`, currently signed by a hardcoded test key `jet-test-index-v1` whose seed is 32 bytes of the value 7. That test key must be deleted, not promoted: the unsigned tier replaces it, so no fake key remains in the tree pretending to be trust.\n\nDEFERRED, still owner-gated, do not build: production key custody, the immutable publication base URL, the signer and rotation procedure, and the operator who regenerates the catalog when nixpkgs moves.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m09-native-nixpkgs-dogfood",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": "blockedBy: none\n1. Evaluate selected nixpkgs revisions off-device and collect exact derivation, output, dependency, and cache facts.\n2. Convert those facts into deterministic `@jetpack` catalog records with upstream provenance.\n3. Sign and publish immutable per-system targets and a retained channel manifest.\n4. Verify signatures, freshness, systems, duplicates, ambiguity, and cache closure identity on the client.\n5. Publish coverage and nativeization reports that distinguish native, imported, local-fallback, and missing packages.\n6. Keep product resolution and realization entirely in Jetpack.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-2157-1): Jetpack gets a local unofficial package catalog that needs no keys and carries no signing guarantee, so local use works today. It is explicit opt-in and never a silent fallback from a failed signature. Packages realized through it are marked unverified in the lock and the Hangar receipt. Every rejection on the signed path stays. The hardcoded test key is deleted rather than promoted. Official signed publication, key custody, the publication URL, rotation and the operator are deferred until a real registry exists."
+        },
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "Owner ruled: no key ceremony now. Add a local unofficial unsigned catalog tier for immediate local use, explicit opt-in, provenance recorded as unverified, signed-path checks untouched, and delete the hardcoded test key. Official publication deferred until a real registry exists."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -146117,11 +146127,11 @@
         {
           "n": 3,
           "text": "The index is Jet-signed, immutably published, and the client rejects forged, stale, cross-system, duplicate and ambiguous records",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-24T12:08:42.761Z"
+          "evidence": "DEFERRED by owner ruling 2026-08-25: official signed publication waits until there is a real registry. The signed-path rejections for forged, stale, cross-system, duplicate and ambiguous records remain implemented and tested; what is deferred is key custody, the publication URL, the rotation procedure and the operator. Superseded for now by the local unofficial tier in the criteria below.",
+          "at": "2026-08-25T19:15:35.157Z"
         },
         {
           "n": 4,
@@ -146149,6 +146159,51 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-25T14:07:32.366Z"
+        },
+        {
+          "n": 7,
+          "text": "A local unofficial catalog generated on this machine needs no key, no signature and no publication endpoint, and jetpack realizes packages through it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:15:31.314Z"
+        },
+        {
+          "n": 8,
+          "text": "The unsigned tier is explicit opt-in: it is never the default, and a missing or invalid signature on an official source never silently falls back to unsigned",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:15:31.667Z"
+        },
+        {
+          "n": 9,
+          "text": "A package realized from an unsigned catalog is marked unverified in the lock and in the Hangar receipt, and an audit can list exactly which objects lack a signature chain",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:15:32.917Z"
+        },
+        {
+          "n": 10,
+          "text": "The user can see which trust tier is in play without reading a config file",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:15:34.235Z"
+        },
+        {
+          "n": 11,
+          "text": "The hardcoded jet-test-index-v1 test key is deleted from the tree, with no fake key left standing in for trust",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:15:34.792Z"
         }
       ],
       "refs": [
@@ -146159,8 +146214,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T12:08:41.716Z",
-      "updated": "2026-08-25T14:07:57.865Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-25T19:15:46.068Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c01fm9ou",
@@ -147499,13 +147554,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Implement the arithmetic policy system ratified by D-WRAP-SCOPE1.\n2. Keep exact Int and checked fixed-width behavior as the zero-ceremony default.\n3. Support checked, wrapping, and saturating expert control with visible scope and inspectable provenance.\n4. Reuse shared Prelude arithmetic operations on every tier.\n5. Add general endian-load and rotation APIs where the Murmur port needs them.\n6. Rewrite the port step for step against the C reference and run all vectors.",
+      "plan": "1. Follow D-WRAP-SCOPE1=A. Keep exact `Int` and checked fixed-width arithmetic as the zero-annotation default.\n2. Register `#Arithmetic(.Checked|.Wrapping|.Saturating)` for functions, methods, and blocks in `Syntax.rs` and marker checking.\n3. Record the innermost lexical policy and its source span on each fixed-width add, subtract, multiply, negate, and power operation.\n4. Keep division, remainder, shifts, conversions, indexing, slicing, bounds, and exact `Int` outside the policy.\n5. Lower policy-tagged operations through existing shared functions in `crates/jet-codegen/src/Prelude/Core/**`. Delete no safety checks.\n6. Make AOT, JIT, interpreter, comptime, and web adapters call the same Prelude operations without policy branches.\n7. Reuse `Reader.read_u32_le` for endian loads. Add standard fixed-width `rotate_left` and `rotate_right` methods only if absent.\n8. Project active mode and provenance through hover, semantic tokens, reflection, semindex, inspect, and diagnostics.\n9. Rewrite `examples/features/ports/murmur3_x86_32/run.jet` with one visible wrapping region and the general Core helpers.\n10. Update syntax law, grammars, snapshots, numeric tests, Murmur provenance, and the expected golden.\n11. Run parser, sema, numeric Prelude, TIR, JIT, comptime, web, UI, and golden checks through `scripts/agent/jet-env`.\n12. Run the C oracle, every Jet vector, default `jet run`, and `jet run --release`; compare exact outputs.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted D-WRAP-SCOPE1=A into exact compiler and Prelude ownership. Reused Reader for endian loads, bounded the policy, and added provenance, negative safety, and all-tier proof."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -147524,111 +147584,111 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Default Int remains exact, and fixed-width arithmetic traps on overflow outside an explicit selected policy.",
+          "text": "Default `Int` stays exact, and fixed-width arithmetic traps on overflow outside an explicit selected policy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:11.039Z"
+          "at": "2026-08-25T19:14:58.235Z"
         },
         {
           "n": 2,
-          "text": "The ratified expert policy supports checked, wrapping, and saturating behavior with deterministic scope and precedence.",
+          "text": "`#Arithmetic` accepts only `.Checked`, `.Wrapping`, or `.Saturating` on functions, methods, and blocks; other sites and values get registered diagnostics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:11.039Z"
+          "at": "2026-08-25T19:14:58.235Z"
         },
         {
           "n": 3,
-          "text": "Wrapping changes arithmetic overflow only; division by zero, shift counts, conversions, indexing, slices, and bounds stay checked.",
+          "text": "The innermost lexical scope wins, and the policy never crosses a call boundary unless the callee declaration carries it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:11.039Z"
+          "at": "2026-08-25T19:14:58.235Z"
         },
         {
           "n": 4,
-          "text": "Hover, semantic tokens, reflection, and inspect output name the active policy and its source scope.",
+          "text": "Policy changes fixed-width add, subtract, multiply, negate, and power only; all other arithmetic, conversion, shift, and bounds checks stay unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:11.039Z"
+          "at": "2026-08-25T19:14:58.235Z"
         },
         {
           "n": 5,
-          "text": "All execution tiers call the same Prelude arithmetic rules; no engine re-encodes policy.",
+          "text": "Hover, semantic tokens, reflection, semindex, and inspect output name each operation’s active policy and exact source scope.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:11.039Z"
+          "at": "2026-08-25T19:14:58.235Z"
         },
         {
           "n": 6,
-          "text": "The Murmur3 x86_32 port uses one visible modular policy and general Core endian and rotation APIs.",
+          "text": "AOT, JIT, interpreter, comptime, and web call the same Prelude arithmetic operations; no engine re-encodes mode, precedence, or traps.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:11.039Z"
+          "at": "2026-08-25T19:14:58.235Z"
         },
         {
           "n": 7,
-          "text": "All reference vectors, tail lengths, unaligned input, and nonzero seeds match on default `jet run` and AOT.",
+          "text": "The Murmur3 x86_32 port uses one visible wrapping policy, `Reader.read_u32_le`, and standard fixed-width rotation methods.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:11.039Z"
+          "at": "2026-08-25T19:14:58.235Z"
         },
         {
           "n": 8,
-          "text": "The algorithm body is no longer longer than the reference C body after comments and harness code are excluded.",
+          "text": "All C reference vectors, tail lengths, unaligned input, zero and nonzero seeds, and boundary shift counts agree on default `jet run` and AOT.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:11.039Z"
+          "at": "2026-08-25T19:14:58.235Z"
         },
         {
           "n": 9,
-          "text": "Syntax.rs entry updated",
+          "text": "The Jet algorithm body is no longer longer than the selected C body after comments, tests, and harness code are excluded.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:42:45.567Z"
+          "at": "2026-08-25T19:14:58.235Z"
         },
         {
           "n": 10,
-          "text": "syntax-decisions.md log entry",
+          "text": "`Syntax.rs` records D-WRAP-SCOPE1=A and `syntax-decisions.md` records the owner outcome.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:42:45.567Z"
+          "at": "2026-08-25T19:14:58.235Z"
         },
         {
           "n": 11,
-          "text": "jet devtools grammars regenerated",
+          "text": "Jet devtools grammars, diagnostics, formatter snapshots, numeric snapshots, and Murmur goldens use the current surface only.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:42:45.567Z"
+          "at": "2026-08-25T19:14:58.235Z"
         },
         {
           "n": 12,
-          "text": "snapshots re-blessed",
+          "text": "Nested checked islands inside wrapping code trap as checked, while division by zero, invalid shifts, conversion overflow, and out-of-bounds access still fail.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:42:45.567Z"
+          "at": "2026-08-25T19:14:58.235Z"
         }
       ],
       "refs": [
@@ -147642,8 +147702,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:31.706Z",
-      "updated": "2026-08-25T13:42:45.567Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T19:14:58.605Z",
+      "updatedBy": "Main"
     },
     {
       "id": "cp3zupnt",
@@ -147654,13 +147714,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Implement the implicit structured Error route on every function and erase it only after sema proves it unreachable.\n2. Auto-propagate unhandled errors through plain calls. Keep `??` for local handling and `?(text)` for journey context.\n3. Add prefix roles: `?Success`, `!Error`, `!(E1 | E2)`, and `!Never`.\n4. Require `#Error` on custom explicit error types. Apply one declared `Source -> TargetError` conversion automatically.\n5. Expose default, typed, converted, and proven-unreachable routes in hover, reflection, inspect, reports, and receipts.\n6. Use one front-end semantic model and one shared Prelude carrier across AOT, JIT, interpreter, comptime, and web.\n7. Migrate examples and teach the frequency-priced ladder: no beginner syntax, one expert contract, full audit.",
+      "plan": "1. Follow D-FAILURE-FOUNDATION1=A. Implement this card and #2182 as one clean cutover; do not land a compatibility interval.\n2. Add prefix contracts in `crates/jet-parser/src/Parser/Types.rs` and canonical output in `Formatter/**`.\n3. Represent the effective default, typed, union, and `!Never` contracts as sema facts on every callable.\n4. Implement call propagation and unique error conversion in `crates/jet-sema/src/Sema/CheckerInfer/expr.rs` and the existing conversion registry.\n5. Keep `??` as local handling. Make `?(text)` add one structured context frame without replacing the cause.\n6. Register `#Error` and validate explicit error domains in `Syntax.rs`, marker checking, diagnostics, and UI snapshots.\n7. Lower one Result-shaped carrier through `crates/jet-codegen/src/TIR/**` and `Prelude/Errors.jet`. Keep engines as adapters.\n8. Project the effective contract and proof into hover, completion, reflection, semindex, inspect, JSON, reports, and receipts.\n9. Pair with #2182 to remove suffix contracts and bare propagation from every active source, grammar, template, and document.\n10. Run parser, sema, codegen, comptime, JIT, semindex, diagnostics, and golden tests through `scripts/agent/jet-env`.\n11. Smoke implicit, typed, union, converted, contextual, optional, unit, and `!Never` cases with default `jet run` and `--release`.\n12. Exercise interpreter deopt, comptime, and web cases that reach the failure surface; all must use the shared Prelude carrier.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted D-FAILURE-FOUNDATION1=A into a compiler-seam plan. Added the #2182 clean-cutover contract, exact ownership, introspection, diagnostics, and full I9 proof matrix."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -147679,84 +147744,111 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every function receives the structured Error route by default, and sema records when that route is reachable or proven impossible.",
+          "text": "Every callable has one effective structured Error contract; sema records whether it is default, explicit, converted, or proven unreachable.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:32.224Z"
+          "at": "2026-08-25T19:14:52.668Z"
         },
         {
           "n": 2,
-          "text": "A plain fallible call propagates automatically with no postfix `?`; `??` handles locally and `?(text)` adds one journey context note.",
+          "text": "A plain fallible call propagates automatically in statement, argument, return, branch, closure, method, and nested-expression positions without postfix `?`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:32.224Z"
+          "at": "2026-08-25T19:14:52.668Z"
         },
         {
           "n": 3,
-          "text": "Expert signatures accept `?Success`, `!Error`, `!(E1 | E2)`, and `!Never` with one unambiguous prefix grammar in every type position.",
+          "text": "`??` handles locally, while `?(text)` adds exactly one source-linked context frame and preserves the original structured cause.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:32.224Z"
+          "at": "2026-08-25T19:14:52.668Z"
         },
         {
           "n": 4,
-          "text": "Only Core Error types and named types marked `#Error` may appear after `!`; invalid types get one registered teaching diagnostic.",
+          "text": "Expert signatures accept prefix `?Success`, `!Error`, `!(E1 | E2)`, and `!Never` unambiguously in declarations, aliases, fields, generics, and function types.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:32.224Z"
+          "at": "2026-08-25T19:14:52.668Z"
         },
         {
           "n": 5,
-          "text": "One unique declared `Source -> TargetError` conversion applies automatically; missing and ambiguous crossings get exact sema diagnostics.",
+          "text": "Only Core Error types and named `#Error` types can follow `!`; invalid domains get one registered teaching diagnostic and UI snapshot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:32.224Z"
+          "at": "2026-08-25T19:14:52.668Z"
         },
         {
           "n": 6,
-          "text": "`!Never` rejects every reachable failure and records the proof used to erase the default Error route.",
+          "text": "One unique declared `Source -> TargetError` conversion applies automatically; missing, cyclic, and ambiguous crossings get distinct sema diagnostics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:32.224Z"
+          "at": "2026-08-25T19:14:52.668Z"
         },
         {
           "n": 7,
-          "text": "Hover, completion, reflection, `jet inspect`, human reports, JSON, and receipts show the effective error contract even when source omits it.",
+          "text": "`!Never` rejects every reachable failure path and records the sema proof that removes the default Error route.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:32.224Z"
+          "at": "2026-08-25T19:14:52.668Z"
         },
         {
           "n": 8,
-          "text": "The default report preserves code, message, causes, context, original error identity, and source journey without string parsing.",
+          "text": "Hover, completion, reflection, semindex, `jet inspect`, human reports, JSON, generated docs, and receipts show the effective contract and its source.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:32.224Z"
+          "at": "2026-08-25T19:14:52.668Z"
         },
         {
           "n": 9,
-          "text": "AOT, JIT, interpreter, comptime, and web use the same shared failure carrier and conversion rules.",
+          "text": "The default report preserves code, message, typed identity, causes, context frames, source journey, and conversion history without string parsing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:32.224Z"
+          "at": "2026-08-25T19:14:52.668Z"
+        },
+        {
+          "n": 10,
+          "text": "The #2172 and #2182 patches land as one cutover; active code has no compatibility alias, accepted legacy AST, or second failure carrier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:14:52.668Z"
+        },
+        {
+          "n": 11,
+          "text": "AOT, default JIT, interpreter deopt, comptime, and web use the same Prelude carrier, conversion table, context frames, and error meaning.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:14:52.668Z"
+        },
+        {
+          "n": 12,
+          "text": "Behavioral tests cover implicit, explicit, union, converted, contextual, optional-success, unit-success, callback, generic, and impossible-failure contracts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:14:52.668Z"
         }
       ],
       "refs": [
@@ -147770,8 +147862,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:42.647Z",
-      "updated": "2026-08-25T13:42:26.707Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T19:14:53.037Z",
+      "updatedBy": "Main"
     },
     {
       "id": "cq5blslq",
@@ -147782,13 +147874,20 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Ratify D-RESULT-DECON2 for the compact exhaustive form.\n2. Reuse ordinary enum patterns, payload binding, and branch typing in parser and sema.\n3. Define canonical formatter layout for one-line, two-line, long, commented, and nested cases.\n4. Keep D-CHOOSE-TEST1 for one-sided tests and D-ERR-DECON1 for fallback control flow.\n5. Migrate representative Result examples and diagnostics.\n6. Prove payload typing, exhaustiveness, effects, early exits, and value results on all execution tiers.",
+      "plan": "1. Follow the owner outcome D-RESULT-DECON2=B after #2182 fixes the final question-mark grammar.\n2. Parse `result ? ok -> success ! error -> failure` in `Parser/Statements/conditionals.rs` with one fixed two-branch shape.\n3. Distinguish this infix handler from prefix optional types, `?(text)`, optional chaining, unary not, and ordinary branch arrows.\n4. Desugar the surface into the existing Result pattern branch AST with `.Ok` and `.Err` payload bindings.\n5. Reuse ordinary branch typing, effects, divergence, ownership, and TIR lowering. Do not add a Result carrier or runtime helper.\n6. Format fitting handlers on one line and long handlers as a stable two-arm layout in `Formatter/Statements.rs`.\n7. Add registered diagnostics for a missing branch, duplicate role, bad binding, wrong receiver, type mismatch, and malformed arrow.\n8. Keep one-sided checks on `subject == pattern -> body` and fallback handling on `??`.\n9. Update `Syntax.rs`, the syntax decision log, grammars, highlighters, parser tests, UI snapshots, examples, and goldens.\n10. Run parser, formatter, sema, TIR, diagnostics, and golden tests through `scripts/agent/jet-env`.\n11. Smoke statement, value, diverging, effectful, nested, commented, and generic handlers with default `jet run` and AOT.\n12. Exercise JIT and interpreter deopt to prove the syntax uses the existing Result split on every tier.",
       "checkSteps": null,
-      "blockedBy": [],
+      "blockedBy": [
+        "cz2ys9cb"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Corrected the plan to the owner-ratified D-RESULT-DECON2=B outcome. Added exact grammar disambiguation, AST desugaring, ownership, diagnostics, and tier proof; #2182 now gates it."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -147802,105 +147901,106 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A fitting `.Ok(value)` plus `.Err(error)` handler uses at most two physical lines in canonical formatted source.",
+          "text": "The canonical exhaustive form is `result ? ok -> success ! error -> failure`, exactly matching D-RESULT-DECON2=B.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.786Z"
+          "at": "2026-08-25T19:14:55.441Z"
         },
         {
           "n": 2,
-          "text": "The compact form is exhaustive, binds each payload once, preserves source order, and cannot drop a failure silently.",
+          "text": "A fitting handler formats on one line; long, blocked, nested, or commented branches use one deterministic expanded layout.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.786Z"
+          "at": "2026-08-25T19:14:55.441Z"
         },
         {
           "n": 3,
-          "text": "One-sided success or failure checks keep the existing one-line `subject == pattern -> body` form.",
+          "text": "The form always has one success branch and one failure branch, binds each payload once, preserves source order, and cannot drop failure.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.786Z"
+          "at": "2026-08-25T19:14:55.441Z"
         },
         {
           "n": 4,
-          "text": "The new surface lowers through the existing enum-pattern branch mechanism and does not add a second Result carrier or handler API.",
+          "text": "The grammar is unambiguous beside prefix `?Success`, prefix `!Error`, `?(text)`, `?.`, unary `!`, and nested branch expressions.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.786Z"
+          "at": "2026-08-25T19:14:55.441Z"
         },
         {
           "n": 5,
-          "text": "The formatter has deterministic layouts for short, long, commented, nested, value-yielding, and diverging handlers.",
+          "text": "One-sided success or failure checks keep `subject == pattern -> body`; `??` remains the fallback and early-exit surface.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.786Z"
+          "at": "2026-08-25T19:14:55.441Z"
         },
         {
           "n": 6,
-          "text": "Diagnostics name a missing arm, duplicate arm, wrong payload type, and non-exhaustive value handler with source spans.",
+          "text": "Parser desugaring uses the existing `.Ok` and `.Err` branch AST; sema, TIR, codegen, JIT, and interpreter add no second carrier or handler API.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.786Z"
+          "at": "2026-08-25T19:14:55.441Z"
         },
         {
           "n": 7,
-          "text": "Examples and goldens prove statement and value forms on default `jet run`, AOT, JIT, and interpreter paths.",
+          "text": "Statement, value, diverging, effectful, ownership-sensitive, generic, and nested handlers preserve ordinary Result semantics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:12.786Z"
+          "at": "2026-08-25T19:14:55.441Z"
         },
         {
           "n": 8,
-          "text": "Syntax.rs entry updated",
+          "text": "Registered diagnostics identify a missing branch, duplicate role, bad payload binding, non-Result receiver, type mismatch, and malformed arrow with exact spans.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:39:54.881Z"
+          "at": "2026-08-25T19:14:55.441Z"
         },
         {
           "n": 9,
-          "text": "syntax-decisions.md log entry",
+          "text": "Examples and goldens prove the compact surface on default `jet run`, AOT, JIT, and interpreter paths.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:39:54.881Z"
+          "at": "2026-08-25T19:14:55.441Z"
         },
         {
           "n": 10,
-          "text": "jet devtools grammars regenerated",
+          "text": "`Syntax.rs` records D-RESULT-DECON2=B and `syntax-decisions.md` records the owner outcome.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:39:54.882Z"
+          "at": "2026-08-25T19:14:55.441Z"
         },
         {
           "n": 11,
-          "text": "snapshots re-blessed",
+          "text": "Jet devtools grammars, syntax highlighting, formatter snapshots, and diagnostic snapshots contain the canonical form only.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:39:54.882Z"
+          "at": "2026-08-25T19:14:55.441Z"
         }
       ],
       "refs": [
+        "D-RESULT-DECON2",
         "D-CHOOSE-TEST1",
         "D-ERR-DECON1",
         "D-FMTCOLLAPSE1"
@@ -147913,8 +148013,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:47.080Z",
-      "updated": "2026-08-24T23:39:54.882Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T19:14:55.822Z",
+      "updatedBy": "Main"
     },
     {
       "id": "cr8bdkzb",
@@ -148033,15 +148133,21 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Make the recognized build entry success contract `BuildPlan`.\n2. Route BuildContext failures through the implicit structured Error channel by default.\n3. Let experts declare `!BuildError` or a `#Error` union with ordinary automatic conversions.\n4. Reject `BuildPlan!` and every retired build signature with an exact migration diagnostic.\n5. Migrate all build entries, generated templates, docs, tests, and examples.\n6. Prove valid plans and structured failures through the programmable-build runner.",
+      "plan": "1. Apply D-FAILURE-FOUNDATION1=A as the amendment to D-BUILD-FAIL1 after #2172 and #2182 land.\n2. Recognize only the real programmable-build entry in `crates/jet-sema/src/Sema/Bundle.rs` and related output checks.\n3. Set its success contract to `BuildPlan`. Use the ordinary implicit Error route for beginner source.\n4. Preserve each `BuildError` variant as typed identity and structured report data across BuildContext operations.\n5. Allow expert `!BuildError` and `#Error` unions through the ordinary unique conversion registry.\n6. Keep build execution in `crates/jet-comptime/src/Comptime/Build/**` on the shared failure carrier and report envelope.\n7. Reject `BuildPlan!`, explicit postfix-era forms, wrong parameters, and wrong success types with registered diagnostics.\n8. Migrate build entries, examples, fixtures, package templates, docs, grammars, formatter snapshots, and goldens.\n9. Extend `tests/build_entry*.rs`, `tests/build_graph.rs`, UI diagnostics, and JSON report tests.\n10. Run focused sema, comptime, build-entry, build-graph, UI, and golden tests through `scripts/agent/jet-env`.\n11. Smoke one successful plan and each failure contract through the real `jet build` programmable-build path.",
       "checkSteps": null,
       "blockedBy": [
-        "D-FAILURE-FOUNDATION1"
+        "cp3zupnt",
+        "cz2ys9cb"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted the build-entry amendment against D-FAILURE-FOUNDATION1=A. Added exact compiler and comptime ownership, recognized-entry boundaries, migration scope, and structured failure proof."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -148060,75 +148166,93 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every recognized `fn build` returns BuildPlan as its success value and never treats BuildPlan as an error type.",
+          "text": "Every recognized programmable-build entry has `BuildPlan` as its success value and never treats `BuildPlan` as an error domain.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:48.525Z"
+          "at": "2026-08-25T19:14:56.833Z"
         },
         {
           "n": 2,
-          "text": "The beginner build signature writes `BuildPlan` with no routine Error declaration or propagation marks.",
+          "text": "The beginner build signature writes `BuildPlan` with no Error declaration or propagation marks and receives the ordinary implicit Error route.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:48.525Z"
+          "at": "2026-08-25T19:14:56.833Z"
         },
         {
           "n": 3,
-          "text": "BuildContext failures preserve structured BuildError identity inside the implicit Error report.",
+          "text": "Only the recognized build entry gets this success contract; an ordinary function named `build` follows normal callable rules.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:48.525Z"
+          "at": "2026-08-25T19:14:56.833Z"
         },
         {
           "n": 4,
-          "text": "An expert build entry may declare `!BuildError` or a `#Error` union, and unique declared conversions apply automatically.",
+          "text": "BuildContext failures preserve their exact `BuildError` variant, fields, source span, causes, and context inside the structured report.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:48.525Z"
+          "at": "2026-08-25T19:14:56.833Z"
         },
         {
           "n": 5,
-          "text": "Non-build functions use the same failure law; the compiler adds no separate build-only carrier or propagation rule.",
+          "text": "An expert build entry may declare `!BuildError` or a `#Error` union; one unique declared conversion applies automatically.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:48.525Z"
+          "at": "2026-08-25T19:14:56.833Z"
         },
         {
           "n": 6,
-          "text": "`BuildPlan!` and other retired build signatures get one registered diagnostic with the exact current form.",
+          "text": "The compiler adds no build-only carrier, propagation operator, conversion table, or engine-specific error mapping.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:48.525Z"
+          "at": "2026-08-25T19:14:56.833Z"
         },
         {
           "n": 7,
-          "text": "All build examples, fixtures, templates, docs, formatter snapshots, and grammars migrate in one pass.",
+          "text": "`BuildPlan!` and every retired build signature get registered diagnostics with the exact current form and no accepted alias.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:48.525Z"
+          "at": "2026-08-25T19:14:56.833Z"
         },
         {
           "n": 8,
-          "text": "Programmable-build tests prove a valid plan, an implicit structured failure, an explicit BuildError contract, and human/JSON parity.",
+          "text": "All build examples, fixtures, templates, docs, formatter snapshots, generated surfaces, and grammars migrate in one pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:48.525Z"
+          "at": "2026-08-25T19:14:56.833Z"
+        },
+        {
+          "n": 9,
+          "text": "Programmable-build tests prove a valid plan, implicit failure, explicit BuildError, union conversion, ambiguous conversion, and human/JSON parity.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:14:56.833Z"
+        },
+        {
+          "n": 10,
+          "text": "The real build runner preserves identical failure identity and report meaning for local, cached, remote, and replayed actions.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:14:56.833Z"
         }
       ],
       "refs": [
@@ -148142,7 +148266,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:55.606Z",
-      "updated": "2026-08-25T13:30:48.525Z",
+      "updated": "2026-08-25T19:14:57.210Z",
       "updatedBy": "Main"
     },
     {
@@ -148618,13 +148742,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Ratify D-TAIL-RETURN1.\n2. Type a value arm table once and apply the selected function-tail rule in sema and TIR.\n3. Add a lint for an arm table followed by a same-type default return when an `else` value arm is equivalent.\n4. Supply a behavior-preserving fix that inserts `else`, removes redundant returns, and preserves comments.\n5. Migrate the service example to canonical value-table form.\n6. Prove divergence, unit bodies, loops, nested blocks, comments, and all execution tiers.",
+      "plan": "1. Follow D-TAIL-RETURN1=A. Amend the narrower D-BODY-LAST1 rewrite instead of adding another tail-return rule.\n2. Parse and format final expressions with existing statement and expression nodes; add no new return token or branch carrier.\n3. Make sema give every value-expected block an expected type and type its final expression as that block’s value.\n4. Keep explicit `return` for early exit. Make statement tails and semicolon tails yield unit with focused diagnostics.\n5. Remove any registration-time function-only Return synthesis that duplicates the new block-value law.\n6. Lower block values and value arm tables in `crates/jet-codegen/src/TIR/lower/control_flow.rs`; engines consume TIR only.\n7. Add the redundant-tail lint and source fix in the existing lint and fix registries, with comment-preserving edits.\n8. Migrate `examples/features/tooling/service_runtime.jet` to exhaustive value tables with explicit `else` arms.\n9. Cover functions, methods, lambdas, fallback blocks, nested blocks, loops, divergence, effects, unit, and comments.\n10. Update `Syntax.rs`, syntax decisions, grammars, formatter tests, lint UI snapshots, semindex, examples, and goldens.\n11. Run parser, formatter, sema, TIR, lint, fix, UI, services runtime, JIT, web, and golden checks through `scripts/agent/jet-env`.\n12. Smoke `service_runtime.jet` with default `jet run` and `jet run --release`, then compare its golden output.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted D-TAIL-RETURN1=A as one compositional block-value law. Added removal of the old function-only rewrite, exact TIR and lint ownership, safe fix boundaries, and tier proof."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -148638,105 +148767,106 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A function can express the selected branch result as one value arm table with an explicit `else` arm.",
+          "text": "Every value-expected function, method, lambda, fallback, nested block, and value arm yields its final expression under D-TAIL-RETURN1=A.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:17.081Z"
+          "at": "2026-08-25T19:14:59.609Z"
         },
         {
           "n": 2,
-          "text": "The final-expression return rule matches D-TAIL-RETURN1 for function blocks, lambdas, methods, nested blocks, and unit bodies.",
+          "text": "Explicit `return` remains an early exit; a semicolon, assignment, declaration, or other statement tail yields unit instead of an accidental value.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:17.081Z"
+          "at": "2026-08-25T19:14:59.609Z"
         },
         {
           "n": 3,
-          "text": "A registered lint detects an arm table followed by an equivalent default return and stays silent when control flow or effects differ.",
+          "text": "Sema checks one expected block type across all reachable tails and reports mixed types, missing values, and accidental unit with exact spans.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:17.081Z"
+          "at": "2026-08-25T19:14:59.609Z"
         },
         {
           "n": 4,
-          "text": "The lint fix preserves evaluation order, payload bindings, comments, source spans, effects, and the exact returned value.",
+          "text": "The implementation removes the old function-only tail rewrite and keeps one sema and TIR block-value mechanism.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:17.081Z"
+          "at": "2026-08-25T19:14:59.609Z"
         },
         {
           "n": 5,
+          "text": "A registered lint detects an arm table followed by an equivalent default return and stays silent when control flow, effects, or evaluation differ.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:14:59.609Z"
+        },
+        {
+          "n": 6,
+          "text": "The lint fix adds an explicit `else` arm, removes redundant returns and fallback tails, and preserves comments, bindings, order, effects, and spans.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:14:59.609Z"
+        },
+        {
+          "n": 7,
           "text": "`status_label` and `outcome_label` become exhaustive value tables with no repeated `return` and no trailing fallback statement.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:17.081Z"
-        },
-        {
-          "n": 6,
-          "text": "Missing `else`, mixed arm types, diverging arms, unreachable tails, and accidental unit results get precise sema diagnostics.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-24T23:10:17.081Z"
-        },
-        {
-          "n": 7,
-          "text": "Default `jet run`, AOT, JIT, interpreter, and web agree for value tables and final-expression returns.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-24T23:10:17.081Z"
+          "at": "2026-08-25T19:14:59.609Z"
         },
         {
           "n": 8,
-          "text": "Syntax.rs entry updated",
+          "text": "Loops, divergence, unreachable tails, nested blocks, comments, and unit bodies have deterministic behavior and focused diagnostics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T00:20:23.067Z"
+          "at": "2026-08-25T19:14:59.609Z"
         },
         {
           "n": 9,
-          "text": "syntax-decisions.md log entry",
+          "text": "Default `jet run`, AOT, JIT, interpreter, comptime, and web agree for block values, arm-table values, and early returns.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T00:20:23.067Z"
+          "at": "2026-08-25T19:14:59.609Z"
         },
         {
           "n": 10,
-          "text": "jet devtools grammars regenerated",
+          "text": "`Syntax.rs` records D-TAIL-RETURN1=A and `syntax-decisions.md` records its amendment to D-BODY-LAST1.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T00:20:23.067Z"
+          "at": "2026-08-25T19:14:59.609Z"
         },
         {
           "n": 11,
-          "text": "snapshots re-blessed",
+          "text": "Jet devtools grammars, formatter snapshots, lint UI snapshots, semindex facts, service examples, and goldens use the current rule only.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T00:20:23.067Z"
+          "at": "2026-08-25T19:14:59.609Z"
         }
       ],
       "refs": [
+        "D-TAIL-RETURN1",
         "D-BRANCH-LINT1",
         "D-BRANCH-VALUE1",
         "D-CALLABLE-ONE1"
@@ -148749,8 +148879,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:22.506Z",
-      "updated": "2026-08-25T00:20:23.067Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T19:14:59.994Z",
+      "updatedBy": "Main"
     },
     {
       "id": "cyxijw5j",
@@ -148862,15 +148992,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Retire `Success Error!`, bare declaration `!`, and bare postfix propagation `?`.\n2. Migrate optional success to `?Success` and explicit errors to `!Error` or `!(E1 | E2)`.\n3. Remove routine default Error declarations and propagation marks from beginner examples.\n4. Keep `?(text)` as the only postfix question-mark error form.\n5. Add registered diagnostics with exact rewrites and no legacy parser path.\n6. Migrate source, Core declarations, tests, docs, templates, formatter snapshots, and editor grammars in one pass.\n7. Run retirement ratchets and tier-parity examples.",
+      "plan": "1. Pair this migration with #2172 in one branch and one integration change. Neither card may close or land alone.\n2. Measure all suffix contracts, bare declaration `!`, bare propagation `?`, and formatter recovery paths before editing.\n3. Migrate optional success to `?Success` and explicit failure to `!Error` or `!(E1 | E2)`.\n4. Remove routine default Error contracts and bare propagation marks. Keep only contextual `?(text)` postfix syntax.\n5. Update `crates/jet-parser/src/Parser/Types.rs`, postfix parsing, formatter modules, and parser tests for the canonical grammar.\n6. Keep minimal diagnostic-only recognition for retired forms. It must emit registered fixes and never construct an accepted legacy AST.\n7. Migrate `examples/**`, `tests/**`, Core declarations, package templates, generated fixtures, docs, and editor grammars in one pass.\n8. Update `Syntax.rs` with D-FAILURE-FOUNDATION1, record the amendment in `syntax-decisions.md`, and regenerate grammars.\n9. Re-bless only source-shaped snapshots whose meaning is unchanged. Review every semantic snapshot change separately.\n10. Add a retirement ratchet with a narrow allowlist for deliberate diagnostic fixtures and ratified history.\n11. Run parser, formatter, grammar, diagnostics, golden, package, comptime, JIT, and web checks through `scripts/agent/jet-env`.\n12. Smoke the same failure matrix with default `jet run` and `jet run --release` before either card closes.",
       "checkSteps": null,
-      "blockedBy": [
-        "D-FAILURE-FOUNDATION1"
-      ],
+      "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted the failure migration as the mandatory clean-cutover half of #2172. Added a measured census, diagnostic-only recovery law, exact corpus ownership, ratchets, and tier proof."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -148889,75 +149022,102 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Active source uses prefix `?Success` and `!Error`; no active suffix error type or infix failure spelling remains.",
+          "text": "Active source uses prefix `?Success`, `!Error`, and `!(E1 | E2)`; no accepted suffix, infix, or bare default declaration form remains.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:49.054Z"
+          "at": "2026-08-25T19:14:54.008Z"
         },
         {
           "n": 2,
-          "text": "Beginner functions omit the default Error contract, and plain fallible calls omit bare postfix propagation `?`.",
+          "text": "Beginner functions omit the default Error contract, and plain fallible calls omit bare postfix propagation `?` in every expression position.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:49.054Z"
+          "at": "2026-08-25T19:14:54.008Z"
         },
         {
           "n": 3,
-          "text": "`?(text)` remains legal only as a journey context form and preserves the original structured cause.",
+          "text": "`?(text)` remains legal only as a journey-context form and preserves typed identity, the original cause, and prior context frames.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:49.054Z"
+          "at": "2026-08-25T19:14:54.008Z"
         },
         {
           "n": 4,
-          "text": "Bare declaration `!`, suffix `Error!`, and bare call `?` each receive registered diagnostics with exact current rewrites.",
+          "text": "Bare declaration `!`, suffix `Error!`, infix failure syntax, and bare call `?` each get registered diagnostics with exact canonical rewrites.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:49.054Z"
+          "at": "2026-08-25T19:14:54.008Z"
         },
         {
           "n": 5,
-          "text": "The formatter emits only prefix roles and never recreates retired suffix or propagation syntax.",
+          "text": "Diagnostic recovery recognizes retired text only to report it; no parser, AST, formatter, sema, TIR, codegen, or runtime compatibility path accepts it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:49.054Z"
+          "at": "2026-08-25T19:14:54.008Z"
         },
         {
           "n": 6,
-          "text": "Examples, Core declarations, aliases, function values, generics, templates, docs, snapshots, and grammars migrate in one cutover.",
+          "text": "The formatter emits only prefix roles and contextual `?(text)`; formatting twice is byte-stable and never recreates retired syntax.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:49.054Z"
+          "at": "2026-08-25T19:14:54.008Z"
         },
         {
           "n": 7,
-          "text": "Retirement ratchets find no active old spelling outside deliberate diagnostic fixtures.",
+          "text": "Examples, Core declarations, aliases, lambdas, function values, generics, templates, docs, snapshots, and grammars migrate in one cutover.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:49.054Z"
+          "at": "2026-08-25T19:14:54.008Z"
         },
         {
           "n": 8,
-          "text": "Default `jet run`, AOT, JIT, interpreter, comptime, and web agree for implicit, typed, optional, converted, contextual, and impossible failures.",
+          "text": "`Syntax.rs`, `syntax-decisions.md`, generated grammars, completions, syntax highlighting, and formatter snapshots name the current law only.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:30:49.054Z"
+          "at": "2026-08-25T19:14:54.008Z"
+        },
+        {
+          "n": 9,
+          "text": "A repository ratchet finds no retired active spelling outside an explained allowlist of diagnostic fixtures and decision history.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:14:54.008Z"
+        },
+        {
+          "n": 10,
+          "text": "Default `jet run`, AOT, JIT, interpreter, comptime, and web agree for implicit, typed, optional, converted, contextual, unit, and impossible failures.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:14:54.008Z"
+        },
+        {
+          "n": 11,
+          "text": "#2172 and #2182 share one integrated cutover commit or branch; neither card closes while the other leaves active old or new forms incomplete.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:14:54.008Z"
         }
       ],
       "refs": [
@@ -148971,7 +149131,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:39.181Z",
-      "updated": "2026-08-25T13:30:49.054Z",
+      "updated": "2026-08-25T19:14:54.389Z",
       "updatedBy": "Main"
     },
     {
@@ -207328,6 +207488,33 @@
       "supersededBy": "D-CHANNEL-AUTO1",
       "created": "2026-08-25T19:09:51.517Z",
       "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-VERDICT-2157-1",
+      "cardId": "c00s3cle",
+      "group": "verdict",
+      "title": "Local unofficial catalog now, signed publication deferred",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Jetpack gets a local unofficial package catalog that needs no keys and carries no signing guarantee, so local use works today. It is explicit opt-in and never a silent fallback from a failed signature. Packages realized through it are marked unverified in the lock and the Hangar receipt. Every rejection on the signed path stays. The hardcoded test key is deleted rather than promoted. Official signed publication, key custody, the publication URL, rotation and the operator are deferred until a real registry exists.",
+      "comment": "Jetpack gets a local unofficial package catalog that needs no keys and carries no signing guarantee, so local use works today. It is explicit opt-in and never a silent fallback from a failed signature. Packages realized through it are marked unverified in the lock and the Hangar receipt. Every rejection on the signed path stays. The hardcoded test key is deleted rather than promoted. Official signed publication, key custody, the publication URL, rotation and the operator are deferred until a real registry exists.",
+      "supersededBy": "D-JPK-NIXINDEX1",
+      "created": "2026-08-25T19:15:46.068Z",
+      "ratifiedAt": "2026-08-25"
     }
   ],
   "questions": [
@@ -209373,6 +209560,195 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-25T19:15:46.068Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-2157-1",
+      "note": "Jetpack gets a local unofficial package catalog that needs no keys and carries no signing guarantee, so local use works today. It is explicit opt-in and never a silent fallback from a failed signature. Packages realized through it are marked unverified in the lock and the Hangar receipt. Every rejection on the signed path stays. The hardcoded test key is deleted rather than promoted. Official signed publication, key custody, the publication URL, rotation and the operator are deferred until a real registry exists."
+    },
+    {
+      "at": "2026-08-25T19:15:36.017Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c00s3cle",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:15:35.158Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c00s3cle",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-25T19:15:34.792Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#11 The hardcoded jet-test-index-v1 test key is deleted from the"
+    },
+    {
+      "at": "2026-08-25T19:15:34.236Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#10 The user can see which trust tier is in play without reading"
+    },
+    {
+      "at": "2026-08-25T19:15:32.917Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#9 A package realized from an unsigned catalog is marked unveri"
+    },
+    {
+      "at": "2026-08-25T19:15:31.668Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#8 The unsigned tier is explicit opt-in: it is never the defaul"
+    },
+    {
+      "at": "2026-08-25T19:15:31.314Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#7 A local unofficial catalog generated on this machine needs n"
+    },
+    {
+      "at": "2026-08-25T19:15:30.957Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c00s3cle",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-25T19:14:59.994Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cxf6x7ap",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:14:59.609Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cxf6x7ap",
+      "note": "phase,blockedBy,refs,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:14:59.091Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cxf6x7ap",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:14:58.606Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "co323ahi",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:14:58.235Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "co323ahi",
+      "note": "phase,blockedBy,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:14:57.695Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "co323ahi",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:14:57.210Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cs2bko2y",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:14:56.833Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cs2bko2y",
+      "note": "phase,blockedBy,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:14:56.291Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cs2bko2y",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:14:55.822Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cq5blslq",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:14:55.441Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cq5blslq",
+      "note": "phase,blockedBy,refs,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:14:54.918Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cq5blslq",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:14:54.389Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cz2ys9cb",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:14:54.008Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cz2ys9cb",
+      "note": "phase,blockedBy,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:14:53.488Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cz2ys9cb",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:14:53.037Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cp3zupnt",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:14:52.668Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cp3zupnt",
+      "note": "phase,blockedBy,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:14:52.138Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cp3zupnt",
+      "note": ""
+    },
     {
       "at": "2026-08-25T19:09:51.517Z",
       "by": "owner",
@@ -212683,195 +213059,6 @@
       "action": "card.update",
       "ref": "c0fttoym",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:18.854Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c05968om",
-      "note": "#9 Slice-specific: the behavior this card alone owns — “jetos a"
-    },
-    {
-      "at": "2026-08-24T23:26:18.503Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c05968om",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:18.129Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0v3x1cu",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos /"
-    },
-    {
-      "at": "2026-08-24T23:26:17.764Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0v3x1cu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:17.400Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0pllqqs",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos /"
-    },
-    {
-      "at": "2026-08-24T23:26:17.055Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0pllqqs",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:16.686Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ff4rd6",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos p"
-    },
-    {
-      "at": "2026-08-24T23:26:16.346Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0ff4rd6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:15.790Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c08ehiis",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos t"
-    },
-    {
-      "at": "2026-08-24T23:26:15.207Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c08ehiis",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:14.664Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0dwvyof",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos t"
-    },
-    {
-      "at": "2026-08-24T23:26:14.004Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0dwvyof",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:13.654Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0x1bnix",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos a"
-    },
-    {
-      "at": "2026-08-24T23:26:13.316Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0x1bnix",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:12.956Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0njkjtb",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos d"
-    },
-    {
-      "at": "2026-08-24T23:26:12.593Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0njkjtb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:12.208Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0i3v9v2",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos d"
-    },
-    {
-      "at": "2026-08-24T23:26:11.861Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0i3v9v2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:11.507Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0cslm3b",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos d"
-    },
-    {
-      "at": "2026-08-24T23:26:11.152Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0cslm3b",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:10.773Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c07a88xb",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos d"
-    },
-    {
-      "at": "2026-08-24T23:26:10.432Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c07a88xb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:10.063Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0x0ur5x",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos t"
-    },
-    {
-      "at": "2026-08-24T23:26:09.715Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0x0ur5x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:09.360Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rec6tv",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos t"
-    },
-    {
-      "at": "2026-08-24T23:26:09.017Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0rec6tv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:08.639Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0gqfgov",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos p"
     }
   ],
   "nextNum": 368,

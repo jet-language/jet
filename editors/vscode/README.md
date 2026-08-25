@@ -2,7 +2,7 @@
 
 Extension id: **`jet-lang.jet`** (publisher `jet-lang`, name `jet`).
 Generated TextMate syntax highlighting + LSP: diagnostics, quick-fixes,
-formatting, semantic tokens (full/range/delta), inlay hints, navigation,
+formatting (full/range/on-type), semantic tokens (full/range/delta), inlay hints, navigation,
 rename, document links, run/test code lenses, call hierarchy, and type
 hierarchy.
 
@@ -10,7 +10,7 @@ hierarchy.
 
 | Area | Jet LSP 3.17 behavior |
 |---|---|
-| Documents | Incremental UTF-16 range sync, stale-version rejection, diagnostics, full/range formatting, quick fixes |
+| Documents | Incremental UTF-16 range sync, stale-version rejection, diagnostics, full/range/on-type formatting, quick fixes |
 | Completion | Context-aware items, snippets, auto-import edits, signature help |
 | Navigation | Hover, definition, references, prepare-rename/rename, document and workspace symbols across workspace folders |
 | Structure | Folding, occurrence highlights, selection ranges, document links, run/test code lenses |

@@ -1127,9 +1127,9 @@ impl<'a> Parser<'a> {
                     self.func_with_marker_list().map(Item::Func)
                 }
                 TokKind::Ident(_)
-                    if matches!(self.peek2().kind, TokKind::Colon)
+                    if matches!(self.peek2().kind, TokKind::ColonColon)
                         && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::TYPE_OUTPUT)
-                        && matches!(self.peek4().kind, TokKind::ColonColon) =>
+                        && matches!(self.peek4().kind, TokKind::Dot) =>
                 {
                     self.output_def().map(Item::Const)
                 }

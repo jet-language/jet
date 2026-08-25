@@ -804,7 +804,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: None,
+        usage: Some("dev [<file.jet|dir>] [--canvas] [-- <args>]"),
     },
     CommandSpec {
         name: "try",
@@ -1394,6 +1394,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--restart", help: "with dev: always rerun from scratch after a save" },
     FlagSpec { long: "--swap", help: "with dev: hot-swap compatible edits and restart after type changes" },
     FlagSpec { long: "--watch", help: "with run/dev: re-run on dependency changes; --watch=off runs once" },
+    FlagSpec { long: "--canvas", help: "with dev: open the full Canvas IDE over this dev session" },
     // E2-M18 REPL flags.
     FlagSpec { long: "--project", help: "with repl: load package settings and imports from this directory" },
     // E3 interactive scripting flags.

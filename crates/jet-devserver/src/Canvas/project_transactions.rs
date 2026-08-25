@@ -473,7 +473,7 @@ pub(super) fn apply_project_add_target(
         after.push('\n');
     }
     after.push_str(&format!(
-        "{name}: Output :: .{kind}{{ name: \"{}\", entry: {entry} }}\n",
+        "{name} :: Output.{kind}{{ name: \"{}\", entry: {entry} }}\n",
         manifest_string(&name)
     ));
     jet_driver::Package::PackageFacts::parse(&after, manifest_rel.clone())
@@ -565,7 +565,7 @@ pub(super) fn apply_project_create_package(
         _ => "Executable",
     };
     let manifest = format!(
-        "name: \"{}\"\nversion: \"0.1.0\"\n{}: Output :: .{}{{ name: \"{}\", entry: run }}\n",
+        "name: \"{}\"\nversion: \"0.1.0\"\n{} :: Output.{}{{ name: \"{}\", entry: run }}\n",
         name, name, output_kind, name
     );
     jet_driver::Package::PackageFacts::parse(&manifest, manifest_rel.clone())

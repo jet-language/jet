@@ -4237,9 +4237,9 @@ supply the omitted qualifier, so the compact and explicit forms have the same
 meaning:
 
 ```jet
-command: Output :: .Executable.{ name: "greeter", entry: run }
-library: Output :: .Library.{ name: "greeter_core", modules: [Greeter] }
-service: Output :: .Service.{ name: "greeter_api", entry: serve }
+command :: Output.Executable{ name: "greeter", entry: run }
+library :: Output.Library{ name: "greeter_core", modules: [Greeter] }
+service :: Output.Service{ name: "greeter_api", entry: serve }
 ```
 
 This decision reuses the existing named-payload enum construction

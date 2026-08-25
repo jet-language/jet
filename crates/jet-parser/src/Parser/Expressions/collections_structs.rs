@@ -445,7 +445,7 @@ impl<'a> Parser<'a> {
     /// The leading `.` before `{` was already consumed; parses the brace body and
     /// returns `EnumLitArg::Named` entries (S77 field punning applies, matching
     /// struct dot-construction).
-    pub(super) fn enum_lit_named_fields(&mut self) -> Result<(Vec<EnumLitArg>, usize), Diagnostic> {
+    pub(crate) fn enum_lit_named_fields(&mut self) -> Result<(Vec<EnumLitArg>, usize), Diagnostic> {
         self.expect(TokKind::LBrace, "to open a named enum-variant literal")?;
         let mut args = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {

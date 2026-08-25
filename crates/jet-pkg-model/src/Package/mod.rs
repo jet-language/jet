@@ -1941,7 +1941,11 @@ fn parse_common(
                 continue;
             }
         }
-        let Some((field, value)) = split_field(&entry) else {
+        let Some((field, value)) = split_package_binding(&entry)
+            .filter(|(_, operator, _)| *operator == "::")
+            .map(|(field, _, value)| (field.trim().to_string(), value.trim().to_string()))
+            .or_else(|| split_field(&entry))
+        else {
             // D-BUILDSCOPE1: a package's single `fn build` may live beside
             // manifest fields in this same file. It has no `field:` shape,
             // so the ordinary entry loop must step over it (the Driver reads
@@ -1963,7 +1967,7 @@ fn parse_common(
             )));
         };
         seen.insert(field.clone(), value.clone());
-        if let Some(output_value) = value.strip_prefix("Output ::") {
+        if let Some(output_value) = value.strip_prefix("Output.") {
             let output = parse_output_value(&field, output_value.trim())?;
             if facts.outputs.insert(field.clone(), output).is_some() {
                 return Err(PackageParseError::Composition(format!(

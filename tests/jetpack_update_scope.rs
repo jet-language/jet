@@ -41,7 +41,10 @@ fn update_from_nested_cwd_reports_and_uses_project_scope() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("scope: project dependencies"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("scope: project dependencies"),
+        "stderr: {stderr}"
+    );
     assert!(stderr.contains("scope: user tools"), "stderr: {stderr}");
     assert!(
         stderr.contains(project.path.to_string_lossy().as_ref()),

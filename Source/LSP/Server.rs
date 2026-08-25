@@ -354,6 +354,7 @@ fn handle_request(
         "textDocument/codeAction" => code_action_response(server, params, id),
         "textDocument/formatting" => format_response(server, params, id),
         "textDocument/rangeFormatting" => range_format_response(server, params, id),
+        "textDocument/onTypeFormatting" => on_type_format_response(server, params, id),
         "textDocument/completion" => completion_response(server, params, id),
         "textDocument/signatureHelp" => signature_help_response(server, params, id),
         "textDocument/documentSymbol" => document_symbol_response(server, params, id),
@@ -521,6 +522,10 @@ fn initialize_response(id: &JSONValue) -> String {
     "textDocumentSync": 2,
     "documentFormattingProvider": true,
     "documentRangeFormattingProvider": true,
+    "documentOnTypeFormattingProvider": {
+      "firstTriggerCharacter": "\n",
+      "moreTriggerCharacter": ["}"]
+    },
     "codeActionProvider": true,
     "completionProvider": {
       "triggerCharacters": ["."],
@@ -1036,6 +1041,235 @@ fn range_format_response(
             json_escape(&new_text)
         ),
     ))
+}
+
+fn on_type_format_response(
+    server: &Server,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let position = json_get(params, "position")?;
+    let position = LspPos {
+        line: json_u32(json_get(position, "line")?)?,
+        character: json_u32(json_get(position, "character")?)?,
+    };
+    let trigger = json_get(params, "ch").and_then(json_str)?;
+    let tokens = server.lex(doc);
+    let edits = on_type_format_edits(&doc.text, &tokens, position, trigger);
+    let edits = edits
+        .iter()
+        .map(|edit| {
+            format!(
+                r#"{{"range":{},"newText":"{}"}}"#,
+                range_json(byte_span_to_range(&doc.text, edit.span)),
+                json_escape(&edit.new_text)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(response(id, &format!("[{}]", edits)))
+}
+
+#[derive(Clone, Copy)]
+struct TokenBracePair {
+    open: Span,
+    close: Span,
+}
+
+fn on_type_format_edits(
+    src: &str,
+    tokens: &[Token],
+    position: LspPos,
+    trigger: &str,
+) -> Vec<crate::Diagnostics::TextEdit> {
+    let offset = lsp_pos_to_offset(src, position);
+    let Some(trigger_start) = offset.checked_sub(1) else {
+        return Vec::new();
+    };
+    if src.get(trigger_start..offset) != Some(trigger)
+        || opaque_trigger(tokens, trigger_start, offset)
+    {
+        return Vec::new();
+    }
+
+    let pairs = token_brace_pairs(tokens);
+    if trigger == "\n" {
+        let Some(active) = pairs
+            .iter()
+            .filter(|pair| pair.open.end <= offset && offset <= pair.close.start)
+            .min_by_key(|pair| pair.close.end - pair.open.start)
+            .copied()
+        else {
+            return Vec::new();
+        };
+        return newline_format_edits(src, active, position, &pairs);
+    }
+    if trigger != "}" {
+        return Vec::new();
+    }
+    let Some(pair) = pairs
+        .iter()
+        .find(|pair| pair.close.start == trigger_start)
+        .copied()
+    else {
+        return Vec::new();
+    };
+    closing_brace_format_edits(src, pair)
+}
+
+fn opaque_trigger(tokens: &[Token], start: usize, end: usize) -> bool {
+    tokens.iter().any(|token| {
+        token.span.start <= start
+            && end <= token.span.end
+            && matches!(
+                &token.kind,
+                TokKind::Str(_) | TokKind::LineComment(_) | TokKind::BlockComment(_)
+            )
+    })
+}
+
+fn token_brace_pairs(tokens: &[Token]) -> Vec<TokenBracePair> {
+    let mut opens = Vec::new();
+    let mut pairs = Vec::new();
+    for token in tokens {
+        match &token.kind {
+            TokKind::LBrace => opens.push(token.span),
+            TokKind::RBrace => {
+                if let Some(open) = opens.pop() {
+                    pairs.push(TokenBracePair {
+                        open,
+                        close: token.span,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    pairs
+}
+
+fn newline_format_edits(
+    src: &str,
+    pair: TokenBracePair,
+    position: LspPos,
+    pairs: &[TokenBracePair],
+) -> Vec<crate::Diagnostics::TextEdit> {
+    let line_start = match line_boundary(src, position.line) {
+        Some(start) => start,
+        None => return Vec::new(),
+    };
+    let line_end = line_content_end(src, line_start);
+    let existing_indent_end = leading_indent_end(src, line_start, line_end);
+    let base_indent = block_indent(src, pair.open.start);
+    let close_on_line = pairs.iter().find(|candidate| {
+        candidate.open.start == pair.open.start
+            && candidate.close.start >= line_start
+            && candidate.close.start < line_end
+    });
+
+    let mut edits = Vec::new();
+    let first = if existing_indent_end < line_end {
+        existing_indent_end
+    } else {
+        line_end
+    };
+    let expected_indent = if first < line_end && src.as_bytes().get(first) == Some(&b'}') {
+        if pair.close.start != first {
+            return Vec::new();
+        }
+        base_indent.clone()
+    } else {
+        format!("{}    ", base_indent)
+    };
+    if src.get(line_start..existing_indent_end) != Some(expected_indent.as_str()) {
+        edits.push(crate::Diagnostics::TextEdit {
+            span: Span::new(line_start, existing_indent_end),
+            new_text: expected_indent,
+        });
+    }
+
+    if let Some(close) = close_on_line {
+        if close.close.start > existing_indent_end {
+            let gap_start = src[line_start..close.close.start]
+                .char_indices()
+                .rev()
+                .take_while(|(_, ch)| *ch == ' ' || *ch == '\t')
+                .last()
+                .map(|(index, _)| line_start + index)
+                .unwrap_or(close.close.start);
+            let line_break = line_ending_before(src, line_start);
+            edits.push(crate::Diagnostics::TextEdit {
+                span: Span::new(gap_start, close.close.start),
+                new_text: format!("{}{}", line_break, base_indent),
+            });
+        }
+    }
+    edits
+}
+
+fn closing_brace_format_edits(
+    src: &str,
+    pair: TokenBracePair,
+) -> Vec<crate::Diagnostics::TextEdit> {
+    let line = byte_offset_to_lsp(src, pair.close.start).line;
+    let Some(line_start) = line_boundary(src, line) else {
+        return Vec::new();
+    };
+    let line_end = line_content_end(src, line_start);
+    let existing_indent_end = leading_indent_end(src, line_start, line_end);
+    if existing_indent_end != pair.close.start {
+        return Vec::new();
+    }
+    let expected_indent = block_indent(src, pair.open.start);
+    if src.get(line_start..existing_indent_end) == Some(expected_indent.as_str()) {
+        return Vec::new();
+    }
+    vec![crate::Diagnostics::TextEdit {
+        span: Span::new(line_start, existing_indent_end),
+        new_text: expected_indent,
+    }]
+}
+
+fn block_indent(src: &str, offset: usize) -> String {
+    let line = byte_offset_to_lsp(src, offset).line;
+    let Some(line_start) = line_boundary(src, line) else {
+        return String::new();
+    };
+    let line_end = line_content_end(src, line_start);
+    let indent_end = leading_indent_end(src, line_start, line_end);
+    src[line_start..indent_end].to_string()
+}
+
+fn line_content_end(src: &str, line_start: usize) -> usize {
+    let bytes = src.as_bytes();
+    let mut index = line_start;
+    while index < bytes.len() && !matches!(bytes[index], b'\r' | b'\n') {
+        index += 1;
+    }
+    index
+}
+
+fn leading_indent_end(src: &str, line_start: usize, line_end: usize) -> usize {
+    let bytes = src.as_bytes();
+    let mut index = line_start;
+    while index < line_end && matches!(bytes[index], b' ' | b'\t') {
+        index += 1;
+    }
+    index
+}
+
+fn line_ending_before(src: &str, line_start: usize) -> &'static str {
+    if line_start >= 2
+        && src.as_bytes().get(line_start - 2..line_start) == Some(&b"\r\n"[..])
+    {
+        "\r\n"
+    } else {
+        "\n"
+    }
 }
 
 fn format_requested_lines(src: &str, requested: LspRange) -> Option<(LspRange, String)> {
@@ -3286,6 +3520,122 @@ mod project_part_tests {
         assert!(edited.ends_with("fn two(){\nprint(2)\n}\n"), "{edited}");
         assert_eq!(range.start, requested.start);
         assert_eq!(range.end, requested.end);
+    }
+
+    fn apply_on_type_edits(src: &str, edits: &[crate::Diagnostics::TextEdit]) -> String {
+        let mut edits = edits.to_vec();
+        edits.sort_by_key(|edit| std::cmp::Reverse(edit.span.start));
+        let mut out = src.to_string();
+        for edit in edits {
+            let range = byte_span_to_range(&out, edit.span);
+            out = apply_lsp_edit(&out, range, None, &edit.new_text).expect("valid on-type edit");
+        }
+        out
+    }
+
+    fn apply_on_type(src: &str, position: LspPos, trigger: &str) -> String {
+        let (tokens, _) = crate::Lexer::lex(src);
+        let edits = on_type_format_edits(src, &tokens, position, trigger);
+        apply_on_type_edits(src, &edits)
+    }
+
+    #[test]
+    fn on_type_newline_indents_inline_empty_nested_and_unicode_blocks() {
+        assert_eq!(
+            apply_on_type(
+                "fn run() {\n statement }\n",
+                LspPos {
+                    line: 1,
+                    character: 0,
+                },
+                "\n",
+            ),
+            "fn run() {\n    statement\n}\n"
+        );
+        assert_eq!(
+            apply_on_type(
+                "fn run() {\n}\n",
+                LspPos {
+                    line: 1,
+                    character: 0,
+                },
+                "\n",
+            ),
+            "fn run() {\n    \n}\n"
+        );
+        assert_eq!(
+            apply_on_type(
+                "fn run() {\n    if ok {\n value }\n}\n",
+                LspPos {
+                    line: 2,
+                    character: 0,
+                },
+                "\n",
+            ),
+            "fn run() {\n    if ok {\n        value\n    }\n}\n"
+        );
+        assert_eq!(
+            apply_on_type(
+                "fn run() {\r\n café }\r\n",
+                LspPos {
+                    line: 1,
+                    character: 0,
+                },
+                "\n",
+            ),
+            "fn run() {\r\n    café\r\n}\r\n"
+        );
+    }
+
+    #[test]
+    fn on_type_closing_brace_outdents_only_matching_block() {
+        let source = "fn run() {\n    value\n        }\n";
+        let close = source.rfind('}').expect("closing brace");
+        let position = byte_offset_to_lsp(source, close + 1);
+        assert_eq!(
+            apply_on_type(source, position, "}"),
+            "fn run() {\n    value\n}\n"
+        );
+    }
+
+    #[test]
+    fn on_type_ignores_opaque_and_unmatched_contexts() {
+        for (source, position) in [
+            (
+                "// {\nvalue\n",
+                LspPos {
+                    line: 1,
+                    character: 0,
+                },
+            ),
+            (
+                "fn run() {\n value\n",
+                LspPos {
+                    line: 1,
+                    character: 0,
+                },
+            ),
+            (
+                "fn run() { /* {\nvalue } */ }\n",
+                LspPos {
+                    line: 1,
+                    character: 0,
+                },
+            ),
+            (
+                "fn run() { \"\"\"{\nvalue}\"\"\" }\n",
+                LspPos {
+                    line: 1,
+                    character: 0,
+                },
+            ),
+        ] {
+            assert_eq!(
+                apply_on_type(source, position, "\n"),
+                source,
+                "source should not receive an opaque or unmatched edit: {source:?}"
+            );
+        }
     }
 
     #[test]

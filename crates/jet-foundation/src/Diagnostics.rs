@@ -1278,7 +1278,7 @@ mod renderer_tests {
                 "  \x1b[2;37m--> main.jet:1:2\x1b[0m\n",
                 "    |\n",
                 "  1 | abc\n",
-                "    | \x1b[31m^^\x1b[0m\n",
+                "    |  \x1b[31m^^\x1b[0m\n",
                 " \x1b[1mWhy:\x1b[0m error why\n",
                 " \x1b[1mFix:\x1b[0m error fix\n",
             )
@@ -1290,7 +1290,7 @@ mod renderer_tests {
                 "  \x1b[2;37m--> main.jet:1:2\x1b[0m\n",
                 "    |\n",
                 "  1 | abc\n",
-                "    | \x1b[33m^^\x1b[0m\n",
+                "    |  \x1b[33m^^\x1b[0m\n",
                 " \x1b[1mWhy:\x1b[0m warning why\n",
                 " \x1b[1mFix:\x1b[0m warning fix\n",
             )
@@ -1307,7 +1307,7 @@ mod renderer_tests {
                 "  --> main.jet:1:2\n",
                 "    |\n",
                 "  1 | abc\n",
-                "    | ^^\n",
+                "    |  ^^\n",
                 " Why: error why\n",
                 " Fix: error fix\n",
             )
@@ -1319,7 +1319,7 @@ mod renderer_tests {
                 "  --> main.jet:1:2\n",
                 "    |\n",
                 "  1 | abc\n",
-                "    | ^^\n",
+                "    |  ^^\n",
                 " Why: warning why\n",
                 " Fix: warning fix\n",
             )
@@ -1342,7 +1342,7 @@ mod renderer_tests {
                 "  --> wide.jet:1:2\n",
                 "    |\n",
                 "  1 | a界b\n",
-                "    | ^^\n",
+                "    |  ^^\n",
                 " Why: error why\n",
                 " Fix: error fix\n",
             )

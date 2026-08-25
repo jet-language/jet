@@ -3911,14 +3911,13 @@ fn arrow_in_block_if_comment_does_not_create_inline_guard() {
 }
 #[test]
 fn fmt_output_callable_stability() {
-    let source = "app: Output :: .Executable{ name: \"demo\", entry: start };\n\nfn start() {}\n";
+    let source = "app :: Output.Executable{ name: \"demo\", entry: start }\n\nfn start() {}\n";
     let once = jet::format_source(source).expect("typed Output should format");
     for token in [
-        "app: Output ::",
-        ".Executable{",
+        "app ::",
+        "Output.Executable{",
         "name: \"demo\"",
         "entry: start",
-        ";",
     ] {
         assert!(
             once.contains(token),

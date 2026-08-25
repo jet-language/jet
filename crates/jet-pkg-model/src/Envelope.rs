@@ -721,7 +721,7 @@ fn try_output_hash_of_with_hook(
                 link.seen,
                 allowed_peers,
                 hangar.display(),
-                shared_cas.display(),
+                format_args!("{shared_cas:?}"),
                 link.cas_key,
             );
         }

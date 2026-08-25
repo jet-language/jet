@@ -1981,11 +1981,8 @@ impl<'a> Fmt<'a> {
         }
         if matches!(&c.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT) {
             self.write(&c.name);
-            self.write(": ");
-            self.write(Syntax::TYPE_OUTPUT);
             self.write(" :: ");
             self.fmt_expr(&c.value, Prec::OrFallback);
-            self.write(";");
             return;
         }
         if matches!(&c.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT_DEFAULTS) {

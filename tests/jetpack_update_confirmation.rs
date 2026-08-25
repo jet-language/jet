@@ -54,9 +54,7 @@ fn update_noninteractive_requires_yes_and_yes_applies() {
     let applied_stderr = String::from_utf8_lossy(&applied.stderr);
     assert!(applied_stderr.contains("applying plan (--yes)"));
     assert!(!applied_stderr.contains("Apply?"));
-    assert!(
-        fs::read_to_string(project.join(".jet/lock"))
-            .unwrap()
-            .contains("exact = \"github:acme/tools#v1.2.0\"")
-    );
+    assert!(fs::read_to_string(project.join(".jet/lock"))
+        .unwrap()
+        .contains("exact = \"github:acme/tools#v1.2.0\""));
 }

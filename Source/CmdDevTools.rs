@@ -155,6 +155,53 @@ fn exit_if_internal_fault(diagnostics: &[jet::Diagnostics::Diagnostic]) {
     }
 }
 
+pub(crate) fn open_canvas_browser(url: &str) {
+    let explicit = std::env::var_os("JET_CANVAS_BROWSER")
+        .filter(|value| !value.is_empty())
+        .or_else(|| std::env::var_os("BROWSER").filter(|value| !value.is_empty()));
+    let mut command = if let Some(browser) = explicit {
+        let mut command = Command::new(browser);
+        command.arg(url);
+        command
+    } else {
+        #[cfg(target_os = "macos")]
+        {
+            let mut command = Command::new("open");
+            command.arg(url);
+            command
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "start", "", url]);
+            command
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            let mut command = Command::new("xdg-open");
+            command.arg(url);
+            command
+        }
+    };
+    if let Err(error) = command.spawn() {
+        eprintln!("Canvas browser launch failed: {error}");
+        eprintln!("Canvas: {url}");
+    }
+}
+
+fn print_canvas_hint(file: &str, mode: OutputMode, printed: &mut bool) {
+    if *printed
+        || mode.json
+        || mode.quiet
+        || !std::io::stdin().is_terminal()
+        || !std::io::stdout().is_terminal()
+    {
+        return;
+    }
+    println!("Canvas: jet dev {file} --canvas");
+    *printed = true;
+}
+
 /// `jet dev <file>` — the E2-M4 watch/interpret loop (D-DEV4), extended by c77
 /// with three-mode routing (D-DEVMODE1=A) and hot-swap/restart (D-HOTSWAP1=B).
 /// Re-checks and re-runs on dependency-aware invalidation (#439 / E3-UL6),
@@ -173,6 +220,8 @@ pub(crate) fn run_dev(
     setting_overrides: &BTreeMap<String, String>,
     program_args: &[&String],
     record_name: Option<&str>,
+    canvas: bool,
+    canvas_port: Option<u16>,
 ) {
     let mut runtime_args = Vec::with_capacity(program_args.len() + 1);
     runtime_args.push(file.to_string());
@@ -189,6 +238,8 @@ pub(crate) fn run_dev(
             setting_overrides,
             program_args,
             record_name,
+            canvas,
+            canvas_port,
         );
     });
 }
@@ -204,12 +255,26 @@ fn run_dev_inner(
     setting_overrides: &BTreeMap<String, String>,
     program_args: &[&String],
     record_name: Option<&str>,
+    canvas: bool,
+    canvas_port: Option<u16>,
 ) {
     let path = Path::new(file);
     if !path.exists() {
         crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
         exit(ExitCodes::USER_ERROR);
     }
+
+    let canvas_host = if canvas && policy != WatchPolicy::Once {
+        match jet_devserver::WebHost::bind(file, false, canvas_port) {
+            Ok(host) => Some(host),
+            Err(message) => {
+                eprintln!("{message}");
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
+    } else {
+        None
+    };
 
     // D-DEVR-PROD1=A / I9: native `jet dev` and `jet run --watch` use the
     // same receipt context as one-shot `jet run`; the execution tier only
@@ -267,6 +332,22 @@ fn run_dev_inner(
         profile,
         setting_overrides,
     );
+    let mut canvas_hint_printed = false;
+    if let Some(host) = canvas_host.as_ref() {
+        host.start_canvas();
+        if prev_bundle.is_some() {
+            host.mark_ready(0, false);
+        } else {
+            host.mark_error(
+                "E2105".to_string(),
+                format!("Canvas kept the last-good program; `{file}` is not ready"),
+                false,
+            );
+        }
+        open_canvas_browser(&host.canvas_url());
+    } else if prev_bundle.is_some() {
+        print_canvas_hint(file, mode, &mut canvas_hint_printed);
+    }
     // #439 / E3-UL6: dependency-aware watch session shared with `jet run --watch`.
     let mut watch = match jet_devserver::WatchSession::open(path) {
         Ok(watch) => watch,
@@ -310,6 +391,9 @@ fn run_dev_inner(
                         profile,
                         setting_overrides,
                     );
+                    if prev_bundle.is_some() {
+                        print_canvas_hint(file, mode, &mut canvas_hint_printed);
+                    }
                 }
                 DevSessionAction::RestartFresh => {
                     session = jet_devserver::SessionSnapshot {
@@ -341,6 +425,9 @@ fn run_dev_inner(
                         profile,
                         setting_overrides,
                     );
+                    if prev_bundle.is_some() {
+                        print_canvas_hint(file, mode, &mut canvas_hint_printed);
+                    }
                 }
                 DevSessionAction::Tests => {
                     failed_claims = run_dev_tests(file, &[]);
@@ -372,6 +459,9 @@ fn run_dev_inner(
             if receipt.change_kinds.iter().all(|k| *k == "stale") {
                 continue;
             }
+            if let Some(host) = canvas_host.as_ref() {
+                host.mark_building();
+            }
             let next = render_dev_change(
                 file,
                 try_anyway,
@@ -383,6 +473,20 @@ fn run_dev_inner(
                 profile,
                 setting_overrides,
             );
+            if let Some(host) = canvas_host.as_ref() {
+                if next.is_some() {
+                    host.mark_ready(0, true);
+                } else {
+                    host.mark_error(
+                        "E2105".to_string(),
+                        format!("Canvas kept the last-good program after `{file}` failed to reload"),
+                        true,
+                    );
+                }
+            }
+            if next.is_some() {
+                print_canvas_hint(file, mode, &mut canvas_hint_printed);
+            }
             // Transactional hot replacement: commit only when the new bundle
             // loaded; otherwise keep the prior session valid.
             let mut txn = jet_devserver::HotReplaceTxn::begin(session.clone());
