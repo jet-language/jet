@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2188,
-    "rev": 44596,
+    "rev": 44606,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -146017,8 +146017,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T12:08:39.571Z",
-      "updated": "2026-08-24T21:10:22.785Z",
-      "updatedBy": "Main",
+      "updated": "2026-08-25T01:20:57.863Z",
+      "updatedBy": "orchestrator",
       "completedAt": "2026-08-24T21:10:22.785Z"
     },
     {
@@ -146089,8 +146089,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T12:08:41.716Z",
-      "updated": "2026-08-24T21:50:18.491Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-25T01:20:57.028Z",
+      "updatedBy": "orchestrator"
     },
     {
       "id": "c01fm9ou",
@@ -146101,58 +146101,64 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m09-native-nixpkgs-dogfood",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "Index-backed native realization lands: signed index resolve, native closure admission, lock pin writeback, precise E1350 for a damaged closure, and exit 2 for an unprovidable package. Proven by tests/jetpack_engine.rs:4147 across all four phases, test result: ok. 2 passed; 0 failed."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "default.[ripgrep] in a minimal env.jet enters from a cold root and runs rg --version with no nix, no fixture directory and no host /nix/store",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-24T12:08:44.297Z"
+          "evidence": "Passing test indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object (tests/jetpack_engine.rs:4147) runs jetpack enter --trust -- rg --version from a cold root inside the no-host-store namespace (tests/support/no_nix_namespace.rs) with PATH empty, JETPACK_FIXTURES removed and /nix/store hidden; the child prints ripgrep 15.2.0. No nix binary is invoked at any point.",
+          "at": "2026-08-25T01:20:06.690Z"
         },
         {
           "n": 2,
           "text": "Realized.references is populated and the closure graph records every transitive reference",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-24T12:08:44.656Z"
+          "evidence": "Realized.references is built from every admitted objects direct_reference_digests in realization_from_index (crates/jetpack/src/Provider.rs:1692-1703), which rejects an empty digest; the parent asserts the closure graph records the transitive reference at tests/jetpack_engine.rs:4292-4298.",
+          "at": "2026-08-25T01:20:07.405Z"
         },
         {
           "n": 3,
           "text": "The record carries both the upstream cache proof and the index proof",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-24T12:08:44.997Z"
+          "evidence": "The producer facts carry the upstream cache proof (nix.cache.closure.receipt.sha256) alongside the index proof (nix.index.proof.v1, nix.index.record.sha256, nix.index.target.sha256, nix.index.manifest.sha256) at crates/jetpack/src/Provider.rs:1571-1597.",
+          "at": "2026-08-25T01:20:07.760Z"
         },
         {
           "n": 4,
           "text": "With network access removed the same closure still runs offline from the Hangar",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-24T12:08:45.341Z"
+          "evidence": "The offline-reuse phase passes with the network namespace disabled. The indexed realization now publishes its lock pin through record_nix_lock_after_store (crates/jetpack/src/Provider.rs:990), so Provider::cache_expectation can rebuild the identity and realize.rs:154-170 serves the closure from the Hangar instead of failing E1276.",
+          "at": "2026-08-25T01:20:08.126Z"
         },
         {
           "n": 5,
           "text": "Deleting one transitive object makes the offline run fail naming that exact reference, and an online repair fetches only that object",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-24T12:08:45.715Z"
+          "evidence": "The offline-missing phase deletes one transitive object and the run fails with E1350 naming /nix/store/cccccccccccccccccccccccccccccccc-ripgrep-runtime-1.0, exit 2; a lock-pinned reference now reaches the indexed provider (locked_pin, crates/jetpack/src/CLI/realize.rs:182-195) instead of the generic E1276, and RefOutcome::Unavailable makes an unprovidable package exit 2. The online-repair phase then refetches only the missing object, asserted by the per-object request counts at tests/jetpack_engine.rs:4323-4337. Full result: test result: ok. 2 passed; 0 failed.",
+          "at": "2026-08-25T01:20:08.471Z"
         }
       ],
       "refs": [],
@@ -146160,8 +146166,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T12:08:43.932Z",
-      "updated": "2026-08-24T12:08:45.715Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-25T01:20:09.418Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-25T01:20:09.418Z"
     },
     {
       "id": "c025wleh",
@@ -146172,13 +146179,19 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m09-native-nixpkgs-dogfood",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "Hangar-only projection lands: the rootless namespace projection runs with the host /nix/store hidden, proven by nix_projection_runs_in_rootless_namespace_without_host_store."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -146201,11 +146214,11 @@
         {
           "n": 3,
           "text": "Linux proof runs in a rootless user namespace on a machine with no /nix/store",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-24T12:08:47.303Z"
+          "evidence": "Passing test Store::Tests::tests::nix_projection::nix_projection_runs_in_rootless_namespace_without_host_store proves the projection runs with the host /nix/store hidden.",
+          "at": "2026-08-25T01:20:17.307Z"
         },
         {
           "n": 4,
@@ -146222,8 +146235,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T12:08:46.153Z",
-      "updated": "2026-08-24T23:23:28.079Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-25T01:20:26.758Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-25T01:20:26.757Z"
     },
     {
       "id": "c0yfdicc",
@@ -205576,6 +205590,54 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-25T00:12:18.721Z"
+    },
+    {
+      "id": "D-JPK-NIXINDEX1",
+      "cardId": "c00s3cle",
+      "group": "other",
+      "title": "Signed nixpkgs index selects and proves package identity",
+      "gist": "Record how Jetpack trusts a signed index to name a nixpkgs package.",
+      "lesson": "Jetpack must know which store path a nixpkgs name points at before it can fetch anything. It reads that from a signed index that records one channel, one revision, one system, and the attrs it can prove. Jetpack refuses an index whose manifest, target, signature, or canonical record fails verification. It also refuses an attr the index does not cover, rather than guessing.",
+      "explainer": "",
+      "story": "Ana asks for ripgrep. Jetpack looks it up in the signed index, checks the signature, and gets an exact store path. When she asks for an attr the index does not carry, Jetpack says so plainly instead of failing later.",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-08-25T01:20:57.028Z"
+    },
+    {
+      "id": "D-JPK-NIXCACHE1",
+      "cardId": "c01b5i3v",
+      "group": "other",
+      "title": "Native admission of a signed Nix cache closure",
+      "gist": "Record how Jetpack takes bytes from a Nix binary cache without Nix.",
+      "lesson": "Once Jetpack knows the store path, it fetches the closure straight from the standard Nix binary cache. It parses narinfo itself, decodes the compressed archive itself, and checks the upstream signature itself. Every object in the closure lands in the Hangar under Jetpack control. No Nix executable takes part, so this works on a machine that has never had Nix.",
+      "explainer": "",
+      "story": "Milo has no Nix installed. Jetpack still fetches ripgrep and everything it depends on, verifies each object, and puts them in the Hangar where Jetpack owns them.",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-08-25T01:20:57.863Z"
     }
   ],
   "questions": [
@@ -207594,6 +207656,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-25T01:20:57.863Z",
+      "by": "orchestrator",
+      "action": "decision.add",
+      "ref": "D-JPK-NIXCACHE1",
+      "note": "Native admission of a signed Nix cache closure (draft)"
+    },
+    {
+      "at": "2026-08-25T01:20:57.028Z",
+      "by": "orchestrator",
+      "action": "decision.add",
+      "ref": "D-JPK-NIXINDEX1",
+      "note": "Signed nixpkgs index selects and proves package identity (draft)"
+    },
+    {
+      "at": "2026-08-25T01:20:26.758Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c025wleh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T01:20:17.308Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c025wleh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-25T01:20:09.418Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c01fm9ou",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T01:20:08.471Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01fm9ou",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-25T01:20:08.127Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01fm9ou",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-25T01:20:07.760Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01fm9ou",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-25T01:20:07.406Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01fm9ou",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-25T01:20:06.690Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c01fm9ou",
+      "note": "#1"
+    },
     {
       "at": "2026-08-25T00:24:56.239Z",
       "by": "owner",
@@ -211023,76 +211155,6 @@
       "action": "card.criteria-meet",
       "ref": "c0y7iumo",
       "note": "#9"
-    },
-    {
-      "at": "2026-08-24T21:10:16.646Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y7iumo",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-24T21:10:16.276Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y7iumo",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-24T21:10:15.835Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y7iumo",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-24T21:10:15.376Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y7iumo",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-24T21:10:14.900Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y7iumo",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T21:10:14.435Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y7iumo",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T21:10:13.933Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y7iumo",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T21:10:13.473Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y7iumo",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T21:10:13.122Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00s3cle",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-24T21:10:12.764Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00s3cle",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
