@@ -251,12 +251,15 @@ impl<'a> Checker<'a> {
         let def_span = self.record_import_alias_use(alias);
         if let Some(def_span) = def_span {
             let module_path = self.module_path.to_string();
+            let identity = self
+                .name_ledger
+                .alias_identity(self.module_idx, def_span);
             self.record_reference_anchor_with_identity(
                 span,
                 &module_path,
                 "import_alias",
                 def_span,
-                Some(format!("import:{alias}")),
+                identity,
             );
         }
     }

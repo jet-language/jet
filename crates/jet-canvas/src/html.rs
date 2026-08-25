@@ -82,9 +82,23 @@ body:not(.is-debug-active) #debug-menu[open] .debug-controls { display: grid; }
 body:not(.is-debug-active) .debug-controls > :not(#debug-start) { display: none; }
 .debug-controls select { flex: 1 1 130px; min-width: 112px; max-width: 220px; }
 .debug-controls button { min-width: 30px; padding: 0 7px; }
-#workbench { min-height: 0; min-width: 0; position: relative; display: grid; grid-template-columns: minmax(156px, 15vw) minmax(0, 1fr) minmax(238px, 20vw); background: #05070b; }
+#workbench { min-height: 0; min-width: 0; position: relative; display: grid; grid-template-columns: minmax(156px, 15vw) minmax(0, 1fr) minmax(238px, 20vw); grid-template-rows: auto minmax(0, 1fr); background: #05070b; }
+#workbench-header { grid-column: 1 / -1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 7px 12px; border-bottom: 1px solid #23344a; background: linear-gradient(180deg, #101a27, #0b121c); box-shadow: inset 0 1px 0 rgba(255,255,255,.03); }
+.workbench-heading { display: grid; gap: 1px; min-width: 142px; }
+.workbench-heading strong { color: #f8fbff; font-size: 13px; letter-spacing: .04em; }
+.workbench-heading span { color: #7895b8; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.workbench-map { min-width: 0; display: flex; align-items: center; gap: 6px; overflow: auto hidden; scrollbar-width: thin; }
+.workbench-map span, .workbench-session { display: flex; align-items: baseline; gap: 6px; min-width: max-content; padding: 5px 8px; border: 1px solid #29415d; border-radius: 4px; background: rgba(7,14,23,.72); }
+.workbench-map b, .workbench-session > b { color: #8fb2dc; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.workbench-map span span { color: #d7e4f7; font-size: 11px; letter-spacing: 0; text-transform: none; }
+.workbench-session { justify-content: end; gap: 8px; border-color: #365a7f; }
+#workbench-header #session-identity { max-width: 220px; overflow: hidden; color: #cfe9ff; text-overflow: ellipsis; white-space: nowrap; }
+#workbench-header #run-hud { position: static; top: auto; right: auto; z-index: auto; display: block; min-width: 132px; margin: 0; padding: 0; border: 0; background: transparent; color: #9fb9d8; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; white-space: nowrap; }
+#workbench-header #run-hud.is-running { display: block; color: #fef3c7; }
 .side { min-width: 0; overflow: hidden auto; background: #0b1017; border-right: 1px solid #23344a; box-shadow: inset -1px 0 0 rgba(255,255,255,.03); }
-.right { border-right: 0; border-left: 1px solid #23344a; box-shadow: inset 1px 0 0 rgba(255,255,255,.03); display: grid; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
+.right { border-right: 0; border-left: 1px solid #23344a; box-shadow: inset 1px 0 0 rgba(255,255,255,.03); display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; overflow: hidden; }
+#right-drawer #details { min-height: 0; overflow: auto; }
+#right-drawer #preview-panel { min-height: 0; }
 .panel { border-bottom: 1px solid #23344a; padding: clamp(9px, 1.2vw, 13px); }
 .panel h2 { margin: 0 0 10px; color: #eaf5ff; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
 .component-tree-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
@@ -105,6 +119,8 @@ body:not(.is-debug-active) .debug-controls > :not(#debug-start) { display: none;
 .panel summary .count { justify-self: end; }
 .panel details > :not(summary) { margin-top: 8px; }
 .graph-list, .search-results, .project-list, .variable-list { display: grid; gap: 6px; }
+#project-panel details > #project-rail { max-height: min(26vh, 250px); overflow: auto; padding-right: 3px; scrollbar-width: thin; }
+#output-panel details > #output-list { max-height: min(18vh, 170px); overflow: auto; padding-right: 3px; scrollbar-width: thin; }
 .project-section { display: grid; gap: 7px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #22364d; }
 .project-section h3 { margin: 0; color: #8fb2dc; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .09em; text-transform: uppercase; }
 .library-panel { gap: 8px; }
@@ -392,6 +408,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 .problem-empty { color: #8fb2dc; border: 1px dashed #334155; border-radius: 6px; padding: 8px; font: 11px "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace; }
 @media (max-width: 1120px) {
   #workbench { grid-template-columns: minmax(142px, 18vw) minmax(0, 1fr) minmax(200px, 23vw); }
+  #workbench-header { gap: 8px; }
   #brand span { display: none; }
   #topbar { gap: 6px; }
   .debug-controls { flex-basis: 280px; }
@@ -399,6 +416,9 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 }
 @media (max-width: 900px) {
   #workbench { grid-template-columns: minmax(0, 1fr); }
+  #workbench-header { grid-template-columns: auto minmax(0, 1fr); }
+  .workbench-session { justify-self: end; }
+  .workbench-map { grid-column: 1 / -1; grid-row: 2; }
   #canvas-dock { display: flex; }
   #graph-strip { top: 56px; left: 10px; right: 10px; max-width: calc(100% - 20px); }
   #wire-status { top: 104px; left: 10px; right: 10px; max-width: none; }
@@ -411,6 +431,9 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 }
 @media (max-width: 640px) {
   #workbench { grid-template-columns: 1fr; }
+  #workbench-header { grid-template-columns: 1fr; gap: 5px; }
+  .workbench-session { justify-self: stretch; justify-content: start; }
+  .workbench-map { grid-column: auto; grid-row: auto; }
   .side { width: min(310px, calc(100vw - 42px)); }
   .side:not(.is-drawer-open) { display: none; }
   #minimap { display: none; }
@@ -439,8 +462,8 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
     </div>
     <div class="toolbar-group" aria-label="Run controls">
       <button id="check-current" title="Check current source" aria-label="Check current source">Check</button>
-      <button id="run-current" class="primary" title="Run current entry" aria-label="Run current entry">Run</button>
-      <details id="debug-menu" class="toolbar-menu"><summary class="icon-button" title="Debug controls" aria-label="Debug controls"><svg viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><path d="M7 10h10"/><path d="M12 6v14"/><path d="M5 14h14"/><path d="M8 22h8"/><path d="M4 18l4-4"/><path d="M20 18l-4-4"/></svg></summary><div class="toolbar-popover debug-controls">
+      <button id="run-current" class="primary" title="Run current entry" aria-label="Run current entry" data-capability="runtime_output" hidden>Run</button>
+      <details id="debug-menu" class="toolbar-menu" data-capability="runtime_output" hidden><summary class="icon-button" title="Debug controls" aria-label="Debug controls"><svg viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><path d="M7 10h10"/><path d="M12 6v14"/><path d="M5 14h14"/><path d="M8 22h8"/><path d="M4 18l4-4"/><path d="M20 18l-4-4"/></svg></summary><div class="toolbar-popover debug-controls">
       <select id="debug-session" aria-label="Debug session"><option value="none">No live session</option></select>
       <span id="debug-liveness" class="tag" role="status">Runtime idle</span>
       <button id="debug-start" type="button" aria-label="Start debug">Start debug</button>
@@ -475,29 +498,38 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
     <span id="jump">loading graph</span>
   </header>
   <main id="workbench">
+    <header id="workbench-header" aria-label="Jet project workbench">
+      <div class="workbench-heading"><span>Project IDE</span><strong>Canvas Workbench</strong></div>
+      <div class="workbench-map" aria-label="Workbench regions">
+        <span><b>Project</b><span>Files · Outputs</span></span>
+        <span><b>Editor</b><span>Code · Graph</span></span>
+        <span><b>Runtime</b><span>Preview · Problems</span></span>
+      </div>
+      <div class="workbench-session"><b>Session</b><span id="session-identity" class="tag" data-session-id="">starting session</span><div id="run-hud" aria-live="polite" data-capability="runtime_output" hidden>run idle</div></div>
+    </header>
     <aside id="left-drawer" class="side">
       <section id="canvas-panel" class="panel">
         <div id="canvas-component-tree" data-canvas-component-tree role="tree" aria-label="My Canvas">
           <div class="component-tree-head"><h2>My Canvas</h2><span class="tag">source tree</span></div>
-          <section id="project-panel" class="component-tree-section">
+          <section id="project-panel" class="component-tree-section" data-canvas-panel="project">
             <details open>
               <summary><span>Files</span><span id="project-mode" class="count">file</span></summary>
               <div id="project-rail" class="project-list"></div>
             </details>
           </section>
-          <section id="output-panel" class="component-tree-section">
+          <section id="output-panel" class="component-tree-section" data-canvas-panel="output" hidden>
             <details open>
               <summary><span>Outputs</span><span id="output-count" class="count">0</span></summary>
               <div id="output-list" class="project-list" aria-label="Project outputs"></div>
             </details>
           </section>
-          <section id="graphs-panel" class="component-tree-section">
+          <section id="graphs-panel" class="component-tree-section" data-canvas-panel="graphs">
             <details open>
               <summary><span>Functions</span><span class="component-tree-section-actions"><button id="canvas-new-function" type="button" title="Create a source-backed function">+ New</button><button id="canvas-new-callback" type="button" title="Create a source-backed callback handler">+ Callback</button><span id="graph-count" class="count">0</span></span></summary>
               <div id="graph-list" class="graph-list"></div>
             </details>
           </section>
-          <section id="variables-panel" class="component-tree-section">
+          <section id="variables-panel" class="component-tree-section" data-canvas-panel="variables">
             <details open>
               <summary><span>Variables</span><span class="component-tree-section-actions"><button id="canvas-add-variable" type="button" title="Promote a selected value to a source-backed variable">+ Add</button><span id="variable-count" class="count">0</span></span></summary>
               <div id="variables-list" class="variable-list"></div>
@@ -505,7 +537,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
           </section>
         </div>
       </section>
-      <section id="status-panel" class="panel"><details open><summary><span>Status</span><span id="status-count" class="count">clean</span></summary><div id="status-summary" class="status-grid"></div><div id="package-summary" class="project-section dev-only package-detail"></div><div id="dependency-summary" class="project-section dev-only package-detail"></div><div id="dev-summary" class="project-section dev-only package-detail"></div><div id="diagnostics-summary" class="project-section dev-only diagnostic-detail"></div><div id="trust-summary" class="project-section dev-only package-detail"></div><div id="session-identity" class="tag" data-session-id="">starting session</div><div id="session-views" class="project-section" aria-label="Session views"><div data-session-view="text"></div><div data-session-view="graph"></div><div data-session-view="designer" data-capability="designer"></div><div data-session-view="preview" data-capability="preview"></div><div data-session-view="terminal"></div><div data-session-view="debugger" data-capability="runtime_output"></div><div data-session-view="tests" data-capability="diagnostics"></div><div data-session-view="custom servers" data-capability="service"></div></div></details></section>
+      <section id="status-panel" class="panel"><details open><summary><span>Status</span><span id="status-count" class="count">clean</span></summary><div id="status-summary" class="status-grid"></div><div id="package-summary" class="project-section dev-only package-detail"></div><div id="dependency-summary" class="project-section dev-only package-detail"></div><div id="dev-summary" class="project-section dev-only package-detail"></div><div id="diagnostics-summary" class="project-section dev-only diagnostic-detail"></div><div id="trust-summary" class="project-section dev-only package-detail"></div><div id="session-views" class="project-section" aria-label="Session views"><div data-session-view="text"></div><div data-session-view="graph"></div><div data-session-view="designer" data-capability="designer"></div><div data-session-view="preview" data-capability="preview"></div><div data-session-view="terminal"></div><div data-session-view="debugger" data-capability="runtime_output"></div><div data-session-view="tests" data-capability="diagnostics"></div><div data-session-view="custom servers" data-capability="service"></div></div></details></section>
       <section id="search-panel" class="panel"><details><summary><span>Search</span></summary><input id="canvas-search" class="search" placeholder="Find in graph"><div id="search-results" class="search-results"></div></details></section>
     </aside>
     <section id="stage">
@@ -513,7 +545,6 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <div id="graph-strip" aria-label="Graph tabs"></div>
       <div id="wire-status" role="status" aria-label="Canvas hover details" aria-live="polite"><span id="wire-status-dot"></span><b>Ready</b><span>Hover a node or pin for details</span></div>
       <div id="graph-overview" aria-label="Graph overview"></div>
-      <div id="run-hud" aria-live="polite">run idle</div>
       <section id="review-view" aria-label="Git text review">
         <header id="review-head">
           <div>

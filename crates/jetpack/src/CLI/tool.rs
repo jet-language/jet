@@ -335,6 +335,16 @@ pub(super) fn update_user_tools(
     parsed: &Parsed,
     confirmation: &mut UpdateConfirmation,
 ) -> i32 {
+    update_user_tools_with_plan(theme, parsed, confirmation, false, || 0)
+}
+
+pub(super) fn update_user_tools_with_plan(
+    theme: &Theme,
+    parsed: &Parsed,
+    confirmation: &mut UpdateConfirmation,
+    has_other_plan: bool,
+    apply_other: impl FnOnce() -> i32,
+) -> i32 {
     if parsed.flags.offline {
         theme.error(
             "cannot update user-tools offline",
@@ -347,48 +357,46 @@ pub(super) fn update_user_tools(
         recover_profile_state()?;
         let mut manifest = read_tool_manifest()?;
         let (changed, updates) = refresh_tool_manifest_sources(theme, parsed, &mut manifest, true)?;
+        if !changed && !has_other_plan {
+            return Ok(UserToolsUpdateOutcome::NoChange);
+        }
+        if !has_other_plan {
+            theme.status("Plan channel update");
+        }
         if changed {
-            let name_w = updates
-                .iter()
-                .map(|update| update.name.len())
-                .max()
-                .unwrap_or(8)
-                .max(8);
-            for update in &updates {
-                render_channel_update_row(
-                    theme,
-                    &update.name,
-                    name_w,
-                    &update.before,
-                    &update.after,
-                    update.package_count,
-                    update.download_bytes,
-                );
-            }
-            let download_bytes = updates
-                .iter()
-                .map(|update| update.download_bytes)
-                .collect::<Option<Vec<_>>>()
-                .map(|sizes| sizes.into_iter().sum());
-            if let Some(bytes) = download_bytes {
-                theme.download_line(bytes);
-            }
-            if !confirmation.confirm(theme, parsed.flags.assume_yes) {
-                return Ok(false);
-            }
+            render_tool_update_plan(theme, &updates);
+        }
+        if !confirmation.confirm(theme, parsed.flags.assume_yes) {
+            return Ok(UserToolsUpdateOutcome::Cancelled);
+        }
+        let other_code = apply_other();
+        if other_code != 0 {
+            return Ok(UserToolsUpdateOutcome::Failed(other_code));
+        }
+        if changed {
             write_tool_manifest(&manifest)?;
         }
-        Ok(changed)
+        Ok(UserToolsUpdateOutcome::Applied { changed })
     });
     match result {
-        Ok(true) => {
+        Ok(UserToolsUpdateOutcome::Applied { changed: true }) => {
             theme.ok("user-tools channel pins updated");
             0
         }
-        Ok(false) => {
+        Ok(UserToolsUpdateOutcome::NoChange) if !has_other_plan => {
             theme.status("no moving user-tools channels to update");
             0
         }
+        Ok(UserToolsUpdateOutcome::NoChange) => 0,
+        Ok(UserToolsUpdateOutcome::Applied { changed: false }) => 0,
+        Ok(UserToolsUpdateOutcome::Cancelled) => {
+            if has_other_plan {
+                2
+            } else {
+                0
+            }
+        }
+        Ok(UserToolsUpdateOutcome::Failed(code)) => code,
         Err(error) => report_tool_profile_error(theme, &error),
     }
 }
@@ -749,6 +757,42 @@ struct ToolSourceUpdate {
     after: String,
     package_count: usize,
     download_bytes: Option<u64>,
+}
+
+enum UserToolsUpdateOutcome {
+    NoChange,
+    Cancelled,
+    Applied { changed: bool },
+    Failed(i32),
+}
+
+fn render_tool_update_plan(theme: &Theme, updates: &[ToolSourceUpdate]) {
+    let name_w = updates
+        .iter()
+        .map(|update| update.name.len())
+        .max()
+        .unwrap_or(8)
+        .max(8);
+    for update in updates {
+        render_channel_update_row(
+            theme,
+            "tools",
+            &update.name,
+            name_w,
+            &update.before,
+            &update.after,
+            update.package_count,
+            update.download_bytes,
+        );
+    }
+    let download_bytes = updates
+        .iter()
+        .map(|update| update.download_bytes)
+        .collect::<Option<Vec<_>>>()
+        .map(|sizes| sizes.into_iter().sum());
+    if let Some(bytes) = download_bytes {
+        theme.download_line(bytes);
+    }
 }
 
 #[derive(Clone)]

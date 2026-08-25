@@ -21,6 +21,8 @@ pub use WatchService::{
     EDIT_TO_VISIBLE_BUDGET_MS,
 };
 
+pub const MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WatchPolicy {
     Auto,
@@ -55,23 +57,64 @@ impl Request {
         if reader.read_line(&mut line)? == 0 {
             return Ok(None);
         }
-        let mut content_length = 0;
+        let mut parts = line.split_whitespace();
+        let method = parts.next().unwrap_or("");
+        let target = parts.next().unwrap_or("");
+        let version = parts.next().unwrap_or("");
+        if method.is_empty()
+            || target.is_empty()
+            || version != "HTTP/1.1"
+            || parts.next().is_some()
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "malformed devserver request line",
+            ));
+        }
+        let mut content_length = None;
         let mut headers = HashMap::new();
         loop {
             let mut header = String::new();
             if reader.read_line(&mut header)? == 0 || header == "\r\n" || header == "\n" {
                 break;
             }
-            if let Some((name, value)) = header.trim_end_matches(['\r', '\n']).split_once(':') {
-                let name = name.trim().to_ascii_lowercase();
-                let value = value.trim().to_string();
-                if name == "content-length" {
-                    content_length = value.parse().unwrap_or(0);
-                }
-                headers.insert(name, value);
+            let Some((name, value)) = header.trim_end_matches(['\r', '\n']).split_once(':') else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "malformed devserver header",
+                ));
+            };
+            let name = name.trim().to_ascii_lowercase();
+            let value = value.trim().to_string();
+            if name.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "malformed devserver header name",
+                ));
             }
+            if matches!(
+                name.as_str(),
+                "authorization" | "content-length" | "host" | "origin" | "transfer-encoding"
+            ) && headers.contains_key(&name)
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "duplicate devserver security header",
+                ));
+            }
+            if name == "content-length" {
+                let length = value.parse::<usize>().map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "invalid devserver content length",
+                    )
+                })?;
+                content_length = Some(length);
+            }
+            headers.insert(name, value);
         }
-        if content_length > 1024 * 1024 {
+        let content_length = content_length.unwrap_or(0);
+        if content_length > MAX_REQUEST_BODY_BYTES {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "devserver request body exceeds 1 MiB",
@@ -79,10 +122,9 @@ impl Request {
         }
         let mut body = vec![0; content_length];
         reader.read_exact(&mut body)?;
-        let mut parts = line.split_whitespace();
         Ok(Some(Self {
-            method: parts.next().unwrap_or("").to_string(),
-            target: parts.next().unwrap_or("/").to_string(),
+            method: method.to_string(),
+            target: target.to_string(),
             headers,
             body,
         }))
@@ -214,6 +256,14 @@ mod tests {
         assert_eq!(r.body, b"ok");
         assert_eq!(r.headers.get("content-length").map(String::as_str), Some("2"));
         assert_eq!(query_param(&r.target, "q").as_deref(), Some("a b"));
+    }
+    #[test]
+    fn malformed_request_metadata_fails_closed() {
+        let mut invalid_length = &b"POST /x HTTP/1.1\r\nContent-Length: nope\r\n\r\n"[..];
+        assert!(Request::read(&mut invalid_length).is_err());
+
+        let mut malformed_line = &b"GET /x\r\nHost: localhost\r\n\r\n"[..];
+        assert!(Request::read(&mut malformed_line).is_err());
     }
     #[test]
     fn traversal_is_rejected() {

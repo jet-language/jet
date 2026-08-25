@@ -644,7 +644,10 @@
         loadProofRail();
         loadCanvasActions({ skipRedraw: firstLoad });
         applySourceHash();
-        if (firstLoad) fitGraph(true);
+        if (firstLoad) {
+          fitGraph(true);
+          restoreCanvasDebugger();
+        }
       })
       .catch((e) => {
         const offline = navigator.onLine === false;

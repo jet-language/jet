@@ -82,13 +82,11 @@ fn collect_unused_imports(
                 && !ignored_name(&import.alias)
             {
                 if let Some(alias) = ledger.alias(module_idx, &import.alias) {
-                    if alias.span.start < alias.span.end
-                        && !alias_used(ledger, alias)
-                    {
+                    if alias.span.start < alias.span.end && !alias_used(ledger, alias) {
                         let name = import.alias.clone();
                         let explicit_alias = import.alias_span.start > import.span.start;
                         let span = if explicit_alias {
-                            import.alias_span
+                            alias.span
                         } else {
                             import.span
                         };
@@ -120,11 +118,10 @@ fn collect_unused_imports(
                 let Some(alias) = ledger.alias(module_idx, &binding.local) else {
                     continue;
                 };
-                if alias.span.start >= alias.span.end || alias_used(ledger, alias)
-                {
+                if alias.span.start >= alias.span.end || alias_used(ledger, alias) {
                     continue;
                 }
-                let span = import_binding_span(&module.source, &binding);
+                let span = alias.span;
                 if span.start >= span.end {
                     continue;
                 }
@@ -233,7 +230,7 @@ fn collect_unreachable_exports(
                 {
                     continue;
                 }
-                let span = import_binding_span(&module.source, &binding);
+                let span = alias.span;
                 if span.start >= span.end {
                     continue;
                 }
@@ -281,79 +278,6 @@ fn removable_private_function(function: &Func) -> bool {
         && function.every.is_none()
         && !function.is_must_use
         && function.kernel.is_none()
-}
-
-/// Import aliases have two parser-owned spans: the source path and, for the
-/// simple module form, the explicit alias. Member-list aliases retain the
-/// original member span only. Recover the local identifier from the bounded
-/// import source so a fix never replaces the imported target path.
-fn import_binding_span(source: &str, binding: &crate::AST::ImportBinding<'_>) -> Span {
-    let original = binding.item_span.unwrap_or(binding.module_alias_span);
-    if let Some(alias) = binding.alias {
-        if let Some((start, end)) =
-            identifier_after_as(source, original.end, binding.import_span.end, alias)
-        {
-            return Span::new(start, end);
-        }
-    }
-    last_identifier_span(source, original).unwrap_or(original)
-}
-
-fn identifier_after_as(
-    source: &str,
-    start: usize,
-    end: usize,
-    alias: &str,
-) -> Option<(usize, usize)> {
-    let source = source.get(start..end)?;
-    let mut cursor = 0;
-    while let Some((token, _token_start, token_end)) = next_identifier(source, cursor) {
-        cursor = token_end;
-        if token != "as" {
-            continue;
-        }
-        let Some((candidate, candidate_start, candidate_end)) = next_identifier(source, cursor)
-        else {
-            return None;
-        };
-        if candidate == alias {
-            return Some((start + candidate_start, start + candidate_end));
-        }
-        cursor = candidate_end;
-    }
-    None
-}
-
-fn last_identifier_span(source: &str, span: Span) -> Option<Span> {
-    let source = source.get(span.start..span.end)?;
-    let mut cursor = 0;
-    let mut last = None;
-    while let Some((_, token_start, token_end)) = next_identifier(source, cursor) {
-        last = Some(Span::new(span.start + token_start, span.start + token_end));
-        cursor = token_end;
-    }
-    last
-}
-
-fn next_identifier(source: &str, mut cursor: usize) -> Option<(&str, usize, usize)> {
-    while cursor < source.len() {
-        let ch = source[cursor..].chars().next()?;
-        if ch == '_' || ch.is_alphabetic() {
-            let start = cursor;
-            cursor += ch.len_utf8();
-            while cursor < source.len() {
-                let ch = source[cursor..].chars().next()?;
-                if ch == '_' || ch.is_alphanumeric() {
-                    cursor += ch.len_utf8();
-                } else {
-                    break;
-                }
-            }
-            return Some((&source[start..cursor], start, cursor));
-        }
-        cursor += ch.len_utf8();
-    }
-    None
 }
 
 fn export_kind(kind: &str) -> bool {

@@ -271,6 +271,7 @@ fn resolve_output_callable(
         authority: crate::AST::OutputCallableAuthority::SafeJet,
         effects: Vec::new(),
         selected: false,
+        selection_reason: "not selected".to_string(),
     })
 }
 
@@ -455,6 +456,7 @@ pub(super) fn resolve_outputs(
                     )
             }) {
                 fact.selected = true;
+                fact.selection_reason = "explicit address".to_string();
             } else {
                 let mut choices = resolved
                     .iter()
@@ -484,9 +486,11 @@ pub(super) fn resolve_outputs(
                 .collect::<Vec<_>>();
             if executable.len() == 1 {
                 resolved[executable[0]].2.selected = true;
+                resolved[executable[0]].2.selection_reason = "sole compatible Output".to_string();
             } else if executable.len() > 1 {
                 if let Some(index) = run_default_index {
                     resolved[index].2.selected = true;
+                    resolved[index].2.selection_reason = "checked defaults.run".to_string();
                 } else if run_default.is_none() {
                     let mut names = executable
                         .iter()
@@ -500,6 +504,9 @@ pub(super) fn resolve_outputs(
     } else if matches!(mode, CompileMode::Test | CompileMode::TestOverride) {
         for (_, _, fact) in &mut resolved {
             fact.selected = fact.kind == crate::AST::OutputKind::Check;
+            if fact.selected {
+                fact.selection_reason = "all Check Outputs".to_string();
+            }
         }
     }
     for (module, item, fact) in resolved {

@@ -505,6 +505,37 @@ pub(crate) fn compute_rename(
     if is_keyword(name) {
         return Err(format!("`{}` is a keyword and cannot be renamed", name));
     }
+    let alias_target = db
+        .refs
+        .iter()
+        .find(|reference| {
+            reference.module_path == path
+                && reference.span.start <= offset
+                && offset <= reference.span.end
+        })
+        .and_then(|reference| {
+            reference
+                .target
+                .as_ref()
+                .filter(|target| target.kind == "import_alias")
+                .cloned()
+        })
+        .or_else(|| {
+            db.defs
+                .iter()
+                .find(|definition| {
+                    definition.module_path == path
+                        && definition.def_span.start <= offset
+                        && offset <= definition.def_span.end
+                        && definition.identity.starts_with("import:")
+                })
+                .map(|definition| jet_semindex::DefinitionAnchor {
+                    module_path: definition.module_path.clone(),
+                    kind: "import_alias".to_string(),
+                    def_span: definition.def_span.into(),
+                    semantic_identity: Some(definition.identity.clone()),
+                })
+        });
     let indexed_case = db
         .defs
         .iter()
@@ -541,6 +572,30 @@ pub(crate) fn compute_rename(
                 Syntax::canonical_name_case(new_name, case)
             ));
         }
+    }
+    if let Some(target) = alias_target {
+        let mut spans = vec![
+            (
+                target.module_path.clone(),
+                Span::new(target.def_span.start, target.def_span.end),
+            ),
+        ];
+        spans.extend(db.refs.iter().filter_map(|reference| {
+            let candidate = reference.target.as_ref()?;
+            (candidate.kind == "import_alias"
+                && candidate.module_path == target.module_path
+                && candidate.def_span.start == target.def_span.start
+                && candidate.def_span.end == target.def_span.end)
+                .then_some((reference.module_path.clone(), reference.span))
+        }));
+        spans.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then(left.1.start.cmp(&right.1.start))
+                .then(left.1.end.cmp(&right.1.end))
+        });
+        spans.dedup();
+        return Ok(spans);
     }
     let mut spans: Vec<(String, Span)> = Vec::new();
     // Include definition spans

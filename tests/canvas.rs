@@ -4256,6 +4256,26 @@ fn canvas_project_json_reports_single_file_without_manifest() {
 }
 
 #[test]
+fn canvas_project_capabilities_follow_checked_package_target() {
+    let dir = temp_dir("project_capabilities");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"canvas_capabilities\"\nversion: \"0.1.0\"\ntarget: \"web\"\noutputs: .{ app: Executable{ entry: run } }\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    fs::write(&entry, "fn run() {\n    print(\"canvas\")\n}\n").unwrap();
+
+    let json = jet::Canvas::project_json_for_entry(&entry);
+    assert!(json.contains("\"graph\":true"), "{json}");
+    assert!(json.contains("\"code\":true"), "{json}");
+    assert!(json.contains("\"diagnostics\":true"), "{json}");
+    assert!(json.contains("\"runtime_output\":true"), "{json}");
+    assert!(json.contains("\"preview\":true"), "{json}");
+    assert!(json.contains("\"designer\":false"), "{json}");
+}
+
+#[test]
 fn canvas_and_semindex_share_composed_package_facts() {
     let dir = temp_dir("package_facts_parity");
     let entry = dir.join("main.jet");
@@ -5767,6 +5787,15 @@ fn canvas_details_are_descriptor_driven_and_dom_safe() {
     assert!(
         diagnostics.contains("function diagnosticDetailDescriptors"),
         "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains("function diagnosticLabel(severity)"),
+        "Canvas diagnostic text must derive its header from machine severity: {diagnostics}"
+    );
+    assert!(
+        diagnostics.contains("diagnosticLabel(entry.severity)")
+            && diagnostics.contains("diagnosticLabel(severity)"),
+        "Canvas diagnostic fallbacks must preserve warning severity: {diagnostics}"
     );
     assert!(
         diagnostics.contains("renderFieldDescriptors(problemsList"),

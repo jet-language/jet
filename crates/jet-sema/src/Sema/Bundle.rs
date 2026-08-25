@@ -1562,7 +1562,7 @@ fn populate_name_ledger(
                         local.to_string(),
                         target,
                         target_module,
-                        binding.item_span.unwrap_or(import.alias_span),
+                        binding.local_span,
                         alias_visibility,
                     );
                 }

@@ -246,12 +246,13 @@ async function bigMinimapInk(ctx) {
 }
 
 export class CanvasScenario {
-  constructor({ port, outDir, scenarioName, seed = 373, browser = "chromium" }) {
+  constructor({ port, outDir, scenarioName, seed = 373, browser = "chromium", session = "" }) {
     this.port = port;
     this.outDir = outDir;
     this.scenarioName = scenarioName;
     this.seed = Number(seed) || 373;
     this.browser = browser;
+    this.session = session;
     this.driver = createDriver(browser);
     this.lastScreenshot = null;
   }
@@ -267,7 +268,8 @@ export class CanvasScenario {
   }
 
   async openCanvas(port = this.port) {
-    await this.driver.navigate(`http://127.0.0.1:${port}/canvas`);
+    const session = this.session ? `?session=${encodeURIComponent(this.session)}` : "";
+    await this.driver.navigate(`http://127.0.0.1:${port}/canvas${session}`);
     await this.waitForCanvas();
     return await this.driver.evaluate(`(() => {
       const navigation = performance.getEntriesByType("navigation")[0];
@@ -1781,6 +1783,203 @@ export const scenarios = {
     const projectPayload = project.canvas || project;
     if (!Array.isArray(projectPayload.outputs)) throw new Error("project output launcher field missing");
     await ctx.screenshot("resident-session-workbench");
+  },
+
+  "session-surface-matrix": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.waitFor(async () => await ctx.driver.evaluate("!!window.__jetCanvasSession"), "surface matrix session");
+
+    const initial = await ctx.driver.evaluate(`Promise.all([
+      fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()),
+      fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json()),
+      fetch("/canvas/graph", { cache: "no-store" }).then((r) => r.json())
+    ]).then(([session, project, graph]) => ({ session: session.session, project, graph }))`);
+    const session = initial.session;
+    const project = initial.project;
+    const outputs = project.outputs || [];
+    const outputByTarget = new Map(outputs.map((output) => [output.target || output.name, output]));
+    const requiredOutputs = [
+      ["cli", "executable"],
+      ["service", "service"],
+      ["web", "executable"],
+      ["ui", "executable"],
+      ["game", "executable"],
+      ["library", "library"],
+      ["build", "check"],
+    ];
+    const missingOutputs = requiredOutputs.filter(([target, kind]) => {
+      const output = outputByTarget.get(target);
+      return !output || output.kind !== kind || !output.entry;
+    });
+    if (missingOutputs.length || outputs.length < requiredOutputs.length) {
+      throw new Error(`surface output matrix incomplete: ${JSON.stringify({ missingOutputs, outputs })}`);
+    }
+
+    const capabilities = project.capabilities || {};
+    if (!capabilities.preview || !capabilities.designer || !capabilities.service) {
+      throw new Error(`surface capabilities incomplete: ${JSON.stringify(capabilities)}`);
+    }
+    const customServer = (project.services || []).find((service) => service.name === "custom_server");
+    if (!customServer || !customServer.run?.includes("custom-server") || customServer.ports?.[0] !== 43817) {
+      throw new Error(`custom server projection missing: ${JSON.stringify(project.services)}`);
+    }
+
+    const canvasListener = session.listeners?.canvas;
+    const applicationListener = session.listeners?.application;
+    if (!canvasListener || canvasListener.transport !== "canvas" || !canvasListener.port
+      || applicationListener?.port !== 0
+      || session.custom_servers?.owner !== "application"
+      || session.custom_servers?.transport !== "application") {
+      throw new Error(`session listener/custom-server boundary missing: ${JSON.stringify(session)}`);
+    }
+
+    const actions = await ctx.query({ schema_version: 1, op: "actions", revision: initial.graph.revision });
+    const commands = Object.fromEntries((actions.actions || [])
+      .filter((action) => action.kind === "canvas.command")
+      .map((action) => [action.action_id, action]));
+    for (const actionId of ["canvas.command:run", "canvas.command:check", "canvas.command:dev"]) {
+      if (!commands[actionId] || commands[actionId].command?.[0] !== "jet") {
+        throw new Error(`CLI command surface missing ${actionId}: ${JSON.stringify(commands[actionId])}`);
+      }
+    }
+    if (!commands["canvas.command:service.start"]?.available
+      || commands["canvas.command:service.start"].command?.[0] !== "jetpack") {
+      throw new Error(`service command surface missing: ${JSON.stringify(commands["canvas.command:service.start"])}`);
+    }
+
+    for (const [target] of requiredOutputs) {
+      const selected = await ctx.driver.evaluate(`fetch("/canvas/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ op: "select_output", output: ${JSON.stringify(target)}, target: ${JSON.stringify(target)}, client_id: "surface-primary" })
+      }).then((r) => r.json())`);
+      const selectedSession = selected.session;
+      if (!selectedSession || selectedSession.id !== session.id
+        || selectedSession.source_revision !== session.source_revision
+        || selectedSession.run?.output !== target) {
+        throw new Error(`output selection left resident session: ${JSON.stringify({ target, selected })}`);
+      }
+    }
+
+    const second = await ctx.driver.evaluate(`fetch("/canvas/session?client_id=surface-second", { cache: "no-store" }).then((r) => r.json())`);
+    if (!second.session || second.session.id !== session.id || second.session.clients < 2
+      || second.session.source_revision !== session.source_revision) {
+      throw new Error(`second browser client did not share session: ${JSON.stringify(second)}`);
+    }
+
+    const endpoint = `http://127.0.0.1:${ctx.port}`;
+    const validHeaders = {
+      authorization: `Bearer ${ctx.session}`,
+      host: `127.0.0.1:${ctx.port}`,
+      origin: `http://127.0.0.1:${ctx.port}`,
+    };
+    const hostileRequests = [
+      {
+        label: "missing session",
+        expected: 401,
+        init: { headers: { host: validHeaders.host } },
+      },
+      {
+        label: "wrong session",
+        expected: 401,
+        init: { headers: { ...validHeaders, authorization: "Bearer wrong" } },
+      },
+      {
+        label: "foreign origin",
+        expected: 401,
+        init: { headers: { ...validHeaders, origin: `http://evil.invalid:${ctx.port}` } },
+      },
+      {
+        label: "foreign host",
+        expected: 401,
+        init: { headers: { ...validHeaders, host: `evil.invalid:${ctx.port}`, origin: `http://evil.invalid:${ctx.port}` } },
+      },
+      {
+        label: "wrong method",
+        expected: 405,
+        init: { method: "POST", headers: validHeaders, body: "{}" },
+      },
+    ];
+    for (const hostile of hostileRequests) {
+      const response = await fetch(`${endpoint}/canvas/graph`, hostile.init);
+      if (response.status !== hostile.expected) {
+        throw new Error(`${hostile.label} request returned ${response.status}, expected ${hostile.expected}`);
+      }
+    }
+
+    const projectRoot = project.project_root;
+    if (!projectRoot) throw new Error(`project root missing from Canvas projection: ${JSON.stringify(project)}`);
+    const sourceBeforeReconnect = await ctx.source();
+    await writeFile(join(projectRoot, "package.jet"), `name: "canvas_session_matrix"
+version: "0.1.0"
+outputs: .{
+    cli: .Executable{ name: "cli", entry: run }
+    library: .Library{ name: "library", entry: run }
+}
+`);
+    await ctx.driver.navigate("about:blank");
+    await ctx.openCanvas();
+    const reconnected = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session)`);
+    if (!reconnected || reconnected.id !== session.id || reconnected.source_revision !== session.source_revision) {
+      throw new Error(`Canvas reconnect did not preserve resident session: ${JSON.stringify({ session, reconnected })}`);
+    }
+    await ctx.waitFor(async () => await ctx.driver.evaluate(`(() => {
+      const project = window.__jetCanvasCapabilities || {};
+      const panels = Array.from(document.querySelectorAll("[data-capability]")).reduce((out, panel) => {
+        out[panel.getAttribute("data-capability")] = panel.hidden;
+        return out;
+      }, {});
+      return project.service === false && project.preview === false && project.designer === false
+        && panels.service === true && panels.preview === true && panels.designer === true
+        && panels.runtime_output === false && panels.diagnostics === false;
+    })()`), "capability change after reconnect");
+    const narrowedProject = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
+    if ((narrowedProject.outputs || []).length !== 2) {
+      throw new Error(`capability-change project did not reload: ${JSON.stringify(narrowedProject)}`);
+    }
+    if (await ctx.source() !== sourceBeforeReconnect) throw new Error("hostile or reconnect checks changed Jet source");
+
+    const beforeErrorSource = await ctx.source();
+    const stale = await ctx.transaction({
+      schema_version: 1,
+      op: "replace_source",
+      revision: "sha256-stale-surface-matrix",
+      source: "fn broken("
+    });
+    if (stale.ok || stale.json?.kind !== "conflict") {
+      throw new Error(`stale surface edit was not refused: ${JSON.stringify(stale)}`);
+    }
+    const invalid = await ctx.transaction({
+      schema_version: 1,
+      op: "replace_source",
+      revision: (await ctx.graph()).revision,
+      source: "fn broken("
+    });
+    if (invalid.ok || invalid.json?.kind !== "diagnostic" || await ctx.source() !== beforeErrorSource) {
+      throw new Error(`invalid surface edit did not preserve source: ${JSON.stringify({ invalid, source: await ctx.source() })}`);
+    }
+    const afterError = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session)`);
+    const refused = (afterError.history?.receipts || []).filter((receipt) => receipt.status === "refused");
+    if (afterError.id !== session.id || afterError.last_good_program !== session.last_good_program
+      || refused.length < 2) {
+      throw new Error(`session error receipts or last-good state missing: ${JSON.stringify(afterError)}`);
+    }
+
+    await ctx.driver.evaluate(`fetch("/__jet_dev_disconnect?client=surface-second", { method: "POST" })`);
+    const reconnectedClient = await ctx.driver.evaluate(`fetch("/canvas/session?client_id=surface-second", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session)`);
+    if (!reconnectedClient || reconnectedClient.id !== session.id || reconnectedClient.source_revision !== session.source_revision
+      || reconnectedClient.history.count !== afterError.history.count || reconnectedClient.clients < 2) {
+      throw new Error(`reconnect created a divergent session: ${JSON.stringify({ afterError, reconnected: reconnectedClient })}`);
+    }
+
+    const primaryClient = await ctx.driver.evaluate("window.__jetCanvasSessionApi.clientId()");
+    await ctx.driver.evaluate(`fetch("/__jet_dev_disconnect?client=surface-second", { method: "POST" })`);
+    await ctx.driver.evaluate(`fetch("/__jet_dev_disconnect?client=" + encodeURIComponent(${JSON.stringify(primaryClient)}), { method: "POST" })`);
+    const shutdown = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session)`);
+    if (!shutdown || shutdown.id !== session.id || shutdown.clients !== 0) {
+      throw new Error(`session shutdown did not release client leases: ${JSON.stringify(shutdown)}`);
+    }
+    await ctx.screenshot("session-surface-matrix");
   },
 
   "keyboard-cheat-sheet-accessibility-states": async (ctx) => {

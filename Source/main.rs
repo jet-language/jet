@@ -1330,7 +1330,11 @@ fn canvas_flag_value<'a>(argv: &'a [String], name: &str) -> Option<&'a str> {
         .or_else(|| flag_value(argv, name))
 }
 
-fn canvas_options_from_args(argv: &[String]) -> jet_devserver::WebHost::CanvasHostOptions {
+fn canvas_options_from_args(
+    argv: &[String],
+    output: Option<&str>,
+    target: Option<&str>,
+) -> jet_devserver::WebHost::CanvasHostOptions {
     let mut options = jet_devserver::WebHost::CanvasHostOptions::default();
     if let Some(host) = canvas_flag_value(argv, "--canvas-host") {
         options.host = host.to_string();
@@ -1359,6 +1363,8 @@ fn canvas_options_from_args(argv: &[String]) -> jet_devserver::WebHost::CanvasHo
     if let Some(authority) = canvas_flag_value(argv, "--canvas-authority") {
         options.authority = authority.to_string();
     }
+    options.output = output.map(str::to_string);
+    options.target = target.map(str::to_string);
     options.audit = argv.iter().any(|arg| arg == "--canvas-audit");
     options
 }
@@ -1657,6 +1663,7 @@ fn main() {
             exit(ExitCodes::OK);
         }
     };
+    let canvas_requested = jet_argv.iter().any(|arg| arg == jet::CLI::CANVAS_FLAG);
     let record_name = named_record_for_command(jet_argv, cmd, json);
     let debug_replay = named_debug_replay(jet_argv, cmd, json);
     if library_flag && cmd != "build" {
@@ -1668,7 +1675,8 @@ fn main() {
         exit(ExitCodes::USAGE);
     }
     if let Some(output) = output_name.as_deref() {
-        if cmd != "run" || output.is_empty() {
+        let output_allowed = cmd == "run" || (cmd == "dev" && canvas_requested);
+        if !output_allowed || output.is_empty() {
             crate::cli_error!(@fix "E2104", "`--output` needs a runnable Output address with `jet run`", format!("write `jet run --output <address> <file.{}>`", jet::Syntax::FILE_EXT));
             exit(ExitCodes::USAGE);
         }
@@ -2496,8 +2504,13 @@ fn main() {
             // streaming output for sub-200ms feedback. The interpreter is a dev
             // convenience only — `jet build`/`jet run` never touch it (I2/I3).
             let try_anyway = raw.iter().any(|a| a == "--try-anyway");
-            let canvas_requested = jet_argv.iter().any(|a| a == jet::CLI::CANVAS_FLAG);
-            let canvas_options = canvas_requested.then(|| canvas_options_from_args(jet_argv));
+            let canvas_options = canvas_requested.then(|| {
+                canvas_options_from_args(
+                    jet_argv,
+                    output_name.as_deref(),
+                    requested_target.as_deref(),
+                )
+            });
             // c139 (D-JIT2=A): --interpret forces tier-0 interpreter; otherwise
             // CraneliftBackend wraps it (M0 delegates, M1+ JIT-compiles).
             let use_interpreter = raw.iter().any(|a| a == "--interpret");
@@ -2823,10 +2836,13 @@ fn main() {
                                 let try_anyway = jet_argv.iter().any(|a| a == "--try-anyway");
                                 let use_interpreter = jet_argv.iter().any(|a| a == "--interpret");
                                 let policy = watch_policy_from(&raw, WatchPolicy::Auto);
-                                let canvas_requested =
-                                    jet_argv.iter().any(|arg| arg == jet::CLI::CANVAS_FLAG);
-                                let canvas_options =
-                                    canvas_requested.then(|| canvas_options_from_args(jet_argv));
+                                let canvas_options = canvas_requested.then(|| {
+                                    canvas_options_from_args(
+                                        jet_argv,
+                                        output_name.as_deref(),
+                                        requested_target.as_deref(),
+                                    )
+                                });
                                 run_dev(
                                     &entry_str,
                                     try_anyway,

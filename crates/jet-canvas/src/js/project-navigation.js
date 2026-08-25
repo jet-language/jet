@@ -1686,6 +1686,25 @@
     };
   }
 
+  function restoreCanvasDebugger() {
+    const persisted = canvasSession && canvasSession.debugger;
+    if (!latestDoc || !persisted || persisted.state !== "active" || !persisted.session_id) return;
+    if (persisted.source_id && persisted.source_id !== currentCanvasSourceId()) return;
+    if (persisted.revision && persisted.revision !== latestDoc.revision) return;
+    if (debugSessionId) return;
+    debugSessionId = persisted.session_id;
+    debugSessionInfo = {
+      id: persisted.session_id,
+      state: "running",
+      tier: persisted.tier || "jet-dev-interpreter",
+      source_id: persisted.source_id || currentCanvasSourceId(),
+      revision: persisted.revision || latestDoc.revision
+    };
+    debugConnectionState = "connecting";
+    syncDebugSessionPicker();
+    runDebug([]);
+  }
+
   function releaseDebugSession(snapshot, report = false) {
     if (!snapshot || !snapshot.id || !snapshot.revision) return Promise.resolve();
     const debugUrl = window.__JET_CANVAS_DEBUG__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/debug");

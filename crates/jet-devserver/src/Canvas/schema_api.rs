@@ -348,9 +348,32 @@ fn project_source_roots(ctx: &ProjectContext) -> Vec<PathBuf> {
         .to_path_buf()]
 }
 
-fn project_capabilities_json(targets: &str, environment: &EnvProjectJson) -> String {
-    let target_text = targets.to_ascii_lowercase();
-    let service = !environment.services.is_empty() || target_text.contains("\"kind\":\"service\"");
+fn project_capabilities_json(
+    packages: &str,
+    targets: &str,
+    environment: &EnvProjectJson,
+) -> String {
+    let target_text = format!("{packages}{targets}").to_ascii_lowercase();
+    let service = !environment.services.is_empty()
+        || target_text.contains("\"kind\":\"service\"")
+        || target_text.contains("\"target\":\"service\"");
+    let has_checked_output = [
+        "\"kind\":\"library\"",
+        "\"kind\":\"executable\"",
+        "\"kind\":\"service\"",
+        "\"kind\":\"check\"",
+        "\"kind\":\"environment\"",
+        "\"kind\":\"image\"",
+        "\"kind\":\"bundle\"",
+        "\"kind\":\"system\"",
+        "\"kind\":\"fleet\"",
+    ]
+    .iter()
+    .any(|kind| target_text.contains(kind));
+    let runtime_output = !has_checked_output
+        || target_text.contains("\"kind\":\"executable\"")
+        || target_text.contains("\"kind\":\"service\"")
+        || service;
     let preview = target_text.contains("\"target\":\"web\"")
         || target_text.contains("\"kind\":\"ui\"")
         || target_text.contains("\"kind\":\"game\"")
@@ -361,8 +384,12 @@ fn project_capabilities_json(targets: &str, environment: &EnvProjectJson) -> Str
         || target_text.contains("\"target\":\"ui\"")
         || target_text.contains("\"target\":\"game\"");
     format!(
-        "{{\"graph\":true,\"code\":true,\"diagnostics\":true,\"runtime_output\":true,\"terminal\":true,\"service\":{},\"preview\":{},\"designer\":{}}}",
-        service, preview, designer
+        "{{\"graph\":true,\"code\":true,\"diagnostics\":true,\"runtime_output\":{},\"terminal\":{},\"service\":{},\"preview\":{},\"designer\":{}}}",
+        runtime_output,
+        runtime_output && !preview,
+        service,
+        preview,
+        designer
     )
 }
 
@@ -440,7 +467,8 @@ fn project_json_for_entry_inner(path: &Path) -> String {
         .join(",");
     let locks_json = lock_project_json(&ctx.project_root);
     let env_projection = env_project_json(&ctx.project_root);
-    let capabilities_json = project_capabilities_json(&targets_json, &env_projection);
+    let capabilities_json =
+        project_capabilities_json(&packages_json, &targets_json, &env_projection);
     let diagnostics = [
         ctx.authority_diagnostic
             .as_ref()

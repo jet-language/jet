@@ -379,8 +379,10 @@ pub(super) fn complete_bundle_check(
             let identity = name_ledger
                 .semantic_identity(output.module, &output.semantic_name)
                 .unwrap_or_else(|| format!("{alias}::{}", output.semantic_name));
+            let local_identity = format!("{alias}::{}", output.semantic_name);
             output.effects = public_solved
                 .get(&identity)
+                .or_else(|| public_solved.get(&local_identity))
                 .map(|effects| effects.iter().cloned().collect())
                 .unwrap_or_default();
             name_ledger.record_reference(

@@ -313,12 +313,7 @@ impl SymbolDB {
                         };
                         let output = value.resolved_output.as_ref()?;
                         let target = &bundle.modules[output.module];
-                        let identity = facts
-                            .name_ledger
-                            .semantic_identity(output.module, &output.semantic_name)
-                            .unwrap_or_else(|| {
-                                format!("{}::{}", target.alias, output.semantic_name)
-                            });
+                        let identity = format!("{}::{}", target.alias, output.semantic_name);
                         Some(OutputFact {
                             binding: value.name.clone(),
                             kind: output.kind.as_str().to_string(),
@@ -383,7 +378,7 @@ fn definition_matches_target(definition: &SymDef, target: &DefinitionAnchor) -> 
         && definition.def_span.start == target.def_span.start
         && definition.def_span.end == target.def_span.end
         && match (&definition.kind, target.kind.as_str()) {
-            (SymKind::Module, "module")
+            (SymKind::Module, "module" | "import_alias")
             | (SymKind::Function { .. }, "function" | "method" | "extern")
             | (SymKind::Struct { .. }, "struct")
             | (SymKind::Enum { .. }, "enum")
@@ -1055,10 +1050,37 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
         }
         apply_inferred_effect_rows(&mut db, module_idx, module, facts);
     }
+    add_import_alias_definitions(&mut db, &facts.name_ledger);
     add_breadcrumb_hints(&mut db);
     db.finalize_index(facts, bundle);
     db.symbols = build_semantic_symbol_index(&db, bundle);
     db
+}
+
+fn add_import_alias_definitions(
+    db: &mut SymbolDB,
+    ledger: &jet_foundation::Names::NameLedger,
+) {
+    let mut aliases = ledger.aliases().collect::<Vec<_>>();
+    aliases.sort_by_key(|alias| (alias.module, alias.span.start, alias.span.end, alias.name.clone()));
+    for alias in aliases {
+        if alias.span.start >= alias.span.end {
+            continue;
+        }
+        let Some(module_path) = ledger.module_path(alias.module) else {
+            continue;
+        };
+        let Some(identity) = ledger.alias_identity(alias.module, alias.span) else {
+            continue;
+        };
+        db.defs.push(SymDef {
+            identity,
+            name: alias.name.clone(),
+            def_span: alias.span,
+            module_path: module_path.to_string(),
+            kind: SymKind::Module,
+        });
+    }
 }
 
 fn apply_inferred_effect_rows(

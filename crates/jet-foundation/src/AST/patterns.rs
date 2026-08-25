@@ -528,6 +528,7 @@ pub struct ResolvedOutput {
     pub authority: OutputCallableAuthority,
     pub effects: Vec<String>,
     pub selected: bool,
+    pub selection_reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

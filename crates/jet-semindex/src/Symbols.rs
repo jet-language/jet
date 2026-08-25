@@ -431,6 +431,12 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
         .collect();
 
     for def in &db.defs {
+        // Import bindings have richer source/import provenance below. Their
+        // exact declaration anchors still live in `db.defs` for references
+        // and rename, but must not duplicate the import symbol projection.
+        if def.identity.starts_with("import:") {
+            continue;
+        }
         let owner = members
             .get(def.identity.as_str())
             .map(|owner| (*owner).to_string())
@@ -511,9 +517,24 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
             lexical_scope,
         });
     }
-    for module in &bundle.modules {
-        collect_import_symbols(&mut symbols, bundle, module, &module.imports, None);
-        collect_inline_import_symbols(db, bundle, module, &module.items, None, &mut symbols);
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        collect_import_symbols(
+            &mut symbols,
+            bundle,
+            module_idx,
+            module,
+            &module.imports,
+            None,
+        );
+        collect_inline_import_symbols(
+            db,
+            bundle,
+            module_idx,
+            module,
+            &module.items,
+            None,
+            &mut symbols,
+        );
     }
     SemanticSymbolIndex::new(symbols)
 }
@@ -521,6 +542,7 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
 fn collect_import_symbols(
     symbols: &mut Vec<SemanticSymbol>,
     bundle: &ProgramBundle,
+    module_idx: usize,
     module: &jet_foundation::AST::LoadedModule,
     imports: &[jet_foundation::AST::ImportDecl],
     lexical_scope: Option<&SemanticLexicalScope>,
@@ -590,7 +612,10 @@ fn collect_import_symbols(
                         lexical_scope: lexical_scope.cloned(),
                     });
                     let suffix = format!("{module_alias}.{original}::{local_name}");
-                    symbol.identity = import_identity(module, lexical_scope, &suffix);
+                    symbol.identity = bundle
+                        .name_ledger
+                        .alias_identity(module_idx, binding.local_span)
+                        .unwrap_or_else(|| import_identity(module, lexical_scope, &suffix));
                     symbol.name = local_name.clone();
                     symbol.qualified_name = local_name;
                     symbol.owner = None;
@@ -614,8 +639,12 @@ fn collect_import_symbols(
                     .and_then(|module_idx| bundle.name_ledger.effective_alias(module_idx, &alias))
                     .map(|name| name.name.clone())
                     .unwrap_or_else(|| alias.clone());
+                let identity = bundle
+                    .name_ledger
+                    .alias_identity(module_idx, import.alias_span)
+                    .unwrap_or_else(|| import_identity(module, lexical_scope, &alias_name));
                 symbols.push(SemanticSymbol {
-                    identity: import_identity(module, lexical_scope, &alias_name),
+                    identity,
                     name: alias_name.clone(),
                     qualified_name: alias_name.clone(),
                     owner: None,
@@ -649,6 +678,7 @@ fn import_identity(
 fn collect_inline_import_symbols(
     db: &SymbolDB,
     bundle: &ProgramBundle,
+    module_idx: usize,
     module: &jet_foundation::AST::LoadedModule,
     items: &[AST::Item],
     parent_scope: Option<&SemanticLexicalScope>,
@@ -659,9 +689,24 @@ fn collect_inline_import_symbols(
             continue;
         };
         let scope = inline_module_scope(db, module.display.as_str(), code_module, parent_scope);
-        collect_import_symbols(symbols, bundle, module, &code_module.imports, Some(&scope));
+        collect_import_symbols(
+            symbols,
+            bundle,
+            module_idx,
+            module,
+            &code_module.imports,
+            Some(&scope),
+        );
         if let Some(body) = &code_module.body {
-            collect_inline_import_symbols(db, bundle, module, body, Some(&scope), symbols);
+            collect_inline_import_symbols(
+                db,
+                bundle,
+                module_idx,
+                module,
+                body,
+                Some(&scope),
+                symbols,
+            );
         }
     }
 }

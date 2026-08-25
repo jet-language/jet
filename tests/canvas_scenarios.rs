@@ -19,6 +19,7 @@ static NEXT_CANVAS_CASE: AtomicU64 = AtomicU64::new(0);
 const MAX_CANVAS_BROWSERS: usize = 4;
 const BIG_PROJECT_SCENARIO: &str = "big-project-perf";
 const DEVSERVER_REAL_CLIENT_SCENARIO: &str = "devserver-real-client-survival";
+const SESSION_SURFACE_MATRIX_SCENARIO: &str = "session-surface-matrix";
 const BIG_FUNCTION_COUNT: usize = 300;
 const BIG_MODULE_COUNT: usize = 12;
 const BIG_FUNCTIONS_PER_MODULE: usize = BIG_FUNCTION_COUNT / BIG_MODULE_COUNT;
@@ -530,6 +531,11 @@ fn resident_session_ide_state_matrix() {
 }
 
 #[test]
+fn session_surface_matrix() {
+    run_target_independent_scenario(SESSION_SURFACE_MATRIX_SCENARIO);
+}
+
+#[test]
 fn review_diff_overlays() {
     run_canvas_scenario("review-diff-overlays");
 }
@@ -1027,17 +1033,48 @@ fn run_canvas_scenario(name: &str) {
     );
 }
 
+fn run_target_independent_scenario(name: &str) {
+    let Some(tools) = canvas_tools() else {
+        panic!("Canvas scenario `{name}` needs dev-shell Chromium and Node");
+    };
+
+    run_browser_scenario_with_server(
+        name,
+        "chromium",
+        &tools.node,
+        &[("CHROMIUM", tools.chromium.as_path())],
+        true,
+    );
+}
+
 fn run_browser_scenario(name: &str, browser: &str, node: &Path, environment: &[(&str, &Path)]) {
+    run_browser_scenario_with_server(name, browser, node, environment, false);
+}
+
+fn run_browser_scenario_with_server(
+    name: &str,
+    browser: &str,
+    node: &Path,
+    environment: &[(&str, &Path)],
+    target_independent: bool,
+) {
     let _browser_permit = CanvasBrowserPermit::acquire();
     ensure_jet_built();
 
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let case = CanvasCase::new(&repo, name);
     let port = free_port();
-    let mut server = DevServer::start(&repo, &case.dir, &case.entry, port);
+    let mut server = DevServer::start(&repo, &case.dir, &case.entry, port, target_independent);
     if case.big_fixture.is_some() {
         assert_big_fixture_preflight(&repo, &case, port);
     }
+    let session = CANVAS_SESSIONS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap()
+        .get(&port)
+        .cloned()
+        .expect("Canvas server session secret");
     let mut command = Command::new(node);
     command
         .current_dir(&repo)
@@ -1050,6 +1087,8 @@ fn run_browser_scenario(name: &str, browser: &str, node: &Path, environment: &[(
         .arg(browser)
         .arg("--port")
         .arg(port.to_string())
+        .arg("--session")
+        .arg(session)
         .arg("--out-dir")
         .arg(&case.screenshots)
         .arg("--seed")
@@ -1212,6 +1251,23 @@ impl CanvasCase {
             fs::copy(repo.join("examples/features/web/ui_showcase.jet"), &entry)
                 .expect("copy Canvas devserver regression source");
             None
+        } else if name == SESSION_SURFACE_MATRIX_SCENARIO {
+            fs::write(
+                dir.join("package.jet"),
+                "name: \"canvas_session_matrix\"\nversion: \"0.1.0\"\noutputs: .{\n    cli: .Executable{ name: \"cli\", entry: run }\n    service: .Service{ name: \"service\", entry: serve }\n    web: .Executable{ name: \"web\", entry: web }\n    ui: .Executable{ name: \"ui\", entry: ui }\n    game: .Executable{ name: \"game\", entry: game }\n    library: .Library{ name: \"library\", entry: run }\n    build: .Check{ name: \"build\", entry: build }\n}\ndefaults: .{ run: cli }\n",
+            )
+            .expect("write Canvas session matrix package fixture");
+            fs::write(
+                dir.join("env.jet"),
+                "module env.dev {\n    prompt: \"canvas-session-matrix\",\n    services: { custom_server: { ports: [43817], run: [\"custom-server\"], ready: \"custom-server-ready\" } },\n}\n",
+            )
+            .expect("write Canvas session matrix environment fixture");
+            fs::write(
+                &entry,
+                "fn run() {\n    print(\"cli\")\n}\n\nfn serve() {\n    print(\"service\")\n}\n\nfn web() {\n    print(\"web\")\n}\n\nfn ui() {\n    print(\"ui\")\n}\n\nfn game() {\n    print(\"game\")\n}\n\nfn build() {\n    print(\"build\")\n}\n",
+            )
+            .expect("write Canvas session matrix source fixture");
+            None
         } else {
             if matches!(name, "library-panel" | "library-panel-events") {
                 fs::write(
@@ -1282,14 +1338,30 @@ struct DevServer {
 }
 
 impl DevServer {
-    fn start(repo: &Path, cwd: &Path, entry: &Path, port: u16) -> DevServer {
+    fn start(
+        repo: &Path,
+        cwd: &Path,
+        entry: &Path,
+        port: u16,
+        target_independent: bool,
+    ) -> DevServer {
         let jet = cargo_target_dir(repo).join("debug/jet");
-        let mut child = Command::new(jet)
+        let mut command = Command::new(jet);
+        command
             .current_dir(cwd)
             .arg("dev")
-            .arg(entry)
-            .arg("--target=web")
-            .arg(format!("--port={port}"))
+            .arg(entry);
+        if target_independent {
+            command
+                .arg("--canvas")
+                .arg(format!("--canvas-port={port}"));
+        } else {
+            command
+                .arg("--canvas")
+                .arg("--target=web")
+                .arg(format!("--port={port}"));
+        }
+        let mut child = command
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -1389,7 +1461,7 @@ fn http_ok(port: u16, path: &str) -> bool {
         .map(|token| format!("Authorization: Bearer {token}\r\n"))
         .unwrap_or_default();
     let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{authorization}Connection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n{authorization}Connection: close\r\n\r\n"
     );
     if stream.write_all(request.as_bytes()).is_err() {
         return false;
@@ -1411,7 +1483,7 @@ fn http_body(port: u16, path: &str) -> String {
         .map(|token| format!("Authorization: Bearer {token}\r\n"))
         .unwrap_or_default();
     let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{authorization}Connection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n{authorization}Connection: close\r\n\r\n"
     );
     stream
         .write_all(request.as_bytes())

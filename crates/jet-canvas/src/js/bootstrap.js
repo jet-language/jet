@@ -51,4 +51,5 @@ function canvasPayload(value) {
   const proofUrl = window.__JET_CANVAS_PROOF__ || (base + "/proof");
   const commandUrl = window.__JET_CANVAS_COMMAND__ || (base + "/command");
   window.__jetCanvasProofRail = true;
-  Promise.resolve(typeof loadCanvasSession === "function" ? loadCanvasSession() : null).finally(() => loadGraph());
+  Promise.resolve(typeof loadCanvasSession === "function" ? loadCanvasSession() : null)
+    .finally(() => loadGraph(canvasSession && canvasSession.project_context && canvasSession.project_context.source_id || undefined));

@@ -30,6 +30,8 @@
   function syncCanvasSession(session) {
     if (!session || !session.id) return;
     canvasSession = session;
+    const projectContext = session.project_context || {};
+    if (projectContext.source_id) selectedSourceId = projectContext.source_id;
     const shortId = String(session.id).slice(-18);
     const currentRevision = session.source_revision || session.accepted_revision || "uncommitted";
     const identity = document.getElementById("session-identity");
@@ -70,6 +72,9 @@
       acceptedRevision: session.accepted_revision || null,
       lastGoodRevision: session.last_good_revision || null,
       lastGoodProgram: session.last_good_program || null,
+      projectContext,
+      run: session.run || { output: null, target: null },
+      debugger: session.debugger || { state: "idle" },
       state: session.state || "starting",
       clients: session.clients || 0,
       history: session.history || { count: 0, receipts: [] },

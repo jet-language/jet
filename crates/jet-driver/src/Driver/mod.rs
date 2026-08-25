@@ -5467,6 +5467,26 @@ pub fn check_file_with_effect_facts_profile(
     );
     (diagnostics, bundle, facts)
 }
+
+/// Like `check_file_with_effect_facts_profile`, but retain Run-mode Output
+/// selection facts for read-only tooling that explains the selected Output.
+pub fn check_file_with_effect_facts_for_run(
+    file: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
+    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl_for_run(
+        file,
+        profile,
+        setting_overrides,
+    );
+    (diagnostics, bundle, facts)
+}
+
 pub fn check_file_with_effect_facts_for_output(
     file: &str,
     output: &str,
@@ -5587,6 +5607,32 @@ fn check_file_with_effect_facts_impl(
             profile,
             setting_overrides,
             explicit_output,
+            false,
+        )
+    })
+}
+
+fn check_file_with_effect_facts_impl_for_run(
+    file: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+    Vec<std::path::PathBuf>,
+) {
+    crate::run_compiler_work(|| {
+        check_file_on_compiler_stack(
+            file,
+            &[],
+            false,
+            None,
+            None,
+            profile,
+            setting_overrides,
+            None,
+            true,
         )
     })
 }
@@ -5600,6 +5646,7 @@ fn check_file_on_compiler_stack(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
     explicit_output: Option<&str>,
+    run_mode: bool,
 ) -> (
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
@@ -5640,6 +5687,11 @@ fn check_file_on_compiler_stack(
                     output,
                     false,
                     crate::Policy::GateSet::default(),
+                )
+            } else if run_mode {
+                crate::Sema::check_bundle_with_effect_facts(
+                    &mut bundle,
+                    crate::Sema::CompileMode::Run,
                 )
             } else {
                 match incremental {
@@ -6253,6 +6305,7 @@ fn swap_command_entry_point(
             alias_span: zero,
             span: zero,
             item_spans: Vec::new(),
+            local_spans: Vec::new(),
             is_pub: false,
             is_package_pub: false,
             inline_version: None,

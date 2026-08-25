@@ -22,7 +22,7 @@ fn jet_test_outside_project_environment_refuses_without_acquiring() {
     fs::write(project.join("run.jet"), "fn run() {}\n").unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["test", "--no-color"])
+        .args(["test"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &jetpack_root)
         .env_remove("JETPACK_ENV")

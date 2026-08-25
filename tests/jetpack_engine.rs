@@ -7077,8 +7077,14 @@ fn use_many_packages_settles_one_row_per_package_without_output_flood() {
     let project = Scratch::new("use-many-packages");
     copy_dir_recursive(&example_dir(), &project.path);
     let root = Scratch::new("use-many-packages-root");
+    let fixtures = example_fixtures(&root.path);
+    fs::copy(
+        fixtures.join("nixpkgs-ripgrep.json"),
+        fixtures.join("jetpack-ripgrep.json"),
+    )
+    .unwrap();
     let refs = (0..26)
-        .map(|_| "ripgrep@stable")
+        .map(|_| "ripgrep@jetpack")
         .collect::<Vec<_>>()
         .join(" ");
     let binary = common::jetpack_bin()
@@ -7090,7 +7096,7 @@ fn use_many_packages_settles_one_row_per_package_without_output_flood() {
         .args(["-qfec", &command, "/dev/null"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
-        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+        .env("JETPACK_FIXTURES", &fixtures)
         .env_remove("NO_COLOR")
         .env_remove("FORCE_COLOR")
         .output()
@@ -7103,6 +7109,10 @@ fn use_many_packages_settles_one_row_per_package_without_output_flood() {
     let transcript = String::from_utf8_lossy(&output.stdout);
     let settled = transcript.matches('✓').count();
     assert_eq!(settled, 26, "one settled row per package: {transcript}");
+    assert!(
+        settled + 1 <= 30,
+        "26 settled rows plus aggregate must fit the 30-row terminal: {transcript}"
+    );
     assert!(
         transcript.contains("0/26 packages"),
         "aggregate live line must remain pinned above settled rows: {transcript}"

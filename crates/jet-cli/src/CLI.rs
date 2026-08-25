@@ -1354,7 +1354,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--stdin-path", help: "with fmt -: path label used in diagnostics when reading from stdin" },
     FlagSpec { long: "--small", help: "with build/run: favor a smaller binary" },
     FlagSpec { long: "--lib", help: "with build: emit the native Library and C header" },
-    FlagSpec { long: "--output", help: "with run: run a named build output" },
+    FlagSpec { long: "--output", help: "with run/dev: select a named build output (Canvas uses it as the initial selection)" },
     FlagSpec { long: "--locked", help: "with fetch: verify only, refuse network" },
     FlagSpec { long: "--effect", help: "with find: require an effect such as FS.Read" },
     FlagSpec { long: "--example", help: "with find: search by input/output example" },
@@ -1396,11 +1396,11 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--swap", help: "with dev: hot-swap compatible edits and restart after type changes" },
     FlagSpec { long: "--watch", help: "with run/dev: re-run on dependency changes; --watch=off runs once" },
     FlagSpec { long: CANVAS_FLAG, help: "with dev: open the full Canvas IDE over this dev session" },
-    FlagSpec { long: "--canvas-host", help: "with --canvas: bind host (loopback by default)" },
-    FlagSpec { long: "--canvas-port", help: "with --canvas: bind an explicit port" },
-    FlagSpec { long: "--canvas-transport", help: "with --canvas: select the named transport" },
-    FlagSpec { long: "--canvas-authority", help: "with --canvas: select loopback or remote authority" },
-    FlagSpec { long: "--canvas-audit", help: "with --canvas: enable request/rebuild audit output" },
+    FlagSpec { long: "--canvas-host", help: "with dev: with --canvas, bind host (loopback by default)" },
+    FlagSpec { long: "--canvas-port", help: "with dev: with --canvas, bind an explicit port" },
+    FlagSpec { long: "--canvas-transport", help: "with dev: with --canvas, select the named transport" },
+    FlagSpec { long: "--canvas-authority", help: "with dev: with --canvas, select loopback or remote authority" },
+    FlagSpec { long: "--canvas-audit", help: "with dev: with --canvas, enable request/rebuild audit output" },
     // E2-M18 REPL flags.
     FlagSpec { long: "--project", help: "with repl: load package settings and imports from this directory" },
     // E3 interactive scripting flags.
@@ -2297,6 +2297,22 @@ mod tests {
         assert!(flags_for_command("dev")
             .iter()
             .any(|flag| flag.0 == CANVAS_FLAG));
+        for expert_flag in [
+            "--output",
+            "--target",
+            "--canvas-host",
+            "--canvas-port",
+            "--canvas-transport",
+            "--canvas-authority",
+            "--canvas-audit",
+        ] {
+            assert!(
+                flags_for_command("dev")
+                    .iter()
+                    .any(|flag| flag.0 == expert_flag),
+                "{expert_flag} must be visible in dev help"
+            );
+        }
         assert!(man_page("0.0.0").contains("--canvas"));
         assert!(completions_bash().contains("--canvas"));
         assert!(completions_zsh().contains("--canvas"));

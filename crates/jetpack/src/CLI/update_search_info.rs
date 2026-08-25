@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 pub(super) fn render_channel_update_row(
     theme: &Theme,
+    scope: &str,
     name: &str,
     name_w: usize,
     before: &str,
@@ -23,7 +24,14 @@ pub(super) fn render_channel_update_row(
         package_noun(package_count),
         download_size(download_bytes),
     );
-    theme.plan_row(Output::PlanMark::Change, name, name_w, before, &after);
+    let label = format!("{scope:<5} {name:<name_w$}");
+    theme.plan_row(
+        Output::PlanMark::Change,
+        &label,
+        label.len(),
+        before,
+        &after,
+    );
 }
 
 #[derive(Default)]
@@ -37,6 +45,19 @@ impl UpdateConfirmation {
             .decision
             .get_or_insert_with(|| theme.confirm_apply(assume_yes))
     }
+}
+
+struct ProjectSourceUpdate {
+    source: super::realize::ChannelSource,
+    before: String,
+    after: String,
+    package_count: usize,
+    download_bytes: Option<u64>,
+}
+
+pub(super) struct ProjectUpdatePlan {
+    project_dir: PathBuf,
+    updates: Vec<ProjectSourceUpdate>,
 }
 
 fn package_noun(count: usize) -> String {
@@ -69,17 +90,31 @@ pub(super) fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
         theme.status("scope: user tools");
     }
     if update_deps && update_tools {
-        let project_code = if project_scope.is_some() {
-            cmd_update_project(theme, parsed, &mut confirmation)
+        let project_plan = if project_scope.is_some() {
+            match plan_project_update(theme, parsed) {
+                Ok(plan) => plan,
+                Err(code) => return code,
+            }
         } else {
-            0
+            None
         };
-        let tools_code = super::tool::update_user_tools(theme, parsed, &mut confirmation);
-        return if project_code != 0 || tools_code != 0 {
-            2
-        } else {
-            0
-        };
+        if let Some(plan) = &project_plan {
+            theme.status("Plan channel update");
+            render_project_update_plan(theme, plan);
+        }
+        let has_project_plan = project_plan.is_some();
+        let mut project_plan = project_plan;
+        return super::tool::update_user_tools_with_plan(
+            theme,
+            parsed,
+            &mut confirmation,
+            has_project_plan,
+            || {
+                project_plan
+                    .take()
+                    .map_or(0, |plan| apply_project_update(theme, plan))
+            },
+        );
     }
     if update_tools {
         return super::tool::update_user_tools(theme, parsed, &mut confirmation);
@@ -111,12 +146,29 @@ fn cmd_update_project(
     parsed: &Parsed,
     confirmation: &mut UpdateConfirmation,
 ) -> i32 {
+    let plan = match plan_project_update(theme, parsed) {
+        Ok(Some(plan)) => plan,
+        Ok(None) => return 0,
+        Err(code) => return code,
+    };
+    theme.status("Plan channel update");
+    render_project_update_plan(theme, &plan);
+    if !confirmation.confirm(theme, parsed.flags.assume_yes) {
+        return 2;
+    }
+    apply_project_update(theme, plan)
+}
+
+pub(super) fn plan_project_update(
+    theme: &Theme,
+    parsed: &Parsed,
+) -> Result<Option<ProjectUpdatePlan>, i32> {
     if parsed.flags.offline {
-        return offline_refusal(theme, "update");
+        return Err(offline_refusal(theme, "update"));
     }
     let plan = match load_project_plan(theme) {
         Ok(plan) => plan,
-        Err(code) => return code,
+        Err(code) => return Err(code),
     };
     let project_dir = &plan.project_root;
     let only = parsed.positional.first().map(String::as_str);
@@ -137,7 +189,7 @@ fn cmd_update_project(
                     "declare `{name}` with `#latest` for manual movement or `#auto` for automatic movement"
                 ),
             );
-            return 2;
+            return Err(2);
         }
     }
     let selected: Vec<_> = sources
@@ -153,13 +205,13 @@ fn cmd_update_project(
             ),
             None => theme.status("no channel sources to update."),
         }
-        return if only.is_some() { 2 } else { 0 };
+        return if only.is_some() { Err(2) } else { Ok(None) };
     }
 
     let mut ok = true;
     let mut updates = Vec::new();
-    for source in &selected {
-        match resolve_source_channel(source, &parsed.flags) {
+    for source in selected {
+        match resolve_source_channel(&source, &parsed.flags) {
             Ok(exact) => {
                 let before = Lock::locked_source_channel(&project_dir, &source.name)
                     .map(|lock| lock.exact)
@@ -169,8 +221,14 @@ fn cmd_update_project(
                     .iter()
                     .filter(|spec| spec.source.label() == source.name)
                     .count();
-                let download_bytes = channel_download_size_from_fixture(source, &parsed.flags);
-                updates.push((source, before, exact, package_count, download_bytes));
+                let download_bytes = channel_download_size_from_fixture(&source, &parsed.flags);
+                updates.push(ProjectSourceUpdate {
+                    source,
+                    before,
+                    after: exact,
+                    package_count,
+                    download_bytes,
+                });
             }
             Err(e) => {
                 report_provider_error(theme, &e);
@@ -179,39 +237,54 @@ fn cmd_update_project(
         }
     }
     if !ok {
-        return 2;
+        return Err(2);
     }
-    theme.status("Plan channel update");
-    let name_w = updates
+    Ok(Some(ProjectUpdatePlan {
+        project_dir: plan.project_root,
+        updates,
+    }))
+}
+
+pub(super) fn render_project_update_plan(theme: &Theme, plan: &ProjectUpdatePlan) {
+    let name_w = plan
+        .updates
         .iter()
-        .map(|(source, _, _, _, _)| source.name.len())
+        .map(|update| update.source.name.len())
         .max()
         .unwrap_or(0)
         .max(8);
-    for (source, before, exact, package_count, download_bytes) in &updates {
+    for update in &plan.updates {
         render_channel_update_row(
             theme,
-            &source.name,
+            "deps",
+            &update.source.name,
             name_w,
-            before,
-            exact,
-            *package_count,
-            *download_bytes,
+            &update.before,
+            &update.after,
+            update.package_count,
+            update.download_bytes,
         );
     }
-    let download_bytes = updates
+    let download_bytes = plan
+        .updates
         .iter()
-        .map(|(_, _, _, _, bytes)| *bytes)
+        .map(|update| update.download_bytes)
         .collect::<Option<Vec<_>>>()
         .map(|sizes| sizes.into_iter().sum());
     if let Some(bytes) = download_bytes {
         theme.download_line(bytes);
     }
-    if !confirmation.confirm(theme, parsed.flags.assume_yes) {
-        return 2;
-    }
-    for (source, _before, exact, _package_count, _download_bytes) in updates {
-        if let Err(error) = rewrite_channel_manifest(&project_dir, &source, &exact) {
+}
+
+pub(super) fn apply_project_update(theme: &Theme, plan: ProjectUpdatePlan) -> i32 {
+    let ProjectUpdatePlan {
+        project_dir,
+        updates,
+    } = plan;
+    let mut ok = true;
+    for update in updates {
+        let source = update.source;
+        if let Err(error) = rewrite_channel_manifest(&project_dir, &source, &update.after) {
             theme.error_coded(
                 "E1340",
                 &format!("channel `{}` could not update the manifest", source.name),
@@ -226,14 +299,14 @@ fn cmd_update_project(
             Lock::LockedSourceChannel {
                 name: source.name.clone(),
                 channel: source.channel.as_str().to_string(),
-                exact: exact.clone(),
+                exact: update.after.clone(),
             },
         );
         theme.status(&format!(
             "{} {} → {}",
             theme.bold(&source.name),
             theme.gray(source.channel.as_str()),
-            exact
+            update.after
         ));
     }
     if ok {

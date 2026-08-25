@@ -723,3 +723,29 @@ fn run() {
     );
     assert!(lints[0].what.contains("other"));
 }
+
+#[test]
+fn selective_alias_ledger_keeps_local_binding_span() {
+    let src = r#"
+module util {
+    pub fn double(x: Int) Int -> x * 2
+    pub fn triple(x: Int) Int -> x * 3
+}
+use util.[double as d, triple as t]
+fn run() { print(d(5)) }
+"#;
+    let (bundle, diagnostics) = check(src);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+    let alias = bundle
+        .name_ledger
+        .alias(0, "t")
+        .expect("selective import alias");
+    let alias_start = src.find("triple as t").expect("alias source") + "triple as ".len();
+    let expected_span = jet_sema::Diagnostics::Span::new(alias_start, alias_start + 1);
+    assert_eq!(alias.span, expected_span);
+    let lint = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "L0103" && diagnostic.what.contains("t"))
+        .expect("unused selective alias lint");
+    assert_eq!(lint.span, Some(expected_span));
+}

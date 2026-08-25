@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2199,
-    "rev": 44974,
+    "nextNum": 2203,
+    "rev": 45011,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25,7 +25,8 @@
         "radar:e7",
         "radar:e10",
         "radar:e9",
-        "radar:e12"
+        "radar:e12",
+        "radar-sq"
       ]
     },
     "completionCursor": "2026-08-25T17:00:59.210Z"
@@ -151085,7 +151086,7 @@
       "id": "c0rlso3f",
       "num": 2198,
       "title": "Jet ships three hardcoded domains nobody owns, including the default catalog endpoint",
-      "body": "OWNER acquired `jet-lang.dev` on 2026-08-25. Auditing what the tree already points at surfaced a live supply-chain exposure, independent of any marketing use.\n\nMEASURED, all currently in the shipped tree:\n\n1. `crates/jetpack/src/NixIndex.rs:29` — `const DEFAULT_ENDPOINT: &str = \"https://index.jet.dev/nixpkgs\";`. This is the DEFAULT signed-catalog endpoint. The catalog maps a package name to an exact store path. Whoever controls that host controls what `ripgrep` resolves to for any jetpack that reaches the default. `jet.dev` is not owned by the project.\n\n2. `crates/jetpack/src/JetOS/identity.rs:20` and `:67` — `HOME_URL=\"https://jet.dev/jetos\"` written into `/etc/os-release` on every jetos generation. Same unowned host, and it is baked into installed systems.\n\n3. `Source/Publish/SBOM.rs:26` and `:171` — `DocumentNamespace: https://jet-lang.org/spdx/{name}-{version}-{subject}`. SPDX requires the namespace to be a URI the document producer controls, precisely so a namespace cannot be forged or collided. `jet-lang.org` is a different registration from `jet-lang.dev` and is not owned either.\n\nWHY THIS IS NOT COSMETIC: the catalog endpoint is a trust boundary. Content addressing and upstream cache signature checks protect the BYTES, but the name-to-store-path mapping comes from the catalog. A hostile default endpoint hands an attacker the mapping. The SPDX namespace is weaker but still a provenance claim about a domain the project does not hold.\n\nWHAT TO DO:\n\n- Point every hardcoded host at the owned domain, or remove the default entirely so a catalog endpoint must be configured explicitly. Removing the default is the safer shape and fits the ratified local unofficial tier on card #2157: no endpoint, no key, explicit opt-in.\n- If a default endpoint is retained, it must be on the owned domain and the client must still verify, never trust the host.\n- Fix the SPDX namespace to the owned domain so the provenance claim is true.\n- Grep for any other unowned host in shipped strings and fix them in the same pass.\n\nRELATED: card #2157 defers official signed publication until a real registry exists. This card is not that work. This card only stops the tree from pointing at hosts the project does not control.",
+      "body": "OWNER acquired jet-lang.dev on 2026-08-25. Auditing what the tree already points at surfaced a live supply-chain exposure, independent of any marketing use.MEASURED, all currently in the shipped tree:1. crates/jetpack/src/NixIndex.rs:29 — const DEFAULT_ENDPOINT: &str = \"https://index.jet.dev/nixpkgs\";. This is the DEFAULT signed-catalog endpoint. The catalog maps a package name to an exact store path. Whoever controls that host controls what ripgrep resolves to for any jetpack that reaches the default. jet.dev is not owned by the project.2. crates/jetpack/src/JetOS/identity.rs:20 and :67 — HOME_URL=\"https://jet.dev/jetos\" written into /etc/os-release on every jetos generation. Same unowned host, and it is baked into installed systems.3. Source/Publish/SBOM.rs:26 and :171 — DocumentNamespace: https://jet-lang.org/spdx/{name}-{version}-{subject}. SPDX requires the namespace to be a URI the document producer controls, precisely so a namespace cannot be forged or collided. jet-lang.org is a different registration from jet-lang.dev and is not owned either.WHY THIS IS NOT COSMETIC: the catalog endpoint is a trust boundary. Content addressing and upstream cache signature checks protect the BYTES, but the name-to-store-path mapping comes from the catalog. A hostile default endpoint hands an attacker the mapping. The SPDX namespace is weaker but still a provenance claim about a domain the project does not hold.WHAT TO DO:- Point every hardcoded host at the owned domain, or remove the default entirely so a catalog endpoint must be configured explicitly. Removing the default is the safer shape and fits the ratified local unofficial tier on card #2157: no endpoint, no key, explicit opt-in.- If a default endpoint is retained, it must be on the owned domain and the client must still verify, never trust the host.- Fix the SPDX namespace to the owned domain so the provenance claim is true.- Grep for any other unowned host in shipped strings and fix them in the same pass.`RELATED: card #2157 defers official signed publication until a real registry exists. This card is not that work. This card only stops the tree from pointing at hosts the project does not control.",
       "kind": "bug",
       "track": "epoch",
       "epoch": "e5",
@@ -151149,9 +151150,301 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T19:42:35.730Z",
-      "updated": "2026-08-25T19:42:38.586Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-25T19:57:47.513Z",
+      "updatedBy": "owner",
       "workOrder": 0
+    },
+    {
+      "id": "c0nctuf1",
+      "num": 2199,
+      "title": "Publish the Jet trust root at a stable address so signatures have an anchor",
+      "body": "Owner acquired `jet-lang.dev` 2026-08-25. This card makes signing possible later without doing the key ceremony now.\n\nWHY THIS IS THE FIRST DOMAIN CARD: card #2157 deferred official signed publication partly because there was nowhere to publish. A signature is only worth something if a verifier can independently obtain the public key from a place the project controls. Owning a domain supplies that place.\n\nMEASURED TODAY: the only working catalog is signed by a hardcoded test key `jet-test-index-v1` whose seed is 32 bytes of the value 7 (`target-nixfeed/sign-test.mjs`). Anyone can forge it. Card #2157 requires deleting it rather than promoting it.\n\nWHAT TO BUILD: a documented, stable location under the owned domain that serves the Jet public signing key or keys, in a form the client already understands (`trust/nix-index-v1.ed25519.pub` is the current shape read by `IndexClient::from_roots_with_mode` in `crates/jetpack/src/NixIndex.rs`). Include key id, algorithm and validity, and a documented rotation story even if rotation is manual at first.\n\nEXPLICITLY NOT THIS CARD: generating production key material, choosing custody, or signing a real catalog. Those stay owner-gated on #2157. This card only establishes the address and the format so the later ceremony has somewhere to land.\n\nTRAP: fetching a key over HTTPS is not the same as trusting it. The client must pin or verify the key it already has rather than accepting whatever the host returns. A trust root served over a network is only an anchor if the client refuses substitutions.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e11",
+      "milestoneId": "e11-m06-ecosystem-adoption",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A documented stable location under the owned domain serves the Jet public signing key with its key id, algorithm and validity",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:26.546Z"
+        },
+        {
+          "n": 2,
+          "text": "The served format is exactly what the existing client reads, proven by pointing a client at it and verifying a signature",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:26.900Z"
+        },
+        {
+          "n": 3,
+          "text": "The client refuses a substituted key rather than accepting whatever the host returns, proven by a test that serves a different key",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:27.264Z"
+        },
+        {
+          "n": 4,
+          "text": "A written rotation procedure exists, including how a verifier learns a key was retired",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:27.639Z"
+        },
+        {
+          "n": 5,
+          "text": "No production key material is created by this card, and the hardcoded test key is not promoted",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:28.002Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T19:59:25.500Z",
+      "updated": "2026-08-25T20:00:14.515Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 1
+    },
+    {
+      "id": "c095d6zw",
+      "num": 2200,
+      "title": "Give the Jetpack package index and binary cache real endpoints",
+      "body": "Owner acquired `jet-lang.dev` 2026-08-25. The stated endgame is a jetpackages repository replacing nixpkgs, with consumed packages landing in the Hangar under jetpack control.\n\nWHAT EXISTS: the client reads its endpoint from `config/nix-index-v1.endpoint` in the root; a generated local feed is served today by a Node script on `http://127.0.0.1:45123`. Host-owned cache mirrors already exist as a concept: the retired top-level `cache` verb, now `jetpack hangar cache bind|list|publish|verify|substitute`, binds ordered mirrors.\n\nWHAT TO BUILD: a published package index endpoint and a published binary cache endpoint under the owned domain, plus the client configuration that makes them the defaults when the user opts into the official tier. Serving is static content: signed index targets and content-addressed objects. No dynamic service is required for a first version.\n\nWHY THE CACHE MATTERS BEYOND CONVENIENCE: card #2197 exists because thirty agents on one machine each stored a private copy. A project-run mirror generalises that fix from one machine to an organisation, so agents on different machines also stop re-downloading the same closure.\n\nDEPENDS ON: the trust-root card, because an official endpoint without a verifiable key is just an unverified source with a nicer name. The local unofficial tier from #2157 remains the keyless path and must keep working.\n\nTRAP: do not make an official endpoint the default before signing exists. A default endpoint that is fetched but not verified is worse than no default, because it looks trustworthy.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e11",
+      "milestoneId": "e11-m06-ecosystem-adoption",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [
+        "c0nctuf1"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A published index endpoint under the owned domain serves signed index targets that the existing client resolves against",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:29.367Z"
+        },
+        {
+          "n": 2,
+          "text": "A published binary cache endpoint serves content-addressed objects that jetpack admits through its normal verification path",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:29.735Z"
+        },
+        {
+          "n": 3,
+          "text": "The endpoints are static content with no dynamic service required, proven by serving them from object storage or equivalent",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:30.107Z"
+        },
+        {
+          "n": 4,
+          "text": "An official endpoint is never the default until its signatures verify, and an unverified fetch is an error rather than a silent trust",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:30.501Z"
+        },
+        {
+          "n": 5,
+          "text": "The local unofficial keyless tier still works unchanged alongside the published endpoints",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:30.873Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T19:59:28.994Z",
+      "updated": "2026-08-25T19:59:36.388Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 2
+    },
+    {
+      "id": "c0kgi07h",
+      "num": 2201,
+      "title": "Distribute the Jet toolchain from an owned channel so jet self update means something",
+      "body": "Owner acquired `jet-lang.dev` 2026-08-25.\n\nWHAT EXISTS: `jet self` already manages the installation and reports the toolchain selected for a project (`jet self toolchain`, `jet self doctor`). There is no channel to update from.\n\nWHAT TO BUILD: a published toolchain channel under the owned domain carrying versioned Jet releases per platform with digests, and the client side that resolves, verifies and installs from it. The shape already exists in the tree: the native provider fetches a GitHub release asset, verifies a pinned digest and admits it into the Hangar (`crates/jetpack/src/Provider/native.rs`). Reuse that mechanism rather than inventing a second downloader.\n\nRELATION TO TIERS: a toolchain is the most security-sensitive artifact the project ships, so the unofficial keyless tier from #2157 must NOT be an acceptable source for it by default. Pinned digests are the minimum bar.\n\nTRAP: a self-updating toolchain that replaces its own running binary has the same in-place rewrite problem as card #2193's tool drift. Decide the shape before implementing: stage beside, verify, then swap; never write over a running executable.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e11",
+      "milestoneId": "e11-m06-ecosystem-adoption",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [
+        "c0nctuf1"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A published channel under the owned domain lists versioned Jet releases per platform with digests",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:32.217Z"
+        },
+        {
+          "n": 2,
+          "text": "jet self resolves, verifies against the digest and installs a release from that channel",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:32.604Z"
+        },
+        {
+          "n": 3,
+          "text": "The install stages beside the running binary and swaps after verification, never writing over a running executable",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:32.971Z"
+        },
+        {
+          "n": 4,
+          "text": "The unofficial keyless tier is not an acceptable default source for a toolchain, and choosing it requires an explicit override",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:33.355Z"
+        },
+        {
+          "n": 5,
+          "text": "A corrupted or digest-mismatched release is refused with a registered diagnostic and leaves the existing toolchain working",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:59:33.731Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T19:59:31.855Z",
+      "updated": "2026-08-25T19:59:37.418Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 3
+    },
+    {
+      "id": "c0k1wwnw",
+      "num": 2202,
+      "title": "Generate a page per diagnostic code from the registry",
+      "body": "Owner acquired `jet-lang.dev` 2026-08-25. Jet has roughly nine hundred registered diagnostics, each with a code, what, why and fix text, and a UI snapshot (invariant I4). That registry is already the single source of truth, so a page per code is generated rather than authored.\n\nThis card covers generation and publication. Whether the terminal message carries the address is a separate owner decision, ballot `D-DIAG-URL1` on this card.\n\nWHAT TO BUILD: a generator that reads the diagnostic registry and emits one page per code carrying the same what, why and fix the compiler prints, plus any worked example already present in the snapshot corpus. Pages must be regenerated from the registry, never hand-edited, so they cannot drift from the compiler.\n\nTRAP: the pages must be generated in the same build that blesses snapshots, or they will drift. A page that contradicts the compiler is worse than no page.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e11",
+      "milestoneId": "e11-m06-ecosystem-adoption",
+      "phase": "deciding",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A generator emits one page per registered diagnostic code directly from the registry, with no hand-authored page",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T20:01:01.445Z"
+        },
+        {
+          "n": 2,
+          "text": "Every page carries the same what, why and fix text the compiler prints for that code, verified by comparing generated output against the registry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T20:01:01.797Z"
+        },
+        {
+          "n": 3,
+          "text": "Pages regenerate in the same build step that blesses diagnostic snapshots, so a drifted page fails the build",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T20:01:02.147Z"
+        },
+        {
+          "n": 4,
+          "text": "A code added to the registry without a generated page fails a check",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T20:01:02.494Z"
+        },
+        {
+          "n": 5,
+          "text": "Whether the terminal message carries the address follows the ratified outcome of D-DIAG-URL1 and nothing is added to diagnostic text before that ruling",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T20:01:02.854Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T20:01:01.078Z",
+      "updated": "2026-08-25T20:01:03.750Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 4
     }
   ],
   "decisions": [
@@ -207780,6 +208073,130 @@
       "supersededBy": "D-JPK-NIXINDEX1",
       "created": "2026-08-25T19:15:46.068Z",
       "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-DOMAIN-LAYOUT1",
+      "cardId": "c0nctuf1",
+      "group": "other",
+      "title": "What the Jet domain names mean",
+      "gist": "Choose how Jet uses its domain so each address means one thing.",
+      "lesson": "Jet now owns a domain. Several parts of the tool want a network address: the package index, the binary cache, the signing key, and toolchain downloads. Each address becomes a promise that is hard to move later, because installed machines record it. Choosing the shape once, before anything is published, avoids a migration that would break existing installs.",
+      "explainer": "Three shipped strings already point at hosts nobody owns, so this is not hypothetical.",
+      "story": "Nate installs Jet on a second machine. It fetches a toolchain, resolves packages, and checks a signature. Each of those reaches a different address. If the addresses are ad hoc, moving any one of them later breaks every machine that recorded it.",
+      "inWild": "# What already ships, pointing at unowned hosts\ncrates/jetpack/src/NixIndex.rs:29\n  DEFAULT_ENDPOINT = \"https://index.jet.dev/nixpkgs\"\n\ncrates/jetpack/src/JetOS/identity.rs:20\n  HOME_URL=\"https://jet.dev/jetos\"      # baked into /etc/os-release\n\nSource/Publish/SBOM.rs:26\n  DocumentNamespace: https://jet-lang.org/spdx/...",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One host per role, as subdomains (recommended)",
+          "detail": "Each role gets its own name: the package index, the binary cache, the signing key, the toolchain channel, and the site. Any one can move to different infrastructure, or be served by a CDN or object store, without touching the others. Roles stay legible in logs and in error messages. Cost: more DNS records and certificates to manage, and a newcomer sees several names rather than one.",
+          "code": "index.jet-lang.dev     signed package index\ncache.jet-lang.dev     content-addressed objects\nkeys.jet-lang.dev      public signing keys\ndl.jet-lang.dev        toolchain releases\njet-lang.dev           the site"
+        },
+        {
+          "key": "B",
+          "name": "One host, paths per role",
+          "detail": "Everything lives under the apex with a path prefix. One certificate, one record, one thing to remember. Cost: every role shares one origin, so the cache cannot be moved behind different infrastructure from the index without a redirect, and a single misconfiguration affects all of them.",
+          "code": "jet-lang.dev/index/...\njet-lang.dev/cache/...\njet-lang.dev/keys/...\njet-lang.dev/dl/..."
+        },
+        {
+          "key": "C",
+          "name": "Split by trust rather than by role",
+          "detail": "Anything a client must verify sits on one host; everything human-facing sits on another. Makes the trust boundary visible in the name itself, which is useful when explaining what an attacker controlling a host could do. Cost: an unusual layout that people must learn, and roles with very different traffic shapes share an origin.",
+          "code": "trust.jet-lang.dev     keys, index, cache\njet-lang.dev           site, docs, playground"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Each role can move independently, and the address in an error message says what it was for.",
+        "tradeoff": "More DNS and certificate management than a single host.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "One origin for everything is simpler to set up, but it couples the cache to the site, and the cache is the part most likely to need different infrastructure as it grows."
+          },
+          {
+            "key": "C",
+            "reason": "Naming the trust boundary is genuinely instructive, but it is an unfamiliar layout and it still puts the index and the cache on one origin."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "Three shipped strings already reference hosts the project does not own, including the default package index endpoint, so some layout must be chosen before those can be corrected.",
+        "boilOcean": "The largest version would add a mirror network, regional endpoints, and per-tenant namespaces. None is needed to stop pointing at unowned hosts, and each can be added under option A without changing existing names.",
+        "hybrid": "A hybrid could put keys under the apex and everything else on subdomains. It saves one record and loses the property that every role can move on its own.",
+        "cooperative": "Static hosting for all four roles is available from ordinary object storage, so option A costs configuration rather than infrastructure.",
+        "adversarial": "The strongest case against subdomains is that a forgotten certificate on one of them silently breaks package resolution. That is real, and it argues for monitoring rather than for one host, since a single host failing breaks everything at once instead."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-25T20:00:14.515Z"
+    },
+    {
+      "id": "D-DIAG-URL1",
+      "cardId": "c0k1wwnw",
+      "group": "other",
+      "title": "Whether a Jet diagnostic carries a link",
+      "gist": "Choose whether error messages point at a web page for more detail.",
+      "lesson": "Jet treats every diagnostic as a product. Each one has a registered code, a what, a why, and a fix, plus a snapshot test. Owning a domain makes it possible to give each code a page. The question is whether the error text itself should carry that address, since the text is the most read thing the compiler produces and every character in it competes for attention.",
+      "explainer": "Roughly nine hundred codes exist, and the pages would be generated from the same source that produces the messages.",
+      "story": "Ana hits an error she does not understand. The message already tells her what happened, why, and what to do. A link would offer more, but only if she is online and only if it says more than the message already did.",
+      "inWild": "# A Jet diagnostic today\nError [E1272]: 28 packages lack a supported Nix compatibility output\n Why: `cargo@default` and 27 others need a pinned compatibility output.\n      Jetpack does not invoke an installed Nix executable for realization.\n Fix: provide a pinned fixture or verified Hangar output, or replace the\n      package with a native source or adapter.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "No link in the message; publish the pages anyway (recommended)",
+          "detail": "Every code gets a generated page, reachable by searching the code or by a documented address, but the terminal text stays exactly as it is. The message must remain sufficient on its own, which is the existing standard and the reason the diagnostics are good. Cost: a user who wants more has to know the pages exist.",
+          "code": "Error [E1272]: 28 packages lack a supported Nix compatibility output\n Why: ...\n Fix: ...\n\n# and separately, generated:\njet-lang.dev/e/E1272"
+        },
+        {
+          "key": "B",
+          "name": "Append a link to every diagnostic",
+          "detail": "Each message ends with its address. Maximum discoverability, and a user can always go deeper. Cost: one more line on every error in every build log forever, and it invites messages to get lazier over time because the page can carry the explanation.",
+          "code": "Error [E1272]: 28 packages lack a supported Nix compatibility output\n Why: ...\n Fix: ...\n More: jet-lang.dev/e/E1272"
+        },
+        {
+          "key": "C",
+          "name": "Link only where the page adds something the message cannot",
+          "detail": "A link appears only for codes whose page carries a worked example, a migration table, or a long explanation that does not belong in a terminal. Keeps the common case clean and spends the line only where it pays. Cost: a rule someone must apply per code, and inconsistency that users may read as arbitrary.",
+          "code": "Error [E0112]: type mismatch\n Why: ...\n Fix: ...\n\nError [E1272]: 28 packages lack a supported Nix compatibility output\n Why: ...\n Fix: ...\n More: jet-lang.dev/e/E1272   (migration table)"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "The message being sufficient on its own is why Jet diagnostics are good, and a link is the easiest way to erode that.",
+        "tradeoff": "Discoverability of the pages depends on search rather than on the message itself.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A line on every error forever is a large permanent cost, and it creates steady pressure to move explanation off the terminal and onto the web."
+          },
+          {
+            "key": "C",
+            "reason": "Spending the line only where it pays is the most defensible middle, but it needs a per-code judgement that will drift as nine hundred codes evolve."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "Every diagnostic already carries a registered code, what, why and fix text, and a snapshot test, so the source material for generated pages exists without new authoring.",
+        "boilOcean": "The largest version would add per-code playground links, version-specific pages and localisation. None of that changes whether the terminal text carries an address, which is the only owner decision here.",
+        "hybrid": "A hybrid could omit links in machine output and include them in human output. That is worth doing under any option, since machine consumers should never receive prose.",
+        "cooperative": "Rust and Elm both point at longer explanations, and both are frequently cited as having good errors, so a link is not evidence of a weak message.",
+        "adversarial": "The strongest case for option B is that a user who does not know the pages exist will never find them. The mitigation is naming the pages in the help output and the docs rather than in every error line."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-25T20:01:03.750Z"
     }
   ],
   "questions": [
@@ -209825,6 +210242,258 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-25T20:01:03.750Z",
+      "by": "orchestrator",
+      "action": "decision.add",
+      "ref": "D-DIAG-URL1",
+      "note": "Whether a Jet diagnostic carries a link"
+    },
+    {
+      "at": "2026-08-25T20:01:03.375Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0k1wwnw",
+      "note": "milestoneId,workOrder"
+    },
+    {
+      "at": "2026-08-25T20:01:02.854Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0k1wwnw",
+      "note": "#5 Whether the terminal message carries the address follows the"
+    },
+    {
+      "at": "2026-08-25T20:01:02.494Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0k1wwnw",
+      "note": "#4 A code added to the registry without a generated page fails "
+    },
+    {
+      "at": "2026-08-25T20:01:02.148Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0k1wwnw",
+      "note": "#3 Pages regenerate in the same build step that blesses diagnos"
+    },
+    {
+      "at": "2026-08-25T20:01:01.797Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0k1wwnw",
+      "note": "#2 Every page carries the same what, why and fix text the compi"
+    },
+    {
+      "at": "2026-08-25T20:01:01.445Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0k1wwnw",
+      "note": "#1 A generator emits one page per registered diagnostic code di"
+    },
+    {
+      "at": "2026-08-25T20:01:01.079Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0k1wwnw",
+      "note": "Generate a page per diagnostic code from the registry"
+    },
+    {
+      "at": "2026-08-25T20:00:14.515Z",
+      "by": "orchestrator",
+      "action": "decision.add",
+      "ref": "D-DOMAIN-LAYOUT1",
+      "note": "What the Jet domain names mean"
+    },
+    {
+      "at": "2026-08-25T19:59:37.418Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0kgi07h",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T19:59:36.388Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c095d6zw",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T19:59:35.839Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0nctuf1",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T19:59:35.307Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0kgi07h",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-25T19:59:34.766Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c095d6zw",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-25T19:59:34.239Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0kgi07h",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-25T19:59:33.731Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0kgi07h",
+      "note": "#5 A corrupted or digest-mismatched release is refused with a r"
+    },
+    {
+      "at": "2026-08-25T19:59:33.355Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0kgi07h",
+      "note": "#4 The unofficial keyless tier is not an acceptable default sou"
+    },
+    {
+      "at": "2026-08-25T19:59:32.972Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0kgi07h",
+      "note": "#3 The install stages beside the running binary and swaps after"
+    },
+    {
+      "at": "2026-08-25T19:59:32.605Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0kgi07h",
+      "note": "#2 jet self resolves, verifies against the digest and installs "
+    },
+    {
+      "at": "2026-08-25T19:59:32.217Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0kgi07h",
+      "note": "#1 A published channel under the owned domain lists versioned J"
+    },
+    {
+      "at": "2026-08-25T19:59:31.855Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0kgi07h",
+      "note": "Distribute the Jet toolchain from an owned channel so jet self update means something"
+    },
+    {
+      "at": "2026-08-25T19:59:31.411Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c095d6zw",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-25T19:59:30.873Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c095d6zw",
+      "note": "#5 The local unofficial keyless tier still works unchanged alon"
+    },
+    {
+      "at": "2026-08-25T19:59:30.501Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c095d6zw",
+      "note": "#4 An official endpoint is never the default until its signatur"
+    },
+    {
+      "at": "2026-08-25T19:59:30.108Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c095d6zw",
+      "note": "#3 The endpoints are static content with no dynamic service req"
+    },
+    {
+      "at": "2026-08-25T19:59:29.735Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c095d6zw",
+      "note": "#2 A published binary cache endpoint serves content-addressed o"
+    },
+    {
+      "at": "2026-08-25T19:59:29.367Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c095d6zw",
+      "note": "#1 A published index endpoint under the owned domain serves sig"
+    },
+    {
+      "at": "2026-08-25T19:59:28.994Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c095d6zw",
+      "note": "Give the Jetpack package index and binary cache real endpoints"
+    },
+    {
+      "at": "2026-08-25T19:59:28.522Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0nctuf1",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-25T19:59:28.002Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nctuf1",
+      "note": "#5 No production key material is created by this card, and the "
+    },
+    {
+      "at": "2026-08-25T19:59:27.640Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nctuf1",
+      "note": "#4 A written rotation procedure exists, including how a verifie"
+    },
+    {
+      "at": "2026-08-25T19:59:27.264Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nctuf1",
+      "note": "#3 The client refuses a substituted key rather than accepting w"
+    },
+    {
+      "at": "2026-08-25T19:59:26.900Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nctuf1",
+      "note": "#2 The served format is exactly what the existing client reads,"
+    },
+    {
+      "at": "2026-08-25T19:59:26.546Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0nctuf1",
+      "note": "#1 A documented stable location under the owned domain serves t"
+    },
+    {
+      "at": "2026-08-25T19:59:25.500Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0nctuf1",
+      "note": "Publish the Jet trust root at a stable address so signatures have an anchor"
+    },
+    {
+      "at": "2026-08-25T19:57:47.514Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0rlso3f",
+      "note": "body"
+    },
     {
       "at": "2026-08-25T19:46:23.730Z",
       "by": "orchestrator",
@@ -213071,258 +213740,6 @@
       "by": "orchestrator",
       "action": "card.update",
       "ref": "c0e626pj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:05.630Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0jk3869",
-      "note": "#7 Slice-specific: the behavior this card alone owns — “Self-ho"
-    },
-    {
-      "at": "2026-08-24T23:27:05.143Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0jk3869",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:04.375Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0e4xqox",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Self-ho"
-    },
-    {
-      "at": "2026-08-24T23:27:03.691Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0e4xqox",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:02.996Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c08s1yhj",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Self-ho"
-    },
-    {
-      "at": "2026-08-24T23:27:02.628Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c08s1yhj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:02.267Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c03jur1b",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Self-ho"
-    },
-    {
-      "at": "2026-08-24T23:27:01.928Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c03jur1b",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:01.579Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0y6j175",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Self-ho"
-    },
-    {
-      "at": "2026-08-24T23:27:01.236Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0y6j175",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:00.874Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0syq510",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Self-ho"
-    },
-    {
-      "at": "2026-08-24T23:27:00.499Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0syq510",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:00.138Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0noev0x",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Self-ho"
-    },
-    {
-      "at": "2026-08-24T23:26:59.792Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0noev0x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:59.425Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0gutf6c",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Self-ho"
-    },
-    {
-      "at": "2026-08-24T23:26:59.065Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0gutf6c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:58.697Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0bfcs5p",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Self-ho"
-    },
-    {
-      "at": "2026-08-24T23:26:58.348Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0bfcs5p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:57.971Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0lpd9yg",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “MCP SDK"
-    },
-    {
-      "at": "2026-08-24T23:26:57.582Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0lpd9yg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:57.232Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0utsmdj",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Cross c"
-    },
-    {
-      "at": "2026-08-24T23:26:56.886Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0utsmdj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:56.532Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0zmoznd",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Compile"
-    },
-    {
-      "at": "2026-08-24T23:26:56.148Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0zmoznd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:55.773Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0zdbl2x",
-      "note": "#7 Slice-specific: the behavior this card alone owns — “core.cr"
-    },
-    {
-      "at": "2026-08-24T23:26:55.433Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0zdbl2x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:55.057Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0oqtn3i",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Polyglo"
-    },
-    {
-      "at": "2026-08-24T23:26:54.687Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0oqtn3i",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:54.314Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c9q0534j",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “core.ga"
-    },
-    {
-      "at": "2026-08-24T23:26:53.950Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c9q0534j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:53.606Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0p12web",
-      "note": "#7 Slice-specific: the behavior this card alone owns — “Self-ho"
-    },
-    {
-      "at": "2026-08-24T23:26:53.249Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0p12web",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:52.885Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c08t6mf1",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “core.os"
-    },
-    {
-      "at": "2026-08-24T23:26:52.521Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c08t6mf1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:52.125Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0mz0hn4",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Executa"
-    },
-    {
-      "at": "2026-08-24T23:26:51.741Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0mz0hn4",
       "note": "logEntry"
     }
   ],

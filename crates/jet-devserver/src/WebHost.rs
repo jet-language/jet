@@ -22,7 +22,9 @@ use std::time::{Duration, Instant};
 use jet_driver::Diagnostics::ColorChoice;
 use jet_foundation::JSON::json_escape;
 
-use crate::{content_type_for, query_param, static_path, write_response, Request};
+use crate::{
+    content_type_for, query_param, static_path, write_response, MAX_REQUEST_BODY_BYTES, Request,
+};
 
 /// Ports tried, in order, before giving up. 8080 is the conventional static-
 /// dev-server port; a small bounded scan upward covers "something else is
@@ -531,6 +533,8 @@ pub struct CanvasHostOptions {
     pub transport: String,
     pub authority: String,
     pub audit: bool,
+    pub output: Option<String>,
+    pub target: Option<String>,
 }
 
 impl Default for CanvasHostOptions {
@@ -541,6 +545,8 @@ impl Default for CanvasHostOptions {
             transport: "http".to_string(),
             authority: "loopback".to_string(),
             audit: false,
+            output: None,
+            target: None,
         }
     }
 }
@@ -548,6 +554,11 @@ impl Default for CanvasHostOptions {
 pub struct WebHost {
     listener: Mutex<Option<TcpListener>>,
     application_listener: Mutex<Option<TcpListener>>,
+    started: AtomicBool,
+    shutdown: Arc<AtomicBool>,
+    server_threads: Mutex<Vec<thread::JoinHandle<()>>>,
+    poll_thread: Mutex<Option<thread::JoinHandle<()>>>,
+    terminal_thread: Mutex<Option<thread::JoinHandle<()>>>,
     status: Arc<DevStatus>,
     debug_sessions: Arc<crate::Canvas::DebugSessions>,
     session: Arc<crate::ResidentDevSession>,
@@ -564,7 +575,7 @@ impl WebHost {
             .local_addr()
             .map(|address| address.port())
             .unwrap_or(*PORT_RANGE.start());
-        let application_listener = bind_application_server()?;
+        let application_listener = bind_application_server(None)?;
         let application_port = application_listener
             .local_addr()
             .map(|address| address.port())
@@ -575,6 +586,11 @@ impl WebHost {
         Ok(Self {
             listener: Mutex::new(Some(listener)),
             application_listener: Mutex::new(Some(application_listener)),
+            started: AtomicBool::new(false),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            server_threads: Mutex::new(Vec::new()),
+            poll_thread: Mutex::new(None),
+            terminal_thread: Mutex::new(None),
             status,
             debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
             session: Arc::new(crate::ResidentDevSession::new(
@@ -608,16 +624,12 @@ impl WebHost {
         options: &CanvasHostOptions,
     ) -> Result<Self, String> {
         let host = validate_canvas_options(options)?;
-        let mut effective = options.clone();
-        if effective.port.is_none() {
-            effective.port = fallback_port;
-        }
-        let listener = bind_canvas_server(&host, effective.port)?;
+        let listener = bind_canvas_server(&host, options.port)?;
         let bound_port = listener
             .local_addr()
             .map(|address| address.port())
             .unwrap_or(0);
-        let application_listener = bind_application_server()?;
+        let application_listener = bind_application_server(fallback_port)?;
         let application_port = application_listener
             .local_addr()
             .map(|address| address.port())
@@ -625,17 +637,24 @@ impl WebHost {
         let status = Arc::new(DevStatus::new(file, verbose || options.audit));
         status.set_port(bound_port);
         let session_secret = mint_session_secret()?;
+        let session = Arc::new(crate::ResidentDevSession::new_with_canvas_host(
+            file,
+            &host,
+            bound_port,
+            application_port,
+        ));
+        session.select_output_values(options.output.as_deref(), options.target.as_deref());
         Ok(Self {
             listener: Mutex::new(Some(listener)),
             application_listener: Mutex::new(Some(application_listener)),
+            started: AtomicBool::new(false),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            server_threads: Mutex::new(Vec::new()),
+            poll_thread: Mutex::new(None),
+            terminal_thread: Mutex::new(None),
             status,
             debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
-            session: Arc::new(crate::ResidentDevSession::new_with_canvas_host(
-                file,
-                &host,
-                bound_port,
-                application_port,
-            )),
+            session,
             canvas_file: file.to_string(),
             canvas_only: false,
             bind_host: host,
@@ -657,14 +676,21 @@ impl WebHost {
         let status = Arc::new(DevStatus::new(file, verbose || options.audit));
         status.set_port(bound_port);
         let session_secret = mint_session_secret()?;
+        let session = Arc::new(crate::ResidentDevSession::new_with_canvas_host(
+            file, &host, bound_port, 0,
+        ));
+        session.select_output_values(options.output.as_deref(), options.target.as_deref());
         Ok(Self {
             listener: Mutex::new(Some(listener)),
             application_listener: Mutex::new(None),
+            started: AtomicBool::new(false),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            server_threads: Mutex::new(Vec::new()),
+            poll_thread: Mutex::new(None),
+            terminal_thread: Mutex::new(None),
             status,
             debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
-            session: Arc::new(crate::ResidentDevSession::new_with_canvas_host(
-                file, &host, bound_port, 0,
-            )),
+            session,
             canvas_file: file.to_string(),
             canvas_only: true,
             bind_host: host,
@@ -693,6 +719,9 @@ impl WebHost {
     }
 
     fn start_inner(&self, terminal_controls: bool) {
+        if self.started.swap(true, Ordering::SeqCst) {
+            return;
+        }
         let listener = self.listener.lock().unwrap().take();
         if let Some(listener) = listener {
             let status = Arc::clone(&self.status);
@@ -702,7 +731,8 @@ impl WebHost {
             let canvas_only = self.canvas_only;
             let bind_host = self.bind_host.clone();
             let session_secret = self.session_secret.clone();
-            thread::spawn(move || {
+            let shutdown = Arc::clone(&self.shutdown);
+            let handle = thread::spawn(move || {
                 serve_forever(
                     listener,
                     status,
@@ -713,15 +743,18 @@ impl WebHost {
                     canvas_only,
                     bind_host,
                     session_secret,
+                    shutdown,
                 )
             });
+            self.server_threads.lock().unwrap().push(handle);
         }
         if let Some(listener) = self.application_listener.lock().unwrap().take() {
             let status = Arc::clone(&self.status);
             let debug_sessions = Arc::clone(&self.debug_sessions);
             let session = Arc::clone(&self.session);
             let canvas_file = self.canvas_file.clone();
-            thread::spawn(move || {
+            let shutdown = Arc::clone(&self.shutdown);
+            let handle = thread::spawn(move || {
                 serve_forever(
                     listener,
                     status,
@@ -732,16 +765,21 @@ impl WebHost {
                     false,
                     "127.0.0.1".to_string(),
                     String::new(),
+                    shutdown,
                 )
             });
+            self.server_threads.lock().unwrap().push(handle);
         }
         {
             let status = Arc::clone(&self.status);
-            thread::spawn(move || loop {
-                thread::sleep(Duration::from_millis(LIVE_RELOAD_POLL_MS));
-                status.activate_requested_browser_trace();
-                status.expire_clients();
+            let shutdown = Arc::clone(&self.shutdown);
+            let handle = thread::spawn(move || {
+                while !wait_for_shutdown(&shutdown, Duration::from_millis(LIVE_RELOAD_POLL_MS)) {
+                    status.activate_requested_browser_trace();
+                    status.expire_clients();
+                }
             });
+            *self.poll_thread.lock().unwrap() = Some(handle);
         }
         if self.canvas_only || !terminal_controls {
             println!("Canvas: {}", self.canvas_url());
@@ -759,7 +797,12 @@ impl WebHost {
             );
         }
         if terminal_controls {
-            start_terminal_controls(Arc::clone(&self.status));
+            if let Some(handle) = start_terminal_controls(
+                Arc::clone(&self.status),
+                Arc::clone(&self.shutdown),
+            ) {
+                *self.terminal_thread.lock().unwrap() = Some(handle);
+            }
         }
         self.status.activate();
     }
@@ -802,19 +845,60 @@ impl WebHost {
     }
 }
 
-fn start_terminal_controls(status: Arc<DevStatus>) {
+impl Drop for WebHost {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        self.listener.lock().unwrap().take();
+        self.application_listener.lock().unwrap().take();
+
+        if let Some(handle) = self.terminal_thread.lock().unwrap().take() {
+            let _ = handle.join();
+        }
+        if let Some(handle) = self.poll_thread.lock().unwrap().take() {
+            let _ = handle.join();
+        }
+        let handles = self.server_threads.lock().unwrap().drain(..).collect::<Vec<_>>();
+        for handle in handles {
+            let _ = handle.join();
+        }
+        self.status.active.store(false, Ordering::SeqCst);
+    }
+}
+
+fn wait_for_shutdown(shutdown: &AtomicBool, duration: Duration) -> bool {
+    let deadline = Instant::now() + duration;
+    while !shutdown.load(Ordering::SeqCst) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        thread::sleep(remaining.min(Duration::from_millis(10)));
+    }
+    true
+}
+
+fn start_terminal_controls(
+    status: Arc<DevStatus>,
+    shutdown: Arc<AtomicBool>,
+) -> Option<thread::JoinHandle<()>> {
     if !status.pin {
-        return;
+        return None;
     }
     let Some(raw) = jet_repl::Term::RawGuard::enable() else {
-        return;
+        return None;
     };
     status.controls_ready.store(true, Ordering::SeqCst);
-    thread::spawn(move || {
+    Some(thread::spawn(move || {
         let mut keys = jet_repl::Term::KeyReader::new(std::io::stdin());
         loop {
+            if shutdown.load(Ordering::SeqCst) {
+                status.disable_terminal_controls();
+                drop(raw);
+                return;
+            }
             match keys.read_key() {
                 jet_repl::Term::Key::Char('v' | 'V') => status.toggle_verbose(),
+                jet_repl::Term::Key::Idle => {}
                 jet_repl::Term::Key::CtrlC => {
                     status.disable_terminal_controls();
                     drop(raw);
@@ -829,7 +913,7 @@ fn start_terminal_controls(status: Arc<DevStatus>) {
                 _ => {}
             }
         }
-    });
+    }))
 }
 
 /// Pure — the parity words shared verbatim by the terminal line and the
@@ -1090,45 +1174,132 @@ fn url_host(host: &str) -> String {
 }
 
 fn canvas_api_path(path: &str, target: &str) -> bool {
-    (matches!(
+    matches!(
         path,
-        "/__jet_dev_version"
+        "/__jet_canvas"
+            | "/__jet_canvas/"
+            | "/__jet_canvas/app.js"
+            | "/__jet_canvas/session"
+            | "/__jet_canvas/live"
+            | "/__jet_canvas/graph"
+            | "/__jet_canvas/project"
+            | "/__jet_canvas/source-control"
+            | "/__jet_canvas/core-catalog"
+            | "/__jet_canvas/proof"
+            | "/__jet_canvas/source"
+            | "/__jet_canvas/command"
+            | "/__jet_canvas/transaction"
+            | "/__jet_canvas/project/transaction"
+            | "/__jet_canvas/query"
+            | "/__jet_canvas/debug"
+            | "/canvas"
+            | "/canvas/"
+            | "/canvas/app.js"
+            | "/canvas/session"
+            | "/canvas/graph"
+            | "/canvas/project"
+            | "/canvas/source-control"
+            | "/canvas/core-catalog"
+            | "/canvas/proof"
+            | "/canvas/source"
+            | "/canvas/command"
+            | "/canvas/transaction"
+            | "/canvas/project/transaction"
+            | "/canvas/query"
+            | "/canvas/debug"
+            | "/panel"
+            | "/panel/"
+            | "/panel/app.js"
+            | "/panel/session"
+            | "/panel/graph"
+            | "/panel/project"
+            | "/panel/source-control"
+            | "/panel/core-catalog"
+            | "/panel/proof"
+            | "/panel/source"
+            | "/panel/command"
+            | "/panel/transaction"
+            | "/panel/project/transaction"
+            | "/panel/query"
+            | "/panel/debug"
+            | "/__jet_dev_version"
             | "/__jet_dev_status"
             | "/__jet_dev_disconnect"
             | "/__jet_perf_browser"
-            | "/__jet_canvas/live"
     )
-        || (path.starts_with("/__jet_canvas/") && !path.ends_with("/app.js"))
-        || (path.starts_with("/canvas/") && !path.ends_with("/app.js"))
-        || (path.starts_with("/panel/") && !path.ends_with("/app.js")))
-        || (path == "/" && query_param(target, "jet_panel_graph").as_deref() == Some("1"))
+        || (path == "/"
+            && (query_param(target, "jet_panel").as_deref() == Some("1")
+                || query_param(target, "jet_panel_app").as_deref() == Some("1")
+                || query_param(target, "jet_panel_graph").as_deref() == Some("1")))
 }
 
 fn canvas_request_authorized(
     request: &Request,
-    _target: &str,
+    target: &str,
     bind_host: &str,
     port: u16,
     session_secret: &str,
 ) -> bool {
+    if !matches!(request.method.as_str(), "GET" | "POST")
+        || request.body.len() > MAX_REQUEST_BODY_BYTES
+        || request.headers.contains_key("transfer-encoding")
+        || (request.method == "POST" && !request.headers.contains_key("content-length"))
+        || (request.method == "GET" && !request.body.is_empty())
+    {
+        return false;
+    }
+    let path = target.split('?').next().unwrap_or("");
+    if !canvas_api_path(path, target) {
+        return false;
+    }
     let Some(host) = request.headers.get("host") else {
         return false;
     };
     if !host_header_allowed(host, bind_host, port) {
         return false;
     }
-    if let Some(origin) = request.headers.get("origin") {
+    let origin = request.headers.get("origin");
+    if let Some(origin) = origin {
         if !origin_allowed(origin, bind_host, port) {
             return false;
         }
+    } else if !canvas_bootstrap_path(path, target)
+        && !request
+            .headers
+            .get("sec-fetch-site")
+            .is_some_and(|site| site.eq_ignore_ascii_case("same-origin"))
+    {
+        return false;
     }
-    let Some(authorization) = request.headers.get("authorization") else {
-        return false;
+    let session_valid = if let Some(token) = request
+        .headers
+        .get("authorization")
+        .and_then(|authorization| authorization.strip_prefix("Bearer "))
+    {
+        constant_time_equal(token, session_secret)
+    } else {
+        query_param(target, "session")
+            .is_some_and(|token| constant_time_equal(&token, session_secret))
     };
-    let Some(token) = authorization.strip_prefix("Bearer ") else {
-        return false;
-    };
-    constant_time_equal(token, session_secret)
+    session_valid && (origin.is_some() || query_param(target, "session").is_some())
+}
+
+fn canvas_bootstrap_path(path: &str, target: &str) -> bool {
+    matches!(
+        path,
+        "/__jet_canvas"
+            | "/__jet_canvas/"
+            | "/__jet_canvas/app.js"
+            | "/canvas"
+            | "/canvas/"
+            | "/canvas/app.js"
+            | "/panel"
+            | "/panel/"
+            | "/panel/app.js"
+    ) || matches!(
+        target,
+        "/?jet_panel=1" | "/?jet_panel_app=1"
+    )
 }
 
 fn host_header_allowed(value: &str, bind_host: &str, port: u16) -> bool {
@@ -1176,9 +1347,16 @@ fn unauthorized(stream: &mut TcpStream) -> std::io::Result<()> {
     )
 }
 
-fn bind_application_server() -> Result<TcpListener, String> {
-    TcpListener::bind(("127.0.0.1", 0))
-        .map_err(|error| format!("error: couldn't start the application listener: {error}"))
+fn bind_application_server(port: Option<u16>) -> Result<TcpListener, String> {
+    let bind_port = port.unwrap_or(0);
+    TcpListener::bind(("127.0.0.1", bind_port)).map_err(|error| {
+        match port {
+            Some(port) => format!(
+                "error: couldn't bind the application listener on port {port}: {error}"
+            ),
+            None => format!("error: couldn't start the application listener: {error}"),
+        }
+    })
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1199,28 +1377,38 @@ fn serve_forever(
     canvas_only: bool,
     bind_host: String,
     session_secret: String,
+    shutdown: Arc<AtomicBool>,
 ) {
-    for stream in listener.incoming() {
-        if let Ok(stream) = stream {
-            let status = Arc::clone(&status);
-            let debug_sessions = Arc::clone(&debug_sessions);
-            let session = Arc::clone(&session);
-            let canvas_file = canvas_file.clone();
-            let bind_host = bind_host.clone();
-            let session_secret = session_secret.clone();
-            thread::spawn(move || {
-                let _ = handle_connection(
-                    stream,
-                    &status,
-                    &debug_sessions,
-                    &session,
-                    &canvas_file,
-                    listener_kind,
-                    canvas_only,
-                    &bind_host,
-                    &session_secret,
-                );
-            });
+    if listener.set_nonblocking(true).is_err() {
+        return;
+    }
+    while !shutdown.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                let status = Arc::clone(&status);
+                let debug_sessions = Arc::clone(&debug_sessions);
+                let session = Arc::clone(&session);
+                let canvas_file = canvas_file.clone();
+                let bind_host = bind_host.clone();
+                let session_secret = session_secret.clone();
+                thread::spawn(move || {
+                    let _ = handle_connection(
+                        stream,
+                        &status,
+                        &debug_sessions,
+                        &session,
+                        &canvas_file,
+                        listener_kind,
+                        canvas_only,
+                        &bind_host,
+                        &session_secret,
+                    );
+                });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                let _ = wait_for_shutdown(&shutdown, Duration::from_millis(10));
+            }
+            Err(_) => return,
         }
     }
 }
@@ -1247,6 +1435,14 @@ fn handle_connection(
     let method = request.method.as_str();
     let target = request.target.as_str();
     let body = request.body.as_slice();
+    let path = target.split('?').next().unwrap_or("/");
+
+    if listener_kind == ListenerKind::Canvas
+        && canvas_api_path(path, target)
+        && !canvas_request_authorized(&request, target, bind_host, status.port(), session_secret)
+    {
+        return unauthorized(&mut stream);
+    }
 
     if method != "GET" && method != "POST" {
         return write_response(
@@ -1257,13 +1453,6 @@ fn handle_connection(
         );
     }
 
-    let path = target.split('?').next().unwrap_or("/");
-    if listener_kind == ListenerKind::Canvas
-        && canvas_api_path(path, target)
-        && !canvas_request_authorized(&request, target, bind_host, status.port(), session_secret)
-    {
-        return unauthorized(&mut stream);
-    }
     if let Some(client) = query_param(target, "client_id") {
         session.note_client(&client);
     }
@@ -1334,6 +1523,7 @@ fn handle_connection(
         };
     }
     if let Some(asset) = crate::canvas_asset(method, target, path) {
+        let asset = inject_canvas_session(asset, session_secret);
         return write_response(
             &mut stream,
             asset.status,
@@ -1346,12 +1536,15 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
         return match crate::Canvas::graph_json_for_file(Path::new(canvas_file)) {
-            Ok(body) => write_response(
-                &mut stream,
-                "200 OK",
-                "application/json; charset=utf-8",
-                with_session(body, session).as_bytes(),
-            ),
+            Ok(body) => {
+                session.select_project_source_from_payload(&body);
+                write_response(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    with_session(body, session).as_bytes(),
+                )
+            }
             Err(diags) => {
                 let body = with_session(
                     crate::Canvas::graph_json_error_for_file(Path::new(canvas_file), &diags),
@@ -1382,13 +1575,19 @@ fn handle_connection(
                 source_id.as_deref(),
             ),
         };
+        if let Some(source_id) = source_id.as_deref() {
+            session.select_project_source(source_id);
+        }
         return match graph {
-            Ok(body) => write_response(
-                &mut stream,
-                "200 OK",
-                "application/json; charset=utf-8",
-                with_session(body, session).as_bytes(),
-            ),
+            Ok(body) => {
+                session.select_project_source_from_payload(&body);
+                write_response(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    with_session(body, session).as_bytes(),
+                )
+            }
             Err(body) => write_response(
                 &mut stream,
                 "409 Conflict",
@@ -1618,7 +1817,7 @@ fn handle_connection(
             debug_sessions,
         ) {
             Ok(body) => {
-                session.record_debug(&request);
+                session.record_debug_response(&request, &body);
                 write_response(
                     &mut stream,
                     "200 OK",
@@ -1748,6 +1947,18 @@ fn handle_connection(
     let code = serve_static(&mut stream, path, &nonce)?;
     status.log_request(method, path, code, started.elapsed());
     Ok(())
+}
+
+fn inject_canvas_session(mut asset: crate::CanvasAsset, session_secret: &str) -> crate::CanvasAsset {
+    if asset.content_type == "text/html; charset=utf-8" {
+        if let Some(index) = asset.body.find("app.js?") {
+            let insert_at = index + "app.js?".len();
+            asset
+                .body
+                .insert_str(insert_at, &format!("session={session_secret}&"));
+        }
+    }
+    asset
 }
 
 fn method_not_allowed(stream: &mut TcpStream) -> std::io::Result<()> {
@@ -2032,11 +2243,15 @@ mod tests {
     use super::{
         canvas_api_path, canvas_request_authorized, constant_time_equal, format_build_time,
         format_line_colored, format_line_plain, frame_lines, header_words, host_header_allowed,
-        inject_live_reload, mint_session_secret, origin_allowed, CanvasHostOptions, DevStatus,
-        Ordering, WebHost,
+        handle_connection, inject_canvas_session, inject_live_reload, mint_session_secret, origin_allowed,
+        CanvasHostOptions, DevStatus, ListenerKind, Ordering, WebHost,
     };
     use crate::Request;
+    use std::io::Read;
     use std::collections::HashMap;
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::Arc;
+    use std::thread;
 
     #[test]
     fn injects_before_closing_body_tag() {
@@ -2294,6 +2509,25 @@ mod tests {
             url.len() > 80,
             "session secret should not be a short marker: {url}"
         );
+        let address = host
+            .listener
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        assert!(address.ip().is_loopback(), "default Canvas address: {address}");
+        assert!(!address.ip().is_unspecified(), "default Canvas address: {address}");
+    }
+
+    #[test]
+    fn canvas_sessions_get_distinct_ephemeral_ports_and_secrets() {
+        let first = WebHost::bind_canvas("app.jet", false, None).unwrap();
+        let second = WebHost::bind_canvas("app.jet", false, None).unwrap();
+
+        assert_ne!(first.status.port(), second.status.port());
+        assert_ne!(first.session_secret, second.session_secret);
     }
 
     #[test]
@@ -2325,14 +2559,98 @@ mod tests {
     }
 
     #[test]
+    fn canvas_non_loopback_requires_explicit_remote_authority() {
+        let mut options = CanvasHostOptions::default();
+        options.host = "0.0.0.0".to_string();
+        let error = WebHost::bind_canvas_with_options("app.jet", false, &options)
+            .err()
+            .expect("non-loopback Canvas must require explicit authority");
+        assert!(error.contains("authority = remote"), "{error}");
+
+        options.authority = "remote".to_string();
+        let host = WebHost::bind_canvas_with_options("app.jet", false, &options)
+            .expect("remote Canvas must bind only after explicit authority");
+        let address = host
+            .listener
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        assert!(address.ip().is_unspecified(), "remote Canvas address: {address}");
+    }
+
+    #[test]
+    fn started_canvas_session_releases_its_port_on_shutdown() {
+        let host = WebHost::bind_canvas("app.jet", false, None).unwrap();
+        let port = host.status.port();
+        host.start_canvas();
+        drop(host);
+
+        WebHost::bind_canvas("app.jet", false, Some(port))
+            .expect("a shut down Canvas session must release its port");
+    }
+
+    #[test]
     fn web_canvas_override_keeps_program_listener_separate() {
-        let options = CanvasHostOptions::default();
+        let mut options = CanvasHostOptions::default();
+        options.output = Some("service@local#debug".to_string());
+        options.target = Some("board.browser".to_string());
+        options.audit = true;
         let host = WebHost::bind_web_with_canvas_options("app.jet", false, None, &options)
             .expect("web Canvas host should bind independently");
         assert!(host.canvas_url().contains("/canvas?session="));
+        assert!(host.status.verbose.load(Ordering::Relaxed));
         let session = host.session.json();
+        assert!(session.contains("\"run\":{\"output\":\"service@local#debug\",\"target\":\"board.browser\"}"));
         assert!(session.contains("\"canvas\":{\"host\":\"127.0.0.1\""));
         assert!(!session.contains("\"application\":{\"host\":\"127.0.0.1\",\"port\":0"));
+    }
+
+    #[test]
+    fn canvas_session_post_cannot_change_program_selection() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let status = Arc::new(DevStatus::new_with_terminal("app.jet", false, false, false));
+        status.set_port(port);
+        let debug_sessions = crate::Canvas::DebugSessions::default();
+        let session = Arc::new(crate::ResidentDevSession::new("app.jet", port, 0));
+        let secret = mint_session_secret().unwrap();
+        let server = thread::spawn({
+            let session = Arc::clone(&session);
+            let secret = secret.clone();
+            move || {
+                let (stream, _) = listener.accept().unwrap();
+                handle_connection(
+                    stream,
+                    &status,
+                    &debug_sessions,
+                    &session,
+                    "app.jet",
+                    ListenerKind::Canvas,
+                    true,
+                    "127.0.0.1",
+                    &secret,
+                )
+                .unwrap();
+            }
+        });
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let body = r#"{"op":"select_output","output":"web","target":"browser"}"#;
+        let request = format!(
+            "POST /canvas/session HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nAuthorization: Bearer {secret}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        std::io::Write::write_all(&mut client, request.as_bytes()).unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        server.join().unwrap();
+
+        assert!(response.starts_with("HTTP/1.1 405 Method Not Allowed"), "{response}");
+        assert!(session
+            .json()
+            .contains("\"run\":{\"output\":null,\"target\":null}"));
     }
 
     #[test]
@@ -2365,6 +2683,49 @@ mod tests {
             8123,
             &secret
         ));
+        request.headers.insert(
+            "authorization".to_string(),
+            format!("Bearer {secret}"),
+        );
+        request.headers.remove("origin");
+        assert!(!canvas_request_authorized(
+            &request,
+            &request.target,
+            "127.0.0.1",
+            8123,
+            &secret
+        ));
+        request.headers.insert(
+            "origin".to_string(),
+            "http://localhost:8123".to_string(),
+        );
+        request.method = "PUT".to_string();
+        assert!(!canvas_request_authorized(
+            &request,
+            &request.target,
+            "127.0.0.1",
+            8123,
+            &secret
+        ));
+        request.method = "GET".to_string();
+        request.target = "/canvas/not-a-route".to_string();
+        assert!(!canvas_request_authorized(
+            &request,
+            &request.target,
+            "127.0.0.1",
+            8123,
+            &secret
+        ));
+        request.target = "/canvas/graph".to_string();
+        request.body = vec![0; MAX_REQUEST_BODY_BYTES + 1];
+        assert!(!canvas_request_authorized(
+            &request,
+            &request.target,
+            "127.0.0.1",
+            8123,
+            &secret
+        ));
+        request.body.clear();
         assert!(!canvas_request_authorized(
             &request,
             &request.target,
@@ -2375,5 +2736,67 @@ mod tests {
         assert!(!host_header_allowed("evil.test:8123", "127.0.0.1", 8123));
         assert!(!origin_allowed("http://evil.test:8123", "127.0.0.1", 8123));
         assert!(!constant_time_equal(&secret, "wrong"));
+    }
+
+    #[test]
+    fn canvas_page_and_bootstrap_reject_missing_session() {
+        let secret = "canvas-test-secret";
+        let response = canvas_response("/canvas", secret);
+        assert!(response.starts_with("HTTP/1.1 401 Unauthorized"), "{response}");
+
+        let response = canvas_response(&format!("/canvas?session={secret}"), secret);
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        assert!(response.contains(&format!("app.js?session={secret}&")), "{response}");
+
+        let response = canvas_response(&format!("/canvas/app.js?session={secret}"), secret);
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+    }
+
+    fn canvas_response(target: &str, secret: &str) -> String {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        let raw = format!(
+            "GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        );
+        std::io::Write::write_all(&mut client, raw.as_bytes()).unwrap();
+
+        let status = DevStatus::new_with_terminal("app.jet", false, false, false);
+        status.set_port(port);
+        let session = crate::ResidentDevSession::new_with_canvas_host(
+            "app.jet",
+            "127.0.0.1",
+            port,
+            0,
+        );
+        let debug_sessions = crate::Canvas::DebugSessions::default();
+        handle_connection(
+            server,
+            &status,
+            &debug_sessions,
+            &session,
+            "app.jet",
+            ListenerKind::Canvas,
+            true,
+            "127.0.0.1",
+            secret,
+        )
+        .unwrap();
+
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        response
+    }
+
+    #[test]
+    fn canvas_session_injection_only_changes_html_bootstrap() {
+        let html = crate::canvas_asset("GET", "/canvas", "/canvas").unwrap();
+        let html = inject_canvas_session(html, "secret");
+        assert!(html.body.contains("app.js?session=secret&"));
+
+        let js = crate::canvas_asset("GET", "/canvas/app.js", "/canvas/app.js").unwrap();
+        let js = inject_canvas_session(js, "secret");
+        assert!(!js.body.contains("session=secret"));
     }
 }

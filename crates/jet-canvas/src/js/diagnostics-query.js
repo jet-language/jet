@@ -89,8 +89,12 @@
       });
   }
 
+  function diagnosticLabel(severity) {
+    return severity === "warning" ? "Warning" : "Error";
+  }
+
   function diagnosticFullText(entry) {
-    return entry.rendered || `Error [${entry.code || "diagnostic"}]: ${entry.what || entry.message || ""}\n Why: ${entry.why || ""}\n Fix: ${entry.fix || ""}`;
+    return entry.rendered || `${diagnosticLabel(entry.severity)} [${entry.code || "diagnostic"}]: ${entry.what || entry.message || ""}\n Why: ${entry.why || ""}\n Fix: ${entry.fix || ""}`;
   }
 
   function diagnosticKey(diag, i, rev) {
@@ -118,7 +122,7 @@
       what: diag.what || diag.message || "Jet diagnostic",
       why: diag.why || "",
       fix: diag.fix || "",
-      rendered: diag.rendered || `Error [${diag.code || "diagnostic"}]: ${diag.what || "Jet diagnostic"}\n Why: ${diag.why || ""}\n Fix: ${diag.fix || ""}`,
+      rendered: diag.rendered || `${diagnosticLabel(severity)} [${diag.code || "diagnostic"}]: ${diag.what || "Jet diagnostic"}\n Why: ${diag.why || ""}\n Fix: ${diag.fix || ""}`,
       source_span: span,
       line: span && span.line,
       column: span && span.column

@@ -8,7 +8,7 @@ mod jetpack_fixtures;
 use jetpack_fixtures::{jetpack, write_channel_fixture, Scratch};
 
 #[test]
-fn update_noninteractive_requires_yes_and_yes_applies() {
+fn update_noninteractive_requires_yes_and_short_yes_applies() {
     let project = Scratch::new("update-confirmation-project");
     let root = Scratch::new("update-confirmation-root");
     let fixtures = Scratch::new("update-confirmation-fixtures");
@@ -38,9 +38,13 @@ fn update_noninteractive_requires_yes_and_yes_applies() {
         "stderr: {plan_stderr}"
     );
     assert!(!project.join(".jet/lock").exists());
+    assert!(
+        fs::read_dir(&root.path).unwrap().next().is_none(),
+        "non-interactive update downloaded or realized a package"
+    );
 
     let applied = jetpack()
-        .args(["update", "--no-color", "--yes", "--fixtures"])
+        .args(["update", "--no-color", "-y", "--fixtures"])
         .arg(&fixtures.path)
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)

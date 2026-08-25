@@ -11,9 +11,12 @@
 //!   * `--trust` bypasses; `jetpack config trust add` pre-authorizes.
 
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod common;
+#[path = "support/no_nix_namespace.rs"]
+mod no_nix_namespace;
 use common::{jetpack_bin, Scratch};
 
 fn jetpack() -> Command {
@@ -104,6 +107,53 @@ fn write_secret_project(dir: &std::path::Path, main_src: &str) {
     )
     .unwrap();
     fs::write(dir.join("main.jet"), main_src).unwrap();
+}
+
+fn assert_cached_entries(proj: &Path, root: &Path, home: &Path) {
+    let env = jetpack()
+        .args(["env", "--no-color", "--offline", "--", "fastfetch"])
+        .current_dir(proj)
+        .env("JETPACK_ROOT", root)
+        .env("HOME", home)
+        .env_remove("JETPACK_FIXTURES")
+        .output()
+        .unwrap();
+    assert!(
+        env.status.success(),
+        "cached env entry failed: {}",
+        String::from_utf8_lossy(&env.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&env.stdout).trim(),
+        "fastfetch stub"
+    );
+    assert!(!String::from_utf8_lossy(&env.stderr).contains("continue?"));
+
+    let use_shell = jetpack()
+        .args([
+            "use",
+            "fastfetch@jetpack",
+            "--no-color",
+            "--offline",
+            "--",
+            "fastfetch",
+        ])
+        .current_dir(proj)
+        .env("JETPACK_ROOT", root)
+        .env("HOME", home)
+        .env_remove("JETPACK_FIXTURES")
+        .output()
+        .unwrap();
+    assert!(
+        use_shell.status.success(),
+        "cached use entry failed: {}",
+        String::from_utf8_lossy(&use_shell.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&use_shell.stdout).trim(),
+        "fastfetch stub"
+    );
+    assert!(!String::from_utf8_lossy(&use_shell.stderr).contains("continue?"));
 }
 
 #[test]
@@ -209,13 +259,39 @@ fn env_runs_no_project_function() {
 /// the only possible source.
 #[test]
 fn cached_env_and_use_enter_offline_without_confirmation() {
+    const TEST_NAME: &str = "cached_env_and_use_enter_offline_without_confirmation";
+    const PROJECT_ENV: &str = "JETPACK_CACHED_ENTRY_PROJECT";
+    const ROOT_ENV: &str = "JETPACK_CACHED_ENTRY_ROOT";
+    const HOME_ENV: &str = "JETPACK_CACHED_ENTRY_HOME";
+
+    if let Some(project) = std::env::var_os(PROJECT_ENV).map(PathBuf::from) {
+        let root = PathBuf::from(std::env::var_os(ROOT_ENV).expect("cached-entry root"));
+        let home = PathBuf::from(std::env::var_os(HOME_ENV).expect("cached-entry home"));
+        no_nix_namespace::run_in_no_nix_namespace(
+            TEST_NAME,
+            no_nix_namespace::NetworkMode::Disabled,
+            || assert_cached_entries(&project, &root, &home),
+        );
+        return;
+    }
+
     let proj = Scratch::new("cached-entry");
     let root = Scratch::new("cached-entry-root");
     let home = Scratch::new("cached-entry-home");
     let fixtures = Scratch::new("cached-entry-fixtures");
     let fastfetch_out = Scratch::new("cached-entry-fastfetch-out");
     write_package_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\"); }\n");
+    fs::write(
+        proj.path.join("env.jet"),
+        "module env.dev { packages: [fastfetch@jetpack] }\n",
+    )
+    .unwrap();
     write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path);
+    fs::rename(
+        fixtures.join("nixpkgs-fastfetch.json"),
+        fixtures.join("jetpack-fastfetch.json"),
+    )
+    .unwrap();
 
     let pattern = format!("{}*", proj.path.display());
     let grant = jetpack()
@@ -242,50 +318,20 @@ fn cached_env_and_use_enter_offline_without_confirmation() {
         "env prep failed: {}",
         String::from_utf8_lossy(&prep.stderr)
     );
-    fs::remove_file(fixtures.join("nixpkgs-fastfetch.json")).unwrap();
+    fs::remove_file(fixtures.join("jetpack-fastfetch.json")).unwrap();
     fs::remove_file(fixtures.join("fastfetch.drv")).unwrap();
 
-    let env = jetpack()
-        .args(["env", "--no-color", "--offline", "--", "fastfetch"])
-        .current_dir(&proj.path)
-        .env("JETPACK_ROOT", &root.path)
-        .env("HOME", &home.path)
-        .env_remove("JETPACK_FIXTURES")
-        .output()
-        .unwrap();
-    assert!(
-        env.status.success(),
-        "cached env entry failed: {}",
-        String::from_utf8_lossy(&env.stderr)
+    std::env::set_var(PROJECT_ENV, &proj.path);
+    std::env::set_var(ROOT_ENV, &root.path);
+    std::env::set_var(HOME_ENV, &home.path);
+    no_nix_namespace::run_in_no_nix_namespace(
+        TEST_NAME,
+        no_nix_namespace::NetworkMode::Disabled,
+        || {},
     );
-    assert_eq!(String::from_utf8_lossy(&env.stdout).trim(), "fastfetch stub");
-    assert!(!String::from_utf8_lossy(&env.stderr).contains("continue?"));
-
-    let use_shell = jetpack()
-        .args([
-            "use",
-            "fastfetch@nixpkgs",
-            "--no-color",
-            "--offline",
-            "--",
-            "fastfetch",
-        ])
-        .current_dir(&proj.path)
-        .env("JETPACK_ROOT", &root.path)
-        .env("HOME", &home.path)
-        .env_remove("JETPACK_FIXTURES")
-        .output()
-        .unwrap();
-    assert!(
-        use_shell.status.success(),
-        "cached use entry failed: {}",
-        String::from_utf8_lossy(&use_shell.stderr)
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&use_shell.stdout).trim(),
-        "fastfetch stub"
-    );
-    assert!(!String::from_utf8_lossy(&use_shell.stderr).contains("continue?"));
+    std::env::remove_var(PROJECT_ENV);
+    std::env::remove_var(ROOT_ENV);
+    std::env::remove_var(HOME_ENV);
 }
 
 /// Bare project dev (no file — the project-level U19 command, distinct from

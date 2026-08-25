@@ -550,6 +550,22 @@ impl NameLedger {
         self.alias_uses.contains(&(module, alias.span))
     }
 
+    /// Stable identity for one import binding. The defining span is part of
+    /// the identity so equal alias spellings in different scopes cannot join.
+    pub fn alias_identity(&self, module: usize, span: Span) -> Option<String> {
+        self.aliases
+            .values()
+            .any(|alias| alias.module == module && alias.span == span)
+            .then(|| {
+                format!(
+                    "import:{}::{}..{}",
+                    self.module_path(module).unwrap_or_default(),
+                    span.start,
+                    span.end
+                )
+            })
+    }
+
     pub fn alias(&self, module: usize, name: &str) -> Option<&NameAlias> {
         self.aliases.get(&(module, name.to_string()))
     }
