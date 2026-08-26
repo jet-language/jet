@@ -597,6 +597,19 @@ impl<'a> Checker<'a> {
             Type::Result { ok, err } => {
                 self.check_declared_type_rules(ok, span);
                 self.check_declared_type_rules(err, span);
+                // D-FAILURE-FOUNDATION1=A: every explicit `!` domain is
+                // checked after source/import spellings are resolved. Keep
+                // this beside the recursive declared-type walk so callbacks,
+                // aliases, fields, and function returns share one rule.
+                let resolved_error = self.resolve_type((**err).clone());
+                if !self.is_error_domain(&resolved_error) {
+                    let domain = resolved_error.show();
+                    self.diags.push(Diagnostic::from_row(
+                        "E2417",
+                        &[("domain", domain.as_str())],
+                        Some(span),
+                    ));
+                }
             }
             Type::Union(members) => {
                 // D-UNIONTYPE1=A: only concrete closed member types.

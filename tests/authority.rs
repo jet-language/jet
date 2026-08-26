@@ -8,12 +8,12 @@ mod tir_support;
 fn authority_is_a_named_prelude_rights_carrier() {
     let source = r#"
 struct Holder {
-    abilities: Authority
+    authority: Authority
 }
 
 fn run() {
-    abilities :: Authority.workspace()
-    print("abilities")
+    authority :: Authority.workspace()
+    print("authority")
 }
 "#;
     let output = jet::compile(source).expect("Authority type should compile");
@@ -56,10 +56,10 @@ fn host_executable(name: &str) -> String {
 
 const AUTHORITY_VALUE_SOURCE: &str = r#"
 fn run() {
-    #FX(abilities: FS.Read, IO) {
-        narrowed :: abilities.with("FS.Read")
+    #FX(authority: FS.Read, IO) {
+        narrowed :: authority.with("FS.Read")
         _released :: narrowed.without("FS.Read")
-        print("abilities")
+        print("authority")
     }
 }
 "#;
@@ -77,15 +77,15 @@ fn authority_with_and_without_are_the_only_narrowing_family() {
         "{}",
         output.rust
     );
-    tir_support::assert_tiers_agree("authority_narrowing", AUTHORITY_VALUE_SOURCE, "abilities\n");
+    tir_support::assert_tiers_agree("authority_narrowing", AUTHORITY_VALUE_SOURCE, "authority\n");
 }
 
 #[test]
 fn authority_with_outside_held_rights_is_e0712() {
     let source = r#"
 fn run() {
-    abilities :: Authority.workspace()
-    abilities.with("FS.Write")
+    authority :: Authority.workspace()
+    authority.with("FS.Write")
 }
 "#;
     let (_, _, stderr) = tir_support::jit_run("authority_outside", source);
@@ -99,14 +99,14 @@ use core.process as process
 use core.plugin as plugin
 
 struct SessionHolder {
-    abilities: Authority
+    authority: Authority
 }
 
 fn run() {
-    session :: SessionHolder{abilities: Authority.workspace()}
-    #FX(abilities: Exec, IO) {
-        result :: process.run(["echo", "abilities"], abilities)
-        plugin :: plugin.load("missing.wasm", session.abilities)
+    session :: SessionHolder{authority: Authority.workspace()}
+    #FX(authority: Exec, IO) {
+        result :: process.run(["echo", "authority"], authority)
+        plugin :: plugin.load("missing.wasm", session.authority)
         print("boundary")
     }
 }
@@ -133,8 +133,8 @@ fn authority_process_boundary_runs_on_all_hosted_tiers() {
 use core.process as process
 
 fn run() {
-    #FX(abilities: Exec, IO) {
-        result :: process.run(["echo", "boundary"], abilities)
+    #FX(authority: Exec, IO) {
+        result :: process.run(["echo", "boundary"], authority)
         print("boundary")
     }
 }
@@ -486,7 +486,7 @@ fn run() {
 
 #[test]
 fn authority_example_runs_on_all_hosted_tiers() {
-    tir_support::assert_example_cli_tiers_agree("types/authority", "abilities\n");
+    tir_support::assert_example_cli_tiers_agree("types/authority", "authority\n");
 }
 
 #[test]
@@ -511,7 +511,7 @@ fn run() {
 #[test]
 fn authority_parser_accepts_the_named_value() {
     let (tokens, diagnostics) = jet::Lexer::lex(
-        "fn run() { #FX(abilities: FS.Read) { value :: abilities.with(\"FS.Read\") } }",
+        "fn run() { #FX(authority: FS.Read) { value :: authority.with(\"FS.Read\") } }",
     );
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     jet::Parser::parse(&tokens).expect("parser must accept Authority");
@@ -525,7 +525,7 @@ fn authority_sema_keeps_the_named_type() {
 
 #[test]
 fn authority_tir_runs_the_same_value() {
-    tir_support::assert_tiers_agree("authority_tir", AUTHORITY_VALUE_SOURCE, "abilities\n");
+    tir_support::assert_tiers_agree("authority_tir", AUTHORITY_VALUE_SOURCE, "authority\n");
 }
 
 #[test]
@@ -536,14 +536,14 @@ fn authority_aot_runs_the_same_value() {
         AUTHORITY_VALUE_SOURCE,
     );
     assert_eq!(code, 0, "AOT failed: {stderr}");
-    assert_eq!(stdout, "abilities\n");
+    assert_eq!(stdout, "authority\n");
 }
 
 #[test]
 fn authority_jit_runs_the_same_value() {
     let (code, stdout, stderr) = tir_support::jit_run("authority_jit", AUTHORITY_VALUE_SOURCE);
     assert_eq!(code, 0, "JIT failed: {stderr}");
-    assert_eq!(stdout, "abilities\n");
+    assert_eq!(stdout, "authority\n");
 }
 
 #[test]
@@ -551,12 +551,12 @@ fn authority_dev_runs_the_same_value() {
     let (code, stdout, stderr) =
         tir_support::interpreter_run("authority_dev", AUTHORITY_VALUE_SOURCE);
     assert_eq!(code, 0, "dev/interpreter failed: {stderr}");
-    assert_eq!(stdout, "abilities\n");
+    assert_eq!(stdout, "authority\n");
 }
 
 #[test]
 fn authority_comptime_uses_the_same_value() {
-    let source = "@abilities :: Authority.from_rights([\"FS.Read\", \"IO\"])\n@narrowed :: abilities.with(\"FS.Read\")\n@released :: narrowed.without(\"FS.Read\")\n\nfn run() { print(\"abilities\") }\n";
+    let source = "@authority :: Authority.from_rights([\"FS.Read\", \"IO\"])\n@narrowed :: authority.with(\"FS.Read\")\n@released :: narrowed.without(\"FS.Read\")\n\nfn run() { print(\"authority\") }\n";
     let output = jet::compile(source).expect("comptime should construct Authority");
     assert!(output.rust.contains("JetAuthority"), "{}", output.rust);
 }
@@ -565,23 +565,23 @@ fn authority_comptime_uses_the_same_value() {
 fn authority_repl_accepts_the_same_value() {
     let transcript = jet::REPL::run_transcript(
         &[
-            "abilities :: Authority.workspace()",
-            "narrowed :: abilities.with(\"FS.Read\")",
+            "authority :: Authority.workspace()",
+            "narrowed :: authority.with(\"FS.Read\")",
             "released :: narrowed.without(\"FS.Read\")",
             "#FX(scoped: FS.Read) { inside :: scoped.with(\"FS.Read\") }",
-            "print(\"abilities\")",
+            "print(\"authority\")",
         ],
         None,
     );
     assert!(
-        transcript.contains("abilities"),
+        transcript.contains("authority"),
         "REPL changed Authority meaning: {transcript}"
     );
 }
 
 #[test]
 fn authority_web_accepts_the_same_value() {
-    let source = "#Target(Web)\nfn run() {\n    #FX(abilities: IO) {\n        narrowed :: abilities.with(\"IO\")\n        released :: narrowed.without(\"IO\")\n        value :: released\n    }\n}\n";
+    let source = "#Target(Web)\nfn run() {\n    #FX(authority: IO) {\n        narrowed :: authority.with(\"IO\")\n        released :: narrowed.without(\"IO\")\n        value :: released\n    }\n}\n";
     let web = jet::compile_web_with_path(source, "tests/fixtures/authority_web.jet")
         .expect("web should accept Authority")
         .web

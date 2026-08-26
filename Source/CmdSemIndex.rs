@@ -35,6 +35,19 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
                 println!("  references:  {}", idx.references().len());
                 println!("  call edges:  {}", idx.call_edges().len());
                 println!("  effects:     {}", idx.effects().len());
+                println!("  arithmetic:  {}", idx.arithmetic().len());
+                for fact in idx.arithmetic() {
+                    println!(
+                        "    fixed-width {}: .{}; scope = {}:{}..{}; operation = {}..{}",
+                        fact.operation,
+                        fact.policy,
+                        fact.module_path,
+                        fact.scope_span.start,
+                        fact.scope_span.end,
+                        fact.operation_span.start,
+                        fact.operation_span.end,
+                    );
+                }
                 println!("note: pass --json for the full stable document");
             }
         }

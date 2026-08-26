@@ -2161,7 +2161,7 @@ struct Header {
 
 #[test]
 fn fmt_rejects_retired_body_derive_line() {
-    // Ability requests have one spelling: a marker before the type.
+    // Effect requests have one spelling: a marker before the type.
     let src = "\
 struct Score {
     points: Int
@@ -3741,7 +3741,7 @@ fn fmt_preserves_dotted_effect_paths() {
     // is stored as one opaque string end to end, so fmt needs no new emission
     // logic; this pins that the dot survives every printer that touches an
     // effect list (`#(…)` bounds, prohibitions, and `#FX` regions).
-    let src = "fn load(path: String) String -[FS.Read]> {\n    return path\n}\n\nfn archive(path: String) -[FS.Write]> {\n    print(path)\n}\n\nfn read_only(path: String) -[FS.Read, !FS.Write]> {\n    load(path)\n}\n\nfn boot() -[FS]> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    #FX(Net.HTTP.Get) {\n        print(\"net\")\n    }\n    #FX(caps: FS.Read) {\n        load(\"app.conf\")\n    }\n}\n";
+    let src = "fn load(path: String) String -[FS.Read]> {\n    return path\n}\n\nfn archive(path: String) -[FS.Write]> {\n    print(path)\n}\n\nfn read_only(path: String) -[FS.Read, !FS.Write]> {\n    load(path)\n}\n\nfn boot() -[FS]> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    #FX(Net.HTTP.Get) {\n        print(\"net\")\n    }\n    #FX(authority: FS.Read) {\n        load(\"app.conf\")\n    }\n}\n";
     assert_fmt_stable(src, "dotted effect paths (D-EFFTREE1)");
 }
 

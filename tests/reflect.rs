@@ -25,7 +25,7 @@ fn arithmetic_policy_is_visible_in_function_reflection() {
     let path = root.join("main.jet");
     std::fs::write(
         &path,
-        "#Arithmetic(.Wrapping)\nfn wrapped(value: U8) U8 { return value + U8{1} }\nfn run() {}\n",
+        "#Arithmetic(.Wrapping)\npub fn wrapped(value: U8) U8 -> { return value + U8{1} }\nfn run() {}\n",
     )
     .unwrap();
     let (diagnostics, bundle, effect_facts) =

@@ -11,6 +11,9 @@ mod Symbols;
 mod Types;
 
 pub use jet_pkg_model::Package::PackageFacts;
+pub use jet_pkg_model::EffectBudget::{
+    render_effect_projection_line, render_effect_projection_object, EffectProjection,
+};
 pub use jet_sema::SemIndexEffectFacts;
 pub use Build::{
     binder_active_parameter, build_index, build_symbol_db, function_parameter_parts,

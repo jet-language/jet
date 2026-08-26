@@ -941,7 +941,10 @@ impl<'a> Checker<'a> {
             }
         }
         match stmt {
-            Stmt::Val(b) => self.check_binding(b),
+            Stmt::Val(b) => {
+                self.check_binding(b);
+                crate::Sema::Effects::record_authority_alias(self, b);
+            }
             Stmt::Assign {
                 target,
                 op,
@@ -1718,6 +1721,7 @@ impl<'a> Checker<'a> {
                 if self.rewrite_anonymous_taskgroup_spawn(stmt) {
                     if let Stmt::Val(b) = stmt {
                         self.check_binding(b);
+                        crate::Sema::Effects::record_authority_alias(self, b);
                     }
                     return;
                 }
@@ -1794,7 +1798,14 @@ impl<'a> Checker<'a> {
                         return;
                     }
                 }
-                if let Some(ty) = self.infer_fallible_stmt(expr) {
+                // A statement consumes the call's success value. An enclosing
+                // value-if may leave its Result carrier in `expected_type`,
+                // but that expectation belongs only to the branch value, not
+                // to this statement.
+                let saved_expected = self.expected_type.take();
+                let inferred = self.infer_fallible_stmt(expr);
+                self.expected_type = saved_expected;
+                if let Some(ty) = inferred {
                     if ty.is_fallible() && !self.suppress_must_use {
                         self.diags.push(Diagnostic::error(
                                 "E0402",
@@ -1826,7 +1837,9 @@ impl<'a> Checker<'a> {
                 }
             }
             Stmt::DeferClose { close, .. } => {
+                let saved_expected = self.expected_type.take();
                 self.infer_fallible_stmt(close);
+                self.expected_type = saved_expected;
             }
             Stmt::Return(expr, span) => {
                 self.check_return_expr(expr, span, None);
@@ -2485,6 +2498,7 @@ impl<'a> Checker<'a> {
                 }
                 self.push_scope();
                 self.check_binding(init);
+                crate::Sema::Effects::record_authority_alias(self, init);
                 self.require_bool(cond, "a counted loop condition");
                 self.push_loop_value_frame(label.as_ref());
                 self.push_loop_break_frame();
@@ -2974,6 +2988,8 @@ impl<'a> Checker<'a> {
                     );
                 }
                 self.region_stack.push(crate::Sema::RegionAccum {
+                    binding: binding.clone(),
+                    aliases: std::collections::BTreeMap::new(),
                     caps: cap_set,
                     caps_span: *caps_span,
                     direct: crate::Sema::EffectSet::new(),

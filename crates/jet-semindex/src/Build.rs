@@ -5,6 +5,7 @@ use jet_foundation::Diagnostics::Span;
 use jet_foundation::Syntax;
 use jet_foundation::AST::{self, Item, LoadedModule, ProgramBundle};
 use jet_sema::{effect_key, SemIndexEffectFacts};
+use jet_pkg_model::EffectBudget::{project_program_effects, render_effect_projection_line};
 use std::collections::{HashMap, HashSet};
 
 use crate::Symbols::{build_semantic_symbol_index, canonical_symbol_name, SemanticSymbolIndex};
@@ -228,6 +229,12 @@ impl SymbolDB {
             )
         });
         self.index.set_arithmetic(self.arithmetic.clone());
+        self.index.set_effect_projection(project_program_effects(
+            bundle,
+            &facts.summaries,
+            "run",
+            None,
+        ));
         self.index
             .set_state_graphs(build_state_graphs(bundle, facts));
         self.index.set_bypasses(self.bypasses.clone());
@@ -357,6 +364,29 @@ impl SymbolDB {
         );
     }
 
+    fn refresh_effect_hovers(&mut self) {
+        let projection = self.index.effect_projection().clone();
+        let line = render_effect_projection_line(&projection);
+        for hover in &mut self.hover {
+            if !hover.text.starts_with("fn ") {
+                continue;
+            }
+            if let Some(start) = hover.text.find("\nrequired effects:") {
+                hover.text.truncate(start);
+            }
+            hover.text.push('\n');
+            hover.text.push_str(&line);
+        }
+    }
+
+    /// Attach package policy to both the semantic index and the already-built
+    /// editor hover projection. LSP callers can use this after checking an
+    /// entry without rebuilding symbol facts.
+    pub fn attach_package_facts(&mut self, facts: jet_pkg_model::Package::PackageFacts) {
+        self.index.attach_package_facts(facts);
+        self.refresh_effect_hovers();
+    }
+
     fn align_reference_targets(&mut self) {
         for reference in &mut self.refs {
             let Some(target) = &mut reference.target else {
@@ -381,6 +411,34 @@ impl SymbolDB {
             .iter()
             .find(|h| h.module_path == path && h.span.start <= offset && offset <= h.span.end)
             .map(|h| h.text.as_str())
+    }
+
+    /// Hover text for the innermost policy-tagged operation at `offset`.
+    /// Symbol hovers may cover an operand, so consumers need this narrower
+    /// query to retain operation provenance instead of stopping at the name.
+    pub fn arithmetic_hover_at(&self, path: &str, offset: usize) -> Option<&str> {
+        let fact = self
+            .arithmetic
+            .iter()
+            .filter(|fact| {
+                fact.module_path == path
+                    && fact.operation_span.start <= offset
+                    && offset <= fact.operation_span.end
+            })
+            .min_by_key(|fact| {
+                fact.operation_span
+                    .end
+                    .saturating_sub(fact.operation_span.start)
+            })?;
+        self.hover
+            .iter()
+            .find(|hover| {
+                hover.module_path == path
+                    && hover.span.start == fact.operation_span.start
+                    && hover.span.end == fact.operation_span.end
+                    && hover.text.starts_with("fixed-width ")
+            })
+            .map(|hover| hover.text.as_str())
     }
 
     /// All inlay hints for a module path.
@@ -1136,6 +1194,7 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
     add_state_graph_hovers(&mut db, bundle, facts);
     add_breadcrumb_hints(&mut db);
     db.finalize_index(facts, bundle);
+    db.refresh_effect_hovers();
     db.symbols = build_semantic_symbol_index(&db, bundle);
     db
 }

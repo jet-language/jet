@@ -1106,6 +1106,7 @@ pub struct SemIndexView {
     pub references: Vec<jet_semindex::SymbolRef>,
     pub calls: Vec<jet_semindex::CallEdge>,
     pub effects: Vec<jet_semindex::EffectFact>,
+    pub arithmetic: Vec<jet_semindex::ArithmeticOperationFact>,
     pub outputs: Vec<jet_semindex::OutputFact>,
 }
 
@@ -1481,6 +1482,7 @@ impl SemIndexView {
             references: index.references().to_vec(),
             calls: index.call_edges().to_vec(),
             effects: index.effects().to_vec(),
+            arithmetic: index.arithmetic().to_vec(),
             outputs: index.outputs().to_vec(),
         }
     }

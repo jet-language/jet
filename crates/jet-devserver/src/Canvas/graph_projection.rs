@@ -66,8 +66,10 @@ pub(super) fn project_checked(
     let blueprint = canvas_blueprint_facts_json(path, src, bundle, &index, runtime_events);
     let enum_catalog = enum_catalog_json(bundle);
     let pattern_catalog = pattern_catalog_json(bundle);
+    let effect_projection =
+        jet_semindex::render_effect_projection_object(index.effect_projection());
     let json = format!(
-        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\",\"state_graphs\"],\"enum_variants\":{},\"pattern_variants\":{},\"blueprint\":{}}}}}",
+        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\",\"state_graphs\"],\"effect_projection\":{},\"enum_variants\":{},\"pattern_variants\":{},\"blueprint\":{}}}}}",
         GRAPH_SCHEMA_VERSION,
         json_str(source_id),
         json_str(&source_revision(src)),
@@ -76,6 +78,7 @@ pub(super) fn project_checked(
         node_catalog::catalog_json(),
         graph_json.join(","),
         index.schema_version(),
+        effect_projection,
         enum_catalog,
         pattern_catalog,
         blueprint
@@ -2012,7 +2015,9 @@ fn project_stmt(
                 g,
                 ordinal,
                 &format!("authority: {title}"),
+                &Vec::new(),
                 &granted,
+                &Vec::new(),
                 binding.as_deref(),
                 *span,
             );

@@ -121,6 +121,20 @@ fn check_file_api_includes_semindex_for_clean_program() {
 }
 
 #[test]
+fn check_file_api_projects_arithmetic_policy_and_scope() {
+    let source = "fn run() {\n    #Arithmetic(.Wrapping) {\n        value :: U8{250} + U8{10}\n        print(value)\n    }\n}\n";
+    let path = fixture_file("compiler_api_arithmetic.jet", source);
+    let checked = jet::Compiler::check_file(&path);
+    assert!(checked.diagnostics.is_empty(), "{:?}", checked.diagnostics);
+    let sem = checked.semantic_index.expect("arithmetic semindex");
+    let operation = sem.arithmetic.first().expect("arithmetic operation");
+    assert_eq!(operation.operation, "add");
+    assert_eq!(operation.policy, "Wrapping");
+    assert!(operation.scope_span.start < operation.operation_span.start);
+    assert!(operation.scope_span.end > operation.operation_span.end);
+}
+
+#[test]
 fn check_file_api_keeps_semindex_absent_when_errors_exist() {
     let path = fixture_file(
         "compiler_api_bad.jet",

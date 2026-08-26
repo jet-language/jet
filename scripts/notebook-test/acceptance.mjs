@@ -86,7 +86,7 @@ async function runClient(client) {
   }, `${client} output`);
 }
 
-const source = `#Abilities(caps: IO, FS) {
+const source = `#FX(authority: IO, FS) {
     eprint("ambient-eprint")
     name :: input("name: ") ?? "fallback"
     assert(name == "Ada")

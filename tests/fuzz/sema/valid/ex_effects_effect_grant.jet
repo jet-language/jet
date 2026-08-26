@@ -1,15 +1,15 @@
-// A named `#FX(abilities: FS) { … }` narrows and binds an Authority handle.
+// A named `#FX(authority: FS) { … }` narrows and binds an Authority handle.
 // The handle is RAII-revoked at scope end and cannot escape the block (E0711);
 // an effect outside the list has no authority backing it (E0712). The
-// ability fact is compile-time only; codegen erases it to a plain block (I3).
+// authority fact is compile-time only; codegen erases it to a plain block (I3).
 use core.files as fs
 
 fn run() {
     path :: "/tmp/jet_scap_grant.txt"
     // Filesystem + console authority is listed only for the extent of this
     // block. Every effect used inside (`FS` for the file work, `IO` for `print`)
-    // must be in the list (E0712). The handle `caps` may not escape (E0711).
-    #FX(abilities: FS, IO) {
+    // must be in the list (E0712). The handle `authority` may not escape (E0711).
+    #FX(authority: FS, IO) {
         fs.write(path, "granted\nthen revoked") ?? panic("write failed")
         text :: fs.read(path) ?? panic("read failed")
         print(text.to_upper())

@@ -311,7 +311,6 @@ fn semindex_projects_arithmetic_policy_and_exact_scope() {
         r#"fn run() {
     #Arithmetic(.Wrapping) {
         value :: U8{250} + U8{10}
-        print(value)
     }
 }
 "#,

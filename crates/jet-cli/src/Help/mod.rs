@@ -194,6 +194,18 @@ pub fn build_index() -> Vec<Entry> {
         .collect();
     for group in CLI::command_groups() {
         for action in group.actions {
+            let summary = match (group.name, action.name) {
+                ("inspect", "authority") => {
+                    "read required, granted, denied effects, and their authority source"
+                }
+                ("inspect", "provenance") => {
+                    "read dependency provenance with required, granted, denied effects, and authority"
+                }
+                ("inspect", "dossier") => {
+                    "show symbols plus required, granted, denied effects, and authority policy"
+                }
+                _ => action.summary,
+            };
             entries.push(Entry {
                 symbol: command_symbol(
                     format!("{} {}", group.name, action.name),
@@ -203,7 +215,7 @@ pub fn build_index() -> Vec<Entry> {
                         .map(|usage| format!("jet {} {}", group.name, usage))
                         .collect::<Vec<_>>()
                         .join("\n"),
-                    action.summary,
+                    summary,
                     None,
                 ),
                 category: category_for(action.handler.dispatch_word()),

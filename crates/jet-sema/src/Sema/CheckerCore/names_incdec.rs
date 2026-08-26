@@ -43,7 +43,13 @@ impl<'a> Checker<'a> {
     // --- expressions ------------------------------------------------------
 
     pub(crate) fn require_bool(&mut self, e: &mut Expr, what: &str) {
-        if let Some(t) = self.infer(e) {
+        // Conditions consume a success Boolean, even when an enclosing value
+        // expression expects its Result carrier. That lets a fallible Boolean
+        // call use the same automatic propagation path as every other value.
+        let saved_expected = self.expected_type.replace(Type::Bool);
+        let inferred = self.infer(e);
+        self.expected_type = saved_expected;
+        if let Some(t) = inferred {
             if t != Type::Bool {
                 self.diags.push(Diagnostic::error(
                     "E0110",

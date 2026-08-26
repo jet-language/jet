@@ -1211,6 +1211,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
                 "DimensionInfo".to_string(),
             )))),
             "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
+            "arithmetic" => Some(Type::List(Box::new(Type::Named(
+                "ArithmeticOperationInfo".to_string(),
+            )))),
             "is_pub" => Some(Type::Bool),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,

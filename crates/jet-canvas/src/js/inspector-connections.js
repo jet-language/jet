@@ -1014,6 +1014,29 @@
     return row;
   }
 
+  function appendEffectProjectionDetails(parent, projection) {
+    const section = appendDetailsSection(parent, "Effect Authority");
+    const list = document.createElement("div");
+    list.className = "pin-list";
+    for (const [label, key] of [
+      ["Required Effects", "required_effects"],
+      ["Granted Effects", "granted_effects"],
+      ["Denied Effects", "denied_effects"]
+    ]) {
+      const item = document.createElement("div");
+      item.className = "pin-row";
+      appendText(item, "b", "", label);
+      appendText(item, "code", "", (projection[key] || []).join(", ") || "none");
+      list.appendChild(item);
+    }
+    const authority = document.createElement("div");
+    authority.className = "pin-row";
+    appendText(authority, "b", "", "Authority");
+    appendText(authority, "code", "", projection.authority || "not recorded");
+    list.appendChild(authority);
+    section.appendChild(list);
+  }
+
   function variableDetailDescriptors(graph, variable, initExpr) {
     const isParam = variable.source === "input";
     const signatureOp = {
@@ -1590,6 +1613,8 @@
     renderFieldDescriptors(facts, nodeDetailDescriptors(node, graph, pins), { state, fieldsClass: "details-facts" });
     hero.appendChild(facts);
     details.appendChild(hero);
+    const effectProjection = latestDoc && latestDoc.facts && latestDoc.facts.effect_projection;
+    if (effectProjection) appendEffectProjectionDetails(details, effectProjection);
 
     if (node.kind === "binding") {
       const renameBox = document.createElement("div");

@@ -206,6 +206,7 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
             }
             TNumericOp::CastAs { .. } => init_clif_ty(arg, meta),
             TNumericOp::InlineRange { .. }
+            | TNumericOp::CheckedIntToFixed { .. }
             | TNumericOp::TryFrom { .. }
             | TNumericOp::FloatToInt { .. }
             | TNumericOp::FloatNarrow { .. } => Ok(types::I64),

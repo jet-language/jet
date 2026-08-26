@@ -12,44 +12,62 @@
 //
 // The exponent arrives as an `i128` so an exponent of any integer width,
 // signed or unsigned, reaches here losslessly.
-const JET_POW_NEGATIVE: &str = JET_ARITHMETIC_POWER_NEGATIVE;
-const JET_POW_OVERFLOW: &str = JET_ARITHMETIC_POWER_OVERFLOW;
-
 trait JetPow: Copy {
     fn jet_pow(self, exponent: i128, file: &str, line: u32) -> Self;
     fn jet_wrapping_pow(self, exponent: i128, file: &str, line: u32) -> Self;
     fn jet_saturating_pow(self, exponent: i128, file: &str, line: u32) -> Self;
 }
+
+fn jet_power_fixed_value(result: JetFixedArithmeticResult, file: &str, line: u32) -> i64 {
+    match result {
+        JetFixedArithmeticResult::Value(value) => value,
+        JetFixedArithmeticResult::Absent => jet_arithmetic_stop(
+            file,
+            line,
+            "this checked fixed-width operation has no result",
+        ),
+        JetFixedArithmeticResult::Trap(error) => {
+            let message = error.message();
+            jet_arithmetic_stop(file, line, &message)
+        }
+    }
+}
+
 macro_rules! jet_pow_impl {
     ($($t:ty),*) => { $(
         impl JetPow for $t {
             fn jet_pow(self, exponent: i128, file: &str, line: u32) -> Self {
-                if exponent < 0 {
-                    jet_arithmetic_stop(file, line, JET_POW_NEGATIVE);
-                }
-                if exponent > u32::MAX as i128 {
-                    jet_arithmetic_stop(file, line, JET_POW_OVERFLOW);
-                }
-                self.checked_pow(exponent as u32)
-                    .unwrap_or_else(|| jet_arithmetic_stop(file, line, JET_POW_OVERFLOW))
+                jet_power_fixed_value(jet_fixed_arithmetic(
+                    self as i64,
+                    exponent,
+                    JET_FIXED_OP_POW,
+                    JET_FIXED_MODE_TRAP,
+                    <$t>::MIN < 0,
+                    <$t>::BITS as u8,
+                    true,
+                ), file, line) as $t
             }
             fn jet_wrapping_pow(self, exponent: i128, file: &str, line: u32) -> Self {
-                if exponent < 0 {
-                    jet_arithmetic_stop(file, line, JET_POW_NEGATIVE);
-                }
-                if exponent > u32::MAX as i128 {
-                    jet_arithmetic_stop(file, line, JET_POW_OVERFLOW);
-                }
-                self.wrapping_pow(exponent as u32)
+                jet_power_fixed_value(jet_fixed_arithmetic(
+                    self as i64,
+                    exponent,
+                    JET_FIXED_OP_POW,
+                    JET_FIXED_MODE_WRAPPING,
+                    <$t>::MIN < 0,
+                    <$t>::BITS as u8,
+                    true,
+                ), file, line) as $t
             }
             fn jet_saturating_pow(self, exponent: i128, file: &str, line: u32) -> Self {
-                if exponent < 0 {
-                    jet_arithmetic_stop(file, line, JET_POW_NEGATIVE);
-                }
-                if exponent > u32::MAX as i128 {
-                    jet_arithmetic_stop(file, line, JET_POW_OVERFLOW);
-                }
-                self.saturating_pow(exponent as u32)
+                jet_power_fixed_value(jet_fixed_arithmetic(
+                    self as i64,
+                    exponent,
+                    JET_FIXED_OP_POW,
+                    JET_FIXED_MODE_SATURATING,
+                    <$t>::MIN < 0,
+                    <$t>::BITS as u8,
+                    true,
+                ), file, line) as $t
             }
         }
     )* };

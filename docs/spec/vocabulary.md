@@ -48,6 +48,23 @@ Authority: [D-LOOPEVAL1 and D-COMPREHENSION1](syntax-decisions.md#s19--loops).
 A collecting loop does not yield. The word `yield` belongs to a `Stream<T>` producer;
 use `next` to omit an item from a collecting loop.
 
+## Effect roles
+
+An effect projection has four separate roles at the application boundary:
+
+| Role | Meaning |
+|---|---|
+| `required_effects` | Effects reached by the selected entry, computed by sema. |
+| `granted_effects` | Effects allowed by the effective application or dependency policy. |
+| `denied_effects` | Effects explicitly refused by that policy. |
+| `authority` | The identity of the policy source, such as `package.jet authority.holds`. |
+
+The roles are facts, not synonyms. A required effect can be granted, denied, or
+undecided; an authority name identifies who supplied the policy and is not an
+effect. Expert source may use `#FX`; beginner source omits routine effect rows.
+Inspect, hover, JSON, receipts, lock provenance, and Canvas use the same four
+labels so a policy decision cannot be mistaken for a sema requirement.
+
 ## Retired senses
 
 | Retired wording | Write this |

@@ -194,13 +194,32 @@ impl ReplAuthorization<'_> {
         why: &str,
         span: crate::Diagnostics::Span,
     ) -> Diagnostic {
+        let granted: Holds = self.policy.flags.allow.iter().cloned().collect();
+        let denied: Holds = self.policy.flags.deny.iter().cloned().collect();
+        let render = |effects: &Holds| {
+            if effects.is_empty() {
+                "none".to_string()
+            } else {
+                effects.iter().cloned().collect::<Vec<_>>().join(", ")
+            }
+        };
+        let authority = if self.policy.session.contains(request) {
+            "REPL session Authority"
+        } else {
+            "jet repl invocation policy"
+        };
         Diagnostic::error(
             "E1803",
             format!(
                 "{}.{} for `{}` was denied",
                 request.root, request.operation, request.resource
             ),
-            format!("{why}; the host operation did not run"),
+            format!(
+                "{why}; required_effects={}; granted_effects={}; denied_effects={}; authority={authority}; the host operation did not run",
+                request.root,
+                render(&granted),
+                render(&denied),
+            ),
             format!(
                 "approve this exact operation interactively, or restart with `jet repl --allow-{}`",
                 request.root.to_ascii_lowercase()

@@ -36,6 +36,10 @@ pub(crate) mod contract_kernel {
     include!("../../../jet-codegen/src/Prelude/Core/Contracts.rs");
 }
 
+pub(crate) mod fixed_arithmetic_kernel {
+    include!("../../../jet-codegen/src/Prelude/Core/FixedArithmetic.rs");
+}
+
 pub(crate) mod service_prelude {
     include!("../../../jet-codegen/src/Prelude/Service.rs");
 }
@@ -780,28 +784,27 @@ fn jet_trap_overflow(op: &str, line: u32) {
     with_runtime_mut(|rt| rt.set_arithmetic_stop(line, msg));
 }
 
-pub(crate) const INTN_OP_ADD: i64 = 0;
-pub(crate) const INTN_OP_SUB: i64 = 1;
-pub(crate) const INTN_OP_MUL: i64 = 2;
-pub(crate) const INTN_OP_DIV: i64 = 3;
-pub(crate) const INTN_OP_REM: i64 = 4;
-pub(crate) const INTN_OP_BIT_AND: i64 = 5;
-pub(crate) const INTN_OP_BIT_OR: i64 = 6;
-pub(crate) const INTN_OP_BIT_XOR: i64 = 7;
-pub(crate) const INTN_OP_SHL: i64 = 8;
-pub(crate) const INTN_OP_SHR: i64 = 9;
-/// D-EXPSEM1=A: `^` on a fixed-width whole number.
-pub(crate) const INTN_OP_POW: i64 = 10;
-/// D-FLOORDIV1=A: `/%` on a fixed-width whole number.
-pub(crate) const INTN_OP_FLOOR_DIV: i64 = 11;
-/// D-MODSEM1=A: `%` on a fixed-width whole number.
-pub(crate) const INTN_OP_MOD: i64 = 12;
-pub(crate) const INTN_OP_ROTATE_LEFT: i64 = 13;
-pub(crate) const INTN_OP_ROTATE_RIGHT: i64 = 14;
-pub(crate) const INTN_MODE_TRAP: i64 = 0;
-pub(crate) const INTN_MODE_WRAPPING: i64 = 1;
-pub(crate) const INTN_MODE_SATURATING: i64 = 2;
-pub(crate) const INTN_MODE_CHECKED: i64 = 3;
+// JIT ABI aliases. Values come from the shared Prelude table; lowering carries
+// them across the Cranelift boundary but does not define arithmetic meaning.
+pub(crate) const INTN_OP_ADD: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_ADD;
+pub(crate) const INTN_OP_SUB: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_SUB;
+pub(crate) const INTN_OP_MUL: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_MUL;
+pub(crate) const INTN_OP_DIV: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_DIV;
+pub(crate) const INTN_OP_REM: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_REM;
+pub(crate) const INTN_OP_BIT_AND: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_BIT_AND;
+pub(crate) const INTN_OP_BIT_OR: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_BIT_OR;
+pub(crate) const INTN_OP_BIT_XOR: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_BIT_XOR;
+pub(crate) const INTN_OP_SHL: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_SHL;
+pub(crate) const INTN_OP_SHR: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_SHR;
+pub(crate) const INTN_OP_POW: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_POW;
+pub(crate) const INTN_OP_FLOOR_DIV: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_FLOOR_DIV;
+pub(crate) const INTN_OP_MOD: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_MOD;
+pub(crate) const INTN_OP_ROTATE_LEFT: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_ROTATE_LEFT;
+pub(crate) const INTN_OP_ROTATE_RIGHT: i64 = fixed_arithmetic_kernel::JET_FIXED_OP_ROTATE_RIGHT;
+pub(crate) const INTN_MODE_TRAP: i64 = fixed_arithmetic_kernel::JET_FIXED_MODE_TRAP;
+pub(crate) const INTN_MODE_WRAPPING: i64 = fixed_arithmetic_kernel::JET_FIXED_MODE_WRAPPING;
+pub(crate) const INTN_MODE_SATURATING: i64 = fixed_arithmetic_kernel::JET_FIXED_MODE_SATURATING;
+pub(crate) const INTN_MODE_CHECKED: i64 = fixed_arithmetic_kernel::JET_FIXED_MODE_CHECKED;
 
 /// Reads the resident runtime's trapped flag from JIT code. `1` = a trap is
 /// pending (branch to epilogue); `0` = keep going.
@@ -1079,155 +1082,22 @@ fn jet_jit_intn_binop(
     right_signed: i64,
     line: u32,
 ) -> i64 {
-    use jet_codegen::Comptime::{CtReport, CtValue, MathLayout};
-    use jet_codegen::AST::BinOp;
-    let signed = signed != 0;
-    let bits = bits as u8;
-    let right_signed = right_signed != 0;
-    if matches!(op, INTN_OP_ROTATE_LEFT | INTN_OP_ROTATE_RIGHT) {
-        let count = MathLayout::integer_widen(right, right_signed);
-        if count < 0 {
-            with_runtime_mut(|rt| {
-                rt.set_arithmetic_stop(
-                    line,
-                    contract_kernel::jet_arithmetic_message("rotate_negative"),
-                )
-            });
-            return 0;
+    match fixed_arithmetic_kernel::jet_fixed_arithmetic(
+        left,
+        right as i128,
+        op,
+        mode,
+        signed != 0,
+        bits as u8,
+        right_signed != 0,
+    ) {
+        fixed_arithmetic_kernel::JetFixedArithmeticResult::Value(value) => value,
+        fixed_arithmetic_kernel::JetFixedArithmeticResult::Absent => {
+            Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, false, 0))
         }
-        let width = u32::from(bits);
-        let mask = if bits == 64 {
-            u128::from(u64::MAX)
-        } else {
-            (1_u128 << bits) - 1
-        };
-        let value = (MathLayout::integer_widen(left, signed) as u128) & mask;
-        let shift = (count as u128 % u128::from(width)) as u32;
-        let rotated = if shift == 0 {
-            value
-        } else if op == INTN_OP_ROTATE_LEFT {
-            ((value << shift) | (value >> (width - shift))) & mask
-        } else {
-            ((value >> shift) | (value << (width - shift))) & mask
-        };
-        return MathLayout::integer_narrow(rotated as i128, signed, bits);
-    }
-    let op = match op {
-        INTN_OP_ADD => BinOp::Add,
-        INTN_OP_SUB => BinOp::Sub,
-        INTN_OP_MUL => BinOp::Mul,
-        INTN_OP_DIV => BinOp::Div,
-        INTN_OP_REM => BinOp::Rem,
-        INTN_OP_BIT_AND => BinOp::BitAnd,
-        INTN_OP_BIT_OR => BinOp::BitOr,
-        INTN_OP_BIT_XOR => BinOp::BitXor,
-        INTN_OP_SHL => BinOp::Shl,
-        INTN_OP_SHR => BinOp::Shr,
-        INTN_OP_POW => BinOp::Pow,
-        INTN_OP_FLOOR_DIV => BinOp::FloorDiv,
-        INTN_OP_MOD => BinOp::Mod,
-        _ => {
-            with_runtime_mut(|rt| {
-                let message = contract_kernel::jet_arithmetic_message("unknown");
-                rt.set_arithmetic_stop(line, message)
-            });
-            return 0;
-        }
-    };
-    let shift_count = MathLayout::integer_widen(right, right_signed);
-    let shift_direction = match op {
-        BinOp::Shl => Some("left"),
-        BinOp::Shr => Some("right"),
-        _ => None,
-    };
-    if let Some(message) = shift_direction.and_then(|direction| {
-        contract_kernel::jet_arithmetic_shift_message(direction, shift_count, bits)
-    }) {
-        with_runtime_mut(|rt| rt.set_arithmetic_stop(line, &message));
-        return 0;
-    }
-    // D-FLOORDIV1=A: `/%` names a zero divisor exactly, rather than falling
-    // into the shared "this division can't be done" wording below.
-    if mode == INTN_MODE_TRAP && matches!(op, BinOp::FloorDiv | BinOp::Mod) && right == 0 {
-        let message = contract_kernel::jet_arithmetic_message("divide_zero");
-        with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
-        return 0;
-    }
-    if mode == INTN_MODE_TRAP && op == BinOp::Rem && right == 0 {
-        let message = contract_kernel::jet_arithmetic_message("divide_zero");
-        with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
-        return 0;
-    }
-    let span = jet_codegen::Diagnostics::Span::new(0, 0);
-    let result = match mode {
-        INTN_MODE_TRAP => {
-            MathLayout::integer_binop(op, left, right, signed, bits, right_signed, span)
-        }
-        INTN_MODE_WRAPPING => MathLayout::overflow_opt(
-            jet_codegen::Syntax::BUILTIN_WRAPPING,
-            op,
-            left,
-            right,
-            signed,
-            bits,
-            span,
-        ),
-        INTN_MODE_SATURATING => MathLayout::overflow_opt(
-            jet_codegen::Syntax::BUILTIN_SATURATING,
-            op,
-            left,
-            right,
-            signed,
-            bits,
-            span,
-        ),
-        INTN_MODE_CHECKED => MathLayout::overflow_opt(
-            jet_codegen::Syntax::BUILTIN_CHECKED,
-            op,
-            left,
-            right,
-            signed,
-            bits,
-            span,
-        ),
-        _ => unreachable!("fixed-width integer mode"),
-    };
-    match result {
-        Ok(CtValue::Int(value)) => value,
-        Ok(CtValue::Present(value)) => {
-            let CtValue::Int(value) = *value else {
-                return 0;
-            };
-            Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, true, value as u64))
-        }
-        Ok(CtValue::Failed(CtReport::Clean(_))) => 0,
-        Ok(_) => 0,
-        Err(_) if mode == INTN_MODE_CHECKED => 0,
-        Err(_) => {
-            // D-FLOORDIV1=A / D-MODSEM1=A: `/%` and `%` report the Prelude's own
-            // overflow wording, not the shared "this division can't be done"
-            // sentence `/` uses, so a fixed-width width overflow reads the same
-            // here as it does on every other tier.
-            match op {
-                BinOp::FloorDiv | BinOp::Mod => {
-                    let message = contract_kernel::jet_arithmetic_message("divide_overflow");
-                    with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
-                }
-                BinOp::Pow => {
-                    let message = contract_kernel::jet_arithmetic_message("pow");
-                    with_runtime_mut(|rt| rt.set_arithmetic_stop(line, message));
-                }
-                _ => {
-                    let name = match op {
-                        BinOp::Add => "add",
-                        BinOp::Sub => "sub",
-                        BinOp::Mul => "mul",
-                        BinOp::Div => "div",
-                        _ => "shift",
-                    };
-                    jet_trap_overflow(name, line);
-                }
-            }
+        fixed_arithmetic_kernel::JetFixedArithmeticResult::Trap(error) => {
+            let message = error.message();
+            with_runtime_mut(|rt| rt.set_arithmetic_stop(line, &message));
             0
         }
     }
@@ -1877,6 +1747,19 @@ fn jet_jit_numeric_try_int(value: i64, kind: i64) -> i64 {
                 .heap
                 .alloc_string("value doesn't fit in destination type");
             alloc_jit_result(rt, false, error as u64)
+        }
+    })
+}
+
+fn jet_jit_numeric_checked_int(value: i64, kind: i64, line: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_try_from(value, kind) {
+        Some(value) => value as u64 as i64,
+        None => {
+            rt.set_arithmetic_stop(
+                line.max(0) as u32,
+                "value doesn't fit in destination type",
+            );
+            0
         }
     })
 }
@@ -4277,6 +4160,7 @@ host_fns! {
     parse_f64: "jet_jit_parse_f64" => jet_jit_parse_f64: sig_str_unary_i64;
     numeric_try_i64: "jet_jit_numeric_try_i64" => jet_jit_numeric_try_i64: sig_i64_i64_i64_i64;
     numeric_try_int: "jet_jit_numeric_try_int" => jet_jit_numeric_try_int: sig_i64_i64_i64;
+    numeric_checked_int: "jet_jit_numeric_checked_int" => jet_jit_numeric_checked_int: sig_i64_i64_i64_i64;
     numeric_float_to_int: "jet_jit_numeric_float_to_int" => jet_jit_numeric_float_to_int: sig_f64_i64_i64;
     numeric_float_narrow: "jet_jit_numeric_float_narrow" => jet_jit_numeric_float_narrow: sig_f64_i64;
     numeric_checked_widen: "jet_jit_numeric_checked_widen" => jet_jit_numeric_checked_widen: sig_numeric_checked_widen;

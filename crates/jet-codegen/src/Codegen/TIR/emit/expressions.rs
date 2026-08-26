@@ -956,6 +956,15 @@ fn emit_numeric_op(
                 checked
             }
         }
+        TNumericOp::CheckedIntToFixed {
+            host_kind,
+            dst_rust,
+            dst_spelling,
+            line,
+        } => format!(
+            "match {}jet_std::jet_int_try_from({}, {host_kind}) {{ Some(value) => value as {dst_rust}, None => jet_arithmetic_stop({:?}, {line}, &format!(\"value doesn't fit in {dst_spelling}\")) }}",
+            cx.root_prefix, recv, cx.file
+        ),
         TNumericOp::TryFrom {
             dst_rust,
             dst_spelling,

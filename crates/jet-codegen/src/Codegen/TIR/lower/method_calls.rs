@@ -4990,6 +4990,31 @@ fn lower_method_call_impl(
             let source = lower_expr(&args[0].expr, cx, env);
             let source_signed = !matches!(source.ty, Type::IntN { signed: false, .. });
             let target = resolved_ret.cloned().unwrap_or(Type::Float);
+            if matches!(&target, Type::IntN { .. }) && matches!(&source.ty, Type::Int) {
+                let conversion = resolve_numeric_conversion_op(&target.name(), "Int")
+                    .expect("sema admitted a fixed-width Int conversion");
+                let TNumericOp::TryFrom {
+                    host_kind,
+                    dst_rust,
+                    dst_spelling,
+                } = conversion
+                else {
+                    unreachable!("fixed-width Int conversion must be checked");
+                };
+                return TExpr {
+                    ty: target,
+                    kind: TExprKind::NumericMethod {
+                        recv: Box::new(source),
+                        op: TNumericOp::CheckedIntToFixed {
+                            host_kind,
+                            dst_rust,
+                            dst_spelling,
+                            line: crate::Diagnostics::span_line_col(&cx.src, method_span.start)
+                                .0 as u32,
+                        },
+                    },
+                };
+            }
             return TExpr {
                 ty: target.clone(),
                 kind: TExprKind::NumericMethod {

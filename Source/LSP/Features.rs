@@ -54,6 +54,7 @@ pub(crate) fn compute_hover(
     path: &str,
     offset: usize,
 ) -> Option<String> {
+    let arithmetic_hover = db.arithmetic_hover_at(path, offset).map(str::to_string);
     if let Some(fact) = compiler_fact_at(tokens, offset) {
         return Some(match fact {
             Syntax::COMPILER_FACT_LAYOUT => format!(
@@ -82,6 +83,10 @@ pub(crate) fn compute_hover(
                 }
             }
         }
+        if let Some(arithmetic) = arithmetic_hover.as_deref() {
+            hover.push_str("\n\n");
+            hover.push_str(arithmetic);
+        }
         return Some(hover);
     }
     if let Some(reference) = db.refs.iter().find(|reference| {
@@ -93,15 +98,25 @@ pub(crate) fn compute_hover(
             if let Some(symbol) = db.symbols.symbols().iter().find(|symbol| {
                 symbol.module_path == target.module_path && symbol.span == Some(target.def_span)
             }) {
-                return Some(semantic_hover(symbol, path));
+                let mut hover = semantic_hover(symbol, path);
+                if let Some(arithmetic) = arithmetic_hover.as_deref() {
+                    hover.push_str("\n\n");
+                    hover.push_str(arithmetic);
+                }
+                return Some(hover);
             }
         }
     }
     let name = find_ident_at(tokens, offset)?;
     if let Some(symbol) = db.symbols.resolve_visible_in(name, Some(path)) {
-        return Some(semantic_hover(symbol, path));
+        let mut hover = semantic_hover(symbol, path);
+        if let Some(arithmetic) = arithmetic_hover.as_deref() {
+            hover.push_str("\n\n");
+            hover.push_str(arithmetic);
+        }
+        return Some(hover);
     }
-    db.hover_at(path, offset).map(str::to_string)
+    arithmetic_hover.or_else(|| db.hover_at(path, offset).map(str::to_string))
 }
 
 /// Hover over package metadata and typed environment option fields from the
@@ -1966,13 +1981,16 @@ fn arithmetic_modifier(
         .filter(|fact| {
             token.start < fact.operation_span.end && fact.operation_span.start < token.end
         })
-        .fold(0, |mods, fact| {
-            mods | match fact.policy.as_str() {
-                "Checked" => sm::ARITHMETIC_CHECKED,
-                "Wrapping" => sm::ARITHMETIC_WRAPPING,
-                "Saturating" => sm::ARITHMETIC_SATURATING,
-                _ => 0,
-            }
+        .min_by_key(|fact| {
+            fact.operation_span
+                .end
+                .saturating_sub(fact.operation_span.start)
+        })
+        .map_or(0, |fact| match fact.policy.as_str() {
+            "Checked" => sm::ARITHMETIC_CHECKED,
+            "Wrapping" => sm::ARITHMETIC_WRAPPING,
+            "Saturating" => sm::ARITHMETIC_SATURATING,
+            _ => 0,
         })
 }
 

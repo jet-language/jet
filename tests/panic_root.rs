@@ -10,7 +10,7 @@ fn run() {
 "#,
         r#"
 fn run() {
-    #FX(caps: FS) {
+    #FX(authority: FS) {
         panic("stop")
     }
 }

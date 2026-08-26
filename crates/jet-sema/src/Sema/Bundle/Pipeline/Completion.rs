@@ -351,6 +351,11 @@ pub(super) fn complete_bundle_check(
                 .map(|effects| (key.clone(), effects.clone()))
         })
         .collect();
+    // D-EFFECT-AUTHORITY1: publish the exact selected-entry row once, after
+    // the qualified reachability fixpoint closes. All execution tiers receive
+    // this bundle carrier; none of them recompute effects from source.
+    bundle.package_guarantees.application_authority.required_effects =
+        super::super::super::Effects::program_effects(bundle, &public_solved, "run");
     super::super::super::CheckerCoreLib::validate_service_handlers(
         bundle,
         &public_summaries,

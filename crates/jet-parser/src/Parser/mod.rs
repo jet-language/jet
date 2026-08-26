@@ -1610,7 +1610,7 @@ fn notify(ready: Bool) -[Net]> {
     task.group group {
         task fetch()
     }
-    #FX(caps: FS, Net) {
+    #FX(authority: FS, Net) {
         use_caps(caps)
     }
 }
@@ -1627,7 +1627,7 @@ fn notify(ready: Bool) -[Net]> {
         assert!(once.contains("loop item in items -> audit(item)"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");
         assert!(once.contains("task fetch()"), "{once}");
-        assert!(once.contains("#FX(caps: FS, Net)"), "{once}");
+        assert!(once.contains("#FX(authority: FS, Net)"), "{once}");
         let twice = format_source(&once).expect("canonical arrow/control syntax reformats");
         assert_eq!(once, twice);
     }

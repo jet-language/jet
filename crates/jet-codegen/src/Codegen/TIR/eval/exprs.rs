@@ -10091,7 +10091,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
     }
 
     fn eval_numeric_op(
-        &self,
+        &mut self,
         v: &CtValue,
         op: &crate::Codegen::TIR::TNumericOp,
         recv_ty: &crate::AST::Type,
@@ -10161,6 +10161,42 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     },
                     _ => Ok(v.clone()),
                 }
+            }
+            TNumericOp::CheckedIntToFixed {
+                dst_spelling,
+                host_kind,
+                line,
+                ..
+            } => {
+                let value = exact_big(v).ok_or_else(|| {
+                    unsupported("checked fixed-width construction expects Int", self.span())
+                })?;
+                let (lo, hi) = match *host_kind {
+                    0 => (i8::MIN as i128, i8::MAX as i128),
+                    1 => (i16::MIN as i128, i16::MAX as i128),
+                    2 => (i32::MIN as i128, i32::MAX as i128),
+                    3 => (i64::MIN as i128, i64::MAX as i128),
+                    4 => (u8::MIN as i128, u8::MAX as i128),
+                    5 => (u16::MIN as i128, u16::MAX as i128),
+                    6 => (u32::MIN as i128, u32::MAX as i128),
+                    7 => (u64::MIN as i128, u64::MAX as i128),
+                    _ => (i64::MIN as i128, i64::MAX as i128),
+                };
+                let lower = jet_foundation::Numeric::CtBigInt::from_str(&lo.to_string())
+                    .expect("integer construction lower bound");
+                let upper = jet_foundation::Numeric::CtBigInt::from_str(&hi.to_string())
+                    .expect("integer construction upper bound");
+                if value.compare(&lower) == std::cmp::Ordering::Less
+                    || value.compare(&upper) == std::cmp::Ordering::Greater
+                {
+                    return Err(self.runtime_stop(
+                        "E3010",
+                        *line,
+                        &format!("value doesn't fit in {dst_spelling}"),
+                    ));
+                }
+                let _ = (recv_ty, result_ty);
+                Ok(exact_int_value(value))
             }
             TNumericOp::CheckedIntToFloat {
                 source_signed,

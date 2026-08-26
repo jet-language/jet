@@ -4248,6 +4248,11 @@ fn run_program_with_structs_at_stage_and_cli(
     cli_bundle: Option<&ProgramBundle>,
     package_hardened: bool,
 ) -> Result<CtValue, Diagnostic> {
+    if matches!(stage, Comptime::PurityStage::RunTime) {
+        if let Some(diagnostic) = program.application_authority.policy_diagnostic() {
+            return Err(diagnostic);
+        }
+    }
     let cli_dispatch = if let Some(bundle) =
         cli_bundle.filter(|_| program.entry == crate::Codegen::mangle_generated("cli_main"))
     {
@@ -4522,6 +4527,9 @@ pub fn run_named_func_with_memos(
     sink: &mut DevSink,
     memos: MemoState,
 ) -> Result<CtValue, Diagnostic> {
+    if let Some(diagnostic) = program.application_authority.policy_diagnostic() {
+        return Err(diagnostic);
+    }
     // Deopt runs on the JIT's own thread, which never entered a caller's
     // `with_package_edition` scope, so the edition is established here from the
     // program's carried bundle fact — the same reason `package_hardened` rides

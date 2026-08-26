@@ -2,6 +2,7 @@
 
 use jet_foundation::Diagnostics::Span;
 use jet_pkg_model::Overlay::OverlayPolicy;
+use jet_pkg_model::EffectBudget::EffectProjection;
 use jet_pkg_model::Package::PackageFacts;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
@@ -312,6 +313,9 @@ pub struct TypeDossier {
     /// hatch at once.
     pub bypass_facts: Vec<BypassFact>,
     pub state_graphs: Vec<StateGraphFact>,
+    /// Application-boundary effect roles. Required is sema-owned; granted,
+    /// denied, and authority are the attached package policy projection.
+    pub effect_projection: EffectProjection,
 }
 
 /// One named definition in the program.
@@ -514,6 +518,7 @@ pub struct SemIndex {
     /// index was built for a package entry.
     package_facts: Option<PackageFacts>,
     workspace_overlay_policy: Option<OverlayPolicy>,
+    effect_projection: EffectProjection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -549,6 +554,7 @@ impl SemIndex {
             state_graphs: Vec::new(),
             package_facts: None,
             workspace_overlay_policy: None,
+            effect_projection: EffectProjection::default(),
         }
     }
 
@@ -587,7 +593,20 @@ impl SemIndex {
     /// Attach the shared typed package model after the compiler facts exist.
     /// Existing package-neutral constructors remain valid.
     pub fn attach_package_facts(&mut self, facts: PackageFacts) {
+        let required_effects = self.effect_projection.required_effects.clone();
+        self.effect_projection = jet_pkg_model::EffectBudget::project_application_effects(
+            &required_effects,
+            Some(&facts),
+        );
         self.package_facts = Some(facts);
+    }
+
+    pub(crate) fn set_effect_projection(&mut self, projection: EffectProjection) {
+        self.effect_projection = projection;
+    }
+
+    pub fn effect_projection(&self) -> &EffectProjection {
+        &self.effect_projection
     }
 
     pub fn workspace_overlay_policy(&self) -> Option<&OverlayPolicy> {
@@ -721,6 +740,7 @@ impl SemIndex {
             references,
             bypass_facts,
             state_graphs,
+            effect_projection: self.effect_projection.clone(),
         }
     }
 

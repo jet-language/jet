@@ -5524,6 +5524,7 @@ impl<'a> Checker<'a> {
                     &Type::Named(crate::Syntax::AUTHORITY_HANDLE_TYPE.to_string()),
                     &mut args[1],
                 );
+                crate::Sema::Effects::check_authority_boundary_scope(self, &args[1].expr);
                 args[1].flags.authority_boundary = true;
             }
             for arg in args.iter_mut().skip(2) {
@@ -5550,6 +5551,7 @@ impl<'a> Checker<'a> {
                     &Type::Named(crate::Syntax::AUTHORITY_HANDLE_TYPE.to_string()),
                     &mut args[1],
                 );
+                crate::Sema::Effects::check_authority_boundary_scope(self, &args[1].expr);
                 args[1].flags.authority_boundary = true;
             }
             for arg in args.iter_mut().skip(2) {

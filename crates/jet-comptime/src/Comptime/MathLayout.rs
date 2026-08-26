@@ -8,6 +8,55 @@ use crate::AST::{BinOp, CtFloat, Type};
 use super::Diagnostics::{comptime_panic, overflow, unsupported};
 use crate::AST::CtValue;
 
+mod fixed_arithmetic {
+    include!("../../../jet-codegen/src/Prelude/Core/FixedArithmetic.rs");
+}
+
+fn fixed_op(op: BinOp) -> Option<i64> {
+    Some(match op {
+        BinOp::Add => fixed_arithmetic::JET_FIXED_OP_ADD,
+        BinOp::Sub => fixed_arithmetic::JET_FIXED_OP_SUB,
+        BinOp::Mul => fixed_arithmetic::JET_FIXED_OP_MUL,
+        BinOp::Div => fixed_arithmetic::JET_FIXED_OP_DIV,
+        BinOp::Rem => fixed_arithmetic::JET_FIXED_OP_REM,
+        BinOp::BitAnd => fixed_arithmetic::JET_FIXED_OP_BIT_AND,
+        BinOp::BitOr => fixed_arithmetic::JET_FIXED_OP_BIT_OR,
+        BinOp::BitXor => fixed_arithmetic::JET_FIXED_OP_BIT_XOR,
+        BinOp::Shl => fixed_arithmetic::JET_FIXED_OP_SHL,
+        BinOp::Shr => fixed_arithmetic::JET_FIXED_OP_SHR,
+        BinOp::Pow => fixed_arithmetic::JET_FIXED_OP_POW,
+        BinOp::FloorDiv => fixed_arithmetic::JET_FIXED_OP_FLOOR_DIV,
+        BinOp::Mod => fixed_arithmetic::JET_FIXED_OP_MOD,
+        _ => return None,
+    })
+}
+
+fn fixed_result(
+    result: fixed_arithmetic::JetFixedArithmeticResult,
+    signed: bool,
+    bits: u8,
+    checked: bool,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    match result {
+        fixed_arithmetic::JetFixedArithmeticResult::Value(value) => {
+            let value = CtValue::Int(value);
+            if checked {
+                Ok(CtValue::Present(Box::new(value)))
+            } else {
+                Ok(value)
+            }
+        }
+        fixed_arithmetic::JetFixedArithmeticResult::Absent => {
+            Ok(CtValue::absent(Type::IntN { signed, bits }))
+        }
+        fixed_arithmetic::JetFixedArithmeticResult::Trap(error) => {
+            let message = error.message();
+            Err(comptime_panic(&message, span))
+        }
+    }
+}
+
 pub fn integer_type_layout(ty: &Type) -> Option<(bool, u8)> {
     match ty {
         Type::Int => Some((true, 64)),
@@ -159,61 +208,24 @@ pub fn integer_binop(
 ) -> Result<CtValue, Diagnostic> {
     let a = integer_widen(left, signed);
     let b = integer_widen(right, right_signed);
-    let (lo, hi) = crate::AST::int_range(signed, bits);
-    let checked = |value: Option<i128>, name: &str| {
-        value
-            .filter(|value| (lo..=hi).contains(value))
-            .map(|value| CtValue::Int(integer_narrow(value, signed, bits)))
-            .ok_or_else(|| overflow(name, span))
-    };
-    if let Some(message) = integer_shift_trap(op, b, bits) {
-        return Err(comptime_panic(&message, span));
-    }
-    if op == BinOp::Rem {
-        if let Some(message) = integer_remainder_trap(right) {
-            return Err(comptime_panic(message, span));
-        }
-    }
-    match op {
-        BinOp::Add => checked(a.checked_add(b), "add"),
-        BinOp::Sub => checked(a.checked_sub(b), "subtract"),
-        BinOp::Mul => checked(a.checked_mul(b), "multiply"),
-        BinOp::Div if b == 0 => Err(comptime_panic(INTEGER_DIVIDE_ZERO, span)),
-        BinOp::Div => checked(a.checked_div(b), "divide"),
-        // D-FLOORDIV1=A: `/%` rounds down, in the same words `/` uses when the
-        // divisor is zero.
-        BinOp::FloorDiv if b == 0 => Err(comptime_panic(INTEGER_DIVIDE_ZERO, span)),
-        BinOp::FloorDiv => checked(floor_div(a, b), "divide"),
-        // D-MODSEM1=A: `%` is the floored modulo.
-        BinOp::Mod if b == 0 => Err(comptime_panic(INTEGER_DIVIDE_ZERO, span)),
-        BinOp::Mod => checked(floored_mod(a, b), "take the remainder of"),
-        // D-MODSEM1=A: `MIN %% -1` is 0, which fits every width.
-        BinOp::Rem => Ok(CtValue::Int(integer_narrow(
-            a.wrapping_rem(b),
+    if let Some(fixed_op) = fixed_op(op) {
+        return fixed_result(
+            fixed_arithmetic::jet_fixed_arithmetic(
+                left,
+                right as i128,
+                fixed_op,
+                fixed_arithmetic::JET_FIXED_MODE_TRAP,
+                signed,
+                bits,
+                right_signed,
+            ),
             signed,
             bits,
-        ))),
-        // D-EXPSEM1=A: exact whole-number power, trapping outside the range,
-        // in the same words every other tier uses.
-        BinOp::Pow if b < 0 => Err(comptime_panic(INTEGER_POWER_NEGATIVE, span)),
-        BinOp::Pow => u32::try_from(b)
-            .ok()
-            .and_then(|e| a.checked_pow(e))
-            .filter(|value| (lo..=hi).contains(value))
-            .map(|value| CtValue::Int(integer_narrow(value, signed, bits)))
-            .ok_or_else(|| comptime_panic(INTEGER_POWER_OVERFLOW, span)),
-        BinOp::BitAnd => Ok(CtValue::Int(integer_narrow(a & b, signed, bits))),
-        BinOp::BitOr => Ok(CtValue::Int(integer_narrow(a | b, signed, bits))),
-        BinOp::BitXor => Ok(CtValue::Int(integer_narrow(a ^ b, signed, bits))),
-        BinOp::Shl => Ok(CtValue::Int(integer_narrow(a << (b as u32), signed, bits))),
-        BinOp::Shr => {
-            let value = if signed {
-                a >> (b as u32)
-            } else {
-                ((left as u64) >> (b as u32)) as i128
-            };
-            Ok(CtValue::Int(integer_narrow(value, signed, bits)))
-        }
+            false,
+            span,
+        );
+    }
+    match op {
         BinOp::Eq => Ok(CtValue::Bool(a == b)),
         BinOp::Ne => Ok(CtValue::Bool(a != b)),
         BinOp::Lt => Ok(CtValue::Bool(a < b)),
@@ -225,13 +237,21 @@ pub fn integer_binop(
 }
 
 pub fn integer_neg(value: i64, bits: u8, span: Span) -> Result<CtValue, Diagnostic> {
-    let value = integer_widen(value, true);
-    let (lo, hi) = crate::AST::int_range(true, bits);
-    value
-        .checked_neg()
-        .filter(|value| (lo..=hi).contains(value))
-        .map(|value| CtValue::Int(integer_narrow(value, true, bits)))
-        .ok_or_else(|| overflow("negate", span))
+    fixed_result(
+        fixed_arithmetic::jet_fixed_arithmetic(
+            value,
+            0,
+            fixed_arithmetic::JET_FIXED_OP_NEG,
+            fixed_arithmetic::JET_FIXED_MODE_TRAP,
+            true,
+            bits,
+            true,
+        ),
+        true,
+        bits,
+        false,
+        span,
+    )
 }
 
 const MATH_TYPES: &[&str] = &[
@@ -694,126 +714,34 @@ pub fn overflow_opt(
     bits: u8,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
-    let (lo, hi) = crate::AST::int_range(signed, bits);
-    let narrow = |n: i128| -> i64 { integer_narrow(n, signed, bits) };
-    // Bit-pattern wrap matching Rust's wrapping_* on fixed widths.
-    let wrapping = |n: i128| -> i64 { narrow(n) };
-    let checked_op = |op: BinOp, a: i128, b: i128| -> Option<i128> {
-        match op {
-            BinOp::Add => a.checked_add(b),
-            BinOp::Sub => a.checked_sub(b),
-            BinOp::Mul => a.checked_mul(b),
-            BinOp::Div => a.checked_div(b),
-            BinOp::Rem => a.checked_rem(b),
-            BinOp::Pow => u32::try_from(b).ok().and_then(|exponent| a.checked_pow(exponent)),
-            _ => None,
-        }
+    let fixed_op = if mode == "rotate_left" {
+        fixed_arithmetic::JET_FIXED_OP_ROTATE_LEFT
+    } else if mode == "rotate_right" {
+        fixed_arithmetic::JET_FIXED_OP_ROTATE_RIGHT
+    } else {
+        fixed_op(op).ok_or_else(|| overflow(mode, span))?
     };
-    let a = integer_widen(left, signed);
-    let b = integer_widen(right, signed);
-    if matches!(mode, "rotate_left" | "rotate_right") {
-        if b < 0 {
-            return Err(comptime_panic(INTEGER_ROTATE_NEGATIVE, span));
-        }
-        let width = u32::from(bits);
-        let mask = if bits == 64 {
-            u128::from(u64::MAX)
-        } else {
-            (1_u128 << bits) - 1
-        };
-        let value = (a as u128) & mask;
-        let count = (b as u128 % u128::from(width)) as u32;
-        let rotated = if count == 0 {
-            value
-        } else if mode == "rotate_left" {
-            ((value << count) | (value >> (width - count))) & mask
-        } else {
-            ((value >> count) | (value << (width - count))) & mask
-        };
-        return Ok(CtValue::Int(integer_narrow(rotated as i128, signed, bits)));
-    }
-    let wrapping_pow = |base: i128, exponent: i128| -> i64 {
-        let mask = if bits == 64 {
-            u128::from(u64::MAX)
-        } else {
-            (1_u128 << bits) - 1
-        };
-        let mut base = (base as u128) & mask;
-        let mut exponent = exponent as u128;
-        let mut result = 1_u128 & mask;
-        while exponent != 0 {
-            if exponent & 1 != 0 {
-                result = result.wrapping_mul(base) & mask;
-            }
-            exponent >>= 1;
-            if exponent != 0 {
-                base = base.wrapping_mul(base) & mask;
-            }
-        }
-        integer_narrow(result as i128, signed, bits)
+    let fixed_mode = match mode {
+        Syntax::BUILTIN_WRAPPING => fixed_arithmetic::JET_FIXED_MODE_WRAPPING,
+        Syntax::BUILTIN_SATURATING => fixed_arithmetic::JET_FIXED_MODE_SATURATING,
+        Syntax::BUILTIN_CHECKED => fixed_arithmetic::JET_FIXED_MODE_CHECKED,
+        "checked_policy" => fixed_arithmetic::JET_FIXED_MODE_TRAP,
+        "rotate_left" | "rotate_right" => fixed_arithmetic::JET_FIXED_MODE_WRAPPING,
+        _ => return Err(overflow(mode, span)),
     };
-    let saturating_pow = |base: i128, exponent: i128| -> i64 {
-        let clamp_product = |left: i128, right: i128| {
-            left.checked_mul(right).map(|value| value.clamp(lo, hi)).unwrap_or_else(|| {
-                if (left < 0) == (right < 0) { hi } else { lo }
-            })
-        };
-        let mut base = base.clamp(lo, hi);
-        let mut exponent = exponent;
-        let mut result = 1_i128;
-        while exponent != 0 {
-            if exponent & 1 != 0 {
-                result = clamp_product(result, base);
-            }
-            exponent >>= 1;
-            if exponent != 0 {
-                base = clamp_product(base, base);
-            }
-        }
-        integer_narrow(result, signed, bits)
-    };
-    match mode {
-        Syntax::BUILTIN_WRAPPING => {
-            let raw = match op {
-                BinOp::Add => a.wrapping_add(b),
-                BinOp::Sub => a.wrapping_sub(b),
-                BinOp::Mul => a.wrapping_mul(b),
-                BinOp::Pow if b < 0 => return Err(comptime_panic(INTEGER_POWER_NEGATIVE, span)),
-                BinOp::Pow => return Ok(CtValue::Int(wrapping_pow(a, b))),
-                BinOp::Div => {
-                    if b == 0 {
-                        return Err(unsupported("division by zero", span));
-                    }
-                    a.wrapping_div(b)
-                }
-                _ => return Err(unsupported("wrapping on this operator", span)),
-            };
-            Ok(CtValue::Int(wrapping(raw)))
-        }
-        Syntax::BUILTIN_SATURATING => {
-            let raw = match op {
-                BinOp::Add => a.saturating_add(b),
-                BinOp::Sub => a.saturating_sub(b),
-                BinOp::Mul => a.saturating_mul(b),
-                BinOp::Pow if b < 0 => return Err(comptime_panic(INTEGER_POWER_NEGATIVE, span)),
-                BinOp::Pow => return Ok(CtValue::Int(saturating_pow(a, b))),
-                BinOp::Div => {
-                    if b == 0 {
-                        return Err(unsupported("division by zero", span));
-                    }
-                    a.saturating_div(b)
-                }
-                _ => return Err(unsupported("saturating on this operator", span)),
-            };
-            let clamped = raw.clamp(lo, hi);
-            Ok(CtValue::Int(narrow(clamped)))
-        }
-        Syntax::BUILTIN_CHECKED => match checked_op(op, a, b) {
-            Some(raw) if (lo..=hi).contains(&raw) => {
-                Ok(CtValue::Present(Box::new(CtValue::Int(narrow(raw)))))
-            }
-            _ => Ok(CtValue::absent(Type::IntN { signed, bits })),
-        },
-        _ => Err(overflow(mode, span)),
-    }
+    fixed_result(
+        fixed_arithmetic::jet_fixed_arithmetic(
+            left,
+            right as i128,
+            fixed_op,
+            fixed_mode,
+            signed,
+            bits,
+            true,
+        ),
+        signed,
+        bits,
+        mode == Syntax::BUILTIN_CHECKED,
+        span,
+    )
 }

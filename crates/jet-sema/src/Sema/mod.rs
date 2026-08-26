@@ -296,18 +296,58 @@ impl TypeRegistry {
                 Type::Named(name) => {
                     if name == crate::Syntax::TYPE_ERR
                         || name == crate::Syntax::TYPE_NEVER
-                        || crate::Sema::Diagnostics::is_core_error_family_type(name)
                         || registry.is_error_type(name)
+                        || (!registry.contains(name)
+                            && crate::Sema::Diagnostics::is_core_error_type(name))
                     {
                         return true;
                     }
                     let Some((params, target)) = registry.type_alias(name) else {
                         return false;
                     };
-                    params.is_empty() && seen.insert(name.clone()) && visit(registry, target, seen)
+                    if !params.is_empty() || !seen.insert(name.clone()) {
+                        return false;
+                    }
+                    let valid = visit(registry, target, seen);
+                    seen.remove(name);
+                    valid
+                }
+                // A generic `#Error` declaration is still one named error
+                // domain. Generic aliases are expanded here as well when a
+                // caller reaches this registry before the normal type
+                // resolver has expanded them.
+                Type::Apply { name, args } => {
+                    if registry.is_error_type(name)
+                        || (!registry.contains(name)
+                            && crate::Sema::Diagnostics::is_core_error_type(name))
+                    {
+                        return true;
+                    }
+                    let Some((params, target)) = registry.type_alias(name) else {
+                        return false;
+                    };
+                    if params.len() != args.len() || !seen.insert(name.clone()) {
+                        return false;
+                    }
+                    let substitutions = params
+                        .iter()
+                        .zip(args.iter().cloned())
+                        .map(|(param, argument)| (param.name.clone(), argument))
+                        .collect();
+                    let expanded = crate::Generics::substitute_type(target, &substitutions);
+                    let valid = visit(registry, &expanded, seen);
+                    seen.remove(name);
+                    valid
                 }
                 Type::Union(members) => {
                     !members.is_empty() && members.iter().all(|member| visit(registry, member, seen))
+                }
+                // D-VALIDATE-DECODE1=B: typed decoding reports one
+                // accumulated Core error list, not an arbitrary list-shaped
+                // error domain.
+                Type::List(inner) => {
+                    matches!(inner.as_ref(), Type::Named(name)
+                        if name == "FieldError" && !registry.contains(name))
                 }
                 _ => false,
             }

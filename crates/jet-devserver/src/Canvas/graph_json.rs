@@ -176,7 +176,9 @@ pub(super) fn add_authority_region(
     g: &mut GraphBuilder,
     ordinal: usize,
     title: &str,
+    required_effects: &[String],
     granted_effects: &[String],
+    denied_effects: &[String],
     binding: Option<&str>,
     span: Span,
 ) {
@@ -184,10 +186,12 @@ pub(super) fn add_authority_region(
         .map(|name| format!("Authority handle `{name}`"))
         .unwrap_or_else(|| "lexical #FX authority".to_string());
     g.regions.push(format!(
-        "{{\"region_id\":{},\"kind\":\"authority\",\"title\":{},\"required_effects\":[],\"granted_effects\":{},\"denied_effects\":[],\"authority\":{},\"source_span\":{}}}",
+        "{{\"region_id\":{},\"kind\":\"authority\",\"title\":{},\"required_effects\":{},\"granted_effects\":{},\"denied_effects\":{},\"authority\":{},\"source_span\":{}}}",
         json_str(&format!("{}:region:{ordinal}:authority", g.graph_id)),
         json_str(title),
+        json_strs(required_effects),
         json_strs(granted_effects),
+        json_strs(denied_effects),
         json_str(&authority),
         span_json(span.into())
     ));

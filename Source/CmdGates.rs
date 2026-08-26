@@ -143,6 +143,8 @@ fn append_authority_entries(
     source: &str,
 ) {
     let provenance = |field: &str| vec![format!("{source}:{field}")];
+    let holds_authority = format!("{source} authority.holds");
+    let grants_authority = format!("{source} authority.grants");
     if let Some(allow) = &authority.holds.allow {
         ledger.push(external_entry(
             GateKind::BuildFlag,
@@ -150,7 +152,10 @@ fn append_authority_entries(
             "package",
             source,
             "authority.holds.allow",
-            &format!("holds allow: {}", allow.join(",")),
+            &format!(
+                "required effects: not evaluated; granted effects: {}; denied effects: none; authority: {holds_authority}",
+                allow.join(",")
+            ),
             provenance("authority.holds.allow"),
         ));
     }
@@ -161,7 +166,10 @@ fn append_authority_entries(
             "package",
             source,
             "authority.holds.deny",
-            &format!("holds deny: {}", deny.join(",")),
+            &format!(
+                "required effects: not evaluated; granted effects: none; denied effects: {}; authority: {holds_authority}",
+                deny.join(",")
+            ),
             provenance("authority.holds.deny"),
         ));
     }
@@ -172,7 +180,10 @@ fn append_authority_entries(
             "package",
             source,
             dependency,
-            &format!("authority.grants: {}", rights.join(",")),
+            &format!(
+                "required effects: not evaluated; granted effects: {}; denied effects: none; authority: {grants_authority}",
+                rights.join(",")
+            ),
             provenance("authority.grants"),
         ));
     }
@@ -275,14 +286,23 @@ pub(crate) fn append_external_writers(ledger: &mut GateLedger, root: &Path, args
             append_authority_entries(ledger, authority, jet::Syntax::UNIFIED_LOCK_FILE);
         } else {
             for package in &lock.packages {
-                if !package.effect_grants.is_empty() {
+                if !package.effect_grants.is_empty() || !package.granted_effects.is_empty() {
                     ledger.push(external_entry(
                         GateKind::DependencyGrant,
-                        "security",
-                        "package",
-                        jet::Syntax::UNIFIED_LOCK_FILE,
-                        &package.name,
-                        &format!("effects: {}", package.effect_grants.join(",")),
+                "security",
+                "package",
+                jet::Syntax::UNIFIED_LOCK_FILE,
+                &package.name,
+                        &format!(
+                            "required effects: {}; granted effects: {}; denied effects: {}; authority: {}",
+                            effect_names(&package.required_effects, &package.effects),
+                            effect_names(&package.granted_effects, &package.effect_grants),
+                            effect_names(&package.denied_effects, &[]),
+                            package
+                                .effect_authority
+                                .as_deref()
+                                .unwrap_or(".jet/lock effect provenance"),
+                        ),
                         vec![format!(
                             "{}:dependency.effect-grants",
                             jet::Syntax::UNIFIED_LOCK_FILE
@@ -298,7 +318,10 @@ pub(crate) fn append_external_writers(ledger: &mut GateLedger, root: &Path, args
                 "package",
                 jet::Syntax::UNIFIED_LOCK_FILE,
                 &format!("build:{subject}"),
-                &format!("workspace authority: {}", effects.join(",")),
+                &format!(
+                    "required effects: not evaluated; granted effects: {}; denied effects: none; authority: .jet/lock workspace authority",
+                    effects.join(",")
+                ),
                 vec![format!(
                     "{}:workspace.build-grants",
                     jet::Syntax::UNIFIED_LOCK_FILE
@@ -377,6 +400,15 @@ pub(crate) fn append_external_writers(ledger: &mut GateLedger, root: &Path, args
     }
 
     append_invocation_flags(ledger, args);
+}
+
+fn effect_names(primary: &[String], fallback: &[String]) -> String {
+    let effects = if primary.is_empty() { fallback } else { primary };
+    if effects.is_empty() {
+        "none".to_string()
+    } else {
+        effects.join(",")
+    }
 }
 
 fn append_invocation_flags(ledger: &mut GateLedger, args: &[String]) {

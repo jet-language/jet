@@ -37,7 +37,30 @@ pub struct EffectProjection {
     pub authority: String,
 }
 
+impl Default for EffectProjection {
+    fn default() -> Self {
+        Self {
+            required_effects: EffectSet::new(),
+            granted_effects: EffectSet::new(),
+            denied_effects: EffectSet::new(),
+            authority: "application default".to_string(),
+        }
+    }
+}
+
 impl EffectProjection {
+    /// Carry this checked application decision into the execution bundle.
+    /// Required effects remain the sema fact; the other fields remain the
+    /// manifest or interactive policy fact.
+    pub fn application_authority(&self) -> jet_foundation::Authority::ApplicationAuthority {
+        jet_foundation::Authority::ApplicationAuthority {
+            required_effects: self.required_effects.clone(),
+            granted_effects: self.granted_effects.clone(),
+            denied_effects: self.denied_effects.clone(),
+            authority: self.authority.clone(),
+        }
+    }
+
     /// Required effects with no policy verdict at the application boundary.
     pub fn undecided(&self) -> EffectSet {
         let empty = Holds::new();
@@ -141,6 +164,7 @@ pub fn application_policy_diagnostic(
         crate::Sema::show_set(&missing)
     };
     let required_text = crate::Sema::show_set(&projection.required_effects);
+    let granted_text = crate::Sema::show_set(&projection.granted_effects);
     Diagnostic::error(
         "E1803",
         if denied.is_empty() {
@@ -149,7 +173,7 @@ pub fn application_policy_diagnostic(
             format!("application authority denies `{denied_text}`")
         },
         format!(
-            "required_effects={required_text}; denied_effects={denied_text}; undecided_effects={missing_text}; authority={}",
+            "required_effects={required_text}; granted_effects={granted_text}; denied_effects={denied_text}; undecided_effects={missing_text}; authority={}",
             projection.authority
         ),
         "declare the effect in `authority.holds.allow`, deny it deliberately, or approve it once or for the project in an interactive terminal".to_string(),
@@ -473,6 +497,35 @@ pub fn render_effect_projection_line(projection: &EffectProjection) -> String {
     )
 }
 
+/// JSON object used inside semantic-index, dossier, and Canvas documents.
+/// The status wrapper remains owned by command renderers; consumers embed this
+/// object so the four roles stay one shared projection instead of four ad-hoc
+/// serializers.
+pub fn render_effect_projection_object(projection: &EffectProjection) -> String {
+    let required = projection
+        .required_effects
+        .iter()
+        .map(|effect| jet_foundation::JSON::quote(effect))
+        .collect::<Vec<_>>()
+        .join(",");
+    let granted = projection
+        .granted_effects
+        .iter()
+        .map(|effect| jet_foundation::JSON::quote(effect))
+        .collect::<Vec<_>>()
+        .join(",");
+    let denied = projection
+        .denied_effects
+        .iter()
+        .map(|effect| jet_foundation::JSON::quote(effect))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"required_effects\":[{required}],\"granted_effects\":[{granted}],\"denied_effects\":[{denied}],\"authority\":{}}}",
+        jet_foundation::JSON::quote(&projection.authority),
+    )
+}
+
 /// Machine application-boundary summary. The legacy `effects` field remains
 /// for existing consumers; the role-specific fields are the canonical view
 /// for new CLI, inspect, and Canvas consumers.
@@ -679,14 +732,32 @@ pub fn update_lock_provenance(
         } else {
             pkg.name.as_str()
         };
-        pkg.effects = provenance_for(entries, key);
-        pkg.effect_grants = manifest
+        pkg.required_effects = provenance_for(entries, key);
+        pkg.effects = pkg.required_effects.clone();
+        pkg.granted_effects = manifest
             .authority
             .grants
             .iter()
             .find(|(dep, _)| dep == &pkg.name)
             .map(|(_, effects)| effects.clone())
             .unwrap_or_default();
+        pkg.effect_grants = pkg.granted_effects.clone();
+        pkg.denied_effects = manifest
+            .authority
+            .holds
+            .deny
+            .clone()
+            .unwrap_or_default();
+        pkg.effect_authority = Some(
+            if pkg.source == crate::Lock::LockSource::Root {
+                "package.jet authority.holds"
+            } else if pkg.granted_effects.is_empty() {
+                "package.jet authority.holds"
+            } else {
+                "package.jet authority.grants"
+            }
+            .to_string(),
+        );
     }
 }
 

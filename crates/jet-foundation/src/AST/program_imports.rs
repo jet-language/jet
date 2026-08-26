@@ -653,6 +653,9 @@ pub struct PackageGuarantees {
     /// `authority.holds.deny`. The loader carries the raw canonical rights here so
     /// sema applies the same memory proof as a signature denial.
     pub memory_denials: Vec<String>,
+    /// D-EFFECT-AUTHORITY1: the application-boundary policy and the exact
+    /// sema-projected effects carried into every execution tier.
+    pub application_authority: crate::Authority::ApplicationAuthority,
 }
 
 impl ProgramBundle {

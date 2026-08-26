@@ -139,6 +139,13 @@ fn function_at(items: &[Item], definition: crate::Diagnostics::Span) -> Option<&
 pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
     crate::boot_tir_eval();
     let started = Instant::now();
+    if let Some(diagnostic) = bundle
+        .package_guarantees
+        .application_authority
+        .policy_diagnostic()
+    {
+        return RunOutcome::Problems(vec![diagnostic]);
+    }
     if !try_anyway {
         if let Some(diagnostic) = jet_driver::InterpreterBoundary::dev_boundary_scan(bundle) {
             return RunOutcome::Problems(vec![diagnostic]);
@@ -248,6 +255,13 @@ fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) ->
 /// internal-tooling mismatch, not a source error.
 pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> RunOutcome {
     crate::boot_tir_eval();
+    if let Some(diagnostic) = bundle
+        .package_guarantees
+        .application_authority
+        .policy_diagnostic()
+    {
+        return RunOutcome::Problems(vec![diagnostic]);
+    }
     if !try_anyway {
         if let Some(diagnostic) = jet_driver::InterpreterBoundary::dev_boundary_scan(bundle) {
             return RunOutcome::Problems(vec![diagnostic]);
@@ -534,6 +548,26 @@ fn checked_bundle_with_entry(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CheckedBundle, Vec<Diagnostic>> {
+    checked_bundle_with_application_authority(
+        file,
+        gates,
+        entry_fn,
+        profile,
+        setting_overrides,
+        None,
+    )
+}
+
+fn checked_bundle_with_application_authority(
+    file: &str,
+    gates: jet_foundation::Policy::GateSet,
+    entry_fn: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    application_authority: Option<
+        &jet_foundation::Authority::ApplicationAuthority,
+    >,
+) -> Result<CheckedBundle, Vec<Diagnostic>> {
     jet_driver::run_compiler_work(|| {
         if let Some(Err(diags)) =
             crate::check_programmable_build_for_tier(file, gates, profile, setting_overrides)
@@ -577,6 +611,19 @@ fn checked_bundle_with_entry(
                     crate::Sema::CompileMode::Run,
                     gates,
                 );
+                if let Some(application_authority) = application_authority {
+                    // The CLI may have made an invocation-local decision. Keep
+                    // the fresh sema projection's required row, and replace
+                    // only the policy half of the one bundle carrier.
+                    let required_effects = bundle
+                        .package_guarantees
+                        .application_authority
+                        .required_effects
+                        .clone();
+                    let mut applied = application_authority.clone();
+                    applied.required_effects = required_effects;
+                    bundle.package_guarantees.application_authority = applied;
+                }
                 // Same gate as `jet build` / entry-swap: recoverable parse
                 // teaching must not disappear on the default `jet run` path.
                 // The canonical extension hook runs before this gate so its
@@ -732,7 +779,15 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings(
     // front end, the JIT run, and the tier-artifact store that reads what the
     // run just published all share the same thread-local run state.
     on_compiler_stack(|| {
-        run_jit_once_on_compiler_stack(file, program_args, json, gates, setting_overrides, false)
+        run_jit_once_on_compiler_stack(
+            file,
+            program_args,
+            json,
+            gates,
+            setting_overrides,
+            false,
+            None,
+        )
     })
     .outcome
 }
@@ -747,8 +802,39 @@ pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints(
     gates: jet_foundation::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
 ) -> RunWithLints {
+    run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority(
+        file,
+        program_args,
+        json,
+        gates,
+        setting_overrides,
+        None,
+    )
+}
+
+/// Run the default JIT with the application decision already resolved by the
+/// command boundary. `None` keeps the ordinary package policy carried by the
+/// loader; `Some` is the invocation-local once approval.
+pub fn run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority(
+    file: &str,
+    program_args: &[&str],
+    json: bool,
+    gates: jet_foundation::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+    application_authority: Option<
+        &jet_foundation::Authority::ApplicationAuthority,
+    >,
+) -> RunWithLints {
     on_compiler_stack(|| {
-        run_jit_once_on_compiler_stack(file, program_args, json, gates, setting_overrides, true)
+        run_jit_once_on_compiler_stack(
+            file,
+            program_args,
+            json,
+            gates,
+            setting_overrides,
+            true,
+            application_authority,
+        )
     })
 }
 
@@ -759,6 +845,9 @@ fn run_jit_once_on_compiler_stack(
     gates: jet_foundation::Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
     surface_lints: bool,
+    application_authority: Option<
+        &jet_foundation::Authority::ApplicationAuthority,
+    >,
 ) -> RunWithLints {
     crate::RunCache::reset_phases();
     let started = std::time::Instant::now();
@@ -772,7 +861,11 @@ fn run_jit_once_on_compiler_stack(
     // A cached tier-1 module has the ordinary `run` entry. A named job must
     // pass through entry selection first, so never let a warm artifact skip
     // the shared job selector.
-    if !surface_lints && requested.is_none() && setting_overrides.is_empty() {
+    if application_authority.is_none()
+        && !surface_lints
+        && requested.is_none()
+        && setting_overrides.is_empty()
+    {
         if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
             if timing {
                 timer.metric("cache_hit", 1);
@@ -785,14 +878,25 @@ fn run_jit_once_on_compiler_stack(
             };
         }
     }
-    match checked_bundle_with_entry(file, gates, requested, "dev", setting_overrides) {
+    match checked_bundle_with_application_authority(
+        file,
+        gates,
+        requested,
+        "dev",
+        setting_overrides,
+        application_authority,
+    ) {
         Ok(checked) => {
             if timing {
                 timer.lap("frontend");
             }
             let lints = checked.lints;
             let bundle = checked.bundle;
-            if surface_lints && requested.is_none() && setting_overrides.is_empty() {
+            if application_authority.is_none()
+                && surface_lints
+                && requested.is_none()
+                && setting_overrides.is_empty()
+            {
                 if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
                     if timing {
                         timer.metric("cache_hit", 1);
@@ -817,12 +921,13 @@ fn run_jit_once_on_compiler_stack(
             let mut scheduled_stderr = String::new();
             if selected.is_none() && bundle_has_service_output(&bundle) {
                 for name in scheduled_job_names_once(&bundle) {
-                    let job_bundle = match checked_bundle_with_entry(
+                    let job_bundle = match checked_bundle_with_application_authority(
                         file,
                         gates,
                         Some(&name),
                         "dev",
                         setting_overrides,
+                        application_authority,
                     ) {
                         Ok(job_bundle) => job_bundle.bundle,
                         Err(diags) => {
@@ -997,13 +1102,43 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> RunWithLints {
+    run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_and_authority(
+        file,
+        program_args,
+        gates,
+        profile,
+        setting_overrides,
+        None,
+    )
+}
+
+/// Run the tier-0 interpreter with the application decision already resolved
+/// by the command boundary. `Some` carries an invocation-local once approval
+/// into the exact checked bundle that the interpreter executes.
+pub fn run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_and_authority(
+    file: &str,
+    program_args: &[&str],
+    gates: jet_foundation::Policy::GateSet,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    application_authority: Option<
+        &jet_foundation::Authority::ApplicationAuthority,
+    >,
+) -> RunWithLints {
     crate::RunCache::reset_phases();
     if let Some(result) = job_help_if_requested(file, program_args, gates, setting_overrides) {
         return result;
     }
     on_compiler_stack(|| {
         let requested = requested_job(program_args);
-        match checked_bundle_with_entry(file, gates, requested, profile, setting_overrides) {
+        match checked_bundle_with_application_authority(
+            file,
+            gates,
+            requested,
+            profile,
+            setting_overrides,
+            application_authority,
+        ) {
             Ok(checked) => {
                 let lints = checked.lints;
                 let bundle = checked.bundle;

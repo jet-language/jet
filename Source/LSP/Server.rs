@@ -1971,7 +1971,18 @@ fn hover_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) -
     let tokens = server.lex(doc);
     let checked = server.check_with_bundle(doc);
     let db = match checked.bundle {
-        Some(b) => build_symbol_db(&b, &checked.facts),
+        Some(b) => {
+            let mut db = build_symbol_db(&b, &checked.facts);
+            if let Some(package) = jet_semindex::package_facts_for_entry(
+                std::path::Path::new(&doc.path),
+            )
+            .ok()
+            .flatten()
+            {
+                db.attach_package_facts(package);
+            }
+            db
+        }
         None => SymbolDB::new(),
     };
 
@@ -1979,7 +1990,17 @@ fn hover_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) -
     let hover = discovery
         .as_ref()
         .and_then(|index| compute_discovery_hover(&doc.text, offset, index))
-        .or_else(|| compute_hover(&db, &tokens, &doc.text, &doc.path, offset));
+        .or_else(|| compute_hover(&db, &tokens, &doc.text, &doc.path, offset))
+        .map(|text| {
+            if text.contains("required effects:") {
+                text
+            } else {
+                format!(
+                    "{text}\n\n{}",
+                    jet_semindex::render_effect_projection_line(db.index.effect_projection())
+                )
+            }
+        });
     match hover {
         Some(text) => {
             let result = format!(

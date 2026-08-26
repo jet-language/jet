@@ -1410,6 +1410,46 @@ pub(crate) fn is_core_error_family_type(name: &str) -> bool {
     )
 }
 
+/// D-FAILURE-FOUNDATION1=A: every Core type that may be named as the error
+/// side of an explicit `!` contract. This is intentionally broader than the
+/// default-error conversion family above: types such as `CryptoError`,
+/// `TaskFailure`, and `AllocError` keep their own typed failure meaning even
+/// when they do not convert implicitly to `Err`.
+pub(crate) fn is_core_error_type(name: &str) -> bool {
+    matches!(
+        name,
+        "AllocError"
+            | "AuthError"
+            | "BrowserError"
+            | "CBORError"
+            | "CompilerError"
+            | "ComputeError"
+            | "CryptoError"
+            | "DBError"
+            | "DataError"
+            | "EmailError"
+            | "EncodingError"
+            | "EnvError"
+            | "EventConfigError"
+            | "Expired"
+            | "FileCryptoError"
+            | "HTTPError"
+            | "IOError"
+            | "JSONError"
+            | "KeyWrapError"
+            | "NetError"
+            | "RangeError"
+            | "ServiceError"
+            | "TaskFailure"
+            | "TextError"
+            | "UTF8Error"
+            | "VaultError"
+            | "WsError"
+            | "XMLError"
+            | "FieldError"
+    )
+}
+
 pub(crate) fn is_printable(
     ty: &Type,
     registry: &TypeRegistry,

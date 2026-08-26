@@ -742,6 +742,58 @@ pub struct SemIndexEffectFacts {
     pub fact_registry: jet_foundation::Facts::FactRegistry,
 }
 
+/// D-EFFECT-AUTHORITY1: project the exact solved effect row for the selected
+/// application entry. This is the sema-owned source of truth consumed by the
+/// bundle's application-authority carrier; package tooling must not re-walk
+/// summaries and accidentally lose maximal or transitive effects.
+pub fn program_effects(
+    bundle: &crate::AST::ProgramBundle,
+    solved: &HashMap<String, EffectSet>,
+    default_entry: &str,
+) -> EffectSet {
+    fn lookup(
+        solved: &HashMap<String, EffectSet>,
+        module_alias: Option<&str>,
+        name: &str,
+    ) -> EffectSet {
+        let qualified = module_alias.map(|alias| format!("{alias}::{name}"));
+        qualified
+            .as_deref()
+            .and_then(|key| solved.get(key))
+            .or_else(|| solved.get(name))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    let selected = bundle
+        .modules
+        .iter()
+        .flat_map(|module| module.items.iter())
+        .find_map(|item| match item {
+            crate::AST::Item::Const(value) => value
+                .resolved_output
+                .as_ref()
+                .filter(|output| output.selected)
+                .map(|output| (output.module, output.semantic_name.as_str())),
+            _ => None,
+        });
+    if let Some((module, name)) = selected {
+        return lookup(
+            solved,
+            bundle.modules.get(module).map(|module| module.alias.as_str()),
+            name,
+        );
+    }
+    lookup(
+        solved,
+        bundle
+            .modules
+            .get(bundle.entry)
+            .map(|module| module.alias.as_str()),
+        default_entry,
+    )
+}
+
 /// D-EFF2 (callback param bound): one obligation that a callback argument passed
 /// to a `fn(…) -[]>` / `fn(…) -[E]>` parameter satisfies the declared bound. The
 /// callback's own effect contribution is captured as the delta of the function's
@@ -767,6 +819,14 @@ pub struct CallbackObligation {
 /// walks its body. Sealed into a `RegionSummary` when the region closes.
 #[derive(Debug, Clone)]
 pub struct RegionAccum {
+    /// The optional handle introduced by this region. Kept on the active
+    /// stack so a nested boundary cannot pass an outer, wider handle through
+    /// a narrower region.
+    pub binding: Option<String>,
+    /// Authority values narrowed from a handle in this lexical region. The
+    /// map keeps boundary checks source-local without treating unrelated
+    /// `Authority` values as scoped capabilities.
+    pub aliases: BTreeMap<String, EffectSet>,
     pub caps: EffectSet,
     pub caps_span: Span,
     pub direct: EffectSet,
@@ -1583,7 +1643,9 @@ pub fn check_region_caps(
 /// handle`, `x :: handle`, `f(handle)`, `[handle]`, a struct field, an `or`
 /// fallback — lets the revoked authority leak past the scope (E0711).
 pub fn grant_handle_escape(body: &[crate::AST::Stmt], handle: &str) -> Option<Span> {
-    body.iter().find_map(|s| stmt_handle_escape(s, handle))
+    body.iter()
+        .find_map(|s| stmt_handle_escape(s, handle))
+        .or_else(|| grant_derived_handle_escape(body, handle))
 }
 
 /// Collect the source facts for Authority values that cross an approved Core
@@ -1635,6 +1697,378 @@ pub fn authority_delegations(
         });
     }
     delegations
+}
+
+fn authority_expr_rights(
+    regions: &[RegionAccum],
+    expr: &crate::AST::Expr,
+) -> Option<EffectSet> {
+    use crate::AST::{Expr, StrPart};
+
+    match expr {
+        Expr::Ident(name, _) => regions.iter().rev().find_map(|region| {
+            if region.binding.as_deref() == Some(name.as_str()) {
+                Some(region.caps.clone())
+            } else {
+                region.aliases.get(name).cloned()
+            }
+        }),
+        Expr::Paren(inner, _) => authority_expr_rights(regions, inner),
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } if matches!(method.as_str(), "with" | "without") => {
+            let mut rights = authority_expr_rights(regions, receiver)?;
+            let requested = args.first().and_then(|arg| match &arg.expr {
+                Expr::Str(parts, _) if parts.iter().all(|part| matches!(part, StrPart::Lit(_))) => {
+                    let text = parts
+                        .iter()
+                        .filter_map(|part| match part {
+                            StrPart::Lit(text) => Some(text.as_str()),
+                            StrPart::Interp(..) => None,
+                        })
+                        .collect::<String>();
+                    jet_foundation::Authority::parse_right(&text)
+                }
+                _ => None,
+            });
+            match (method.as_str(), requested) {
+                ("with", Some(requested))
+                    if rights
+                        .iter()
+                        .any(|bound| effect_covers(bound, &requested)) =>
+                {
+                    rights.clear();
+                    rights.insert(requested);
+                }
+                ("without", Some(requested)) => {
+                    rights.retain(|held| !effect_covers(&requested, held));
+                }
+                _ => {}
+            }
+            Some(rights)
+        }
+        _ => None,
+    }
+}
+
+/// Check an Authority argument after sema has identified an approved Core
+/// boundary.  Only active named handles participate; ordinary Authority data
+/// such as `session.authority` remains an ordinary boundary value.
+pub(crate) fn check_authority_boundary_scope(
+    checker: &mut super::Checker<'_>,
+    expr: &crate::AST::Expr,
+) {
+    let Some(rights) = authority_expr_rights(&checker.region_stack, expr) else {
+        return;
+    };
+    let Some(current) = checker.region_stack.last() else {
+        return;
+    };
+    let widening = effects_uncovered(&rights, &current.caps);
+    if !widening.is_empty() {
+        checker.diags.push(e0712(
+            &widening,
+            &current.caps,
+            expr.span(),
+            crate::Syntax::KW_FX,
+        ));
+    }
+}
+
+/// Record a local `Authority` value derived from an active named scope. The
+/// boundary checker consumes this fact later in the same sema walk.
+pub(crate) fn record_authority_alias(
+    checker: &mut super::Checker<'_>,
+    binding: &crate::AST::Binding,
+) {
+    let Some(rights) = authority_expr_rights(&checker.region_stack, &binding.init) else {
+        return;
+    };
+    if let Some(region) = checker.region_stack.last_mut() {
+        if binding.name != "_" {
+            region.aliases.insert(binding.name.clone(), rights);
+        }
+    }
+}
+
+/// D-AUTHORITY-SCOPE1: a value derived from a scoped handle is still scoped.
+/// The existing escape walk intentionally treats `handle.with(…)` as an
+/// in-place operation. Track those derived bindings separately so the
+/// narrowing operation itself stays legal while returning, storing, or
+/// capturing its result remains rejected.
+fn authority_chain_rooted_in(
+    expr: &crate::AST::Expr,
+    handle: &str,
+    aliases: &BTreeSet<String>,
+) -> bool {
+    use crate::AST::Expr;
+    match expr {
+        Expr::Ident(name, _) => name == handle || aliases.contains(name),
+        Expr::Paren(inner, _) => authority_chain_rooted_in(inner, handle, aliases),
+        Expr::MethodCall {
+            receiver,
+            method,
+            ..
+        } if matches!(method.as_str(), "with" | "without") => {
+            authority_chain_rooted_in(receiver, handle, aliases)
+        }
+        _ => false,
+    }
+}
+
+fn is_authority_narrowing_chain(
+    expr: &crate::AST::Expr,
+    handle: &str,
+    aliases: &BTreeSet<String>,
+) -> bool {
+    use crate::AST::Expr;
+    match expr {
+        Expr::Paren(inner, _) => is_authority_narrowing_chain(inner, handle, aliases),
+        Expr::MethodCall {
+            receiver,
+            method,
+            ..
+        } if matches!(method.as_str(), "with" | "without") => {
+            authority_chain_rooted_in(receiver, handle, aliases)
+        }
+        _ => false,
+    }
+}
+
+/// Spans below an approved Authority boundary are deliberately ignored by
+/// value-escape checks. The boundary consumer receives the handle as a
+/// borrowed/delegated value and is already recorded by the checked call fact.
+fn authority_boundary_spans(expr: &crate::AST::Expr) -> HashSet<Span> {
+    use crate::AST::Expr;
+    let mut spans = HashSet::new();
+    expr.for_each_expr(|nested| match nested {
+        Expr::Call(call) => {
+            for arg in &call.args {
+                if arg.flags.authority_boundary {
+                    arg.expr.for_each_expr(|value| {
+                        spans.insert(value.span());
+                    });
+                }
+            }
+        }
+        Expr::CallValue { args, .. } | Expr::MethodCall { args, .. } => {
+            for arg in args {
+                if arg.flags.authority_boundary {
+                    arg.expr.for_each_expr(|value| {
+                        spans.insert(value.span());
+                    });
+                }
+            }
+        }
+        _ => {}
+    });
+    spans
+}
+
+/// Find a scoped Authority value in a value position. This is intentionally a
+/// projection over the checked AST: it does not resolve new types or approve
+/// new consumers, and approved boundary arguments are skipped.
+fn authority_value_escape(
+    expr: &crate::AST::Expr,
+    handle: &str,
+    aliases: &BTreeSet<String>,
+) -> Option<Span> {
+    use crate::AST::Expr;
+    let boundary_spans = authority_boundary_spans(expr);
+    let mut found = None;
+    expr.for_each_expr(|nested| {
+        if found.is_some() || boundary_spans.contains(&nested.span()) {
+            return;
+        }
+        if matches!(nested, Expr::Ident(name, _) if aliases.contains(name))
+            || is_authority_narrowing_chain(nested, handle, aliases)
+        {
+            found = Some(nested.span());
+        }
+    });
+    found
+}
+
+/// A discarded expression is allowed to use a scoped Authority in place. Its
+/// non-boundary call arguments are still value positions, so callbacks and
+/// ordinary helpers cannot smuggle a derived handle away.
+fn authority_call_argument_escape(
+    expr: &crate::AST::Expr,
+    handle: &str,
+    aliases: &BTreeSet<String>,
+) -> Option<Span> {
+    use crate::AST::Expr;
+    let mut found = None;
+    expr.for_each_expr(|nested| {
+        if found.is_some() {
+            return;
+        }
+        let args = match nested {
+            Expr::Call(call) => Some(&call.args),
+            Expr::CallValue { args, .. } | Expr::MethodCall { args, .. } => Some(args),
+            _ => None,
+        };
+        if let Some(args) = args {
+            found = args
+                .iter()
+                .filter(|arg| !arg.flags.authority_boundary)
+                .find_map(|arg| authority_value_escape(&arg.expr, handle, aliases));
+        }
+    });
+    found
+}
+
+fn derived_binding_escape(
+    binding: &crate::AST::Binding,
+    handle: &str,
+    aliases: &mut BTreeSet<String>,
+) -> Option<Span> {
+    if is_authority_narrowing_chain(&binding.init, handle, aliases) {
+        if binding.name != "_" {
+            aliases.insert(binding.name.clone());
+        }
+        None
+    } else {
+        authority_value_escape(&binding.init, handle, aliases)
+    }
+}
+
+fn derived_block_escape(
+    body: &[crate::AST::Stmt],
+    handle: &str,
+    aliases: &mut BTreeSet<String>,
+) -> Option<Span> {
+    let saved = aliases.clone();
+    let found = body
+        .iter()
+        .find_map(|stmt| derived_stmt_escape(stmt, handle, aliases));
+    *aliases = saved;
+    found
+}
+
+fn derived_stmt_escape(
+    stmt: &crate::AST::Stmt,
+    handle: &str,
+    aliases: &mut BTreeSet<String>,
+) -> Option<Span> {
+    use crate::AST::{ForKind, Stmt};
+    match stmt {
+        Stmt::Expr(expr) => authority_call_argument_escape(expr, handle, aliases),
+        Stmt::Val(binding) => derived_binding_escape(binding, handle, aliases),
+        Stmt::Assign { value, .. } => authority_value_escape(value, handle, aliases),
+        Stmt::Return(Some(value), _) | Stmt::BreakValue(value, _)
+        | Stmt::BreakLabelValue(_, _, value, _) | Stmt::Yield(value, _)
+        | Stmt::DeferClose { close: value, .. } => authority_value_escape(value, handle, aliases),
+        Stmt::While { cond, body, .. } => authority_call_argument_escape(cond, handle, aliases)
+            .or_else(|| derived_block_escape(body, handle, aliases)),
+        Stmt::For { kind, body, .. } => {
+            let header = match kind {
+                ForKind::Range {
+                    start, end, step, ..
+                } => authority_call_argument_escape(start, handle, aliases)
+                    .or_else(|| authority_call_argument_escape(end, handle, aliases))
+                    .or_else(|| {
+                        step.as_ref()
+                            .and_then(|step| authority_call_argument_escape(step, handle, aliases))
+                    }),
+                ForKind::In { collection, step } => {
+                    authority_call_argument_escape(collection, handle, aliases).or_else(|| {
+                        step.as_ref()
+                            .and_then(|step| authority_call_argument_escape(step, handle, aliases))
+                    })
+                }
+            };
+            header.or_else(|| derived_block_escape(body, handle, aliases))
+        }
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        }
+        | Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => authority_call_argument_escape(subject, handle, aliases)
+            .or_else(|| {
+                arms.iter().find_map(|arm| {
+                    authority_call_argument_escape(&arm.cond, handle, aliases)
+                        .or_else(|| derived_block_escape(&arm.body, handle, aliases))
+                })
+            })
+            .or_else(|| {
+                else_body
+                    .as_deref()
+                    .and_then(|body| derived_block_escape(body, handle, aliases))
+            }),
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
+            let saved = aliases.clone();
+            let found = derived_binding_escape(init, handle, aliases)
+                .or_else(|| authority_call_argument_escape(cond, handle, aliases))
+                .or_else(|| {
+                    step.as_deref()
+                        .and_then(|step| derived_stmt_escape(step, handle, aliases))
+                })
+                .or_else(|| derived_block_escape(body, handle, aliases));
+            *aliases = saved;
+            found
+        }
+        Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => None,
+        Stmt::Loop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
+        | Stmt::Switched { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
+        | Stmt::AuthorityScope { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::ScopeMember { body, .. } => derived_block_escape(body, handle, aliases),
+        Stmt::ComptimeBlock { .. } => None,
+        Stmt::ComptimeIf {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => authority_call_argument_escape(cond, handle, aliases)
+            .or_else(|| derived_block_escape(then_body, handle, aliases))
+            .or_else(|| {
+                else_body
+                    .as_deref()
+                    .and_then(|body| derived_block_escape(body, handle, aliases))
+            }),
+        Stmt::ContextBlock { fields, body, .. } => fields
+            .iter()
+            .find_map(|(_, value, _)| authority_value_escape(value, handle, aliases))
+            .or_else(|| derived_block_escape(body, handle, aliases)),
+        Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::BreakLabel(..)
+        | Stmt::ContinueLabel(..)
+        | Stmt::Return(None, _) => None,
+    }
+}
+
+fn grant_derived_handle_escape(body: &[crate::AST::Stmt], handle: &str) -> Option<Span> {
+    let mut aliases = BTreeSet::new();
+    body.iter()
+        .find_map(|stmt| derived_stmt_escape(stmt, handle, &mut aliases))
 }
 
 fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {

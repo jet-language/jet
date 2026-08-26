@@ -147,10 +147,10 @@ fn run() {
 /// runtime tiers. The Authority handle is sema-only and the comptime block
 /// still contributes no runtime scope machinery.
 #[test]
-fn comptime_named_caps_scope_is_plain_block() {
+fn comptime_named_authority_scope_is_plain_block() {
     let src = r#"
 @ {
-    #FX(abilities: IO) {
+    #FX(authority: IO) {
         @answer :: 42
     }
 }

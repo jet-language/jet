@@ -1510,8 +1510,8 @@ fn repl_deny_rand_blocks_draw_and_mutating_shuffle() {
     let inputs = &[
         "use core.math.random as random",
         "xs := [1, 2, 3]",
-        "#FX(caps: Rand) { random.int(1, 10) }",
-        "#FX(caps: Rand) { random.shuffle(&xs) }",
+        "#FX(authority: Rand) { random.int(1, 10) }",
+        "#FX(authority: Rand) { random.shuffle(&xs) }",
         "xs",
     ];
     let out = run_transcript_with_flags(inputs, None, &["rand"], &["rand"]);
@@ -1576,7 +1576,7 @@ fn repl_core_fs_read_inline() {
     ));
     std::fs::create_dir_all(&root).expect("create fixture root");
     std::fs::write(root.join("payload.txt"), "repl-fs-payload").expect("write fixture");
-    let read_expr = "#FX(caps: FS, IO) { io.eprint(fs.read(\"payload.txt\") ?? panic(\"read failed\")) }";
+    let read_expr = "#FX(authority: FS, IO) { io.eprint(fs.read(\"payload.txt\") ?? panic(\"read failed\")) }";
     let inputs = &["use core.files as fs", "use core.term as io", read_expr];
     let out = run_transcript_with_flags(inputs, root.to_str(), &["fs", "io"], &[]);
     std::fs::remove_dir_all(&root).ok();
@@ -1592,7 +1592,7 @@ fn repl_core_process_run_is_authorized_and_captured() {
     let inputs = &[
         "use core.process as process",
         "use core.term as io",
-        "#FX(caps: Exec, IO) { io.eprint((process.run([\"sh\", \"-c\", \"read value || printf repl-process-ok\"]) ?? panic(\"run failed\")).output) }",
+        "#FX(authority: Exec, IO) { io.eprint((process.run([\"sh\", \"-c\", \"read value || printf repl-process-ok\"]) ?? panic(\"run failed\")).output) }",
     ];
     let out = run_transcript_with_flags(inputs, None, &["exec"], &["io"]);
     assert!(
@@ -1602,11 +1602,11 @@ fn repl_core_process_run_is_authorized_and_captured() {
 }
 
 #[test]
-fn repl_process_boundary_uses_the_passed_abilities_value() {
+fn repl_process_boundary_uses_the_passed_authority_value() {
     let inputs = &[
         "use core.process as process",
-        r#"#FX(abilities: Exec, IO) {
-    restricted :: abilities.without("Exec")
+        r#"#FX(authority: Exec, IO) {
+    restricted :: authority.without("Exec")
     process.run(["printf", "should-not-run"], restricted)
 }"#,
     ];
@@ -1662,7 +1662,7 @@ fn repl_tty_ctrl_c_reaches_child_group_and_restores_input() {
   sleep 0.2
   printf 'use core.process as process\r'
   sleep 0.2
-  printf '#FX(caps: Exec) { process.run(["sh", "-c", "trap '\''printf done > child-exited.txt; exit 130'\'' INT; printf $$ > child.pid; while :; do :; done"]) ?? panic("run failed") }\r'
+  printf '#FX(authority: Exec) { process.run(["sh", "-c", "trap '\''printf done > child-exited.txt; exit 130'\'' INT; printf $$ > child.pid; while :; do :; done"]) ?? panic("run failed") }\r'
   sleep 0.8
   printf '\003'
   sleep 0.5
@@ -1839,7 +1839,7 @@ fn repl_tty_ctrl_c_warns_while_blocking_child_stops() {
   sleep 0.2
   printf 'use core.process as process\r'
   sleep 0.15
-  printf '#FX(caps: Exec) { process.run(["sh", "-c", "trap '\''sleep 0.4; exit 130'\'' INT; while :; do :; done"]) ?? panic("run failed") }\r'
+  printf '#FX(authority: Exec) { process.run(["sh", "-c", "trap '\''sleep 0.4; exit 130'\'' INT; while :; do :; done"]) ?? panic("run failed") }\r'
   sleep 0.6
   printf '\003'
   sleep 0.8
@@ -1953,7 +1953,7 @@ fn repl_non_tty_denies_ungranted_files_before_execution() {
     let root = std::env::temp_dir().join(format!("jet_repl_deny_{}", std::process::id()));
     std::fs::create_dir_all(&root).expect("create root");
     let target = root.join("must-not-exist.txt");
-    let input = "#FX(caps: FS) { fs.write(\"must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }";
+    let input = "#FX(authority: FS) { fs.write(\"must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }";
     let out = run_transcript(&["use core.files as fs", input], root.to_str());
     assert!(
         out.contains("E1803") && out.contains("FS.Write"),
@@ -1968,7 +1968,7 @@ fn repl_allow_and_deny_flags_work_in_transcript_mode() {
     let root = std::env::temp_dir().join(format!("jet_repl_flags_{}", std::process::id()));
     std::fs::create_dir_all(&root).expect("create root");
     let input =
-        "#FX(caps: FS) { fs.write(\"flag.txt\", \"allowed\") ?? panic(\"write failed\") }";
+        "#FX(authority: FS) { fs.write(\"flag.txt\", \"allowed\") ?? panic(\"write failed\") }";
     let allowed = run_transcript_with_flags(
         &["use core.files as fs", input],
         root.to_str(),
@@ -2006,7 +2006,7 @@ fn repl_cli_allow_and_deny_flags_control_non_tty_execution() {
 
     let root = std::env::temp_dir().join(format!("jet_repl_cli_flags_{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
-    let input = b"use core.files as fs\n#FX(caps: FS) { fs.write(\"cli.txt\", \"yes\") ?? panic(\"write failed\") }\n:quit\n";
+    let input = b"use core.files as fs\n#FX(authority: FS) { fs.write(\"cli.txt\", \"yes\") ?? panic(\"write failed\") }\n:quit\n";
     let run = |extra: &[&str]| {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
         cmd.arg("repl")
@@ -2076,7 +2076,7 @@ fn repl_allow_fs_still_rejects_paths_outside_project_root() {
     std::fs::remove_file(&outside).ok();
     let escaped = outside.to_string_lossy().replace('\\', "\\\\");
     let input = format!(
-        "#FX(caps: FS) {{ fs.write(\"{escaped}\", \"bad\") ?? panic(\"write failed\") }}"
+        "#FX(authority: FS) {{ fs.write(\"{escaped}\", \"bad\") ?? panic(\"write failed\") }}"
     );
     let out = run_transcript_with_flags(
         &["use core.files as fs", &input],
@@ -2105,7 +2105,7 @@ fn repl_allow_fs_rejects_symlink_components_before_open() {
     std::fs::create_dir_all(&root).unwrap();
     std::fs::create_dir_all(&outside).unwrap();
     symlink(&outside, root.join("escape")).unwrap();
-    let input = "#FX(caps: FS) { fs.write(\"escape/must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }";
+    let input = "#FX(authority: FS) { fs.write(\"escape/must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }";
     let out = run_transcript_with_flags(
         &["use core.files as fs", input],
         root.to_str(),
@@ -2137,11 +2137,11 @@ fn repl_tty_prompts_and_reuses_exact_session_tuple() {
   sleep 0.2
   printf 'use core.files as fs\r'
   sleep 0.2
-  printf '#FX(caps: FS) { fs.read("value.txt") ?? panic("read failed") }\r'
+  printf '#FX(authority: FS) { fs.read("value.txt") ?? panic("read failed") }\r'
   sleep 0.2
   printf 's'
   sleep 0.2
-  printf '#FX(caps: FS) { fs.read("value.txt") ?? panic("read failed") }\r'
+  printf '#FX(authority: FS) { fs.read("value.txt") ?? panic("read failed") }\r'
   sleep 0.2
   printf 'c'
   sleep 0.2
@@ -3133,16 +3133,16 @@ fn repl_exact_int_equality_is_numeric() {
 #[test]
 fn repl_core_random_widened_draws_dispatch() {
     let calls = [
-        "#FX(caps: Rand) { random.seed(1) }",
-        "#FX(caps: Rand) { random.bool(0.5) }",
-        "#FX(caps: Rand) { random.float_range(1.0, 2.0) }",
-        "#FX(caps: Rand) { random.normal(0.0, 1.0) }",
-        "#FX(caps: Rand) { random.exponential(1.0) }",
-        "#FX(caps: Rand) { random.bytes(3) }",
-        "#FX(caps: Rand) { random.pick([1, 2, 3, 4, 5]) ?? 0 }",
-        "#FX(caps: Rand) { random.sample([1, 2, 3, 4, 5], 2) }",
-        "#FX(caps: Rand) { random.weighted_pick([1, 2, 3, 4, 5], [1.0, 1.0, 1.0, 1.0, 1.0]) ?? 0 }",
-        "#FX(caps: Rand) { random.split(7) }",
+        "#FX(authority: Rand) { random.seed(1) }",
+        "#FX(authority: Rand) { random.bool(0.5) }",
+        "#FX(authority: Rand) { random.float_range(1.0, 2.0) }",
+        "#FX(authority: Rand) { random.normal(0.0, 1.0) }",
+        "#FX(authority: Rand) { random.exponential(1.0) }",
+        "#FX(authority: Rand) { random.bytes(3) }",
+        "#FX(authority: Rand) { random.pick([1, 2, 3, 4, 5]) ?? 0 }",
+        "#FX(authority: Rand) { random.sample([1, 2, 3, 4, 5], 2) }",
+        "#FX(authority: Rand) { random.weighted_pick([1, 2, 3, 4, 5], [1.0, 1.0, 1.0, 1.0, 1.0]) ?? 0 }",
+        "#FX(authority: Rand) { random.split(7) }",
     ];
     for call in calls {
         let out = run_transcript_with_flags(
@@ -3160,7 +3160,7 @@ fn repl_core_random_widened_draws_dispatch() {
         &[
             "use core.math.random as random",
             "ys := [1, 2, 3, 4, 5]",
-            "#FX(caps: Rand) { random.shuffle(&ys) }",
+            "#FX(authority: Rand) { random.shuffle(&ys) }",
         ],
         None,
         &["rand"],

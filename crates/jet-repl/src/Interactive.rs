@@ -138,6 +138,23 @@ struct InteractiveEffectPrompt<'a, R: Read> {
     guard: &'a mut RawGuard,
 }
 
+fn print_effect_roles(request: &crate::Comptime::ReplEffectRequest, reused: bool) {
+    println!("  Required effects: {}", request.root);
+    println!(
+        "  Granted effects: {}",
+        if reused { request.root.as_str() } else { "none" }
+    );
+    println!("  Denied effects: none");
+    println!(
+        "  Authority: {}",
+        if reused {
+            "REPL session Authority"
+        } else {
+            "interactive approval"
+        }
+    );
+}
+
 impl<R: Read> EffectPrompt for InteractiveEffectPrompt<'_, R> {
     fn choose(
         &mut self,
@@ -149,6 +166,7 @@ impl<R: Read> EffectPrompt for InteractiveEffectPrompt<'_, R> {
                 "Using session {}.{} authority for `{}`. [c] Continue  [r] Revoke",
                 request.root, request.operation, request.resource
             );
+            print_effect_roles(request, true);
             io::stdout().flush().ok();
             loop {
                 match self.reader.read_key() {
@@ -173,6 +191,7 @@ impl<R: Read> EffectPrompt for InteractiveEffectPrompt<'_, R> {
                 "Core effect Exec requests orderly REPL exit with status {}. [y/N]",
                 request.resource
             );
+            print_effect_roles(request, false);
             io::stdout().flush().ok();
             loop {
                 match self.reader.read_key() {
@@ -193,6 +212,7 @@ impl<R: Read> EffectPrompt for InteractiveEffectPrompt<'_, R> {
             "Core effect {} requests runtime authority before this operation.",
             request.root
         );
+        print_effect_roles(request, false);
         println!("  Operation: {}", request.operation.to_ascii_lowercase());
         println!("  Target:    {}", request.resource);
         println!("  [o] Once  [s] Exact Tuple for This Session  [d] Deny");

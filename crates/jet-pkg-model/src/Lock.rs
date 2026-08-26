@@ -48,6 +48,13 @@ pub struct LockedPackage {
     /// D-EFFBUDGET1: effect names granted to this dependency via `package.jet`'s
     /// `grants: { … }` block — recorded so an audited exception is a diff.
     pub effect_grants: Vec<String>,
+    /// Canonical role projection for inspect/provenance consumers. `effects`
+    /// and `effect_grants` remain the lock's stored provenance inputs; these
+    /// fields make required, granted, and denied roles explicit on round-trip.
+    pub required_effects: Vec<String>,
+    pub granted_effects: Vec<String>,
+    pub denied_effects: Vec<String>,
+    pub effect_authority: Option<String>,
     /// D-JPK-CACHE1=A (U24/A4): the realized-output envelope — the same field
     /// set carried on the hangar object (`Jetpack::Envelope`), frozen into the
     /// lock schema now so binary-cache substitution can be driven straight off
@@ -105,6 +112,10 @@ pub struct DependencyProvenanceReport {
     pub transparency: ProvenanceField,
     pub publisher: ProvenanceField,
     pub build: ProvenanceField,
+    pub required_effects: Vec<String>,
+    pub granted_effects: Vec<String>,
+    pub denied_effects: Vec<String>,
+    pub authority: String,
 }
 
 impl LockedPackage {
@@ -203,6 +214,21 @@ impl LockedPackage {
             transparency,
             publisher,
             build,
+            required_effects: if self.required_effects.is_empty() {
+                self.effects.clone()
+            } else {
+                self.required_effects.clone()
+            },
+            granted_effects: if self.granted_effects.is_empty() {
+                self.effect_grants.clone()
+            } else {
+                self.granted_effects.clone()
+            },
+            denied_effects: self.denied_effects.clone(),
+            authority: self
+                .effect_authority
+                .clone()
+                .unwrap_or_else(|| "not recorded".to_string()),
         }
     }
 }
@@ -577,6 +603,52 @@ pub fn write(lock: &LockFile) -> String {
                 .map(|e| format!("\"{}\"", e))
                 .collect();
             out.push_str(&format!("effect-grants = [{}]\n", grants.join(", ")));
+        }
+        let required_effects = if pkg.required_effects.is_empty() {
+            &pkg.effects
+        } else {
+            &pkg.required_effects
+        };
+        let granted_effects = if pkg.granted_effects.is_empty() {
+            &pkg.effect_grants
+        } else {
+            &pkg.granted_effects
+        };
+        if !required_effects.is_empty() {
+            out.push_str(&format!(
+                "required-effects = [{}]\n",
+                required_effects
+                    .iter()
+                    .map(|effect| format!("\"{}\"", effect))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if !granted_effects.is_empty() {
+            out.push_str(&format!(
+                "granted-effects = [{}]\n",
+                granted_effects
+                    .iter()
+                    .map(|effect| format!("\"{}\"", effect))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if !pkg.denied_effects.is_empty() {
+            out.push_str(&format!(
+                "denied-effects = [{}]\n",
+                pkg.denied_effects
+                    .iter()
+                    .map(|effect| format!("\"{}\"", effect))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if let Some(authority) = &pkg.effect_authority {
+            out.push_str(&format!(
+                "effect-authority = \"{}\"\n",
+                escape_str(authority)
+            ));
         }
 
         // D-JPK-CACHE1=A (A4): realized-output envelope. Emitted only once the
@@ -1266,6 +1338,12 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 }
                 "effects" => pkg.effects = parse_string_array(val),
                 "effect-grants" => pkg.effect_grants = parse_string_array(val),
+                "required-effects" => pkg.required_effects = parse_string_array(val),
+                "granted-effects" => pkg.granted_effects = parse_string_array(val),
+                "denied-effects" => pkg.denied_effects = parse_string_array(val),
+                "effect-authority" => {
+                    pkg.effect_authority = Some(unescape_str(val));
+                }
                 // D-JPK-CACHE1=A (A4): realized-output envelope. Seeing any of
                 // these marks the package as realized (envelope becomes Some).
                 "output-hash" => pkg.envelope_mut().output_hash = val.trim_matches('"').to_string(),
@@ -1700,6 +1778,10 @@ struct PartialPkg {
     inferred_layer: Option<crate::Syntax::RuntimeLayer>,
     effects: Vec<String>,
     effect_grants: Vec<String>,
+    required_effects: Vec<String>,
+    granted_effects: Vec<String>,
+    denied_effects: Vec<String>,
+    effect_authority: Option<String>,
     envelope: Option<LockEnvelope>,
     receipt: Option<String>,
     provenance: Option<DependencyProvenance>,
@@ -1734,6 +1816,10 @@ impl PartialPkg {
             inferred_layer: self.inferred_layer,
             effects: self.effects,
             effect_grants: self.effect_grants,
+            required_effects: self.required_effects,
+            granted_effects: self.granted_effects,
+            denied_effects: self.denied_effects,
+            effect_authority: self.effect_authority,
             envelope: self.envelope,
             receipt: self.receipt,
             provenance: self.provenance,
@@ -2162,6 +2248,10 @@ pub fn record_nix_realization(
         inferred_layer: None,
         effects: Vec::new(),
         effect_grants: Vec::new(),
+        required_effects: Vec::new(),
+        granted_effects: Vec::new(),
+        denied_effects: Vec::new(),
+        effect_authority: None,
         envelope: Some(envelope),
         receipt: existing_receipt,
         provenance: existing_provenance,
@@ -2270,6 +2360,10 @@ pub fn record_foreign_realization(
         inferred_layer: None,
         effects: Vec::new(),
         effect_grants: Vec::new(),
+        required_effects: Vec::new(),
+        granted_effects: Vec::new(),
+        denied_effects: Vec::new(),
+        effect_authority: None,
         envelope: Some(envelope),
         receipt: existing_receipt,
         provenance: None,
@@ -2451,6 +2545,10 @@ pub fn record_cran_realization(
         inferred_layer: None,
         effects: Vec::new(),
         effect_grants: Vec::new(),
+        required_effects: Vec::new(),
+        granted_effects: Vec::new(),
+        denied_effects: Vec::new(),
+        effect_authority: None,
         envelope: Some(envelope),
         receipt: existing_receipt,
         provenance: existing_provenance,
@@ -2580,6 +2678,10 @@ pub fn record_luarocks_realization(
         inferred_layer: None,
         effects: Vec::new(),
         effect_grants: Vec::new(),
+        required_effects: Vec::new(),
+        granted_effects: Vec::new(),
+        denied_effects: Vec::new(),
+        effect_authority: None,
         envelope: Some(envelope),
         receipt: existing_receipt,
         provenance: existing_provenance,
@@ -2716,6 +2818,10 @@ pub fn record_registry_realization(
         inferred_layer: None,
         effects: Vec::new(),
         effect_grants: Vec::new(),
+        required_effects: Vec::new(),
+        granted_effects: Vec::new(),
+        denied_effects: Vec::new(),
+        effect_authority: None,
         envelope: Some(envelope),
         receipt: existing_receipt,
         provenance: existing_provenance,
@@ -3451,6 +3557,10 @@ mod a4_envelope_tests {
             inferred_layer: None,
             effects: Vec::new(),
             effect_grants: Vec::new(),
+            required_effects: Vec::new(),
+            granted_effects: Vec::new(),
+            denied_effects: Vec::new(),
+            effect_authority: None,
             envelope,
             receipt: None,
             provenance: None,

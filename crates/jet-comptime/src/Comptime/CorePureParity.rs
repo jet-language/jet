@@ -14,6 +14,7 @@ use crate::Comptime::Builtins::{as_bool, as_int};
 use crate::Comptime::Diagnostics::unsupported;
 use crate::Comptime::EmailAdapter;
 use crate::Comptime::Methods::as_float;
+use crate::Comptime::ServicesLite;
 use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 use jet_foundation::Syntax::CoreCallPureRoute;
 
@@ -657,6 +658,13 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             return Some(format!("[:{}]", values.join(", ")));
         }
         _ => {}
+    }
+    // D-SERVICE-RECEIPT2=A / I9: service lifecycle values cross the evaluator
+    // boundary as the same typed facts that AOT's Prelude `JetShow` renders.
+    // Keep opaque handles and audit records on that projection instead of
+    // exposing the CtValue carrier fields or error variant names.
+    if let Some(text) = ServicesLite::service_display_value(value) {
+        return Some(text);
     }
     let core_type = match value {
         CtValue::Struct { type_name, .. } => type_name
@@ -3226,5 +3234,54 @@ mod tests {
                 "XML tree cannot contain Float or Bytes values",
             )))
         );
+    }
+
+    #[test]
+    fn service_lifecycle_display_and_json_use_typed_facts() {
+        let receipt = CtValue::Struct {
+            type_name: "DeliveryReceipt".to_string(),
+            fields: vec![
+                ("id".to_string(), CtValue::Str("d-1".to_string())),
+                (
+                    "state".to_string(),
+                    CtValue::Enum {
+                        type_name: "DeliveryState".to_string(),
+                        variant: "Accepted".to_string(),
+                        args: Vec::new(),
+                    },
+                ),
+                ("attempts".to_string(), CtValue::Int(1)),
+                ("retention_until".to_string(), CtValue::Int(20)),
+                ("deadline".to_string(), CtValue::Int(30)),
+                (
+                    "idempotency_key".to_string(),
+                    CtValue::Str("order-1".to_string()),
+                ),
+                ("duplicate".to_string(), CtValue::Bool(false)),
+                (
+                    "authority".to_string(),
+                    CtValue::Str("orders".to_string()),
+                ),
+                ("generation".to_string(), CtValue::Int(2)),
+                (
+                    "signature".to_string(),
+                    CtValue::Str("sig".to_string()),
+                ),
+            ],
+        };
+        assert_eq!(
+            display(&receipt),
+            Some("DeliveryReceipt(id=d-1, state=Accepted, attempts=1, retention_until=20, deadline=30, key=order-1, duplicate=false, authority=orders, generation=2, signature=sig)".to_string())
+        );
+        assert_eq!(
+            receipt.to_json(),
+            "{\"id\":\"d-1\",\"state\":\"Accepted\",\"attempts\":1,\"retention_until\":20,\"deadline\":30,\"idempotency_key\":\"order-1\",\"duplicate\":false,\"authority\":\"orders\",\"generation\":2,\"signature\":\"sig\"}"
+        );
+        let error = CtValue::Enum {
+            type_name: "ServiceError".to_string(),
+            variant: "Partitioned".to_string(),
+            args: vec![(None, CtValue::Str("authority partitioned".to_string()))],
+        };
+        assert_eq!(display(&error), Some("authority partitioned".to_string()));
     }
 }

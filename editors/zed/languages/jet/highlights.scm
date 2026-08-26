@@ -134,7 +134,7 @@
   "check"
 ] @function.builtin
 
-; marker.rule: ABI Bindgen CLI Close Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten FX HTML Impure Inline Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
+; marker.rule: ABI Arithmetic Bindgen CLI Close Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten FX HTML Impure Inline Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # & ... :: := @ @[ ]@ ^ ~
 ; operator: ! != % %% %%= %= && &= * *= + ++ += - -- -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> == > >= >> >>= ? ?. ?? ^= { | |= || ~| ~|=
 ; END GENERATED JET SYNTAX HIGHLIGHTS

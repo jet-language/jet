@@ -1845,10 +1845,10 @@ export const scenarios = {
     const actions = payload(actionsValue).actions || [];
     const commandMap = new Map(actions.filter((action) => action.kind === "canvas.command").map((action) => [action.action_id, action]));
     for (const [id, command] of [
-      ["canvas.command:run", ["jet", "run", "main.jet"]],
-      ["canvas.command:check", ["jet", "check", "main.jet"]],
-      ["canvas.command:test", ["jet", "test", "main.jet"]],
-      ["canvas.command:dev", ["jet", "dev", "main.jet", "--target=web"]],
+      ["canvas.command:run", ["jet", "run", "run.jet"]],
+      ["canvas.command:check", ["jet", "check", "run.jet"]],
+      ["canvas.command:test", ["jet", "test", "run.jet"]],
+      ["canvas.command:dev", ["jet", "dev", "run.jet", "--target=web"]],
       ["canvas.command:service.start", ["jetpack", "services", "up"]],
     ]) {
       if (JSON.stringify(commandMap.get(id)?.command) !== JSON.stringify(command)
@@ -1872,7 +1872,7 @@ export const scenarios = {
     const runReceipt = await postCommand("canvas.command:run");
     const checkPayload = payload(checkReceipt.value);
     const runPayload = payload(runReceipt.value);
-    if (checkReceipt.status !== 200 || !checkPayload.success || checkPayload.command?.join(" ") !== "jet check main.jet") {
+    if (checkReceipt.status !== 200 || !checkPayload.success || checkPayload.command?.join(" ") !== "jet check run.jet") {
       throw new Error(`Canvas did not execute the real CLI check: ${JSON.stringify(checkReceipt)}`);
     }
     if (runReceipt.status !== 200 || !runPayload.success || !runPayload.stdout.includes("cli")) {
@@ -1882,11 +1882,16 @@ export const scenarios = {
 
     const projectRoot = project.project_root;
     const jet = process.env.JET_BIN || join(process.cwd(), "target/debug/jet");
-    const runCli = async (args) => {
+    const jetpack = process.env.JETPACK_BIN || join(process.cwd(), "target/debug/jetpack");
+    const runJetpack = async (args) => {
       try {
-        const result = await execFileAsync(jet, args, {
+        const result = await execFileAsync(jetpack, args, {
           cwd: projectRoot,
-          env: { ...process.env, TMPDIR: process.env.TMPDIR || "/home/nate/.cache/jet-test-scratch" },
+          env: {
+            ...process.env,
+            JET_ROOT: projectRoot,
+            TMPDIR: process.env.TMPDIR || "/home/nate/.cache/jet-test-scratch",
+          },
           maxBuffer: 2 * 1024 * 1024,
         });
         return { ok: true, ...result };
@@ -1894,12 +1899,46 @@ export const scenarios = {
         return { ok: false, code: error.code, stdout: error.stdout || "", stderr: error.stderr || "" };
       }
     };
+    const runCli = async (args) => {
+      return await runJetpack(["env", "-y", "--", jet, ...args]);
+    };
     for (const target of ["web", "x86_64-unknown-linux-gnu"]) {
-      const result = await runCli(["check", "main.jet", `--target=${target}`]);
+      const result = await runCli(["check", "run.jet", `--target=${target}`]);
       if (!result.ok) throw new Error(`real ${target} check failed: ${JSON.stringify(result)}`);
     }
-    const testResult = await runCli(["test", "main.jet"]);
+    const testResult = await runCli(["test", "run.jet"]);
     if (!testResult.ok) throw new Error(`real CLI test failed: ${JSON.stringify(testResult)}`);
+
+    for (const [output, marker] of [["cli", "cli"], ["service", "service"], ["ui", "ui"], ["game", "game"]]) {
+      const result = await runCli(["run", "run.jet", `--output=${output}`]);
+      const outputText = `${result.stdout || ""}${result.stderr || ""}`;
+      if (!result.ok || !outputText.includes(marker)) {
+        throw new Error(`named ${output} output did not execute through the CLI: ${JSON.stringify(result)}`);
+      }
+    }
+
+    let serviceAttempted = false;
+    try {
+      serviceAttempted = true;
+      const up = await runJetpack(["services", "up", "canvas_service", "--trust", "--no-color"]);
+      if (!up.ok) throw new Error(`real service start failed: ${JSON.stringify(up)}`);
+      const health = await runJetpack(["services", "health", "canvas_service", "--trust", "--json", "--no-color"]);
+      if (!health.ok || !health.stdout.includes('"health":"healthy"')) {
+        throw new Error(`real service health failed: ${JSON.stringify(health)}`);
+      }
+      const wait = await runJetpack(["services", "wait", "canvas_service", "--trust", "--no-color"]);
+      if (!wait.ok) throw new Error(`real service wait failed: ${JSON.stringify(wait)}`);
+      const logs = await runJetpack(["services", "logs", "canvas_service", "--no-color"]);
+      const logText = `${logs.stdout || ""}${logs.stderr || ""}`;
+      if (!logs.ok || !logText.includes("canvas-service-ready")) {
+        throw new Error(`real service logs lost readiness evidence: ${JSON.stringify(logs)}`);
+      }
+    } finally {
+      if (serviceAttempted) {
+        const down = await runJetpack(["services", "down", "canvas_service", "--no-color"]);
+        if (!down.ok) throw new Error(`real service shutdown failed: ${JSON.stringify(down)}`);
+      }
+    }
 
     const appPort = session.listeners?.application?.port;
     if (!appPort || appPort === session.listeners?.canvas?.port) {
@@ -2087,20 +2126,37 @@ export const scenarios = {
       }
     }
 
-    const second = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session?client_id=surface-second"))}, { cache: "no-store" }).then((r) => r.json())`);
-    const secondSession = canvasPayload(second).session || canvasPayload(second);
-    if (!secondSession || secondSession.id !== session.id || secondSession.clients < 2
-      || secondSession.source_revision !== session.source_revision) {
-      throw new Error(`second browser client did not share session: ${JSON.stringify(second)}`);
-    }
+    const secondary = new CanvasScenario({
+      port: ctx.port,
+      outDir: join(ctx.outDir, "secondary"),
+      scenarioName: `${ctx.scenarioName}-secondary`,
+      seed: ctx.seed + 1,
+      browser: ctx.browser,
+      session: ctx.session,
+      programTarget: ctx.programTarget,
+    });
+    await secondary.start();
+    try {
+      await secondary.openCanvas();
+      await secondary.waitFor(
+        async () => await secondary.driver.evaluate("!!window.__jetCanvasSession"),
+        "second browser session",
+      );
+      const secondaryClientAtStart = await secondary.driver.evaluate("window.__jetCanvasSessionApi.clientId()");
+      const secondSession = await secondary.driver.evaluate("window.__jetCanvasSession");
+      if (!secondaryClientAtStart || secondaryClientAtStart === primaryClientAtStart
+        || !secondSession || secondSession.id !== session.id || secondSession.clients < 2
+        || secondSession.sourceRevision !== session.source_revision) {
+        throw new Error(`second browser did not share resident session: ${JSON.stringify({ primaryClientAtStart, secondaryClientAtStart, secondSession })}`);
+      }
 
-    const endpoint = `http://127.0.0.1:${ctx.port}`;
-    const validHeaders = {
-      authorization: `Bearer ${ctx.session}`,
-      host: `127.0.0.1:${ctx.port}`,
-      origin: `http://127.0.0.1:${ctx.port}`,
-    };
-    const hostileRequests = [
+      const endpoint = `http://127.0.0.1:${ctx.port}`;
+      const validHeaders = {
+        authorization: `Bearer ${ctx.session}`,
+        host: `127.0.0.1:${ctx.port}`,
+        origin: `http://127.0.0.1:${ctx.port}`,
+      };
+      const hostileRequests = [
       {
         label: "missing session",
         path: "/canvas/graph",
@@ -2143,48 +2199,48 @@ export const scenarios = {
         expected: 401,
         init: { headers: validHeaders },
       },
-    ];
-    for (const hostile of hostileRequests) {
-      const response = await fetch(`${endpoint}${hostile.path}`, hostile.init);
-      if (response.status !== hostile.expected) {
-        throw new Error(`${hostile.label} request returned ${response.status}, expected ${hostile.expected}`);
+      ];
+      for (const hostile of hostileRequests) {
+        const response = await fetch(`${endpoint}${hostile.path}`, hostile.init);
+        if (response.status !== hostile.expected) {
+          throw new Error(`${hostile.label} request returned ${response.status}, expected ${hostile.expected}`);
+        }
       }
-    }
 
-    const projectRoot = project.project_root;
-    if (!projectRoot) throw new Error(`project root missing from Canvas projection: ${JSON.stringify(project)}`);
-    const sourceBeforeReconnect = await ctx.source();
-    await writeFile(join(projectRoot, "package.jet"), `name: "canvas_session_matrix"
+      const projectRoot = project.project_root;
+      if (!projectRoot) throw new Error(`project root missing from Canvas projection: ${JSON.stringify(project)}`);
+      const sourceBeforeReconnect = await ctx.source();
+      await writeFile(join(projectRoot, "package.jet"), `name: "canvas_session_matrix"
 version: "0.1.0"
     outputs: .{
     cli: .Executable{ name: "cli", entry: run }
     library: .Library{ name: "library", entry: run }
 }
 `);
-    await ctx.driver.navigate("about:blank");
-    await ctx.openCanvas();
-    const reconnected = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session"))}, { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
-    if (!reconnected || reconnected.id !== session.id || reconnected.source_revision !== session.source_revision) {
-      throw new Error(`Canvas reconnect did not preserve resident session: ${JSON.stringify({ session, reconnected })}`);
-    }
-    let observedProject = null;
-    try {
-      await ctx.waitFor(async () => {
-        observedProject = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/project"))}, { cache: "no-store" }).then(async (r) => {
+      await ctx.driver.navigate("about:blank");
+      await ctx.openCanvas();
+      const reconnected = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session"))}, { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
+      if (!reconnected || reconnected.id !== session.id || reconnected.source_revision !== session.source_revision) {
+        throw new Error(`Canvas reconnect did not preserve resident session: ${JSON.stringify({ session, reconnected })}`);
+      }
+      let observedProject = null;
+      try {
+        await ctx.waitFor(async () => {
+          observedProject = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/project"))}, { cache: "no-store" }).then(async (r) => {
           const value = await r.json();
           const project = value.canvas || value;
           return { status: r.status, outputs: project.outputs || [], capabilities: project.capabilities || {}, project_root: project.project_root || null };
         })`);
-        return observedProject.status === 200
-          && observedProject.outputs.length === 2
-          && !observedProject.capabilities.preview
-          && !observedProject.capabilities.designer
-          && JSON.stringify(observedProject.capabilities) !== JSON.stringify(project.capabilities || {});
-      }, "project capability change after reconnect", 15000);
-    } catch (error) {
-      throw new Error(`${error.message}: ${JSON.stringify(observedProject)}`);
-    }
-    await ctx.waitFor(async () => await ctx.driver.evaluate(`(async () => {
+          return observedProject.status === 200
+            && observedProject.outputs.length === 2
+            && !observedProject.capabilities.preview
+            && !observedProject.capabilities.designer
+            && JSON.stringify(observedProject.capabilities) !== JSON.stringify(project.capabilities || {});
+        }, "project capability change after reconnect", 15000);
+      } catch (error) {
+        throw new Error(`${error.message}: ${JSON.stringify(observedProject)}`);
+      }
+      await ctx.waitFor(async () => await ctx.driver.evaluate(`(async () => {
       const response = await fetch(${JSON.stringify(ctx.sessionUrl("/canvas/project"))}, { cache: "no-store" });
       const value = await response.json();
       const expectedProject = value.canvas || value;
@@ -2220,72 +2276,105 @@ version: "0.1.0"
         && unsupportedPanels.every((panel) => !layout.panels?.includes(panel))
         && document.getElementById("workbench-preview-label")?.hidden === (expected.preview !== true);
         })()`), "capability change after reconnect", 15000);
-    const narrowedProject = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/project"))}, { cache: "no-store" }).then((r) => r.json())`);
-    const narrowedProjectPayload = canvasPayload(narrowedProject);
-    if ((narrowedProjectPayload.outputs || []).length !== 2) {
-      throw new Error(`capability-change project did not reload: ${JSON.stringify(narrowedProject)}`);
-    }
-    if (await ctx.source() !== sourceBeforeReconnect) throw new Error("hostile or reconnect checks changed Jet source");
+      const narrowedProject = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/project"))}, { cache: "no-store" }).then((r) => r.json())`);
+      const narrowedProjectPayload = canvasPayload(narrowedProject);
+      if ((narrowedProjectPayload.outputs || []).length !== 2) {
+        throw new Error(`capability-change project did not reload: ${JSON.stringify(narrowedProject)}`);
+      }
 
-    const beforeErrorSource = await ctx.source();
-    const stale = await ctx.transaction({
+      await secondary.driver.navigate("about:blank");
+      await secondary.openCanvas();
+      await secondary.waitFor(
+        async () => await secondary.driver.evaluate("!!window.__jetCanvasSession"),
+        "second browser reconnect",
+      );
+      const secondaryClientAfterReconnect = await secondary.driver.evaluate("window.__jetCanvasSessionApi.clientId()");
+      const secondaryReconnected = await secondary.driver.evaluate("window.__jetCanvasSession");
+      const secondaryProject = await secondary.driver.evaluate(`fetch(${JSON.stringify(secondary.sessionUrl("/canvas/project"))}, { cache: "no-store" }).then((r) => r.json())`);
+      const secondaryProjectPayload = canvasPayload(secondaryProject);
+      const secondaryUi = await secondary.driver.evaluate(`(() => ({
+        capabilities: window.__jetCanvasCapabilities || {},
+        previewHidden: document.getElementById("preview-panel")?.hidden,
+        designerHidden: document.querySelector('[data-session-view="designer"]')?.hidden,
+        layout: window.__jetCanvasLayout || {}
+      }))()`);
+      if (!secondaryClientAfterReconnect || !secondaryReconnected
+        || secondaryReconnected.id !== session.id
+        || secondaryReconnected.sourceRevision !== session.source_revision
+        || (secondaryProjectPayload.outputs || []).length !== 2
+        || secondaryProjectPayload.capabilities?.preview === true
+        || secondaryProjectPayload.capabilities?.designer === true
+        || secondaryUi.capabilities.preview === true
+        || secondaryUi.capabilities.designer === true
+        || secondaryUi.previewHidden !== true
+        || secondaryUi.designerHidden !== true
+        || secondaryUi.layout.panels?.includes("preview")
+        || secondaryUi.layout.views?.includes("designer")) {
+        throw new Error(`second browser lost capability/reconnect state: ${JSON.stringify({ secondaryClientAtStart, secondaryClientAfterReconnect, secondaryReconnected, secondaryProject, secondaryUi })}`);
+      }
+      if (await ctx.source() !== sourceBeforeReconnect) throw new Error("hostile or reconnect checks changed Jet source");
+
+      const beforeErrorSource = await ctx.source();
+      const stale = await ctx.transaction({
       schema_version: 1,
       op: "replace_source",
       revision: "sha256-stale-surface-matrix",
       source: "fn broken("
-    });
-    const stalePayload = canvasPayload(stale.json);
-    if (stale.ok || stalePayload?.kind !== "conflict") {
-      throw new Error(`stale surface edit was not refused: ${JSON.stringify(stale)}`);
-    }
-    const invalid = await ctx.transaction({
+      });
+      const stalePayload = canvasPayload(stale.json);
+      if (stale.ok || stalePayload?.kind !== "conflict") {
+        throw new Error(`stale surface edit was not refused: ${JSON.stringify(stale)}`);
+      }
+      const invalid = await ctx.transaction({
       schema_version: 1,
       op: "replace_source",
       revision: canvasPayload(await ctx.graph()).revision,
       source: "fn broken("
-    });
-    const invalidPayload = canvasPayload(invalid.json);
-    if (invalid.ok || invalidPayload?.kind !== "diagnostic" || await ctx.source() !== beforeErrorSource) {
-      throw new Error(`invalid surface edit did not preserve source: ${JSON.stringify({ invalid, source: await ctx.source() })}`);
-    }
-    const afterError = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session"))}, { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
-    const refused = (afterError.history?.receipts || []).filter((receipt) => receipt.status === "refused");
-    if (afterError.id !== session.id || !afterError.last_good_program
-      || refused.length < 2) {
-      throw new Error(`session error receipts or last-good state missing: ${JSON.stringify(afterError)}`);
-    }
-
-    await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/__jet_dev_disconnect?client=surface-second"))}, { method: "POST" })`);
-    const reconnectedClient = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session?client_id=surface-second"))}, { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
-    if (!reconnectedClient || reconnectedClient.id !== session.id || reconnectedClient.source_revision !== session.source_revision
-      || reconnectedClient.history.count !== afterError.history.count || reconnectedClient.clients < 2) {
-      throw new Error(`reconnect created a divergent session: ${JSON.stringify({ afterError, reconnected: reconnectedClient })}`);
-    }
-
-    const primaryClient = await ctx.driver.evaluate("window.__jetCanvasSessionApi.clientId()");
-    await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/__jet_dev_disconnect?client=surface-second"))}, { method: "POST" })`);
-    await ctx.driver.navigate("about:blank");
-    await sleep(1000);
-    const disconnectResults = [];
-    const knownClients = new Set([primaryClientAtStart, primaryClient, "surface-second"]);
-    let shutdown = null;
-    for (let attempt = 0; attempt < 20; attempt++) {
-      for (const client of knownClients) {
-        const disconnectClient = `${endpoint}${ctx.sessionUrl("/__jet_dev_disconnect?client=" + encodeURIComponent(client))}`;
-        const response = await fetch(disconnectClient, { method: "POST", headers: validHeaders });
-        if (attempt === 0) disconnectResults.push({ client, status: response.status, body: await response.text() });
-        else await response.text();
+      });
+      const invalidPayload = canvasPayload(invalid.json);
+      if (invalid.ok || invalidPayload?.kind !== "diagnostic" || await ctx.source() !== beforeErrorSource) {
+        throw new Error(`invalid surface edit did not preserve source: ${JSON.stringify({ invalid, source: await ctx.source() })}`);
       }
-      const shutdownResponse = await fetch(`${endpoint}${ctx.sessionUrl("/canvas/session")}`, { cache: "no-store", headers: validHeaders });
-      const shutdownValue = await shutdownResponse.json();
-      shutdown = shutdownValue.session || shutdownValue.canvas?.session || shutdownValue;
-      if (shutdown?.clients === 0) break;
-      await sleep(100);
+      const afterError = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session"))}, { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
+      const refused = (afterError.history?.receipts || []).filter((receipt) => receipt.status === "refused");
+      if (afterError.id !== session.id || !afterError.last_good_program
+        || refused.length < 2) {
+        throw new Error(`session error receipts or last-good state missing: ${JSON.stringify(afterError)}`);
+      }
+
+      const reconnectedClient = await secondary.driver.evaluate("window.__jetCanvasSessionApi.load()");
+      if (!reconnectedClient || reconnectedClient.id !== session.id || reconnectedClient.source_revision !== session.source_revision
+        || reconnectedClient.history.count !== afterError.history.count || reconnectedClient.clients < 2) {
+        throw new Error(`reconnect created a divergent session: ${JSON.stringify({ afterError, reconnected: reconnectedClient })}`);
+      }
+
+      const primaryClient = await ctx.driver.evaluate("window.__jetCanvasSessionApi.clientId()");
+      await secondary.driver.navigate("about:blank");
+      await ctx.driver.navigate("about:blank");
+      await sleep(1000);
+      const disconnectResults = [];
+      const knownClients = new Set([primaryClientAtStart, primaryClient, secondaryClientAtStart, secondaryClientAfterReconnect]);
+      let shutdown = null;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        for (const client of knownClients) {
+          const disconnectClient = `${endpoint}${ctx.sessionUrl("/__jet_dev_disconnect?client=" + encodeURIComponent(client))}`;
+          const response = await fetch(disconnectClient, { method: "POST", headers: validHeaders });
+          if (attempt === 0) disconnectResults.push({ client, status: response.status, body: await response.text() });
+          else await response.text();
+        }
+        const shutdownResponse = await fetch(`${endpoint}${ctx.sessionUrl("/canvas/session")}`, { cache: "no-store", headers: validHeaders });
+        const shutdownValue = await shutdownResponse.json();
+        shutdown = shutdownValue.session || shutdownValue.canvas?.session || shutdownValue;
+        if (shutdown?.clients === 0) break;
+        await sleep(100);
+      }
+      if (!shutdown || shutdown.id !== session.id || shutdown.clients !== 0) {
+        throw new Error(`session shutdown did not release client leases: ${JSON.stringify({ shutdown, primaryClientAtStart, primaryClient, secondaryClientAtStart, secondaryClientAfterReconnect, disconnectResults })}`);
+      }
+      await ctx.screenshot("session-surface-matrix");
+    } finally {
+      await secondary.close();
     }
-    if (!shutdown || shutdown.id !== session.id || shutdown.clients !== 0) {
-      throw new Error(`session shutdown did not release client leases: ${JSON.stringify({ shutdown, primaryClientAtStart, primaryClient, disconnectResults })}`);
-    }
-    await ctx.screenshot("session-surface-matrix");
   },
 
   "keyboard-cheat-sheet-accessibility-states": async (ctx) => {

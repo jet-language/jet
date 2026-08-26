@@ -236,6 +236,114 @@ pub enum Verdict {
     Missing,
 }
 
+/// D-EFFECT-AUTHORITY1: the application boundary's one checked policy fact.
+///
+/// Sema owns `required_effects`; the package loader owns the initial policy
+/// rows; an interactive CLI may replace those rows with its once/project
+/// decision. Every execution tier receives this same carrier through the
+/// checked `ProgramBundle`. It is deliberately separate from `JetAuthority`,
+/// which is the ordinary source-level value lowered by the Prelude.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplicationAuthority {
+    pub required_effects: Holds,
+    pub granted_effects: Holds,
+    pub denied_effects: Holds,
+    pub authority: String,
+}
+
+impl Default for ApplicationAuthority {
+    fn default() -> Self {
+        Self {
+            required_effects: Holds::new(),
+            granted_effects: Holds::new(),
+            denied_effects: Holds::new(),
+            authority: "application default".to_string(),
+        }
+    }
+}
+
+impl ApplicationAuthority {
+    /// Project the parsed `authority.holds` rows without teaching an engine
+    /// how to parse package policy.
+    pub fn from_policy(
+        allow: Option<&[String]>,
+        deny: Option<&[String]>,
+        authority: impl Into<String>,
+    ) -> Self {
+        let parse = |names: Option<&[String]>| {
+            names
+                .into_iter()
+                .flatten()
+                .filter_map(|name| parse_right(name))
+                .collect()
+        };
+        Self {
+            required_effects: Holds::new(),
+            granted_effects: parse(allow),
+            denied_effects: parse(deny),
+            authority: authority.into(),
+        }
+    }
+
+    /// Required effects with no policy verdict at the application boundary.
+    pub fn undecided_effects(&self) -> Holds {
+        self.required_effects
+            .iter()
+            .filter(|effect| answer(&self.granted_effects, &self.denied_effects, effect) == Verdict::Missing)
+            .cloned()
+            .collect()
+    }
+
+    /// Required effects that the policy explicitly denies.
+    pub fn denied_required_effects(&self) -> Holds {
+        self.required_effects
+            .iter()
+            .filter(|effect| answer(&self.granted_effects, &self.denied_effects, effect) == Verdict::Denied)
+            .cloned()
+            .collect()
+    }
+
+    pub fn is_allowed(&self) -> bool {
+        self.undecided_effects().is_empty() && self.denied_required_effects().is_empty()
+    }
+
+    /// Structured refusal shared by the interpreter and JIT adapters. CLI
+    /// approval happens before those adapters and updates this same carrier.
+    pub fn policy_diagnostic(&self) -> Option<Diagnostic> {
+        if self.is_allowed() {
+            return None;
+        }
+        let denied = self.denied_required_effects();
+        let undecided = self.undecided_effects();
+        let render = |rights: &Holds| {
+            if rights.is_empty() {
+                "none".to_string()
+            } else {
+                rights.iter().cloned().collect::<Vec<_>>().join(", ")
+            }
+        };
+        let denied_text = render(&denied);
+        let denied_policy_text = render(&self.denied_effects);
+        let granted_text = render(&self.granted_effects);
+        let undecided_text = render(&undecided);
+        let required_text = render(&self.required_effects);
+        Some(Diagnostic::error(
+            "E1803",
+            if denied.is_empty() {
+                format!("application authority is undecided for `{undecided_text}`")
+            } else {
+                format!("application authority denies `{denied_text}`")
+            },
+            format!(
+                "required_effects={required_text}; granted_effects={granted_text}; denied_effects={denied_policy_text}; denied_required_effects={denied_text}; undecided_effects={undecided_text}; authority={}",
+                self.authority
+            ),
+            "declare the effect in `authority.holds.allow`, or approve it before execution in an interactive terminal".to_string(),
+            None,
+        ))
+    }
+}
+
 pub fn covers_any(bounds: &Holds, right: &str) -> bool {
     bounds.iter().any(|bound| covers(bound, right))
 }

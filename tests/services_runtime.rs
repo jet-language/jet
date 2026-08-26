@@ -309,6 +309,37 @@ fn run() {
 }
 "#;
 
+const CANCELLED_RESTART_SOURCE: &str = r#"
+use core.sys as env
+use core.service as services
+use core.time as time
+
+fn worker() {}
+
+fn run() {
+    store :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := services.runtime(store, retention: retention)
+    tree := services.tree("cancel-restart")
+    endpoint :: tree.worker("worker", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    if phase == "send" {
+        accepted :: runtime.send(endpoint, "cancelled", key: "cancelled") ?? panic("send")
+        cancelled :: accepted.cancel() ?? panic("cancel")
+        state :: cancelled.status() ?? panic("cancel status")
+        print("send:{state.show()}")
+    } else {
+        recovered :: runtime.send(endpoint, "cancelled", key: "cancelled") ?? panic("recover")
+        state :: recovered.status() ?? panic("recover status")
+        history :: recovered.events() ?? panic("recover events")
+        print("recover:{state.show()}:{history.len()}")
+        tree.handoff_generation() ?? panic("handoff")
+        print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
+    }
+}
+"#;
+
 fn compile_restart_binary(source: &str) -> (PathBuf, PathBuf) {
     let serial = RESTART_SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
@@ -482,6 +513,23 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
         )
         .success(),
         "a truncated authority log was accepted"
+    );
+}
+
+#[test]
+fn service_authority_replays_cancelled_delivery_without_requeue_or_pin() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(CANCELLED_RESTART_SOURCE);
+    let store = dir.join("cancelled.log");
+    assert_eq!(
+        run_restart_process(&bin, &store, "send", None),
+        "send:Cancelled\n"
+    );
+    assert_eq!(
+        run_restart_process(&bin, &store, "recover", None),
+        "recover:Cancelled:2\nreceipt:ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\n"
     );
 }
 
@@ -2145,5 +2193,234 @@ fn an_unknown_migration_policy_is_refused() {
     assert!(
         !ok,
         "an unknown migration policy must stop the program: {stdout}{stderr}"
+    );
+}
+
+const DURABLE_LIFECYCLE_MATRIX_SOURCE: &str = r#"
+use core.service as service
+use core.testing as testing
+use core.time as time
+
+fn worker() -[]> {}
+
+fn state_name(delivery: ^Delivery) String -> {
+    state :: delivery.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "Pending" }
+        .Accepted -> { return "Accepted" }
+        .Delivering -> { return "Delivering" }
+        .Delivered -> { return "Delivered" }
+        .DeadLettered -> { return "DeadLettered" }
+        .Cancelled -> { return "Cancelled" }
+    }
+    return "unknown"
+}
+
+fn run() {
+    temp := testing.temp_dir("durable-lifecycle-matrix")
+    delivery_path :: Path.from(temp).join("delivery.log").to_string()
+    state_path :: Path.from(temp).join("state.log").to_string()
+    retention :: Duration.seconds(60) ?? panic("retention")
+    runtime := service.runtime(delivery_path, retention: retention)
+
+    tree := service.tree("lifecycle-matrix")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    state :: service.state_store(state_path) ?? panic("state store")
+    tree.set_state_event_log(state, "lifecycle-events", 1, "reversible") ?? panic("state")
+    endpoint :: tree.worker("api", worker, capacity: 2) ?? panic("worker")
+    tree.start() ?? panic("start")
+
+    accepted :: runtime.send(endpoint, "accepted", key: "same") ?? panic("accept")
+    accepted_state :: state_name(~accepted)
+    print("accept:{accepted_state}")
+    duplicate :: runtime.send(endpoint, "accepted", key: "same") ?? panic("duplicate")
+    duplicate_id :: (~duplicate).show()
+    accepted_id :: (~accepted).show()
+    duplicate_state :: state_name(~duplicate)
+    print("duplicate:{duplicate_id == accepted_id}:{duplicate_state}")
+    conflict :: runtime.send(endpoint, "different", key: "same")
+    if conflict == {
+        .Ok(delivery) -> {
+            delivery.cancel() ?? panic("unexpected conflict")
+            print("conflict:accepted")
+        }
+        .Err(_) -> { print("conflict:Policy") }
+    }
+    delivered :: tree.receive(endpoint) ?? panic("deliver")
+    print("delivered:{delivered}")
+    runtime.commit(accepted) ?? panic("commit")
+    retained :: runtime.retain(duplicate) ?? panic("retain")
+    retained_receipt :: (~retained).receipt() ?? panic("retained receipt")
+    retained_text :: "{retained_receipt}"
+    retained_events :: (~retained).events() ?? panic("retained events")
+    retention_kept := retained_text.contains("retention_until=-1") == false
+    retained_state :: state_name(^retained)
+    print("retention:{retention_kept}:{retained_events.len()}:{retained_state}")
+
+    retry_source :: runtime.send(endpoint, "retry", key: "retry") ?? panic("retry source")
+    retry_first :: tree.receive(endpoint) ?? panic("retry first")
+    print("retry_first:{retry_first}")
+    retry :: runtime.retry(retry_source) ?? panic("retry")
+    retry_receipt :: (~retry).receipt() ?? panic("retry receipt")
+    retry_text :: "{retry_receipt}"
+    retry_events :: (~retry).events() ?? panic("retry events")
+    retried := retry_text.contains("attempts=1")
+    retry_state :: state_name(~retry)
+    print("retry_state:{retry_state}:{retried}:{retry_events.len()}")
+    retry_second :: tree.receive(endpoint) ?? panic("retry second")
+    print("retry_second:{retry_second}")
+    retry_copy :: ~retry
+    runtime.commit(retry) ?? panic("retry commit")
+    retry_done :: state_name(^retry_copy)
+    print("retry_done:{retry_done}")
+
+    cancelled_handle :: runtime.send(endpoint, "cancel", key: "cancel") ?? panic("cancel source")
+    cancelled :: cancelled_handle.cancel() ?? panic("cancel")
+    cancel_state :: state_name(^cancelled)
+    print("cancel:{cancel_state}")
+
+    dead_handle :: runtime.send(endpoint, "dead", key: "dead") ?? panic("dead source")
+    dead :: runtime.dead_letter(dead_handle) ?? panic("dead letter")
+    dead_state :: state_name(^dead)
+    print("dead:{dead_state}")
+
+    short_runtime := service.runtime(delivery_path, retention: Duration.milliseconds(1) ?? panic("short retention"))
+    expiring :: short_runtime.send(endpoint, "expire", key: "expire") ?? panic("expire source")
+    time.sleep(Duration.milliseconds(10) ?? panic("sleep"))
+    expiry_events :: (~expiring).events() ?? panic("expiry events")
+    expiry_state :: state_name(^expiring)
+    print("expiry:{expiry_state}:{expiry_events.len()}")
+
+    partition_source :: runtime.send(endpoint, "partition", key: "partition") ?? panic("partition source")
+    tree.partition_worker(endpoint) ?? panic("partition")
+    partition_retry :: runtime.retry(partition_source)
+    if partition_retry == {
+        .Ok(delivery) -> {
+            delivery.cancel() ?? panic("unexpected partition retry")
+            print("partition:accepted")
+        }
+        .Err(_) -> { print("partition:Partitioned") }
+    }
+    tree.reconcile_worker(endpoint) ?? panic("reconcile")
+    recovered :: runtime.send(endpoint, "partition", key: "partition") ?? panic("partition recovery")
+    recovered_state :: state_name(~recovered)
+    print("partition_recovery:{recovered_state}")
+    partition_delivery :: tree.receive(endpoint) ?? panic("partition delivery")
+    print("partition_delivery:{partition_delivery}")
+    recovered_copy :: ~recovered
+    runtime.commit(recovered) ?? panic("partition commit")
+    recovered_events :: (~recovered_copy).events() ?? panic("recovered events")
+    recovered_state_done :: state_name(^recovered_copy)
+    print("partition_done:{recovered_state_done}:{recovered_events.len()}")
+
+    foreign := service.tree("foreign")
+    foreign_endpoint :: foreign.worker("api", worker, capacity: 1) ?? panic("foreign worker")
+    foreign.start() ?? panic("foreign start")
+    revoked :: tree.send_durable(foreign_endpoint, "revoked", key: "revoked")
+    if revoked == {
+        .Ok(delivery) -> {
+            delivery.cancel() ?? panic("unexpected revoked delivery")
+            print("revoked:accepted")
+        }
+        .Err(_) -> { print("revoked:Revoked") }
+    }
+    foreign.stop() ?? panic("foreign stop")
+    tree.stop() ?? panic("stop")
+}
+"#;
+
+#[test]
+fn durable_lifecycle_matrix_covers_all_delivery_scenarios_on_all_tiers() {
+    tir_support::assert_tiers_agree(
+        "durable_lifecycle_matrix",
+        DURABLE_LIFECYCLE_MATRIX_SOURCE,
+        "accept:Accepted\nduplicate:true:Accepted\nconflict:Policy\ndelivered:accepted\nretention:true:3:Delivered\nretry_first:retry\nretry_state:Accepted:true:3\nretry_second:retry\nretry_done:Delivered\ncancel:Cancelled\ndead:DeadLettered\nexpiry:DeadLettered:2\npartition:Partitioned\npartition_recovery:Accepted\npartition_delivery:partition\npartition_done:Delivered:3\nrevoked:Revoked\n",
+    );
+}
+
+const DURABLE_CRASH_REPLAY_SOURCE: &str = r#"
+use core.service as service
+use core.sys as env
+
+fn worker() -[]> {}
+
+fn state_name(delivery: ^Delivery) String -> {
+    state :: delivery.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "Pending" }
+        .Accepted -> { return "Accepted" }
+        .Delivering -> { return "Delivering" }
+        .Delivered -> { return "Delivered" }
+        .DeadLettered -> { return "DeadLettered" }
+        .Cancelled -> { return "Cancelled" }
+    }
+    return "unknown"
+}
+
+fn run() {
+    store :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    retention :: Duration.seconds(60) ?? panic("retention")
+    runtime := service.runtime(store, retention: retention)
+    tree := service.tree("durable-crash")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+
+    if phase == "accept" {
+        accepted :: runtime.send(endpoint, "crash", key: "crash") ?? panic("accept")
+        id :: accepted.show()
+        print("accepted:{id}")
+    } else if phase == "deliver" {
+        delivery :: runtime.send(endpoint, "crash", key: "crash") ?? panic("deliver lookup")
+        id :: (~delivery).show()
+        state :: state_name(^delivery)
+        print("before:{id}:{state}")
+        received :: tree.receive(endpoint) ?? panic("receive")
+        print("received:{received}")
+        print("crash_window:open")
+    } else {
+        recovered :: runtime.send(endpoint, "crash", key: "crash") ?? panic("recover lookup")
+        recovered_id :: (~recovered).show()
+        recovered_state :: state_name(~recovered)
+        print("recovered:{recovered_id}:{recovered_state}")
+        retry :: runtime.retry(recovered) ?? panic("recover retry")
+        retry_id :: (~retry).show()
+        retry_state :: state_name(~retry)
+        retry_copy :: ~retry
+        print("retry:{retry_id}:{retry_state}")
+        received :: tree.receive(endpoint) ?? panic("replay receive")
+        print("received:{received}")
+        runtime.commit(retry) ?? panic("replay commit")
+        history :: (~retry_copy).events() ?? panic("replay history")
+        replayed_state :: state_name(^retry_copy)
+        print("replayed:{replayed_state}:{history.len()}")
+        print("same_identity:{recovered_id == retry_id}")
+    }
+}
+"#;
+
+#[test]
+fn durable_lifecycle_crash_window_recovers_and_replays_one_identity() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(DURABLE_CRASH_REPLAY_SOURCE);
+    let store = dir.join("crash.log");
+    let accepted = run_restart_process(&bin, &store, "accept", None);
+    assert!(accepted.starts_with("accepted:Delivery(svc-"), "{accepted}");
+    let delivered = run_restart_default_process(&dir, &store, "deliver", None);
+    assert!(delivered.starts_with("before:Delivery(svc-"), "{delivered}");
+    assert!(delivered.contains(":Accepted\nreceived:crash\ncrash_window:open\n"));
+    let recovered = run_restart_process(&bin, &store, "recover", None);
+    assert_eq!(
+        recovered.lines().last(),
+        Some("same_identity:true"),
+        "recovery changed the durable identity: {recovered}"
+    );
+    assert!(
+        recovered.contains("recovered:Delivery(svc-")
+            && recovered.contains(":Delivering\nretry:Accepted\nreceived:crash\nreplayed:Delivered:5\n"),
+        "crash-window replay did not rebuild the signed history: {recovered}"
     );
 }

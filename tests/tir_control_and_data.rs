@@ -318,6 +318,75 @@ fn run() {
     assert_eq!(interp_stdout, jit_stdout);
 }
 
+/// D-FAILURE-FOUNDATION1=A: a plain fallible call inserts the existing
+/// propagation node in every value/statement shape; only `??` handles locally.
+#[test]
+fn implicit_failure_propagation_covers_call_positions() {
+    let src = r#"
+struct Box {
+    value: Int
+
+    fn bump(self, by: Int) Int ! -> {
+        return add(self.value + by)
+    }
+}
+
+fn source(value: Int) Int ! -> {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value
+}
+
+fn add(value: Int) Int ! -> return value + 1
+
+fn is_zero(value: Int) Bool ! -> return value == 0
+
+fn argument(value: Int) Int ! -> {
+    return add(source(value))
+}
+
+fn nested(value: Int) Int ! -> {
+    return source(value) + 1
+}
+
+fn branch(value: Int) Int ! -> {
+    if is_zero(value) {
+        source(value)
+    }
+    return value
+}
+
+fn branch_value(value: Int) Int ! -> {
+    return if is_zero(value) -> { source(value) } else -> { value + 1 }
+}
+
+fn closure(value: Int) Int ! -> {
+    worker :: (n: Int) Int ! -> source(n) + 1
+    return worker(value)
+}
+
+fn method(value: Int) Int ! -> {
+    box :: Box{ value: source(value) }
+    return add(box.bump(1))
+}
+
+fn run() {
+    print(argument(2) ?? 0)
+    print(nested(2) ?? 0)
+    print(branch(0) ?? 99)
+    print(closure(2) ?? 0)
+    print(method(2) ?? 0)
+    print(branch_value(0) ?? 99)
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "implicit_failure_propagation_positions",
+        src,
+        "3\n3\n99\n3\n5\n99\n",
+    );
+}
+
 /// `?? panic(...)` must stay on the native tier and use the full shared rich
 /// stop renderer, including source and scalar-local context.
 #[test]

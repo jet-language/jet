@@ -1053,11 +1053,11 @@ fn jet_proof_record(kind: u8, state: u8, name: &str, message: &str, file: &str, 
     let _ = report.flush();
 }
 // D-INTBIG1/D-NUMOPS1: plain arithmetic on a fixed-width integer traps on
-// overflow (safe by default) — a silent corruption becomes a caught bug. Each
-// fixed-width operator lowers to one of these, which reports E3010 with the
-// source location instead of wrapping. Exact default `Int` uses packed Prelude
-// helpers. `wrapping(…)`/`saturating(…)`/`checked(…)` opt out at the fixed-width
-// use site. Floats and `#Numeric` distinct types keep plain Rust operators.
+// overflow (safe by default) — a silent corruption becomes a caught bug. The
+// operation table itself lives in `Core/FixedArithmetic.rs`; this file only
+// supplies the typed method adapter used by generated Rust. Exact default
+// `Int` uses packed Prelude helpers. Floats and `#Numeric` distinct types keep
+// plain Rust operators.
 trait JetArith: Copy {
     fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self;
     fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self;
@@ -1078,86 +1078,122 @@ trait JetArith: Copy {
     fn jet_rotate_left(self, bits: i128, file: &str, line: u32) -> Self;
     fn jet_rotate_right(self, bits: i128, file: &str, line: u32) -> Self;
 }
+
+fn jet_fixed_value(result: JetFixedArithmeticResult, file: &str, line: u32) -> i64 {
+    match result {
+        JetFixedArithmeticResult::Value(value) => value,
+        JetFixedArithmeticResult::Absent => jet_arithmetic_stop(
+            file,
+            line,
+            "this checked fixed-width operation has no result",
+        ),
+        JetFixedArithmeticResult::Trap(error) => {
+            let message = error.message();
+            jet_arithmetic_stop(file, line, &message)
+        }
+    }
+}
+
 macro_rules! jet_arith_impl {
-    ($($t:ty),*) => { $(
+    ($(($t:ty, $signed:expr)),*) => { $(
         impl JetArith for $t {
             fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self {
-                self.checked_add(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
-                    JET_ARITHMETIC_ADD_OVERFLOW))
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, rhs as i128, JET_FIXED_OP_ADD, JET_FIXED_MODE_TRAP,
+                    $signed, <$t>::BITS as u8, $signed,
+                ), file, line) as $t
             }
             fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self {
-                self.checked_sub(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
-                    JET_ARITHMETIC_SUB_OVERFLOW))
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, rhs as i128, JET_FIXED_OP_SUB, JET_FIXED_MODE_TRAP,
+                    $signed, <$t>::BITS as u8, $signed,
+                ), file, line) as $t
             }
             fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self {
-                self.checked_mul(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
-                    JET_ARITHMETIC_MUL_OVERFLOW))
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, rhs as i128, JET_FIXED_OP_MUL, JET_FIXED_MODE_TRAP,
+                    $signed, <$t>::BITS as u8, $signed,
+                ), file, line) as $t
             }
             fn jet_wrapping_add(self, rhs: Self) -> Self {
-                self.wrapping_add(rhs)
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, rhs as i128, JET_FIXED_OP_ADD, JET_FIXED_MODE_WRAPPING,
+                    $signed, <$t>::BITS as u8, $signed,
+                ), "<fixed-width>", 0) as $t
             }
             fn jet_wrapping_sub(self, rhs: Self) -> Self {
-                self.wrapping_sub(rhs)
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, rhs as i128, JET_FIXED_OP_SUB, JET_FIXED_MODE_WRAPPING,
+                    $signed, <$t>::BITS as u8, $signed,
+                ), "<fixed-width>", 0) as $t
             }
             fn jet_wrapping_mul(self, rhs: Self) -> Self {
-                self.wrapping_mul(rhs)
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, rhs as i128, JET_FIXED_OP_MUL, JET_FIXED_MODE_WRAPPING,
+                    $signed, <$t>::BITS as u8, $signed,
+                ), "<fixed-width>", 0) as $t
             }
             fn jet_saturating_add(self, rhs: Self) -> Self {
-                self.saturating_add(rhs)
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, rhs as i128, JET_FIXED_OP_ADD, JET_FIXED_MODE_SATURATING,
+                    $signed, <$t>::BITS as u8, $signed,
+                ), "<fixed-width>", 0) as $t
             }
             fn jet_saturating_sub(self, rhs: Self) -> Self {
-                self.saturating_sub(rhs)
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, rhs as i128, JET_FIXED_OP_SUB, JET_FIXED_MODE_SATURATING,
+                    $signed, <$t>::BITS as u8, $signed,
+                ), "<fixed-width>", 0) as $t
             }
             fn jet_saturating_mul(self, rhs: Self) -> Self {
-                self.saturating_mul(rhs)
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, rhs as i128, JET_FIXED_OP_MUL, JET_FIXED_MODE_SATURATING,
+                    $signed, <$t>::BITS as u8, $signed,
+                ), "<fixed-width>", 0) as $t
             }
             fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self {
-                jet_division(
-                    self as i128,
-                    rhs as i128,
-                    <$t>::MIN as i128,
-                    <$t>::MAX as i128,
-                )
-                .map(|value| value as $t)
-                .unwrap_or_else(|message| jet_arithmetic_stop(file, line, message))
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, rhs as i128, JET_FIXED_OP_DIV, JET_FIXED_MODE_TRAP,
+                    $signed, <$t>::BITS as u8, $signed,
+                ), file, line) as $t
             }
             fn jet_rem(self, rhs: Self, file: &str, line: u32) -> Self {
-                if rhs == 0 {
-                    jet_arithmetic_stop(file, line, JET_ARITHMETIC_DIVIDE_ZERO);
-                }
-                self.checked_rem(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
-                    JET_ARITHMETIC_REMAINDER_OVERFLOW))
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, rhs as i128, JET_FIXED_OP_REM, JET_FIXED_MODE_TRAP,
+                    $signed, <$t>::BITS as u8, $signed,
+                ), file, line) as $t
             }
             fn jet_shl(self, bits: i128, file: &str, line: u32) -> Self {
-                let w = (Self::BITS) as i128;
-                if let Some(message) = jet_arithmetic_shift_message("left", bits, w as u8) {
-                    jet_arithmetic_stop(file, line, &message);
-                }
-                self << (bits as u32)
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, bits, JET_FIXED_OP_SHL, JET_FIXED_MODE_TRAP,
+                    $signed, <$t>::BITS as u8, true,
+                ), file, line) as $t
             }
             fn jet_shr(self, bits: i128, file: &str, line: u32) -> Self {
-                let w = (Self::BITS) as i128;
-                if let Some(message) = jet_arithmetic_shift_message("right", bits, w as u8) {
-                    jet_arithmetic_stop(file, line, &message);
-                }
-                self >> (bits as u32)
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, bits, JET_FIXED_OP_SHR, JET_FIXED_MODE_TRAP,
+                    $signed, <$t>::BITS as u8, true,
+                ), file, line) as $t
             }
             fn jet_rotate_left(self, bits: i128, file: &str, line: u32) -> Self {
-                if bits < 0 {
-                    jet_arithmetic_stop(file, line, JET_ARITHMETIC_ROTATE_NEGATIVE);
-                }
-                self.rotate_left((bits % Self::BITS as i128) as u32)
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, bits, JET_FIXED_OP_ROTATE_LEFT, JET_FIXED_MODE_TRAP,
+                    $signed, <$t>::BITS as u8, true,
+                ), file, line) as $t
             }
             fn jet_rotate_right(self, bits: i128, file: &str, line: u32) -> Self {
-                if bits < 0 {
-                    jet_arithmetic_stop(file, line, JET_ARITHMETIC_ROTATE_NEGATIVE);
-                }
-                self.rotate_right((bits % Self::BITS as i128) as u32)
+                jet_fixed_value(jet_fixed_arithmetic(
+                    self as i64, bits, JET_FIXED_OP_ROTATE_RIGHT, JET_FIXED_MODE_TRAP,
+                    $signed, <$t>::BITS as u8, true,
+                ), file, line) as $t
             }
         }
     )* };
 }
-jet_arith_impl!(i8, i16, i32, i64, u8, u16, u32, u64);
+jet_arith_impl!(
+    (i8, true), (i16, true), (i32, true), (i64, true),
+    (u8, false), (u16, false), (u32, false), (u64, false)
+);
 /// E3001 (E2-M12, D-OBS1/D-OBS2): rich panic report — includes the function name,
 /// a source-line context box, and (in debug builds only) safe local variable values.
 /// `col` is 1-based; `caret_len` covers the highlighted span in the source line.

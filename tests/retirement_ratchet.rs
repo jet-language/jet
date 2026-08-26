@@ -208,6 +208,154 @@ fn contains_word(text: &str, word: &str) -> bool {
     })
 }
 
+const RETIRED_AUTHORITY_WORDS: &[&str] = &[
+    concat!("Abil", "ity"),
+    concat!("Abil", "ities"),
+    concat!("Capabil", "ity"),
+    concat!("Cap", "s"),
+];
+
+const RETIRED_AUTHORITY_MARKERS: &[&str] = &[
+    concat!("#", "Abil", "ities"),
+    concat!("#", "Cap", "s"),
+];
+
+const RETIRED_AUTHORITY_IDENTIFIERS: &[&str] = &[
+    concat!("KW_", "CAPS"),
+    concat!("TYPE_", "ABILITIES"),
+    concat!("CAP_", "HANDLE_TYPE"),
+    concat!("Stmt::", "Cap", "s"),
+];
+
+fn relative_path(path: &Path) -> String {
+    path.strip_prefix(env!("CARGO_MANIFEST_DIR"))
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn is_authority_history(path: &str) -> bool {
+    path == "docs/spec/syntax-decisions.md"
+        || path == "docs/agents/agent-memory.md"
+        || path == "docs/reference/prior-art.md"
+        || path.starts_with("docs/archive/")
+        || path.starts_with("docs/audits/")
+        || path.starts_with("docs/plans/")
+        || path.starts_with("docs/proposals/")
+        || path.starts_with("docs/research/")
+}
+
+fn is_authority_diagnostic_fixture(path: &str) -> bool {
+    path.starts_with("tests/ui/")
+        || path.starts_with("tests/fuzz/")
+        || path == "tests/syntax_reconciliation.rs"
+        || path == "scripts/notebook-test/acceptance.mjs"
+        || path == "docs/spec/diagnostics.md"
+        || path == "docs/spec/diagnostic-rows.md"
+}
+
+fn is_authority_diagnostic_producer(path: &str, line: &str) -> bool {
+    if path == "crates/jet-codegen/src/Prelude/Markers.jet" {
+        return line.trim_start().starts_with("marker ")
+            && (line.contains(concat!("marker ", "Abil", "ities"))
+                || line.contains(concat!("marker ", "Cap", "s")));
+    }
+    if path == "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs" {
+        return line.contains(concat!("\"", "Abil", "ity", "\""))
+            || line.contains(concat!("\"", "Abil", "ities", "\""))
+            || line.contains(concat!("\"", "Capabil", "ity", "\""))
+            || line.contains(concat!("\"", "Cap", "s", "\""));
+    }
+    false
+}
+
+fn is_unrelated_authority_word(path: &str, line: &str) -> bool {
+    if matches!(
+        path,
+        "crates/jet-pkg-model/src/CompilerExtension.rs"
+            | "crates/jet-driver/src/CompilerExtensionHook.rs"
+            | "crates/jetpack-bin/tests/compiler_extension_e2e.rs"
+    ) {
+        return true;
+    }
+    if path.starts_with("docs/reference/surfaces/")
+        || path == "docs/reference/core-surface-ledger.json"
+    {
+        return true;
+    }
+    matches!(
+        (path, line),
+        ("crates/jet-canvas/src/js/inspector-connections.js", line)
+            if line.contains(concat!("Capabil", "ity mismatch"))
+    ) || matches!(
+        (path, line),
+        ("crates/jet-devserver/src/WebHost.rs", line)
+            if line.contains(concat!("Abil", "ity check"))
+    ) || matches!(
+        (path, line),
+        ("crates/jet-driver/src/Driver/mod.rs", line)
+            if line.contains(concat!("Abil", "ity grants"))
+    ) || matches!(
+        (path, line),
+        ("crates/jet-driver/src/Foreign.rs", line)
+            if line.contains(concat!("Capabil", "ity report"))
+    ) || matches!(
+        (path, line),
+        ("crates/jet-pkg-model/src/FFI.rs", line)
+            if line.contains(concat!("Capabil", "ity-bearing"))
+    ) || matches!(
+        (path, line),
+        ("crates/jet-repl/src/Notebook/trust.rs", line)
+            if line.contains(concat!("Abil", "ity widget"))
+    ) || matches!(
+        (path, line),
+        ("crates/jet-sema/src/Sema/mod.rs", line)
+            if line.contains(concat!("Abil", "ity")) && line.contains("derive rows")
+    ) || matches!(
+        (path, line),
+        ("crates/jetpack/src/Recipe.rs", line)
+            if line.contains(concat!("Capabil", "ity-limited"))
+    ) || matches!(
+        (path, line),
+        ("examples/features/io/app_config.jet", line)
+            if line
+                .trim_start()
+                .starts_with(concat!("// ", "Abil", "ity"))
+    ) || matches!(
+        (path, line),
+        ("examples/features/net/browser_cdp.jet", line)
+            if line.contains(concat!("Abil", "ity-gated protocol"))
+    ) || matches!(
+        (path, line),
+        ("scripts/canvas-test/scenario.mjs", line)
+            if line.contains(concat!("Capabil", "ity mismatch"))
+    ) || matches!(
+        (path, line),
+        ("docs/spec/spec.md", line)
+            if line.contains(concat!("Capabil", "ity parameters"))
+    )
+}
+
+fn authority_retired_words_in_line(line: &str) -> Vec<&'static str> {
+    let mut hits = Vec::new();
+    for word in RETIRED_AUTHORITY_WORDS {
+        if contains_word(line, word) {
+            hits.push(*word);
+        }
+    }
+    for marker in RETIRED_AUTHORITY_MARKERS {
+        if line.contains(marker) {
+            hits.push(*marker);
+        }
+    }
+    for identifier in RETIRED_AUTHORITY_IDENTIFIERS {
+        if line.contains(identifier) {
+            hits.push(*identifier);
+        }
+    }
+    hits
+}
+
 #[test]
 fn retirement_walk_skips_outputs_and_nested_worktrees_but_keeps_live_source_visible() {
     assert!(is_skipped_dir(Path::new("build")));
@@ -821,6 +969,41 @@ fn a_finished_retirement_stays_finished() {
             assert_eq!(retired, 0, "`{}` came back in {retired} files", row.retired);
         }
     }
+}
+
+#[test]
+fn retired_authority_vocabulary_stays_in_fixtures_history_or_unrelated_english() {
+    let mut offenders = Vec::new();
+    for path in all_files() {
+        let relative = relative_path(&path);
+        if relative.starts_with("plugins/tower/") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for (line_number, line) in text.lines().enumerate() {
+            let hits = authority_retired_words_in_line(line);
+            if hits.is_empty()
+                || is_authority_history(&relative)
+                || is_authority_diagnostic_fixture(&relative)
+                || is_authority_diagnostic_producer(&relative, line)
+                || is_unrelated_authority_word(&relative, line)
+            {
+                continue;
+            }
+            offenders.push(format!(
+                "{relative}:{}: {}",
+                line_number + 1,
+                hits.join(", ")
+            ));
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "retired authority vocabulary escaped its fixture/history boundary:\n{}",
+        offenders.join("\n")
+    );
 }
 
 #[test]

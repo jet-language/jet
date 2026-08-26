@@ -1586,6 +1586,10 @@ impl<'a> Parser<'a> {
                 // D-STRUCT-LIFE1=A: lifecycle metadata is retained on the
                 // type for sema/formatter consumers, not lowered as a derive.
                 Syntax::MARKER_DEPRECATED => {}
+                // D-FAILURE-FOUNDATION1=A: `Error` is a type fact, not a
+                // derive. Keep it in `type_markers`; sema registers the
+                // named type as an allowed explicit failure domain.
+                Syntax::MARKER_ERROR => {}
                 // Any other name is a derive-trait: the D-VERDICT-732-1
                 // (formerly D-MARKERMOVE3) built-ins (`#[Debug]`,
                 // `#[Summarize]`, `#[Comparable]`) or a user derive-trait name.

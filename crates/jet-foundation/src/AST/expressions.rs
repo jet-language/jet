@@ -652,8 +652,8 @@ pub enum Expr {
         /// return type or the method is void.
         resolved_ret: Option<Type>,
         /// D-NUMWIDEN-CROSS1=E / card #1662: sema sets this when it
-        /// synthesizes this method-call shape as an implicit checked
-        /// integer-to-float conversion. Replaces the retired
+        /// synthesizes this method-call shape as an implicit checked numeric
+        /// crossing, including exact-Int fixed-width construction. Replaces the retired
         /// `\0numeric.checked_widen` fake-`recv_type` marker (`recv_type`
         /// stays `None` on this shape now, so it keeps its one honest
         /// meaning of "resolved user-defined receiver type"). Lowering

@@ -490,7 +490,7 @@ smallest offending source span:
 | E0378 | parse | teaching: retired alias binding `=`; write `::` (D-ALIAS-OP1=B) |
 | E0379 | parse | teaching: a guard follows its source with no comma (D-LOOP-GUARD1=A) |
 | E0380 | sema | bindingless loop requires a named binding for a scalar source or a nested loop |
-| E0381 | parse | ordinary `marker Name(...)` fact stated as an `on` clause or a second parameter list, not an `@`-marked named parameter (D-META-FORM1=A, D-ONCE-AT1=D) |
+| E0381 | parse | retired marker declaration shape; use one named parameter list (D-MARKER-SITES1=B) |
 | E0385 | parse | teaching: retired declaration default `name: Type = value`; write `name: Type{value}` (D-DEFAULT-SHAPE1=B) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
@@ -1983,7 +1983,7 @@ REPL step number in place of a file span (`<repl:N>`).
 |------|------|-----|-----|
 | E1801 | This snippet ran more than `{N}` interpreter steps without finishing. | The REPL interpreter caps each input to avoid hanging your session; this almost always means a loop that never ends. | Check any loops for a condition that never becomes false. Use `:run` to allow unbounded execution (compiles and runs instead of interpreting). |
 | E1802 | The REPL interpreter can't run `{feature}`. | The REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler. | Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler. |
-| E1803 | `{Root}.{Operation}` for `{resource}` was denied. | REPL host effects require both an enclosing `#FX` and runtime invocation authority; denied operations stop before touching host state. | Approve the exact operation interactively, or restart with the matching `jet repl --allow-{root}` flag. `--deny-{root}` always wins. |
+| E1803 | application authority is undecided or denies a required effect. | The diagnostic keeps the application projection explicit: `required_effects`, `granted_effects`, `denied_effects`, and `authority` are separate facts; an undecided or denied effect stops before host state changes. | Declare the effect in `authority.holds.allow`, deny it deliberately, or approve the exact operation once or for the project in an interactive terminal. |
 
 ## Source import diagnostics (D-JPK-IMPORTTODO1, D-MIGRATE-SRC1)
 

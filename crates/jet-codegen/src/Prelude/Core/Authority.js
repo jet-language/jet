@@ -1,11 +1,16 @@
 // D-AUTHORITY-NAME1=A: web carrier and narrowing operations for the ordinary
 // Authority value.
 function jet_authority_covers(held, requested) {
-  return held === requested || requested.startsWith(`${held}.`);
+  return (
+    held === requested ||
+    requested.startsWith(`${held}.`) ||
+    requested.startsWith(`${held}:`) ||
+    requested.startsWith(`${held}/`)
+  );
 }
 
 function jet_authority_workspace() {
-  return { rights: new Set(["FS.Read"]) };
+  return { rights: new Set(["FS.Read:repo", "FS.Write:.jet/build"]) };
 }
 
 function jet_authority_from_rights(rights) {

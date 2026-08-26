@@ -57,6 +57,50 @@ fn assert_authority_output(output: &std::process::Output, tier: &str) {
 }
 
 #[test]
+fn default_run_records_source_linked_authority_delegation() {
+    let root = authority_project("run-delegation-receipt");
+    let package = r#"
+name: "authority_receipts"
+version: "0.1.0"
+authority: .{ holds: { allow: [Exec, IO] } }
+"#;
+    let program = r#"
+use core.process as process
+
+fn run() {
+    #FX(authority: Exec, IO) {
+        result :: process.run(["echo", "receipt"], authority)
+        print("done")
+    }
+}
+"#;
+    std::fs::write(root.join("package.jet"), package).expect("receipt package");
+    std::fs::write(root.join("run.jet"), program).expect("receipt program");
+    let output = run_authority_cli(&root, &["run", "run.jet"]);
+    assert!(
+        output.status.success(),
+        "default run rejected the receipt project:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt = std::fs::read_to_string(root.join(".jet/receipts/authority.jsonl"))
+        .expect("default run should write the authority receipt");
+    let delegation = receipt
+        .lines()
+        .find(|line| line.contains("\"kind\":\"delegation\""))
+        .expect("default run should write a delegation receipt");
+    assert!(delegation.contains("\"scope\":\"authority@"), "{delegation}");
+    assert!(delegation.contains("\"resource\":\"process\""), "{delegation}");
+    assert!(delegation.contains("\"operation\":\"run\""), "{delegation}");
+    assert!(delegation.contains("\"source\":\"run.jet\""), "{delegation}");
+    assert!(delegation.contains("\"authority\":\"authority\""), "{delegation}");
+    assert!(
+        delegation.contains("\"policy_source\":\"#FX; declared policy\""),
+        "{delegation}"
+    );
+}
+
+#[test]
 fn malformed_authority_fields_share_e1221() {
     let cases = [
         (

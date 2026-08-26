@@ -10,6 +10,26 @@ use crate::AST::{CtValue, Type};
 use jet_foundation::Authority::{answer, Holds, Verdict};
 use jet_foundation::Effects::{core_effect, is_nondeterministic_core, Effect};
 
+fn repl_effect_roles(
+    required: &str,
+    granted: &Holds,
+    denied: &Holds,
+    authority: &str,
+) -> String {
+    let render = |effects: &Holds| {
+        if effects.is_empty() {
+            "none".to_string()
+        } else {
+            effects.iter().cloned().collect::<Vec<_>>().join(", ")
+        }
+    };
+    format!(
+        "required_effects={required}; granted_effects={}; denied_effects={}; authority={authority}",
+        render(granted),
+        render(denied),
+    )
+}
+
 pub(super) fn repl_effect_request(
     module: &str,
     method: &str,
@@ -175,14 +195,22 @@ pub fn apply_repl_authorized_core_call_with_type(
     };
     let request = repl_effect_request(module, method, &args);
     let Some(authorizer) = authorizer else {
+        let granted = grants
+            .iter()
+            .filter_map(super::super::Builtins::authority_holds)
+            .flatten()
+            .collect::<Holds>();
+        let denied = Holds::new();
         return Err(Diagnostic::error(
             "E1803",
             format!(
                 "{}.{} for `{}` was denied",
                 request.root, request.operation, request.resource
             ),
-            "this REPL mode has no runtime authority provider, so the host operation did not run"
-                .to_string(),
+            format!(
+                "this REPL mode has no runtime authority provider; {}; the host operation did not run",
+                repl_effect_roles(&request.root, &granted, &denied, "REPL lexical Authority"),
+            ),
             format!(
                 "restart with `jet repl --allow-{}` or use an interactive session and approve the exact operation",
                 request.root.to_ascii_lowercase()
@@ -219,8 +247,10 @@ pub fn apply_repl_authorized_core_call_with_type(
                 "{}.{} for `{}` has no REPL runtime authority",
                 request.root, request.operation, request.resource
             ),
-            "REPL host effects require both lexical `#FX` access and invocation policy; no host operation ran"
-                .to_string(),
+            format!(
+                "REPL host effects require both lexical `#FX` access and invocation policy; {}; no host operation ran",
+                repl_effect_roles(&request.root, &held, &denied, "REPL lexical Authority"),
+            ),
             format!(
                 "wrap this operation in `#FX(grant: {}) {{ ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`",
                 request.root,

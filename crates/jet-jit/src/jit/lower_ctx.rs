@@ -22720,6 +22720,17 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
                 Ok(widened)
             }
+            TNumericOp::CheckedIntToFixed { host_kind, line, .. } => {
+                if !matches!(&recv.ty, Type::Int) {
+                    return Err("checked fixed-width construction expects Int".to_string());
+                }
+                let kind = self.b.ins().iconst(types::I64, *host_kind);
+                let line = self.b.ins().iconst(types::I64, i64::from(*line));
+                let converted = self
+                    .call_host(self.host.numeric_checked_int, &[value, kind, line]);
+                self.emit_trap_check()?;
+                Ok(converted)
+            }
             TNumericOp::TryFrom { host_kind, .. } => {
                 if matches!(&recv.ty, Type::Int) {
                     let kind = self.b.ins().iconst(types::I64, *host_kind);

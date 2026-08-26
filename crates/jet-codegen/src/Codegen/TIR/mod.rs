@@ -275,6 +275,10 @@ pub struct JitProgram {
     /// D-MEM-GUARANTEE1: package hardening is a checked bundle fact carried
     /// into named deopt; the evaluator never reparses package.jet.
     pub package_hardened: bool,
+    /// D-EFFECT-AUTHORITY1: the sema-projected application decision travels
+    /// with the lowered program. TIR, JIT, deopt, and the interpreter consume
+    /// this value; none of them rediscover package.jet or re-solve effects.
+    pub application_authority: jet_foundation::Authority::ApplicationAuthority,
     /// D-REL3: the package edition is a checked bundle fact carried the same
     /// way, because every tier that runs this program answers edition-gated
     /// questions (`core.data`'s checked surface, `fixed_sigs.rs`) from the
@@ -2344,6 +2348,10 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
             source_file: module.display.clone(),
             source_text: module.source.clone(),
             package_hardened: bundle.package_guarantees.harden,
+            application_authority: bundle
+                .package_guarantees
+                .application_authority
+                .clone(),
             edition: bundle.edition.clone(),
             entry: entry_name,
             funcs,
@@ -4574,6 +4582,15 @@ pub enum TNumericOp {
     CheckedIntToFloat {
         source_signed: bool,
         target_f32: bool,
+        line: u32,
+    },
+    /// A non-fallible fixed-width construction from exact `Int`. The shared
+    /// conversion range is checked, then the arithmetic stop boundary is used
+    /// instead of exposing a `Result` to the source expression.
+    CheckedIntToFixed {
+        host_kind: i64,
+        dst_rust: String,
+        dst_spelling: String,
         line: u32,
     },
     /// An integer-narrowing conversion → the checked `<{dst}>::try_from(...)` form

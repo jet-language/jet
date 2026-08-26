@@ -48,6 +48,13 @@ impl JitBackend for CraneliftBackend {
         bundle: &ProgramBundle,
         _try_anyway: bool,
     ) -> Result<RunOutcome, Vec<jet_foundation::Diagnostics::Diagnostic>> {
+        if let Some(diagnostic) = bundle
+            .package_guarantees
+            .application_authority
+            .policy_diagnostic()
+        {
+            return Err(vec![diagnostic]);
+        }
         let resident = crate::with_program_allocator(bundle, || {
             TIR::install_comptime_bridge();
             try_resident_hot_swap(bundle)
@@ -73,6 +80,13 @@ impl JitBackend for CraneliftBackend {
     }
 
     fn restart(&mut self, bundle: &ProgramBundle, _try_anyway: bool) -> RunOutcome {
+        if let Some(diagnostic) = bundle
+            .package_guarantees
+            .application_authority
+            .policy_diagnostic()
+        {
+            return RunOutcome::Problems(vec![diagnostic]);
+        }
         let resident = crate::with_program_allocator(bundle, || {
             TIR::install_comptime_bridge();
             try_resident_restart(bundle)
@@ -88,6 +102,13 @@ impl JitBackend for CraneliftBackend {
 }
 
 fn run_bundle_on_compiler_stack(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
+    if let Some(diagnostic) = bundle
+        .package_guarantees
+        .application_authority
+        .policy_diagnostic()
+    {
+        return RunOutcome::Problems(vec![diagnostic]);
+    }
     let resident = crate::with_program_allocator(bundle, || {
         let _ = try_anyway;
         TIR::install_comptime_bridge();

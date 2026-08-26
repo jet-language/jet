@@ -1288,6 +1288,10 @@ fn build_method_info_with_vocabulary(
         method.return_view_provenance.as_ref(),
     );
     facts.extend(type_fact_rows(&method.name, &method_signature_type(method)));
+    let arithmetic = crate::AST::arithmetic_policy_facts(&method.body)
+        .iter()
+        .map(arithmetic_operation_info)
+        .collect();
     let effects = method
         .declared_effects
         .as_ref()
@@ -1313,6 +1317,7 @@ fn build_method_info_with_vocabulary(
             ("effects", build_effect_info(&effects)),
             ("dimensions", ct_list(dimensions)),
             ("facts", ct_list(facts)),
+            ("arithmetic", ct_list(arithmetic)),
             // D-REFLECT1: the retained marker nodes, same source as every other
             // consumer. This was hardcoded empty, so reflection reported that a
             // method carried no markers no matter what was written on it.
@@ -2635,10 +2640,13 @@ fn build_function_info(
     let arithmetic = facts
         .arithmetic
         .get(&qualified)
-        .into_iter()
-        .flatten()
-        .map(arithmetic_operation_info)
-        .collect();
+        .map(|facts| facts.iter().map(arithmetic_operation_info).collect())
+        .unwrap_or_else(|| {
+            crate::AST::arithmetic_policy_facts(&func.body)
+                .iter()
+                .map(arithmetic_operation_info)
+                .collect()
+        });
     let declared_facts = declared_function_facts(
         &qualified,
         func.maturity,
@@ -2733,7 +2741,7 @@ mod tests {
     use super::*;
     use crate::{
         Diagnostics::Span,
-        AST::{Dimension, QuantityKind, Type},
+        AST::{AccessConvention, Dimension, QuantityKind, Type},
     };
 
     fn span() -> Span {
@@ -2820,6 +2828,57 @@ mod tests {
             .find(|(field, _)| field == name)
             .map(|(_, value)| value)
             .unwrap_or_else(|| panic!("missing field `{name}` in {value:?}"))
+    }
+
+    #[test]
+    fn method_info_includes_arithmetic_operation_provenance() {
+        let mut method = method("increment", true);
+        let fact = crate::AST::ArithmeticPolicyFact {
+            mode: crate::AST::ArithmeticMode::Saturating,
+            scope_span: Span::new(10, 40),
+            operation_span: Span::new(24, 33),
+            operation: Some(crate::AST::ArithmeticOperation::Add),
+        };
+        let mut flags = crate::AST::CallArgFlags::default();
+        flags.arithmetic_policy = Some(fact);
+        method.body = vec![crate::AST::Stmt::Expr(crate::AST::Expr::Call(
+            crate::AST::Call {
+                name: crate::Syntax::BUILTIN_SATURATING.to_string(),
+                name_span: fact.operation_span,
+                type_args: Vec::new(),
+                args: vec![crate::AST::CallArg {
+                    convention: AccessConvention::Read,
+                    expr: crate::AST::Expr::Int(1, fact.operation_span, None, None),
+                    span: fact.operation_span,
+                    flags,
+                    label: None,
+                    spread: false,
+                }],
+                resolved_ret: None,
+                range_checked: false,
+                widen_approx: false,
+            },
+        ))];
+
+        let info = build_method_info(&method);
+        let CtValue::List(arithmetic) = struct_field(&info, "arithmetic") else {
+            panic!("arithmetic");
+        };
+        let CtValue::Struct { fields, .. } = arithmetic.first().expect("arithmetic row") else {
+            panic!("arithmetic row");
+        };
+        assert!(fields.iter().any(|(name, value)| {
+            name == "operation" && matches!(value, CtValue::Str(operation) if operation == "add")
+        }));
+        assert!(fields.iter().any(|(name, value)| {
+            name == "policy" && matches!(value, CtValue::Str(policy) if policy == ".Saturating")
+        }));
+        assert!(fields.iter().any(|(name, value)| {
+            name == "scope_span"
+                && matches!(value, CtValue::Struct { fields, .. }
+                    if fields.iter().any(|(name, value)| name == "start" && matches!(value, CtValue::Int(10)))
+                        && fields.iter().any(|(name, value)| name == "end" && matches!(value, CtValue::Int(40))))
+        }));
     }
 
     #[test]

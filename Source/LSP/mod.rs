@@ -575,6 +575,25 @@ fn run() {}
                 .all(|fact| fact.module_path == project.entry()),
             "arithmetic provenance used the wrong source module"
         );
+        let operation = db.arithmetic.first().expect("arithmetic operation");
+        let hover = compute_hover(
+            &db,
+            &tokens,
+            src,
+            project.entry(),
+            operation.operation_span.start,
+        )
+        .expect("arithmetic operation hover");
+        assert!(hover.contains("fixed-width add: .Wrapping"), "{hover}");
+        assert!(
+            hover.contains(&format!(
+                "scope = {}:{}..{}",
+                project.entry(),
+                operation.scope_span.start,
+                operation.scope_span.end
+            )),
+            "hover lost exact arithmetic scope: {hover}"
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::Generics::substitute_type;
-use crate::Sema::Checker;
+use crate::Sema::{Checker, TypeRegistry};
 use crate::AST::Type;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
@@ -290,6 +290,56 @@ impl<'a> Checker<'a> {
                 dimension,
             },
             Type::Measure(measure) => Type::Measure(measure),
+        }
+    }
+
+    /// D-FAILURE-FOUNDATION1=A: validate an explicit failure domain after
+    /// resolving source/import spellings. The local registry remains the
+    /// source of truth; this method only selects the owning registry for a
+    /// public imported nominal so validation does not reject a valid imported
+    /// `#Error` type.
+    pub(crate) fn is_error_domain(&self, ty: &Type) -> bool {
+        fn visit(checker: &Checker<'_>, ty: &Type) -> bool {
+            if checker.registry.is_error_domain(ty) {
+                return true;
+            }
+            match ty {
+                Type::Union(members) => {
+                    !members.is_empty() && members.iter().all(|member| visit(checker, member))
+                }
+                Type::Named(name) => {
+                    let (_, leaf) = Checker::split_type_name(name);
+                    checker
+                        .imported_error_registry(name)
+                        .is_some_and(|registry| {
+                            registry.is_error_domain(&Type::Named(leaf.to_string()))
+                        })
+                }
+                Type::Apply { name, args } => {
+                    let (_, leaf) = Checker::split_type_name(name);
+                    checker
+                        .imported_error_registry(name)
+                        .is_some_and(|registry| {
+                            registry.is_error_domain(&Type::Apply {
+                                name: leaf.to_string(),
+                                args: args.clone(),
+                            })
+                        })
+                }
+                _ => false,
+            }
+        }
+
+        visit(self, ty)
+    }
+
+    fn imported_error_registry(&self, name: &str) -> Option<&TypeRegistry> {
+        let (import_ns, leaf) = Self::split_type_name(name);
+        let owner = self.struct_owner_module(leaf, import_ns)?;
+        if owner == self.module_idx {
+            Some(self.registry)
+        } else {
+            self.modules?.get(owner).map(|module| &module.registry)
         }
     }
 

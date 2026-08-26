@@ -1388,6 +1388,188 @@ fn delivery_event_to_ct(event: JetDeliveryEvent) -> CtValue {
     }
 }
 
+fn service_ct_field<'a>(
+    fields: &'a [(String, CtValue)],
+    type_name: &str,
+    name: &str,
+    span: Span,
+) -> Result<&'a CtValue, Diagnostic> {
+    fields
+        .iter()
+        .find_map(|(field, value)| (field == name).then_some(value))
+        .ok_or_else(|| unsupported(&format!("{type_name}.{name}"), span))
+}
+
+fn service_ct_text(
+    fields: &[(String, CtValue)],
+    type_name: &str,
+    name: &str,
+    span: Span,
+) -> Result<String, Diagnostic> {
+    match service_ct_field(fields, type_name, name, span)? {
+        CtValue::Str(value) => Ok(value.clone()),
+        _ => Err(unsupported(&format!("{type_name}.{name}"), span)),
+    }
+}
+
+fn service_ct_int(
+    fields: &[(String, CtValue)],
+    type_name: &str,
+    name: &str,
+    span: Span,
+) -> Result<i64, Diagnostic> {
+    match service_ct_field(fields, type_name, name, span)? {
+        CtValue::Int(value) => Ok(*value),
+        _ => Err(unsupported(&format!("{type_name}.{name}"), span)),
+    }
+}
+
+fn service_ct_bool(
+    fields: &[(String, CtValue)],
+    type_name: &str,
+    name: &str,
+    span: Span,
+) -> Result<bool, Diagnostic> {
+    match service_ct_field(fields, type_name, name, span)? {
+        CtValue::Bool(value) => Ok(*value),
+        _ => Err(unsupported(&format!("{type_name}.{name}"), span)),
+    }
+}
+
+fn ct_to_delivery_state(value: &CtValue, span: Span) -> Result<JetDeliveryState, Diagnostic> {
+    let CtValue::Enum {
+        type_name,
+        variant,
+        args,
+    } = value
+    else {
+        return Err(unsupported("DeliveryState", span));
+    };
+    if type_name != "DeliveryState" || !args.is_empty() {
+        return Err(unsupported("DeliveryState", span));
+    }
+    match variant.as_str() {
+        "Pending" => Ok(JetDeliveryState::Pending),
+        "Accepted" => Ok(JetDeliveryState::Accepted),
+        "Delivering" => Ok(JetDeliveryState::Delivering),
+        "Delivered" => Ok(JetDeliveryState::Delivered),
+        "DeadLettered" => Ok(JetDeliveryState::DeadLettered),
+        "Cancelled" => Ok(JetDeliveryState::Cancelled),
+        _ => Err(unsupported("DeliveryState variant", span)),
+    }
+}
+
+fn ct_to_delivery_receipt(
+    value: &CtValue,
+    span: Span,
+) -> Result<JetDeliveryReceipt, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("DeliveryReceipt", span));
+    };
+    if type_name != "DeliveryReceipt" {
+        return Err(unsupported("DeliveryReceipt", span));
+    }
+    Ok(JetDeliveryReceipt {
+        id: service_ct_text(fields, "DeliveryReceipt", "id", span)?,
+        state: ct_to_delivery_state(service_ct_field(
+            fields,
+            "DeliveryReceipt",
+            "state",
+            span,
+        )?, span)?,
+        attempts: service_ct_int(fields, "DeliveryReceipt", "attempts", span)?,
+        retention_until: service_ct_int(fields, "DeliveryReceipt", "retention_until", span)?,
+        deadline: service_ct_int(fields, "DeliveryReceipt", "deadline", span)?,
+        idempotency_key: service_ct_text(fields, "DeliveryReceipt", "idempotency_key", span)?,
+        duplicate: service_ct_bool(fields, "DeliveryReceipt", "duplicate", span)?,
+        authority: service_ct_text(fields, "DeliveryReceipt", "authority", span)?,
+        generation: service_ct_int(fields, "DeliveryReceipt", "generation", span)?,
+        signature: service_ct_text(fields, "DeliveryReceipt", "signature", span)?,
+    })
+}
+
+fn ct_to_delivery_event(value: &CtValue, span: Span) -> Result<JetDeliveryEvent, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("DeliveryEvent", span));
+    };
+    if type_name != "DeliveryEvent" {
+        return Err(unsupported("DeliveryEvent", span));
+    }
+    Ok(JetDeliveryEvent {
+        sequence: service_ct_int(fields, "DeliveryEvent", "sequence", span)?,
+        state: ct_to_delivery_state(service_ct_field(
+            fields,
+            "DeliveryEvent",
+            "state",
+            span,
+        )?, span)?,
+        attempts: service_ct_int(fields, "DeliveryEvent", "attempts", span)?,
+        timestamp: service_ct_int(fields, "DeliveryEvent", "timestamp", span)?,
+        signature: service_ct_text(fields, "DeliveryEvent", "signature", span)?,
+    })
+}
+
+fn ct_to_service_error(value: &CtValue, span: Span) -> Result<JetServiceError, Diagnostic> {
+    let CtValue::Enum {
+        type_name,
+        variant,
+        args,
+    } = value
+    else {
+        return Err(unsupported("ServiceError", span));
+    };
+    if type_name != "ServiceError" || args.len() != 1 {
+        return Err(unsupported("ServiceError", span));
+    }
+    let CtValue::Str(message) = &args[0].1 else {
+        return Err(unsupported("ServiceError message", span));
+    };
+    let message = message.clone();
+    Ok(match variant.as_str() {
+        "Full" => JetServiceError::Full(message),
+        "Ambiguous" => JetServiceError::Ambiguous(message),
+        "Unknown" => JetServiceError::Unknown(message),
+        "NotStarted" => JetServiceError::NotStarted(message),
+        "Policy" => JetServiceError::Policy(message),
+        "Unavailable" => JetServiceError::Unavailable(message),
+        "Partitioned" => JetServiceError::Partitioned(message),
+        "Revoked" => JetServiceError::Revoked(message),
+        "Stale" => JetServiceError::Stale(message),
+        "Expired" => JetServiceError::Expired(message),
+        _ => return Err(unsupported("ServiceError variant", span)),
+    })
+}
+
+/// D-SERVICE-RECEIPT2=A / I9: the evaluator and resident JIT marshal service
+/// values back into the Prelude types and call the same `JetShow` impls as AOT.
+pub fn service_display_value(value: &CtValue) -> Option<String> {
+    let span = Span::new(0, 0);
+    match value {
+        CtValue::Enum { type_name, .. } if type_name == "DeliveryState" => {
+            Some(ct_to_delivery_state(value, span).ok()?.jet_show())
+        }
+        CtValue::Enum { type_name, .. } if type_name == "ServiceError" => {
+            Some(ct_to_service_error(value, span).ok()?.jet_show())
+        }
+        CtValue::Struct { type_name, .. } if type_name == "Delivery" => {
+            Some(ct_to_delivery_record(value, span).ok()?.jet_show())
+        }
+        CtValue::Struct { type_name, .. } if type_name == "DeliveryReceipt" => {
+            Some(ct_to_delivery_receipt(value, span).ok()?.jet_show())
+        }
+        CtValue::Struct { type_name, .. } if type_name == "DeliveryEvent" => {
+            Some(ct_to_delivery_event(value, span).ok()?.jet_show())
+        }
+        CtValue::Struct { type_name, .. } if type_name == "ServiceEndpoint" => {
+            Some(ct_to_endpoint(value, span).ok()?.jet_show())
+        }
+        CtValue::Struct { type_name, .. } if type_name == "ServiceRuntime" => {
+            Some(ct_to_runtime(value, span).ok()?.jet_show())
+        }
+        _ => None,
+    }
+}
+
 fn ct_to_runtime(value: &CtValue, span: Span) -> Result<JetServiceRuntime, Diagnostic> {
     let CtValue::Struct { type_name, fields } = value else {
         return Err(unsupported("ServiceRuntime", span));

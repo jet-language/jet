@@ -1558,8 +1558,9 @@ pub fn jet_services_authority_take_pending(
         if entry.authority.is_empty()
             || entry.tree != endpoint.tree
             || entry.worker != endpoint.worker
-            || !service_authority_entry_routes_to_endpoint(&runtime, entry, endpoint)
+            || entry.state == JetDeliveryState::Cancelled
             || entry.dead
+            || !service_authority_entry_routes_to_endpoint(&runtime, entry, endpoint)
             || (entry.delivered_to_worker && entry.delivered)
             // A retained receipt is eligible only after retry explicitly
             // places it back in the bounded pending queue.
@@ -1663,6 +1664,11 @@ pub fn jet_services_authority_requeue_pending(
         if authority_entry.dead {
             return Err(JetServiceError::Unavailable(
                 "cannot requeue a dead-lettered service receipt".to_string(),
+            ));
+        }
+        if authority_entry.state == JetDeliveryState::Cancelled {
+            return Err(JetServiceError::Unavailable(
+                "cannot requeue a cancelled service receipt".to_string(),
             ));
         }
         if service_authority_entry_expired(authority_entry, service_authority_now()) {
@@ -1778,6 +1784,7 @@ pub fn jet_services_authority_has_uncommitted(
     Ok(entries.iter().any(|entry| {
         entry.tree == endpoint.tree
             && entry.worker == endpoint.worker
+            && entry.state != JetDeliveryState::Cancelled
             && service_authority_entry_routes_to_endpoint(&runtime, entry, endpoint)
             // A handoff must pin the shard for every live durable receipt,
             // including one still waiting in the authority queue. Rotating
@@ -2416,6 +2423,11 @@ pub fn jet_services_delivery_events(
                 let timestamp = created.parse::<i64>().map_err(|_| {
                     service_authority_error("delivery event timestamp is malformed")
                 })?;
+                if !events.is_empty() {
+                    return Err(service_authority_error(
+                        "delivery event sequence is not monotonic",
+                    ));
+                }
                 events.push(JetDeliveryEvent {
                     sequence: 1,
                     state: JetDeliveryState::Accepted,
@@ -2445,11 +2457,6 @@ pub fn jet_services_delivery_events(
                 if !jet_ct_eq(&expected, &supplied) {
                     return Err(service_authority_error(
                         "delivery acceptance history signature does not validate",
-                    ));
-                }
-                if events.len() != 0 {
-                    return Err(service_authority_error(
-                        "delivery event sequence is not monotonic",
                     ));
                 }
             }

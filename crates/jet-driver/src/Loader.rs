@@ -1112,6 +1112,12 @@ fn load_entry_with_overlays_mode_on_stack(
                     contain: package_manifest.policy.contain.clone(),
                     harden: package_manifest.policy.harden,
                     memory_denials: package_memory_denials,
+                    application_authority:
+                        jet_foundation::Authority::ApplicationAuthority::from_policy(
+                            package_manifest.authority.holds.allow.as_deref(),
+                            package_manifest.authority.holds.deny.as_deref(),
+                            "package.jet authority.holds",
+                        ),
                 };
                 policy.extend(package_manifest.policy.declarations);
                 let source = pack_path.display().to_string();

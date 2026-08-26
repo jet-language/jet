@@ -1096,6 +1096,7 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::NumericMethod {
             recv,
             op: TIR::TNumericOp::CastAs { .. }
+                | TIR::TNumericOp::CheckedIntToFixed { .. }
                 | TIR::TNumericOp::InlineRange { .. },
         } => web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions),
         TIR::TExprKind::BuiltinMethod {
@@ -1998,6 +1999,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
             recv,
             op:
                 TIR::TNumericOp::CastAs { .. }
+                | TIR::TNumericOp::CheckedIntToFixed { .. }
                 | TIR::TNumericOp::FloatToInt { .. }
                 | TIR::TNumericOp::InlineRange { .. },
         } => web_expr_supported(recv),
@@ -6639,6 +6641,23 @@ fn wasm_emit_expr(
         },
         TIR::TExprKind::NumericMethod {
             recv,
+            op: TIR::TNumericOp::CheckedIntToFixed {
+                dst_rust,
+                dst_spelling,
+                host_kind,
+                line,
+            },
+        } => {
+            let input = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
+            let (lo, hi) = js_host_int_bounds(*host_kind).ok_or(())?;
+            let file = mangle_generated("source_file");
+            let error = format!("value doesn't fit in {dst_spelling}");
+            format!(
+                "{{ let value = ({input}); if value >= JetWasmInt::from_decimal({lo:?}).expect(\"valid fixed-width lower bound\") && value <= JetWasmInt::from_decimal({hi:?}).expect(\"valid fixed-width upper bound\") {{ value.to_string().parse::<{dst_rust}>().expect(\"checked fixed-width conversion\") }} else {{ jet_arithmetic_stop({file}, {line}, &{error:?}.to_string()) }} }}"
+            )
+        }
+        TIR::TExprKind::NumericMethod {
+            recv,
             op: TIR::TNumericOp::InlineRange { lo, hi, fallible },
         } => {
             let input = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
@@ -8233,7 +8252,7 @@ fn js_host_int_bounds(host_kind: i64) -> Option<(&'static str, &'static str)> {
         4 => ("0", "255"),
         5 => ("0", "65535"),
         6 => ("0", "4294967295"),
-        7 => ("0", "9223372036854775807"),
+        7 => ("0", "18446744073709551615"),
         _ => return None,
     })
 }
@@ -9101,6 +9120,20 @@ fn tir_js_expr(
             TIR::TNumericOp::CastAs { .. } => {
                 format!("Number({})", tir_js_expr(recv, funcs, file_prefix)?)
             }
+            TIR::TNumericOp::CheckedIntToFixed {
+                host_kind,
+                dst_spelling,
+                line,
+                ..
+            } => {
+                let input = tir_js_expr(recv, funcs, file_prefix)?;
+                let (lo, hi) = js_host_int_bounds(*host_kind).ok_or(())?;
+                let file = mangle_generated("source_file");
+                format!(
+                    "(() => {{ const value = BigInt({input}); return value >= {lo}n && value <= {hi}n ? value : jet_runtime_stop(\"E3010\", {file}, {line}, {msg}); }})()",
+                    msg = json_quote(&format!("value doesn't fit in {dst_spelling}")),
+                )
+            }
             TIR::TNumericOp::FloatToInt {
                 lower,
                 upper_exclusive,
@@ -9950,6 +9983,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/Option.rs"),
     "\n",
     include_str!("../Prelude/Core/FixedList.rs"),
+    "\n",
+    include_str!("../Prelude/Core/FixedArithmetic.rs"),
     "\n",
     "\n",
     include_str!("../Prelude/Core/Power.rs"),

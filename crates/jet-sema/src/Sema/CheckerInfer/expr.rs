@@ -1309,6 +1309,28 @@ impl<'a> Checker<'a> {
             return None;
         }
         self.check_scoped_loan_read(e);
+        // A callable's Result contract is the carrier at its boundary, but
+        // ordinary composite expressions consume the success value. Keep the
+        // carrier expectation for direct calls and explicit constructors so
+        // `return fallible()` and `return Ok/Err(...)` stay intact; expose the
+        // success type to everything else so a nested call can propagate at
+        // its own expression boundary.
+        let saved_expected = self.expected_type.clone();
+        let preserves_result_carrier = matches!(
+            e.without_parens(),
+            Expr::Call(..)
+                | Expr::MethodCall { .. }
+                | Expr::CallValue { .. }
+                | Expr::Ok(..)
+                | Expr::Err(..)
+                | Expr::Try(..)
+                | Expr::If { .. }
+        );
+        if !preserves_result_carrier {
+            if let Some(Type::Result { ok, .. }) = saved_expected.as_ref() {
+                self.expected_type = Some((**ok).clone());
+            }
+        }
         // Card #1440: an else-less all-pattern dispatch chain proves coverage
         // once (E0307) before ordinary per-level inference walks its arms.
         if matches!(e, Expr::If { .. }) && noelse_terminated(e) {
@@ -1319,6 +1341,7 @@ impl<'a> Checker<'a> {
         } else {
             self.infer_checked(e)
         };
+        self.expected_type = saved_expected;
         let result = self.auto_propagate_call(e, result);
         if result
             .as_ref()
@@ -1955,6 +1978,16 @@ impl<'a> Checker<'a> {
         cond: &Expr,
         value: &mut Expr,
     ) -> Option<Type> {
+        // A value-if checked under a callable's Result contract still has
+        // success-valued branches. Keep explicit `Ok`/`Err` constructors on
+        // the carrier path, but let every other branch call use the normal
+        // automatic propagation rule.
+        let saved_expected = self.expected_type.clone();
+        if let Some(Type::Result { ok, .. }) = saved_expected.as_ref() {
+            if !matches!(value.without_parens(), Expr::Ok(..) | Expr::Err(..)) {
+                self.expected_type = Some((**ok).clone());
+            }
+        }
         let result_pattern = matches!(
             cond,
             Expr::PatternTest {
@@ -1964,18 +1997,24 @@ impl<'a> Checker<'a> {
             }
         );
         if !result_pattern {
-            return self.infer(value);
+            let result = self.infer(value);
+            self.expected_type = saved_expected;
+            return result;
         }
         self.normalize_contextual_expr(value);
         let Expr::Call(call) = value else {
-            return self.infer(value);
+            let result = self.infer(value);
+            self.expected_type = saved_expected;
+            return result;
         };
         self.clear_uninit_mut_args(&call.args);
-        match self.check_call(call, true) {
-            Some(Some(ty)) => Some(ty),
+        let result = match self.check_call(call, true) {
+            Some(Some(ty)) => self.auto_propagate_call(value, Some(ty)),
             Some(None) => Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
             None => None,
-        }
+        };
+        self.expected_type = saved_expected;
+        result
     }
 
     pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
@@ -4105,7 +4144,8 @@ impl<'a> Checker<'a> {
 
     /// D-DOTCTOR3=A: elaborate `Type.{ body }` / inferred `.{ body }` against the
     /// head (or expected type), rewrite to ListLit / MapLit / StructLit / value,
-    /// then re-infer. Never inserts a conversion.
+    /// then re-infer. Runtime exact-Int fixed-width scalar construction records
+    /// the existing checked conversion seam for TIR lowering.
     pub(crate) fn elaborate_typed_lit(&mut self, e: &mut Expr) -> Option<Type> {
         let Expr::TypedLit { head, body, span } =
             std::mem::replace(e, Expr::Absent(Span::new(0, 0)))
@@ -4270,6 +4310,34 @@ impl<'a> Checker<'a> {
         match ty {
             Some(got) => {
                 if got != head {
+                    // D-FIXED-CONSTRUCT1: a runtime exact `Int` crossing into
+                    // a fixed-width scalar must use the existing checked,
+                    // destination-owned conversion seam. A typed scalar
+                    // literal is not a wrapping arithmetic operation, so its
+                    // range check remains active inside any arithmetic policy.
+                    if got == Type::Int && matches!(head, Type::IntN { .. }) {
+                        let source_span = e.span();
+                        let source = std::mem::replace(e, Expr::Absent(source_span));
+                        *e = Expr::MethodCall {
+                            receiver: Box::new(Expr::Ident(head.name(), source_span)),
+                            method: Syntax::conversion_method_for_source("Int"),
+                            method_span: source_span,
+                            owner_type_args: Vec::new(),
+                            type_args: Vec::new(),
+                            args: vec![crate::AST::CallArg {
+                                convention: crate::AST::AccessConvention::Read,
+                                expr: source,
+                                span: source_span,
+                                flags: crate::AST::CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            }],
+                            recv_type: None,
+                            resolved_ret: Some(head.clone()),
+                            checked_widen: true,
+                        };
+                        return Some(head);
+                    }
                     self.check_type_assignable(&head, &got, e.span());
                 }
                 Some(head)

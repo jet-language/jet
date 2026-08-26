@@ -2984,6 +2984,10 @@ fn lock_file_content_hash_roundtrip() {
         effects: vec![],
 
         effect_grants: vec![],
+        required_effects: vec![],
+        granted_effects: vec![],
+        denied_effects: vec![],
+        effect_authority: None,
         envelope: None,
         receipt: None,
         provenance: None,
@@ -4803,6 +4807,10 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
             effects: vec![],
 
             effect_grants: vec![],
+            required_effects: vec![],
+            granted_effects: vec![],
+            denied_effects: vec![],
+            effect_authority: None,
             envelope: None,
             receipt: None,
             provenance: None,

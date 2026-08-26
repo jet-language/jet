@@ -430,6 +430,48 @@ fn write_authority_delegation_receipts(
     Ok(())
 }
 
+fn resolve_run_authority_before_execution(
+    file: &str,
+    src: &str,
+    mode: OutputMode,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    package_manifest: &mut Option<(PathBuf, jet::Package::PackageFacts)>,
+) -> Option<jet_foundation::Authority::ApplicationAuthority> {
+    let checked = match crate::CmdInspect::check_projection_for_run(
+        Path::new(file),
+        profile,
+        setting_overrides,
+    ) {
+        Ok(checked) => checked,
+        Err(diags) => {
+            report_problems(mode, file, src, &diags);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let mut projection = jet::EffectBudget::project_program_effects(
+        &checked.bundle,
+        &checked.facts.summaries,
+        jet::Codegen::ENTRY_FN,
+        package_manifest.as_ref().map(|(_, manifest)| manifest),
+    );
+    let delegations = checked
+        .facts
+        .summaries
+        .values()
+        .flat_map(|summary| summary.authority_delegations.iter().cloned())
+        .collect::<Vec<_>>();
+    resolve_application_authority(
+        "run",
+        file,
+        src,
+        mode,
+        &mut projection,
+        package_manifest,
+        &delegations,
+    )
+}
+
 fn resolve_application_authority(
     cmd: &str,
     file: &str,
@@ -438,9 +480,9 @@ fn resolve_application_authority(
     projection: &mut jet::EffectBudget::EffectProjection,
     package_manifest: &mut Option<(PathBuf, jet::Package::PackageFacts)>,
     delegations: &[jet::Sema::AuthorityDelegation],
-) {
+) -> Option<jet_foundation::Authority::ApplicationAuthority> {
     if !matches!(cmd, "build" | "run") {
-        return;
+        return None;
     }
     let denied: jet::Sema::EffectSet = projection
         .required_effects
@@ -487,7 +529,7 @@ fn resolve_application_authority(
             report_problems(mode, file, src, &[diagnostic]);
             exit(ExitCodes::USER_ERROR);
         }
-        return;
+        return None;
     }
     if !authority_prompt_is_interactive(mode) {
         let diagnostic = jet::EffectBudget::application_policy_diagnostic(projection, &BTreeSet::new());
@@ -496,9 +538,10 @@ fn resolve_application_authority(
     }
 
     eprintln!(
-        "authority required for {} — choose once, project, or deny [{}]",
+        "authority required for {} — choose once, project, or deny [{}]\n  {}",
         json_strings(&undecided.iter().cloned().collect::<Vec<_>>()),
-        projection.authority
+        projection.authority,
+        jet::EffectBudget::render_effect_projection_line(projection),
     );
     eprint!("authority> ");
     let _ = std::io::stderr().flush();
@@ -618,6 +661,7 @@ fn resolve_application_authority(
         report_problems(mode, file, src, &[diagnostic]);
         exit(ExitCodes::USER_ERROR);
     }
+    (scope == "invocation").then(|| projection.application_authority())
 }
 
 /// D-BUILDPROFILE1: load Package build profiles from the project root of `source_file`.
@@ -1020,6 +1064,15 @@ pub(crate) fn run_compile_cmd(
             exit(ExitCodes::USAGE);
         }
 
+        let application_authority = resolve_run_authority_before_execution(
+            file,
+            &src,
+            mode,
+            profile.budget_name(),
+            setting_overrides,
+            &mut package_manifest,
+        );
+
         if program_args.is_empty() {
             if let Some(capture) = record.as_ref() {
                 try_recorded_run(file, capture, mode);
@@ -1034,12 +1087,13 @@ pub(crate) fn run_compile_cmd(
             .iter()
             .map(|arg| arg.as_str())
             .collect::<Vec<_>>();
-        let run = jet::Interpreter::run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints(
+        let run = jet::Interpreter::run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_and_authority(
             file,
             &args,
             gates,
             profile.budget_name(),
             setting_overrides,
+            application_authority.as_ref(),
         );
         crate::CmdDevTools::render_lints(file, mode, &run.lints);
         match run.outcome {
@@ -1087,6 +1141,15 @@ pub(crate) fn run_compile_cmd(
         && !is_plugin
         && !selects_build_entry
     {
+        let application_authority = resolve_run_authority_before_execution(
+            file,
+            &src,
+            mode,
+            profile.budget_name(),
+            setting_overrides,
+            &mut package_manifest,
+        );
+
         if program_args.is_empty() {
             if let Some(capture) = record.as_ref() {
                 try_recorded_run(file, capture, mode);
@@ -1099,12 +1162,13 @@ pub(crate) fn run_compile_cmd(
             .iter()
             .map(|arg| arg.as_str())
             .collect::<Vec<_>>();
-        let run = jet::Interpreter::run_jit_once_with_args_opts_and_gates_and_settings_with_lints(
+        let run = jet::Interpreter::run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority(
             file,
             &args,
             mode.json,
             gates,
             setting_overrides,
+            application_authority.as_ref(),
         );
         crate::CmdDevTools::render_lints(file, mode, &run.lints);
         match run.outcome {
@@ -1179,6 +1243,14 @@ pub(crate) fn run_compile_cmd(
         if let Some(ref key) = native_key {
             let out = bin_path(file);
             if jet::BuildCache::try_copy_cached(key, &out) {
+                let _application_authority = resolve_run_authority_before_execution(
+                    file,
+                    &src,
+                    mode,
+                    profile.budget_name(),
+                    setting_overrides,
+                    &mut package_manifest,
+                );
                 if verbose {
                     eprintln!("[build] cache hit -> reused cached binary (front end skipped)");
                 }

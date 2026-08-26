@@ -218,6 +218,9 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/MapKey.rs"),
     include_str!("../Prelude/Core/RuntimeStack.rs"),
     include_str!("../Prelude/Core/Authority.rs"),
+    // D-WRAP-SCOPE1=A / I9: one fixed-width arithmetic operation table for
+    // AOT, JIT, TIR evaluation, comptime, and web adapters.
+    include_str!("../Prelude/Core/FixedArithmetic.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/ViewAccess.rs"),
     // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module
@@ -3288,6 +3291,10 @@ mod tests {
         let option = std::fs::read_to_string(root.join("src/Prelude/Core/Option.rs")).unwrap();
         let fixed_list =
             std::fs::read_to_string(root.join("src/Prelude/Core/FixedList.rs")).unwrap();
+        let fixed_arithmetic = std::fs::read_to_string(
+            root.join("src/Prelude/Core/FixedArithmetic.rs"),
+        )
+        .unwrap();
         let columns = std::fs::read_to_string(root.join("src/Prelude/Core/Columns.rs")).unwrap();
         let column_list =
             std::fs::read_to_string(root.join("src/Prelude/Core/ColumnList.rs")).unwrap();
@@ -3445,6 +3452,9 @@ mod tests {
         let fixed_list_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/FixedList.rs\")")
             .unwrap();
+        let fixed_arithmetic_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/FixedArithmetic.rs\")")
+            .unwrap();
         let columns_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Columns.rs\")")
             .unwrap();
@@ -3573,7 +3583,9 @@ mod tests {
                 && time_pos < sketch_pos
                 && sketch_pos < contracts_pos
                 && contracts_pos < map_key_pos
+                && map_key_pos < fixed_arithmetic_pos
                 && map_key_pos < core_pos
+                && fixed_arithmetic_pos < core_pos
                 && sketch_pos < core_pos
                 && core_pos < view_access_pos
                 && view_access_pos < collections_pos
@@ -3640,6 +3652,7 @@ mod tests {
                 sketch.as_str(),
                 contracts.as_str(),
                 map_key.as_str(),
+                fixed_arithmetic.as_str(),
                 core.as_str(),
                 view_access.as_str(),
                 power.as_str(),
@@ -3695,6 +3708,7 @@ mod tests {
                     time.as_str(),
                     sketch.as_str(),
                     contracts.as_str(),
+                    fixed_arithmetic.as_str(),
                     core.as_str(),
                     view_access.as_str(),
                     power.as_str(),

@@ -57,7 +57,7 @@ tag Input { deny: [IO] }
 #MustUse fn discardable() Int -> { 1 }
 
 fn run() {
-    #FX(caps: IO) {}
+    #FX(authority: IO) {}
     discardable().drop("intentional result discard")
     detached :: task 42
     detached.detach()

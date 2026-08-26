@@ -2555,6 +2555,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                             && matches!(dst_rust.as_str(), "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" | "f32" | "f64")
                     }
                     TNumericOp::CheckedIntToFloat { .. } => recv.ty.is_integer(),
+                    TNumericOp::CheckedIntToFixed { .. } => matches!(&recv.ty, Type::Int),
                     TNumericOp::FloatToInt { .. } | TNumericOp::FloatNarrow { .. } => recv.ty.is_float(),
                     TNumericOp::TryFrom { .. } => recv.ty.is_integer(),
                     TNumericOp::InlineRange { .. } => recv.ty.is_integer(),

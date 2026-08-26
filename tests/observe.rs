@@ -333,13 +333,13 @@ fn panic_context_uses_only_lexically_live_locals() {
             &["shield_only"],
         ),
         (
-            "caps",
-            "#FX(IO) { caps_only :: 7; print(caps_only) }",
-            &["caps_only"],
+            "authority",
+            "#FX(IO) { authority_only :: 7; print(authority_only) }",
+            &["authority_only"],
         ),
         (
             "grant",
-            "#FX(caps: IO) { grant_only :: 7; print(grant_only) }",
+            "#FX(authority: IO) { grant_only :: 7; print(grant_only) }",
             &["grant_only"],
         ),
         // `assume_deterministic { … }` was renamed to `#Nondeterministic("reason") { … }`
@@ -557,6 +557,51 @@ fn run() {
     let (code, stdout, stderr) = build_and_run_debug("try_note_lazy", src);
     assert_eq!(code, 0, "successful propagation should exit 0: {stderr}");
     assert_eq!(stdout.trim(), "ok", "success note was evaluated: {stdout}");
+}
+
+#[test]
+fn fallback_handles_locally_and_context_preserves_the_structured_cause() {
+    let have_rustc = common::have_rustc();
+    if !have_rustc {
+        return;
+    }
+
+    // `??` owns the first failure: it must not create a journey hop. The
+    // second crossing uses the canonical `?(text)` form; it adds one hop and
+    // leaves both the typed code and nested cause on the same carrier.
+    let src = r#"
+fn fail() String ! -> Err("outer", code: "E_OUTER", cause: Err("root"))
+fn pass_through() ! -[]> {
+    _ :: fail()?("loading")
+}
+fn run() ! {
+    recovered :: fail() ?? "fallback"
+    print(recovered)
+    _ :: pass_through()?
+}
+"#;
+    let (code, stdout, stderr) = build_and_run_debug("fallback_context_cause", src);
+    assert_eq!(code, 1, "the second failure must escape: {stderr}");
+    assert_eq!(stdout.trim(), "fallback", "the first failure was not handled locally");
+    assert!(
+        stderr.starts_with("Error [E_OUTER]: outer\n  cause: root\n"),
+        "the structured error and nested cause must survive propagation: {stderr}"
+    );
+    assert!(
+        stderr.contains("Trail [E3002] (2 hops via ?, origin first):\n"),
+        "only the explicit context and outer propagation should be traced: {stderr}"
+    );
+    assert!(
+        stderr.contains("  1. pass_through (")
+            && stderr.contains(") — loading\n")
+            && stderr.contains("  2. run ("),
+        "the context must be one source-linked hop: {stderr}"
+    );
+    assert_eq!(
+        stderr.matches(" — loading\n").count(),
+        1,
+        "the context note must be evaluated exactly once: {stderr}"
+    );
 }
 
 #[test]

@@ -1212,16 +1212,16 @@ fn run() {
 /// default `jet run`, and the forced interpreter. The named handle is sema-only
 /// and the body remains an ordinary lexical block on every tier.
 #[test]
-fn caps_block() {
+fn authority_scope() {
     let src = "\
 fn announce(label: String, n: Int) -[IO]> {
     print(\"{label}: {n}\")
 }
 fn run() {
-    #FX(abilities: IO) {
+    #FX(authority: IO) {
         announce(\"answer\", 42)
     }
 }
 ";
-    tir_support::assert_tiers_agree("tir_caps", src, "answer: 42\n");
+    tir_support::assert_tiers_agree("tir_authority", src, "answer: 42\n");
 }

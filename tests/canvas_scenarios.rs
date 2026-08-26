@@ -1090,7 +1090,10 @@ fn run_browser_scenario_with_server(
     target_independent: bool,
     program_target: Option<&str>,
 ) {
-    let _browser_permit = CanvasBrowserPermit::acquire();
+    let browser_count = if name == SESSION_SURFACE_MATRIX_SCENARIO { 2 } else { 1 };
+    let _browser_permits = (0..browser_count)
+        .map(|_| CanvasBrowserPermit::acquire())
+        .collect::<Vec<_>>();
     ensure_jet_built();
 
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -1120,6 +1123,7 @@ fn run_browser_scenario_with_server(
         .envs(environment.iter().copied())
         .env("TMPDIR", "/home/nate/.cache/jet-test-scratch")
         .env("JET_BIN", cargo_target_dir(&repo).join("debug/jet"))
+        .env("JETPACK_BIN", cargo_target_dir(&repo).join("debug/jetpack"))
         .arg("scripts/canvas-test/run.mjs")
         .arg("--scenario")
         .arg(name)
@@ -1280,7 +1284,11 @@ impl CanvasCase {
         ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create Canvas scenario dir");
-        let entry = dir.join("main.jet");
+        let entry = if matches!(name, SESSION_SURFACE_MATRIX_SCENARIO | WORKBENCH_E2E_SCENARIO) {
+            dir.join("run.jet")
+        } else {
+            dir.join("main.jet")
+        };
         let big_fixture = if name == BIG_PROJECT_SCENARIO {
             Some(write_big_fixture(&dir))
         } else if name == "canvas-onboarding-tour" {
@@ -1302,7 +1310,7 @@ impl CanvasCase {
             .expect("write Canvas session matrix package fixture");
             fs::write(
                 dir.join("env.jet"),
-                "module env.dev {\n    prompt: \"canvas-session-matrix\",\n    services: { custom_server: { enable: false, ports: [43817], run: [\"node\", \"custom-server.mjs\"], ready: \"custom-server-ready\" } },\n}\n",
+                "module env.dev {\n    prompt: \"canvas-session-matrix\",\n    services: { custom_server: { enable: false, ports: [43817], run: [\"node\", \"custom-server.mjs\"], ready: \"custom-server-ready\" }, canvas_service: { enable: true, run: [\"node\", \"--eval\", \"console.log('canvas-service-ready'); setInterval(() => {{}}, 1000);\"] } },\n}\n",
             )
             .expect("write Canvas session matrix environment fixture");
             fs::write(
@@ -1312,7 +1320,7 @@ impl CanvasCase {
             .expect("write Canvas custom server fixture");
             fs::write(
                 &entry,
-                "fn run() { print(\"cli\") }\nfn serve() { print(\"service\") }\nfn web() { print(\"web\") }\nfn ui() { print(\"ui\") }\nfn game() { print(\"game\") }\n\nfn build(b: BuildContext) BuildPlan ! -> {\n    return b.plan()\n}\n",
+                "use core.term as io\n\nfn run() { io.print(\"cli\") }\nfn serve() { io.print(\"service\") }\nfn web() { io.print(\"web\") }\nfn ui() { io.print(\"ui\") }\nfn game() { io.print(\"game\") }\n\nfn build(b: BuildContext) BuildPlan ! -> {\n    return b.plan()\n}\n",
             )
             .expect("write Canvas session matrix source fixture");
             None
@@ -1395,7 +1403,17 @@ impl DevServer {
         program_target: Option<&str>,
     ) -> DevServer {
         let jet = cargo_target_dir(repo).join("debug/jet");
-        let mut command = Command::new(jet);
+        let mut command = if cwd.join("env.jet").is_file() {
+            let mut command = Command::new(cargo_target_dir(repo).join("debug/jetpack"));
+            command
+                .current_dir(cwd)
+                .env("JET_ROOT", cwd)
+                .args(["env", "-y", "--"])
+                .arg(&jet);
+            command
+        } else {
+            Command::new(&jet)
+        };
         command.current_dir(cwd).arg("dev").arg(entry);
         if target_independent {
             command.arg("--canvas").arg(format!("--canvas-port={port}"));
@@ -1453,8 +1471,7 @@ impl DevServer {
     }
 
     fn stop(&mut self) -> String {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        stop_process_tree(&mut self.child);
         let mut out = String::new();
         if let Some(mut stdout) = self.child.stdout.take() {
             let _ = stdout.read_to_string(&mut out);
@@ -1470,9 +1487,34 @@ impl DevServer {
 
 impl Drop for DevServer {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        stop_process_tree(&mut self.child);
     }
+}
+
+fn stop_process_tree(child: &mut Child) {
+    #[cfg(unix)]
+    stop_process_tree_unix(child.id());
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+}
+
+#[cfg(unix)]
+fn stop_process_tree_unix(pid: u32) {
+    let children_path = format!("/proc/{pid}/task/{pid}/children");
+    if let Ok(children) = fs::read_to_string(children_path) {
+        for child in children
+            .split_whitespace()
+            .filter_map(|value| value.parse::<u32>().ok())
+        {
+            stop_process_tree_unix(child);
+        }
+    }
+    let _ = Command::new("kill")
+        .args(["-KILL", &pid.to_string()])
+        .status();
 }
 
 fn wait_for_server(child: &mut Child, port: u16) {

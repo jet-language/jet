@@ -19,6 +19,8 @@ mod common;
 mod no_nix_namespace;
 
 const PROBE_JSON_PREFIX: &str = "JETPACK_DOGFOOD_JSON=";
+const DOGFOOD_MODE_ENV: &str = "JETPACK_DOGFOOD_MODE";
+const DOGFOOD_ROOT_ENV: &str = "JETPACK_DOGFOOD_ROOT";
 const EXPECTED_PACKAGES: &[&str] = &[
     "cargo",
     "sccache",
@@ -153,13 +155,33 @@ const PROBES: &[Probe] = &[
 
 #[test]
 fn jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures() {
+    let test_name = "jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures";
+    if env::var_os(no_nix_namespace::CHILD_MARKER).is_some() {
+        let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let contract = assert_env_lock_contract(&repo);
+        let jetpack = common::jetpack_bin();
+        let test_binary = env::current_exe().expect("current test binary");
+        let scratch = DogfoodScratch::existing(PathBuf::from(
+            env::var_os(DOGFOOD_ROOT_ENV).expect("dogfood child root"),
+        ));
+        let mode = env::var(DOGFOOD_MODE_ENV).expect("dogfood child mode");
+        let network_mode = match mode.as_str() {
+            "online" => no_nix_namespace::NetworkMode::Enabled,
+            "offline" => no_nix_namespace::NetworkMode::Disabled,
+            other => panic!("unknown dogfood mode {other}"),
+        };
+        no_nix_namespace::run_in_no_nix_namespace(test_name, network_mode, || {
+            run_phase(&repo, &jetpack, &test_binary, &scratch, &contract, &mode);
+        });
+        return;
+    }
+
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let contract = assert_env_lock_contract(&repo);
     let lock_path = repo.join(".jet/lock");
     let lock_before = fs::read(&lock_path).expect("read checked-in Jet lock");
-    let jetpack = common::jetpack_bin();
-    let test_binary = env::current_exe().expect("current test binary");
     let scratch = DogfoodScratch::new(&repo);
+    env::set_var(DOGFOOD_ROOT_ENV, &scratch.root);
 
     assert!(!scratch.root.join("hangar/objects").exists());
     assert!(!scratch.root.join("fixtures").exists());
@@ -175,14 +197,8 @@ fn jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures() {
 
     for (mode, network_mode) in modes {
         let mode = mode.to_owned();
-        env::set_var("JETPACK_DOGFOOD_MODE", &mode);
-        no_nix_namespace::run_in_no_nix_namespace(
-            "jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures",
-            network_mode,
-            || {
-                run_phase(&repo, jetpack, &test_binary, &scratch, &contract, &mode);
-            },
-        );
+        env::set_var(DOGFOOD_MODE_ENV, &mode);
+        no_nix_namespace::run_in_no_nix_namespace(test_name, network_mode, || {});
         assert!(!scratch.root.join("fixtures").exists());
 
         let summary = read_phase_summary(&scratch, &mode);
@@ -434,6 +450,7 @@ fn clean_command(program: &Path, repo: &Path, scratch: &DogfoodScratch, _offline
     let cargo_home = env::var_os("CARGO_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env::var_os("HOME").expect("HOME")).join(".cargo"));
+    let loader_path = env::var_os("LD_LIBRARY_PATH");
     let mut command = Command::new(program);
     command
         .env_clear()
@@ -447,6 +464,9 @@ fn clean_command(program: &Path, repo: &Path, scratch: &DogfoodScratch, _offline
         .env("CARGO_TARGET_DIR", &scratch.target)
         .env("JETPACK_ROOT", &scratch.root)
         .env("NO_COLOR", "1");
+    if let Some(loader_path) = loader_path {
+        command.env("LD_LIBRARY_PATH", loader_path);
+    }
     command
 }
 
@@ -856,6 +876,7 @@ struct DogfoodScratch {
     home: PathBuf,
     tmp: PathBuf,
     target: PathBuf,
+    owned: bool,
 }
 
 impl DogfoodScratch {
@@ -879,6 +900,21 @@ impl DogfoodScratch {
             home,
             tmp,
             target,
+            owned: true,
+        }
+    }
+
+    fn existing(root: PathBuf) -> Self {
+        let base = root
+            .parent()
+            .expect("dogfood root parent")
+            .to_path_buf();
+        Self {
+            root,
+            home: base.join("home"),
+            tmp: base.join("tmp"),
+            target: base.join("target"),
+            owned: false,
         }
     }
 
@@ -921,6 +957,9 @@ fn install_signed_index_config(repo: &Path, root: &Path) {
 
 impl Drop for DogfoodScratch {
     fn drop(&mut self) {
+        if !self.owned {
+            return;
+        }
         let base = self.root.parent().expect("scratch parent");
         common::make_tree_writable(base);
         let _ = fs::remove_dir_all(base);

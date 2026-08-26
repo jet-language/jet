@@ -7,6 +7,7 @@ use jet_foundation::AST::ProgramBundle;
 use jet_foundation::AST::{AccessConvention, ParamZone, Type};
 use jet_foundation::JSON::json_escape;
 use jet_pkg_model::Overlay::OverlayPolicy;
+use jet_pkg_model::EffectBudget::{render_effect_projection_line, render_effect_projection_object};
 use jet_pkg_model::Package::{
     dep_display, ConfigFacts as PackageConfigFacts, EnvironmentFact, MemberRef,
     OutputFact as PackageOutputFact, OutputPayload, PackageFacts, ServiceFact,
@@ -839,11 +840,12 @@ impl SemIndex {
             .workspace_overlay_policy()
             .map(workspace_overlay_policy_json)
             .unwrap_or_else(|| "null".to_string());
+        let effect_projection = render_effect_projection_object(self.effect_projection());
         let expand = expand
             .map(|value| format!(",\"expand\":{}", json_expand_projection(value)))
             .unwrap_or_default();
         let payload = format!(
-            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"state_graphs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"arithmetic\":[{}],\"members\":[{}]{}}}",
+            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"state_graphs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"effect_projection\":{},\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"arithmetic\":[{}],\"members\":[{}]{}}}",
             self.schema_version(),
             defs.join(","),
             definition_facts.join(","),
@@ -852,6 +854,7 @@ impl SemIndex {
             state_graphs.join(","),
             package,
             workspace_overlays,
+            effect_projection,
             refs.join(","),
             calls.join(","),
             effects.join(","),
@@ -928,8 +931,9 @@ impl TypeDossier {
         let refs: Vec<String> = self.references.iter().map(json_ref).collect();
         let bypasses: Vec<String> = self.bypass_facts.iter().map(json_bypass).collect();
         let state_graphs: Vec<String> = self.state_graphs.iter().map(json_state_graph).collect();
+        let effect_projection = render_effect_projection_object(&self.effect_projection);
         let payload = format!(
-            "{{\"schema_version\":{},\"target\":{},\"definition\":{},\"members\":[{}],\"references\":[{}],\"bypass_facts\":[{}],\"state_graphs\":[{}]}}",
+            "{{\"schema_version\":{},\"target\":{},\"definition\":{},\"members\":[{}],\"references\":[{}],\"bypass_facts\":[{}],\"state_graphs\":[{}],\"effect_projection\":{}}}",
             self.schema_version,
             json_str(&self.target),
             def_json,
@@ -937,6 +941,7 @@ impl TypeDossier {
             refs.join(","),
             bypasses.join(","),
             state_graphs.join(","),
+            effect_projection,
         );
         render_status_json(
             "ok",
@@ -961,6 +966,9 @@ impl TypeDossier {
             }
             None => out.push_str("summary\n  defined: not found\n"),
         }
+        out.push_str("effect roles\n  ");
+        out.push_str(&render_effect_projection_line(&self.effect_projection));
+        out.push('\n');
         out.push_str("members\n");
         if self.members.is_empty() {
             out.push_str("  none\n");

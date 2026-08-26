@@ -1056,11 +1056,46 @@ fn render_provenance_text(
         render_provenance_field("transparency", &report.transparency);
         render_provenance_field("publisher", &report.publisher);
         render_provenance_field("build", &report.build);
+        render_effect_provenance_text(report);
     }
 }
 
 fn render_provenance_field(label: &str, field: &jet::Lock::ProvenanceField) {
     println!("  {label:<12} {} ({})", field.value, field.status.label());
+}
+
+fn render_effect_provenance_text(report: &jet::Lock::DependencyProvenanceReport) {
+    if report.required_effects.is_empty()
+        && report.granted_effects.is_empty()
+        && report.denied_effects.is_empty()
+        && report.authority == "not recorded"
+    {
+        return;
+    }
+    println!("  effect roles");
+    println!("    required effects: {}", effect_names(&report.required_effects));
+    println!("    granted effects: {}", effect_names(&report.granted_effects));
+    println!("    denied effects: {}", effect_names(&report.denied_effects));
+    println!("    authority: {}", report.authority);
+}
+
+fn effect_names(effects: &[String]) -> String {
+    if effects.is_empty() {
+        "none".to_string()
+    } else {
+        effects.join(", ")
+    }
+}
+
+fn json_strings(values: &[String]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| format!("\"{}\"", json_escape(value)))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
 }
 
 fn render_provenance_json(
@@ -1094,16 +1129,28 @@ fn render_provenance_json_package(report: &jet::Lock::DependencyProvenanceReport
         jet::Lock::ProvenanceStatus::Enforced
     )
     .then_some("E1204");
-    let fields = [
+    let mut fields = vec![
         format!("\"name\":\"{}\"", json_escape(&report.name)),
         format!("\"version\":\"{}\"", json_escape(&report.version)),
         render_provenance_json_field("integrity", &report.integrity, integrity_evidence),
         render_provenance_json_field("transparency", &report.transparency, None),
         render_provenance_json_field("publisher", &report.publisher, None),
         render_provenance_json_field("build", &report.build, None),
-    ]
-    .join(",");
-    format!("{{{}}}", fields)
+    ];
+    if !report.required_effects.is_empty()
+        || !report.granted_effects.is_empty()
+        || !report.denied_effects.is_empty()
+        || report.authority != "not recorded"
+    {
+        fields.push(format!(
+            "\"required_effects\":{},\"granted_effects\":{},\"denied_effects\":{},\"authority\":\"{}\"",
+            json_strings(&report.required_effects),
+            json_strings(&report.granted_effects),
+            json_strings(&report.denied_effects),
+            json_escape(&report.authority),
+        ));
+    }
+    format!("{{{}}}", fields.join(","))
 }
 
 fn render_provenance_json_field(
