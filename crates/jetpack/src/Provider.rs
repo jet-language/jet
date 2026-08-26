@@ -556,9 +556,9 @@ pub fn cache_expectation(
 }
 
 /// Return the exact external approval subject for a Core Cargo action without
-/// executing package code. The CLI gates this subject before the Store reaches
-/// the provider; project metadata can therefore describe a build but cannot
-/// authorize its Cargo/build-script execution.
+/// executing package code. Every realization caller must gate this subject
+/// before the Store reaches the provider; project metadata can therefore
+/// describe a build but cannot authorize its Cargo/build-script execution.
 pub(crate) fn core_build_identity(
     spec: &RefSpec,
     table: &SourceTable,

@@ -197,6 +197,109 @@ fn jetos_studio_serve_exposes_projection_json() {
 }
 
 #[test]
+fn jetos_studio_control_plane_rejects_unauthenticated_and_cross_origin_actions() {
+    let root = Scratch::new("studio-auth-root");
+    fs::create_dir_all(root.path.join("studio")).unwrap();
+    fs::write(
+        root.path.join("studio/index.html"),
+        "<!doctype html><title>Studio</title>",
+    )
+    .unwrap();
+    fs::write(root.path.join("studio/app.json"), "{}").unwrap();
+    fs::write(root.path.join("studio/data.json"), "{}").unwrap();
+
+    let project = Scratch::new("studio-auth-project");
+    copy_dir_recursive(&config_example_dir(), &project.path);
+    let mut child = jetos()
+        .args([
+            "studio",
+            project.path.to_str().unwrap(),
+            "--host",
+            "halcyon",
+            "--serve",
+            "127.0.0.1:0",
+            "--no-color",
+        ])
+        .env("JETOS_STUDIO_ROOT", &root.path)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let stdout = child.stdout.take().unwrap();
+    let mut reader = std::io::BufReader::new(stdout);
+    let mut line = String::new();
+    {
+        use std::io::BufRead;
+        reader.read_line(&mut line).unwrap();
+    }
+    let guard = KillOnDrop(child);
+    let addr = studio_addr(&line);
+    let connect_addr = addr.split_once('?').map(|(host, _)| host).unwrap_or(&addr);
+    let host = format!("Host: {connect_addr}\r\n");
+
+    for path in ["/studio/data.json", "/studio/source"] {
+        let response = studio_raw(
+            &addr,
+            &format!("GET {path} HTTP/1.1\r\n{host}Connection: close\r\n\r\n"),
+        );
+        assert!(
+            response.contains("401 Unauthorized"),
+            "unauthenticated Studio read reached {path}: {response}"
+        );
+    }
+
+    for (path, body) in [
+        ("/studio/transaction", "{\"op\":\"session\"}"),
+        ("/studio/run", "{\"action\":\"check\"}"),
+    ] {
+        let response = studio_raw(
+            &addr,
+            &format!(
+                "POST {path} HTTP/1.1\r\n{host}Origin: http://{connect_addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        );
+        assert!(
+            response.contains("401 Unauthorized"),
+            "unauthenticated Studio action reached {path}: {response}"
+        );
+    }
+
+    let token = addr
+        .split_once("?session=")
+        .map(|(_, token)| token)
+        .expect("Studio service URL must carry its session token");
+    let body = "{\"action\":\"check\"}";
+    let csrf = studio_raw(
+        &addr,
+        &format!(
+            "POST /studio/run HTTP/1.1\r\n{host}Origin: http://evil.test\r\nCookie: jetos_studio={token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ),
+    );
+    assert!(
+        csrf.contains("401 Unauthorized"),
+        "cross-origin Studio action reached JetOS: {csrf}"
+    );
+
+    let source = studio_http(&addr, "GET", "/studio/source", "");
+    assert!(source.contains("module halcyon"), "authorized read failed: {source}");
+    let session = studio_http(&addr, "POST", "/studio/transaction", "{\"op\":\"session\"}");
+    assert!(session.contains("200 OK"), "authorized transaction failed: {session}");
+    assert!(session.contains("session_id"), "authorized transaction lacked session: {session}");
+
+    drop(guard);
+}
+
+#[test]
 fn jetos_studio_transaction_previews_and_writes_source() {
     let project = Scratch::new("studio-edit-project");
     copy_dir_recursive(&config_example_dir(), &project.path);

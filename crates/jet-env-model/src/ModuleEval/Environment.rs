@@ -3623,4 +3623,32 @@ mod tests {
         )
         .is_err());
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_dotenv_path_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-env-dotenv-symlink-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = root.with_file_name(format!(
+            "jet-env-dotenv-outside-{}",
+            std::process::id()
+        ));
+        std::fs::write(&outside, "SECRET=must-not-read\n").unwrap();
+        symlink(&outside, root.join(".env")).unwrap();
+
+        assert!(checked_dotenv_path(&root, ".env").is_err());
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "SECRET=must-not-read\n"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+    }
 }

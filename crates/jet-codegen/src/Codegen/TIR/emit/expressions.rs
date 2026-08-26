@@ -3971,7 +3971,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let v = emit_tir_expr(value, cx);
             let fb = emit_tir_orfallback_rhs(fallback, cx);
             jet_format!(
-                "match {} {{ Ok({jet_prefix}ok) => {jet_prefix}ok, Err({}) => {} }}",
+                "match {} {{ Ok({jet_prefix}ok) => {jet_prefix}ok, Err({}) => {{ jet_journey_reset(); {} }} }}",
                 v,
                 ambient_err_local().rust_name(),
                 fb

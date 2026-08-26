@@ -7,7 +7,7 @@ use super::kernel_bootstrap::{run_kernel_bootstrap_builder, validate_boot_payloa
 use super::options_rendering::boot_profile;
 use super::store_realize::{
     desktop_default_required_packages, first_party_package_ref, jetos_runtime_package_ref,
-    realize_ref, try_realize_ref,
+    realize_ref, try_realize_ref, RealizeRefError,
 };
 use super::types::{Generation, OSFlags, CACHYOS_KERNEL_PACKAGE, SYSTEMD_INIT_PACKAGE};
 use crate::Output::Theme;
@@ -28,6 +28,10 @@ pub(super) fn build_generation(
     source_config: &Path,
 ) -> Option<Generation> {
     let roots = Store::resolve();
+    let project_dir = source_config
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     let final_dir = generation_dir(system, flags.name.as_deref());
     let generation_name = final_dir.file_name()?.to_string_lossy().into_owned();
     let published_proof = if final_dir.exists() {
@@ -112,6 +116,7 @@ pub(super) fn build_generation(
             flags,
             &plan.table,
             &spec,
+            project_dir,
             name_w,
             Some((&mut live, progress_step - 1, progress_total)),
         ) {
@@ -149,11 +154,13 @@ pub(super) fn build_generation(
             flags,
             &plan.table,
             &spec,
+            project_dir,
             name_w.max(CACHYOS_KERNEL_PACKAGE.len()),
             Some((&mut live, progress_step - 1, progress_total)),
         ) {
             Ok(entry) => entry,
-            Err(_) => {
+            Err(RealizeRefError::BuildRejected) => return None,
+            Err(RealizeRefError::Provider(_)) => {
                 theme.error_coded(
                     "E1280",
                     "jetos CachyOS kernel package is missing",
@@ -194,11 +201,13 @@ pub(super) fn build_generation(
             flags,
             &plan.table,
             &spec,
+            project_dir,
             name_w.max(SYSTEMD_INIT_PACKAGE.len()),
             Some((&mut live, progress_step - 1, progress_total)),
         ) {
             Ok(entry) => entry,
-            Err(_) => {
+            Err(RealizeRefError::BuildRejected) => return None,
+            Err(RealizeRefError::Provider(_)) => {
                 theme.error_coded(
                     "E1281",
                     "jetos systemd init package is missing",
@@ -237,11 +246,13 @@ pub(super) fn build_generation(
             flags,
             &plan.table,
             &spec,
+            project_dir,
             name_w.max(package.len()),
             Some((&mut live, progress_step - 1, progress_total)),
         ) {
             Ok(entry) => entry,
-            Err(_) => {
+            Err(RealizeRefError::BuildRejected) => return None,
+            Err(RealizeRefError::Provider(_)) => {
                 theme.error_coded(
                     "E1288",
                     "jetos GNOME desktop package is missing",

@@ -7250,3 +7250,31 @@ mod missing_c_lib_tests {
         assert!(!report.contains("runtime_host.rs"));
     }
 }
+
+#[cfg(test)]
+mod web_output_boundary_tests {
+    use super::validate_web_output_file;
+
+    #[cfg(unix)]
+    #[test]
+    fn web_artifact_writer_rejects_symlink_output() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::current_dir()
+            .unwrap()
+            .join(format!(".jet-web-output-symlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = root.join("outside.js");
+        let output = root.join("app.js");
+        std::fs::write(&outside, "must survive").unwrap();
+        symlink(&outside, &output).unwrap();
+
+        let error = validate_web_output_file(&output, &root)
+            .expect_err("web artifact writes must not follow symlinks");
+        assert!(error.contains("must not be a symlink"), "{error}");
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

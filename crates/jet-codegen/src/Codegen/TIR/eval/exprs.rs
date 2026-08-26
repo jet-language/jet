@@ -4229,6 +4229,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             );
                             continue;
                         }
+                        // A recovered failure must not leave its `?` journey
+                        // attached to a later failure in the same run. AOT,
+                        // JIT, and Wasm clear the same Foundation buffer at
+                        // their `??` recovery edge.
+                        jet_foundation::Outcome::jet_journey_reset();
                         let previous_ambient_err = scope.get(&ambient_err_local().name).cloned();
                         if let CtValue::Failed(CtReport::Told(error)) = &value {
                             // D-FAIL-BIND1=A: the interpreter carries the

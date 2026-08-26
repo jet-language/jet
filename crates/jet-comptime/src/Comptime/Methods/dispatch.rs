@@ -1646,7 +1646,7 @@ impl<'a> Interp<'a> {
         }
     }
 
-    fn integer_width_for_expr(&self, expr: &Expr) -> Option<u32> {
+fn integer_width_for_expr(&self, expr: &Expr) -> Option<u32> {
         match expr {
             Expr::Ident(name, _) => self
                 .binding_types
@@ -1666,5 +1666,46 @@ impl<'a> Interp<'a> {
             },
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn embed_file_bytes_and_build_embed_reject_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-comptime-embed-symlink-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = root.with_file_name(format!(
+            "jet-comptime-embed-outside-{}",
+            std::process::id()
+        ));
+        std::fs::write(&outside, "must not be embedded").unwrap();
+        symlink(&outside, root.join("payload.txt")).unwrap();
+        let span = Span::new(0, 1);
+
+        for builtin in [
+            crate::Syntax::BUILTIN_EMBED_FILE,
+            crate::Syntax::BUILTIN_EMBED_BYTES,
+        ] {
+            assert!(
+                eval_build_time_io(builtin, &root, Some("payload.txt"), None, span).is_err(),
+                "{builtin} must reject a symlink escape"
+            );
+        }
+        let args = [CtValue::Str("payload.txt".to_string())];
+        assert!(eval_build_embed(&args, &root, None, span).is_err());
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must not be embedded");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
     }
 }

@@ -1426,6 +1426,16 @@ mod tests {
     }
 
     #[test]
+    fn prefix_pattern_does_not_match_sibling_name() {
+        let dir = scratch("prefix_sibling");
+        let store = dir.join("trust");
+        add_pattern(&store, "/home/dev/app");
+        assert!(is_trusted(&store, Path::new("/home/dev/app/src"), "h"));
+        assert!(!is_trusted(&store, Path::new("/home/dev/application"), "h"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn pattern_matching_tolerates_canonical_path_aliases() {
         let dir = scratch("canonical_alias");
         let store = dir.join("trust");

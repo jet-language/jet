@@ -1239,8 +1239,13 @@ pub(crate) fn unique_temp_name(tag: &str) -> String {
 }
 
 fn write_unique_temp_file(tag: &str, source: &str) -> std::io::Result<std::path::PathBuf> {
-    use std::io::Write;
     let path = std::env::temp_dir().join(unique_temp_name(tag));
+    write_temp_file_at(&path, source)?;
+    Ok(path)
+}
+
+fn write_temp_file_at(path: &std::path::Path, source: &str) -> std::io::Result<()> {
+    use std::io::Write;
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -1252,10 +1257,10 @@ fn write_unique_temp_file(tag: &str, source: &str) -> std::io::Result<std::path:
     }
     let mut file = options.open(&path)?;
     if let Err(error) = file.write_all(source.as_bytes()) {
-        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path);
         return Err(error);
     }
-    Ok(path)
+    Ok(())
 }
 
 // ── :run ───────────────────────────────────────────────────────────────────
@@ -3989,6 +3994,28 @@ mod tests {
             crate::Diagnostics::Span::new(0, 1),
         )
         .expect("repl authority");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repl_temp_writer_rejects_existing_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-repl-temp-symlink-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("outside.txt");
+        let link = root.join("session.jet");
+        std::fs::write(&target, "must survive\n").unwrap();
+        symlink(&target, &link).unwrap();
+
+        assert!(write_temp_file_at(&link, "attacker\n").is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "must survive\n");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

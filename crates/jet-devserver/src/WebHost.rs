@@ -2457,7 +2457,7 @@ mod tests {
         canvas_api_path, canvas_request_authorized, constant_time_equal, format_build_time,
         format_line_colored, format_line_plain, frame_lines, header_words, host_header_allowed,
         handle_connection, inject_canvas_session, inject_live_reload, mint_session_secret, origin_allowed,
-        CanvasHostOptions, DevStatus, ListenerKind, Ordering, WebHost,
+        stage_and_swap, CanvasHostOptions, DevStatus, ListenerKind, Ordering, WebHost,
     };
     use crate::Request;
     use std::io::Read;
@@ -2465,6 +2465,32 @@ mod tests {
     use std::net::{TcpListener, TcpStream};
     use std::sync::Arc;
     use std::thread;
+
+    #[cfg(unix)]
+    #[test]
+    fn stage_and_swap_rejects_symlinked_destination() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::current_dir()
+            .unwrap()
+            .join(format!(".jet-webhost-symlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let output = root.join("build");
+        let staging = output.join(".staging");
+        let outside = root.join("outside.js");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(&staging.join("web.manifest.json"), "staged").unwrap();
+        std::fs::write(&outside, "must survive").unwrap();
+        symlink(&outside, output.join("web.manifest.json")).unwrap();
+
+        assert!(
+            stage_and_swap(&staging, &output).is_err(),
+            "web finalization must not replace a symlinked output"
+        );
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn injects_before_closing_body_tag() {

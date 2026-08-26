@@ -1645,3 +1645,38 @@ pub(super) fn rel_path(root: &Path, path: &Path) -> String {
         .to_string_lossy()
         .replace(std::path::MAIN_SEPARATOR, "/")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::validate_project_path;
+
+    #[cfg(unix)]
+    #[test]
+    fn project_path_validation_rejects_symlink_components() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-canvas-project-path-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = root.with_file_name(format!(
+            "jet-canvas-project-outside-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, root.join("linked")).unwrap();
+
+        let error = validate_project_path(
+            &root,
+            &root.join("linked/new.jet"),
+            "linked/new.jet",
+        )
+        .expect_err("Canvas must not resolve project paths through symlinks");
+        assert!(error.contains("must not traverse symlinks"), "{error}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+}

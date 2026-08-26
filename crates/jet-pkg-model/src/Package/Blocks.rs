@@ -424,6 +424,19 @@ pub(super) fn validate_dependency_name(name: &str) -> bool {
         && Path::new(name).components().nth(1).is_none()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::validate_dependency_name;
+
+    #[test]
+    fn dependency_names_reject_path_components() {
+        for name in ["../escape", "..", "escape/name", r"escape\name", "escape:name"] {
+            assert!(!validate_dependency_name(name), "accepted unsafe name: {name}");
+        }
+        assert!(validate_dependency_name("safe-name"));
+    }
+}
+
 /// Detect a native C-library link ref (S59/D-CFFI2): `c@system` or
 /// `c@"vendor/path"`.
 fn parse_c_lib_ref(value: &str) -> Option<String> {

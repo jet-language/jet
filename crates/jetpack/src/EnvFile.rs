@@ -114,34 +114,37 @@ impl EnvFile {
 
     /// Render the canonical `env.jet` text for this environment.
     pub fn render(&self) -> String {
-        let prompt = self.prompt_label();
+        let prompt = quote_jet_string(&self.prompt_label());
         let mut lines = Vec::new();
         for s in &self.named {
             match &s.via {
                 Some(via) => lines.push(format!(
-                    "        pkg.source(\"{}\", \"{}\", \"{via}\");",
-                    s.name, s.upstream
+                    "        pkg.source({}, {}, {});",
+                    quote_jet_string(&s.name),
+                    quote_jet_string(&s.upstream),
+                    quote_jet_string(via),
                 )),
                 None => lines.push(format!(
-                    "        pkg.source(\"{}\", \"{}\");",
-                    s.name, s.upstream
+                    "        pkg.source({}, {});",
+                    quote_jet_string(&s.name),
+                    quote_jet_string(&s.upstream),
                 )),
             }
         }
         if let Some(default) = &self.default_source {
             lines.push(format!(
-                "        pkg.source(\"{}\");",
-                published_source(default)
+                "        pkg.source({});",
+                quote_jet_string(published_source(default))
             ));
         }
         let pkgs = self
             .packages
             .iter()
-            .map(|p| format!("\"{p}\""))
+            .map(|p| quote_jet_string(p))
             .collect::<Vec<_>>()
             .join(", ");
         lines.push(format!("        pkg.packages([{pkgs}]);"));
-        lines.push(format!("        pkg.prompt(\"{prompt}\");"));
+        lines.push(format!("        pkg.prompt({prompt});"));
         format!(
             "// {file} — a Jetpack project environment\n\
              use jetpack as pkg;\n\
@@ -155,6 +158,25 @@ impl EnvFile {
             body = lines.join("\n"),
         )
     }
+}
+
+/// Quote a value for a plain Jet string literal. Jet strings use doubled
+/// braces for literal braces because single braces start interpolation.
+fn quote_jet_string(value: &str) -> String {
+    let mut out = String::from("\"");
+    for character in value.chars() {
+        match character {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '{' => out.push_str("{{"),
+            '}' => out.push_str("}}"),
+            character => out.push(character),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Path to the env file in a project dir.
@@ -314,8 +336,26 @@ fn call_args(text: &str, name: &str) -> Option<String> {
     i += 1;
     let mut depth = 1;
     let mut out = String::new();
+    let mut in_quote = false;
+    let mut escaped = false;
     while i < bytes.len() {
+        if in_quote {
+            out.push(bytes[i]);
+            if escaped {
+                escaped = false;
+            } else if bytes[i] == '\\' {
+                escaped = true;
+            } else if bytes[i] == '"' {
+                in_quote = false;
+            }
+            i += 1;
+            continue;
+        }
         match bytes[i] {
+            '"' => {
+                in_quote = true;
+                out.push('"');
+            }
             '(' => {
                 depth += 1;
                 out.push('(');
@@ -341,11 +381,32 @@ fn quoted_strings(fragment: &str) -> Vec<String> {
     while let Some(c) = chars.next() {
         if c == '"' {
             let mut s = String::new();
-            for c in chars.by_ref() {
-                if c == '"' {
-                    break;
+            // `for c in chars.by_ref()` would hold the borrow across the whole
+            // body, so the lookahead below could not touch `chars`.
+            while let Some(c) = chars.next() {
+                match c {
+                    '"' => break,
+                    '\\' => match chars.next() {
+                        Some('n') => s.push('\n'),
+                        Some('t') => s.push('\t'),
+                        Some('"') => s.push('"'),
+                        Some('\\') => s.push('\\'),
+                        Some(other) => {
+                            s.push('\\');
+                            s.push(other);
+                        }
+                        None => s.push('\\'),
+                    },
+                    '{' if chars.peek() == Some(&'{') => {
+                        chars.next();
+                        s.push('{');
+                    }
+                    '}' if chars.peek() == Some(&'}') => {
+                        chars.next();
+                        s.push('}');
+                    }
+                    character => s.push(character),
                 }
-                s.push(c);
             }
             out.push(s);
         }
@@ -464,6 +525,29 @@ pub fn shell() => [JSON] {
         a.sort();
         b.sort();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn render_keeps_hostile_values_as_jet_string_data() {
+        let hostile = "$(touch pwned); `id`; \"quote\" {interpolation}\nnext";
+        let ef = EnvFile {
+            default_source: Some(hostile.to_string()),
+            packages: vec![hostile.to_string()],
+            prompt: Some(hostile.to_string()),
+            ..Default::default()
+        };
+
+        let rendered = ef.render();
+        let (_, diagnostics) = crate::Lexer::lex(&rendered);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}\n{rendered}");
+        assert!(rendered.contains(
+            r#"pkg.prompt("$(touch pwned); `id`; \"quote\" {{interpolation}}\nnext");"#
+        ));
+
+        let parsed = parse(&rendered);
+        assert_eq!(parsed.prompt.as_deref(), Some(hostile));
+        assert_eq!(parsed.default_source.as_deref(), Some(hostile));
+        assert_eq!(parsed.packages, vec![hostile]);
     }
 
     #[test]

@@ -4999,6 +4999,43 @@ fn canvas_project_transactions_reject_reserved_create_package_path() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn canvas_project_transactions_reject_symlink_package_path() {
+    use std::os::unix::fs::symlink;
+
+    let dir = temp_dir("project_symlink_path");
+    fs::create_dir_all(dir.join("packages/app")).unwrap();
+    fs::write(
+        dir.join("workspace.jet"),
+        "module workspace {\n    members: [\"./packages/app\"]\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("packages/app/package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\npackages: { app: executable }\n",
+    )
+    .unwrap();
+    let entry = dir.join("packages/app/main.jet");
+    fs::write(&entry, "fn run() {\n    print(\"app\")\n}\n").unwrap();
+
+    let project = jet::Canvas::project_json_for_entry(&entry);
+    let project_revision = json_field(&project, "project_revision");
+    let outside = dir.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    symlink(&outside, dir.join("packages/escape")).unwrap();
+    let req = format!(
+        "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":false,\"project_revision\":\"{}\",\"package_path\":\"packages/escape\",\"files\":[{{\"path\":\"packages/escape/package.jet\",\"revision\":\"missing\"}},{{\"path\":\"packages/escape/run.jet\",\"revision\":\"missing\"}}],\"name\":\"escape\",\"target\":\"executable\"}}",
+        project_revision
+    );
+    let err = jet::Canvas::apply_project_transaction_json(&entry, &req)
+        .expect_err("Canvas must not create a package through a symlink");
+    assert!(err.contains("symlink"), "{err}");
+    assert!(!outside.join("package.jet").exists());
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn canvas_project_transactions_roll_back_when_later_write_fails() {
     let dir = temp_dir("project_rollback");

@@ -1858,12 +1858,7 @@ fn manifest_rejects_traversal_dependency_name() {
     let raw = manifest_with_deps("root", "0.1.0", "    ../escape: \"1.0.0\",");
     let error = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
         .expect_err("dependency names must not become path components");
-    assert!(
-        error.what.contains("dependency name"),
-        "{} {}",
-        error.code,
-        error.what
-    );
+    assert_eq!(error.code, "E1206", "{} {}", error.code, error.what);
 }
 
 #[test]
@@ -3237,6 +3232,53 @@ fn transitive_path_dependency_cannot_escape_declaring_package() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
+#[cfg(unix)]
+#[test]
+fn transitive_path_dependency_cannot_escape_via_symlinked_directory() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tmp_dir("transitive_path_symlink_escape");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    write(
+        &tmp,
+        "outer/package.jet",
+        &manifest_with_deps("outer", "0.1.0", "    escape: ./link/escape,"),
+    );
+    write(&tmp, "outer/outer.jet", "pub fn outer() {}\n");
+    write(
+        &tmp,
+        "outside/escape/package.jet",
+        &min_manifest("escape", "0.1.0"),
+    );
+    write(
+        &tmp,
+        "outside/escape/escape.jet",
+        "pub fn hostile() {}\n",
+    );
+    symlink(tmp.join("outside"), tmp.join("outer/link")).unwrap();
+
+    let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,");
+    write(&tmp, "package.jet", &raw);
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let options = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+
+    let error = with_store(&store, || {
+        jet::Fetch::fetch(&tmp, &manifest, None, &options)
+            .expect_err("a symlinked transitive path must be rejected")
+    });
+    assert_eq!(first_diag_code(&error), "E1206");
+    assert!(error[0].what.contains("escapes"));
+    assert!(!store.join("escape").exists(), "escaped package was ingested");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn version_conflict_emits_e1201() {
     let tmp = tmp_dir("ver_conflict");
@@ -3370,6 +3412,33 @@ fn fetch_locked_rejects_missing_lock() {
 }
 
 #[test]
+fn compiler_rejects_transitive_path_dependency_escape() {
+    let tmp = tmp_dir("compiler_transitive_path_escape");
+    let outer = tmp.join("outer");
+    let outside = tmp.join("outside");
+    write(
+        &outer,
+        "package.jet",
+        &(min_manifest("outer", "0.1.0") + "\ndeps: { escape: ../outside }\n"),
+    );
+    write(&outer, "outer.jet", "pub fn value() {}\n");
+    write(&outside, "package.jet", &min_manifest("outside", "0.1.0"));
+    write(&outside, "outside.jet", "pub fn value() {}\n");
+    let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,");
+    write(&tmp, "package.jet", &raw);
+    write(&tmp, "run.jet", "fn run() {}\n");
+
+    let entry = tmp.join("run.jet");
+    let errors = jet::Driver::compile_bundle_path_build(
+        entry.to_str().unwrap(),
+        jet::Driver::BuildRunOptions::default(),
+    )
+    .expect_err("the compiler must not read a transitive manifest outside its package");
+    assert_eq!(first_diag_code(&errors), "E1206");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn fetch_locked_rejects_tampered_path_dependency_source() {
     let tmp = tmp_dir("locked_path_tamper");
     let store = tmp.join("store");
@@ -3403,6 +3472,41 @@ fn fetch_locked_rejects_tampered_path_dependency_source() {
             .expect_err("locked fetch must reject a changed path source")
     });
     assert_eq!(first_diag_code(&error), "E1204");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn locked_build_rejects_tampered_path_dependency_source() {
+    let tmp = tmp_dir("locked_build_path_tamper");
+    let store = tmp.join("store");
+    let dependency = tmp.join("greeter");
+    fs::create_dir_all(&store).unwrap();
+    write(&dependency, "package.jet", &min_manifest("greeter", "0.1.0"));
+    write(&dependency, "greeter.jet", "pub fn greet() {}");
+    let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
+    write(&tmp, "package.jet", &raw);
+    write(&tmp, "run.jet", "fn run() {}\n");
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let unlocked = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+    with_store(&store, || {
+        jet::Fetch::fetch(&tmp, &manifest, None, &unlocked)
+            .expect("initial path fetch should create a lock hash");
+    });
+
+    write(&dependency, "greeter.jet", "pub fn compromised() {}\n");
+    let mut locked = jet::Driver::BuildRunOptions::default();
+    locked.locked = true;
+    let entry = tmp.join("run.jet");
+    let errors = with_store(&store, || {
+        jet::Driver::compile_bundle_path_build(entry.to_str().unwrap(), locked)
+            .expect_err("locked build must reject a changed path source before loading it")
+    });
+    assert_eq!(first_diag_code(&errors), "E1204");
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -3517,9 +3621,12 @@ fn git_dep_local_bare_repo_fetches_ok() {
         &format!("    mylib: {{ git: \"{}\", tag: \"v0.1.0\" }},", repo_url),
     );
     write(&tmp, "package.jet", &raw);
+    write(&tmp, "run.jet", "fn run() {}\n");
 
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
+    let home = tmp.join("home");
+    fs::create_dir_all(&home).unwrap();
 
     let mf = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
     let opts = jet::Fetch::FetchOptions {
@@ -3529,12 +3636,62 @@ fn git_dep_local_bare_repo_fetches_ok() {
         resolution: jet::Publish::ResolveMode::Conservative,
     };
 
-    let result = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts));
-    assert!(
-        result.is_ok(),
-        "git dep fetch should succeed: {:?}",
-        result.err()
-    );
+    let previous_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &home);
+    let (lock, _) = with_store(&store, || {
+        jet::Fetch::fetch(&tmp, &mf, None, &opts).expect("git dep fetch should succeed")
+    });
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+
+    let revision = lock
+        .packages
+        .iter()
+        .find(|package| package.name == "mylib")
+        .and_then(|package| package.locked.as_ref())
+        .expect("git lock entry should pin a revision");
+    let url_hash = jet::SHA256::sha256_hex(repo_url.as_bytes());
+    let revision_prefix: String = revision.rev.chars().take(16).collect();
+    let cache_dir = home
+        .join(".jet")
+        .join("git-cache")
+        .join(&url_hash[..16])
+        .join(revision_prefix);
+    fs::write(cache_dir.join("mylib.jet"), "pub fn compromised() {}\n").unwrap();
+    fs::write(
+        tmp.join(".jet-build/deps/mylib/mylib.jet"),
+        "pub fn compromised() {}\n",
+    )
+    .unwrap();
+
+    let locked = jet::Fetch::FetchOptions {
+        locked: true,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+    let previous_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &home);
+    let error = with_store(&store, || {
+        jet::Fetch::fetch(&tmp, &mf, Some(&lock), &locked)
+            .expect_err("locked fetch must reject a changed git cache")
+    });
+    match previous_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+    assert_eq!(first_diag_code(&error), "E1204");
+
+    let mut locked_build = jet::Driver::BuildRunOptions::default();
+    locked_build.locked = true;
+    let entry = tmp.join("run.jet");
+    let build_error = with_store(&store, || {
+        jet::Driver::compile_bundle_path_build(entry.to_str().unwrap(), locked_build)
+            .expect_err("locked build must reject a changed Git dependency link")
+    });
+    assert_eq!(first_diag_code(&build_error), "E1204");
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -6780,6 +6937,38 @@ fn registry_corrupt_artifact_is_rejected_before_install() {
         .expect_err("a content-addressed registry artifact must fail closed when corrupted");
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     assert!(error.to_string().contains("failed its content hash"));
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn registry_artifact_hash_covers_auxiliary_files() {
+    let tmp = tmp_dir("registry_artifact_auxiliary_hash");
+    let repo = tmp.join("registry");
+    let source = tmp.join("source");
+    fs::create_dir_all(&repo).unwrap();
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("package.jet"), "package bytes").unwrap();
+    fs::write(
+        source.join("registry.json"),
+        r#"{"name":"asset-kit","version":"1.0.0"}"#,
+    )
+    .unwrap();
+    fs::write(source.join("embedded.bin"), b"published asset").unwrap();
+
+    let expected_hash = jet::Publish::registry_artifact_hash(&source).unwrap();
+    fs::write(source.join("embedded.bin"), b"tampered asset").unwrap();
+    let error = jet::Publish::publish_artifact(
+        &repo,
+        &source,
+        "asset-kit",
+        "1.0.0",
+        &expected_hash,
+    )
+    .expect_err("mutating a non-Jet artifact file must fail content verification");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("source hash changed"));
+    let destination = jet::Publish::artifact_path(&repo, "asset-kit", "1.0.0").unwrap();
+    assert!(!destination.exists());
     let _ = fs::remove_dir_all(&tmp);
 }
 

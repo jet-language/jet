@@ -2536,6 +2536,9 @@ fn compile_bundle_path_build_on_compiler_stack(
     prepared: Option<PreparedBuildFrontEnd>,
     without_codegen: bool,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    if options.locked {
+        crate::Loader::verify_locked_dependency_sources(file)?;
+    }
     let inputs = FrontEndInputs::for_build(file, &options);
     // #2083: resume the caller's front end only when it checked this program,
     // under these facts, without an entry overlay. Anything else gets a fresh
@@ -3234,6 +3237,9 @@ fn compile_build_from_front_end(
                 probes: Vec::new(),
             }
         };
+        if options.locked {
+            crate::Loader::verify_locked_dependency_sources(file)?;
+        }
         if options.execute {
             generated.extend(check_action_generated_sources(
                 &evaluated.plan,

@@ -947,13 +947,7 @@ pub(super) fn canvas_action_candidate(
     .map_err(|_| edit_error("overlap", "Canvas action edit overlapped"))?;
     let formatted = jet_driver::Formatter::format_source(&changed)
         .map_err(|diags| diagnostics_error(path, src, &diags))?;
-    let tmp = temp_canvas_check_path(path);
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&tmp)
-        .map_err(|e| edit_error("io", &e.to_string()))?;
-    std::io::Write::write_all(&mut file, formatted.as_bytes())
+    let tmp = write_canvas_check_file(path, &formatted)
         .map_err(|e| edit_error("io", &e.to_string()))?;
     let (check, _) = jet_driver::Driver::check_file(&tmp.display().to_string(), None, true);
     let _ = fs::remove_file(&tmp);
@@ -976,6 +970,23 @@ fn temp_canvas_check_path(path: &Path) -> PathBuf {
         .unwrap_or("canvas_action");
     tmp.set_file_name(format!("{stem}.canvas-action-check.jet"));
     tmp
+}
+
+fn write_canvas_check_file(path: &Path, source: &str) -> std::io::Result<PathBuf> {
+    let tmp = temp_canvas_check_path(path);
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(0o400000);
+    }
+    let mut file = options.open(&tmp)?;
+    if let Err(error) = std::io::Write::write_all(&mut file, source.as_bytes()) {
+        let _ = fs::remove_file(&tmp);
+        return Err(error);
+    }
+    Ok(tmp)
 }
 
 pub(super) fn apply_insert_structural(
@@ -3858,4 +3869,35 @@ fn write_checked_candidate(path: &Path, before: &str, candidate: &str) -> Result
         })?;
     }
     Ok(edit_ok_source(changed, candidate))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{temp_canvas_check_path, write_canvas_check_file};
+
+    #[cfg(unix)]
+    #[test]
+    fn canvas_action_check_writer_rejects_existing_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-canvas-action-check-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("main.jet");
+        let outside = root.join("outside.jet");
+        std::fs::write(&outside, "must survive\n").unwrap();
+        let temp = temp_canvas_check_path(&source);
+        symlink(&outside, &temp).unwrap();
+
+        assert!(
+            write_canvas_check_file(&source, "attacker\n").is_err(),
+            "Canvas action validation must not follow a pre-existing temp symlink"
+        );
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive\n");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

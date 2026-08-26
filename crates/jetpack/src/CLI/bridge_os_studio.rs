@@ -46,6 +46,7 @@ pub(super) fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
         disk: parsed.flags.os_disk.clone(),
         json: parsed.flags.json,
         assume_yes: parsed.flags.assume_yes,
+        trust: parsed.flags.trust,
         real_tier: false,
         host: parsed.flags.studio_host.clone(),
     };
@@ -78,6 +79,7 @@ pub(super) fn cmd_user(theme: &Theme, parsed: &Parsed) -> i32 {
         disk: parsed.flags.os_disk.clone(),
         json: parsed.flags.json,
         assume_yes: parsed.flags.assume_yes,
+        trust: parsed.flags.trust,
         real_tier: false,
         host: parsed.flags.studio_host.clone(),
     };

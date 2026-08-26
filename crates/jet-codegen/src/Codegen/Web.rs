@@ -6611,7 +6611,7 @@ fn wasm_emit_expr(
             fallback: TIR::TOrFallback::Value(fallback),
             ..
         } => format!(
-            "match ({}) {{ Ok(value) => value, Err(_) => {} }}",
+            "match ({}) {{ Ok(value) => value, Err(_) => {{ jet_journey_reset(); {} }} }}",
             wasm_emit_expr(value, funcs, file_prefix, reconstructions)?,
             wasm_emit_expr(fallback, funcs, file_prefix, reconstructions)?
         ),
@@ -6638,7 +6638,7 @@ fn wasm_emit_expr(
             };
             let msg = wasm_emit_expr(msg, funcs, file_prefix, reconstructions)?;
             jet_name_format!(
-                "match ({value}) {{ Ok({name_prefix}ok) => {name_prefix}ok, Err(_) => jet_panic_rich({:?}, {}, {:?}, {:?}, {}, {}, &({msg})) }}",
+                "match ({value}) {{ Ok({name_prefix}ok) => {name_prefix}ok, Err(_) => {{ jet_journey_reset(); jet_panic_rich({:?}, {}, {:?}, {:?}, {}, {}, &({msg})) }} }}",
                 loc.file,
                 loc.line,
                 loc.fn_name,

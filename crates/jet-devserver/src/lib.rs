@@ -383,6 +383,35 @@ mod tests {
             );
         }
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn static_paths_reject_symlinked_files() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-devserver-static-symlink-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = root.with_file_name(format!(
+            "jet-devserver-static-outside-{}",
+            std::process::id()
+        ));
+        std::fs::write(&outside, "must not be served").unwrap();
+        symlink(&outside, root.join("escape.js")).unwrap();
+
+        assert!(
+            static_path(&root, "/escape.js").is_err(),
+            "static serving must not follow a symlink out of its root"
+        );
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must not be served");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_file(&outside);
+    }
+
     #[test]
     fn canvas_assets_are_owned_routes() {
         let page = canvas_asset("GET", "/canvas", "/canvas").unwrap();

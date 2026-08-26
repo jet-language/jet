@@ -29,6 +29,9 @@ pub struct OSFlags {
     pub disk: Option<String>,
     pub json: bool,
     pub assume_yes: bool,
+    /// One-shot approval for the exact Core Cargo build identity used by a
+    /// generation, matching the regular package realization path.
+    pub trust: bool,
     /// `--host <name>` — consumed by the global flag parser (shared with the
     /// Studio surface), threaded here so `jet os import` can see it.
     pub host: Option<String>,

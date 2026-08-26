@@ -732,14 +732,22 @@ impl<'a> Resolver<'a> {
                 // unrelated host directory. Root package paths retain their
                 // existing sibling-path behavior; paths declared by a
                 // dependency stay below that dependency's source root.
-                if parent_dir != self.project_root
-                    && (Path::new(path).is_absolute() || !abs_path.starts_with(parent_dir))
-                {
-                    return Err(vec![path_dependency_escape_diagnostic(
-                        dep_name,
-                        path,
-                        parent_dir,
-                    )]);
+                if parent_dir != self.project_root {
+                    let lexical_escape =
+                        Path::new(path).is_absolute() || !abs_path.starts_with(parent_dir);
+                    let canonical_escape = std::fs::canonicalize(parent_dir)
+                        .and_then(|parent_root| {
+                            std::fs::canonicalize(&abs_path)
+                                .map(|resolved| !resolved.starts_with(parent_root))
+                        })
+                        .unwrap_or(true);
+                    if lexical_escape || canonical_escape {
+                        return Err(vec![path_dependency_escape_diagnostic(
+                            dep_name,
+                            path,
+                            parent_dir,
+                        )]);
+                    }
                 }
 
                 // Load the dep's manifest.

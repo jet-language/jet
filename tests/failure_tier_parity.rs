@@ -100,6 +100,19 @@ fn run() {
 }
 "#;
 
+const RECOVERED_CONTEXT: &str = r#"
+fn contextual_source() Int -> Err("context", cause: Err("root"))
+
+fn contextual() Int -> contextual_source()?("loading")
+
+fn later() Int -> Err("later")
+
+fn run() {
+    contextual() ?? 0
+    later()
+}
+"#;
+
 fn normalize_journey_paths(stderr: &str) -> String {
     let mut normalized = stderr
         .lines()
@@ -146,6 +159,39 @@ fn declared_conversion_keeps_one_report_across_runtime_tiers() {
     if tir_support::have_rustc() {
         let (aot_code, aot_out, aot_err) =
             tir_support::build_and_run_full("failure_conversion_tiers", "main", CONVERSION);
+        assert_eq!(aot_code, jit_code);
+        assert_eq!(aot_out, jit_out);
+        assert_eq!(
+            normalize_journey_paths(&aot_err),
+            normalize_journey_paths(&jit_err)
+        );
+    }
+}
+
+#[test]
+fn recovered_context_does_not_leak_into_a_later_failure() {
+    let (jit_code, jit_out, jit_err) =
+        tir_support::jit_run("failure_recovery_tiers", RECOVERED_CONTEXT);
+    assert_eq!(jit_code, 1, "default JIT must report the later failure");
+    assert!(jit_out.is_empty(), "later failure must not print stdout");
+    assert!(jit_err.contains("later"), "JIT report: {jit_err}");
+    assert!(
+        !jit_err.contains("loading"),
+        "recovered context leaked into JIT report: {jit_err}"
+    );
+
+    let (interpreter_code, interpreter_out, interpreter_err) =
+        tir_support::interpreter_run("failure_recovery_tiers", RECOVERED_CONTEXT);
+    assert_eq!(interpreter_code, jit_code);
+    assert_eq!(interpreter_out, jit_out);
+    assert_eq!(
+        normalize_journey_paths(&interpreter_err),
+        normalize_journey_paths(&jit_err)
+    );
+
+    if tir_support::have_rustc() {
+        let (aot_code, aot_out, aot_err) =
+            tir_support::build_and_run_full("failure_recovery_tiers", "main", RECOVERED_CONTEXT);
         assert_eq!(aot_code, jit_code);
         assert_eq!(aot_out, jit_out);
         assert_eq!(

@@ -56,7 +56,7 @@ fn http_get(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
         .map(|session| format!("Authorization: Bearer {session}\r\n"))
         .unwrap_or_default();
     let req = format!(
-        "GET {} HTTP/1.1\r\nHost: localhost:{}\r\n{}Connection: close\r\n\r\n",
+        "GET {} HTTP/1.1\r\nHost: localhost:{}\r\n{}Sec-Fetch-Site: same-origin\r\nConnection: close\r\n\r\n",
         path, port, authorization
     );
     stream.write_all(req.as_bytes()).ok()?;
@@ -85,10 +85,11 @@ fn http_post(port: u16, path: &str, body: &str) -> Option<(u16, Vec<u8>)> {
         .map(|session| format!("Authorization: Bearer {session}\r\n"))
         .unwrap_or_default();
     let req = format!(
-        "POST {} HTTP/1.1\r\nHost: localhost:{}\r\n{}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "POST {} HTTP/1.1\r\nHost: localhost:{}\r\n{}Origin: http://localhost:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         path,
         port,
         authorization,
+        port,
         body.len(),
         body
     );
@@ -214,18 +215,32 @@ fn run() {
 /// Reads the child's stdout for the `serving http://localhost:<port>` line
 /// `run_dev_web` prints on startup (Source/CmdDevWeb.rs), with a bounded
 /// wait — never a blind `sleep`.
-fn wait_for_port(child_stdout: std::process::ChildStdout) -> u16 {
+#[derive(Clone, Copy)]
+struct DevPorts {
+    canvas: u16,
+    application: u16,
+}
+
+fn wait_for_ports(child_stdout: std::process::ChildStdout) -> DevPorts {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
         let reader = BufReader::new(child_stdout);
-        let mut port = None;
+        let mut canvas_port = None;
+        let mut application_port = None;
         let mut session = None;
         for line in reader.lines().map_while(Result::ok) {
-            if port.is_none() {
+            if canvas_port.is_none() {
                 if let Some(rest) = line.split("http://localhost:").nth(1) {
                     if let Some(port_str) = rest.split(|c: char| !c.is_ascii_digit()).next() {
-                        port = port_str.parse::<u16>().ok();
+                        canvas_port = port_str.parse::<u16>().ok();
+                    }
+                }
+            }
+            if application_port.is_none() {
+                if let Some(rest) = line.split("app preview http://localhost:").nth(1) {
+                    if let Some(port_str) = rest.split(|c: char| !c.is_ascii_digit()).next() {
+                        application_port = port_str.parse::<u16>().ok();
                     }
                 }
             }
@@ -238,18 +253,21 @@ fn wait_for_port(child_stdout: std::process::ChildStdout) -> u16 {
                     session = token.map(str::to_string);
                 }
             }
-            if let (Some(port), Some(session)) = (port, session.as_ref()) {
+            if let (Some(canvas), Some(session)) = (canvas_port, session.as_ref()) {
                 *CANVAS_SESSION
                     .get_or_init(|| Mutex::new(None))
                     .lock()
                     .unwrap() = Some(session.clone());
-                let _ = tx.send(port);
+                let _ = tx.send(DevPorts {
+                    canvas,
+                    application: application_port.unwrap_or(canvas),
+                });
                 return;
             }
         }
     });
     rx.recv_timeout(Duration::from_secs(20))
-        .expect("jet dev --target=web never printed its \"serving http://localhost:<port>\" line")
+        .expect("jet dev never printed its serving URL and Canvas session")
 }
 
 #[test]
@@ -347,7 +365,7 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
     let stdout = child.stdout.take().unwrap();
     let guard = KillOnDrop(child);
 
-    let port = wait_for_port(stdout);
+    let port = wait_for_ports(stdout).application;
 
     for path in ["/C:/Windows/win.ini", "/\\Windows\\win.ini", "/\\\\server\\share\\secret"] {
         let (status, _) = http_get(port, path).expect("static-path hostile request failed");
@@ -422,6 +440,118 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
 }
 
 #[test]
+fn jet_dev_web_rejects_windows_absolute_static_paths() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping jet_dev_web_rejects_windows_absolute_static_paths (need rustc)"
+        );
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_windows_static_paths_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("app.jet"), FIXTURE_SRC).unwrap();
+    let mut child = Command::new(jet_bin())
+        .args(["dev", "app.jet", "--target=web"])
+        .current_dir(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to start `jet dev --target=web`");
+
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let stdout = child.stdout.take().unwrap();
+    let guard = KillOnDrop(child);
+    let ports = wait_for_ports(stdout);
+
+    for path in [
+        "/C:/Windows/win.ini",
+        "/C:\\Windows\\win.ini",
+        "/\\Windows\\win.ini",
+        "/\\\\server\\share\\secret",
+    ] {
+        let (status, _) = http_get(ports.application, path)
+            .expect("Windows absolute static-path request failed");
+        assert_eq!(
+            status, 400,
+            "Windows absolute static path escaped the build root: {path}"
+        );
+    }
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn web_test_static_server_rejects_symlink_escape() {
+    if !have_tool("node") {
+        eprintln!("note: skipping web_test_static_server_rejects_symlink_escape (need node)");
+        return;
+    }
+
+    use std::os::unix::fs::symlink;
+
+    let root = std::env::temp_dir().join(format!(
+        "jet-web-test-static-symlink-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("index.html"), "safe\n").unwrap();
+    let outside = root.with_file_name(format!(
+        "jet-web-test-static-outside-{}",
+        std::process::id()
+    ));
+    fs::write(&outside, "secret\n").unwrap();
+    symlink(&outside, root.join("escape.js")).unwrap();
+
+    let port = unused_local_port();
+    let child = Command::new("node")
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/web-test/serve.mjs"))
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--root")
+        .arg(&root)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start web-test static server");
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let _guard = KillOnDrop(child);
+
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(10) {
+        if let Some((200, _)) = http_get(port, "/") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let (status, _) = http_get(port, "/escape.js").expect("static server request");
+    assert_eq!(status, 400, "symlink outside the static root was served");
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "secret\n");
+
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_file(&outside);
+}
+
+#[test]
 fn jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep() {
     if !have_tool("rustc") {
         eprintln!(
@@ -463,7 +593,9 @@ fn jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep() {
         let _ = stderr_tx.send(String::from_utf8_lossy(&bytes).into_owned());
     });
     let guard = KillOnDrop(child);
-    let port = wait_for_port(stdout);
+    let ports = wait_for_ports(stdout);
+    let port = ports.canvas;
+    let application_port = ports.application;
 
     let ready = wait_for_status(port, "tab-a", "ready", Duration::from_secs(10));
     assert!(ready.contains("\"clients\":1"), "{ready}");
@@ -476,7 +608,8 @@ fn jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep() {
 
     let (_, baseline_body) = http_get(port, "/__jet_dev_version").expect("baseline version");
     let baseline_version = String::from_utf8_lossy(&baseline_body).trim().to_string();
-    let (_, initial_js) = http_get(port, "/app.js").expect("initial last-good app.js");
+    let (_, initial_js) =
+        http_get(application_port, "/app.js").expect("initial last-good app.js");
 
     let broken = FIXTURE_SRC.replace("print(size.height)", "missing_hybrid_symbol()");
     fs::write(&src_path, broken).unwrap();
@@ -493,13 +626,14 @@ fn jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep() {
         baseline_version,
         "error build must not trigger reload"
     );
-    let (_, last_good_js) = http_get(port, "/app.js").expect("last-good app.js during error");
+    let (_, last_good_js) =
+        http_get(application_port, "/app.js").expect("last-good app.js during error");
     assert_eq!(
         last_good_js, initial_js,
         "error build replaced last-good output"
     );
 
-    let (_, html) = http_get(port, "/").expect("injected browser shell");
+    let (_, html) = http_get(application_port, "/").expect("injected browser shell");
     let html = String::from_utf8_lossy(&html);
     for marker in [
         "overlayBody.textContent = s.diagnostic",
@@ -525,7 +659,7 @@ fn jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep() {
         .web
         .expect("web output after recovery")
         .js_app;
-    let (_, recovered_js) = http_get(port, "/app.js").expect("recovered app.js");
+    let (_, recovered_js) = http_get(application_port, "/app.js").expect("recovered app.js");
     assert_eq!(String::from_utf8_lossy(&recovered_js), expected_edited);
 
     drop(guard);
@@ -840,7 +974,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     }
     let stdout = child.stdout.take().unwrap();
     let guard = KillOnDrop(child);
-    let port = wait_for_port(stdout);
+    let port = wait_for_ports(stdout).canvas;
 
     let (status, html) = http_get(port, "/canvas").expect("GET Canvas panel");
     assert_eq!(status, 200);
@@ -1732,7 +1866,7 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
     }
     let stdout = child.stdout.take().unwrap();
     let guard = KillOnDrop(child);
-    let port = wait_for_port(stdout);
+    let port = wait_for_ports(stdout).canvas;
     let revision = jet::Canvas::source_revision(source);
 
     let first = format!(
@@ -1904,7 +2038,7 @@ fn jet_dev_web_project_queries_round_trip_and_reject_stale_revision() {
     }
     let stdout = child.stdout.take().unwrap();
     let guard = KillOnDrop(child);
-    let port = wait_for_port(stdout);
+    let port = wait_for_ports(stdout).canvas;
 
     let (status, project) = http_get(port, "/canvas/project").expect("GET project");
     assert_eq!(status, 200);

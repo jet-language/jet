@@ -1795,6 +1795,278 @@ pub fn find_manifest_root(start: &Path) -> Option<PathBuf> {
     find_manifest_root_checked(start).ok().flatten()
 }
 
+/// Verify the source trees a locked build is about to load.
+///
+/// `jet fetch --locked` verifies sources through the package-manager engine,
+/// but the compiler's loader cannot depend on that engine. Keep the compiler
+/// boundary fail-closed as well: a locked build must not load a mutable path
+/// dependency or a mutable project link for a Git dependency.
+pub fn verify_locked_dependency_sources(entry_path: &str) -> Result<(), Vec<Diagnostic>> {
+    let entry = Path::new(entry_path);
+    let entry_dir = entry.parent().unwrap_or(Path::new("."));
+    let manifest_root = find_manifest_root_checked(entry_dir).map_err(|d| vec![d])?;
+    let Some(manifest_root) = manifest_root else {
+        return Ok(());
+    };
+    let lock_root = find_workspace_root_checked(entry_dir)
+        .map_err(|d| vec![d])?
+        .unwrap_or_else(|| manifest_root.clone());
+    let manifest = match Manifest::load(&manifest_root) {
+        Some(Ok(manifest)) => manifest,
+        Some(Err(diagnostic)) => return Err(vec![diagnostic]),
+        None => return Ok(()),
+    };
+    if manifest.dependencies.is_empty() {
+        return Ok(());
+    }
+    let lock_path = lock_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let lock = crate::Lock::load(&lock_root).ok_or_else(|| {
+        vec![crate::Lock::e1202(&lock_path.display().to_string())]
+    })?;
+    crate::Lock::verify_lock_matches_manifest(
+        &lock,
+        &manifest,
+        &lock_path.display().to_string(),
+    )
+    .map_err(|diagnostic| vec![diagnostic])?;
+    crate::Lock::verify_all_manifest_deps_locked(&manifest, &lock)
+        .map_err(|diagnostic| vec![diagnostic])?;
+
+    let mut visited = HashSet::new();
+    verify_locked_manifest(
+        &manifest,
+        &manifest_root,
+        &lock_root,
+        &lock,
+        &mut visited,
+        false,
+    )
+}
+
+fn verify_locked_manifest(
+    manifest: &Manifest::Manifest,
+    package_root: &Path,
+    project_root: &Path,
+    lock: &crate::Lock::LockFile,
+    visited: &mut HashSet<PathBuf>,
+    enforce_path_boundary: bool,
+) -> Result<(), Vec<Diagnostic>> {
+    for (dep_name, spec) in &manifest.dependencies {
+        let (source_root, expected_hash, recurse) = match spec {
+            Manifest::DepSpec::Path { path } => {
+                let source_root = resolve_locked_path_dependency(
+                    dep_name,
+                    path,
+                    package_root,
+                    enforce_path_boundary,
+                )?;
+                let Some(package) = lock.packages.iter().find(|package| {
+                    package.name == *dep_name
+                        && matches!(&package.source, crate::Lock::LockSource::Path(_))
+                }) else {
+                    return Err(vec![locked_dependency_diagnostic(
+                        dep_name,
+                        "the lock has no matching path source identity",
+                    )]);
+                };
+                let Some(expected_hash) = package.content_hash.as_deref() else {
+                    return Err(vec![locked_dependency_diagnostic(
+                        dep_name,
+                        "the lock has no content hash for its path source",
+                    )]);
+                };
+                (source_root, expected_hash.to_string(), true)
+            }
+            Manifest::DepSpec::Git { .. } => {
+                let source_root = project_root
+                    .join(".jet-build")
+                    .join("deps")
+                    .join(dep_name);
+                let Some(package) = lock.packages.iter().find(|package| {
+                    package.name == *dep_name
+                        && matches!(&package.source, crate::Lock::LockSource::Git { .. })
+                }) else {
+                    return Err(vec![locked_dependency_diagnostic(
+                        dep_name,
+                        "the lock has no matching Git source identity",
+                    )]);
+                };
+                let expected_hash = package
+                    .content_hash
+                    .as_deref()
+                    .or_else(|| package.locked.as_ref().map(|revision| revision.tree_hash.as_str()))
+                    .filter(|hash| !hash.trim().is_empty())
+                    .ok_or_else(|| {
+                        vec![locked_dependency_diagnostic(
+                            dep_name,
+                            "the lock has no content hash for its Git source",
+                        )]
+                    })?;
+                (source_root, expected_hash.to_string(), true)
+            }
+            Manifest::DepSpec::Registry(_) | Manifest::DepSpec::Foreign { .. } => {
+                // Registry and foreign dependencies are consumed through the
+                // verified Hangar projection. Their source roots are not
+                // selected by this legacy path/Git loader.
+                continue;
+            }
+        };
+
+        verify_locked_source_tree(dep_name, &source_root, &expected_hash)?;
+        if recurse && visited.insert(normalize_path(&source_root)) {
+            let dependency_manifest = match Manifest::load(&source_root) {
+                Some(Ok(manifest)) => manifest,
+                Some(Err(diagnostic)) => return Err(vec![diagnostic]),
+                None => {
+                    return Err(vec![locked_dependency_diagnostic(
+                        dep_name,
+                        "the locked source has no readable package.jet",
+                    )]);
+                }
+            };
+            verify_locked_manifest(
+                &dependency_manifest,
+                &source_root,
+                project_root,
+                lock,
+                visited,
+                true,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_locked_path_dependency(
+    dep_name: &str,
+    path: &str,
+    package_root: &Path,
+    enforce_boundary: bool,
+) -> Result<PathBuf, Vec<Diagnostic>> {
+    let source_root = normalize_path(&package_root.join(path));
+    // Root packages may intentionally use a sibling path. Transitive path
+    // dependencies stay below their declaring package, including through
+    // intermediate symlinks.
+    if !enforce_boundary {
+        return Ok(source_root);
+    }
+    if Path::new(path).is_absolute() || !source_root.starts_with(package_root) {
+        return Err(vec![path_dependency_escape_diagnostic(dep_name, path, package_root)]);
+    }
+    let parent = std::fs::canonicalize(package_root).map_err(|error| {
+        vec![locked_dependency_diagnostic(
+            dep_name,
+            &format!("could not resolve the declaring package root: {error}"),
+        )]
+    })?;
+    if let Ok(resolved) = std::fs::canonicalize(&source_root) {
+        if !resolved.starts_with(parent) {
+            return Err(vec![path_dependency_escape_diagnostic(dep_name, path, package_root)]);
+        }
+    }
+    Ok(source_root)
+}
+
+fn verify_locked_source_tree(
+    dep_name: &str,
+    source_root: &Path,
+    expected_hash: &str,
+) -> Result<(), Vec<Diagnostic>> {
+    let metadata = std::fs::symlink_metadata(source_root).map_err(|error| {
+        vec![locked_dependency_diagnostic(
+            dep_name,
+            &format!("the locked source is unavailable: {error}"),
+        )]
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(vec![locked_dependency_diagnostic(
+            dep_name,
+            "the locked source is not a real directory",
+        )]);
+    }
+    validate_locked_source_nodes(source_root, dep_name)?;
+    if expected_hash.trim().is_empty() {
+        return Err(vec![locked_dependency_diagnostic(
+            dep_name,
+            "the lock has no content hash for its source",
+        )]);
+    }
+    let actual = crate::SHA256::tree_hash(source_root);
+    if actual != expected_hash {
+        return Err(vec![locked_dependency_diagnostic(
+            dep_name,
+            &format!("the source content hash does not match the lock (expected {expected_hash}, got {actual})"),
+        )]);
+    }
+    Ok(())
+}
+
+fn validate_locked_source_nodes(path: &Path, dep_name: &str) -> Result<(), Vec<Diagnostic>> {
+    let entries = std::fs::read_dir(path).map_err(|error| {
+        vec![locked_dependency_diagnostic(
+            dep_name,
+            &format!("the locked source cannot be read: {error}"),
+        )]
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            vec![locked_dependency_diagnostic(
+                dep_name,
+                &format!("the locked source cannot be read: {error}"),
+            )]
+        })?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || name == "build" || name == "target" {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(entry.path()).map_err(|error| {
+            vec![locked_dependency_diagnostic(
+                dep_name,
+                &format!("the locked source node cannot be read: {error}"),
+            )]
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(vec![locked_dependency_diagnostic(
+                dep_name,
+                "the locked source contains a symlink",
+            )]);
+        }
+        if metadata.is_dir() {
+            validate_locked_source_nodes(&entry.path(), dep_name)?;
+        } else if !metadata.is_file() {
+            return Err(vec![locked_dependency_diagnostic(
+                dep_name,
+                "the locked source contains an unsupported filesystem node",
+            )]);
+        }
+    }
+    Ok(())
+}
+
+fn locked_dependency_diagnostic(dep_name: &str, detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1204",
+        format!("locked dependency `{dep_name}` failed source verification"),
+        detail.to_string(),
+        "run `jet fetch` to recreate the lock from the verified dependency source".to_string(),
+        None,
+    )
+}
+
+fn path_dependency_escape_diagnostic(dep_name: &str, path: &str, package_root: &Path) -> Diagnostic {
+    Diagnostic::error(
+        "E1206",
+        format!("path dependency `{dep_name}` escapes its parent package"),
+        format!(
+            "the path `{path}` resolves outside the declaring package directory `{}`",
+            package_root.display()
+        ),
+        "use a relative path below the declaring package directory".to_string(),
+        None,
+    )
+}
+
 /// Name the package/module authority from the canonical `run.jet` entry when
 /// one exists. A retired `main.jet` never becomes the authority fallback.
 pub fn authority_name_for_entry(entry: &Path) -> Result<String, Diagnostic> {
@@ -1931,7 +2203,7 @@ fn dry_resolve_path_deps(mf: &Manifest::Manifest, project_root: &Path) -> Result
     let mut seen: std::collections::HashMap<String, (String, Vec<String>)> =
         std::collections::HashMap::new();
     let root_name = mf.package.name.clone();
-    dry_resolve_recursive(mf, project_root, &[root_name], &mut seen)
+    dry_resolve_recursive(mf, project_root, &[root_name], &mut seen, false)
 }
 
 fn dry_resolve_recursive(
@@ -1939,12 +2211,31 @@ fn dry_resolve_recursive(
     pkg_dir: &Path,
     chain: &[String],
     seen: &mut std::collections::HashMap<String, (String, Vec<String>)>,
+    enforce_path_boundary: bool,
 ) -> Result<(), Diagnostic> {
     for (dep_alias, spec) in &mf.dependencies {
         let Manifest::DepSpec::Path { path } = spec else {
             continue; // only path deps are resolved dry; git deps need fetch
         };
         let dep_path = normalize_path(&pkg_dir.join(path));
+        if enforce_path_boundary
+            && (Path::new(path).is_absolute() || !dep_path.starts_with(pkg_dir))
+        {
+            return Err(path_dependency_escape_diagnostic(dep_alias, path, pkg_dir));
+        }
+        if enforce_path_boundary {
+            let parent = std::fs::canonicalize(pkg_dir).map_err(|error| {
+                locked_dependency_diagnostic(
+                    dep_alias,
+                    &format!("could not resolve the declaring package root: {error}"),
+                )
+            })?;
+            if let Ok(resolved) = std::fs::canonicalize(&dep_path) {
+                if !resolved.starts_with(parent) {
+                    return Err(path_dependency_escape_diagnostic(dep_alias, path, pkg_dir));
+                }
+            }
+        }
         // Load the dep's manifest to get its package name + version.
         let dep_mf = match Manifest::load(&dep_path) {
             None => continue, // missing manifest is caught later; not an E1201
@@ -1970,7 +2261,7 @@ fn dry_resolve_recursive(
         } else {
             seen.insert(dep_pkg_name.clone(), (dep_version, child_chain.clone()));
             // Recurse into transitive deps.
-            dry_resolve_recursive(&dep_mf, &dep_path, &child_chain, seen)?;
+            dry_resolve_recursive(&dep_mf, &dep_path, &child_chain, seen, true)?;
         }
     }
     Ok(())

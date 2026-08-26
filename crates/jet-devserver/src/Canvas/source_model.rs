@@ -179,4 +179,23 @@ mod tests {
         assert!(!path.exists());
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn compare_and_publish_rejects_symlinked_source() {
+        use std::os::unix::fs::symlink;
+
+        let path = test_path();
+        let outside = path.parent().unwrap().join("outside.jet");
+        fs::write(&outside, "must survive\n").unwrap();
+        fs::remove_file(&path).unwrap();
+        symlink(&outside, &path).unwrap();
+
+        let error = write_source_if_unchanged(&path, "must survive\n", "attacker\n")
+            .expect_err("Canvas source writes must not follow symlinks");
+        assert!(matches!(error, SourceWriteError::Io(_)));
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "must survive\n");
+
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
 }

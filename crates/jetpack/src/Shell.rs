@@ -13,6 +13,8 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+const PROMPT_LABEL_ENV: &str = "JETPACK_PROMPT_LABEL";
+
 /// The shells Jetpack can decorate. Anything else falls back to `bash`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellKind {
@@ -782,6 +784,10 @@ fn enter_with_mode(theme: &Theme, env: &Env, kind: ShellKind, clean: bool) -> i3
     } else {
         env.apply_to(&mut cmd);
     }
+    // Keep the user-controlled label out of shell source. The generated
+    // prompt reads this value through a fixed, quoted print operation so
+    // prompt substitution cannot execute label contents.
+    cmd.env(PROMPT_LABEL_ENV, &env.label);
     if theme.color {
         cmd.env_remove("NO_COLOR");
     } else {
@@ -876,7 +882,7 @@ pub fn branded_shell(kind: ShellKind, label: &str) -> BrandedShell {
                     rc.display().to_string(),
                     "-i".to_string(),
                 ],
-                env_vars: Vec::new(),
+                env_vars: vec![(PROMPT_LABEL_ENV.to_string(), label.to_string())],
                 cleanup_file: Some(rc),
                 cleanup_dir: None,
             }
@@ -886,7 +892,10 @@ pub fn branded_shell(kind: ShellKind, label: &str) -> BrandedShell {
             std::fs::write(dir.join(".zshrc"), zsh_rc(label, path, strip)).ok();
             BrandedShell {
                 command_tail: vec!["zsh".to_string(), "-i".to_string()],
-                env_vars: vec![("ZDOTDIR".to_string(), dir.display().to_string())],
+                env_vars: vec![
+                    ("ZDOTDIR".to_string(), dir.display().to_string()),
+                    (PROMPT_LABEL_ENV.to_string(), label.to_string()),
+                ],
                 cleanup_file: None,
                 cleanup_dir: Some(dir),
             }
@@ -898,7 +907,7 @@ pub fn branded_shell(kind: ShellKind, label: &str) -> BrandedShell {
                 fish_init(label, path, strip),
                 "-i".to_string(),
             ],
-            env_vars: Vec::new(),
+            env_vars: vec![(PROMPT_LABEL_ENV.to_string(), label.to_string())],
             cleanup_file: None,
             cleanup_dir: None,
         },
@@ -907,30 +916,7 @@ pub fn branded_shell(kind: ShellKind, label: &str) -> BrandedShell {
 
 // ── prompt / rc generation ───────────────────────────────────────────────
 
-fn bash_prompt_label(label: &str) -> String {
-    label.replace('\\', "\\\\").replace('\'', "'\\''")
-}
-
-fn zsh_ansi_prompt_label(label: &str) -> String {
-    let mut out = String::new();
-    for ch in label.chars() {
-        match ch {
-            '\\' => out.push_str(r"\\\\"),
-            '\'' => out.push_str(r"\'"),
-            '$' => out.push_str(r"\\$"),
-            '`' => out.push_str(r"\\`"),
-            '%' => out.push_str("%%"),
-            ch => out.push(ch),
-        }
-    }
-    out
-}
-
-fn fish_prompt_label(label: &str) -> String {
-    format!("'{}'", label.replace('\\', "\\\\").replace('\'', "\\'"))
-}
-
-fn bash_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
+fn bash_rc(_label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
     // Source the user's real bashrc first, then override the prompt so the
     // jetpack label is unmistakable: bold cyan label, blue path, green ❯.
     //
@@ -955,7 +941,6 @@ fn bash_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String 
     let success = SharedTheme::SUCCESS_SGR;
     let warn = SharedTheme::WARN_SGR;
     let error = SharedTheme::ERROR_SGR;
-    let label = bash_prompt_label(label);
     let mut rc = format!(
         "[ -f /etc/bash.bashrc ] && . /etc/bash.bashrc\n\
          [ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\n\
@@ -997,16 +982,16 @@ fn bash_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String 
          trap '__jetpack_preexec \"$BASH_COMMAND\"' DEBUG\n\
          PROMPT_COMMAND=\"__jetpack_precmd${{PROMPT_COMMAND:+;$PROMPT_COMMAND}}\"\n\
          if [ \"${{NO_COLOR+x}}\" = x ]; then\n\
-           PS1='{status_prefix}{label} {path_escape} > '\n\
+           PS1='{status_prefix}$(printf \"%s\" \"$JETPACK_PROMPT_LABEL\") {path_escape} > '\n\
          else\n\
-           PS1='{status_prefix}{S}\u{1b}[{accent}m{E}{label}{S}\u{1b}[0m{E} {S}\u{1b}[{border}m{E}{path_escape}{S}\u{1b}[0m{E} {S}\u{1b}[{success}m{E}❯{S}\u{1b}[0m{E} '\n\
+           PS1='{status_prefix}{S}\u{1b}[{accent}m{E}$(printf \"%s\" \"$JETPACK_PROMPT_LABEL\"){S}\u{1b}[0m{E} {S}\u{1b}[{border}m{E}{path_escape}{S}\u{1b}[0m{E} {S}\u{1b}[{success}m{E}❯{S}\u{1b}[0m{E} '\n\
          fi\n"
     );
     rc.push_str(&help_prefill_widgets(ShellKind::Bash));
     rc
 }
 
-fn zsh_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
+fn zsh_rc(_label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
     let path_escape = match path {
         PromptPathMode::Short => "%1~",
         PromptPathMode::Full => "%~",
@@ -1021,8 +1006,6 @@ fn zsh_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
     let success = SharedTheme::SUCCESS_SGR;
     let warn = SharedTheme::WARN_SGR;
     let error = SharedTheme::ERROR_SGR;
-    let ansi_label = zsh_ansi_prompt_label(label);
-    let label = ansi_label.clone();
     let mut rc = format!(
         "[ -f \"$HOME/.zshrc\" ] && source \"$HOME/.zshrc\"\n\
          setopt prompt_subst\n\
@@ -1039,16 +1022,16 @@ fn zsh_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
          __jetpack_precmd() {{ local code=$?; [[ -n $__jetpack_kind ]] || return; if [[ -n $__jetpack_spinner_pid ]]; then kill $__jetpack_spinner_pid 2>/dev/null; wait $__jetpack_spinner_pid 2>/dev/null; if [[ ${{+NO_COLOR}} = 1 ]]; then printf '\\r                                        \\r' >&2; else printf '\\r\\033[2K' >&2; fi; fi; local elapsed=$(( EPOCHSECONDS - __jetpack_started )) result; [[ $code = 0 ]] && result=ok || result=\"failed ($code)\"; [[ $__jetpack_kind = build ]] && __jetpack_build_status=\"$result · ${{elapsed}}s\" || __jetpack_test_status=\"$result · ${{elapsed}}s\"; if [[ ${{+NO_COLOR}} = 1 ]]; then printf '%s %s · %ss\\n' $__jetpack_kind \"$result\" $elapsed; else [[ $code = 0 ]] && printf '\\033[{success}m✓\\033[0m %s ok · %ss\\n' $__jetpack_kind $elapsed || printf '\\033[{error}m✗\\033[0m %s failed (%s) · %ss\\n' $__jetpack_kind $code $elapsed; fi; if [[ $code != 0 ]]; then [[ ${{+NO_COLOR}} = 1 ]] && printf '%s\\n' \"-> $__jetpack_kind failed. Rerun: $__jetpack_command\" || printf '\\033[{warn}m→\\033[0m %s\\n' \"$__jetpack_kind failed. Rerun: $__jetpack_command\"; fi; __jetpack_kind=''; __jetpack_spinner_pid=''; }}\n\
          autoload -Uz add-zsh-hook; add-zsh-hook preexec __jetpack_preexec; add-zsh-hook precmd __jetpack_precmd\n\
          if [[ ${{+NO_COLOR}} = 1 ]]; then\n\
-           PROMPT=$'{status_prefix}{label} {path_escape} > '\n\
+           PROMPT=$'{status_prefix}$(print -r -- \"$JETPACK_PROMPT_LABEL\") {path_escape} > '\n\
          else\n\
-           PROMPT=$'{status_prefix}%{{\\033[{accent}m%}}{ansi_label}%{{\\033[0m%}} %{{\\033[{border}m%}}{path_escape}%{{\\033[0m%}} %{{\\033[{success}m%}}❯%{{\\033[0m%}} '\n\
+           PROMPT=$'{status_prefix}%{{\\033[{accent}m%}}$(print -r -- \"$JETPACK_PROMPT_LABEL\")%{{\\033[0m%}} %{{\\033[{border}m%}}{path_escape}%{{\\033[0m%}} %{{\\033[{success}m%}}❯%{{\\033[0m%}} '\n\
          fi\n"
     );
     rc.push_str(&help_prefill_widgets(ShellKind::Zsh));
     rc
 }
 
-fn fish_init(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
+fn fish_init(_label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
     let path_expr = match path {
         PromptPathMode::Short => "prompt_pwd",
         PromptPathMode::Full => "pwd",
@@ -1063,7 +1046,6 @@ fn fish_init(label: &str, path: PromptPathMode, strip: PromptStripMode) -> Strin
     let success = SharedTheme::SUCCESS_SGR;
     let warn = SharedTheme::WARN_SGR;
     let error = SharedTheme::ERROR_SGR;
-    let label = fish_prompt_label(label);
     let mut rc = format!(
         "set -g __jetpack_build_status 'never run'; set -g __jetpack_test_status 'never run'; set -g __jetpack_kind ''; set -g __jetpack_command ''; set -g __jetpack_started 0; set -g __jetpack_spinner_pid ''; \
          function __jetpack_git_status; if git rev-parse --is-inside-work-tree >/dev/null 2>&1; set -l branch (git branch --show-current 2>/dev/null); test -n \"$branch\"; or set branch detached; if git diff --quiet --ignore-submodules -- 2>/dev/null; and git diff --cached --quiet --ignore-submodules -- 2>/dev/null; echo -n \"$branch clean\"; else; echo -n \"$branch changed\"; end; else; echo -n 'not a git worktree'; end; end; \
@@ -1074,8 +1056,8 @@ fn fish_init(label: &str, path: PromptPathMode, strip: PromptStripMode) -> Strin
          function __jetpack_preexec --on-event fish_preexec; switch $argv[1]; case \"jet build*\"; set -g __jetpack_kind build; case \"jet test*\"; set -g __jetpack_kind test; case '*'; set -g __jetpack_kind ''; return; end; set -g __jetpack_command $argv[1]; set -g __jetpack_started (date +%s); if isatty stderr; command sh -c 'while :; do if [ \"${{NO_COLOR+x}}\" = x ]; then printf \"\\r⠹ running %s · %ss\" \"$0\" \"$(( $(date +%s) - $1 ))\" >&2; else printf \"\\r\\033[{accent}m⠹\\033[0m running %s · %ss\" \"$0\" \"$(( $(date +%s) - $1 ))\" >&2; fi; sleep .1; done' $__jetpack_kind $__jetpack_started &\nset -g __jetpack_spinner_pid $last_pid; end; end; \
          function __jetpack_postexec --on-event fish_postexec; set -l code $status; test -n \"$__jetpack_kind\"; or return; if test -n \"$__jetpack_spinner_pid\"; kill $__jetpack_spinner_pid 2>/dev/null; wait $__jetpack_spinner_pid 2>/dev/null; if set -q NO_COLOR; printf '\\r                                        \\r' >&2; else; printf '\\r\\033[2K' >&2; end; end; set -l elapsed (math (date +%s) - $__jetpack_started); set -l result ok; test $code -eq 0; or set result \"failed ($code)\"; if test $__jetpack_kind = build; set -g __jetpack_build_status \"$result · \"$elapsed\"s\"; else; set -g __jetpack_test_status \"$result · \"$elapsed\"s\"; end; if set -q NO_COLOR; printf '%s %s · %ss\\n' $__jetpack_kind \"$result\" $elapsed; else if test $code -eq 0; printf '\\033[{success}m✓\\033[0m %s ok · %ss\\n' $__jetpack_kind $elapsed; else; printf '\\033[{error}m✗\\033[0m %s failed (%s) · %ss\\n' $__jetpack_kind $code $elapsed; end; if test $code -ne 0; if set -q NO_COLOR; echo \"-> $__jetpack_kind failed. Rerun: $__jetpack_command\"; else; printf '\\033[{warn}m→\\033[0m %s\\n' \"$__jetpack_kind failed. Rerun: $__jetpack_command\"; end; end; set -g __jetpack_kind ''; set -g __jetpack_spinner_pid ''; end; \
          function fish_prompt; {strip_line}\
-         if set -q NO_COLOR; printf '%s ' {label}; echo -n ({path_expr}); echo -n ' > '; \
-         else; printf '\\033[{accent}m%s\\033[0m ' {label}; \
+         if set -q NO_COLOR; printf '%s ' \"$JETPACK_PROMPT_LABEL\"; echo -n ({path_expr}); echo -n ' > '; \
+         else; printf '\\033[{accent}m%s\\033[0m ' \"$JETPACK_PROMPT_LABEL\"; \
          printf '\\033[{border}m%s\\033[0m' ({path_expr}); \
          printf ' \\033[{success}m❯\\033[0m '; end; end\n"
     );
@@ -1175,7 +1157,7 @@ mod tests {
     fn bash_rc_sets_label() {
         let rc = bash_rc("jetpack", PromptPathMode::Short, PromptStripMode::Off);
         assert!(rc.contains("PS1="));
-        assert!(rc.contains("jetpack"));
+        assert!(rc.contains(PROMPT_LABEL_ENV));
     }
 
     #[test]
@@ -1421,13 +1403,16 @@ mod tests {
     fn prompt_rc_has_plain_no_color_fallback() {
         let rc = bash_rc("web-api", PromptPathMode::Full, PromptStripMode::Off);
         assert!(rc.contains("NO_COLOR"));
-        assert!(rc.contains("web-api \\w > "));
+        assert!(rc.contains("printf \"%s\" \"$JETPACK_PROMPT_LABEL\""));
+        assert!(rc.contains(PROMPT_LABEL_ENV));
     }
 
     #[test]
     fn hostile_prompt_labels_are_data_in_generated_shells() {
         let hostile = "label'; $(touch pwned) `echo nope` \\ %";
         let bash = bash_rc(hostile, PromptPathMode::Short, PromptStripMode::Off);
+        assert!(!bash.contains(hostile));
+        assert!(bash.contains("printf \"%s\" \"$JETPACK_PROMPT_LABEL\""));
         let mut bash_check = Command::new("bash")
             .args(["-n"])
             .stdin(Stdio::piped())
@@ -1442,6 +1427,8 @@ mod tests {
         assert!(bash_check.wait().unwrap().success());
 
         let fish = fish_init(hostile, PromptPathMode::Short, PromptStripMode::Off);
+        assert!(!fish.contains(hostile));
+        assert!(fish.contains("printf '%s ' \"$JETPACK_PROMPT_LABEL\""));
         let mut fish_check = Command::new("fish")
             .args(["-n"])
             .stdin(Stdio::piped())
@@ -1456,9 +1443,99 @@ mod tests {
         assert!(fish_check.wait().unwrap().success());
 
         let zsh = zsh_rc(hostile, PromptPathMode::Short, PromptStripMode::Off);
-        assert!(zsh.contains("\\$"));
-        assert!(zsh.contains("\\\\"));
-        assert!(zsh.contains("%%"));
+        assert!(!zsh.contains(hostile));
+        assert!(zsh.contains("print -r -- \"$JETPACK_PROMPT_LABEL\""));
+    }
+
+    #[test]
+    fn hostile_prompt_labels_are_not_reexpanded_in_real_shells() {
+        let path = std::env::var("PATH").unwrap_or_default();
+        let backtick = '\u{60}';
+
+        let bash_marker = unique_tmp("jetpack-bash-prompt-injection");
+        let bash_backtick_marker = unique_tmp("jetpack-bash-prompt-backtick");
+        let bash_hostile = format!(
+            "label; $(touch {}) {backtick}touch {}{backtick} \\ %",
+            shell_single_quote(&bash_marker.display().to_string()),
+            shell_single_quote(&bash_backtick_marker.display().to_string()),
+        );
+        let bash_rc_path = write_temp(
+            "jetpack-bash-prompt-injection-rc",
+            &bash_rc("ignored", PromptPathMode::Short, PromptStripMode::Off),
+        );
+        let _ = pty(
+            &format!(
+                "env -i HOME=/ PATH={} TERM=dumb NO_COLOR=1 JETPACK_PROMPT_LABEL={} bash --noprofile --rcfile {} -i",
+                shell_single_quote(&path),
+                shell_single_quote(&bash_hostile),
+                shell_single_quote(&bash_rc_path.display().to_string()),
+            ),
+            "exit 0\n",
+            true,
+        );
+        assert!(!bash_marker.exists(), "bash executed a command from the label");
+        assert!(
+            !bash_backtick_marker.exists(),
+            "bash executed a backtick command from the label"
+        );
+        let _ = std::fs::remove_file(bash_rc_path);
+
+        let zsh_marker = unique_tmp("jetpack-zsh-prompt-injection");
+        let zsh_backtick_marker = unique_tmp("jetpack-zsh-prompt-backtick");
+        let zsh_hostile = format!(
+            "label; $(touch {}) {backtick}touch {}{backtick} \\ %",
+            shell_single_quote(&zsh_marker.display().to_string()),
+            shell_single_quote(&zsh_backtick_marker.display().to_string()),
+        );
+        let zdir = write_temp_dir("jetpack-zsh-prompt-injection-zdotdir");
+        std::fs::write(
+            zdir.join(".zshrc"),
+            zsh_rc("ignored", PromptPathMode::Short, PromptStripMode::Off),
+        )
+        .unwrap();
+        let _ = pty(
+            &format!(
+                "env -i HOME=/ PATH={} TERM=dumb NO_COLOR=1 JETPACK_PROMPT_LABEL={} ZDOTDIR={} zsh -d -i",
+                shell_single_quote(&path),
+                shell_single_quote(&zsh_hostile),
+                shell_single_quote(&zdir.display().to_string()),
+            ),
+            "exit 0\n",
+            true,
+        );
+        assert!(!zsh_marker.exists(), "zsh executed a command from the label");
+        assert!(
+            !zsh_backtick_marker.exists(),
+            "zsh executed a backtick command from the label"
+        );
+        let _ = std::fs::remove_dir_all(zdir);
+
+        let fish_marker = unique_tmp("jetpack-fish-prompt-injection");
+        let fish_backtick_marker = unique_tmp("jetpack-fish-prompt-backtick");
+        let fish_hostile = format!(
+            "label; $(touch {}) {backtick}touch {}{backtick} \\ %",
+            shell_single_quote(&fish_marker.display().to_string()),
+            shell_single_quote(&fish_backtick_marker.display().to_string()),
+        );
+        let _ = pty(
+            &format!(
+                "env -i HOME=/ PATH={} TERM=dumb NO_COLOR=1 JETPACK_PROMPT_LABEL={} fish --no-config -C {} -i",
+                shell_single_quote(&path),
+                shell_single_quote(&fish_hostile),
+                shell_single_quote(&fish_init(
+                    "ignored",
+                    PromptPathMode::Short,
+                    PromptStripMode::Off,
+                )),
+            ),
+            "exit 0\n",
+            true,
+        );
+        assert!(!fish_marker.exists(), "fish executed a command from the label");
+        assert!(
+            !fish_backtick_marker.exists(),
+            "fish executed a backtick command from the label"
+        );
     }
 
     fn pty(shell_command: &str, input: &str, no_color: bool) -> String {
@@ -1605,9 +1682,10 @@ mod tests {
         let path = std::env::var("PATH").unwrap_or_default();
         let bash = pty(
             &format!(
-                "env -i HOME={} PATH={} TERM=xterm-256color SHELL=/bin/bash HISTFILE=/dev/null bash --noprofile --rcfile {} -i",
+                "env -i HOME={} PATH={} TERM=xterm-256color SHELL=/bin/bash HISTFILE=/dev/null JETPACK_PROMPT_LABEL={} bash --noprofile --rcfile {} -i",
                 shell_single_quote(&home.display().to_string()),
                 shell_single_quote(&path),
+                shell_single_quote(LABEL),
                 shell_single_quote(&bash_rc.display().to_string()),
             ),
             "bind 'set enable-bracketed-paste off'\necho JETPACK_CAPTURE_START\njet() { sleep .1; [ \"$1\" = build ]; }\njet build\njet test\nexit 0\n",

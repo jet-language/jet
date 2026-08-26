@@ -18372,6 +18372,7 @@ impl LowerCtx<'_, '_> {
                             self.b.ins().jump(merge, &[val]);
                             self.b.switch_to_block(fail_block);
                             self.b.seal_block(fail_block);
+                            self.call_host(self.host.trace_reset, &[]);
                             match fallback {
                                 TOrFallback::Value(e) => {
                                     let fb = self.lower_expr(e)?;
@@ -18434,6 +18435,7 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().jump(merge, &[val]);
                         self.b.switch_to_block(fail_block);
                         self.b.seal_block(fail_block);
+                        self.call_host(self.host.trace_reset, &[]);
                         match fallback {
                             TOrFallback::Panic { msg, loc } => {
                                 let msg_val = self.lower_expr(msg)?;
@@ -18508,6 +18510,7 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().jump(merge, &[ok_val]);
                     self.b.switch_to_block(fail_block);
                     self.b.seal_block(fail_block);
+                    self.call_host(self.host.trace_reset, &[]);
                     // D-FAIL-BIND1=A: the failed report is already a Prelude
                     // result handle. Materialize that handle in the shared
                     // compiler-generated slot; fallback lowering only reads it.

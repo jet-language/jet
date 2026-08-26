@@ -641,6 +641,37 @@ mod tests {
             InRepoDep::External
         ));
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn package_tree_operations_reject_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jetpack-package-tree-symlink-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = root.with_file_name(format!(
+            "jetpack-package-tree-outside-{}",
+            std::process::id()
+        ));
+        std::fs::write(&outside, "must not be read or copied").unwrap();
+        symlink(&outside, root.join("escape.txt")).unwrap();
+        let copy = root.with_file_name(format!(
+            "jetpack-package-tree-copy-{}",
+            std::process::id()
+        ));
+
+        assert!(tree_fingerprint(&root).is_err());
+        assert!(copy_tree(&root, &copy).is_err());
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must not be read or copied");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&copy);
+        let _ = std::fs::remove_file(&outside);
+    }
 }
 
 /// A content fingerprint over a whole directory tree: every file's relative

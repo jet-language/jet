@@ -4003,6 +4003,28 @@ mod project_part_tests {
 
     #[cfg(unix)]
     #[test]
+    fn lsp_log_writer_rejects_symlink_destination() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-lsp-log-symlink-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = root.join("outside.log");
+        let log = root.join("jet-lsp.log");
+        std::fs::write(&outside, "must survive\n").unwrap();
+        symlink(&outside, &log).unwrap();
+
+        assert!(append_log_line(&log, "attacker").is_err());
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must survive\n");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn workspace_scan_ignores_non_regular_jet_entries() {
         let root = ShortTestDir::reserve(
             std::path::Path::new("/tmp"),

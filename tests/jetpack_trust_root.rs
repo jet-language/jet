@@ -387,3 +387,34 @@ fn jp6b_compromise_rollback_freeze_and_mix_and_match_fail_closed() {
         Err(TrustError::CacheReceiptExpired { .. })
     ));
 }
+
+#[test]
+fn core_build_hook_requires_the_exact_trust_identity() {
+    let dir = std::env::temp_dir().join(format!(
+        "jetpack-core-build-trust-it-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let store = dir.join("trust");
+    jetpack::Trust::add_grant(
+        &store,
+        &jetpack::Trust::TrustGrant {
+            authority: "build".to_string(),
+            subject: "build-sha256:trusted".to_string(),
+            scope: "repo".to_string(),
+        },
+    );
+    let hostile_identity = "build-sha256:trusted\n$(touch core-build-pwned)";
+    let theme = jetpack::Output::Theme::resolve(true);
+
+    assert!(jetpack::Trust::gate_build_identity(
+        &theme,
+        &store,
+        hostile_identity,
+        false,
+    )
+    .is_err());
+    assert!(!dir.join("core-build-pwned").exists());
+    std::fs::remove_dir_all(&dir).ok();
+}

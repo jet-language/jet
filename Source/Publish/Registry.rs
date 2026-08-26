@@ -1998,26 +1998,25 @@ fn collect_registry_identity_files(
             .to_string_lossy()
             .replace('\\', "/");
         let is_registry_metadata = name == REGISTRY_PACKAGE_METADATA_FILE;
-        if path.extension().and_then(|extension| extension.to_str())
-            == Some(crate::Syntax::FILE_EXT)
-            || is_registry_metadata
-        {
-            let content = if is_registry_metadata {
-                let mut content = Vec::new();
-                std::fs::File::open(&path)?
-                    .take(MAX_REGISTRY_PACKAGE_METADATA_BYTES + 1)
-                    .read_to_end(&mut content)?;
-                if content.len() as u64 > MAX_REGISTRY_PACKAGE_METADATA_BYTES {
-                    return Err(invalid_registry_metadata(
-                        "registry.json exceeds its size limit",
-                    ));
-                }
-                content
-            } else {
-                std::fs::read(&path)?
-            };
-            out.push((relative, content));
-        }
+        // The artifact copy path preserves every visible regular file. Hash
+        // that same set, so an auxiliary payload (for example an embedded
+        // asset) cannot be changed after publication without changing the
+        // signed content identity.
+        let content = if is_registry_metadata {
+            let mut content = Vec::new();
+            std::fs::File::open(&path)?
+                .take(MAX_REGISTRY_PACKAGE_METADATA_BYTES + 1)
+                .read_to_end(&mut content)?;
+            if content.len() as u64 > MAX_REGISTRY_PACKAGE_METADATA_BYTES {
+                return Err(invalid_registry_metadata(
+                    "registry.json exceeds its size limit",
+                ));
+            }
+            content
+        } else {
+            std::fs::read(&path)?
+        };
+        out.push((relative, content));
     }
     Ok(())
 }

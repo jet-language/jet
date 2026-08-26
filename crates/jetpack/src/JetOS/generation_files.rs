@@ -730,6 +730,7 @@ mod request_proof_tests {
             disk: None,
             json: false,
             assume_yes: false,
+            trust: false,
             host: None,
             real_tier,
         }

@@ -4,6 +4,7 @@ use crate::Output::Theme;
 use crate::Provider;
 use crate::RefSpec;
 use crate::Store;
+use crate::Trust;
 use jet_env_model::ModuleEval::SystemPlan;
 use std::path::{Path, PathBuf};
 
@@ -83,6 +84,49 @@ impl RealizedPackage {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum RealizeRefError {
+    Provider(String),
+    BuildRejected,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum CoreBuildAuthorizationError {
+    Identity(String),
+    Denied,
+}
+
+/// Gate the exact Core Cargo action before Store realization can reach a
+/// provider build hook. JetOS uses the same identity and trust gate as the
+/// regular package realization path.
+fn authorize_core_build(
+    theme: &Theme,
+    trust_store: &Path,
+    spec: &RefSpec::RefSpec,
+    table: &RefSpec::SourceTable,
+    ctx: &Provider::Ctx<'_>,
+    bypass: bool,
+) -> Result<(), CoreBuildAuthorizationError> {
+    match Provider::core_build_identity(spec, table, ctx) {
+        Ok(Some(identity)) => {
+            crate::RuntimePolicy::warn_sandbox_fallback(theme);
+            Trust::gate_build_identity(theme, trust_store, &identity, bypass)
+                .map_err(|_| CoreBuildAuthorizationError::Denied)
+        }
+        Ok(None) => Ok(()),
+        Err(reason) => Err(CoreBuildAuthorizationError::Identity(reason)),
+    }
+}
+
+fn report_core_build_identity_error(theme: &Theme, reason: &str) {
+    theme.error_coded(
+        "E1275",
+        "build sandboxing is required but unavailable",
+        &format!("could not establish the exact Core Cargo build identity: {reason}"),
+        "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry.",
+    );
+}
+
 fn canonical_hangar_digest(digest: &str) -> bool {
     digest.len() == 71
         && digest.starts_with("sha256-")
@@ -143,6 +187,7 @@ pub(super) fn realize_ref(
     flags: &OSFlags,
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
+    project_dir: &Path,
     name_w: usize,
     mut progress: Option<(&mut crate::Output::LiveRegion<'_>, usize, usize)>,
 ) -> Option<RealizedPackage> {
@@ -169,10 +214,34 @@ pub(super) fn realize_ref(
         fixtures: fixtures.as_deref(),
         store_dir: &store_dir,
         offline: flags.offline,
-        project_dir: None,
+        project_dir: Some(project_dir),
         nix_index: None,
         nix_roots: None,
     };
+    let trust_store = Trust::store_path();
+    match authorize_core_build(
+        theme,
+        &trust_store,
+        spec,
+        table,
+        &ctx,
+        flags.trust,
+    ) {
+        Ok(()) => {}
+        Err(CoreBuildAuthorizationError::Denied) => {
+            if let Some((live, _, _)) = progress.as_mut() {
+                live.clear();
+            }
+            return None;
+        }
+        Err(CoreBuildAuthorizationError::Identity(reason)) => {
+            if let Some((live, _, _)) = progress.as_mut() {
+                live.clear();
+            }
+            report_core_build_identity_error(theme, &reason);
+            return None;
+        }
+    }
     match Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table }) {
         Ok(realized) => {
             if let Some((live, _, _)) = progress.as_mut() {
@@ -215,9 +284,10 @@ pub(super) fn try_realize_ref(
     flags: &OSFlags,
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
+    project_dir: &Path,
     name_w: usize,
     mut progress: Option<(&mut crate::Output::LiveRegion<'_>, usize, usize)>,
-) -> Result<RealizedPackage, String> {
+) -> Result<RealizedPackage, RealizeRefError> {
     if let Some((live, step, total)) = progress.as_mut() {
         live.set_dependency_status(
             "Building System",
@@ -241,17 +311,44 @@ pub(super) fn try_realize_ref(
         fixtures: fixtures.as_deref(),
         store_dir: &store_dir,
         offline: flags.offline,
-        project_dir: None,
+        project_dir: Some(project_dir),
         nix_index: None,
         nix_roots: None,
     };
+    let trust_store = Trust::store_path();
+    match authorize_core_build(
+        theme,
+        &trust_store,
+        spec,
+        table,
+        &ctx,
+        flags.trust,
+    ) {
+        Ok(()) => {}
+        Err(CoreBuildAuthorizationError::Denied) => {
+            if let Some((live, _, _)) = progress.as_mut() {
+                live.clear();
+            }
+            return Err(RealizeRefError::BuildRejected);
+        }
+        Err(CoreBuildAuthorizationError::Identity(reason)) => {
+            if let Some((live, _, _)) = progress.as_mut() {
+                live.clear();
+            }
+            report_core_build_identity_error(theme, &reason);
+            return Err(RealizeRefError::BuildRejected);
+        }
+    }
     let realized =
         Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table })
             .map_err(|e| {
                 if let Some((live, _, _)) = progress.as_mut() {
                     live.clear();
                 }
-                format!("verified realization failed for `{}`: {e:?}", spec.raw)
+                RealizeRefError::Provider(format!(
+                    "verified realization failed for `{}`: {e:?}",
+                    spec.raw
+                ))
             })?;
     if let Some((live, _, _)) = progress.as_mut() {
         live.clear();
