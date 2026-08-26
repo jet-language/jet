@@ -376,6 +376,9 @@ pub(crate) fn run_output(args: &[String], json: bool) {
     };
     let module = &projection.bundle.modules[output.module];
     let callable_identity = format!("{}::{}", module.alias, output.semantic_name);
+    let failure = output.failure_contract();
+    let failure_contract = failure.effective_type().name();
+    let failure_source = failure.source();
     let mut effects = output.effects.clone();
     effects.sort();
     let required_effects = effects.iter().cloned().collect::<jet::Sema::EffectSet>();
@@ -413,13 +416,15 @@ pub(crate) fn run_output(args: &[String], json: bool) {
                 true,
                 "inspect.output",
                 &format!(
-                    ",\"output\":{{\"binding\":\"{}\",\"kind\":\"{}\",\"name\":\"{}\",\"entry\":\"{}\",\"source_path\":\"{}\",\"callable_identity\":\"{}\",\"effects\":[{}],\"required_effects\":[{}],\"granted_effects\":[{}],\"denied_effects\":[{}],\"authority\":\"{}\",\"selection_reason\":\"{}\"}}",
+                    ",\"output\":{{\"binding\":\"{}\",\"kind\":\"{}\",\"name\":\"{}\",\"entry\":\"{}\",\"source_path\":\"{}\",\"callable_identity\":\"{}\",\"failure_contract\":\"{}\",\"failure_source\":\"{}\",\"effects\":[{}],\"required_effects\":[{}],\"granted_effects\":[{}],\"denied_effects\":[{}],\"authority\":\"{}\",\"selection_reason\":\"{}\"}}",
                     json_escape(binding),
                     json_escape(output.kind.as_str()),
                     json_escape(&output.output_name),
                     json_escape(&output.source_name),
                     json_escape(&output.source_path),
                     json_escape(&callable_identity),
+                    json_escape(&failure_contract),
+                    json_escape(&failure_source),
                     effect_values,
                     effect_values,
                     granted_values,
@@ -438,6 +443,10 @@ pub(crate) fn run_output(args: &[String], json: bool) {
         println!("entry: {}", output.source_name);
         println!("source path: {}", output.source_path);
         println!("callable identity: {callable_identity}");
+        println!(
+            "failure contract: {} ({})",
+            failure_contract, failure_source
+        );
         println!(
             "required effects: {}",
             if effects.is_empty() {

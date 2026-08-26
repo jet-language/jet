@@ -211,6 +211,9 @@ pub struct FactDeclaration {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FactRegistry {
     declarations: BTreeMap<(FactKind, String), FactDeclaration>,
+    /// State labels retain declaration order for typed reflection. The set in
+    /// `FactDeclaration` remains the membership/validation view.
+    state_member_order: BTreeMap<String, Vec<String>>,
     state_graphs: BTreeMap<String, StateGraph>,
 }
 
@@ -234,6 +237,11 @@ impl FactRegistry {
         from: impl IntoIterator<Item = String>,
     ) {
         let name = name.into();
+        let members = members.into_iter().collect::<Vec<_>>();
+        if kind == FactKind::State {
+            self.state_member_order
+                .insert(name.clone(), members.clone());
+        }
         self.declarations.insert(
             (kind, name.clone()),
             FactDeclaration {
@@ -244,6 +252,39 @@ impl FactRegistry {
                 from: from.into_iter().collect(),
             },
         );
+    }
+
+    /// Register the erased state plane owned by one nominal type.
+    pub fn declare_state(
+        &mut self,
+        type_name: impl Into<String>,
+        members: impl IntoIterator<Item = String>,
+    ) {
+        self.declare(
+            FactKind::State,
+            format!("{}.State", type_name.into()),
+            members,
+        );
+    }
+
+    /// Build the state portion of the erased registry from nested struct
+    /// sections. Sema remains responsible for marker validation and graphs;
+    /// this constructor gives early comptime folds the same fact row.
+    pub fn from_state_items(items: &[crate::AST::Item]) -> Self {
+        let mut registry = Self::default();
+        for item in items {
+            let crate::AST::Item::Struct(structure) = item else {
+                continue;
+            };
+            let Some(state) = &structure.state else {
+                continue;
+            };
+            registry.declare_state(
+                structure.name.clone(),
+                state.states.iter().map(|(name, _)| name.clone()),
+            );
+        }
+        registry
     }
 
     pub fn get(&self, kind: FactKind, name: &str) -> Option<&FactDeclaration> {
@@ -262,13 +303,19 @@ impl FactRegistry {
             .entry((kind, name.clone()))
             .or_insert_with(|| FactDeclaration {
                 kind,
-                name,
+                name: name.clone(),
                 members: BTreeSet::new(),
                 deny: BTreeSet::new(),
                 from: BTreeSet::new(),
             })
             .members
-            .insert(member);
+            .insert(member.clone());
+        if kind == FactKind::State {
+            let ordered = self.state_member_order.entry(name).or_default();
+            if !ordered.contains(&member) {
+                ordered.push(member);
+            }
+        }
     }
 
     /// Attach the checked graph to its erased state fact row.
@@ -278,6 +325,13 @@ impl FactRegistry {
 
     pub fn state_graph(&self, name: &str) -> Option<&StateGraph> {
         self.state_graphs.get(name)
+    }
+
+    /// Return state labels in the order written in the owning struct section.
+    pub fn state_members(&self, type_name: &str) -> Option<&[String]> {
+        self.state_member_order
+            .get(&format!("{type_name}.State"))
+            .map(Vec::as_slice)
     }
 
     pub fn contains(&self, kind: FactKind, name: &str) -> bool {

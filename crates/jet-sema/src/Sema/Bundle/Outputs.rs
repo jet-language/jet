@@ -192,6 +192,7 @@ fn resolve_output_callable(
         .funcs
         .get(&semantic_name)
         .or_else(|| states[target].funcs.get(&source_name))?;
+    let failure_contract = signature.failure_contract();
     if signature.is_extern || signature.is_unsafe {
         diags.push(output_error(
             format!("Output entry `{source_name}` is not an ordinary safe Jet function"),
@@ -262,6 +263,7 @@ fn resolve_output_callable(
         lowered_name: rust_path,
         params: signature.params.clone(),
         return_type: signature.return_type.clone(),
+        failure_contract,
         reference: entry.span(),
         definition: name_ledger
             .declaration(target, &semantic_name)

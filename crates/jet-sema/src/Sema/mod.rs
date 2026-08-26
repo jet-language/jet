@@ -1464,11 +1464,9 @@ pub(crate) struct ModuleState {
     core_imports: HashMap<String, String>,
     tests: HashMap<String, Span>,
     trait_reg: TraitRegistry,
-    /// D-STATE-HOME1=A: declared typestate labels by owning struct.
-    declared_states: HashMap<String, Vec<String>>,
-    /// D-STATE-TERMINAL1: checked typestate graph facts used by reflection.
-    /// These facts are erased before code generation.
-    state_graphs: HashMap<String, jet_foundation::Facts::StateGraph>,
+    /// D-FACTMODEL1=A: the one erased fact registry visible to body folds.
+    /// State rows and checked graphs are compile-time metadata only.
+    fact_registry: jet_foundation::Facts::FactRegistry,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// D-STRUCT-POLICY1=A: one bundle-local nominal setting table shared by
     /// marker and `apply` validation.

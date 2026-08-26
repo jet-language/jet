@@ -508,6 +508,11 @@ pub struct OutputEntryFact {
     pub reference_span: SourceSpan,
     pub params: Vec<String>,
     pub return_type: Option<String>,
+    /// The effective Result-shaped carrier of the selected callable.
+    pub failure_contract: String,
+    /// The sema provenance of that carrier: implicit, explicit, converted, or
+    /// proven unreachable.
+    pub failure_source: String,
     pub authority: String,
     pub effects: Vec<String>,
 }

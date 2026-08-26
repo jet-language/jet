@@ -533,56 +533,62 @@ fn check_bundle_opts_for_output_inner(
         .modules
         .iter()
         .enumerate()
-        .map(|(module_idx, m)| ModuleState {
-            module_path: m.display.clone(),
-            source: m.source.clone(),
-            package_scope: jet_foundation::Names::package_scope_for(&m.path, &bundle.project_root),
-            module_alias: m.alias.clone(),
-            items: m.items.clone(),
-            build_facts: bundle.build_facts.clone(),
-            allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
-            exact_int_reachable: std::cell::Cell::new(false),
-            funcs: HashMap::new(),
-            registry: builtin_type_registry(),
-            consts: HashMap::new(),
-            imports: HashMap::new(),
-            inline_foreign_imports: HashMap::new(),
-            inline_reexport_foreign: HashMap::new(),
-            core_imports: HashMap::new(),
-            tests: HashMap::new(),
-            trait_reg: TraitRegistry::default(),
-            declared_states: m
-                .items
-                .iter()
-                .filter_map(|item| match item {
-                    Item::Struct(structure) => structure.state.as_ref().map(|state| {
-                        (
-                            structure.name.clone(),
-                            state.states.iter().map(|(name, _)| name.clone()).collect(),
-                        )
-                    }),
-                    _ => None,
-                })
-                .collect(),
-            state_graphs: HashMap::new(),
-            policy_declarations: m.policy_declarations.clone(),
-            callable_policy_declarations: callable_policy_declarations.clone(),
-            rule_facts: m.rule_facts.clone(),
-            code_modules: HashMap::new(),
-            code_module_identities: HashMap::new(),
-            unqualified: HashMap::new(),
-            unqualified_file: HashMap::new(),
-            core_item_imports: HashMap::new(),
-            reexports: HashMap::new(),
-            inline_unqualified: HashMap::new(),
-            inline_unqualified_file: HashMap::new(),
-            inline_core_imports: HashMap::new(),
-            inline_core_items: HashMap::new(),
-            inline_reexport_inline: HashMap::new(),
-            inline_reexport_file: HashMap::new(),
-            inline_reexport_core: HashMap::new(),
+        .map(|(module_idx, m)| {
+            let fact_registry = crate::Sema::StateTable::declaration_facts(&m.items);
+            ModuleState {
+                module_path: m.display.clone(),
+                source: m.source.clone(),
+                package_scope:
+                    jet_foundation::Names::package_scope_for(&m.path, &bundle.project_root),
+                module_alias: m.alias.clone(),
+                items: m.items.clone(),
+                build_facts: bundle.build_facts.clone(),
+                allow_compiler_api: allow_compiler_api && module_idx == bundle.entry,
+                exact_int_reachable: std::cell::Cell::new(false),
+                funcs: HashMap::new(),
+                registry: builtin_type_registry(),
+                consts: HashMap::new(),
+                imports: HashMap::new(),
+                inline_foreign_imports: HashMap::new(),
+                inline_reexport_foreign: HashMap::new(),
+                core_imports: HashMap::new(),
+                tests: HashMap::new(),
+                trait_reg: TraitRegistry::default(),
+                fact_registry,
+                policy_declarations: m.policy_declarations.clone(),
+                callable_policy_declarations: callable_policy_declarations.clone(),
+                rule_facts: m.rule_facts.clone(),
+                code_modules: HashMap::new(),
+                code_module_identities: HashMap::new(),
+                unqualified: HashMap::new(),
+                unqualified_file: HashMap::new(),
+                core_item_imports: HashMap::new(),
+                reexports: HashMap::new(),
+                inline_unqualified: HashMap::new(),
+                inline_unqualified_file: HashMap::new(),
+                inline_core_imports: HashMap::new(),
+                inline_core_items: HashMap::new(),
+                inline_reexport_inline: HashMap::new(),
+                inline_reexport_file: HashMap::new(),
+                inline_reexport_core: HashMap::new(),
+            }
         })
         .collect();
+    // Early comptime folds and every module checker see the same bundle-wide
+    // state rows. Graphs are attached before top-level `Type.reflect()` folds,
+    // so no consumer needs a source-side typestate table.
+    let initial_items: Vec<Item> = bundle
+        .modules
+        .iter()
+        .flat_map(|module| module.items.iter().cloned())
+        .collect();
+    let mut initial_fact_registry = crate::Sema::StateTable::declaration_facts(&initial_items);
+    for (type_name, graph) in crate::Sema::checked_state_graphs(&initial_items) {
+        initial_fact_registry.set_state_graph(format!("{type_name}.State"), graph);
+    }
+    for state in &mut states {
+        state.fact_registry = initial_fact_registry.clone();
+    }
     let mut name_ledger = std::mem::take(&mut bundle.name_ledger);
     name_ledger.clear_sema_facts();
 
@@ -816,6 +822,7 @@ fn check_bundle_opts_for_output_inner(
             &ct_core_imports[idx],
             &ct_core_item_imports[idx],
             &bundle.build_facts,
+            &states[idx].fact_registry,
             Some(&mut top_level_embed_inputs),
         );
         expand_item_template_loops(&mut module.items, &base, &mut diags);
@@ -1151,23 +1158,9 @@ fn check_bundle_opts_for_output_inner(
                             .iter()
                             .map(|(name, func)| (name.clone(), func))
                             .collect();
-                        let states = module
-                            .items
-                            .iter()
-                            .find_map(|item| match item {
-                                Item::Struct(structure) if structure.name == s.name => structure
-                                    .state
-                                    .as_ref()
-                                    .map(|state| {
-                                        state
-                                            .states
-                                            .iter()
-                                            .map(|(name, _)| name.clone())
-                                            .collect::<Vec<_>>()
-                                    }),
-                                _ => None,
-                            })
-                            .unwrap_or_default();
+                        let states = initial_fact_registry
+                            .state_members(&s.name)
+                            .map_or_else(Vec::new, |states| states.to_vec());
                         let type_path = name_ledger
                             .canonical_path(idx, &s.name)
                             .expect("derive target missing from the name ledger");
@@ -1329,23 +1322,9 @@ fn check_bundle_opts_for_output_inner(
                 let Some(body) = declaration.body.as_ref() else {
                     continue;
                 };
-                let states = module
-                    .items
-                    .iter()
-                    .find_map(|item| match item {
-                        Item::Struct(structure) if structure.name == target.name => structure
-                            .state
-                            .as_ref()
-                            .map(|state| {
-                                state
-                                    .states
-                                    .iter()
-                                    .map(|(name, _)| name.clone())
-                                    .collect::<Vec<_>>()
-                            }),
-                        _ => None,
-                    })
-                    .unwrap_or_default();
+                let states = initial_fact_registry
+                    .state_members(&target.name)
+                    .map_or_else(Vec::new, |states| states.to_vec());
                 let type_path = name_ledger
                     .canonical_path(idx, &target.name)
                     .expect("declared rule target missing from the name ledger");
@@ -2308,9 +2287,13 @@ fn check_bundle_opts_for_output_inner(
         .flat_map(|module| module.items.iter().cloned())
         .collect();
     let all_state_graphs = super::super::checked_state_graphs(&all_items);
+    let mut final_fact_registry = crate::Sema::StateTable::declaration_facts(&all_items);
+    for (type_name, graph) in &all_state_graphs {
+        final_fact_registry.set_state_graph(format!("{type_name}.State"), graph.clone());
+    }
     for (state, module) in states.iter_mut().zip(&bundle.modules) {
         state.items = module.items.clone();
-        state.state_graphs = all_state_graphs.clone();
+        state.fact_registry = final_fact_registry.clone();
     }
 
     complete_bundle_check(

@@ -35,6 +35,11 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
                 println!("  references:  {}", idx.references().len());
                 println!("  call edges:  {}", idx.call_edges().len());
                 println!("  effects:     {}", idx.effects().len());
+                println!("effect roles");
+                println!(
+                    "  {}",
+                    jet_semindex::render_effect_projection_line(idx.effect_projection())
+                );
                 println!("  arithmetic:  {}", idx.arithmetic().len());
                 for fact in idx.arithmetic() {
                     println!(

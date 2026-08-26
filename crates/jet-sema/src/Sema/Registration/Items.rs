@@ -196,6 +196,7 @@ pub(crate) fn eval_comptime_items(
     // D-CORE-USELIST1=A: local grouped-item name → original Core member.
     core_item_imports: &HashMap<String, String>,
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+    fact_registry: &jet_foundation::Facts::FactRegistry,
     mut embed_inputs_out: Option<&mut Vec<crate::AST::ComptimeInput>>,
 ) {
     if !items
@@ -320,7 +321,7 @@ pub(crate) fn eval_comptime_items(
                     crate::AST::rewrite_core_item_call(expr, item);
                 }
             });
-            match crate::Comptime::evaluate_closed_value_with_imports_opts_collecting_structs(
+            match crate::Comptime::evaluate_closed_value_with_imports_opts_collecting_structs_and_facts(
                 &eval_value,
                 &funcs,
                 &externs,
@@ -337,6 +338,7 @@ pub(crate) fn eval_comptime_items(
                 None,
                 &eval_items,
                 build_facts,
+                fact_registry,
             ) {
                 Ok((v, inputs)) => {
                     // `v.jet_type()` reads the element type off the value's

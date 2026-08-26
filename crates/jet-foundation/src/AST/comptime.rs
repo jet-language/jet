@@ -1073,6 +1073,26 @@ impl CtValue {
             fields,
         }
     }
+
+    /// Add one structured context frame to a default error carried by the
+    /// interpreter. The round trip uses the shared Prelude carrier; it never
+    /// parses or rebuilds error meaning from display text.
+    pub fn add_error_context(
+        &mut self,
+        text: String,
+        file: String,
+        line: u32,
+    ) -> bool {
+        let CtValue::Failed(CtReport::Told(error)) = self else {
+            return false;
+        };
+        let Some(mut jet_error) = error.to_jet_err() else {
+            return false;
+        };
+        crate::Outcome::jet_err_add_context(&mut jet_error, text, file, line);
+        *error = Box::new(CtValue::from_jet_err(&jet_error));
+        true
+    }
 }
 
 /// A compiler-private opaque value that can cross the `CtValue` boundary while

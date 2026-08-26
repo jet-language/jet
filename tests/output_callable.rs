@@ -88,11 +88,29 @@ fn inspect_output_reports_selected_callable_facts() {
         "entry: launch",
         "source path: ",
         "callable identity: output_callable::launch",
+        "failure contract: Result<",
+        "implicit default !Err",
         "effects: IO",
         "selection reason: sole compatible Output",
     ] {
         assert!(stdout.contains(expected), "missing {expected}: {stdout}");
     }
+
+    let json = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "output", path.to_str().unwrap(), "--json"])
+        .output()
+        .expect("jet inspect output JSON");
+    assert!(
+        json.status.success(),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let json = String::from_utf8_lossy(&json.stdout);
+    assert!(json.contains("\"failure_contract\":\"Result<"), "{json}");
+    assert!(
+        json.contains("\"failure_source\":\"implicit default !Err\""),
+        "{json}"
+    );
 }
 
 #[test]

@@ -1107,6 +1107,15 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_marker_list() || self.at_single_type_marker() => {
                 self.type_def_with_any_markers()
             }
+            // D-STATE-HOME1=A: a retired companion declaration is still
+            // recognized in an inline code module so it gets the same
+            // owner-shape rewrite as a file-level declaration.
+            TokKind::KwPriv
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL) =>
+            {
+                let (is_pub, is_package_pub) = self.parse_item_visibility();
+                self.reject_top_level_state_decl(is_pub, is_package_pub)
+            }
             TokKind::KwPriv => match self.peek2().kind {
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
@@ -1114,6 +1123,16 @@ impl<'a> Parser<'a> {
                 TokKind::KwTag => self.tag_def(false).map(Item::Tag),
                 _ => self.func().map(Item::Func),
             },
+            TokKind::KwPub
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL)
+                    || (matches!(self.peek2().kind, TokKind::LParen)
+                        && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::PUB_PACKAGE_QUALIFIER)
+                        && matches!(self.peek4().kind, TokKind::RParen)
+                        && matches!(&self.peek5().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL)) =>
+            {
+                let (is_pub, is_package_pub) = self.parse_item_visibility();
+                self.reject_top_level_state_decl(is_pub, is_package_pub)
+            }
             TokKind::KwPub => match self.peek2().kind {
                 TokKind::KwModule => self.code_module(true),
                 TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
@@ -1127,6 +1146,11 @@ impl<'a> Parser<'a> {
             TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
             TokKind::KwTag => self.tag_def(false).map(Item::Tag),
             TokKind::KwModule => self.code_module(false),
+            TokKind::Ident(n)
+                if n == Syntax::KW_STATE_DECL && self.at_state_block() => {
+                let (is_pub, is_package_pub) = self.parse_item_visibility();
+                self.reject_top_level_state_decl(is_pub, is_package_pub)
+            }
             // D-OSTARGET1=A: `#Target(OS.X) impl …` inside a module body.
             TokKind::Hash if self.at_web_target() => match self.parse_web_target_marker()? {
                 super::Items::TargetMarker::OS(os) => self.os_gated_impl(os),

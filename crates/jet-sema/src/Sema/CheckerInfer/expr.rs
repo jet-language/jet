@@ -160,6 +160,16 @@ impl<'a> Checker<'a> {
             .unwrap_or_else(jet_foundation::Layout::TargetLayout::host)
     }
 
+    fn state_fact_registry(
+        &self,
+        type_name: &str,
+    ) -> Option<&jet_foundation::Facts::FactRegistry> {
+        let owner = self.struct_owner_module(type_name, None)?;
+        self.modules
+            .and_then(|modules| modules.get(owner))
+            .map(|module| &module.fact_registry)
+    }
+
     /// D-METAREFLECT1=A: fold a static `Type.reflect()` call from the source
     /// items already owned by this module. The returned TypeInfo is a
     /// compile-time value; no engine receives a reflection request.
@@ -194,16 +204,16 @@ impl<'a> Checker<'a> {
             return Some(None);
         }
         let target = self.layout_target();
-        let graph = self
-            .modules
-            .and_then(|modules| modules.get(self.module_idx))
-            .and_then(|module| module.state_graphs.get(type_name));
-        let Some(value) = crate::Comptime::reflect_type_value_with_target_and_graph(
+        let fact_registry = self.state_fact_registry(type_name);
+        let graph = fact_registry
+            .and_then(|facts| facts.state_graph(&format!("{type_name}.State")));
+        let Some(value) = crate::Comptime::reflect_type_value_with_target_and_graph_and_facts(
             self.items,
             type_name,
             self.module_path,
             &target,
             graph,
+            fact_registry,
         ) else {
             return None;
         };
@@ -345,16 +355,16 @@ impl<'a> Checker<'a> {
                     return Some(None);
                 };
                 let target = self.layout_target();
-                let graph = self
-                    .modules
-                    .and_then(|modules| modules.get(self.module_idx))
-                    .and_then(|module| module.state_graphs.get(type_name));
-                crate::Comptime::reflect_type_value_with_target_and_graph(
+                let fact_registry = self.state_fact_registry(type_name);
+                let graph = fact_registry
+                    .and_then(|facts| facts.state_graph(&format!("{type_name}.State")));
+                crate::Comptime::reflect_type_value_with_target_and_graph_and_facts(
                     self.items,
                     type_name,
                     self.module_path,
                     &target,
                     graph,
+                    fact_registry,
                 )
                 .and_then(|value| {
                     crate::Comptime::reflected_fact_field(&value, read)
@@ -412,22 +422,20 @@ impl<'a> Checker<'a> {
                     _ => None,
                 },
                 jet_foundation::Registry::FactRead::States => match &**inner {
-                    Expr::Ident(type_name, _) => self
-                        .struct_owner_module(type_name, None)
-                        .and_then(|owner| self.modules.and_then(|modules| modules.get(owner)))
-                        .and_then(|module| module.declared_states.get(type_name))
-                        .map(|states| {
-                            let graph = self
-                                .struct_owner_module(type_name, None)
-                                .and_then(|owner| self.modules.and_then(|modules| modules.get(owner)))
-                                .and_then(|module| module.state_graphs.get(type_name));
-                            (
-                                Type::List(Box::new(Type::Named("StateInfo".to_string()))),
-                                crate::Comptime::build_state_infos_with_graph(
-                                    type_name, states, graph,
-                                ),
-                            )
-                        }),
+                    Expr::Ident(type_name, _) => self.state_fact_registry(type_name).and_then(
+                        |fact_registry| {
+                            fact_registry.state_members(type_name).map(|states| {
+                                let graph = fact_registry
+                                    .state_graph(&format!("{type_name}.State"));
+                                (
+                                    Type::List(Box::new(Type::Named("StateInfo".to_string()))),
+                                    crate::Comptime::build_state_infos_with_graph(
+                                        type_name, states, graph,
+                                    ),
+                                )
+                            })
+                        },
+                    ),
                     _ => None,
                 },
                 jet_foundation::Registry::FactRead::Effects => match &**inner {
@@ -1284,7 +1292,13 @@ impl<'a> Checker<'a> {
             || self
                 .expected_type
                 .as_ref()
-                .is_some_and(|expected| matches!(expected, Type::Result { .. }))
+                .is_some_and(|expected| {
+                    matches!(
+                        expected,
+                        Type::Result { err, .. }
+                            if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
+                    )
+                })
         {
             return result;
         }
@@ -5255,9 +5269,8 @@ impl<'a> Checker<'a> {
                 }
                 if leaf == "State" {
                     let is_declared_state = self
-                        .struct_owner_module(alias, None)
-                        .and_then(|owner| self.modules.and_then(|modules| modules.get(owner)))
-                        .and_then(|module| module.declared_states.get(alias))
+                        .state_fact_registry(alias)
+                        .and_then(|facts| facts.state_members(alias))
                         .is_some_and(|states| states.iter().any(|state| state == member));
                     if is_declared_state {
                         self.diags.push(Diagnostic::error(
@@ -5356,7 +5369,7 @@ impl<'a> Checker<'a> {
                 let is_declared_state = self
                     .modules
                     .and_then(|modules| modules.get(owner_mod))
-                    .and_then(|module| module.declared_states.get(type_name))
+                    .and_then(|module| module.fact_registry.state_members(type_name))
                     .is_some_and(|states| states.iter().any(|state| state == member));
                 let (what, why, fix) = if is_declared_state {
                     (

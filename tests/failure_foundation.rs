@@ -125,16 +125,61 @@ fn failure_contract_matrix_agrees_across_execution_tiers() {
 }
 
 #[test]
-fn never_contract_rejects_a_reachable_failure() {
-    let source = r#"
+fn never_contract_rejects_every_reachable_failure_route() {
+    let cases = [
+        (
+            "explicit propagation",
+            r#"
 fn fail() Int -> Err("bad")
 fn impossible() Int !Never -> fail()?("unreachable")
 fn run() {}
-"#;
-    let diagnostics = jet::compile_with_path(source, "failure_never.jet")
-        .expect_err("!Never must reject a reachable failure");
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E2404"),
-        "expected E2404, got {diagnostics:?}"
-    );
+"#,
+        ),
+        (
+            "implicit direct return",
+            r#"
+fn fail() Int -> Err("bad")
+fn impossible() Int !Never -> fail()
+fn run() {}
+"#,
+        ),
+        (
+            "implicit statement propagation",
+            r#"
+fn fail() Int -> Err("bad")
+fn impossible() !Never {
+    fail()
+}
+fn run() {}
+"#,
+        ),
+        (
+            "implicit branch propagation",
+            r#"
+fn fail() Int -> Err("bad")
+fn impossible(value: Bool) Int !Never -> {
+    if value {
+        fail()
+    }
+    return 7
+}
+fn run() {}
+"#,
+        ),
+    ];
+
+    for (case, source) in cases {
+        let diagnostics = jet::compile_with_path(source, "failure_never.jet")
+            .expect_err("!Never must reject a reachable failure");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E2404"),
+            "{case}: expected E2404, got {diagnostics:?}"
+        );
+    }
+
+    jet::compile_with_path(
+        "fn impossible() !Never {}\nfn run() {}\n",
+        "failure_never_empty.jet",
+    )
+    .expect("a !Never function with no reachable failure can fall through as success");
 }

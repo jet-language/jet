@@ -596,7 +596,20 @@ impl<'a> Checker<'a> {
         let Some(mut subj) = subject_clone else {
             return;
         };
-        let Some(st) = self.infer(&mut subj) else {
+        // Result handlers are lowered to this ordinary exhaustive if chain.
+        // Keep a direct fallible receiver as the carrier while the coverage
+        // probe infers it; ordinary value positions still auto-propagate.
+        let preserve_result_carrier = raw
+            .iter()
+            .any(|pattern| matches!(pattern, Pattern::Ok { .. } | Pattern::Err { .. }));
+        if preserve_result_carrier {
+            self.failure_auto_depth += 1;
+        }
+        let subj_ty = self.infer(&mut subj);
+        if preserve_result_carrier {
+            self.failure_auto_depth -= 1;
+        }
+        let Some(st) = subj_ty else {
             return;
         };
         let subj_name = match &subj {

@@ -647,7 +647,7 @@
           || (requestedRevision && sourceRevision !== requestedRevision);
         if (stale) {
           scm = null;
-          scmState.textContent = "git stale";
+          scmState.textContent = "Git Stale";
           scmState.style.color = "#f8c76a";
           if (latestDoc && !(latestDoc.graphs && latestDoc.graphs.length)
             && sourceIsTeachingEmpty(latestDoc.source_text)) {
@@ -662,14 +662,14 @@
         }
         scm = doc;
         const dirtyCount = doc.dirty_files ? " · " + doc.dirty_files + " files" : "";
-        scmState.textContent = doc.available ? (doc.dirty ? "git dirty" + dirtyCount : "git clean") : "no git";
+        scmState.textContent = doc.available ? (doc.dirty ? "Git Dirty" + dirtyCount : "Git Clean") : "No Git";
         scmState.style.color = doc.dirty ? "#fde68a" : "#8fb2dc";
         if (typeof syncReviewFromSourceControl === "function") syncReviewFromSourceControl(doc);
         return doc;
       })
       .catch(() => {
         scm = null;
-        scmState.textContent = "git ?";
+        scmState.textContent = "Git ?";
       });
   }
 
@@ -695,16 +695,17 @@
         const check = doc.check || {};
         const scmDoc = doc.source_control || {};
         const rows = [
-          ["revision", doc.revision || "?"],
-          ["check", check.state || "unknown"],
-          ["git", scmDoc.available ? (scmDoc.dirty ? "dirty" : "clean") : "unavailable"],
-          ["receipt", (doc.command_receipts && (doc.command_receipts.reason || doc.command_receipts.state)) || "missing"],
-          ["proof", proof.state || "missing"]
+          ["Revision", doc.revision || "?"],
+          ["Check", check.state || "unknown"],
+          ["Git", scmDoc.available ? (scmDoc.dirty ? "dirty" : "clean") : "unavailable"],
+          ["Receipt", (doc.command_receipts && (doc.command_receipts.reason || doc.command_receipts.state)) || "missing"],
+          ["Proof", proof.state || "missing"]
         ];
-        proofState.textContent = proof.state || "missing";
+        const proofStatus = String(proof.state || "missing");
+        proofState.textContent = proofStatus.charAt(0).toUpperCase() + proofStatus.slice(1);
         proofState.style.color = proof.state === "current" ? "#8fb2dc" : "#f8c76a";
         proofRail.innerHTML = rows.map(([label, value]) => {
-          const cls = label === "receipt" || value === "missing" ? " is-missing" : "";
+          const cls = label === "Receipt" || value === "missing" ? " is-missing" : "";
           return `<div class="proof-row${cls}"><b>${escapeHtml(label)}</b><span>${escapeHtml(value)}</span></div>`;
         }).join("");
         return doc;

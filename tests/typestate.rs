@@ -336,6 +336,9 @@ impl Box {
     #Transition(Empty, Full) fn fill(self: ^Box<T>) Box<T> -[]> {
         return self
     }
+}
+
+impl Box {
     #State(Full) fn read(self) T -[]> {
         return self.value
     }
@@ -353,6 +356,12 @@ fn run() {
     assert!(
         !compiled.rust.contains("discriminant"),
         "typestate must not add a tag"
+    );
+    let wrong_order = source.replace("    box = box.fill()\n", "");
+    assert!(
+        codes(&wrong_order).iter().any(|code| code == "E0150"),
+        "the shared generic state set must guard methods from a separate impl: {:?}",
+        codes(&wrong_order)
     );
 }
 

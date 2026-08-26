@@ -2456,7 +2456,7 @@ fn lsp_signature_help_returns_active_parameter() {
     if !jet.exists() {
         return;
     }
-    let source = "fn connect(host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) String {\n    return host;\n}\nfn run() {\n    r :: connect(\"db\", tls: true, timeout: 5)\n}\n";
+    let source = "fn connect(host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) String -[IO]> {\n    return host;\n}\nfn run() {\n    r :: connect(\"db\", tls: true, timeout: 5)\n}\n";
     let uri = "file:///tmp/lsp_signature_help_test.jet";
     let call_start = source
         .find("connect(\"db\", tls: true, timeout: 5)")
@@ -2489,7 +2489,7 @@ fn lsp_signature_help_returns_active_parameter() {
                     uri, tls_position.line, tls_position.character
                 ),
                 expect_contains: Some(vec![
-                    "fn connect(host: String, /, timeout seconds: Int, *, tls enabled: Bool, rest: ...String) String -[]>"
+                    "fn connect(host: String, /, timeout seconds: Int, *, tls enabled: Bool, rest: ...String) String -[IO]>"
                         .to_string(),
                     "\"activeParameter\":2".to_string(),
                     "tls enabled: Bool".to_string(),

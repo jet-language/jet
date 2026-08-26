@@ -3,25 +3,26 @@
 #[test]
 fn declared_conversion_reaches_default_error() {
     let source = r#"
+#Error
 enum StoreErr { Missing }
 
 impl StoreErr -> Err {
     return Err("missing")
 }
 
-fn read_store() Int StoreErr! {
+fn read_store() Int !StoreErr -> {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() Int ! {
-    return Ok(read_store()?)
+fn get_user() Int ! -> {
+    return Ok(read_store())
 }
 
 fn run() ! {
-    get_user()?
+    get_user()
 }
 "#;
-    let compiled = jet::compile(source).expect("declared StoreErr => Err must compile");
+    let compiled = jet::compile(source).expect("declared StoreErr -> Err must compile");
     assert!(compiled.rust.contains("errconv_StoreErr_to_Err"));
 }
 
@@ -32,16 +33,62 @@ impl String -> Err {
     return Err(self)
 }
 
-fn read_store() Int String! {
-    return Err("missing")
-}
-
-fn run() ! {
-    value :: read_store()?
-    print(value)
-}
+fn run() {}
 "#;
     jet::compile(source).expect("foreign String source may convert into default Err");
+}
+
+#[test]
+fn declared_conversion_reaches_typed_error() {
+    let source = r#"
+#Error
+enum SourceErr { One }
+#Error
+enum TargetErr { One }
+
+impl SourceErr -> TargetErr {
+    return TargetErr.One
+}
+
+fn read() Int !SourceErr -> {
+    return Err(SourceErr.One)
+}
+
+fn outer() Int !TargetErr -> {
+    value :: read()
+    return Ok(value)
+}
+
+fn run() !TargetErr {
+    outer()
+}
+"#;
+    let compiled = jet::compile(source).expect("declared typed conversion must compile");
+    assert!(compiled.rust.contains("errconv_SourceErr_to_TargetErr"));
+}
+
+#[test]
+fn missing_typed_conversion_reports_e2404() {
+    let source = r#"
+#Error
+enum SourceErr { One }
+#Error
+enum TargetErr { One }
+
+fn read() Int !SourceErr -> {
+    return Err(SourceErr.One)
+}
+
+fn run() Int !TargetErr -> {
+    value :: read()
+    return Ok(value)
+}
+"#;
+    let diagnostics = jet::compile(source).expect_err("missing typed conversion must be rejected");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E2404"),
+        "expected E2404, got {diagnostics:?}"
+    );
 }
 
 #[test]
@@ -62,29 +109,25 @@ fn run() {}
 #[test]
 fn declared_default_conversion_reaches_web_artifact() {
     let source = r#"
+#Error
 enum StoreErr { Missing }
 
 impl StoreErr -> Err {
     return Err("store unavailable")
 }
 
-fn read_store() Int StoreErr! {
+fn read_store() Int !StoreErr -> {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() Int ! {
-    value :: read_store()?
+fn get_user() Int ! -> {
+    value :: read_store()
     return Ok(value)
 }
 
 #Target(Wasm)
 fn run() {
-    result :: get_user()
-    if result == {
-        .Ok(value) -> { print(value) }
-        .Err(error) -> { print(error.message) }
-        else -> {}
-    }
+    value :: get_user()
 }
 "#;
     let output = jet::compile_web_with_path(source, "default_error_conversion_web.jet")

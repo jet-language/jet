@@ -612,23 +612,26 @@ fn default_report_keeps_conversion_identity_at_the_aot_edge() {
     }
 
     let src = r#"
-enum StoreErr { Missing }
-
-impl StoreErr -> Err {
-    return Err("store unavailable")
+impl IOError -> Err {
+    return Err("store unavailable", code: "E_STORE", cause: Err("disk offline"))
 }
 
-fn read_store() Int StoreErr! {
-    return Err(StoreErr.Missing)
+fn read_store() Int !IOError -> {
+    return Err(IOError.InvalidInput(IOContext{
+        operation: .Read,
+        resource: None,
+        os_code: None,
+        cause: Val("disk offline"),
+    }))
 }
 
-fn get_user() Int ! {
-    value :: read_store()?
+fn get_user() Int ! -> {
+    value :: read_store()?("loading store")
     return Ok(value)
 }
 
 fn run() ! {
-    get_user()?
+    get_user()
 }
 "#;
     let generated = jet::compile(src).expect("the converted default report must compile");
@@ -640,12 +643,22 @@ fn run() ! {
     assert_eq!(code, 1, "the converted failure must escape: {stderr}");
     assert!(stdout.is_empty(), "the failure must not print to stdout: {stdout}");
     assert!(
-        stderr.starts_with("Error: store unavailable (type: StoreErr)\n"),
-        "the default report must keep typed identity: {stderr}"
+        stderr.starts_with("Error [E_STORE]: store unavailable (type: IOError)\n  cause: disk offline\n"),
+        "the default report must keep code, message, typed identity, and cause: {stderr}"
     );
     assert!(
-        stderr.contains("  conversion: StoreErr -> Err\n"),
+        stderr.contains("): loading store\n"),
+        "the default report must keep the source-linked context frame: {stderr}"
+    );
+    assert!(
+        stderr.contains("  conversion: IOError -> Err\n"),
         "the default report must keep conversion history: {stderr}"
+    );
+    assert!(
+        stderr.contains("Trail [E3002] (2 hops via ?, origin first):")
+            && stderr.contains("  1. get_user (")
+            && stderr.contains("  2. run ("),
+        "the default report must keep the source journey: {stderr}"
     );
 }
 

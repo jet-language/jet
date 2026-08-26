@@ -1046,7 +1046,7 @@
       || actionEntries.find((item) => item.action_id === "canvas.command:dev")
       || null;
     if (!run) {
-      runHud.textContent = "run permission loading";
+      runHud.textContent = "Run permission loading";
       loadCanvasActions().then(() => {
         const ready = actionEntries.find((item) => item.action_id === "canvas.command:run")
           || actionEntries.find((item) => item.action_id === "canvas.command:dev");

@@ -109,6 +109,17 @@ struct FuncWeb {
     memo_fields: std::collections::BTreeMap<String, Vec<String>>,
 }
 
+/// One lowered error conversion available to the JS adapter. The conversion
+/// body stays TIR, exactly like the native and Wasm paths; JS only formats its
+/// carrier and calls this generated function from `jet_web_try`.
+struct ErrorConvWeb {
+    key: String,
+    source_path: String,
+    source_marker: String,
+    file_prefix: Option<String>,
+    tir: TIR::TFunc,
+}
+
 struct CloseWeb {
     key: String,
     source_path: String,
@@ -145,11 +156,17 @@ pub fn emit_web(
     }
     let source_marker = js_source_marker(bundle);
     let sources = js_sources(bundle);
-    let funcs = collect_web_funcs(bundle, &source_marker, &sources);
+    let (funcs, error_convs) = collect_web_funcs(bundle, &source_marker, &sources);
     let close_funcs = collect_web_close_funcs(bundle, &source_marker, &sources);
     let wasm_rust = emit_wasm_rust(bundle, &funcs)?;
-    let (js_app, js_source_map, handlers) =
-        emit_js_app(bundle, &funcs, &close_funcs, &sources, &source_marker)?;
+    let (js_app, js_source_map, handlers) = emit_js_app(
+        bundle,
+        &funcs,
+        &error_convs,
+        &close_funcs,
+        &sources,
+        &source_marker,
+    )?;
     let manifest_json = emit_manifest(bundle, &funcs, &handlers, &js_source_map);
     Ok(WebArtifacts {
         manifest_json,
@@ -964,6 +981,9 @@ fn web_wasm_expr_supported(
         | TIR::TExprKind::Print(operand) => {
             web_wasm_expr_supported(operand, bundle, file_prefix, reconstructions)
         }
+        TIR::TExprKind::DistinctCtor { arg, .. } => {
+            web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)
+        }
         TIR::TExprKind::ResourceNew(inner) => {
             web_wasm_expr_supported(inner, bundle, file_prefix, reconstructions)
         }
@@ -1141,6 +1161,20 @@ fn web_wasm_expr_supported(
             web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
                 && web_wasm_expr_supported(index, bundle, file_prefix, reconstructions)
         }
+        TIR::TExprKind::StaticCall {
+            owner: TIR::TStaticOwner::User(type_name),
+            method,
+            args,
+            ..
+        } if web_wasm_checked_text_static_supported(
+            expr,
+            type_name,
+            &method.name,
+            args,
+            bundle,
+            file_prefix,
+            reconstructions,
+        ) => true,
         TIR::TExprKind::StaticCall {
             owner: TIR::TStaticOwner::Prelude { path, .. },
             method,
@@ -2075,6 +2109,32 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
     supported
 }
 
+fn web_wasm_checked_text_static_supported(
+    expr: &TIR::TExpr,
+    type_name: &str,
+    method: &str,
+    args: &[TIR::TCallArg],
+    bundle: &ProgramBundle,
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> bool {
+    if bundle_distinct_web_base(bundle, type_name) != Some(Type::String) || args.len() != 1 {
+        return false;
+    }
+    if !web_wasm_expr_supported(&args[0].value, bundle, file_prefix, reconstructions) {
+        return false;
+    }
+    match method {
+        "from" => matches!(
+            &expr.ty,
+            Type::Result { ok, .. }
+                if matches!(ok.as_ref(), Type::Named(name) if name == type_name)
+        ),
+        "encode_hole" => matches!(&expr.ty, Type::String),
+        _ => false,
+    }
+}
+
 fn web_inline_block_supported(stmts: &[TIR::TStmt]) -> bool {
     let Some((last, prefix)) = stmts.split_last() else {
         return true;
@@ -2172,8 +2232,9 @@ fn collect_web_funcs(
     bundle: &ProgramBundle,
     source_marker: &str,
     sources: &[JSSource],
-) -> Vec<FuncWeb> {
+) -> (Vec<FuncWeb>, Vec<ErrorConvWeb>) {
     let mut out = Vec::new();
+    let mut error_convs = Vec::new();
     let memo_fields = web_memo_fields(bundle);
     let extern_funcs = bundle_extern_funcs(bundle);
     for (i, module) in bundle.modules.iter().enumerate() {
@@ -2206,9 +2267,10 @@ fn collect_web_funcs(
             bundle,
             &cx,
             &mut out,
+            &mut error_convs,
         );
     }
-    out
+    (out, error_convs)
 }
 
 fn collect_web_close_funcs(
@@ -2370,6 +2432,7 @@ fn collect_module_funcs(
     bundle: &ProgramBundle,
     cx: &Cx,
     out: &mut Vec<FuncWeb>,
+    error_convs: &mut Vec<ErrorConvWeb>,
 ) {
     let ceiling = module_ceiling.or(file_ceiling);
     let _ = ceiling;
@@ -2413,6 +2476,16 @@ fn collect_module_funcs(
                     memo_fields: memo_fields.clone(),
                 });
             }
+            Item::ErrorConv(conversion) => {
+                let tir = TIR::lower_error_conv(conversion, cx);
+                error_convs.push(ErrorConvWeb {
+                    key: local_web_key(file_prefix, &tir.name),
+                    source_path: source_path.to_string(),
+                    source_marker: source_marker.to_string(),
+                    file_prefix: file_prefix.map(str::to_string),
+                    tir,
+                });
+            }
             Item::CodeModule(cm) => {
                 let mod_ceiling = cm.web_target.or(ceiling);
                 if let Some(body) = &cm.body {
@@ -2429,6 +2502,7 @@ fn collect_module_funcs(
                         bundle,
                         cx,
                         out,
+                        error_convs,
                     );
                 }
             }
@@ -3470,6 +3544,53 @@ fn emit_wasm_inherent_methods(items: &[Item], cx: &Cx, out: &mut String) {
     }
 }
 
+fn checked_text_helper_name(type_name: &str, method: &str) -> String {
+    mangle_path(&format!("checked_text.{type_name}.{method}"))
+}
+
+fn emit_wasm_checked_text_helpers(items: &[Item], cx: &Cx, out: &mut String) {
+    for item in items {
+        match item {
+            Item::Impl(implementation)
+                if implementation.trait_name.as_deref() == Some(crate::Generics::CHECKED_TEXT) =>
+            {
+                for method_name in ["check", "encode_hole"] {
+                    let Some(method) = implementation
+                        .methods
+                        .iter()
+                        .find(|method| method.name == method_name)
+                    else {
+                        continue;
+                    };
+                    if !TIR::tir_covers_trait_method(
+                        method,
+                        &implementation.type_name,
+                        cx,
+                        crate::Generics::CHECKED_TEXT,
+                    ) {
+                        continue;
+                    }
+                    let mut tir = TIR::lower_trait_method(
+                        method,
+                        &implementation.type_name,
+                        cx,
+                        crate::Generics::CHECKED_TEXT,
+                    );
+                    tir.name = checked_text_helper_name(&implementation.type_name, method_name);
+                    tir.kind = TIR::TFuncKind::TopLevel;
+                    TIR::emit_tir_func(&tir, cx, out);
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    emit_wasm_checked_text_helpers(body, cx, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// A Wasm `run` is the browser entry when no companion HTML owns startup.
 fn auto_started_wasm_run(bundle: &ProgramBundle, f: &FuncWeb) -> bool {
     f.key == "run"
@@ -3916,6 +4037,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
             emit_wasm_reflection_impls(&module.items, &cx, &mut out);
         }
         emit_wasm_inherent_methods(&module.items, &cx, &mut out);
+        emit_wasm_checked_text_helpers(&module.items, &cx, &mut out);
         // D-ERR-CONV: web conversion calls use the same TIR-owned conversion
         // bodies as native emission. The web expression emitter only marshals
         // the call at the `?` site; it does not recreate the conversion body.
@@ -6331,6 +6453,13 @@ fn wasm_emit_expr(
             fn_name,
         } => {
             let value = wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?;
+            let context_helper = if note.is_some()
+                && crate::Codegen::TIR::try_target_is_default_error(inner, convert)
+            {
+                "jet_trace_err_note_jet"
+            } else {
+                "jet_trace_err_note"
+            };
             if matches!(convert, TIR::TTryConvert::Never) {
                 let traced = match note {
                     Some(note) => format!(
@@ -6360,7 +6489,8 @@ fn wasm_emit_expr(
             };
             match note {
                 Some(note) => format!(
-                    "jet_trace_err_note({}, {}, {}, {}, || {{ {} }})?",
+                    "{}({}, {}, {}, {}, || {{ {} }})?",
+                    context_helper,
                     propagated,
                     file,
                     line,
@@ -6416,6 +6546,9 @@ fn wasm_emit_expr(
         }
         TIR::TExprKind::DistinctRaw(inner) => {
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
+        }
+        TIR::TExprKind::DistinctCtor { arg, .. } => {
+            wasm_emit_expr(arg, funcs, file_prefix, reconstructions)?
         }
         TIR::TExprKind::OverflowOpt {
             prefix,
@@ -6563,6 +6696,31 @@ fn wasm_emit_expr(
             }
             let symbol = format!("jet_wasm_{key}");
             format!("{symbol}({})", args.iter().map(|a| wasm_emit_call_arg(a, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
+        }
+        TIR::TExprKind::StaticCall {
+            owner: TIR::TStaticOwner::User(type_name),
+            method,
+            args,
+            ..
+        } if method.name == "encode_hole" && args.len() == 1 => {
+            let value = wasm_emit_expr(&args[0].value, funcs, file_prefix, reconstructions)?;
+            format!(
+                "{}(&({value}))",
+                checked_text_helper_name(type_name, "encode_hole")
+            )
+        }
+        TIR::TExprKind::StaticCall {
+            owner: TIR::TStaticOwner::User(type_name),
+            method,
+            args,
+            ..
+        } if method.name == "from" && args.len() == 1 => {
+            let value = wasm_emit_call_arg(&args[0], funcs, file_prefix, reconstructions)?;
+            let local = mangle_generated("checked_text_value");
+            let checker = checked_text_helper_name(type_name, "check");
+            format!(
+                "{{ let {local} = ({value}).clone(); match {checker}(&{local}) {{ Ok(()) => Ok({local}), Err(error) => Err(error) }} }}"
+            )
         }
         TIR::TExprKind::StaticCall {
             owner: TIR::TStaticOwner::Prelude { path, .. },
@@ -6780,6 +6938,7 @@ fn web_emit_error(f: &FuncWeb) -> WebTirUnsupported {
 fn emit_js_app(
     bundle: &ProgramBundle,
     funcs: &[FuncWeb],
+    error_convs: &[ErrorConvWeb],
     close_funcs: &[CloseWeb],
     sources: &[JSSource],
     source_marker: &str,
@@ -6891,6 +7050,15 @@ fn emit_js_app(
                 json_quote(&f.key)
             ));
             out.push_str("}\n\n");
+        }
+    }
+
+    // D-ERR-CONV / I9: JS conversion calls use the same lowered conversion
+    // bodies as native and Wasm emission. The JS expression emitter only
+    // marshals the call at the `?` site.
+    if !funcs.is_empty() {
+        for conversion in error_convs {
+            emit_js_error_conv(conversion, funcs, sources, &mut out)?;
         }
     }
 
@@ -7024,6 +7192,44 @@ fn emit_js_close_fn(
     )?;
     out.push_str(&format!(
         "  }} finally {{ jet_stack_leave({stack_frame}); }}\n}}\n\n"
+    ));
+    Ok(())
+}
+
+fn emit_js_error_conv(
+    conversion: &ErrorConvWeb,
+    funcs: &[FuncWeb],
+    sources: &[JSSource],
+    out: &mut String,
+) -> WebEmitResult<()> {
+    let mut body = String::new();
+    body.push_str(&format!(
+        "  {} file {}\n",
+        conversion.source_marker,
+        js_source_index(sources, &conversion.source_path),
+    ));
+    emit_tir_js_body(
+        &conversion.tir.body,
+        &mut body,
+        funcs,
+        conversion.file_prefix.as_deref(),
+        1,
+    )
+    .map_err(|()| WebTirUnsupported {
+        func_name: conversion.key.clone(),
+        span: conversion.tir.source_span,
+    })?;
+    let async_kw = if body.contains("await ") { "async " } else { "" };
+    let params = conversion
+        .tir
+        .params
+        .iter()
+        .map(|(name, _, _)| web_name(name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    out.push_str(&format!(
+        "{async_kw}function {}({params}) {{\n{body}}}\n\n",
+        conversion.key
     ));
     Ok(())
 }
@@ -7247,6 +7453,10 @@ fn param_names(params: &[(String, Type)]) -> String {
 fn web_name(name: &str) -> &str {
     name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
         .unwrap_or(name)
+}
+
+fn web_error_conversion_pair(name: &str) -> Option<(&str, &str)> {
+    name.strip_prefix("__jet_errconv_")?.split_once("_to_")
 }
 
 fn qualified_web_key(rust_mod: &str, rust_fn: &str) -> String {
@@ -8782,10 +8992,10 @@ fn tir_js_expr(
         E::Try {
             inner,
             note,
+            convert,
             file,
             line,
             fn_name,
-            ..
         } => {
             let note = note
                 .as_ref()
@@ -8794,13 +9004,34 @@ fn tir_js_expr(
                 })
                 .transpose()?
                 .unwrap_or_else(|| "null".to_string());
+            let converter = match convert {
+                TIR::TTryConvert::DefaultErr => "jet_web_default_error".to_string(),
+                TIR::TTryConvert::Typed(conv_fn) => {
+                    let key = local_web_key(file_prefix, conv_fn);
+                    match web_error_conversion_pair(conv_fn) {
+                        Some((source, target)) if target == Syntax::TYPE_ERR => format!(
+                            "(error, original) => jet_web_error_from_conversion({key}(error), {}, {}, original)",
+                            json_quote(source),
+                            json_quote(target),
+                        ),
+                        _ => key,
+                    }
+                }
+                TIR::TTryConvert::WidenUnion { tag, .. } => format!(
+                    "(error) => ({{ tag: {}, values: [error] }})",
+                    json_quote(tag)
+                ),
+                TIR::TTryConvert::None | TIR::TTryConvert::Never => "null".to_string(),
+            };
             format!(
-                "jet_web_try({}, {}, {}, {}, {})",
+                "jet_web_try({}, {}, {}, {}, {}, {}, {})",
                 tir_js_expr(inner, funcs, file_prefix)?,
                 file,
                 line,
                 fn_name,
-                note
+                note,
+                converter,
+                crate::Codegen::TIR::try_target_is_default_error(inner, convert)
             )
         }
         E::OptionLift2 { f, a, b } => format!(

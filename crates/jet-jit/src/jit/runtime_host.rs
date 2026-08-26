@@ -2087,6 +2087,16 @@ fn jet_jit_err_from_conversion(
     })
 }
 
+fn jet_jit_err_add_context(handle: i64, text: i64, file: i64, line: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.heap.clone_string(text).unwrap_or_default();
+        let file = rt.heap.clone_string(file).unwrap_or_default();
+        if let Some(error) = rt.errors.get_mut(handle.saturating_sub(1) as usize) {
+            jet_foundation::Outcome::jet_err_add_context(error, text, file, line as u32);
+        }
+    });
+}
+
 fn jet_jit_err_message(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(error) = rt.errors.get(handle.saturating_sub(1) as usize) else {
@@ -3897,6 +3907,10 @@ host_fns! {
         sig_err_from_conversion
             .returns
             .push(AbiParam::new(types::I64));
+        let mut sig_err_add_context = Signature::new(cc);
+        sig_err_add_context
+            .params
+            .extend([AbiParam::new(types::I64); 4]);
         let mut sig_trace_err = Signature::new(cc);
         sig_trace_err.params.push(AbiParam::new(types::I64));
         sig_trace_err.params.push(AbiParam::new(types::I64));
@@ -4236,6 +4250,7 @@ host_fns! {
     memo_stats: "jet_jit_memo_stats" => jet_jit_memo_stats: sig_struct_get_i64;
     err_new: "jet_jit_err_new" => jet_jit_err_new: sig_i64_i64_i64_i64;
     err_from_conversion: "jet_jit_err_from_conversion" => jet_jit_err_from_conversion: sig_err_from_conversion;
+    err_add_context: "jet_jit_err_add_context" => jet_jit_err_add_context: sig_err_add_context;
     err_message: "jet_jit_err_message" => jet_jit_err_message: sig_str_unary_i64;
     err_code: "jet_jit_err_code" => jet_jit_err_code: sig_str_unary_i64;
     err_cause: "jet_jit_err_cause" => jet_jit_err_cause: sig_str_unary_i64;

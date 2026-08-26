@@ -2757,30 +2757,28 @@ impl LowerCtx<'_, '_> {
         self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
         self.b.switch_to_block(err_block);
         self.b.seal_block(err_block);
-        {
-            let file_h = self
-                .runtime
-                .heap
-                .alloc_string(Self::strip_rust_str_lit(file));
-            let fn_h = self
-                .runtime
-                .heap
-                .alloc_string(Self::strip_rust_str_lit(fn_name));
-            let file_v = self.b.ins().iconst(types::I64, file_h);
-            let line_v = self.b.ins().iconst(types::I64, line as i64);
-            let fn_v = self.b.ins().iconst(types::I64, fn_h);
-            if let Some(note) = note {
-                let note_v = self.lower_expr(note)?;
-                let trace = self
-                    .module
-                    .declare_func_in_func(self.host.trace_err_note, self.b.func);
-                self.b.ins().call(trace, &[file_v, line_v, fn_v, note_v]);
-            } else {
-                let trace = self
-                    .module
-                    .declare_func_in_func(self.host.trace_err, self.b.func);
-                self.b.ins().call(trace, &[file_v, line_v, fn_v]);
-            }
+        let file_h = self
+            .runtime
+            .heap
+            .alloc_string(Self::strip_rust_str_lit(file));
+        let fn_h = self
+            .runtime
+            .heap
+            .alloc_string(Self::strip_rust_str_lit(fn_name));
+        let file_v = self.b.ins().iconst(types::I64, file_h);
+        let line_v = self.b.ins().iconst(types::I64, line as i64);
+        let fn_v = self.b.ins().iconst(types::I64, fn_h);
+        let note_v = note.map(|note| self.lower_expr(note)).transpose()?;
+        if let Some(note_v) = note_v {
+            let trace = self
+                .module
+                .declare_func_in_func(self.host.trace_err_note, self.b.func);
+            self.b.ins().call(trace, &[file_v, line_v, fn_v, note_v]);
+        } else {
+            let trace = self
+                .module
+                .declare_func_in_func(self.host.trace_err, self.b.func);
+            self.b.ins().call(trace, &[file_v, line_v, fn_v]);
         }
         let return_handle = match convert {
             TIR::TTryConvert::None => handle,
@@ -2823,6 +2821,21 @@ impl LowerCtx<'_, '_> {
                 self.call_host(self.host.result_new_i64, &[tag, packed])
             }
         };
+        if note_v.is_some()
+            && jet_codegen::Codegen::TIR::try_target_is_default_error(inner, convert)
+        {
+            let error = self.result_payload(
+                return_handle,
+                &Type::Named(jet_foundation::Syntax::TYPE_ERR.to_string()),
+            )?;
+            let add_context = self
+                .module
+                .declare_func_in_func(self.host.err_add_context, self.b.func);
+            self.b.ins().call(
+                add_context,
+                &[error, note_v.expect("note checked above"), file_v, line_v],
+            );
+        }
         while !self.txn_stack.is_empty() {
             // `?` early-return: emit restores but keep the stack for sibling paths.
             self.emit_txn_rollbacks_keep()?;

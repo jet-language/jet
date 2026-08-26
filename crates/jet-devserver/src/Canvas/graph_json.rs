@@ -1003,10 +1003,7 @@ fn rails_json(g: &GraphBuilder) -> String {
         .any(|n| n.badges.iter().any(|b| b == "effects"))
         || g.regions
             .iter()
-            .any(|r| {
-                r.contains("\"kind\":\"authority\"")
-                    || r.contains("\"kind\":\"grant\"")
-            })
+            .any(|r| r.contains("\"kind\":\"authority\""))
     {
         push_rail(&mut kinds, "effect");
     }

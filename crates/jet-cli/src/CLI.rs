@@ -617,6 +617,37 @@ pub fn command_group_label(name: &str) -> String {
         .join("-")
 }
 
+/// Help-only summaries for commands whose output carries the application
+/// effect projection. Man and completion descriptions stay the registry's
+/// concise summaries; interactive and command help teach the four distinct
+/// roles users will see in those reports.
+pub fn action_help_summary(group: &str, action: &NestedCommandSpec) -> &'static str {
+    match (group, action.name) {
+        ("inspect", "authority") => {
+            "read required, granted, denied effects, and their authority source"
+        }
+        ("inspect", "provenance") => {
+            "read dependency provenance with required, granted, denied effects, and authority"
+        }
+        ("inspect", "dossier") => {
+            "show symbols plus required, granted, denied effects, and authority policy"
+        }
+        ("inspect", "semindex") => {
+            "search code facts plus required, granted, denied effects, and authority"
+        }
+        ("inspect", "output") => {
+            "inspect one Output with required, granted, denied effects, and authority"
+        }
+        ("inspect", "gates") => {
+            "read gates with required, granted, denied effects, and authority"
+        }
+        ("inspect", "expand") => {
+            "show expanded meaning with required, granted, denied effects, and authority"
+        }
+        _ => action.summary,
+    }
+}
+
 /// #1659 criterion 1: the one renderer for a group's nested-action usage
 /// block, shared by `jet help`, `jet <group> --help`, and `jet perf --help`
 /// (CmdPerf.rs) so every caller reads the same `COMMANDS` table instead
@@ -627,10 +658,11 @@ pub fn command_group_usage(name: &str) -> String {
     };
     let mut output = String::new();
     for action in group.actions {
+        let summary = action_help_summary(group.name, action);
         for usage in action.usage.lines() {
             output.push_str(&format!(
                 "  {} {} {:<48} {}\n",
-                BINARY_NAME, group.name, usage, action.summary
+                BINARY_NAME, group.name, usage, summary
             ));
         }
     }

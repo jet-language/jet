@@ -1,10 +1,41 @@
 // D-RESULT-DECON2=B: one fixed exhaustive Result handler handles both payloads.
 fn classify(ok: Bool) Int !Err -> if ok -> Ok(7) else -> Err("bad")
 
+fn choose<T>(value: ^T, ok: Bool) T String! -> if ok -> Ok(value) else -> Err("bad")
+
+fn consume(value: ^String) String -> value
+
+fn owned(ok: Bool) String String! -> {
+    result :: choose("owned", ok)
+    return result ? success -> consume(^success) ! failure -> consume(^failure)
+}
+
+fn generic<T>(value: ^T, ok: Bool) T String! -> {
+    result :: choose(value, ok)
+    return result ? success -> success ! failure -> panic(failure)
+}
+
+fn nested(value: Int, ok: Bool) Int String! -> {
+    outer :: choose(value, ok)
+    return outer ? success -> {
+        inner :: choose(success, ok)
+        inner ? nested_success -> nested_success + 1 ! nested_failure -> 0
+    } ! failure -> 0
+}
+
 fn run() {
     success :: classify(true)
     success ? ok -> print("ok: {ok}") ! error -> print("error: {error}")
 
     failure :: classify(false)
     failure ? ok -> print("ok: {ok}") ! error -> print("error: {error}")
+
+    value_source :: classify(true)
+    value :: value_source ? ok -> ok + 1 ! error -> panic(error)
+    print("value: {value}")
+    print(owned(true))
+    print(owned(false))
+    print(generic(4, true))
+    print(nested(4, true))
+    print(nested(4, false))
 }

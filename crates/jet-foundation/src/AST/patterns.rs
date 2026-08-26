@@ -521,6 +521,10 @@ pub struct ResolvedOutput {
     pub lowered_name: String,
     pub params: Vec<(super::AccessConvention, Type)>,
     pub return_type: Option<Type>,
+    /// The sema-owned effective failure fact for the selected callable.
+    /// Consumers must project this fact instead of rebuilding it from the
+    /// raw return type.
+    pub failure_contract: super::FailureContract,
     pub reference: Span,
     pub definition: Span,
     /// Runnable Outputs never grant FFI or unsafe authority. The exact solved
@@ -529,6 +533,15 @@ pub struct ResolvedOutput {
     pub effects: Vec<String>,
     pub selected: bool,
     pub selection_reason: String,
+}
+
+impl ResolvedOutput {
+    /// Project the selected callable through the same effective failure fact
+    /// used by ordinary callable tooling. Output selection must not create a
+    /// second contract interpretation from the raw return type.
+    pub fn failure_contract(&self) -> super::FailureContract {
+        self.failure_contract.clone()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

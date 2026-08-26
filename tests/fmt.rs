@@ -2236,6 +2236,7 @@ fn fmt_keeps_typestate_markers() {
     // dropping a typestate contract would silently change what the checker enforces.
     let src = "\
 struct Reservation {
+    state { Pending, Confirmed }
     guest: String
 
     #Transition(_, Pending) fn book(guest: String) Reservation {

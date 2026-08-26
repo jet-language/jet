@@ -7616,30 +7616,28 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         // the trail never prints — one tier paying for text no
                         // tier shows.
                         let mut note_failure = None;
+                        let note_text = note.as_ref().map(|note| match self.eval_expr_child(note, scope) {
+                            Ok(CtValue::Str(note)) => note,
+                            Ok(other) => other.jet_show(),
+                            Err(diagnostic) => {
+                                note_failure = Some(diagnostic);
+                                String::new()
+                            }
+                        });
+                        if let Some(diagnostic) = note_failure {
+                            return Err(diagnostic);
+                        }
                         jet_foundation::Outcome::jet_journey_frame(
                             file,
                             *line as u32,
                             fn_name,
-                            || match note {
-                                Some(note) => match self.eval_expr_child(note, scope) {
-                                    Ok(CtValue::Str(note)) => note,
-                                    Ok(other) => other.jet_show(),
-                                    Err(diagnostic) => {
-                                        note_failure = Some(diagnostic);
-                                        String::new()
-                                    }
-                                },
-                                None => String::new(),
-                            },
+                            || note_text.clone().unwrap_or_default(),
                         );
-                        if let Some(diagnostic) = note_failure {
-                            return Err(diagnostic);
-                        }
                         // D-FAIL-ERROR1=A: the evaluator marshals the same
                         // String-to-Err conversion selected by sema. Declared
                         // conversions run their lowered body, so the evaluator
                         // cannot invent a second conversion policy.
-                        let converted = match convert {
+                        let mut converted = match convert {
                             crate::Codegen::TIR::TTryConvert::DefaultErr => {
                                 let e = match *e {
                                     CtValue::Str(message) => Box::new(CtValue::from_jet_err(
@@ -7712,6 +7710,15 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             }
                             _ => CtValue::failed(e),
                         };
+                        if note_text.is_some()
+                            && crate::Codegen::TIR::try_target_is_default_error(inner, convert)
+                        {
+                            let _ = converted.add_error_context(
+                                note_text.clone().unwrap_or_default(),
+                                file.to_string(),
+                                *line as u32,
+                            );
+                        }
                         // Propagate as a function return of the converted error value.
                         self.pending_return = Some(converted);
                         Ok(CtValue::Unit)

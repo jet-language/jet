@@ -730,10 +730,75 @@ fn run() {
             .expect("add completion");
         assert!(hover.contains(&symbol.signature));
         assert!(hover.contains(&symbol.summary));
+        assert!(symbol
+            .signature
+            .contains("failure: Result<Int, Err> (implicit default !Err)"));
+        assert!(hover.contains("failure: Result<Int, Err> (implicit default !Err)"));
         assert_eq!(
             completion.detail.as_deref(),
             Some(symbol.signature.as_str())
         );
+    }
+
+    #[test]
+    fn checked_text_metadata_reaches_editor_symbol_surfaces() {
+        let src = r#"
+#Error
+enum PatternError { Bad }
+Pattern :: distinct String
+impl Pattern.CheckedText {
+    type Error = PatternError
+    fn check(text: String) () !PatternError -[]> {
+        return
+    }
+    fn encode_hole<T: Printable>(value: T) String -[]> {
+        return ""
+    }
+}
+fn run() {
+    
+}
+"#;
+        let (project, diagnostics, bundle, facts) = check_test_document(src);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "checked text editor fixture should check: {diagnostics:#?}"
+        );
+        let db = build_symbol_db(&bundle.expect("bundle"), &facts);
+        let pattern = db
+            .symbols
+            .lookup_qualified("Pattern")
+            .expect("Pattern semantic symbol");
+        assert!(pattern.signature.contains("type Pattern :: distinct String"));
+        assert!(pattern.signature.contains("implements CheckedText"));
+
+        let (tokens, _) = crate::Lexer::lex(src);
+        let offset = src.find("Pattern ::").expect("Pattern declaration") + 1;
+        let symbol = semantic_symbol_at(&db, &tokens, project.entry(), offset)
+            .expect("Pattern symbol at declaration");
+        let metadata = semantic_symbol_metadata_json(&db, symbol).expect("nominal metadata");
+        assert!(metadata.contains("\"nominal_base\":\"String\""));
+        assert!(metadata.contains("\"name\":\"CheckedText\""));
+        assert!(metadata.contains("encode_hole"));
+
+        let completion_offset = src.rfind("    \n").expect("completion scope") + 4;
+        let completion = compute_completions(
+            &db,
+            src,
+            completion_offset,
+            project.entry(),
+            None,
+            None,
+        )
+        .into_iter()
+        .find(|item| item.label == "Pattern")
+        .expect("Pattern completion");
+        assert!(completion
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("implements CheckedText")));
     }
 
     #[test]

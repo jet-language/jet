@@ -17,7 +17,8 @@ use super::Features::{
     compute_definition, compute_discovery_hover, compute_generated_definition, compute_hover,
     compute_refactor_actions, compute_references, compute_rename,
     encode_semantic_tokens_in_span_with_arithmetic, encode_semantic_tokens_with_arithmetic,
-    format_inlay_hints, RefactorAction,
+    format_inlay_hints, semantic_symbol_at, semantic_symbol_at_span,
+    semantic_symbol_metadata_json, RefactorAction,
 };
 use super::Position::{
     apply_lsp_edit, byte_offset_to_lsp, byte_span_to_range, full_document_range, lsp_pos_to_offset,
@@ -1454,12 +1455,16 @@ fn signature_help_response(
             let parts =
                 jet_semindex::function_parameter_parts(params, param_contract, param_variadic);
             let mut label = format!("fn {}({})", def.name, parts.join(", "));
+            if let Some(ret) = ret {
+                label.push(' ');
+                label.push_str(&ret.name());
+            }
             if let Some((param, _)) = effect_via {
-                label.push_str(" =[via ");
+                label.push_str(" -[via ");
                 label.push_str(param);
-                label.push_str("]=>");
+                label.push_str("]>");
             } else if let Some(effects) = effects {
-                label.push_str(" =[");
+                label.push_str(" -[");
                 label.push_str(
                     &effects
                         .iter()
@@ -1467,12 +1472,7 @@ fn signature_help_response(
                         .collect::<Vec<_>>()
                         .join(", "),
                 );
-                label.push_str("]=>");
-            } else if ret.is_some() {
-                label.push_str(" =>");
-            }
-            if let Some(ret) = ret {
-                label.push_str(&format!(" {}", ret.name()));
+                label.push_str("]>");
             }
             let parameter_parts: Vec<&String> = parts
                 .iter()
@@ -2044,10 +2044,15 @@ fn definition_response(
                 std::fs::read_to_string(&def_path).unwrap_or_default()
             };
             let range = byte_span_to_range(&src, def_span);
+            let data = semantic_symbol_at_span(&db, &def_path, def_span)
+                .and_then(|symbol| semantic_symbol_metadata_json(&db, symbol))
+                .map(|data| format!(",\"data\":{data}"))
+                .unwrap_or_default();
             let result = format!(
-                r#"{{"uri":"{}","range":{}}}"#,
+                r#"{{"uri":"{}","range":{}{}}}"#,
                 json_escape(&def_uri),
-                range_json(range)
+                range_json(range),
+                data,
             );
             Some(response(id, &result))
         }
@@ -2226,6 +2231,10 @@ fn references_response(
     };
 
     let refs = compute_references(&db, &tokens, &doc.path, offset, include_decl);
+    let data = semantic_symbol_at(&db, &tokens, &doc.path, offset)
+        .and_then(|symbol| semantic_symbol_metadata_json(&db, symbol))
+        .map(|data| format!(",\"data\":{data}"))
+        .unwrap_or_default();
     let mut items = String::new();
     for (i, (ref_path, span)) in refs.iter().enumerate() {
         if i > 0 {
@@ -2239,9 +2248,10 @@ fn references_response(
         };
         let range = byte_span_to_range(&src, *span);
         items.push_str(&format!(
-            r#"{{"uri":"{}","range":{}}}"#,
+            r#"{{"uri":"{}","range":{}{}}}"#,
             json_escape(&ref_uri),
-            range_json(range)
+            range_json(range),
+            data,
         ));
     }
     Some(response(id, &format!("[{}]", items)))
@@ -2344,11 +2354,15 @@ fn rename_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) 
             // identifier under the cursor, not the new name.
             let old_name = ident_at(&tokens, offset).unwrap_or("");
             let semantic_op = lsp_rename_semantic_op(&db.index, old_name, new_name);
+            let data = semantic_symbol_at(&db, &tokens, &doc.path, offset)
+                .and_then(|symbol| semantic_symbol_metadata_json(&db, symbol))
+                .map(|data| format!(",\"data\":{data}"))
+                .unwrap_or_default();
             Some(response(
                 id,
                 &format!(
-                    r#"{{"changes":{{{}}},"semantic_ops":[{}]}}"#,
-                    changes, semantic_op
+                    r#"{{"changes":{{{}}},"semantic_ops":[{}]{}}}"#,
+                    changes, semantic_op, data
                 ),
             ))
         }

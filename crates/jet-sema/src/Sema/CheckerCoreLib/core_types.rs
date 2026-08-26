@@ -838,7 +838,8 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "CompilerOutputEntry" {
         return match field {
-            "identity" | "name" | "module" | "authority" => Some(Type::String),
+            "identity" | "name" | "module" | "failure_contract" | "failure_source"
+            | "authority" => Some(Type::String),
             "definition_span" | "reference_span" => {
                 Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()))
             }

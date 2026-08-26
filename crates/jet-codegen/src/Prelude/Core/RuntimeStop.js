@@ -148,18 +148,56 @@ export function jet_web_edge_result(value, metadata = {}) {
   return jet_web_result_value(value);
 }
 
+// D-FAIL-CONV: these adapters preserve the Foundation carrier fields while
+// invoking the lowered conversion body. They do not reconstruct meaning from
+// rendered error text.
+function jet_web_default_error(value) {
+  return {
+    schema: "jet.err/v1",
+    message: String(value),
+    code: null,
+    cause: null,
+  };
+}
+
+function jet_web_error_from_conversion(value, source, target, original = null) {
+  const converted = jet_web_result_value(value);
+  const wire = jet_web_error_wire(converted?.wire ?? converted);
+  const originalWire = original?.wire ? jet_web_error_wire(original.wire) : null;
+  const nextWire = {
+    ...wire,
+    typed_identity: source,
+    conversion_history: [
+      ...(Array.isArray(wire.conversion_history) ? wire.conversion_history : []),
+      { source, target },
+    ],
+  };
+  if (originalWire?.source_journey && !nextWire.source_journey) {
+    nextWire.source_journey = originalWire.source_journey;
+  }
+  if (originalWire?.context_frames && !nextWire.context_frames) {
+    nextWire.context_frames = originalWire.context_frames;
+  }
+  return nextWire;
+}
+
 // A `?` carries a typed propagation until the enclosing fallible function
 // returns its Err carrier. The final edge turns that carrier into the native
 // Web error object, so nested `?` sites keep one journey.
-function jet_web_try(value, file, line, fnName, note = null) {
+function jet_web_try(value, file, line, fnName, note = null, convert = null, addContext = false) {
   if (value && value.tag === "Ok") return "value" in value ? value.value : value.values?.[0];
   if (value && value.tag === "Err") {
-    const carrier = jet_web_result_value(value);
+    let carrier = jet_web_result_value(value);
+    if (typeof convert === "function") {
+      const original = carrier;
+      carrier = jet_web_result_value(convert(carrier, original));
+    }
     const wire = jet_web_error_wire(carrier?.wire ?? carrier);
     const hops = carrier?.wire && Array.isArray(carrier.wire.source_journey)
       ? carrier.wire.source_journey.slice()
       : [];
     const last = hops[hops.length - 1];
+    const noteText = typeof note === "function" ? String(note() ?? "") : "";
     if (last && (last.fn_name ?? last.fnName) === fnName && last.file === file && last.line === line) {
       // Same site again: count the repeat instead of printing the line twice.
       hops[hops.length - 1] = { ...last, hops: last.hops + 1 };
@@ -168,12 +206,18 @@ function jet_web_try(value, file, line, fnName, note = null) {
         fn_name: fnName,
         file,
         line,
-        note: typeof note === "function" ? String(note() ?? "") : "",
+        note: noteText,
         hops: 1,
       });
     }
     const journey = jet_web_journey_trail(hops);
     const nextWire = { ...wire, source_journey: hops };
+    if (addContext && typeof note === "function") {
+      nextWire.context_frames = [
+        ...(Array.isArray(wire.context_frames) ? wire.context_frames : []),
+        { text: noteText, file, line },
+      ];
+    }
     throw new JetWebPropagation(nextWire, journey, jet_web_error_frame(nextWire, journey), hops);
   }
   return value;

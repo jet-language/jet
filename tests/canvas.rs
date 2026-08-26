@@ -4356,6 +4356,7 @@ fn canvas_and_semindex_share_composed_package_facts() {
             json.contains("\"authority\":{\"holds\":{\"allow\":[\"FS\"],\"deny\":[\"Net\"]}"),
             "Canvas package policy lost its authority source: {json}"
         );
+        assert!(!json.contains("\"kind\":\"grant\""), "{json}");
     }
     assert!(
         graph.contains("\"required_effects\":[]")

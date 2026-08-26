@@ -558,12 +558,12 @@ impl<'a> Checker<'a> {
         self.check_single_use_consumed_in_current_scope();
         // D-STREAMYIELD1: a generator (`Stream<T> ->`) falling off the end is
         // exactly a bare `return;` — it just ends the stream. Never E0114.
-        let is_entry_fallible_void = f.name == "run"
-            && f.return_type
-                .as_ref()
-                .is_some_and(|ty| is_fallible_void_return(ty));
+        let is_fallible_void = f
+            .return_type
+            .as_ref()
+            .is_some_and(|ty| is_fallible_void_return(ty));
         if !is_generator
-            && !is_entry_fallible_void
+            && !is_fallible_void
             && f.return_type.is_some()
             && value_return.is_none()
             && !block_definitely_returns(&f.body)

@@ -535,7 +535,11 @@ fn command_help(cmd: &str) -> String {
         for usage_line in action.usage.lines() {
             lines.push_str(&format!("  {bin} {} {}\n", group.name, usage_line));
         }
-        return format!("{bin} {} {cmd} — {}\n\n{lines}", group.name, action.summary);
+        return format!(
+            "{bin} {} {cmd} — {}\n\n{lines}",
+            group.name,
+            jet::CLI::action_help_summary(group.name, action)
+        );
     }
     // A canonical flat top-level command: summary, usage, and flags all come
     // from the live registry. No parsing of a second usage string.

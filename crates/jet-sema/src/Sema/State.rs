@@ -202,6 +202,12 @@ pub(crate) fn checked_state_graphs(
 }
 
 impl StateTable {
+    /// Build the state-only registry needed by early comptime and body
+    /// checking. The full table still adds marker requirements below.
+    pub fn declaration_facts(items: &[Item]) -> jet_foundation::Facts::FactRegistry {
+        jet_foundation::Facts::FactRegistry::from_state_items(items)
+    }
+
     fn state_leaf<'a>(type_name: &str, state: &'a str) -> Option<&'a str> {
         if !state.contains('.') {
             return Some(state);
@@ -260,9 +266,8 @@ impl StateTable {
                 }
                 Item::Struct(s) => {
                     if let Some(state) = &s.state {
-                        self.facts.declare(
-                            jet_foundation::Facts::FactKind::State,
-                            format!("{}.State", s.name),
+                        self.facts.declare_state(
+                            s.name.clone(),
                             state.states.iter().map(|(name, _)| name.clone()),
                         );
                         self.declared.insert(s.name.clone(), state.states.clone());

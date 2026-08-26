@@ -14,16 +14,22 @@ use tir_support::{build_and_run, build_and_run_full, compile, have_rustc, jit_ru
 #[test]
 fn result_handler_reuses_result_split_on_all_tiers() {
     let src = r#"
-fn classify(ok: Bool) Int !Err -> if ok -> Ok(7) else -> Err("bad")
+#Error
+enum ClassifyError { Bad }
 
-fn run() {
-    success :: classify(true)
-    success ? ok -> print("ok: {ok}") ! error -> print("error: {error}")
-    failure :: classify(false)
-    failure ? ok -> print("ok: {ok}") ! error -> print("error: {error}")
+fn classify(ok: Bool) Int !ClassifyError -> {
+    if ok { return 7 }
+    return Err(ClassifyError.Bad)
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        classify(true) ? ok -> { print("ok: {ok}"); ok } ! _error -> { print("error"); 0 }
+        classify(false) ? ok -> { print("ok: {ok}"); ok } ! _error -> { print("error"); 0 }
+    }
 }
 "#;
-    tir_support::assert_tiers_agree("result_handler_tiers", src, "ok: 7\nerror: bad\n");
+    tir_support::assert_tiers_agree("result_handler_tiers", src, "ok: 7\nerror\n");
 }
 
 /// D-RESULT-DECON2=B: a diverging arm keeps the ordinary exhaustive-chain
@@ -31,11 +37,13 @@ fn run() {
 #[test]
 fn result_handler_preserves_diverging_arm_on_all_tiers() {
     let src = r#"
-fn choose(ok: Bool) Int !Err -> if ok -> Ok(7) else -> Err("bad")
+fn choose(ok: Bool) Int !Err -> {
+    if ok { return 7 }
+    return Err("bad")
+}
 
 fn run() {
-    value :: choose(true)
-    result :: value ? ok -> ok + 1 ! error -> panic(error)
+    result :: choose(true) ? ok -> ok + 1 ! error -> panic(error)
     print("{result}")
 }
 "#;
@@ -49,25 +57,24 @@ fn run() {
 #[test]
 fn result_handler_preserves_ownership_generic_and_nested_values_on_all_tiers() {
     let src = r#"
-fn choose<T>(value: ^T, ok: Bool) T String! -> if ok -> Ok(value) else -> Err("bad")
+fn choose<T>(value: ^T, ok: Bool) T !String -> {
+    if ok { return value }
+    return Err("bad")
+}
 
 fn consume(value: ^String) String -> value
 
-fn owned(ok: Bool) String String! -> {
-    result :: choose("owned", ok)
-    return result ? success -> consume(^success) ! failure -> consume(^failure)
+fn owned(ok: Bool) String !String -> {
+    return choose("owned", ok) ? success -> consume(^success) ! failure -> consume(^failure)
 }
 
-fn generic<T>(value: ^T, ok: Bool) T String! -> {
-    result :: choose(value, ok)
-    return result ? success -> success ! failure -> panic(failure)
+fn generic<T>(value: ^T, ok: Bool) T !String -> {
+    return choose(value, ok) ? success -> success ! failure -> panic(failure)
 }
 
-fn nested(value: Int, ok: Bool) Int String! -> {
-    outer :: choose(value, ok)
-    return outer ? success -> {
-        inner :: choose(success, ok)
-        inner ? nested_success -> nested_success + 1 ! nested_failure -> 0
+fn nested(value: Int, ok: Bool) Int !String -> {
+    return choose(value, ok) ? success -> {
+        inner :: choose(success, ok) ? nested_success -> nested_success + 1 ! nested_failure -> 0
     } ! failure -> 0
 }
 
@@ -91,6 +98,20 @@ fn result_handler_example_matches_all_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "errors/result_handler",
         include_str!("../examples/features/expected/errors/result_handler.out"),
+    );
+
+    let source = include_str!("../examples/features/errors/result_handler.jet");
+    let (code, stdout, stderr) = tir_support::jit_run_traced("result_handler_example_jit", source);
+    assert_eq!(code, 0, "default `jet run` failed for result_handler: {stderr}");
+    assert_eq!(
+        stdout,
+        include_str!("../examples/features/expected/errors/result_handler.out")
+    );
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
+        "default `jet run` did not execute result_handler on the resident JIT: {stderr}"
     );
 }
 

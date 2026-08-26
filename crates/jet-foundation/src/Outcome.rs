@@ -801,6 +801,30 @@ pub fn jet_journey_frame<F: FnOnce() -> String>(file: &str, line: u32, fn_name: 
     });
 }
 
+/// Propagate a default error with one explicit context frame. The note is
+/// evaluated once on the failure path, then stored both as structured context
+/// and as the source-journey note.
+pub fn jet_trace_err_note_jet<T, F: FnOnce() -> String>(
+    result: JetOutcome<T, JetErr>,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    note: F,
+) -> JetOutcome<T, JetErr> {
+    match result {
+        Ok(value) => {
+            jet_journey_reset();
+            Ok(value)
+        }
+        Err(mut error) => {
+            let text = note();
+            jet_err_add_context(&mut error, text.clone(), file.to_string(), line);
+            jet_journey_frame(file, line, fn_name, || text);
+            Err(error)
+        }
+    }
+}
+
 pub fn jet_render_err(error: &JetErr) -> String {
     JetErrorReport::from_error(error, Vec::new()).render_root()
 }

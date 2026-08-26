@@ -7,6 +7,7 @@
 use crate::Types::{SemIndex, TraitContractFact};
 use jet_foundation::AST::{Item, ProgramBundle};
 use jet_foundation::Diagnostics::Span;
+use jet_pkg_model::EffectBudget::{render_effect_projection_line, render_effect_projection_object, EffectProjection};
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -82,6 +83,9 @@ pub struct DocTest {
 pub struct DocGraph {
     pub schema_version: u32,
     pub root: String,
+    /// Application-boundary effect roles from the same checked index used by
+    /// `jet inspect`. Documentation must not collapse policy into sema facts.
+    pub effect_projection: EffectProjection,
     pub modules: Vec<DocModule>,
     pub items: Vec<DocItem>,
     pub impls: Vec<DocImpl>,
@@ -101,6 +105,7 @@ pub fn build_doc_graph(bundle: &ProgramBundle, index: &SemIndex) -> DocGraph {
     let mut graph = DocGraph {
         schema_version: DOC_SCHEMA_VERSION,
         root: stable_root(&bundle.project_root),
+        effect_projection: index.effect_projection().clone(),
         modules: Vec::new(),
         items: Vec::new(),
         impls: Vec::new(),
@@ -213,10 +218,12 @@ impl DocGraph {
             .map(DocTest::to_json)
             .collect::<Vec<_>>()
             .join(",");
+        let effect_projection = render_effect_projection_object(&self.effect_projection);
         format!(
-            "{{\"schema_version\":{},\"root\":{},\"modules\":[{}],\"items\":[{}],\"impls\":[{}],\"doctests\":[{}]}}",
+            "{{\"schema_version\":{},\"root\":{},\"effect_projection\":{},\"modules\":[{}],\"items\":[{}],\"impls\":[{}],\"doctests\":[{}]}}",
             self.schema_version,
             json_string(&self.root),
+            effect_projection,
             modules,
             items,
             impls,
@@ -227,6 +234,9 @@ impl DocGraph {
     pub fn to_markdown(&self) -> String {
         let mut out = String::from("# Jet Documentation\n\n");
         out.push_str("Generated from the checked semantic graph.\n\n");
+        out.push_str("## Effect Roles\n\n");
+        out.push_str(&render_effect_projection_line(&self.effect_projection));
+        out.push_str("\n\n");
         out.push_str("## Modules\n\n");
         for module in &self.modules {
             out.push_str(&format!(
@@ -306,7 +316,9 @@ impl DocGraph {
         let mut out = String::from(
             "<!doctype html><html><head><meta charset=\"utf-8\"><title>Jet Documentation</title></head><body><h1>Jet Documentation</h1>",
         );
-        out.push_str("<p>Generated from the checked semantic graph.</p><h2>Modules</h2><ul>");
+        out.push_str("<p>Generated from the checked semantic graph.</p><h2>Effect Roles</h2><p>");
+        out.push_str(&html_escape(&render_effect_projection_line(&self.effect_projection)));
+        out.push_str("</p><h2>Modules</h2><ul>");
         for module in &self.modules {
             out.push_str(&format!(
                 "<li><code>{}</code> — <code>{}</code> (<a href=\"{}\">source</a>)",
@@ -526,6 +538,7 @@ fn collect_items(
                 output,
             ),
             Item::Struct(definition) => {
+                let struct_item = output.len();
                 add_item(
                     output,
                     "struct",
@@ -542,6 +555,17 @@ fn collect_items(
                     source,
                     root,
                 );
+                if let Some(state) = &definition.state {
+                    let state_names = state
+                        .states
+                        .iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    output[struct_item]
+                        .signature
+                        .push_str(&format!(" {{ state {{ {state_names} }} }}"));
+                }
                 let owner = qualified(parent, &definition.name);
                 for field in &definition.fields {
                     add_item(

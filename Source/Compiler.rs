@@ -783,6 +783,11 @@ fn compiler_output_entry_value(entry: &jet_semindex::OutputEntryFact) -> CtValue
                 "return_type",
                 compiler_option_string(entry.return_type.as_deref()),
             ),
+            (
+                "failure_contract",
+                CtValue::Str(entry.failure_contract.clone()),
+            ),
+            ("failure_source", CtValue::Str(entry.failure_source.clone())),
             ("authority", CtValue::Str(entry.authority.clone())),
             ("effects", compiler_string_list(entry.effects.clone())),
         ],

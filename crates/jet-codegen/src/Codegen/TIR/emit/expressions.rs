@@ -3108,7 +3108,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     .and_then(|stem| stem.split_once("_to_"));
                 return match conversion {
                     Some((source, target)) => format!(
-                        "{}jet_err_from_conversion({}, {}, {}, {}, {})",
+                        "{}jet_err_from_conversion({}, {}, {}, {}.to_string(), {}.to_string())",
                         cx.root_prefix,
                         value("message"),
                         value("code"),
@@ -3910,6 +3910,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             fn_name,
         } => {
             let v = emit_tir_expr(inner, cx);
+            let context_helper = if note.is_some()
+                && crate::Codegen::TIR::try_target_is_default_error(inner, convert)
+            {
+                "jet_trace_err_note_jet"
+            } else {
+                "jet_trace_err_note"
+            };
             if matches!(convert, TTryConvert::Never) {
                 let traced = match note {
                     Some(note) => format!(
@@ -3941,7 +3948,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             };
             match note {
                 Some(note) => format!(
-                    "jet_trace_err_note({}, {}, {}, {}, || {{ {} }})?",
+                    "{}({}, {}, {}, {}, || {{ {} }})?",
+                    context_helper,
                     propagated,
                     file,
                     line,

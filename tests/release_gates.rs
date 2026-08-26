@@ -865,14 +865,12 @@ fn ci_gate_evidence_preserves_success_and_failure_receipts() {
     let _ = fs::remove_dir_all(&scratch);
     fs::create_dir_all(&scratch).unwrap();
     let script = root.join("tools/ci/ci-evidence.sh");
-    let candidate = "0123456789abcdef0123456789abcdef01234567";
 
     let success_dir = scratch.join("success");
     let success = Command::new("bash")
         .arg(&script)
         .args(["--report-dir", success_dir.to_str().unwrap(), "--", "bash", "-c"])
         .arg("printf 'gate-ok\\n'")
-        .env("GITHUB_SHA", candidate)
         .env("RUNNER_OS", "Linux")
         .env("RUNNER_ARCH", "X64")
         .current_dir(&root)
@@ -889,9 +887,49 @@ fn ci_gate_evidence_preserves_success_and_failure_receipts() {
         "evidence wrapper must preserve gate stdout"
     );
     let success_receipt = fs::read_to_string(success_dir.join("receipt.txt")).unwrap();
+    let candidate = success_receipt
+        .lines()
+        .find_map(|line| line.strip_prefix("candidate_commit="))
+        .expect("receipt must record the candidate")
+        .to_owned();
+    assert_eq!(candidate.len(), 40, "candidate revision must be a full SHA-1");
     assert!(success_receipt.contains("schema=jet.ci-evidence.v1"));
     assert!(success_receipt.contains("status=pass"));
     assert!(success_receipt.contains(&format!("candidate_commit={candidate}")));
+    for field in [
+        "source_candidate_commit",
+        "toolchain_candidate_commit",
+        "artifact_candidate_commit",
+        "signature_candidate_commit",
+        "test_candidate_commit",
+        "support_matrix_candidate_commit",
+        "provenance_candidate_commit",
+        "release_metadata_candidate_commit",
+    ] {
+        assert!(
+            success_receipt.contains(&format!("{field}={candidate}")),
+            "receipt must bind {field} to the candidate"
+        );
+    }
+    let candidate_manifest = fs::read_to_string(success_dir.join("candidate.txt")).unwrap();
+    assert!(candidate_manifest.contains("schema=jet.ci-candidate.v1"));
+    for field in [
+        "candidate_commit",
+        "source_candidate_commit",
+        "toolchain_candidate_commit",
+        "artifact_candidate_commit",
+        "signature_candidate_commit",
+        "test_candidate_commit",
+        "support_matrix_candidate_commit",
+        "provenance_candidate_commit",
+        "release_metadata_candidate_commit",
+    ] {
+        assert!(
+            candidate_manifest.contains(&format!("{field}={candidate}")),
+            "candidate manifest must bind {field} to the candidate"
+        );
+    }
+    assert!(candidate_manifest.contains("signature=not-required-for-ci-test-gate"));
     assert!(success_receipt.contains("command_exit=0"));
     assert!(success_receipt.contains("support_matrix=Linux/X64"));
     assert!(success_receipt.contains("artifact_name=not-published"));
@@ -908,7 +946,7 @@ fn ci_gate_evidence_preserves_success_and_failure_receipts() {
         .arg(&script)
         .args(["--report-dir", failure_dir.to_str().unwrap(), "--", "bash", "-c"])
         .arg("printf 'gate-failed\\n' >&2; exit 23")
-        .env("GITHUB_SHA", candidate)
+        .env("GITHUB_SHA", &candidate)
         .env("RUNNER_OS", "Linux")
         .env("RUNNER_ARCH", "X64")
         .current_dir(&root)
@@ -926,6 +964,33 @@ fn ci_gate_evidence_preserves_success_and_failure_receipts() {
         failure_dir.join("toolchain.txt").is_file(),
         "failed gates must retain toolchain evidence"
     );
+
+    let artifact_mismatch_dir = scratch.join("artifact-mismatch");
+    let artifact_mismatch = Command::new("bash")
+        .arg(&script)
+        .args([
+            "--report-dir",
+            artifact_mismatch_dir.to_str().unwrap(),
+            "--",
+            "bash",
+            "-c",
+        ])
+        .arg("printf 'must-not-run\\n'")
+        .env("GITHUB_SHA", &candidate)
+        .env("JET_CI_ARTIFACT_NAME", "ci-gate-evidence-shard-0-stale")
+        .current_dir(&root)
+        .output()
+        .expect("run CI evidence artifact identity failure path");
+    assert_eq!(artifact_mismatch.status.code(), Some(78));
+    let artifact_mismatch_receipt =
+        fs::read_to_string(artifact_mismatch_dir.join("receipt.txt")).unwrap();
+    assert!(artifact_mismatch_receipt.contains("status=fail"));
+    assert!(
+        fs::read_to_string(artifact_mismatch_dir.join("command.stderr"))
+            .unwrap()
+            .contains("artifact name does not identify candidate")
+    );
+    assert!(artifact_mismatch_dir.join("candidate.txt").is_file());
     let _ = fs::remove_dir_all(&scratch);
 }
 

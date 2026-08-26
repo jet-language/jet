@@ -98,12 +98,13 @@ fn json_output(value: &OutputFact) -> String {
         .as_ref()
         .map_or_else(|| "null".to_string(), |value| json_str(value));
     format!(
-        "{{\"binding\":{},\"kind\":{},\"name\":{},\"module_path\":{},\"span\":{},\"entry\":{{\"identity\":{},\"name\":{},\"module_path\":{},\"definition_span\":{},\"reference_span\":{},\"params\":[{}],\"return_type\":{},\"authority\":{},\"effects\":[{}]}}}}",
+        "{{\"binding\":{},\"kind\":{},\"name\":{},\"module_path\":{},\"span\":{},\"entry\":{{\"identity\":{},\"name\":{},\"module_path\":{},\"definition_span\":{},\"reference_span\":{},\"params\":[{}],\"return_type\":{},\"failure_contract\":{},\"failure_source\":{},\"authority\":{},\"effects\":[{}]}}}}",
         json_str(&value.binding), json_str(&value.kind), json_str(&value.name),
         json_str(&value.module_path), json_span(value.span),
         json_str(&value.entry.identity), json_str(&value.entry.name),
         json_str(&value.entry.module_path), json_span(value.entry.definition_span),
         json_span(value.entry.reference_span), params, return_type,
+        json_str(&value.entry.failure_contract), json_str(&value.entry.failure_source),
         json_str(&value.entry.authority), effects,
     )
 }

@@ -198,7 +198,7 @@ impl<'a> Parser<'a> {
             && matches!(self.peek2().kind, TokKind::LBrace)
     }
 
-    pub(super) fn at_state_block(&self) -> bool {
+    pub(in crate::Parser) fn at_state_block(&self) -> bool {
         if !matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL) {
             return false;
         }
@@ -297,7 +297,7 @@ impl<'a> Parser<'a> {
 
     /// D-STATE-HOME1=A: top-level companion declarations are recognized only
     /// to teach the exact move into `struct Type { state { … } }`.
-    pub(super) fn reject_top_level_state_decl(
+    pub(in crate::Parser) fn reject_top_level_state_decl(
         &mut self,
         is_pub: bool,
         is_package_pub: bool,
@@ -1133,6 +1133,42 @@ mod state_section_tests {
         assert!(diagnostics[0].span.is_some());
         assert!(diagnostics[0].fix.contains("struct Door"));
         assert!(diagnostics[0].fix.contains("state { Open, Closed }"));
+
+        let check_diagnostics = Parser::parse_for_check(&tokens)
+            .expect_err("the retired companion must not enter a recovered check AST");
+        assert_eq!(check_diagnostics.len(), 1, "{check_diagnostics:?}");
+        assert_eq!(check_diagnostics[0].code, "E0157");
+
+        let format_diagnostics = crate::Formatter::format_source(source)
+            .expect_err("the formatter must not print the retired companion");
+        assert_eq!(format_diagnostics.len(), 1, "{format_diagnostics:?}");
+        assert_eq!(format_diagnostics[0].code, "E0157");
+    }
+
+    #[test]
+    fn inline_code_module_companion_uses_the_same_rewrite() {
+        let source = "module ledger { state Order { Draft, Confirmed } }\n";
+        let (tokens, lex_diags) = Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let diagnostics =
+            Parser::parse(&tokens).expect_err("the companion must fail in modules");
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E0157")
+            .expect("E0157");
+        assert!(diagnostic.fix.contains("struct Order"), "{diagnostic:?}");
+        assert!(
+            diagnostic.fix.contains("state { Draft, Confirmed }"),
+            "{diagnostic:?}"
+        );
+        let format_diagnostics = crate::Formatter::format_source(source)
+            .expect_err("the formatter must not print the module companion");
+        assert!(
+            format_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0157"),
+            "{format_diagnostics:?}"
+        );
     }
 
     #[test]

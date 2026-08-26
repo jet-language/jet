@@ -1921,7 +1921,7 @@ does not invent an initial state and does not emit that warning.
 | E0165 | compound assignment needs a mutable place. | S17 permits updates only on a mutable name or an `&` parameter; a computed value has no place to update. | Bind the value with `:=`, then write `name {op} value`. |
 | E0154 | A protocol line does not name `client:` or `server:` as its sender. | A two-endpoint protocol needs only the sender. The other endpoint is the receiver, so a transport arrow repeats information. | Write `client: Message(…)` when the client sends, or `server: Message(…)` when the server sends. |
 | L0152 | `{value}` ends in state `{one}` on one path and `{other}` on another. | Typestate (D-STATE1, D-FACT-FLOW1): after two paths meet, a state holds only when both paths agree — here they do not, so the value is untracked from this point and later state checks on it stay silent. | Bring both paths to the same state before they meet, or do the work that needs the state inside the path that reaches it. |
-| L0153 | `{state}` (in `state {type}`) is unreachable from every entry transition. | When a state graph has entry transitions, no entry path reaches this state. It may be an unused branch or a state name that is not connected to the protocol. | Add an entry or transition path to `{state}`, or remove it from the declaration. |
+| L0153 | `{type}.State.{state}` is unreachable from every entry transition. | When a state graph has entry transitions, no entry path reaches this state. It may be an unused branch or a state name that is not connected to the protocol. | Add an entry or transition path to `{state}`, or remove it from the declaration. |
 
 `check_in` requires a `Confirmed` reservation, but the value is still `Pending`:
 

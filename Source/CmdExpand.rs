@@ -191,6 +191,11 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
     // under a header, empty lenses skipped entirely so the output stays
     // readable on a program that only uses one of the mechanisms.
     let bare = lens_name.is_none();
+    println!("effect roles");
+    println!(
+        "  {}",
+        jet_semindex::render_effect_projection_line(index.effect_projection())
+    );
     let mut printed_any = false;
     for lens in &selected {
         let lines = (lens.render)(bundle, facts, index);

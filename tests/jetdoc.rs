@@ -124,8 +124,54 @@ fn undocumented_public_api_has_a_command_snapshot() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    let rendered = rendered.replace(&entry, "tests/fixtures/jetdoc/undocumented.jet");
     let snapshot = include_str!("ui_lint/undocumented_public_api.warn");
-    for line in snapshot.lines().filter(|line| !line.is_empty()) {
-        assert!(rendered.contains(line), "missing `{line}` in:\n{rendered}");
-    }
+    assert_eq!(rendered, snapshot, "undocumented-public-api UI snapshot drifted");
+}
+
+#[test]
+fn fixture_outputs_match_stable_goldens() {
+    let scratch = Scratch::new();
+    let entry = scratch.copy_fixture("undocumented.jet");
+    let entry = entry.to_string_lossy().into_owned();
+
+    let json = jet_doc(&["doc", "--json", &entry], &scratch.0);
+    assert!(json.status.success(), "{}", String::from_utf8_lossy(&json.stderr));
+    assert_eq!(
+        json.stdout,
+        include_bytes!("fixtures/jetdoc/undocumented.json").as_slice()
+    );
+
+    let local = jet_doc(&["doc", &entry], &scratch.0);
+    assert!(local.status.success(), "{}", String::from_utf8_lossy(&local.stderr));
+    assert_eq!(
+        fs::read(scratch.0.join("docs/index.md")).expect("Markdown output"),
+        include_bytes!("fixtures/jetdoc/undocumented.md").as_slice()
+    );
+    assert_eq!(
+        fs::read(scratch.0.join("docs/index.html")).expect("HTML output"),
+        include_bytes!("fixtures/jetdoc/undocumented.html").as_slice()
+    );
+}
+
+#[test]
+fn nested_state_docs_stay_on_the_struct_item() {
+    let scratch = Scratch::new();
+    let entry = scratch.0.join("nested_state.jet");
+    fs::write(
+        &entry,
+        "pub struct Door { state { Closed, Open } }\nfn run() {}\n",
+    )
+    .expect("write nested state fixture");
+    let entry = entry.to_string_lossy().into_owned();
+    let output = jet_doc(&["doc", "--json", &entry], &scratch.0);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json = String::from_utf8(output.stdout).expect("UTF-8 jetdoc JSON");
+    assert!(json.contains("\"kind\":\"struct\""));
+    assert!(json.contains("\"signature\":\"struct Door { state { Closed, Open } }\""));
+    assert!(!json.contains("\"kind\":\"state\""));
 }

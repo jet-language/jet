@@ -4796,6 +4796,23 @@ pub enum TTryConvert {
     WidenUnion { enum_name: String, tag: String },
 }
 
+/// Whether a `?` produces the default `Err` carrier after its sema-selected
+/// conversion. Only that carrier can own structured context frames.
+pub fn try_target_is_default_error(inner: &TExpr, convert: &TTryConvert) -> bool {
+    match convert {
+        TTryConvert::DefaultErr => true,
+        TTryConvert::None => matches!(
+            inner.ty.unwrap_result().map(|(_, error)| error),
+            Some(Type::Named(name)) if name == crate::Syntax::TYPE_ERR
+        ),
+        TTryConvert::Typed(name) => name
+            .strip_prefix("__jet_errconv_")
+            .and_then(|stem| stem.rsplit_once("_to_"))
+            .is_some_and(|(_, target)| target == crate::Syntax::TYPE_ERR),
+        TTryConvert::Never | TTryConvert::WidenUnion { .. } => false,
+    }
+}
+
 /// c109 Phase 8: the resolved right-hand side of a `??` fallback (`AST::OrFallback`).
 /// `Value` is an expression; `Return` is an early `return [expr]` from the enclosing
 /// function. c109 Phase 15 / #776: `Panic` carries structured message + `TPanicLoc`;

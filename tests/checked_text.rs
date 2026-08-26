@@ -3,9 +3,13 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
+use std::fs;
+use std::process::Command;
+
 use jet::compile;
 
 const SOURCE: &str = r#"
+#Error
 enum TextError { Bad }
 
 Pattern :: distinct String
@@ -13,13 +17,13 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = TextError
 
-    fn check(text: String) () ! -[]> {
+    fn check(text: String) () !TextError -[]> {
         if text == "" { return Err(TextError.Bad) }
-        return Ok(())
+        return Ok()
     }
 
     fn encode_hole<T: Printable>(value: T) String -[]> {
-        return "{value}"
+        return "{hole}"
     }
 }
 
@@ -30,6 +34,7 @@ fn run() {
 "#;
 
 const TIERS_SOURCE: &str = r#"
+#Error
 enum TextError { Bad }
 
 Pattern :: distinct String
@@ -37,13 +42,13 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = TextError
 
-    fn check(text: String) () ! -[]> {
-        if text == "hello [1]" || text == "ok" { return Ok(()) }
+    fn check(text: String) () !TextError -[]> {
+        if text == "hello [1]" || text == "ok" { return Ok() }
         return Err(TextError.Bad)
     }
 
     fn encode_hole<T: Printable>(value: T) String -[]> {
-        return "[{value}]"
+        return "[1]"
     }
 }
 
@@ -75,6 +80,7 @@ fn run() {
 "#;
 
 const DYNAMIC_ERROR_SOURCE: &str = r#"
+#Error
 enum PatternError { Rejected }
 
 Pattern :: distinct String
@@ -82,13 +88,13 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = PatternError
 
-    fn check(text: String) () PatternError! -[]> {
+    fn check(text: String) () !PatternError -[]> {
         if text == "bad" { return Err(PatternError.Rejected) }
-        return Ok(())
+        return Ok()
     }
 
     fn encode_hole<T: Printable>(value: T) String -[]> {
-        return "{value}"
+        return ""
     }
 }
 
@@ -148,8 +154,8 @@ fn malformed_checked_text_impl_reports_the_trait_contract() {
 Pattern :: distinct String
 
 impl Pattern.CheckedText {
-    fn check(text: String) () ! -[]> { return Ok(()) }
-    fn encode_hole<T: Printable>(value: T) String -[]> { return "{value}" }
+    fn check(text: String) () !Error -[]> { return }
+    fn encode_hole<T: Printable>(value: T) String -[]> { return "" }
 }
 
 fn run() {}
@@ -166,8 +172,8 @@ Pattern :: distinct String
 
 impl Pattern.CheckedText {
     type Error = Error
-    fn check(text: String) () ! -[]> { return Ok(()) }
-    fn encode_hole<T: Printable>(value: T) String -[]> { return "{value}" }
+    fn check(text: String) () !Error -[]> { return }
+    fn encode_hole<T: Printable>(value: T) String -[]> { return "" }
 }
 
 fn run() {
@@ -234,5 +240,75 @@ fn dynamic_checked_text_from_keeps_the_shared_error_report() {
 fn checked_text_web_source_compiles() {
     let output = jet::compile_web_with_path(TIERS_SOURCE, "checked_text_web.jet")
         .expect("ordinary CheckedText source should compile for web");
-    assert!(output.web.is_some());
+    let web = output.web.expect("ordinary CheckedText source should produce web artifacts");
+    assert!(web.wasm_rust.contains("__jet_checked_text__Pattern__check"));
+    assert!(web
+        .wasm_rust
+        .contains("__jet_checked_text__Pattern__encode_hole"));
+
+    let have_tool = |name: &str| {
+        Command::new(name)
+            .arg("--version")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    };
+    let have_wasm_target = Command::new("rustc")
+        .args([
+            "--print",
+            "target-libdir",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    if !have_tool("rustc") || !have_tool("node") || !have_wasm_target {
+        eprintln!("note: skipping checked-text web execution (need rustc, wasm32 target, and node)");
+        return;
+    }
+
+    let scratch = common::Scratch::new("checked-text-web");
+    fs::write(scratch.join("app.js"), &web.js_app).unwrap();
+    fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+    fs::write(scratch.join("app_wasm.rs"), &web.wasm_rust).unwrap();
+    fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
+
+    let wasm = Command::new("rustc")
+        .current_dir(&scratch.path)
+        .args([
+            "--edition",
+            "2021",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "-O",
+            "app_wasm.rs",
+            "-o",
+            "app.wasm",
+        ])
+        .output()
+        .expect("spawn checked-text web rustc");
+    assert!(
+        wasm.status.success(),
+        "rustc rejected checked-text web output: {}",
+        String::from_utf8_lossy(&wasm.stderr)
+    );
+
+    let node = Command::new("node")
+        .current_dir(&scratch.path)
+        .arg("app.js")
+        .output()
+        .expect("spawn checked-text web app");
+    assert!(
+        node.status.success(),
+        "node rejected checked-text web output: stdout={} stderr={}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&node.stdout),
+        "hello [1]\nok\nbad rejected\ntrue\nfalse\ntrue\nfalse\n"
+    );
 }

@@ -1608,22 +1608,46 @@ pub fn reflect_type_value_with_target_and_graph(
     target: &TargetLayout,
     graph: Option<&jet_foundation::Facts::StateGraph>,
 ) -> Option<CtValue> {
+    reflect_type_value_with_target_and_graph_and_facts(
+        items, type_name, module, target, graph, None,
+    )
+}
+
+/// Fold `Type.reflect()` from the checked erased fact registry. The optional
+/// registry keeps this seam usable by small reflection-only callers; compiler
+/// paths pass it so state labels and graph facts have one semantic owner.
+pub fn reflect_type_value_with_target_and_graph_and_facts(
+    items: &[Item],
+    type_name: &str,
+    module: &str,
+    target: &TargetLayout,
+    graph: Option<&jet_foundation::Facts::StateGraph>,
+    facts: Option<&jet_foundation::Facts::FactRegistry>,
+) -> Option<CtValue> {
     let module = if module.is_empty() { "main" } else { module };
     let layout_engine = TargetLayoutEngine::new(items.iter(), target.clone());
     for item in items {
         match item {
             Item::Struct(def) if def.name == type_name => {
-                let states = def
-                    .state
-                    .as_ref()
-                    .map(|state| {
-                        state
-                            .states
-                            .iter()
-                            .map(|(name, _)| name.clone())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
+                let states = match facts {
+                    Some(facts) => facts
+                        .state_members(type_name)
+                        .map_or_else(Vec::new, |states| states.to_vec()),
+                    None => def
+                        .state
+                        .as_ref()
+                        .map(|state| {
+                            state
+                                .states
+                                .iter()
+                                .map(|(name, _)| name.clone())
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default(),
+                };
+                let graph = graph.or_else(|| {
+                    facts.and_then(|facts| facts.state_graph(&format!("{}.State", def.name)))
+                });
                 let mut info =
                     build_struct_type_info_with_path_and_vocabulary_and_engine_and_graph(
                         def,
@@ -1730,12 +1754,22 @@ pub fn reflect_type_value_with_target_and_graph(
 
 /// D-FACT-READ1=A: resolve a direct fact read while top-level comptime
 /// bindings are evaluated. This pass runs before sema has built a module
-/// `TypeRegistry`, so it reads the same registered plane through the source
-/// declarations that will be registered moments later.
+/// `TypeRegistry`, but receives the same erased fact registry that sema will
+/// publish after body checking.
 pub fn fact_read_value(
     expr: &Expr,
     items: &[Item],
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+) -> Option<CtValue> {
+    let fact_registry = jet_foundation::Facts::FactRegistry::from_state_items(items);
+    fact_read_value_with_registry(expr, items, build_facts, &fact_registry)
+}
+
+pub(crate) fn fact_read_value_with_registry(
+    expr: &Expr,
+    items: &[Item],
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+    fact_registry: &jet_foundation::Facts::FactRegistry,
 ) -> Option<CtValue> {
     if let Expr::MethodCall {
         receiver,
@@ -1747,7 +1781,14 @@ pub fn fact_read_value(
         if method == "reflect" && args.is_empty() {
             if let Expr::Ident(type_name, _) = receiver.as_ref() {
                 let target = TargetLayout::from_triple(&build_facts.target_triple);
-                return reflect_type_value_with_target(items, type_name, "main", &target);
+                return reflect_type_value_with_target_and_graph_and_facts(
+                    items,
+                    type_name,
+                    "main",
+                    &target,
+                    None,
+                    Some(fact_registry),
+                );
             }
         }
     }
@@ -1802,19 +1843,15 @@ pub fn fact_read_value(
                 .map(|(dimension, _)| build_dimension_info(&dimension)),
             _ => None,
         }),
-        jet_foundation::Registry::FactRead::States => items.iter().find_map(|item| match item {
-            Item::Struct(def) if def.name == subject_name => def.state.as_ref().map(|decl| {
-                build_state_infos(
+        jet_foundation::Registry::FactRead::States => fact_registry
+            .state_members(subject_name)
+            .map(|states| {
+                build_state_infos_with_graph(
                     subject_name,
-                    &decl
-                        .states
-                        .iter()
-                        .map(|(name, _)| name.clone())
-                        .collect::<Vec<_>>(),
+                    states,
+                    fact_registry.state_graph(&format!("{subject_name}.State")),
                 )
             }),
-            _ => None,
-        }),
         jet_foundation::Registry::FactRead::Effects => items.iter().find_map(|item| match item {
             Item::Func(function) if function.name == subject_name => Some(build_effect_info(
                 &function
@@ -2615,22 +2652,10 @@ pub fn build_program_info_with_index(
         for item in &module.items {
             match item {
                 crate::AST::Item::Struct(def) => {
-                    let states = module
-                        .items
-                        .iter()
-                        .find_map(|item| match item {
-                            crate::AST::Item::Struct(owner) if owner.name == def.name => {
-                                owner.state.as_ref().map(|state| {
-                                    state
-                                        .states
-                                        .iter()
-                                        .map(|(name, _)| name.clone())
-                                        .collect::<Vec<_>>()
-                                })
-                            }
-                            _ => None,
-                        })
-                        .unwrap_or_default();
+                    let states = facts
+                        .fact_registry
+                        .state_members(&def.name)
+                        .map_or_else(Vec::new, |states| states.to_vec());
                     let state_graph = facts
                         .fact_registry
                         .state_graph(&format!("{}.State", def.name));

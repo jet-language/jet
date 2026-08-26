@@ -483,6 +483,57 @@ fn run() {}
 }
 
 #[test]
+fn semindex_state_symbols_keep_their_struct_owner() {
+    let path = temp_fixture(
+        "state_owner_symbols.jet",
+        r#"
+struct Door {
+    state { Closed, Open }
+}
+impl Door {
+    #Transition(_, Door.State.Closed) fn new() Door -[]> { return Door{} }
+    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) Door -[]> { return self }
+}
+fn run() {}
+"#,
+    );
+    let index = open(&path).expect("state symbols index");
+    let closed = index
+        .definitions()
+        .iter()
+        .find(|definition| definition.qualified_name.ends_with("Door.State.Closed"))
+        .expect("owning struct state definition");
+    assert!(matches!(
+        &closed.kind,
+        SymbolKind::EnumVariant { parent } if parent == "Door.State"
+    ));
+    let closed_span = closed.def_span;
+    let closed_qualified_name = closed.qualified_name.clone();
+    let marker_reference = index
+        .references_to("Closed")
+        .into_iter()
+        .find(|reference| {
+            reference
+                .target
+                .as_ref()
+                .is_some_and(|target| target.def_span == closed_span)
+        })
+        .expect("qualified marker reference resolves to the state section");
+    assert_eq!(
+        marker_reference.target.as_ref().unwrap().def_span,
+        closed_span
+    );
+    let source = fs::read_to_string(&path).expect("read state symbols fixture");
+    assert_eq!(
+        &source[marker_reference.span.start..marker_reference.span.end],
+        "Closed"
+    );
+    assert!(index.to_json().contains(&format!(
+        "\"name\":\"{closed_qualified_name}\""
+    )));
+}
+
+#[test]
 fn semindex_reconstructs_checked_output_callable() {
     let path = fixture("tooling/output_callable.jet");
     let index = open(&path).expect("Output example indexes");
@@ -492,12 +543,16 @@ fn semindex_reconstructs_checked_output_callable() {
     assert_eq!(output.name, "checked-output");
     assert_eq!(output.entry.name, "launch");
     assert!(output.entry.identity.ends_with("::launch"));
+    assert!(output.entry.failure_contract.starts_with("Result<"));
+    assert_eq!(output.entry.failure_source, "implicit default !Err");
     assert_eq!(output.entry.authority, "safe-jet");
     assert_ne!(output.entry.definition_span, output.entry.reference_span);
     let json = index.to_json();
     for field in [
         "\"outputs\":[{",
         "\"entry\":{\"identity\"",
+        "\"failure_contract\":\"Result<",
+        "\"failure_source\":\"implicit default !Err\"",
         "\"authority\":\"safe-jet\"",
         "\"effects\":[\"IO\"]",
     ] {
@@ -530,6 +585,7 @@ fn jet_inspect_semindex_reports_checked_output() {
         json.contains("\"identity\":\"output_callable::launch\""),
         "{json}"
     );
+    assert!(json.contains("\"failure_source\":\"implicit default !Err\""), "{json}");
 }
 
 #[test]

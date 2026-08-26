@@ -87,7 +87,7 @@ impl<'a> Parser<'a> {
     }
 
     /// D-VISDEFAULT2=A: parse top-level item visibility (`priv`, `pub`, defaults).
-    pub(super) fn parse_item_visibility(&mut self) -> (bool, bool) {
+    pub(in crate::Parser) fn parse_item_visibility(&mut self) -> (bool, bool) {
         if matches!(self.peek().kind, TokKind::KwPub | TokKind::KwPriv)
             && matches!(self.peek2().kind, TokKind::Colon)
         {

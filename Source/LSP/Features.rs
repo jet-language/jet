@@ -64,6 +64,22 @@ fn append_checked_signature(hover: &mut String, checked_signature: &str) {
     hover.push_str(&checked_signature);
 }
 
+fn state_graph_hover_at(
+    db: &SymbolDB,
+    module_path: &str,
+    span: Span,
+) -> Option<String> {
+    db.hover
+        .iter()
+        .find(|hover| {
+            hover.module_path == module_path
+                && hover.span == span
+                && hover.text.starts_with("state `")
+                && hover.text.contains(".State.")
+        })
+        .map(|hover| hover.text.clone())
+}
+
 pub(crate) fn compute_hover(
     db: &SymbolDB,
     tokens: &[Token],
@@ -96,6 +112,20 @@ pub(crate) fn compute_hover(
             }
         });
     }
+    if let Some(hover) = db
+        .hover
+        .iter()
+        .find(|hover| {
+            hover.module_path == path
+                && hover.span.start <= offset
+                && offset <= hover.span.end
+                && hover.text.starts_with("state `")
+                && hover.text.contains(".State.")
+        })
+        .map(|hover| hover.text.clone())
+    {
+        return Some(hover);
+    }
     if let Some(symbol) = db.symbols.at(path, offset) {
         let mut hover = semantic_hover(symbol, path);
         if matches!(symbol.kind, jet_semindex::SemanticSymbolKind::Function) {
@@ -117,6 +147,11 @@ pub(crate) fn compute_hover(
             && offset <= reference.span.end
     }) {
         if let Some(target) = &reference.target {
+            if target.kind == "state" {
+                if let Some(hover) = state_graph_hover_at(db, &target.module_path, target.def_span.into()) {
+                    return Some(hover);
+                }
+            }
             if let Some(symbol) = db.symbols.symbols().iter().find(|symbol| {
                 symbol.module_path == target.module_path && symbol.span == Some(target.def_span)
             }) {
@@ -242,6 +277,118 @@ fn compiler_fact_at(tokens: &[Token], offset: usize) -> Option<&str> {
             && offset <= token.span.end)
             .then_some(name.as_str())
     })
+}
+
+/// Resolve the semantic symbol at one editor position. Navigation and hover
+/// must use the same target identity; spelling lookup alone can pick a shadow.
+pub(crate) fn semantic_symbol_at<'a>(
+    db: &'a SymbolDB,
+    tokens: &[Token],
+    path: &str,
+    offset: usize,
+) -> Option<&'a jet_semindex::SemanticSymbol> {
+    if let Some(symbol) = db.symbols.at(path, offset) {
+        return Some(symbol);
+    }
+    if let Some(reference) = db.refs.iter().find(|reference| {
+        reference.module_path == path
+            && reference.span.start <= offset
+            && offset <= reference.span.end
+    }) {
+        if let Some(target) = &reference.target {
+            if let Some(identity) = &target.semantic_identity {
+                if let Some(symbol) = db.symbols.lookup_identity(identity) {
+                    return Some(symbol);
+                }
+            }
+            if let Some(symbol) = db.symbols.symbols().iter().find(|symbol| {
+                symbol.module_path == target.module_path
+                    && symbol.span == Some(target.def_span.into())
+            }) {
+                return Some(symbol);
+            }
+        }
+    }
+    find_ident_at(tokens, offset).and_then(|name| db.symbols.resolve_visible_in(name, Some(path)))
+}
+
+pub(crate) fn semantic_symbol_at_span<'a>(
+    db: &'a SymbolDB,
+    path: &str,
+    span: Span,
+) -> Option<&'a jet_semindex::SemanticSymbol> {
+    db.symbols.symbols().iter().find(|symbol| {
+        symbol.module_path == path && symbol.span == Some(span.into())
+    })
+}
+
+/// Stable LSP extension for nominal definitions. Standard navigation results
+/// carry ranges only, so this preserves the checked type and trait contract
+/// beside the range without making editors re-check or infer it.
+pub(crate) fn semantic_symbol_metadata_json(
+    db: &SymbolDB,
+    symbol: &jet_semindex::SemanticSymbol,
+) -> Option<String> {
+    let definition = db
+        .index
+        .lookup_identity(&symbol.identity)
+        .or_else(|| {
+            let span = symbol.span?;
+            db.index.definitions().iter().find(|definition| {
+                definition.module_path == symbol.module_path && definition.def_span == span
+            })
+        })?;
+    if definition.nominal_base.is_none() && definition.trait_contracts.is_empty() {
+        return None;
+    }
+    let associated_types = |contract: &jet_semindex::TraitContractFact| {
+        contract
+            .associated_types
+            .iter()
+            .map(|(name, ty)| {
+                format!(
+                    "{{\"name\":\"{}\",\"type\":{}}}",
+                    json_escape(name),
+                    ty.as_deref()
+                        .map(|ty| format!("\"{}\"", json_escape(ty)))
+                        .unwrap_or_else(|| "null".to_string())
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let contracts = definition
+        .trait_contracts
+        .iter()
+        .map(|contract| {
+            let methods = contract
+                .methods
+                .iter()
+                .map(|method| format!("\"{}\"", json_escape(method)))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "{{\"name\":\"{}\",\"associated_types\":[{}],\"methods\":[{}]}}",
+                json_escape(&contract.trait_name),
+                associated_types(contract),
+                methods,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let nominal_base = definition
+        .nominal_base
+        .as_deref()
+        .map(|base| format!("\"{}\"", json_escape(base)))
+        .unwrap_or_else(|| "null".to_string());
+    Some(format!(
+        "{{\"identity\":\"{}\",\"qualified_name\":\"{}\",\"signature\":\"{}\",\"nominal_base\":{},\"trait_contracts\":[{}]}}",
+        json_escape(&definition.identity),
+        json_escape(&definition.qualified_name),
+        json_escape(&symbol.signature),
+        nominal_base,
+        contracts,
+    ))
 }
 
 fn compiler_fact_receiver(tokens: &[Token], src: &str, offset: usize) -> Option<String> {

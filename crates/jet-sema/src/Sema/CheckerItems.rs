@@ -2872,7 +2872,17 @@ impl<'a> Checker<'a> {
         pattern: &mut Pattern,
         span: Span,
     ) -> (Option<Type>, HashMap<String, Type>) {
+        // A Result pattern consumes the carrier itself. Keep a direct
+        // fallible call as `T !E` here; ordinary value positions unwrap the
+        // same call through the existing automatic propagation rule.
+        let preserve_result_carrier = matches!(pattern, Pattern::Ok { .. } | Pattern::Err { .. });
+        if preserve_result_carrier {
+            self.failure_auto_depth += 1;
+        }
         let subj_ty = self.infer(subject);
+        if preserve_result_carrier {
+            self.failure_auto_depth -= 1;
+        }
         let Some(st) = subj_ty else {
             return (None, HashMap::new());
         };

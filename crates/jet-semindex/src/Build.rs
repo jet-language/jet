@@ -342,6 +342,7 @@ impl SymbolDB {
                         let output = value.resolved_output.as_ref()?;
                         let target = &bundle.modules[output.module];
                         let identity = format!("{}::{}", target.alias, output.semantic_name);
+                        let failure = output.failure_contract();
                         Some(OutputFact {
                             binding: value.name.clone(),
                             kind: output.kind.as_str().to_string(),
@@ -356,6 +357,8 @@ impl SymbolDB {
                                 reference_span: output.reference.into(),
                                 params: output.params.iter().map(|(_, ty)| ty.name()).collect(),
                                 return_type: output.return_type.as_ref().map(AST::Type::name),
+                                failure_contract: failure.effective_type().name(),
+                                failure_source: failure.source(),
                                 authority: output.authority.as_str().to_string(),
                                 effects: output.effects.clone(),
                             },
@@ -958,7 +961,12 @@ fn collect_state_marker_references_for_method(
             if raw == Syntax::STATE_ENTRY {
                 continue;
             }
-            ctx.db.refs.push(scoped_ref(raw, span, mp, ctx));
+            // Member references are indexed by their leaf name. Keep the
+            // owner-qualified target from the ledger, but use the same leaf
+            // spelling here so completion, references, and rename include
+            // `Door.State.Closed` marker arguments.
+            let name = raw.rsplit('.').next().unwrap_or(raw.as_str()).to_string();
+            ctx.db.refs.push(scoped_ref(name, span, mp, ctx));
         }
     }
 }

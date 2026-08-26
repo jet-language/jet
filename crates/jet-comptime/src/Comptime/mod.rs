@@ -271,7 +271,7 @@ pub use Reflect::{
     build_origin_info, build_origin_option, build_unit_scale_provenance_info,
     build_view_provenance_info,
     program_reflection_identity, reflect_type_value, reflect_type_value_with_target,
-    reflect_type_value_with_target_and_graph,
+    reflect_type_value_with_target_and_graph, reflect_type_value_with_target_and_graph_and_facts,
     reflected_fact_field, registered_fact_value, ProgramIndexView, ProgramSemanticFacts,
 };
 
@@ -766,7 +766,51 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs<'a>(
     fact_items: &[crate::AST::Item],
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
-    let closed = fold_build_facts(init, fact_items, build_facts);
+    let fact_registry = jet_foundation::Facts::FactRegistry::from_state_items(fact_items);
+    evaluate_closed_value_with_imports_opts_collecting_structs_and_facts(
+        init,
+        funcs,
+        extern_names,
+        base_dir,
+        globals,
+        core_imports,
+        gates,
+        initial_impure_depth,
+        structs,
+        methods,
+        distinct_ranges,
+        distinct_bases,
+        unit_families,
+        mutated,
+        fact_items,
+        build_facts,
+        &fact_registry,
+    )
+}
+
+/// Evaluate a closed value against the caller's already-registered semantic
+/// facts. Sema uses this variant so nested state rows are never reconstructed
+/// from a parallel source-side lookup.
+pub fn evaluate_closed_value_with_imports_opts_collecting_structs_and_facts<'a>(
+    init: &crate::AST::Expr,
+    funcs: &HashMap<String, &'a Func>,
+    extern_names: &HashSet<String>,
+    base_dir: &Path,
+    globals: &HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+    gates: jet_foundation::Policy::GateSet,
+    initial_impure_depth: usize,
+    structs: &HashMap<String, &'a StructDef>,
+    methods: &HashMap<(String, String), &'a Func>,
+    distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
+    distinct_bases: &HashMap<String, crate::AST::Type>,
+    unit_families: &[crate::AST::UnitFamilyDef],
+    mutated: Option<&mut HashMap<String, CtValue>>,
+    fact_items: &[crate::AST::Item],
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+    fact_registry: &jet_foundation::Facts::FactRegistry,
+) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
+    let closed = fold_build_facts(init, fact_items, build_facts, fact_registry);
     evaluate_with_imports_opts_collecting_structs_and_methods(
         &closed,
         funcs,
@@ -789,10 +833,16 @@ fn fold_build_facts(
     init: &crate::AST::Expr,
     fact_items: &[crate::AST::Item],
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+    fact_registry: &jet_foundation::Facts::FactRegistry,
 ) -> crate::AST::Expr {
     let mut closed = init.clone();
     closed.for_each_expr_mut(|expr| {
-        let Some(value) = fact_read_value(expr, fact_items, build_facts) else {
+        let Some(value) = Reflect::fact_read_value_with_registry(
+            expr,
+            fact_items,
+            build_facts,
+            fact_registry,
+        ) else {
             return;
         };
         let span = expr.span();
