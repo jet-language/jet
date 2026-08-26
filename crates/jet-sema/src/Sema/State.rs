@@ -113,10 +113,6 @@ pub(crate) fn checked_state_graphs(
                     state.states.iter().map(|(name, _)| name.clone()).collect(),
                 )
             }),
-            Item::StateDecl(state) => Some((
-                state.type_name.clone(),
-                state.states.iter().map(|(name, _)| name.clone()).collect(),
-            )),
             _ => None,
         })
         .collect();
@@ -254,16 +250,6 @@ impl StateTable {
                         self.add_method(&e.name, m);
                     }
                 }
-                // D-STATE-HOME1=A: register the bounded state-set for this type.
-                Item::StateDecl(sd) => {
-                    self.facts.declare(
-                        jet_foundation::Facts::FactKind::State,
-                        format!("{}.State", sd.type_name),
-                        sd.states.iter().map(|(state, _)| state.clone()),
-                    );
-                    self.declared
-                        .insert(sd.type_name.clone(), sd.states.clone());
-                }
                 _ => {}
             }
         }
@@ -331,6 +317,13 @@ impl StateTable {
                         .chain(structure.trait_impls.iter().flat_map(|block| {
                             block.methods.iter().map(|method| method.name.as_str())
                         }))
+                        .chain(items.iter().filter_map(|item| match item {
+                            Item::Impl(implementation)
+                                if implementation.type_name == structure.name => {
+                                Some(implementation.methods.iter().map(|method| method.name.as_str()))
+                            }
+                            _ => None,
+                        }).flatten())
                         .collect();
                 for (state, span) in decl_states {
                     if members.contains(state.as_str()) {

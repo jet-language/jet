@@ -1484,7 +1484,6 @@ pub fn registered_fact_value(
             Item::Enum(def) => def.name == name,
             Item::Distinct(def) => def.name == name,
             Item::Func(func) => func.name == name,
-            Item::StateDecl(state) => state.type_name == name,
             Item::UnitFamily(family) => family.distinct_defs().iter().any(|def| def.name == name),
             _ => false,
         })
@@ -1598,14 +1597,6 @@ pub fn reflect_type_value_with_target_and_graph(
                             .iter()
                             .map(|(name, _)| name.clone())
                             .collect::<Vec<_>>()
-                    })
-                    .or_else(|| {
-                        items.iter().find_map(|item| match item {
-                            Item::StateDecl(state) if state.type_name == def.name => {
-                                Some(state.states.iter().map(|(name, _)| name.clone()).collect())
-                            }
-                            _ => None,
-                        })
                     })
                     .unwrap_or_default();
                 return Some(

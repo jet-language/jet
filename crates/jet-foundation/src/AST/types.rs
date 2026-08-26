@@ -2170,11 +2170,6 @@ impl Type {
             Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("`*{}`", args[0].name())
             }
-            Type::Apply { name, args }
-                if name == crate::Syntax::TYPE_CHECKED_TEXT && args.len() == 1 =>
-            {
-                args[0].show()
-            }
             Type::Quantity { dimension, .. } => {
                 format!("{} (a physical quantity)", dimension.display_name())
             }
@@ -2270,11 +2265,6 @@ impl Type {
             // D-CAP9: the raw-pointer type names as the canonical `*T`.
             Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("*{}", args[0].name())
-            }
-            Type::Apply { name, args }
-                if name == crate::Syntax::TYPE_CHECKED_TEXT && args.len() == 1 =>
-            {
-                args[0].name()
             }
             Type::Quantity { base, dimension } => {
                 format!(

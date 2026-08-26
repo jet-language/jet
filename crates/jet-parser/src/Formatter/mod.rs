@@ -1025,8 +1025,6 @@ fn item_span_start(item: &Item, src: &str) -> usize {
             .unwrap_or(ec.from_span.start),
         // D-MIGRATE1: use the migration block's own span.
         Item::Migration(m) => m.span.start,
-        // D-STATE-DECL: use the state block's own span.
-        Item::StateDecl(s) => s.span.start,
         Item::ProtocolDecl(p) => p.span.start,
         // D-METADERIVE1=A: use the derive block's own span.
         Item::UserDerive(d) => d.span.start,
@@ -1102,8 +1100,6 @@ fn item_span_end(item: &Item) -> usize {
         Item::ErrorConv(ec) => ec.body_span.end,
         // D-MIGRATE1: use the migration block's own span end.
         Item::Migration(m) => m.span.end,
-        // D-STATE-DECL: use the state block's own span end.
-        Item::StateDecl(s) => s.span.end,
         Item::ProtocolDecl(p) => p.span.end,
         // D-METADERIVE1=A: use the derive block's own span end.
         Item::UserDerive(d) => d.span.end,

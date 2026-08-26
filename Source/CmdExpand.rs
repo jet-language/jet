@@ -13,7 +13,7 @@ use std::process::exit;
 
 use jet::ExitCodes;
 use jet::Sema::SemIndexEffectFacts;
-use jet::AST::{Item, ProgramBundle};
+use jet::AST::{Binding, Item, ProgramBundle, Stmt};
 use jet_foundation::Layout::{TargetLayout, TargetLayoutEngine};
 use jet_semindex::{ExpandLens, ExpandProjection, ExpandValue, SemIndex};
 
@@ -62,6 +62,12 @@ const LENSES: &[Lens] = &[
         render_json: render_layout_json,
     },
     Lens {
+        name: "origin",
+        summary: "D-TRACK-ORIGIN1 typed #Track provenance facts",
+        render: render_origin,
+        render_json: render_origin_json,
+    },
+    Lens {
         name: "derive",
         summary: "derived behavior already attached to types (D-ONCE-DERIVE1)",
         render: render_derive,
@@ -97,7 +103,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
                             "E2104",
                             "`--facts` needs a lens name",
                             "the expand command must know which registered lens to project",
-                            "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, `--facts layout`, `--facts derive`, `--facts templates`, or `--facts callable-signature`",
+                            "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, `--facts layout`, `--facts origin`, `--facts derive`, `--facts templates`, or `--facts callable-signature`",
                         );
                     }
                     if !json {
@@ -136,7 +142,7 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
                         "E2941",
                         &format!("unknown expand lens `{name}`"),
                         "only registered lenses have checked semantic facts",
-                        "use `inline`, `memory`, `web`, `effects`, `layout`, `derive`, `templates`, or `callable-signature`",
+                        "use `inline`, `memory`, `web`, `effects`, `layout`, `origin`, `derive`, `templates`, or `callable-signature`",
                     );
                 }
                 if !json {

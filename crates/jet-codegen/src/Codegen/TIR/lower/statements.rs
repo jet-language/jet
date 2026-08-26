@@ -1855,7 +1855,7 @@ fn lower_refutable_fallback(fallback: &OrFallback, cx: &Cx, env: &LowerEnv) -> V
 /// head as an unowned enum literal. Project it onto the existing Option/Result
 /// AST nodes from the function's declared return type, then let their ordinary
 /// lowering own the carrier representation on every tier.
-fn normalize_eval_fragment_return(expr: &Expr, expected: Option<&Type>) -> Option<Expr> {
+pub(crate) fn normalize_eval_fragment_return(expr: &Expr, expected: Option<&Type>) -> Option<Expr> {
     if !super::is_eval_fragment() {
         return None;
     }

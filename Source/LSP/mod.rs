@@ -390,6 +390,64 @@ mod tests {
     }
 
     #[test]
+    fn compiler_origin_fact_lsp_surface_is_visible_and_fixed() {
+        let src = "fn run() {\n    #Track speed :: Float{3.5}\n    @origin :: speed.@origin\n}\n";
+        let (project, diagnostics, bundle, facts) = check_test_document(src);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "origin fact LSP fixture should check: {diagnostics:#?}"
+        );
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let completion_offset = src.find("speed.@origin").expect("origin access") + 7;
+        let completions =
+            compute_completions(&db, src, completion_offset, project.entry(), None, None);
+        assert!(
+            completions.iter().any(|item| {
+                item.label == "@origin"
+                    && item.detail.as_deref() == Some("compiler fact: OriginInfo?")
+            }),
+            "origin fact completion missing: {}",
+            completions
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(src);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:#?}");
+        let origin_offset = src.find("@origin").expect("origin fact") + 2;
+        let hover = compute_hover(&db, &tokens, src, project.entry(), origin_offset)
+            .expect("origin fact hover");
+        assert!(hover.contains("@origin"), "{hover}");
+        assert!(hover.contains("OriginInfo"), "{hover}");
+
+        let (definition_path, definition_span) =
+            compute_definition(&db, &tokens, src, project.entry(), origin_offset)
+                .expect("origin fact definition");
+        assert_eq!(definition_path, project.entry());
+        assert_eq!(&src[definition_span.start..definition_span.end], "speed");
+
+        let references = compute_references(&db, &tokens, project.entry(), origin_offset, true);
+        assert!(
+            references
+                .iter()
+                .any(|(_, span)| &src[span.start..span.end] == "speed"),
+            "origin receiver references missing: {references:?}"
+        );
+
+        let rename_error = compute_rename(&db, &tokens, project.entry(), origin_offset, "other")
+            .expect_err("compiler facts are not renameable");
+        assert!(
+            rename_error.contains("compiler-owned @origin"),
+            "{rename_error}"
+        );
+    }
+
+    #[test]
     fn rename_basic_function() {
         let src = "fn greet() {}\nfn run() { greet(); }\n";
         let (project, _, bundle, facts) = check_test_document(src);

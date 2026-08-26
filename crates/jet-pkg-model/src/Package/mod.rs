@@ -13,10 +13,6 @@
 pub mod Blocks;
 mod Convert;
 mod Discovery;
-// Card #2179 owns the durable-send lifecycle that edits authority holds in a
-// package manifest. This module is the producer; its consumer has not shipped,
-// so nothing calls it yet. That card removes this allow.
-#[allow(dead_code)]
 mod Edit;
 
 pub use Blocks::{
@@ -26,7 +22,7 @@ pub use Blocks::{
 };
 pub use Convert::{new_template, to_manifest};
 pub use Discovery::{discover_module_in, DiscoveryError};
-pub use Edit::{add_dep, remove_dep};
+pub use Edit::{add_authority_hold, add_dep, remove_dep};
 
 use crate::Authority::{AuthorityError, AuthorityResolver, CheckedFile, CheckedPackage};
 use crate::Lexer;

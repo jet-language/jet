@@ -80,6 +80,26 @@ impl Reservation {
     #State(CheckedIn) fn room_key(self) String -> "key for {self.guest}"
 }
 
+fn run_terminal_outcomes() {
+    success := Workflow.begin()
+    success = success.succeed()
+    print(success.success_report())
+
+    failure := Workflow.begin()
+    failure = failure.fail()
+    print(failure.failure_report())
+
+    cancelled := Workflow.begin()
+    cancelled = cancelled.cancel()
+    print(cancelled.cancel_report())
+
+    session := Session.open()
+    session = session.heartbeat()
+    session = session.close()
+    session = session.reopen()
+    print(session.audit())
+}
+
 fn run() {
     // The correct lifecycle: book -> pay -> check_in -> use. `:=` so `r` can be
     // rebound as it advances through its states.
@@ -87,4 +107,5 @@ fn run() {
     r = r.pay()  // r: Confirmed
     r = r.check_in()  // r: CheckedIn
     print(r.room_key())  // valid: r is CheckedIn
+    run_terminal_outcomes()
 }

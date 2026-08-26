@@ -387,7 +387,7 @@ fn definition_matches_target(definition: &SymDef, target: &DefinitionAnchor) -> 
             | (SymKind::Enum { .. }, "enum")
             | (SymKind::Trait, "trait")
             | (SymKind::Tag, "tag")
-            | (SymKind::Type { .. }, "type" | "checked_text_head" | "state" | "protocol")
+            | (SymKind::Type { .. }, "type" | "state" | "protocol")
             | (SymKind::Const, "const")
             | (SymKind::EnumVariant { .. }, "enum_variant" | "variant")
             | (SymKind::Field { .. }, "field")
@@ -815,6 +815,77 @@ fn scoped_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
     }
 }
 
+fn state_marker_path(expr: &AST::Expr) -> Option<(String, Span)> {
+    match expr {
+        AST::Expr::Ident(name, span) => Some((name.clone(), *span)),
+        AST::Expr::Field(base, member, span) => {
+            Some((format!("{}.{}", state_marker_path(base)?.0, member), *span))
+        }
+        _ => None,
+    }
+}
+
+fn collect_state_marker_references_for_method(
+    owner: &str,
+    method: &AST::Func,
+    mp: &str,
+    ctx: &mut WalkCtx<'_>,
+) {
+    for marker in &method.markers {
+        let slots: &[usize] = match marker.name.as_str() {
+            Syntax::KW_STATE => &[0],
+            Syntax::KW_TRANSITION => &[0, 1],
+            _ => &[],
+        };
+        for &slot in slots {
+            let Some((raw, span)) = marker.args.get(slot).and_then(state_marker_path) else {
+                continue;
+            };
+            if raw == Syntax::STATE_ENTRY {
+                continue;
+            }
+            ctx.db.refs.push(scoped_ref(raw, span, mp, ctx));
+        }
+    }
+    let _ = owner;
+}
+
+fn collect_state_marker_references(item: &Item, mp: &str, ctx: &mut WalkCtx<'_>) {
+    match item {
+        Item::Struct(definition) => {
+            for method in &definition.methods {
+                collect_state_marker_references_for_method(&definition.name, method, mp, ctx);
+            }
+            for implementation in &definition.trait_impls {
+                for method in &implementation.methods {
+                    collect_state_marker_references_for_method(
+                        &definition.name,
+                        method,
+                        mp,
+                        ctx,
+                    );
+                }
+            }
+        }
+        Item::Impl(implementation) => {
+            for method in &implementation.methods {
+                collect_state_marker_references_for_method(
+                    &implementation.type_name,
+                    method,
+                    mp,
+                    ctx,
+                );
+            }
+        }
+        Item::Enum(definition) => {
+            for method in &definition.methods {
+                collect_state_marker_references_for_method(&definition.name, method, mp, ctx);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn record_node(
     ctx: &mut WalkCtx<'_>,
     class: &str,
@@ -962,7 +1033,6 @@ fn item_span(item: &AST::Item) -> Span {
         AST::Item::CodeModule(x) => x.span,
         AST::Item::ErrorConv(x) => x.from_span,
         AST::Item::Migration(x) => x.span,
-        AST::Item::StateDecl(x) => x.span,
         AST::Item::ProtocolDecl(x) => x.span,
         AST::Item::UserDerive(x) => x.span,
         AST::Item::TemplateLoop(x) => x.span,
@@ -1070,7 +1140,6 @@ fn state_declarations(module: &LoadedModule) -> Vec<(String, Vec<(String, Span)>
                 .state
                 .as_ref()
                 .map(|state| (structure.name.clone(), state.states.clone())),
-            Item::StateDecl(state) => Some((state.type_name.clone(), state.states.clone())),
             _ => None,
         })
         .collect()
@@ -1547,6 +1616,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
     if let Some(id) = structural_id {
         ctx.structural_parents.push(id);
     }
+    collect_state_marker_references(item, mp, ctx);
     match item {
         Item::EffectDecl(_) => {}
         // D-META-USER1=A: marker and fact declarations are first-class
@@ -1753,7 +1823,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         def_span: *span,
                         module_path: mp.to_string(),
                         kind: SymKind::EnumVariant {
-                            parent: s.name.clone(),
+                            parent: format!("{}.State", s.name),
                         },
                     });
                     ctx.db.hover.push(HoverEntry {
@@ -1762,7 +1832,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         text: format!("state `{}` of `{}`", name, s.name),
                     });
                     ctx.db.members.push(MemberFact {
-                        owner: s.name.clone(),
+                        owner: format!("{}.State", s.name),
                         name: name.clone(),
                         identity: format!(
                             "state:{}::{}.State.{}",
@@ -2384,28 +2454,6 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         Item::ErrorConv(_) => {}
         // D-MIGRATE1: migration blocks aren't yet indexed for symbols/hover.
         Item::Migration(_) => {}
-        Item::StateDecl(value) => {
-            ctx.db.defs.push(SymDef {
-                identity: format!("type:{}::{}", ctx.scope_identity, value.type_name),
-                name: value.type_name.clone(),
-                def_span: value.type_name_span,
-                module_path: mp.to_string(),
-                kind: SymKind::Type {
-                    derives: Vec::new(),
-                },
-            });
-            for (name, span) in &value.states {
-                ctx.db.defs.push(SymDef {
-                    identity: format!("state:{}::{}", ctx.scope_identity, name),
-                    name: name.clone(),
-                    def_span: *span,
-                    module_path: mp.to_string(),
-                    kind: SymKind::EnumVariant {
-                        parent: value.type_name.clone(),
-                    },
-                });
-            }
-        }
         Item::ProtocolDecl(value) => {
             ctx.db.defs.push(SymDef {
                 identity: format!("type:{}::{}", ctx.scope_identity, value.name),

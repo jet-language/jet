@@ -16,6 +16,7 @@ pub(super) fn complete_bundle_check(
     super::super::super::Effects::SemIndexEffectFacts,
 ) {
     populate_name_ledger(bundle, &states, &mut name_ledger);
+    super::super::record_state_marker_references(bundle, &mut name_ledger);
     record_import_edge_facts(bundle, &mut name_ledger);
 
     // D-SHARED-CYCLE1=C: run one graph/memo pass after registry and import
@@ -109,7 +110,6 @@ pub(super) fn complete_bundle_check(
                 | Item::CModule(_) | Item::CodeModule(_)
                 | Item::ErrorConv(_)
                 | Item::Migration(_) // D-MIGRATE1
-                | Item::StateDecl(_) // D-STATE1: erases
                 | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
                 | Item::UserDerive(_) // D-METADERIVE1=A: already expanded above
                 | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before this pass

@@ -924,6 +924,7 @@ impl<'a> Parser<'a> {
                         diags: Vec::new(),
                         pending_type_gt: false,
                         depth: self.depth,
+                        result_handler_depth: self.result_handler_depth,
                         type_generic_depth: 0,
                         type_generic_chain: Vec::new(),
                         type_generic_truncated: false,

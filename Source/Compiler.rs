@@ -1546,11 +1546,6 @@ fn item_node(item: &AST::Item) -> SyntaxNode {
             Some(m.type_name.clone()),
             m.type_span,
         ),
-        AST::Item::StateDecl(s) => (
-            SyntaxNodeKind::State,
-            Some(s.type_name.clone()),
-            s.type_name_span,
-        ),
         AST::Item::ProtocolDecl(p) => (SyntaxNodeKind::Protocol, Some(p.name.clone()), p.name_span),
         AST::Item::UserDerive(d) => (
             SyntaxNodeKind::Derive,

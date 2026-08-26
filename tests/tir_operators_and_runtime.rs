@@ -271,3 +271,49 @@ fallback :: U8{ 0 }
         "255\n100000\n-120\n9000000001\n200\n[104, 105, 33]\n255\n255\n255\n-2147483648\n3\ntrue\n44\n255\n0\n"
     );
 }
+
+/// D-WRAP-SCOPE1=A / I9: one lexical policy covers functions, methods, and
+/// blocks. It changes only fixed-width add/subtract/multiply/power; division
+/// remains the checked operation inside the wrapping block.
+#[test]
+fn lexical_arithmetic_policy_covers_fixed_width_operations_on_every_tier() {
+    let src = r#"
+#Arithmetic(.Wrapping)
+fn wrapped(left: U8, right: U8) U8 {
+    return left + right
+}
+
+#Arithmetic(.Saturating)
+fn saturated(left: U8, right: U8) U8 {
+    return left + right
+}
+
+struct Accumulator { value: U8 }
+impl Accumulator {
+    #Arithmetic(.Wrapping)
+    fn step(self, right: U8) U8 {
+        return self.value + right
+    }
+}
+
+fn run() {
+    left :: U8{200}
+    right :: U8{100}
+    #Arithmetic(.Wrapping) {
+        print(left + right)
+        print(left - U8{250})
+        print(left * U8{2})
+        print(U8{3} ^ U8{5})
+        print(left / U8{2})
+    }
+    print(wrapped(left, right))
+    print(saturated(left, right))
+    print(Accumulator{value: left}.step(right))
+}
+"#;
+    assert_tiers_agree(
+        "tir_lexical_arithmetic_policy",
+        src,
+        "44\n206\n144\n243\n100\n44\n255\n44\n",
+    );
+}

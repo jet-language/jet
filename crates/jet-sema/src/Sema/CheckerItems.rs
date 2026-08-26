@@ -623,7 +623,7 @@ impl<'a> Checker<'a> {
         // their arguments to infer the owner type, so labels must already be
         // in declaration order when that inference walks them.
         if !self.bind_method_args(method, &msig, args, span) {
-            return msig.return_type.clone();
+            return Some(msig.effective_return_type());
         }
         self.normalize_method_variadic_call(method, &msig, args, span);
         if method == "new" && owner_type_args.is_empty() {
@@ -1154,7 +1154,7 @@ impl<'a> Checker<'a> {
             }
         }
         self.activate_call_reservations(&call_access, span);
-        sig.return_type.clone()
+        sig.effective_return_type().into()
     }
 
     pub(crate) fn check_trait_method_args(
@@ -1201,7 +1201,7 @@ impl<'a> Checker<'a> {
             for arg in args.iter_mut() {
                 self.infer(&mut arg.expr);
             }
-            return sig.return_type.clone();
+            return Some(sig.effective_return_type());
         }
         self.register_binder_refs(args);
 
@@ -1357,7 +1357,7 @@ impl<'a> Checker<'a> {
             self.check_callable_argument_ownership(method, index, param.convention, &param_ty, arg);
         }
         self.activate_call_reservations(&call_access, span);
-        sig.return_type.clone()
+        Some(sig.effective_return_type())
     }
 
     pub(crate) fn struct_owner_module(

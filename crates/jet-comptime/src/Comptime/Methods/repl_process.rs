@@ -222,7 +222,7 @@ pub fn apply_repl_authorized_core_call_with_type(
             "REPL host effects require both lexical `#FX` access and invocation policy; no host operation ran"
                 .to_string(),
             format!(
-                "wrap this operation in `#FX(abilities: {}) {{ ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`",
+                "wrap this operation in `#FX(grant: {}) {{ ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`",
                 request.root,
                 request.root.to_ascii_lowercase()
             ),

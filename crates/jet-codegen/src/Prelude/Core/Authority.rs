@@ -74,7 +74,7 @@ pub(crate) fn jet_authority_with_right(
         Ok([requested.to_string()].into_iter().collect())
     } else {
         Err(format!(
-            "E0712: abilities cannot narrow to `{requested}` outside its held rights"
+            "E0712: authority cannot narrow to `{requested}` outside its held rights"
         ))
     }
 }

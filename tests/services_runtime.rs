@@ -72,11 +72,11 @@ use core.time as time
 
 fn orders_worker() {}
 
-fn receipt_id(receipt: Delivery) Delivery {
+fn receipt_id(receipt: ^Delivery) Delivery -> {
     return receipt
 }
 
-fn receipt_kind(receipt: Delivery) String {
+fn receipt_kind(receipt: ^Delivery) String -> {
     state :: receipt.status() ?? panic("status")
     if state == {
         .Pending -> { return "pending" }
@@ -101,10 +101,13 @@ fn run() {
 
     first :: runtime.send(endpoint, "order", key: "order-1") ?? panic("first")
     id :: receipt_id(~first)
+    receipt :: (~first).receipt() ?? panic("receipt")
+    history :: (~first).events() ?? panic("events")
+    print("audit:{receipt.show().contains(\"DeliveryReceipt\")}:{history.len()}")
     print("first:accepted")
     recovered := services.runtime(store, retention: retention)
     recovered_duplicate :: recovered.retry(~id) ?? panic("recover")
-    print("recovered:{receipt_kind(recovered_duplicate)}")
+    print("recovered:{receipt_kind(^recovered_duplicate)}")
     delivered :: tree.receive(endpoint) ?? panic("deliver")
     print("delivered:{delivered}")
     runtime.commit(first) ?? panic("commit")
@@ -113,17 +116,17 @@ fn run() {
     print("restarted:{tree.restarts(endpoint) ?? panic("restarts")}")
 
     duplicate :: recovered.send(endpoint, "order", key: "order-1") ?? panic("duplicate")
-    print("duplicate:{receipt_kind(duplicate)}")
+    print("duplicate:{receipt_kind(^duplicate)}")
 
     retained :: runtime.retain(~id) ?? panic("retain")
-    print("retain:{receipt_kind(retained)}")
+    print("retain:{receipt_kind(^retained)}")
     retry :: recovered.retry(~id) ?? panic("retry")
-    print("retry:{receipt_kind(retry)}")
+    print("retry:{receipt_kind(^retry)}")
     redelivered :: tree.receive(endpoint) ?? panic("redeliver")
     print("redelivered:{redelivered}")
     runtime.commit(~id) ?? panic("redelivery commit")
     dead :: runtime.dead_letter(id) ?? panic("dead")
-    print("dead:{receipt_kind(dead)}")
+    print("dead:{receipt_kind(^dead)}")
     tree.stop() ?? panic("stop")
     stopped := recovered.send(endpoint, "new-order", key: "order-2")
     if stopped == {
@@ -132,7 +135,7 @@ fn run() {
     }
     tree.start() ?? panic("restart")
     replay :: recovered.send(endpoint, "order", key: "order-1") ?? panic("replay")
-    print("replay:{receipt_kind(replay)}")
+    print("replay:{receipt_kind(^replay)}")
 }
 "#;
 
@@ -145,7 +148,7 @@ fn service_authority_receipts_survive_reopen_and_lifecycle() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "first:accepted\nrecovered:accepted\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:delivered\nretain:accepted\nretry:accepted\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
+        "audit:true:1\nfirst:accepted\nrecovered:accepted\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:delivered\nretain:accepted\nretry:accepted\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
     );
 }
 
@@ -184,11 +187,11 @@ use core.time as time
 
 fn orders_worker() {}
 
-fn receipt_id(receipt: Delivery) Delivery {
+fn receipt_id(receipt: ^Delivery) Delivery -> {
     return receipt
 }
 
-fn receipt_kind(receipt: Delivery) String {
+fn receipt_kind(receipt: ^Delivery) String -> {
     state :: receipt.status() ?? panic("status")
     if state == {
         .Pending -> { return "pending" }
@@ -212,6 +215,7 @@ fn run() {
     tree.start() ?? panic("start")
     if phase == "send" {
         receipt :: runtime.send(endpoint, "order", key: "order-restart") ?? panic("send")
+        receipt.status() ?? panic("send status")
         print("accepted")
     } else {
         tree.fail_worker(endpoint) ?? panic("restart")
@@ -219,7 +223,7 @@ fn run() {
         receipt :: runtime.send(endpoint, "order", key: "order-restart") ?? panic("recover")
         retry :: runtime.retry(receipt) ?? panic("retry")
         retry_copy :: ~retry
-        print(receipt_kind(retry_copy))
+        print(receipt_kind(^retry_copy))
         message :: tree.receive(endpoint) ?? panic("receive")
         print(message)
         runtime.commit(retry) ?? panic("commit")
@@ -380,6 +384,24 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     assert!(
         !restart_status(&bin, &corrupt_store, "recover", corrupt_id.trim()).success(),
         "a receipt with altered authority fields was accepted"
+    );
+
+    // Removing only the final newline leaves a complete framed record without
+    // its commit terminator. Recovery must reject that truncated history.
+    let truncated_store = dir.join("authority-truncated.log");
+    let truncated_id = run_restart_process(&bin, &truncated_store, "send", None);
+    let mut truncated = fs::read(&truncated_store).unwrap();
+    assert_eq!(truncated.pop(), Some(b'\n'));
+    fs::write(&truncated_store, truncated).unwrap();
+    assert!(
+        !restart_status(
+            &bin,
+            &truncated_store,
+            "recover",
+            truncated_id.trim()
+        )
+        .success(),
+        "a truncated authority log was accepted"
     );
 }
 
@@ -1121,7 +1143,8 @@ fn run() {
     conflicting :: tree.send_durable(worker, "different", key: "k1")
     if conflicting == {
         .Ok(delivery) -> {
-            delivery.cancel() ?? panic("unexpected conflict delivery")
+            cancelled :: delivery.cancel() ?? panic("unexpected conflict delivery")
+            cancelled.status() ?? panic("unexpected conflict status")
             print("conflict:accepted")
         }
         .Err(_) -> { print("conflict:rejected") }
@@ -1129,7 +1152,8 @@ fn run() {
     full :: tree.send_durable(worker, "second", key: "k2")
     if full == {
         .Ok(delivery) -> {
-            delivery.cancel() ?? panic("unexpected full delivery")
+            cancelled :: delivery.cancel() ?? panic("unexpected full delivery")
+            cancelled.status() ?? panic("unexpected full status")
             print("full:accepted")
         }
         .Err(_) -> { print("full:rejected") }
@@ -1244,7 +1268,7 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: Delivery) Delivery {
+fn receipt_id(receipt: ^Delivery) Delivery -> {
     return receipt
 }
 
@@ -1298,11 +1322,11 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: Delivery) Delivery {
+fn receipt_id(receipt: ^Delivery) Delivery -> {
     return receipt
 }
 
-fn receipt_kind(receipt: Delivery) String {
+fn receipt_kind(receipt: ^Delivery) String -> {
     state :: receipt.status() ?? panic("status")
     if state == {
         .Pending -> { return "pending" }
@@ -1326,7 +1350,7 @@ fn run() {
 
     receipt :: runtime.send(endpoint, "pending", key: "pending") ?? panic("send")
     id :: receipt_id(~receipt)
-    print("sent:{receipt_kind(receipt)}")
+    print("sent:{receipt_kind(^receipt)}")
     print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
     print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
     print("received:{tree.receive(endpoint) ?? panic("receive")}")
@@ -1380,7 +1404,7 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: Delivery) Delivery {
+fn receipt_id(receipt: ^Delivery) Delivery -> {
     return receipt
 }
 
@@ -1433,7 +1457,7 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: Delivery) Delivery {
+fn receipt_id(receipt: ^Delivery) Delivery -> {
     return receipt
 }
 

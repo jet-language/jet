@@ -839,6 +839,24 @@ fn run() {
     );
 }
 
+/// D-AUTHORITY-MODEL1: a nested `#FX` scope may attenuate its parent, but a
+/// declaration that names a new right is rejected even when its body is empty.
+#[test]
+fn nested_grant_cannot_widen_outer_authority() {
+    let src = r#"
+fn run() {
+    #FX(grant: FS) {
+        #FX(inner: Net) {}
+    }
+}
+"#;
+    assert!(
+        codes(src).iter().any(|code| code == "E0712"),
+        "nested authority widening should be rejected: {:?}",
+        codes(src)
+    );
+}
+
 /// D-AUTHORITY-SCOPE1: an effect used inside a named `#FX(…)` that the list
 /// doesn't authorize has no authority — E0712.
 #[test]

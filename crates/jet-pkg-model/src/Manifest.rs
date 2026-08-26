@@ -401,6 +401,13 @@ pub fn add_dependency(raw: &str, name: &str, spec: &DepSpec) -> String {
     Package::add_dep(raw, name, spec)
 }
 
+/// Add one application effect to `authority.holds.allow` while preserving
+/// comments and the manifest's existing layout. The caller must reparse the
+/// returned source before writing it.
+pub fn add_authority_hold(raw: &str, effect: &str) -> String {
+    Package::add_authority_hold(raw, effect)
+}
+
 /// Remove a dependency from `deps: { … }`, preserving comments.
 pub fn remove_dependency(raw: &str, name: &str) -> String {
     Package::remove_dep(raw, name)

@@ -153,42 +153,6 @@ struct Crate {
     data: Int
 }
 
-#[test]
-fn retired_top_level_state_companion_teaches_nested_owner() {
-    let diagnostics = codes(
-        "state Door { Ready }\nstruct Door { opened: Bool }\nfn run() {}\n",
-    );
-    assert!(diagnostics.iter().any(|code| code == "E0157"), "{diagnostics:?}");
-}
-
-#[test]
-fn state_section_shape_diagnostics_are_distinct() {
-    let empty = codes("struct Empty { state {} }\nfn run() {}\n");
-    assert!(empty.iter().any(|code| code == "E0169"), "{empty:?}");
-
-    let duplicate_section = codes(
-        "struct Door { state { Ready } state { Open } }\nfn run() {}\n",
-    );
-    assert!(
-        duplicate_section.iter().any(|code| code == "E0168"),
-        "{duplicate_section:?}"
-    );
-
-    let duplicate_name = codes("struct Door { state { Ready, Ready } }\nfn run() {}\n");
-    assert!(duplicate_name.iter().any(|code| code == "E0166"), "{duplicate_name:?}");
-
-    let member_collision = codes("struct Door { state { open } open: Bool }\nfn run() {}\n");
-    assert!(
-        member_collision.iter().any(|code| code == "E0167"),
-        "{member_collision:?}"
-    );
-
-    let missing_owner = codes(
-        "struct Door { opened: Bool }\nimpl Door { #State(Ready) fn open(self) {} }\nfn run() {}\n",
-    );
-    assert!(missing_owner.iter().any(|code| code == "E0159"), "{missing_owner:?}");
-}
-
 impl Crate {
     #Transition(_, Stuffed) fn fill(data: Int) Crate -[]> {
         return Crate{ data: data }
@@ -201,6 +165,73 @@ fn run() { }
         codes(src).iter().any(|c| c == "E0151"),
         "undeclared to-state in Transition must be E0151: {:?}",
         codes(src)
+    );
+}
+
+#[test]
+fn unknown_transition_from_state_is_e0151() {
+    let src = r#"
+struct Crate { state { Full, Empty } }
+impl Crate {
+    #Transition(Gone, Full) fn fill() Crate -[]> { return Crate{} }
+}
+fn run() {}
+"#;
+    let diagnostics = codes(src);
+    assert!(
+        diagnostics.iter().any(|code| code == "E0151"),
+        "undeclared from-state in Transition must be E0151: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn retired_top_level_state_companion_teaches_nested_owner() {
+    let diagnostics = codes("state Door { Ready }\nstruct Door { opened: Bool }\nfn run() {}\n");
+    assert!(
+        diagnostics.iter().any(|code| code == "E0157"),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
+fn state_section_shape_diagnostics_are_distinct() {
+    let empty = codes("struct Empty { state {} }\nfn run() {}\n");
+    assert!(empty.iter().any(|code| code == "E0169"), "{empty:?}");
+
+    let duplicate_section = codes("struct Door { state { Ready } state { Open } }\nfn run() {}\n");
+    assert!(
+        duplicate_section.iter().any(|code| code == "E0168"),
+        "{duplicate_section:?}"
+    );
+
+    let duplicate_name = codes("struct Door { state { Ready, Ready } }\nfn run() {}\n");
+    assert!(
+        duplicate_name.iter().any(|code| code == "E0166"),
+        "{duplicate_name:?}"
+    );
+
+    let member_collision = codes("struct Door { state { open } open: Bool }\nfn run() {}\n");
+    assert!(
+        member_collision.iter().any(|code| code == "E0167"),
+        "{member_collision:?}"
+    );
+
+    let missing_owner = codes(
+        "struct Door { opened: Bool }\nimpl Door { #State(Ready) fn open(self) {} }\nfn run() {}\n",
+    );
+    assert!(
+        missing_owner.iter().any(|code| code == "E0159"),
+        "{missing_owner:?}"
+    );
+}
+
+#[test]
+fn member_collision_in_separate_impl_is_e0167() {
+    let diagnostics =
+        codes("struct Door { state { open } }\nimpl Door { fn open(self) {} }\nfn run() {}\n");
+    assert!(
+        diagnostics.iter().any(|code| code == "E0167"),
+        "{diagnostics:?}"
     );
 }
 
@@ -239,8 +270,8 @@ impl Gate {
 
 fn run() {
     g := Gate.new(1)
-    g = g.open()
-    g = g.close()
+    g = g.hold()
+    g = g.reopen()
 }
 "#;
     // Closed has both a self-loop and a reopen edge. Reopened is terminal.
@@ -254,6 +285,24 @@ fn run() {
         lints.iter().all(|code| code != "L0153"),
         "self-loop and reopen must not be unreachable: {:?}",
         lints
+    );
+}
+
+#[test]
+fn duplicate_transition_keeps_method_duplicate_diagnostic() {
+    let src = r#"
+struct Gate { state { Closed, Reopened } }
+impl Gate {
+    #Transition(_, Closed) fn new() Gate -[]> { return Gate{} }
+    #Transition(Closed, Reopened) fn reopen(self: ^Gate) Gate -[]> { return self }
+    #Transition(Closed, Reopened) fn reopen(self: ^Gate) Gate -[]> { return self }
+}
+fn run() {}
+"#;
+    let diagnostics = codes(src);
+    assert!(
+        diagnostics.iter().any(|code| code == "E0105"),
+        "duplicate transitions must retain E0105: {diagnostics:?}"
     );
 }
 

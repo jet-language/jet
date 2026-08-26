@@ -484,28 +484,6 @@ impl<'a> Checker<'a> {
         {
             return Some(self.check_freeze(call));
         }
-        if call.name == Syntax::BUILTIN_CHECKED_TEXT_WRAP {
-            let Some(Type::Named(type_name)) = call.type_args.first().cloned() else {
-                return Some(None);
-            };
-            if call.args.len() != 1 {
-                self.diags.push(Diagnostic::error(
-                        "E0103",
-                        "the checked text constructor needs one encoded String".to_string(),
-                        "the compiler-internal checked text wrapper receives the head's complete encoded body".to_string(),
-                        "use a declared text head literal or its audited `.raw()` escape".to_string(),
-                        Some(call.name_span),
-                    ));
-                return Some(None);
-            }
-            let arg_ty = self.infer(&mut call.args[0].expr);
-            if let Some(ty) = arg_ty {
-                self.check_type_assignable(&Type::String, &ty, call.args[0].expr.span());
-            }
-            let result = crate::Sema::checked_text_type(&type_name);
-            call.resolved_ret = Some(result.clone());
-            return Some(Some(result));
-        }
         if call.name == "apply"
             && self.funcs.get(&call.name).is_none()
             && self.lookup(&call.name).is_none()
@@ -1264,7 +1242,7 @@ impl<'a> Checker<'a> {
             return Some(None);
         }
 
-        let Some(mut sig) = self.text_head_function_sig(&call.name) else {
+        let Some(mut sig) = self.funcs.get(&call.name).cloned() else {
             let mut fix = format!(
                 "define it first ({} {}() {{ ... }}), or call one that exists",
                 Syntax::KW_FN,
@@ -1280,11 +1258,6 @@ impl<'a> Checker<'a> {
                 .funcs
                 .keys()
                 .map(|s| s.as_str())
-                .chain(
-                    self.text_head_context
-                        .into_iter()
-                        .flat_map(|context| context.sigs.keys().map(String::as_str)),
-                )
                 .chain(prelude_cands.iter().copied())
             {
                 let d = edit_distance(&call.name, cand);
@@ -1389,7 +1362,7 @@ impl<'a> Checker<'a> {
             for arg in call.args.iter_mut() {
                 self.infer(&mut arg.expr);
             }
-            return Some(sig.return_type.clone());
+            return Some(Some(sig.effective_return_type()));
         }
 
         // E3211 (card #436): a `String` literal with a known interior NUL
@@ -1522,8 +1495,10 @@ impl<'a> Checker<'a> {
         }
 
         let fn_type_params = self
-            .text_head_function_params(&call.name)
-            .or_else(|| self.trait_reg.fn_params.get(&call.name).cloned())
+            .trait_reg
+            .fn_params
+            .get(&call.name)
+            .cloned()
             .unwrap_or_default();
         let mut call_access = self.call_access_frame();
         let mut generic_subst = HashMap::new();
@@ -2119,11 +2094,12 @@ impl<'a> Checker<'a> {
             call.args.extend(tail);
         }
 
-        Some(sig.return_type.as_ref().map(|t| {
+        Some(Some({
+            let t = sig.effective_return_type();
             let t = if generic_subst.is_empty() {
-                t.clone()
+                t
             } else {
-                self.trait_reg.instantiate_type(t, &generic_subst)
+                self.trait_reg.instantiate_type(&t, &generic_subst)
             };
             if self.unit_fact_for_type(&t).is_some() {
                 t

@@ -44,6 +44,9 @@ impl<'a> Checker<'a> {
         let sendable = self.sendability_problem(&info.ty, true).is_none();
         self.flow.bindings.set_at(name, depth, info);
         self.flow.sendability.set_at(name, depth, sendable);
+        self.flow
+            .origins
+            .set_at(name, depth, crate::Sema::FlowFacts::OriginFact::untracked());
     }
 
     /// Every name a binding is known by here, at any depth. Callers use it
@@ -66,11 +69,6 @@ impl<'a> Checker<'a> {
         let mut globals = self.ct_globals.clone();
         for scope in &self.ct_scopes {
             for (name, value) in scope {
-                globals.insert(name.clone(), value.clone());
-            }
-        }
-        if let Some(context) = self.text_head_context {
-            for (name, value) in &context.globals {
                 globals.insert(name.clone(), value.clone());
             }
         }
@@ -280,6 +278,9 @@ impl<'a> Checker<'a> {
         self.flow.frozen.remove_at(name, depth);
         self.flow.bindings.set_at(name, depth, info);
         self.flow.sendability.set_at(name, depth, true);
+        self.flow
+            .origins
+            .set_at(name, depth, crate::Sema::FlowFacts::OriginFact::untracked());
     }
 
     pub(crate) fn declare_with_sendability(
@@ -330,7 +331,26 @@ impl<'a> Checker<'a> {
                 },
             );
             self.flow.sendability.set_at(&name, depth, true);
+            self.flow.origins.set_at(
+                &name,
+                depth,
+                crate::Sema::FlowFacts::OriginFact::untracked(),
+            );
         }
+    }
+
+    /// Replace the active binding's origin with the scoped "not tracked" row.
+    /// Removing it would make an outer shadowed origin visible again.
+    pub(crate) fn clear_origin(&mut self, name: &str) {
+        let depth = self
+            .flow
+            .origins
+            .depth_of(name)
+            .or_else(|| self.binding_fact_depth(name))
+            .unwrap_or_else(|| self.scope_depth());
+        self.flow
+            .origins
+            .set_at(name, depth, crate::Sema::FlowFacts::OriginFact::untracked());
     }
 
     pub(crate) fn declare_loop_label(&mut self, name: &str, name_span: Span) {

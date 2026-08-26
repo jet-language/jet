@@ -54,6 +54,29 @@ fn core_lang_marker_enums_accept_dot_literals_without_imports() {
 }
 
 #[test]
+fn arithmetic_policy_accepts_only_declared_sites_and_modes() {
+    let valid = codes(
+        r#"
+#Arithmetic(.Checked) fn checked() {}
+struct Accumulator { value: U8 }
+impl Accumulator {
+    #Arithmetic(.Wrapping) fn step(self) {}
+}
+fn run() {
+    #Arithmetic(.Saturating) {}
+}
+"#,
+    );
+    assert!(valid.is_empty(), "{valid:?}");
+
+    let wrong_site = codes("#Arithmetic(.Wrapping) struct Bad { value: U8 }\nfn run() {}");
+    assert!(wrong_site.iter().any(|code| code == "E0355"), "{wrong_site:?}");
+
+    let wrong_mode = codes("#Arithmetic(.Other) fn bad() {}\nfn run() {}");
+    assert!(wrong_mode.iter().any(|code| code == "E0930"), "{wrong_mode:?}");
+}
+
+#[test]
 fn job_scope_and_cli_name_collisions_use_the_job_diagnostic() {
     let valid = codes("#Job(.Ship) fn ship() {}\n#Job(.Internal) fn inspect_job() {}\nfn run() {}");
     assert!(valid.is_empty(), "{valid:?}");

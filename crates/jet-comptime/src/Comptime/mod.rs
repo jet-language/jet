@@ -2349,55 +2349,137 @@ fn expand_template_type(
     Ok(())
 }
 
-/// D-BOUND-SINK1=A: evaluate one library-declared checked text contract on
-/// the exact body text written in the head. A failed Result/Option journey is
-/// the contract's rejection; successful values are intentionally ignored.
-pub fn evaluate_text_head_check(
-    check: &crate::AST::Expr,
+/// D-TEXTHEAD-TYPE1=A: evaluate the ordinary `CheckedText.check` method on
+/// the exact complete text. The method is reached through the same associated
+/// method table used by comptime/dev, so the checker is not duplicated here.
+pub fn evaluate_checked_text_check<'a>(
+    type_name: &str,
     body: String,
     funcs: &HashMap<String, &Func>,
+    methods: &HashMap<(String, String), &'a Func>,
+    structs: &HashMap<String, &'a crate::AST::StructDef>,
+    distinct_bases: &HashMap<String, crate::AST::Type>,
     globals: &HashMap<String, CtValue>,
     base_dir: &Path,
     core_imports: &HashMap<String, String>,
 ) -> Result<(), Diagnostic> {
-    let mut interp = Interp {
-        funcs,
-        base_dir,
-        fuel: FUEL_BUDGET,
-        sink: None,
-        core_imports,
-        debugger: None,
-        depth: 0,
-        cur_func: "text_head_check".to_string(),
-        impure_depth: 0,
-        gates: jet_foundation::Policy::GateSet::default(),
-        repl_mode: false,
-        repl_grants: Vec::new(),
-        repl_authorizer: None,
-        repl_interruptible: false,
-        embed_inputs: Vec::new(),
-        binding_types: HashMap::new(),
-        globals,
-        methods: empty_methods(),
-        structs: empty_structs(),
-        computed_fields: empty_computed(),
-        distinct_ranges: empty_distinct(),
-        distinct_bases: empty_distinct_bases(),
-        migrations: empty_migrations(),
-        list_write_windows: HashMap::new(),
+    let span = crate::Diagnostics::Span::new(0, 0);
+    let check = crate::AST::Expr::MethodCall {
+        receiver: Box::new(crate::AST::Expr::Ident(type_name.to_string(), span)),
+        method: "check".to_string(),
+        method_span: span,
+        owner_type_args: Vec::new(),
+        type_args: Vec::new(),
+        args: vec![crate::AST::CallArg {
+            convention: crate::AST::AccessConvention::Read,
+            expr: crate::AST::Expr::Str(
+                vec![crate::AST::StrPart::Lit(body)],
+                span,
+            ),
+            span,
+            flags: crate::AST::CallArgFlags::default(),
+            label: None,
+            spread: false,
+        }],
+        recv_type: Some(type_name.to_string()),
+        resolved_ret: None,
+        checked_widen: false,
     };
-    let mut scope = HashMap::new();
-    scope.insert("@body".to_string(), CtValue::Str(body));
-    let value = interp.eval(check, &mut scope)?;
+    let (value, _) = evaluate_with_imports_opts_collecting_structs_and_methods(
+        &check,
+        funcs,
+        &HashSet::new(),
+        base_dir,
+        globals,
+        core_imports,
+        jet_foundation::Policy::GateSet::default(),
+        0,
+        structs,
+        methods,
+        &HashMap::new(),
+        distinct_bases,
+        &[],
+        None,
+    )?;
     match value {
         CtValue::Failed(_) => Err(Diagnostic::error(
             "E2712",
-            "this checked text head rejected its body".to_string(),
-            "the library's check expression must accept the complete literal body".to_string(),
-            "fix the head body so it satisfies the declared text grammar".to_string(),
-            Some(check.span()),
+            "this checked text type rejected its body".to_string(),
+            "the type's pure `CheckedText.check` method must accept the complete literal body"
+                .to_string(),
+            "fix the body so it satisfies the type's declared text grammar".to_string(),
+            Some(span),
         )),
         _ => Ok(()),
+    }
+}
+
+/// Evaluate one `CheckedText.encode_hole` call for a compile-time-known hole.
+/// The returned string is only used to prove the same complete body that the
+/// emitted pure method will build at runtime.
+pub fn evaluate_checked_text_hole<'a>(
+    type_name: &str,
+    value: &crate::AST::Expr,
+    funcs: &HashMap<String, &'a Func>,
+    methods: &HashMap<(String, String), &'a Func>,
+    structs: &HashMap<String, &'a crate::AST::StructDef>,
+    distinct_bases: &HashMap<String, crate::AST::Type>,
+    globals: &HashMap<String, CtValue>,
+    base_dir: &Path,
+    core_imports: &HashMap<String, String>,
+) -> Result<String, Diagnostic> {
+    let span = value.span();
+    let call = crate::AST::Expr::MethodCall {
+        receiver: Box::new(crate::AST::Expr::Ident(type_name.to_string(), span)),
+        method: "encode_hole".to_string(),
+        method_span: span,
+        owner_type_args: Vec::new(),
+        type_args: Vec::new(),
+        args: vec![crate::AST::CallArg {
+            convention: crate::AST::AccessConvention::Read,
+            expr: value.clone(),
+            span,
+            flags: crate::AST::CallArgFlags::default(),
+            label: None,
+            spread: false,
+        }],
+        recv_type: Some(type_name.to_string()),
+        resolved_ret: None,
+        checked_widen: false,
+    };
+    let (value, _) = evaluate_with_imports_opts_collecting_structs_and_methods(
+        &call,
+        funcs,
+        &HashSet::new(),
+        base_dir,
+        globals,
+        core_imports,
+        jet_foundation::Policy::GateSet::default(),
+        0,
+        structs,
+        methods,
+        &HashMap::new(),
+        distinct_bases,
+        &[],
+        None,
+    )?;
+    match value {
+        CtValue::Str(value) => Ok(value),
+        CtValue::Failed(_) => Err(Diagnostic::error(
+            "E2712",
+            "this checked text type could not encode its hole".to_string(),
+            "`CheckedText.encode_hole` must return a String for every printable value".to_string(),
+            "use a compile-time-known printable hole or construct the value with `Type.from(text)`"
+                .to_string(),
+            Some(span),
+        )),
+        _ => Err(Diagnostic::error(
+            "E2712",
+            "this checked text type could not encode its hole".to_string(),
+            "`CheckedText.encode_hole` must return a String for every printable value".to_string(),
+            "return a String from `encode_hole`".to_string(),
+            Some(span),
+        )),
     }
 }
 

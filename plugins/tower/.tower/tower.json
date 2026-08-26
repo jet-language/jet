@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2208,
-    "rev": 45180,
+    "rev": 45210,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23,14 +23,16 @@
         "radar:e8",
         "board-ideas",
         "radar:e7",
-        "radar:e10",
         "radar:e9",
-        "radar:e12",
         "radar-sq",
-        "radar:e3"
+        "radar:e3",
+        "radar:e10",
+        "radar:e11",
+        "radar:e12",
+        "radar:e5"
       ]
     },
-    "completionCursor": "2026-08-25T23:06:26.710Z"
+    "completionCursor": "2026-08-26T00:34:09.017Z"
   },
   "epochs": [
     {
@@ -172,6 +174,12 @@
       "id": "e12",
       "name": "Security Hardening",
       "goal": "Validate every saved security candidate, fix each confirmed root cause, add hostile regression proof, and close with an independent security review and a clean follow-up scan.",
+      "status": "planned"
+    },
+    {
+      "id": "e13",
+      "name": "Cross Platform",
+      "goal": "macOS, Windows, and every other non-Linux target. Jet development targets Linux first, so cross-platform support is sequenced deliberately after the Linux experience is right, and a red macOS or Windows row never blocks Linux work.",
       "status": "planned"
     }
   ],
@@ -2111,7 +2119,7 @@
       "title": "M03 · Portable process sessions",
       "goal": "Jet exposes one public process-session model across Unix PTY and Windows ConPTY, including binary streams, redirection, backpressure, tree signals, cancellation, cleanup, and portable resource controls. Someone can know it works by running the native fixtures and seeing identical lifecycle and failure behavior on both platforms.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:01:30.802Z"
     },
     {
@@ -2249,7 +2257,7 @@
       "title": "M01 · Portable native runtime parity",
       "goal": "macOS and Windows have one tested native runtime contract: core.os exposes correct host facts and control-signal lifecycle; C ABI symbols, layouts, callbacks, strings, and status behavior match real C on both macOS architectures and Windows x64/x86; Windows IOCP uses one Prelude scheduler body with AOT/dev parity; and core.files and Path cover the promised cross-platform file model. Someone can run the native matrix and see every supported row execute without skips, while platform errors and cancellation retain Jet meaning.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:02:08.384Z"
     },
     {
@@ -2851,6 +2859,33 @@
       "criteria": [],
       "status": "open",
       "created": "2026-08-25T23:11:06.891Z"
+    },
+    {
+      "id": "e13-m01-macos",
+      "epochId": "e13",
+      "title": "M01 · macOS support",
+      "goal": "Every Jet surface that needs a macOS machine to prove: core.os facts and SIGINT lifecycle, the native C ABI runtime matrix, crypto entropy, JIT ratchet proof on x86_64 and aarch64, and executable leases with a LaunchDaemon installer.",
+      "criteria": [],
+      "status": "open",
+      "created": "2026-08-26T00:45:16.867Z"
+    },
+    {
+      "id": "e13-m02-windows",
+      "epochId": "e13",
+      "title": "M02 · Windows support",
+      "goal": "Every Jet surface that needs a Windows machine to prove: core.os facts and console-control lifecycle, the x64 and x86 native C ABI runtime matrix, IOCP scheduling, crypto entropy, JIT ratchet proof, ConPTY process sessions, and executable leases with a service installer.",
+      "criteria": [],
+      "status": "open",
+      "created": "2026-08-26T00:45:18.303Z"
+    },
+    {
+      "id": "e13-m03-mobile",
+      "epochId": "e13",
+      "title": "M03 · Mobile targets",
+      "goal": "iOS and Android native UI and the app-store distribution pipeline.",
+      "criteria": [],
+      "status": "open",
+      "created": "2026-08-26T00:45:19.372Z"
     }
   ],
   "cards": [
@@ -16832,14 +16867,19 @@
       "body": "Universal-language audit (docs/plans/epoch-3/universal-language-core.md UL9) covers desktop reactive-UI backends only (#134: Linux/GTK4 done, macOS/Windows planned as Not-yet bullets). iOS and Android are the ONE major domain in the replace-any-language plan with zero board card — they exist only as a UL9 plan-doc bullet folded silently into #134s desktop scope, and app-store/Play-store code-signing + submission (the step that makes a native app runnable/distributable at all, unlike jet build/run on desktop) has no card anywhere. Same one reactive/view/style/component/motion/a11y model (I8) extends to these backends per D-NATIVEUI2=B (all platforms simultaneously) precedent, but mobile needs its own card because packaging/signing/store-submission is a materially different lifecycle stage than UI rendering. OWNER-GATES (none ratified — do not implement past a ballot): G1 does Jet target iOS/Android this epoch, and native-compile (aarch64-apple-ios / android NDK targets) vs cross-compile-via-host-toolchain; G2 who owns the app-store/code-signing/notarization pipeline (jet vs jetpack vs jetos) and is sign/notarize/keystore a first-party command; G3 Android/Kotlin interop transport (parallel to ratified D-FFI-SWIFT1 for Swift) — NDK+JNI vs Compose bridge; G4 native UI hot-reload/preview model (reactive-ui-stack Phase 8 states jet dev hot-reload is web-only today) — inside this card or a UL6 extension.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e11",
-      "milestoneId": "e11-m06-ecosystem-adoption",
+      "epoch": "e13",
+      "milestoneId": "e13-m03-mobile",
       "phase": "planning",
       "priority": "P1",
       "plan": "Implement docs/plans/epoch-3/mobile-native-ui.md in seven test-first vertical slices: target/artifact contracts; shared lifecycle; UIKit plus Android JNI View default and Compose adapter; unified NativeDevHost app/preview loop; local signing; direct store APIs; real cross-platform flagship proof. D-NATIVEUI3=A, D-NATIVEUI-ANDROID1=C, D-NATIVEUI-DEV1=C bind all choices.\n\nblockedBy: none.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -16898,10 +16938,10 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-10T21:04:57.727Z",
-      "updated": "2026-08-23T01:07:09.898Z",
+      "updated": "2026-08-26T00:45:29.828Z",
       "tags": [],
       "parentId": null,
-      "updatedBy": "mse11"
+      "updatedBy": "owner"
     },
     {
       "id": "c0tfsrts",
@@ -18315,14 +18355,19 @@
       "body": "[R-POSTE3-1:#523:0] Split from the former #523 umbrella. This card owns only “core.os native macOS facts and SIGINT lifecycle.” It keeps the ratified decisions, invariants, and production seams linked from #523. The other 1 delivery slices have separate cards.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e10",
-      "milestoneId": "e10-m01-native-runtime-parity",
+      "epoch": "e13",
+      "milestoneId": "e13-m01-macos",
       "phase": "ready",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **core.os native macOS facts and SIGINT lifecycle** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with crates/jet-codegen/src/Prelude/CoreLib/Top/FsIoEnvOsTesting.rs, tests/os_native.rs, tests/os_interrupt_windows.rs, tests/corelib.rs, .github/workflows/ci.yml, docs/reference/core-library.md, docs/spec/syntax-decisions.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Implement the named native behavior through the shared Core semantics and a thin platform adapter on each supported host.\n6. Unicode, long paths, links, races, permission denial, sharing violations, cancellation, and platform-specific errors remain safe and accurately classified.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 10 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-08-24",
           "by": "orchestrator",
@@ -18411,9 +18456,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-13T00:23:47.234Z",
-      "updated": "2026-08-24T23:26:43.394Z",
+      "updated": "2026-08-26T00:45:19.894Z",
       "workOrder": 1530,
-      "updatedBy": "orchestrator",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -18424,14 +18469,19 @@
       "body": "Deferred from #436 by D-VERDICT-436-1. Required non-skipping native macOS C ABI matrix must execute production-generated Jet Rust linked to real C. Prove exact symbols; struct/fieldless+payload enum size, alignment, offsets, and discriminants; capture-free pure callbacks under reentrant and concurrent foreign-thread calls; raw status/out-pointer poison-byte safety; borrowed non-null UTF-8 string returns; default C/system and supported macOS calling conventions. No static-only proof, silent skips, cross-target inference, or fake compiler fixture. Preserve #436 parser/sema/codegen exhaustiveness and hostile negative gates.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e10",
-      "milestoneId": "e10-m01-native-runtime-parity",
+      "epoch": "e13",
+      "milestoneId": "e13-m01-macos",
       "phase": "ready",
       "priority": "P0",
       "plan": "Reuse completed #436 parser, sema, TIR/codegen, diagnostic, formatter, and hostile negative coverage as a proven prerequisite, not a live blocker. Add a non-skipping native macOS runtime row to tests/cffi_native_matrix.rs that compiles real Jet source through the production front end, compiles and archives a real C peer with Apple clang, links the emitted Rust, and runs the binary. Cover both x86_64-darwin and aarch64-darwin native runners with pinned Rust and C tool identities. The shared fixture must assert exact imported/exported function and static symbols; struct and fieldless plus payload enum size, alignment, offsets, and discriminants against C-computed values; capture-free pure callbacks under reentrant calls and concurrent foreign threads; raw status/out-pointer poison bytes on failure; borrowed non-null UTF-8 returns; and every macOS-supported default C/system ABI spelling. The job fails when tools, architecture rows, runtime execution, or cases are missing; no skip, cfg-only assertion, cross-runner inference, or fake compiler fixture counts. Preserve #436 hostile UI gates and I1 vetted FFI boundaries. Publish per-architecture command/toolchain/run artifacts and obtain an independent review comparing both native receipts. No new syntax, dependency, or gate.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-07-16",
           "by": "sol-e8-planner",
@@ -18507,9 +18557,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-13T00:25:40.165Z",
-      "updated": "2026-08-23T01:03:02.218Z",
+      "updated": "2026-08-26T00:45:21.194Z",
       "workOrder": 1500,
-      "updatedBy": "mse10",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -18520,14 +18570,19 @@
       "body": "[R-POSTE3-1:#525:0] Split from the former #525 umbrella. This card owns only “Windows x64 native C ABI runtime matrix.” It keeps the ratified decisions, invariants, and production seams linked from #525. The other 1 delivery slices have separate cards.\n\nAbsorbed #997 (c0jnondn, \"Windows x86 native C ABI runtime matrix\") 2026-08-19: #524 covers both macOS arches in ONE card; the Windows split was two sequential cards editing the same fixture (tests/cffi_native_matrix.rs, tests/cffi.rs). One agent adds both Windows rows in one coherent patch. ABI-substance criteria below replace the mispasted filesystem/os-facts template.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e10",
-      "milestoneId": "e10-m01-native-runtime-parity",
+      "epoch": "e13",
+      "milestoneId": "e13-m02-windows",
       "phase": "ready",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Windows x64 native C ABI runtime matrix** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with tests/cffi_native_matrix.rs, tests/cffi.rs, crates/jet-foundation/src/AST/ffi.rs, crates/jet-parser/src/Parser/Items/external_tests_ffi.rs, crates/jet-sema/src, crates/jet-codegen/src, .github/workflows/ci.yml, docs/spec/syntax-decisions.md, docs/spec/diagnostics.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Implement the named native behavior through the shared Core semantics and a thin platform adapter on each supported host.\n6. Unicode, long paths, links, races, permission denial, sharing violations, cancellation, and platform-specific errors remain safe and accurately classified.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 10 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-08-24",
           "by": "orchestrator",
@@ -18677,9 +18732,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-13T00:25:40.260Z",
-      "updated": "2026-08-24T23:26:44.115Z",
+      "updated": "2026-08-26T00:45:25.773Z",
       "workOrder": 1510,
-      "updatedBy": "orchestrator",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -18690,14 +18745,19 @@
       "body": "[R-POSTE3-1:#526:0] Split from the former #526 umbrella. This card owns only “core.crypto native macOS entropy matrix.” It keeps the ratified decisions, invariants, and production seams linked from #526. The other 3 delivery slices have separate cards.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e11",
-      "milestoneId": "e11-m01-portable-targets",
+      "epoch": "e13",
+      "milestoneId": "e13-m01-macos",
       "phase": "ready",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **core.crypto native macOS entropy matrix** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs, crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs, crates/jet-pkg-model/src/Prelude/Crypto.rs, tests/crypto_entropy.rs, tests/fixtures/crypto_bridge_entropy.rs, tests/golden.rs, .github/workflows/ci.yml, docs/reference/core-library.md, docs/spec/syntax-decisions.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Put the named crypto or network semantics in the shared Core/Prelude path with thin target adapters and audited unsafe internals only where required.\n6. Malformed, adversarial, truncated, replayed, oversized, timed-out, or unsupported inputs fail safely without secret leakage, panics, or engine-specific policy.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 11 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-08-24",
           "by": "orchestrator",
@@ -18802,9 +18862,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-13T00:39:33.065Z",
-      "updated": "2026-08-24T23:26:55.773Z",
+      "updated": "2026-08-26T00:45:22.384Z",
       "workOrder": 1570,
-      "updatedBy": "orchestrator",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -18815,14 +18875,19 @@
       "body": "[R-POSTE3-1:#527:0] Split from the former #527 umbrella. This card owns only “Windows IOCP: internal runtime-body conformance.” It keeps the ratified decisions, invariants, and production seams linked from #527. The other 1 delivery slices have separate cards.\n\nAbsorbed #1001 (c0gmlscb, \"Windows IOCP: emitted Prelude body and AOT/dev conformance\") 2026-08-19: identical owned files (scheduler/io.rs, Prelude/Scheduler.rs, tests/scheduler_native.rs, tests/dev.rs); under I9 the IOCP semantics live once in the Prelude body and every tier marshals to it — an \"internal runtime body\" card closing while \"AOT/dev conformance\" waits is a tier split I9 forbids.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e10",
-      "milestoneId": "e10-m01-native-runtime-parity",
+      "epoch": "e13",
+      "milestoneId": "e13-m02-windows",
       "phase": "ready",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Windows IOCP: internal runtime-body conformance** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with crates/jet-codegen/src/scheduler/io.rs, crates/jet-codegen/src/Prelude/Scheduler.rs, tests/scheduler_native.rs, tests/dev.rs, .github/workflows/ci.yml, docs/spec/spec.md, docs/spec/capability-claim-manifest.json. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Implement the named native behavior through the shared Core semantics and a thin platform adapter on each supported host.\n6. Unicode, long paths, links, races, permission denial, sharing violations, cancellation, and platform-specific errors remain safe and accurately classified.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 10 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-08-24",
           "by": "orchestrator",
@@ -18962,9 +19027,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-13T02:47:09.812Z",
-      "updated": "2026-08-24T23:26:44.846Z",
+      "updated": "2026-08-26T00:45:26.523Z",
       "workOrder": 1550,
-      "updatedBy": "orchestrator",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -42945,8 +43010,8 @@
       "body": "[R-POSTE3-1:#467:2] Split from the former #467 umbrella. This card owns only “Executable leases: macOS service, installer, and LaunchDaemon.” It keeps the ratified decisions, invariants, and production seams linked from #467. The other 6 delivery slices have separate cards.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e10",
-      "milestoneId": "e10-m02-executable-lifecycle-integrity",
+      "epoch": "e13",
+      "milestoneId": "e13-m01-macos",
       "phase": "ready",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Executable leases: macOS service, installer, and LaunchDaemon** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with crates/jetpack/src/Store.rs, crates/jetpack/src/RuntimePolicy.rs, crates/jetpack/src/CLI/trust_env_build.rs, tests/jetpack_engine.rs, tests/jetpack_platform.rs, .github/workflows/ci.yml, docs/plans/epoch-4/world-class-package-manager.md, docs/spec/syntax-decisions.md, docs/spec/diagnostics.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use one lease and replacement protocol for running executables, updates, cleanup, and rollback across supported platforms.\n6. Crash, lock contention, antivirus interference, interrupted replacement, stale leases, and reboot cannot publish a partial executable or delete the last good version.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 10 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
@@ -42956,6 +43021,11 @@
       "workOrder": 1680,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-08-24",
           "by": "orchestrator",
@@ -43036,8 +43106,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:10.762Z",
-      "updated": "2026-08-24T23:26:49.167Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-26T00:45:23.744Z",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -43048,8 +43118,8 @@
       "body": "[R-POSTE3-1:#467:3] Split from the former #467 umbrella. This card owns only “Executable leases: Windows service, installer, and registration.” It keeps the ratified decisions, invariants, and production seams linked from #467. The other 6 delivery slices have separate cards.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e10",
-      "milestoneId": "e10-m02-executable-lifecycle-integrity",
+      "epoch": "e13",
+      "milestoneId": "e13-m02-windows",
       "phase": "ready",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Executable leases: Windows service, installer, and registration** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with crates/jetpack/src/Store.rs, crates/jetpack/src/RuntimePolicy.rs, crates/jetpack/src/CLI/trust_env_build.rs, tests/jetpack_engine.rs, tests/jetpack_platform.rs, .github/workflows/ci.yml, docs/plans/epoch-4/world-class-package-manager.md, docs/spec/syntax-decisions.md, docs/spec/diagnostics.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use one lease and replacement protocol for running executables, updates, cleanup, and rollback across supported platforms.\n6. Crash, lock contention, antivirus interference, interrupted replacement, stale leases, and reboot cannot publish a partial executable or delete the last good version.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 10 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
@@ -43059,6 +43129,11 @@
       "workOrder": 1690,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-08-24",
           "by": "orchestrator",
@@ -43139,8 +43214,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:11.087Z",
-      "updated": "2026-08-24T23:26:49.894Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-26T00:45:27.168Z",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -46346,8 +46421,8 @@
       "body": "[R-POSTE3-1:#523:1] Split from the former #523 umbrella. This card owns only “core.os native Windows facts and console-control lifecycle.” It keeps the ratified decisions, invariants, and production seams linked from #523. The other 1 delivery slices have separate cards.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e10",
-      "milestoneId": "e10-m01-native-runtime-parity",
+      "epoch": "e13",
+      "milestoneId": "e13-m02-windows",
       "phase": "ready",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **core.os native Windows facts and console-control lifecycle** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with crates/jet-codegen/src/Prelude/CoreLib/Top/FsIoEnvOsTesting.rs, tests/os_native.rs, tests/os_interrupt_windows.rs, tests/corelib.rs, .github/workflows/ci.yml, docs/reference/core-library.md, docs/spec/syntax-decisions.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Implement the named native behavior through the shared Core semantics and a thin platform adapter on each supported host.\n6. Unicode, long paths, links, races, permission denial, sharing violations, cancellation, and platform-specific errors remain safe and accurately classified.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 10 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
@@ -46357,6 +46432,11 @@
       "workOrder": 1540,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-08-24",
           "by": "orchestrator",
@@ -46445,8 +46525,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:26.457Z",
-      "updated": "2026-08-24T23:26:52.885Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-26T00:45:27.690Z",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -46457,8 +46537,8 @@
       "body": "[R-POSTE3-1:#526:1] Split from the former #526 umbrella. This card owns only “core.crypto native Windows entropy matrix.” It keeps the ratified decisions, invariants, and production seams linked from #526. The other 3 delivery slices have separate cards.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e11",
-      "milestoneId": "e11-m01-portable-targets",
+      "epoch": "e13",
+      "milestoneId": "e13-m02-windows",
       "phase": "ready",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **core.crypto native Windows entropy matrix** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs, crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs, crates/jet-pkg-model/src/Prelude/Crypto.rs, tests/crypto_entropy.rs, tests/fixtures/crypto_bridge_entropy.rs, tests/golden.rs, .github/workflows/ci.yml, docs/reference/core-library.md, docs/spec/syntax-decisions.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Put the named crypto or network semantics in the shared Core/Prelude path with thin target adapters and audited unsafe internals only where required.\n6. Malformed, adversarial, truncated, replayed, oversized, timed-out, or unsupported inputs fail safely without secret leakage, panics, or engine-specific policy.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 11 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
@@ -46468,6 +46548,11 @@
       "workOrder": 1580,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-08-24",
           "by": "orchestrator",
@@ -46567,8 +46652,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:27.721Z",
-      "updated": "2026-08-24T23:27:10.200Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-26T00:45:28.233Z",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -64225,8 +64310,8 @@
       "body": "Single-task slice extracted from former #771 umbrella. This card owns only: Process sessions: Windows ConPTY backend. Sibling scope lives on separate successor cards.\n\nContext only; it does not add sibling scope:\nComplete the shipped #291 core.process model for interactive agent and developer tools. Add terminal-backed child sessions, binary streams, process-tree control, and resource limits without creating a second process API or a shell parser. Non-interactive argv execution remains the safe default; terminal semantics are explicit opt-in. Planning must ballot any new public Core type or function name before code.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e7",
-      "milestoneId": "e7-m03-process-sessions",
+      "epoch": "e13",
+      "milestoneId": "e13-m02-windows",
       "phase": "building",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nD-PROCESS-SESSION1 must choose the public extension to ProcessSpec and ProcessChild. Keep non-interactive argv execution as the safe default. Use native Unix PTYs and Windows ConPTY, with one byte-stream and lifecycle model. Make interrupt, terminate, kill, wait, timeout, and drop control the full process tree. Reuse core.io, core.watcher, core.event, task cancellation, and native job or process-group controls. Add no terminal emulator or sibling process module.",
@@ -64236,6 +64321,11 @@
       "workOrder": 630,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -64318,8 +64408,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:39.059Z",
-      "updated": "2026-08-26T00:23:20.773Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-26T00:45:29.307Z",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -69466,8 +69556,8 @@
       "body": "Split from #729. Platform evidence slice for x86_64 and aarch64 macOS after all native-coverage families integrate.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e11",
-      "milestoneId": "e11-m01-portable-targets",
+      "epoch": "e13",
+      "milestoneId": "e13-m01-macos",
       "phase": "ready",
       "priority": "P1",
       "plan": "Epoch 9 only. Wait for the native JIT implementation cards and the cross-compilation target matrix. Then prove the completed corpus on macOS x86_64 and aarch64. Do not start this card before Epoch 9.",
@@ -69490,6 +69580,11 @@
       "workOrder": 5600,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -69547,8 +69642,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-27T00:40:57.991Z",
-      "updated": "2026-08-23T01:04:39.748Z",
-      "updatedBy": "mse11",
+      "updated": "2026-08-26T00:45:25.038Z",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -69559,8 +69654,8 @@
       "body": "Split from #729. Platform evidence slice for x86_64 and aarch64 Windows after all native-coverage families integrate.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e11",
-      "milestoneId": "e11-m01-portable-targets",
+      "epoch": "e13",
+      "milestoneId": "e13-m02-windows",
       "phase": "ready",
       "priority": "P1",
       "plan": "Epoch 9 only. Wait for the native JIT implementation cards and the cross-compilation target matrix. Then prove the completed corpus on Windows x86_64 and aarch64. Do not start this card before Epoch 9.",
@@ -69583,6 +69678,11 @@
       "workOrder": 5610,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "owner",
+          "text": "Moved to epoch 13 Cross Platform by owner direction 2026-08-25. Jet development targets Linux first, and this card cannot be proven without a non-Linux machine, so it must not block Linux work or hold its old epoch open. Scope and criteria are unchanged."
+        },
         {
           "at": "2026-08-19",
           "by": "fable",
@@ -69640,8 +69740,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-27T00:40:58.496Z",
-      "updated": "2026-08-23T01:08:47.487Z",
-      "updatedBy": "mse11",
+      "updated": "2026-08-26T00:45:28.774Z",
+      "updatedBy": "owner",
       "tags": [],
       "parentId": null
     },
@@ -150249,6 +150349,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-26",
+          "by": "orchestrator",
+          "text": "Awaiting owner acceptance only. All nine exit criteria are met and machine-verified; the bare jetpack question was ruled in chat (reserved for a future interactive TUI, must not enter an environment) and criterion 9 verifies the shipped behaviour. The needs-acceptance flag I set earlier can only be cleared through the owner verification UI, so this card sits in verify until then."
+        },
+        {
           "at": "2026-08-25",
           "by": "orchestrator",
           "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean at 0 errors 0 warnings."
@@ -150366,7 +150471,7 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-25T13:17:36.821Z",
-      "updated": "2026-08-25T23:03:31.625Z",
+      "updated": "2026-08-26T00:24:41.892Z",
       "updatedBy": "orchestrator",
       "workOrder": 1
     },
@@ -151581,13 +151686,17 @@
       "track": "epoch",
       "epoch": "e10",
       "milestoneId": "e10-m08-ui-case-law",
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-08-25",
           "by": "orchestrator",
@@ -151646,8 +151755,8 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-25T23:11:53.234Z",
-      "updated": "2026-08-25T23:13:48.911Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-26T00:34:03.269Z",
+      "updatedBy": "owner",
       "workOrder": 1
     },
     {
@@ -208808,8 +208917,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-25T23:13:27.860Z"
+      "status": "ratified",
+      "created": "2026-08-25T23:13:27.860Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-08-26"
     },
     {
       "id": "D-CASE-PROSE1",
@@ -208870,8 +208981,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-25T23:13:36.768Z"
+      "status": "ratified",
+      "created": "2026-08-25T23:13:36.768Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-26"
     }
   ],
   "questions": [
@@ -210917,6 +211030,160 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-26T00:45:29.828Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0wqwqaq",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:29.307Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c06r4us6",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:28.775Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c00cnpnb",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:28.234Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0tpkgc7",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:27.690Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c08t6mf1",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:27.168Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c06m9njm",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:26.524Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0fylvpy",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:25.773Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0eaqe17",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:25.038Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0rzz168",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:23.744Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c018q48o",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:22.384Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0zdbl2x",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:21.194Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0cq3bd4",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:19.895Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0h1r3b8",
+      "note": "epoch,milestoneId,logEntry"
+    },
+    {
+      "at": "2026-08-26T00:45:19.372Z",
+      "by": "owner",
+      "action": "milestone.add",
+      "ref": "e13-m03-mobile",
+      "note": "M03 · Mobile targets"
+    },
+    {
+      "at": "2026-08-26T00:45:18.303Z",
+      "by": "owner",
+      "action": "milestone.add",
+      "ref": "e13-m02-windows",
+      "note": "M02 · Windows support"
+    },
+    {
+      "at": "2026-08-26T00:45:16.867Z",
+      "by": "owner",
+      "action": "milestone.add",
+      "ref": "e13-m01-macos",
+      "note": "M01 · macOS support"
+    },
+    {
+      "at": "2026-08-26T00:43:42.592Z",
+      "by": "owner",
+      "action": "epoch.add",
+      "ref": "e13",
+      "note": "e13"
+    },
+    {
+      "at": "2026-08-26T00:34:09.017Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-26T00:34:09.017Z"
+    },
+    {
+      "at": "2026-08-26T00:34:03.269Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CASE-PROSE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-26T00:33:08.056Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CASE-CHROME1",
+      "note": "C"
+    },
+    {
+      "at": "2026-08-26T00:24:41.892Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c09vy29f",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-26T00:24:27.310Z",
+      "by": "orchestrator",
+      "action": "acceptance.reject",
+      "ref": "D-ACCEPT-2189",
+      "note": "cli card update: owner-verification bypass rejected"
+    },
     {
       "at": "2026-08-26T00:23:43.057Z",
       "by": "orchestrator",
@@ -214262,160 +214529,6 @@
       "action": "card.update",
       "ref": "c0vprzqp",
       "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-25T13:20:02.076Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0o7ipzb",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-25T13:20:01.575Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0gziu7u",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-25T13:20:01.037Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c09vy29f",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-25T13:20:00.516Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c024o546",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-25T13:19:30.267Z",
-      "by": "owner",
-      "action": "decision.verdict",
-      "ref": "D-VERDICT-2194-1",
-      "note": "Realization displays one live aggregate line carrying the current phase with counts, transferred bytes and total bytes, plus one settled row per package as it completes. Byte totals grow honestly as the closure is discovered rather than being fabricated. Output degrades to deterministic plain lines with no terminal, under NO_COLOR, and when piped, and live regions are erased before any diagnostic."
-    },
-    {
-      "at": "2026-08-25T13:19:29.911Z",
-      "by": "owner",
-      "action": "decision.verdict",
-      "ref": "D-VERDICT-2193-1",
-      "note": "Every tool installed by jetpack is projected as a jetpack shim rather than a hardlink into a read-only store object. The shim execs the real binary for normal use, and when the tool attempts to update itself the shim refuses the in-place write cleanly and offers to move the declarative pin instead. The accepted costs are that jetpack sits in the execution path of every installed tool, and that which reports the shim path."
-    },
-    {
-      "at": "2026-08-25T13:19:29.544Z",
-      "by": "owner",
-      "action": "decision.verdict",
-      "ref": "D-VERDICT-2192-1",
-      "note": "jetpack update determines its scope from the current directory: inside a jetpack project it updates that project. Narrowing flags select dependencies only or tools only, and the default covers everything in scope. It prints one plan naming every moving source with its before and after identity, package count and download size, then applies after a single confirmation. The outdated verb survives separately."
-    },
-    {
-      "at": "2026-08-25T13:19:29.185Z",
-      "by": "owner",
-      "action": "decision.verdict",
-      "ref": "D-VERDICT-2191-1",
-      "note": "A jet verb that needs the project environment while outside it fails with a coded diagnostic and acquires nothing. jetpack env and jetpack use enter silently when the closure is already materialized and confirm once, showing package count and total bytes, when anything must be downloaded. The yes flag skips that prompt. A non-interactive run that would need a download and has no yes flag fails naming the flag, and downloads nothing."
-    },
-    {
-      "at": "2026-08-25T13:19:28.846Z",
-      "by": "owner",
-      "action": "decision.verdict",
-      "ref": "D-VERDICT-2195-1",
-      "note": "The hangar verb groups everything that manipulates the store rather than the project. It absorbs the former top-level cache, shared-store, vendor, clean and list verbs. The name hangar is kept because it is the existing user-facing name for the object store, so no new word is coined. The doctor verb stays top-level because it is what a stuck user runs first."
-    },
-    {
-      "at": "2026-08-25T13:19:28.475Z",
-      "by": "owner",
-      "action": "decision.verdict",
-      "ref": "D-VERDICT-2188-1",
-      "note": "Any verb that reads or executes Jet source belongs to the jet binary. Any verb that acquires, pins, realizes or exposes what your code needs belongs to jetpack. There is no exception. Consequently jetpack dev, jetpack test, jetpack fmt, jetpack build, jetpack run and jetpack enter are deleted, and the hangar verb is removed from the jet binary."
-    },
-    {
-      "at": "2026-08-25T13:19:10.242Z",
-      "by": "owner",
-      "action": "decision.verdict",
-      "ref": "D-VERDICT-2190-1",
-      "note": "Every package reference is written package@source#version. The hash slot answers which version and accepts a literal version or a policy tier such as auto or latest. The prefix spelling, for example the tier written before the name, is deleted; the same meaning is written omp@releases#auto. Plain refs such as ripgrep@nixpkgs are unchanged. The old parse path is removed with no fallback parser retained."
-    },
-    {
-      "at": "2026-08-25T13:19:09.883Z",
-      "by": "owner",
-      "action": "decision.verdict",
-      "ref": "D-VERDICT-2189-1",
-      "note": "jetpack env is the canonical spelling for entering a project environment. jet env becomes a documented thin forward to it, one implementation with two entry points, so the ratified shell auto-activation hook keeps working while the boundary law holds: jet acts on code, jetpack acts on environments. Bare jetpack is reserved for a future interactive TUI and must not enter an environment. jetpack tool run is deleted as the arity-1 case of jetpack use with a trailing command."
-    },
-    {
-      "at": "2026-08-25T13:18:42.814Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c02wcldf",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-25T13:18:41.505Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0a3h9ta",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-25T13:18:41.020Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0vprzqp",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-25T13:18:40.531Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0o7ipzb",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-25T13:18:39.179Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c024o546",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-25T13:18:37.933Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0h7q2i8",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-25T13:18:37.434Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0gziu7u",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-25T13:18:36.922Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c09vy29f",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-25T13:18:36.405Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0o7ipzb",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-25T13:18:35.882Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0a3h9ta",
-      "note": "blockedBy"
     }
   ],
   "nextNum": 368,

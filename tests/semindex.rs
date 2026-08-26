@@ -347,6 +347,11 @@ fn run() {}
     assert_eq!(open_state.reachable, Some(true));
     assert_eq!(orphan.reachable, Some(false));
     assert!(index.to_json().contains("\"state_graphs\":[{"));
+
+    let dossier = index.dossier("Door");
+    assert_eq!(dossier.state_graphs.len(), 1);
+    assert!(dossier.render_text().contains("Open (terminal; reachable)"));
+    assert!(dossier.to_json().contains("\"terminal\":true"));
 }
 
 #[test]

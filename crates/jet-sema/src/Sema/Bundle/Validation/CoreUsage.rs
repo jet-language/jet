@@ -204,7 +204,6 @@ pub(crate) fn collect_used_core(
                 | Item::CModule(_)
                 | Item::ErrorConv(_)
                 | Item::Migration(_) // D-MIGRATE1
-                | Item::StateDecl(_) // D-STATE1: uses no core imports
                 | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
                 | Item::UserDerive(_) // D-METADERIVE1=A: already expanded
                 | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before usage collection

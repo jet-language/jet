@@ -4038,7 +4038,7 @@ signed immutable receipt. Observe or control a handle explicitly:
 
 ```jet
 delivery :: tree.send_durable(api, "order", key: "order-1") ?? panic("send")
-state :: delivery.status() ?? panic("status")
+state :: (~delivery).status() ?? panic("status")
 receipt :: (~delivery).receipt() ?? panic("receipt")
 history :: (~delivery).events() ?? panic("events")
 retry :: delivery.retry() ?? panic("retry")

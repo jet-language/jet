@@ -287,10 +287,6 @@ pub(crate) fn typed_text_mismatch(want: &Type, got: &Type, span: Span) -> Option
                 .filter(|kind| kind.is_typed_text())
                 .map(|_| tn.clone()),
         ),
-        Type::Apply { name, args } if name == Syntax::TYPE_CHECKED_TEXT && args.len() == 1 => {
-            let name = args[0].name();
-            (name.clone(), Some(name))
-        }
         _ => return None,
     };
     if tn == Syntax::TYPE_REGEX && *got == Type::String {
@@ -566,7 +562,6 @@ fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet<S
         Type::Fn { .. } => false,
         Type::Named(name) if builtin_resource_type(name) => false,
         Type::Named(name) if is_type_var_name(name) || core_type_known(name) => true,
-        Type::Named(name) if registry.text_head(name).is_some() => true,
         Type::Named(name) => {
             if !visiting.insert(name.clone()) {
                 return true;
@@ -592,9 +587,6 @@ fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet<S
                     }
                     None => false,
                 };
-            if registry.text_head(name).is_some() {
-                return true;
-            }
             visiting.remove(name);
             result
         }
@@ -685,7 +677,6 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         Type::TraitObject(_) => true,
         Type::Named(name) if is_type_var_name(name) => false,
         Type::Named(name) if core_type_known(name) => false,
-        Type::Named(name) if registry.text_head(name).is_some() => true,
         Type::Named(name) => {
             if !visiting.insert(name.clone()) {
                 return false;
@@ -723,7 +714,6 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         // are typed by a type PARAMETER rather than a concrete arg; see the
         // generic-type report). Errs toward flagging (a false positive is
         // cheaper than a silent miss of an actual allocation).
-        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => true,
         Type::Apply { name, args } if name == "Pool" => {
             let _ = args;
             true

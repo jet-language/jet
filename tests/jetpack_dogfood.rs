@@ -860,11 +860,8 @@ struct DogfoodScratch {
 
 impl DogfoodScratch {
     fn new(repo: &Path) -> Self {
-        let base =
-            PathBuf::from(env::var_os("HOME").expect("HOME")).join(".cache/jet-test-scratch");
-        common::assert_test_path_on_disk(&base, "dogfood scratch root");
-        fs::create_dir_all(&base).expect("create disk scratch root");
-        let path = base.join(format!("jetpack-dogfood-{}", std::process::id()));
+        let base = common::test_scratch_root("jetpack-dogfood");
+        let path = base.join(format!("run-{}", std::process::id()));
         if path.exists() {
             common::make_tree_writable(&path);
             fs::remove_dir_all(&path).expect("remove stale dogfood scratch");

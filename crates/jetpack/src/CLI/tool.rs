@@ -607,6 +607,9 @@ fn tool_uninstall(theme: &Theme, parsed: &Parsed) -> i32 {
             2
         }
         Err(e) => {
+            if e.contains("managed tool `") {
+                return report_tool_profile_error(theme, &io::Error::other(e));
+            }
             theme.error(
                 "tool uninstall failed",
                 &e,
@@ -2292,7 +2295,8 @@ fn publish_generation(generation: u64, witness: &str, tools: &[InstalledTool]) -
                     path.display()
                 )))
             }
-            Ok(metadata) if metadata.is_file() => fs::remove_file(path)?,
+            Ok(metadata) if metadata.is_file() => fs::remove_file(&path)
+                .map_err(|error| managed_tool_write_error(bin, &path, error))?,
             Ok(_) => {
                 return Err(io::Error::other(format!(
                     "managed tool `{bin}` projection is not a regular file"
@@ -2305,19 +2309,8 @@ fn publish_generation(generation: u64, witness: &str, tools: &[InstalledTool]) -
     for tool in tools {
         for bin in &tool.bins {
             let path = user_bin_dir().join(ProfileDispatch::physical_bin_name(bin));
-            install_profile_projection(generation, bin).map_err(|error| {
-                if error.kind() == io::ErrorKind::PermissionDenied {
-                    io::Error::new(
-                        io::ErrorKind::PermissionDenied,
-                        format!(
-                            "managed tool `{bin}` cannot write `{}`: {error}",
-                            path.display()
-                        ),
-                    )
-                } else {
-                    error
-                }
-            })?;
+            install_profile_projection(generation, bin)
+                .map_err(|error| managed_tool_write_error(bin, &path, error))?;
         }
     }
     Store::sync_store_directory(&user_bin_dir())?;
@@ -2335,6 +2328,20 @@ fn publish_generation(generation: u64, witness: &str, tools: &[InstalledTool]) -
         json_str(witness),
     );
     atomic_write_profile_pointer(profile.as_bytes())
+}
+
+fn managed_tool_write_error(bin: &str, path: &Path, error: io::Error) -> io::Error {
+    if error.kind() == io::ErrorKind::PermissionDenied {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "managed tool `{bin}` cannot write `{}`: {error}",
+                path.display()
+            ),
+        )
+    } else {
+        error
+    }
 }
 
 fn install_profile_projection(generation: u64, bin: &str) -> io::Result<()> {

@@ -587,7 +587,6 @@ impl<'a> ComptimeTypeResolver<'a> {
             | Item::Tag(_)
             | Item::UnitFamily(_)
             | Item::Migration(_)
-            | Item::StateDecl(_)
             | Item::ErrorConv(_)
             | Item::TemplateLoop(_) => {}
         }
@@ -1004,7 +1003,6 @@ pub(crate) fn comptime_context_from_items(
             | Item::UnitFamily(_) // D-QUAL3: contributes no comptime context
             | Item::ErrorConv(_)
             | Item::Migration(_) // D-MIGRATE1
-            | Item::StateDecl(_) // D-STATE-DECL
             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2
             | Item::UserDerive(_) // D-METADERIVE1=A: expanded in Bundle.rs
             | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before registration

@@ -479,14 +479,6 @@ pub const TYPE_URL: &str = "URL";
 pub const TYPE_PATH: &str = "Path";
 pub const TYPE_DATETIME: &str = "DateTime";
 
-/// D-BOUND-SINK1=A: compiler-internal nominal carrier for a library-declared
-/// checked text head. It is never a source-spellable type name.
-pub const TYPE_CHECKED_TEXT: &str = "__JetCheckedText";
-
-/// D-BOUND-SINK1=A: compiler-internal wrapper erased by TIR lowering after a
-/// checked text head's hole encoder has produced ordinary `String` text.
-pub const BUILTIN_CHECKED_TEXT_WRAP: &str = "__jet_checked_text_wrap";
-
 /// D-MARKER-SITES1=B: the retired declaration word is kept only so the parser
 /// can give a focused migration diagnostic. It is not part of marker grammar.
 pub const TEXT_HEAD_ON: &str = "on";

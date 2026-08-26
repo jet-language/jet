@@ -54,11 +54,23 @@ pub(crate) fn compute_hover(
     path: &str,
     offset: usize,
 ) -> Option<String> {
-    if compiler_fact_at(tokens, offset) {
-        return Some(format!(
-            "Compiler fact {}: focused layout metadata with typed optional physical facts.",
-            Syntax::COMPILER_FACT_LAYOUT
-        ));
+    if let Some(fact) = compiler_fact_at(tokens, offset) {
+        return Some(match fact {
+            Syntax::COMPILER_FACT_LAYOUT => format!(
+                "Compiler fact {}: focused layout metadata with typed optional physical facts.",
+                Syntax::COMPILER_FACT_LAYOUT
+            ),
+            Syntax::COMPILER_FACT_ORIGIN => format!(
+                "Compiler fact {}: optional OriginInfo provenance derived from sema flow.",
+                Syntax::COMPILER_FACT_ORIGIN
+            ),
+            _ => {
+                let kind = Syntax::fact_read_kind(fact)
+                    .and_then(|read| read.reflection_kind())
+                    .unwrap_or("typed");
+                format!("Compiler fact {fact}: typed {kind} metadata.")
+            }
+        });
     }
     if let Some(symbol) = db.symbols.at(path, offset) {
         let mut hover = semantic_hover(symbol, path);
@@ -182,17 +194,21 @@ fn find_ident_at<'a>(tokens: &'a [Token], offset: usize) -> Option<&'a str> {
     None
 }
 
-fn compiler_fact_at(tokens: &[Token], offset: usize) -> bool {
-    tokens.iter().any(|token| {
-        matches!(&token.kind, TokKind::Ident(name) if name == Syntax::COMPILER_FACT_LAYOUT)
+fn compiler_fact_at(tokens: &[Token], offset: usize) -> Option<&str> {
+    tokens.iter().find_map(|token| {
+        let TokKind::Ident(name) = &token.kind else {
+            return None;
+        };
+        (Syntax::fact_read_kind(name).is_some()
             && token.span.start <= offset
-            && offset <= token.span.end
+            && offset <= token.span.end)
+            .then_some(name.as_str())
     })
 }
 
 fn compiler_fact_receiver(tokens: &[Token], src: &str, offset: usize) -> Option<String> {
     let fact = tokens.iter().find(|token| {
-        matches!(&token.kind, TokKind::Ident(name) if name == Syntax::COMPILER_FACT_LAYOUT)
+        matches!(&token.kind, TokKind::Ident(name) if Syntax::fact_read_kind(name).is_some())
             && token.span.start <= offset
             && offset <= token.span.end
     })?;
@@ -209,6 +225,18 @@ fn compiler_fact_receiver(tokens: &[Token], src: &str, offset: usize) -> Option<
         start -= 1;
     }
     (start < dot).then(|| before[start..dot].to_string())
+}
+
+fn compiler_fact_receiver_span(tokens: &[Token], offset: usize) -> Option<Span> {
+    let fact_index = tokens.iter().position(|token| {
+        matches!(&token.kind, TokKind::Ident(name) if Syntax::fact_read_kind(name).is_some())
+            && token.span.start <= offset
+            && offset <= token.span.end
+    })?;
+    let receiver = tokens.get(fact_index.checked_sub(2)?)?;
+    matches!(&tokens.get(fact_index.checked_sub(1)?)?.kind, TokKind::Dot)
+        .then_some(receiver)
+        .and_then(|token| matches!(&token.kind, TokKind::Ident(_)).then_some(token.span))
 }
 
 /// Resolve a call into source owned by the canonical build graph. Generated
@@ -319,6 +347,42 @@ pub(crate) fn compute_references(
                     reference.module_path == path
                         && reference.span.start <= offset
                         && offset <= reference.span.end
+                })
+                .and_then(|reference| reference.target.as_ref())
+                .and_then(anchor_identity)
+        })
+        .or_else(|| {
+            let receiver = compiler_fact_receiver_span(_tokens, offset)?;
+            db.index
+                .instances()
+                .iter()
+                .flat_map(|instance| &instance.applications)
+                .find(|application| {
+                    application.module_path == path
+                        && application.span.start <= receiver.start
+                        && receiver.end <= application.span.end
+                })
+                .map(|application| application.semantic_identity.clone())
+        })
+        .or_else(|| {
+            let receiver = compiler_fact_receiver_span(_tokens, offset)?;
+            db.defs
+                .iter()
+                .find(|definition| {
+                    definition.module_path == path
+                        && definition.def_span.start <= receiver.start
+                        && receiver.end <= definition.def_span.end
+                })
+                .map(|definition| definition.identity.clone())
+        })
+        .or_else(|| {
+            let receiver = compiler_fact_receiver_span(_tokens, offset)?;
+            db.refs
+                .iter()
+                .find(|reference| {
+                    reference.module_path == path
+                        && reference.span.start <= receiver.start
+                        && receiver.end <= reference.span.end
                 })
                 .and_then(|reference| reference.target.as_ref())
                 .and_then(anchor_identity)
@@ -548,10 +612,10 @@ pub(crate) fn compute_rename(
             new_name
         ));
     }
-    if compiler_fact_at(tokens, offset) {
+    if let Some(fact) = compiler_fact_at(tokens, offset) {
         return Err(format!(
             "compiler-owned {} is fixed; rename the reflected type or field instead",
-            Syntax::COMPILER_FACT_LAYOUT
+            fact
         ));
     }
     let name = match find_ident_at(tokens, offset) {

@@ -388,7 +388,7 @@ marker AddGreeting(@sites: [.Type]) {
 struct Person { name: String }
 
 fn run() {
-    person :: Person.{name: "ada"}
+    person :: Person{name: "ada"}
     print(person.greeting())
 }
 "#;
@@ -667,7 +667,7 @@ fn no_rust_file_keeps_a_second_copy() {
         if text.contains("NON_CODE_ROWS") || text.contains("PRELUDE_GATES") {
             offenders.push(format!("{display} keeps fact law rows in Rust"));
         }
-        if text.contains("\"Net\", \"FS\"") {
+        if text.contains("EFFECT_ROOTS: &[&str]") {
             offenders.push(format!("{display} keeps a copy of the effect roots"));
         }
     }

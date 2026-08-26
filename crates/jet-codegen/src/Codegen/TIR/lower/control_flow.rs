@@ -46,19 +46,28 @@ use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, StructPatField, SwitchArm,
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// D-TAIL-RETURN1=A: lower the sole unadorned final expression through the
-/// existing return lowering path. Sema has already proved that this block is
-/// value-expected; this small AST normalization keeps all ownership,
-/// widening, and fallible return handling in one TIR mechanism.
+/// D-TAIL-RETURN1=A: lower the sole unadorned final expression as a TIR return.
+/// Sema has already checked the expression at the block's expected type. Keep
+/// the source AST as an expression; the TIR return is the one backend-neutral
+/// value boundary consumed by AOT, JIT, and the interpreter.
 pub(crate) fn lower_value_block(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
-    let Some(Stmt::Expr(expr)) = stmts.last() else {
+    let Some((Stmt::Expr(expr), prefix)) = stmts.split_last() else {
         return crate::Codegen::TIR::lower_stmts(stmts, cx, env);
     };
-    let mut value_body = stmts.to_vec();
-    let span = expr.span();
-    value_body.pop();
-    value_body.push(Stmt::Return(Some(expr.clone()), span));
-    crate::Codegen::TIR::lower_stmts(&value_body, cx, env)
+    let mut lowered = crate::Codegen::TIR::lower_stmts(prefix, cx, env);
+    let normalized = crate::Codegen::TIR::normalize_eval_fragment_return(expr, env.ret_ty.as_ref());
+    let mut value = lower_owned_expr(normalized.as_ref().unwrap_or(expr), cx, env);
+    if let Some(want) = &env.ret_ty {
+        value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
+    }
+    lowered.push(TStmt::SourceSpan(expr.span()));
+    if cx.debug_linemap {
+        lowered.push(TStmt::LineMarker(
+            crate::Diagnostics::span_line_col(&cx.src, expr.span().start).0,
+        ));
+    }
+    lowered.push(TStmt::Return(Some(value)));
+    lowered
 }
 
 pub(crate) fn return_type_has_value(ty: &Type) -> bool {

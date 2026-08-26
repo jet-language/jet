@@ -1218,7 +1218,9 @@ impl<'a> Checker<'a> {
         );
         if b.track() && !b.name.is_empty() {
             let depth = self
-                .binding_fact_depth(&b.name)
+                .flow
+                .origins
+                .depth_of(&b.name)
                 .unwrap_or_else(|| self.scope_depth());
             let (line, column) = crate::Diagnostics::span_line_col(&self.source, b.name_span.start);
             self.flow.origins.set_at(

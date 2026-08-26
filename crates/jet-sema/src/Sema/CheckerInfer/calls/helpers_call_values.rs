@@ -55,7 +55,9 @@ impl<'a> Checker<'a> {
     ) -> Option<(String, String, Span)> {
         match receiver {
             Expr::Ident(alias, span) if self.lookup(alias).is_none() => self
-                .text_head_core_import(alias)
+                .core_imports
+                .get(alias)
+                .cloned()
                 .map(|module| (module, alias.clone(), *span)),
             Expr::Field(base, leaf, _) => {
                 let (module, alias, span) = self.core_module_path_from_receiver(base)?;

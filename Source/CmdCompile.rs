@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 use std::sync::LazyLock;
@@ -305,6 +305,225 @@ fn json_strings(values: &[String]) -> String {
             .collect::<Vec<_>>()
             .join(",")
     )
+}
+
+fn env_truthy(name: &str) -> bool {
+    std::env::var(name).ok().is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes"
+        )
+    })
+}
+
+fn authority_prompt_is_interactive(mode: OutputMode) -> bool {
+    !mode.json
+        && !env_truthy("CI")
+        && std::io::stdin().is_terminal()
+        && std::io::stderr().is_terminal()
+}
+
+fn write_authority_receipt(
+    root: &Path,
+    source: &str,
+    operation: &str,
+    scope: &str,
+    projection: &jet::EffectBudget::EffectProjection,
+    policy_source: &str,
+) -> Result<(), String> {
+    let directory = root.join(".jet").join("receipts");
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("could not create authority receipt directory: {error}"))?;
+    let path = directory.join("authority.jsonl");
+    let mut receipt = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|error| format!("could not open authority receipt: {error}"))?;
+    let required = projection
+        .required_effects
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let granted = projection
+        .granted_effects
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let denied = projection
+        .denied_effects
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    writeln!(
+        receipt,
+        "{{\"schema\":\"jet.authority.receipt/v1\",\"scope\":{},\"resource\":\"application\",\"operation\":{},\"source\":{},\"authority\":{},\"policy_source\":{},\"required_effects\":{},\"granted_effects\":{},\"denied_effects\":{}}}",
+        json_escape(scope),
+        json_escape(operation),
+        json_escape(source),
+        json_escape(&projection.authority),
+        json_escape(policy_source),
+        json_strings(&required),
+        json_strings(&granted),
+        json_strings(&denied),
+    )
+    .map_err(|error| format!("could not write authority receipt: {error}"))
+}
+
+fn resolve_application_authority(
+    cmd: &str,
+    file: &str,
+    src: &str,
+    mode: OutputMode,
+    projection: &mut jet::EffectBudget::EffectProjection,
+    package_manifest: &mut Option<(PathBuf, jet::Package::PackageFacts)>,
+) {
+    if !matches!(cmd, "build" | "run") {
+        return;
+    }
+    let denied: jet::Sema::EffectSet = projection
+        .required_effects
+        .iter()
+        .filter(|effect| {
+            jet_foundation::Authority::answer(
+                &projection.granted_effects,
+                &projection.denied_effects,
+                effect,
+            ) == jet_foundation::Authority::Verdict::Denied
+        })
+        .cloned()
+        .collect();
+    if !denied.is_empty() {
+        let diagnostic = jet::EffectBudget::application_policy_diagnostic(projection, &denied);
+        report_problems(mode, file, src, &[diagnostic]);
+        exit(ExitCodes::USER_ERROR);
+    }
+    let undecided = projection.undecided();
+    if undecided.is_empty() {
+        return;
+    }
+
+    let root = package_manifest
+        .as_ref()
+        .map(|(root, _)| root.clone())
+        .unwrap_or_else(|| {
+            Path::new(file)
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf()
+        });
+    if !authority_prompt_is_interactive(mode) {
+        let diagnostic = jet::EffectBudget::application_policy_diagnostic(projection, &BTreeSet::new());
+        report_problems(mode, file, src, &[diagnostic]);
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    eprintln!(
+        "authority required for {} — choose once, project, or deny [{}]",
+        json_strings(&undecided.iter().cloned().collect::<Vec<_>>()),
+        projection.authority
+    );
+    eprint!("authority> ");
+    let _ = std::io::stderr().flush();
+    let mut choice = String::new();
+    let _ = std::io::stdin().read_line(&mut choice);
+    let choice = choice.trim().to_ascii_lowercase();
+    let (scope, policy_source) = match choice.as_str() {
+        "once" | "1" => ("invocation", "interactive.once"),
+        "project" | "2" => {
+            let Some(manifest_path) = jet::Loader::manifest_path(&root) else {
+                let diagnostic = jet::EffectBudget::application_policy_diagnostic(
+                    projection,
+                    &BTreeSet::new(),
+                );
+                report_problems(mode, file, src, &[diagnostic]);
+                exit(ExitCodes::USER_ERROR);
+            };
+            let raw = match fs::read_to_string(&manifest_path) {
+                Ok(raw) => raw,
+                Err(error) => {
+                    let diagnostic = jet::Diagnostics::Diagnostic::error(
+                        "E2105",
+                        format!("can't read `{}` for project approval", manifest_path.display()),
+                        "project approval must edit the canonical package manifest".to_string(),
+                        format!("fix the manifest permissions and retry: {error}"),
+                        None,
+                    );
+                    report_problems(mode, file, src, &[diagnostic]);
+                    exit(ExitCodes::USER_ERROR);
+                }
+            };
+            let mut updated = raw;
+            for effect in &undecided {
+                updated = jet::Manifest::add_authority_hold(&updated, effect);
+            }
+            let reparsed = match jet::Package::PackageFacts::parse(
+                &updated,
+                manifest_path.display().to_string(),
+            ) {
+                Ok(manifest) => manifest,
+                Err(error) => {
+                    let diagnostic = jet::Diagnostics::Diagnostic::error(
+                        "E1221",
+                        format!("project approval produced an invalid `{}`", manifest_path.display()),
+                        error.to_string(),
+                        "edit `authority.holds.allow` with the canonical manifest editor".to_string(),
+                        None,
+                    );
+                    report_problems(mode, file, src, &[diagnostic]);
+                    exit(ExitCodes::USER_ERROR);
+                }
+            };
+            if let Err(error) = fs::write(&manifest_path, updated) {
+                let diagnostic = jet::Diagnostics::Diagnostic::error(
+                    "E2105",
+                    format!("can't write project authority to `{}`", manifest_path.display()),
+                    "project approval must update the canonical package manifest".to_string(),
+                    format!("fix the manifest permissions and retry: {error}"),
+                    None,
+                );
+                report_problems(mode, file, src, &[diagnostic]);
+                exit(ExitCodes::USER_ERROR);
+            }
+            let Some((_, manifest)) = package_manifest.as_mut() else {
+                let diagnostic = jet::EffectBudget::application_policy_diagnostic(
+                    projection,
+                    &BTreeSet::new(),
+                );
+                report_problems(mode, file, src, &[diagnostic]);
+                exit(ExitCodes::USER_ERROR);
+            };
+            *manifest = reparsed;
+            ("project", "package.jet authority.holds")
+        }
+        _ => {
+            let denied_now = undecided.clone();
+            projection.denied_effects.extend(denied_now.iter().cloned());
+            let diagnostic =
+                jet::EffectBudget::application_policy_diagnostic(projection, &denied_now);
+            report_problems(mode, file, src, &[diagnostic]);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    projection.granted_effects.extend(undecided);
+    if let Err(error) = write_authority_receipt(
+        &root,
+        file,
+        cmd,
+        scope,
+        projection,
+        policy_source,
+    ) {
+        let diagnostic = jet::Diagnostics::Diagnostic::error(
+            "E2105",
+            "could not record the application authority receipt".to_string(),
+            "every authority approval is source-linked before the effect runs".to_string(),
+            error,
+            None,
+        );
+        report_problems(mode, file, src, &[diagnostic]);
+        exit(ExitCodes::USER_ERROR);
+    }
 }
 
 /// D-BUILDPROFILE1: load Package build profiles from the project root of `source_file`.
@@ -994,15 +1213,23 @@ pub(crate) fn run_compile_cmd(
         Some((
             jet::EffectBudget::compute_package_effects(program, &facts.solved, &facts.summaries),
             facts.fact_registry.clone(),
-            jet::EffectBudget::summary_line_for_program(
+            jet::EffectBudget::summary_line_for_program_with_authority(
                 program,
                 &facts.summaries,
                 jet::Codegen::ENTRY_FN,
+                package_manifest.as_ref().map(|(_, manifest)| manifest),
             ),
-            jet::EffectBudget::summary_json_for_program(
+            jet::EffectBudget::summary_json_for_program_with_authority(
                 program,
                 &facts.summaries,
                 jet::Codegen::ENTRY_FN,
+                package_manifest.as_ref().map(|(_, manifest)| manifest),
+            ),
+            jet::EffectBudget::project_program_effects(
+                program,
+                &facts.summaries,
+                jet::Codegen::ENTRY_FN,
+                package_manifest.as_ref().map(|(_, manifest)| manifest),
             ),
         ))
     });
@@ -1201,22 +1428,37 @@ pub(crate) fn run_compile_cmd(
                             &checked.facts.summaries,
                         ),
                         checked.facts.fact_registry.clone(),
-                        jet::EffectBudget::summary_line_for_program(
+                        jet::EffectBudget::summary_line_for_program_with_authority(
                             &checked.bundle,
                             &checked.facts.summaries,
                             jet::Codegen::ENTRY_FN,
+                            package_manifest.as_ref().map(|(_, manifest)| manifest),
                         ),
-                        jet::EffectBudget::summary_json_for_program(
+                        jet::EffectBudget::summary_json_for_program_with_authority(
                             &checked.bundle,
                             &checked.facts.summaries,
                             jet::Codegen::ENTRY_FN,
+                            package_manifest.as_ref().map(|(_, manifest)| manifest),
+                        ),
+                        jet::EffectBudget::project_program_effects(
+                            &checked.bundle,
+                            &checked.facts.summaries,
+                            jet::Codegen::ENTRY_FN,
+                            package_manifest.as_ref().map(|(_, manifest)| manifest),
                         ),
                     )),
                     Err(_) => None,
                 }
             }
         };
-        if let Some((entries, fact_registry, effect_summary, effect_json)) = effect_view {
+        if let Some((
+            entries,
+            fact_registry,
+            _effect_summary,
+            _effect_json,
+            mut projection,
+        )) = effect_view
+        {
             // D-PLUGIN1=B (c81): a plugin is deny-by-default — the wasmtime
             // host registers zero host imports, so any host effect used by the
             // plugin's own code would fail to instantiate at load time. Guest
@@ -1234,6 +1476,16 @@ pub(crate) fn run_compile_cmd(
                     }
                 }
             }
+            resolve_application_authority(
+                cmd,
+                file,
+                &src,
+                mode,
+                &mut projection,
+                &mut package_manifest,
+            );
+            let effect_summary = jet::EffectBudget::render_effect_projection_line(&projection);
+            let effect_json = jet::EffectBudget::render_effect_projection_json(&projection);
             // Program stdout stays the program's (U7 / D-DEVMODE1). The
             // effect summary is build-time tool output, not runtime stderr.
             if cmd == "build" {

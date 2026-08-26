@@ -60,62 +60,6 @@ impl<'a> Checker<'a> {
         self.checked_text_type_name(name).is_some()
     }
 
-    pub(crate) fn text_head_contract(
-        &self,
-        name: &str,
-    ) -> Option<(String, &'a crate::Sema::TextHeadContract)> {
-        let (import_ns, leaf) = Self::split_type_name(name);
-        let owner = self.struct_owner_module(leaf, import_ns)?;
-        let registry = if owner == self.module_idx {
-            self.registry
-        } else {
-            &self.modules?.get(owner)?.registry
-        };
-        let contract = registry.text_head(leaf)?;
-        let canonical = if owner == self.module_idx {
-            leaf.to_string()
-        } else {
-            self.canonical_nominal_name(owner, leaf)
-        };
-        Some((canonical, contract))
-    }
-
-    pub(crate) fn text_head_function_sig(&self, name: &str) -> Option<crate::AST::FuncSig> {
-        self.text_head_context
-            .and_then(|context| context.sigs.get(name).cloned())
-            .or_else(|| self.funcs.get(name).cloned())
-    }
-
-    pub(crate) fn text_head_function_params(
-        &self,
-        name: &str,
-    ) -> Option<Vec<crate::AST::TypeParam>> {
-        self.text_head_context
-            .and_then(|context| context.type_params.get(name).cloned())
-    }
-
-    pub(crate) fn text_head_core_import(&self, alias: &str) -> Option<String> {
-        if self.lookup(alias).is_some() {
-            return None;
-        }
-        self.text_head_context
-            .and_then(|context| context.core_imports.get(alias).cloned())
-            .or_else(|| self.core_imports.get(alias).cloned())
-    }
-
-    pub(crate) fn text_head_core_alias(&self, module: &str) -> Option<String> {
-        self.text_head_context
-            .and_then(|context| {
-                context
-                    .core_imports
-                    .iter()
-                    .find_map(|(alias, target)| (target == module).then(|| alias.clone()))
-            })
-            .or_else(|| {
-                crate::Sema::Prelude::core_alias_for(self.core_imports, module).map(str::to_owned)
-            })
-    }
-
     fn imported_nominal_type(&self, name: &str) -> Option<Type> {
         let (import_ns, leaf) = Self::split_type_name(name);
         let owner = self.struct_owner_module(leaf, import_ns)?;
@@ -127,11 +71,7 @@ impl<'a> Checker<'a> {
             Some(Type::TraitObject(vec![leaf.to_string()]))
         } else if module.registry.contains(leaf) {
             let canonical = self.canonical_nominal_name(owner, leaf);
-            if module.registry.text_head(leaf).is_some() {
-                Some(crate::Sema::checked_text_type(&canonical))
-            } else {
-                Some(Type::Named(canonical))
-            }
+            Some(Type::Named(canonical))
         } else {
             None
         }
@@ -205,9 +145,6 @@ impl<'a> Checker<'a> {
                         .to_string(),
                 )
             }
-            Type::Named(n) if self.registry.text_head(&n).is_some() => {
-                crate::Sema::checked_text_type(&n)
-            }
             // D-LANGNS-NAME1=A: `core.compiler.lang` publishes compiler vocabulary as
             // ordinary generated enum declarations. Membership is decided by
             // the rule table, not a fixed leaf list, so it can't join the
@@ -272,12 +209,6 @@ impl<'a> Checker<'a> {
             Type::Named(n) => self.imported_nominal_type(&n).unwrap_or(Type::Named(n)),
             Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
             Type::Shared(inner) => Type::Shared(Box::new(self.resolve_type(*inner))),
-            Type::Apply { name, args } if name == crate::Syntax::TYPE_CHECKED_TEXT => {
-                // The nominal argument is the carrier's identity, not a
-                // source type to resolve again. Re-walking it would wrap
-                // `__JetCheckedText<Head>` inside itself on every pass.
-                Type::Apply { name, args }
-            }
             Type::Apply { name, args } => {
                 if self.registry.is_type_alias(&name) {
                     if let Some((params, target)) = self.registry.type_alias(&name) {

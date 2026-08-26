@@ -32,7 +32,7 @@ Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 - [Item::CodeModule] status=readonly module facts, source edits.
 - [Item::ErrorConv] status=readonly conversion facts, source edits.
 - [Item::Migration] status=readonly schema evolution facts, source edits.
-- [Item::StateDecl] status=readonly typestate facts, source edits.
+- [StructDef::state] status=readonly typestate facts owned by the struct, source edits.
 - [Item::ProtocolDecl] status=readonly protocol facts, source edits.
 - [Item::EffectDecl] status=source through Code lens/source transactions; no dedicated graph projection.
 - [Item::UserDerive] status=readonly derive facts, source edits.

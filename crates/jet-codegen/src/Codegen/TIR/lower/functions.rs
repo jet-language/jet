@@ -203,11 +203,12 @@ pub(crate) fn lower_web_func(f: &Func, cx: &Cx) -> TFunc {
 }
 
 fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool) -> TFunc {
+    let return_type = f.effective_return_type();
     let mut env = LowerEnv::new(f.name.clone());
     env.sentries_enabled = sentries_enabled_for_function(f, cx);
     env.sentries_fenced = cx.dependency_fenced;
     env.gc_return = f.gc_return;
-    env.ret_ty = f.return_type.as_ref().map(|ty| cx.expand_type_aliases(ty));
+    env.ret_ty = Some(cx.expand_type_aliases(&return_type));
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
     // (String, Char) is a borrow in Rust and reads as `(*name)`.
     let mut params = Vec::new();
@@ -271,11 +272,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
     }
     let mut body = resource_param_guards;
     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
-    let lowered_body = if f
-        .return_type
-        .as_ref()
-        .is_some_and(return_type_has_value)
-    {
+    let lowered_body = if return_type_has_value(&return_type) {
         lower_value_block(&f.body, cx, &mut env)
     } else {
         lower_stmts(&f.body, cx, &mut env)
@@ -285,15 +282,13 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
     for param in &f.params {
         collect_signature_clone_types(&param.ty, cx, &mut clone_types);
     }
-    if let Some(return_type) = &f.return_type {
-        collect_signature_clone_types(return_type, cx, &mut clone_types);
-    }
+    collect_signature_clone_types(&return_type, cx, &mut clone_types);
     let generics = render_generics(&f.type_params, &clone_types);
     let body = wrap_contract_scope(
         f,
         body,
         None,
-        f.return_type.as_ref().map(|ty| cx.expand_type_aliases(ty)),
+        Some(cx.expand_type_aliases(&return_type)),
         cx,
     );
     TFunc {
@@ -301,7 +296,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         source_span: f.span,
         params,
         web_param_reconstructions,
-        ret: f.return_type.as_ref().map(|ty| cx.expand_type_aliases(ty)),
+        ret: Some(cx.expand_type_aliases(&return_type)),
         gc_return: f.gc_return,
         return_view_provenance: f.return_view_provenance.clone(),
         generics,
@@ -487,16 +482,12 @@ fn lower_contract_clause(
 }
 
 fn lower_post_contracts_for_owner(f: &Func, owner_type: Option<&str>, cx: &Cx) -> Vec<TContract> {
-    let ret_ty = f
-        .return_type
-        .as_ref()
-        .map(|ty| {
-            let ty = owner_type
-                .map(|owner| resolve_self_ty(ty, owner))
-                .unwrap_or_else(|| ty.clone());
-            cx.expand_type_aliases(&ty)
-        })
-        .unwrap_or(Type::Named("Unit".to_string()));
+    let ret_ty = {
+        let ty = owner_type
+            .map(|owner| resolve_self_ty(&f.effective_return_type(), owner))
+            .unwrap_or_else(|| f.effective_return_type());
+        cx.expand_type_aliases(&ty)
+    };
     let result_name = mangle_generated("result");
     let post = f
         .post
@@ -727,6 +718,7 @@ fn lower_method_for_owner_inner(
     owner_ty: Type,
     cx: &Cx,
 ) -> TFunc {
+    let return_type = resolve_self_ty(&f.effective_return_type(), type_name);
     let previous_type_params = cx.current_type_params.borrow().clone();
     let mut method_type_params = previous_type_params.clone();
     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
@@ -734,7 +726,7 @@ fn lower_method_for_owner_inner(
     let mut env = LowerEnv::new(f.name.clone());
     env.sentries_fenced = cx.dependency_fenced;
     env.gc_return = f.gc_return;
-    env.ret_ty = f.return_type.clone();
+    env.ret_ty = Some(return_type.clone());
     env.self_owner = Some(type_name.to_string());
     let mut params = Vec::new();
     let mut resource_param_guards = Vec::new();
@@ -781,11 +773,7 @@ fn lower_method_for_owner_inner(
     }
     let mut body = resource_param_guards;
     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
-    let lowered_body = if f
-        .return_type
-        .as_ref()
-        .is_some_and(return_type_has_value)
-    {
+    let lowered_body = if return_type_has_value(&return_type) {
         lower_value_block(&f.body, cx, &mut env)
     } else {
         lower_stmts(&f.body, cx, &mut env)
@@ -795,9 +783,7 @@ fn lower_method_for_owner_inner(
         f,
         body,
         Some(type_name),
-        f.return_type
-            .as_ref()
-            .map(|ty| resolve_self_ty(&cx.expand_type_aliases(ty), type_name)),
+        Some(cx.expand_type_aliases(&return_type)),
         cx,
     );
     let mut clone_types = env.cloned_types.borrow().clone();
@@ -805,9 +791,7 @@ fn lower_method_for_owner_inner(
     for param in &f.params {
         collect_signature_clone_types(&param.ty, cx, &mut clone_types);
     }
-    if let Some(return_type) = &f.return_type {
-        collect_signature_clone_types(return_type, cx, &mut clone_types);
-    }
+    collect_signature_clone_types(&return_type, cx, &mut clone_types);
     let generics = render_generics(&f.type_params, &clone_types);
     cx.current_type_params.replace(previous_type_params);
     // An instance method carries `Some(conv)`; a static method carries `None`.
@@ -824,10 +808,7 @@ fn lower_method_for_owner_inner(
         source_span: f.span,
         params,
         web_param_reconstructions: Vec::new(),
-        ret: f
-            .return_type
-            .as_ref()
-            .map(|t| resolve_self_ty(t, type_name)),
+        ret: Some(return_type),
         gc_return: f.gc_return,
         return_view_provenance: f.return_view_provenance.clone(),
         // The enclosing owner params live on `impl<T>`. Method-owned params
@@ -882,6 +863,7 @@ fn lower_trait_method_inner(
     cx: &Cx,
     trait_name: &str,
 ) -> TFunc {
+    let return_type = resolve_self_ty(&f.effective_return_type(), type_name);
     let serde = match trait_name {
         crate::Generics::ENCODE => Some(SerdeCodec::Encode),
         crate::Generics::DECODE => Some(SerdeCodec::Decode),
@@ -898,7 +880,7 @@ fn lower_trait_method_inner(
     env.sentries_enabled = sentries_enabled_for_function(f, cx);
     env.sentries_fenced = cx.dependency_fenced;
     env.gc_return = f.gc_return;
-    env.ret_ty = f.return_type.clone();
+    env.ret_ty = Some(return_type.clone());
     env.self_owner = Some(type_name.to_string());
     let mut params = Vec::new();
     let mut resource_param_guards = Vec::new();
@@ -943,11 +925,7 @@ fn lower_trait_method_inner(
     }
     let mut body = resource_param_guards;
     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
-    let lowered_body = if f
-        .return_type
-        .as_ref()
-        .is_some_and(return_type_has_value)
-    {
+    let lowered_body = if return_type_has_value(&return_type) {
         lower_value_block(&f.body, cx, &mut env)
     } else {
         lower_stmts(&f.body, cx, &mut env)
@@ -957,9 +935,7 @@ fn lower_trait_method_inner(
         f,
         body,
         Some(type_name),
-        f.return_type
-            .as_ref()
-            .map(|ty| resolve_self_ty(&cx.expand_type_aliases(ty), type_name)),
+        Some(cx.expand_type_aliases(&return_type)),
         cx,
     );
     let mut body = body;
@@ -1002,19 +978,14 @@ fn lower_trait_method_inner(
     for param in &f.params {
         collect_signature_clone_types(&param.ty, cx, &mut clone_types);
     }
-    if let Some(return_type) = &f.return_type {
-        collect_signature_clone_types(return_type, cx, &mut clone_types);
-    }
+    collect_signature_clone_types(&return_type, cx, &mut clone_types);
     let generics = render_generics(&f.type_params, &clone_types);
     TFunc {
         name: f.name.clone(),
         source_span: f.span,
         params,
         web_param_reconstructions: Vec::new(),
-        ret: f
-            .return_type
-            .as_ref()
-            .map(|t| resolve_self_ty(t, type_name)),
+        ret: Some(return_type),
         gc_return: f.gc_return,
         return_view_provenance: f.return_view_provenance.clone(),
         generics,
@@ -1065,11 +1036,8 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
 }
 
 fn lower_delegation_method_inner(f: &Func, field: &str, cx: &Cx) -> TFunc {
-    let ret = f
-        .return_type
-        .as_ref()
-        .map(|t| rust_return_type(cx, t))
-        .unwrap_or_default();
+    let return_type = f.effective_return_type();
+    let ret = rust_return_type(cx, &return_type);
     let ret_clause = if ret.is_empty() {
         String::new()
     } else {
@@ -1115,7 +1083,7 @@ fn lower_delegation_method_inner(f: &Func, field: &str, cx: &Cx) -> TFunc {
         source_span: f.span,
         params: Vec::new(),
         web_param_reconstructions: Vec::new(),
-        ret: f.return_type.clone(),
+        ret: Some(return_type),
         gc_return: f.gc_return,
         return_view_provenance: f.return_view_provenance.clone(),
         // The signature is fully pre-rendered (`sig`); `is_view`/`generics` are unused for delegation.
@@ -1141,7 +1109,7 @@ fn lower_delegation_method_inner(f: &Func, field: &str, cx: &Cx) -> TFunc {
         kind: TFuncKind::Delegation {
             sig,
             fwd,
-            has_return: f.return_type.is_some(),
+            has_return: true,
         },
     }
 }

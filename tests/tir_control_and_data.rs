@@ -26,6 +26,37 @@ fn run() {
     tir_support::assert_tiers_agree("result_handler_tiers", src, "ok: 7\nerror: bad\n");
 }
 
+/// D-TAIL-RETURN1=A / I9: a braced function tail, value arm table, and
+/// explicit early return all lower through the same checked block-value path.
+#[test]
+fn braced_value_tails_and_arm_tables_agree_on_all_tiers() {
+    let src = r#"
+fn label(value: Int) String -> {
+    if value == {
+        1 -> { "one" }
+        else -> { "other" }
+    }
+}
+
+fn early(flag: Bool) String -> {
+    if flag { return "early" }
+    "late"
+}
+
+fn run() {
+    print(label(1))
+    print(label(2))
+    print(early(true))
+    print(early(false))
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "tail_return_values",
+        src,
+        "one\nother\nearly\nlate\n",
+    );
+}
+
 /// D-FAIL-ERROR1=A: the labelled/string shape builds a default `Err` value;
 /// one positional typed value in a result arm still wraps that value.
 #[test]

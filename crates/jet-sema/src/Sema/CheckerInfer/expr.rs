@@ -488,6 +488,7 @@ impl<'a> Checker<'a> {
                             .flow
                             .origins
                             .get(subject_name)
+                            .filter(|origin| origin.is_readable())
                             .filter(|_| !self.flow.moved.contains(subject_name))
                             .map(|origin| {
                                 (
@@ -950,14 +951,12 @@ impl<'a> Checker<'a> {
         Some(Type::Named(type_name))
     }
 
-    /// D-BOUND-SINK1=A: a declared text head owns both body validation and
-    /// interpolation encoding. The internal wrapper preserves its nominal
-    /// checked type until TIR erases the already-encoded String.
-    pub(crate) fn rewrite_declared_text_literal(
+    /// D-TEXTHEAD-TYPE1=A: an ordinary distinct String plus its ordinary
+    /// `CheckedText` impl owns literal validation and hole encoding.
+    pub(crate) fn rewrite_checked_text_literal(
         &mut self,
         e: &mut Expr,
         type_name: String,
-        contract: &'a crate::Sema::TextHeadContract,
         span: Span,
     ) -> Option<Type> {
         let old = std::mem::replace(e, Expr::Absent(span));
@@ -965,78 +964,176 @@ impl<'a> Checker<'a> {
             *e = old;
             self.diags.push(Diagnostic::error(
                 "E0112",
-                format!("`{type_name}.{{ … }}` needs a string recipe body"),
-                "a checked text head is constructed from a quoted template, not another expression shape".to_string(),
-                format!("write `{type_name}.{{\"…\"}}` with interpolation holes as needed"),
+                format!("`{type_name}{{ … }}` needs a string recipe body"),
+                "a checked text type is constructed from a quoted template, not another expression shape".to_string(),
+                format!("write `{type_name}{{\"…\"}}` with interpolation holes as needed"),
                 Some(span),
             ));
             return None;
         };
 
-        let mut body = String::new();
-        for part in &parts {
-            match part {
-                StrPart::Lit(text) => body.push_str(text),
-                StrPart::Interp(..) => body.push_str("{}"),
-            }
-        }
-        let funcs = contract
-            .funcs
+        let (import_ns, leaf) = Self::split_type_name(&type_name);
+        let owner = self
+            .struct_owner_module(leaf, import_ns)
+            .unwrap_or(self.module_idx);
+        let context_items = if owner == self.module_idx {
+            self.items
+        } else {
+            self.modules
+                .and_then(|modules| modules.get(owner))
+                .map(|module| module.items.as_slice())
+                .unwrap_or(self.items)
+        };
+        let (owned_funcs, owned_globals, core_imports) = if owner == self.module_idx {
+            (
+                self.ct_funcs.clone(),
+                self.ct_globals.clone(),
+                self.core_imports.clone(),
+            )
+        } else {
+            let (funcs, _externs, globals) =
+                crate::Sema::Registration::comptime_context_from_items(context_items);
+            let imports = self
+                .modules
+                .and_then(|modules| modules.get(owner))
+                .map(|module| module.core_imports.clone())
+                .unwrap_or_else(|| self.core_imports.clone());
+            (funcs, globals, imports)
+        };
+        let funcs = owned_funcs
             .iter()
             .map(|(name, function)| (name.clone(), function))
             .collect::<std::collections::HashMap<_, _>>();
-        if let Err(diagnostic) = crate::Comptime::evaluate_text_head_check(
-            &contract.declaration.check,
+        let mut methods = std::collections::HashMap::new();
+        let mut structs = std::collections::HashMap::new();
+        let mut distinct_bases = std::collections::HashMap::new();
+        for item in context_items {
+            match item {
+                crate::AST::Item::Impl(implementation) => {
+                    for method in &implementation.methods {
+                        methods.insert(
+                            (implementation.type_name.clone(), method.name.clone()),
+                            method,
+                        );
+                    }
+                }
+                crate::AST::Item::Struct(definition) => {
+                    structs.insert(definition.name.clone(), definition);
+                    for block in &definition.trait_impls {
+                        for method in &block.methods {
+                            methods.insert(
+                                (definition.name.clone(), method.name.clone()),
+                                method,
+                            );
+                        }
+                    }
+                }
+                crate::AST::Item::Distinct(definition) => {
+                    distinct_bases.insert(definition.name.clone(), definition.base.clone());
+                }
+                _ => {}
+            }
+        }
+
+        let mut body = String::new();
+        let mut holes_valid = true;
+        for part in &mut parts {
+            match part {
+                StrPart::Lit(text) => body.push_str(text),
+                StrPart::Interp(inner, _) => {
+                    let value = (**inner).clone();
+                    let encoded = Expr::MethodCall {
+                        receiver: Box::new(Expr::Ident(type_name.clone(), span)),
+                        method: "encode_hole".to_string(),
+                        method_span: span,
+                        owner_type_args: Vec::new(),
+                        type_args: Vec::new(),
+                        args: vec![CallArg {
+                            convention: AccessConvention::Read,
+                            expr: value.clone(),
+                            span: value.span(),
+                            flags: CallArgFlags::default(),
+                            label: None,
+                            spread: false,
+                        }],
+                        recv_type: Some(type_name.clone()),
+                        resolved_ret: Some(Type::String),
+                        checked_widen: false,
+                    };
+                    match crate::Comptime::evaluate_checked_text_hole(
+                        &type_name,
+                        &value,
+                        &funcs,
+                        &methods,
+                        &structs,
+                        &distinct_bases,
+                        &owned_globals,
+                        self.ct_base_dir,
+                        &core_imports,
+                    ) {
+                        Ok(encoded_value) => body.push_str(&encoded_value),
+                        Err(diagnostic) => {
+                            self.diags.push(diagnostic);
+                            holes_valid = false;
+                        }
+                    }
+                    *part = StrPart::Interp(Box::new(encoded), crate::AST::StrFormat::Display);
+                }
+            }
+        }
+        if !holes_valid {
+            *e = Expr::Str(parts, literal_span);
+            return None;
+        }
+        if let Err(diagnostic) = crate::Comptime::evaluate_checked_text_check(
+            &type_name,
             body,
             &funcs,
-            &contract.globals,
-            &contract.base_dir,
-            &contract.core_imports,
+            &methods,
+            &structs,
+            &distinct_bases,
+            &owned_globals,
+            self.ct_base_dir,
+            &core_imports,
         ) {
             self.diags.push(diagnostic);
             *e = Expr::Str(parts, literal_span);
             return None;
         }
-        drop(funcs);
 
-        let previous_text_head_context = self.text_head_context.replace(contract);
-        let mut holes_valid = true;
+        drop(funcs);
+        drop(methods);
+        drop(structs);
+        drop(distinct_bases);
+        drop(owned_funcs);
+        drop(owned_globals);
+        drop(core_imports);
         for part in &mut parts {
             let StrPart::Interp(inner, _) = part else {
                 continue;
             };
-            let mut encoded = contract.declaration.hole.clone();
-            let value = (**inner).clone();
-            encoded.for_each_expr_mut(|node| {
-                if matches!(node, Expr::ComptimeName { name, .. } if name == "@value") {
-                    *node = value.clone();
-                }
-            });
-            let ty = self.infer(&mut encoded);
+            let ty = self.infer(inner);
             if ty != Some(Type::String) {
                 self.diags.push(Diagnostic::error(
                     "E0112",
                     "a checked text hole encoder must return String".to_string(),
-                    "every interpolation is passed through the declared head's encoder before it reaches a sink".to_string(),
-                    "make the `hole` expression return a String".to_string(),
-                    Some(encoded.span()),
+                    "every interpolation is passed through the type's pure `encode_hole` method before it reaches the checker".to_string(),
+                    "make `encode_hole` return a String".to_string(),
+                    Some(inner.span()),
                 ));
                 holes_valid = false;
-                continue;
             }
-            *part = StrPart::Interp(Box::new(encoded), crate::AST::StrFormat::Display);
         }
-        self.text_head_context = previous_text_head_context;
         if !holes_valid {
             *e = Expr::Str(parts, literal_span);
             return None;
         }
 
-        let result = crate::Sema::checked_text_type(&type_name);
+        let result = Type::Named(type_name.clone());
         *e = Expr::Call(Call {
-            name: Syntax::BUILTIN_CHECKED_TEXT_WRAP.to_string(),
+            name: type_name,
             name_span: span,
-            type_args: vec![Type::Named(type_name)],
+            type_args: Vec::new(),
             args: vec![CallArg {
                 convention: AccessConvention::Read,
                 expr: Expr::Str(parts, literal_span),
@@ -1652,7 +1749,9 @@ impl<'a> Checker<'a> {
         };
         match entry.target {
             Target::Core { module, item } => {
-                let Some(alias) = self.text_head_core_alias(module) else {
+                let Some(alias) = crate::Sema::Prelude::core_alias_for(self.core_imports, module)
+                    .map(str::to_owned)
+                else {
                     return;
                 };
                 let old = std::mem::replace(e, Expr::Absent(span));
@@ -1812,6 +1911,39 @@ impl<'a> Checker<'a> {
         };
         if let Some(replacement) = contextual_variant {
             *e = replacement;
+        }
+    }
+
+    /// A direct valueless call is a legal effectful Result-handler branch when
+    /// the handler itself is used as a statement. Ordinary expression calls
+    /// still use `infer`, so a value-producing call keeps its normal type and
+    /// ownership checks. This is the same call checker used by statement
+    /// position; the handler adds no carrier or runtime operation.
+    fn infer_pattern_branch_value(
+        &mut self,
+        cond: &Expr,
+        value: &mut Expr,
+    ) -> Option<Type> {
+        let result_pattern = matches!(
+            cond,
+            Expr::PatternTest {
+                pattern: crate::AST::Pattern::Ok { .. }
+                    | crate::AST::Pattern::Err { .. },
+                ..
+            }
+        );
+        if !result_pattern {
+            return self.infer(value);
+        }
+        self.normalize_contextual_expr(value);
+        let Expr::Call(call) = value else {
+            return self.infer(value);
+        };
+        self.clear_uninit_mut_args(&call.args);
+        match self.check_call(call, true) {
+            Some(Some(ty)) => Some(ty),
+            Some(None) => Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+            None => None,
         }
     }
 
@@ -2017,7 +2149,7 @@ impl<'a> Checker<'a> {
                 }
                 self.record_condition_view_bindings(cond);
                 self.check_block(then_body, false);
-                let then_ty = self.infer(then_value);
+                let then_ty = self.infer_pattern_branch_value(cond, then_value);
                 self.pop_scope();
                 for (name, at) in restore_moved {
                     self.flow.moved.set(&name, at);
@@ -2026,7 +2158,7 @@ impl<'a> Checker<'a> {
                 self.flow = before.clone();
                 self.push_scope();
                 self.check_block(else_body, false);
-                let else_ty = self.infer(else_value);
+                let else_ty = self.infer_pattern_branch_value(cond, else_value);
                 self.pop_scope();
                 let else_path = self.flow.clone();
                 // D-LIN1 / D-FACT-FLOW1: E0141 — a `#SingleUse` value consumed
@@ -2715,7 +2847,7 @@ impl<'a> Checker<'a> {
                         return self.infer_core_field(name, &module, &item, *span, *span);
                     }
                 }
-                if let Some(sig) = self.text_head_function_sig(name) {
+                if let Some(sig) = self.funcs.get(name).cloned() {
                     // D-METHODMACRO1=A: a bare top-level function name resolved here
                     // is read as a VALUE, not called (a direct call never reaches this
                     // arm — `check_call` short-circuits on a known global function
@@ -3951,8 +4083,7 @@ impl<'a> Checker<'a> {
         };
         // D-BOUND-HEAD1=A / D-UNIFYLIT1=A: a builtin typed head dispatches on
         // its canonical SOURCE spelling, but `resolve_type` rewrites `URL` to
-        // the internal `Url` nominal (and a library-declared text head to its
-        // `__JetCheckedText<…>` carrier). Read the descriptor from the written
+        // the internal `Url` nominal. Read the descriptor from the written
         // head first: resolving before the match erased `URL`'s head and left
         // the body as a bare String, which then bound to a `Url` slot.
         let head_kind = match &head {
@@ -4050,20 +4181,11 @@ impl<'a> Checker<'a> {
                     span,
                 );
             }
-            (Type::Apply { name, args }, TypedLitBody::Value(inner))
-                if name == Syntax::TYPE_CHECKED_TEXT
-                    && args.len() == 1
-                    && matches!(&args[0], Type::Named(_)) =>
+            (Type::Named(type_name), TypedLitBody::Value(inner))
+                if self.checked_text_type_name(&type_name).is_some() =>
             {
-                let Type::Named(source_name) = &args[0] else {
-                    unreachable!("checked text carrier has one nominal argument")
-                };
-                let Some((canonical, contract)) = self.text_head_contract(source_name) else {
-                    *e = *inner;
-                    return None;
-                };
                 *e = *inner;
-                return self.rewrite_declared_text_literal(e, canonical, contract, span);
+                return self.rewrite_checked_text_literal(e, type_name, span);
             }
             (_, TypedLitBody::Value(inner)) => {
                 *e = *inner;

@@ -2959,7 +2959,6 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::TypeAlias(_) // D-TYPEALIAS1: erases
             | Item::Migration(_) // D-MIGRATE1: migration is sema-only (I3)
-            | Item::StateDecl(_) // D-STATE-DECL: state-set decls erase (I3)
             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)
             | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before codegen
@@ -4281,7 +4280,6 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
             | Item::Tag(_) // D-QUAL2: tags erase
             | Item::TypeAlias(_) // D-TYPEALIAS1: erases
             | Item::Migration(_) // D-MIGRATE1: migration is sema-only (I3)
-            | Item::StateDecl(_) // D-STATE-DECL: state-set decls erase (I3)
             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
             | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)
             | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before codegen

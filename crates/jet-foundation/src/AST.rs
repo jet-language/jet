@@ -33,7 +33,7 @@ pub use items::{
     Field, FleetField, FleetFieldValue, FleetLit, Func, GenericModuleDef, GenericModuleParam,
     HostEntry, ImageField, ImageFieldValue, ImageFromRef, ImageLit, ImplDef, InlineForeign, Item,
     ItemTemplateLoop, JobCachePolicy, JobMetadata, JobScope, JobSkip, KernelMarker, KernelMode,
-    KernelProof, Marker, MarkerDecl, MarkerDeclParam, MarkerTextDecl, MaturityTag, ModuleAliasDef,
+    KernelProof, Marker, MarkerDecl, MarkerDeclParam, MaturityTag, ModuleAliasDef,
     ModuleArg, ModuleDecl, ModuleInstanceApplication, ModuleInstanceIdentity, Namespace,
     OptionEntry, Param, ParamZone, PerfLit, ProfileLit, ProtocolDecl, ProtocolDirection,
     ProtocolMessage, QuantityKind, SerdeWireShape, ServiceEntry, SourceDecl, StateDecl,

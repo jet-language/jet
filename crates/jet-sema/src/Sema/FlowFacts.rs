@@ -431,6 +431,16 @@ pub(crate) struct OriginFact {
 }
 
 impl OriginFact {
+    pub(crate) fn untracked() -> Self {
+        Self {
+            tracked: false,
+            source: None,
+            line: None,
+            column: None,
+            ambiguity: false,
+        }
+    }
+
     fn ambiguous() -> Self {
         Self {
             tracked: false,
@@ -439,6 +449,10 @@ impl OriginFact {
             column: None,
             ambiguity: true,
         }
+    }
+
+    pub(crate) fn is_readable(&self) -> bool {
+        self.tracked || self.ambiguity
     }
 }
 
@@ -450,6 +464,9 @@ impl Plane for Origin {
     fn join(left: Option<&Self::Fact>, right: Option<&Self::Fact>) -> Option<Self::Fact> {
         match (left, right) {
             (None, None) => None,
+            (Some(fact), None) | (None, Some(fact)) if !fact.is_readable() => {
+                Some(OriginFact::untracked())
+            }
             (Some(_), None) | (None, Some(_)) => Some(OriginFact::ambiguous()),
             (Some(left), Some(right)) if left == right => Some(left.clone()),
             (Some(_), Some(_)) => Some(OriginFact::ambiguous()),
@@ -906,6 +923,18 @@ mod tests {
             merged.get("value").and_then(|fact| fact.source.as_deref()),
             None
         );
+    }
+
+    #[test]
+    fn origin_join_does_not_invent_ambiguity_for_untracked_paths() {
+        let before: Facts<Origin> = Facts::new();
+        let mut then = Facts::new();
+        then.set("value", OriginFact::untracked());
+        let otherwise: Facts<Origin> = Facts::new();
+        let merged = Facts::merge_paths(&before, &[then, otherwise], &mut Vec::new());
+        let fact = merged.get("value").expect("untracked row survives the merge");
+        assert!(!fact.tracked);
+        assert!(!fact.ambiguity);
     }
 
     #[test]

@@ -443,16 +443,6 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(m.span.end);
             }
-            // D-STATE-DECL: state-set declarations are emitted verbatim (non-destructive).
-            Item::StateDecl(s) => {
-                // `StateDecl::span` starts at `state`, not at the visibility
-                // token that the top-level parser consumed first.
-                self.fmt_pub_qualifier(s.is_pub, s.is_package_pub);
-                let text = self.src[s.span.start..s.span.end].to_string();
-                self.write(&text);
-                self.newline();
-                self.skip_verbatim_comments(s.span.end);
-            }
             // D-PROTO1/D-PROTO2: protocol declarations have typed message
             // fields, so format those fields instead of copying the block.
             Item::ProtocolDecl(p) => self.fmt_protocol_decl(p),

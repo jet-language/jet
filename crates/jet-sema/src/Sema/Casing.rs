@@ -272,12 +272,6 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
             }
         }
         Item::ModuleAlias(m) => snake(&m.name, m.name_span, "module alias", out),
-        Item::StateDecl(s) => {
-            pascal(&s.type_name, s.type_name_span, "state type", out);
-            for (name, span) in &s.states {
-                pascal(name, *span, "state", out);
-            }
-        }
         Item::ProtocolDecl(p) => {
             pascal(&p.name, p.name_span, "protocol", out);
             for m in &p.messages {

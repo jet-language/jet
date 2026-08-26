@@ -3,11 +3,12 @@ use crate::Diagnostics::TextEdit;
 
 impl<'a> Parser<'a> {
     /// D-RESULT-DECON2=B: the compact exhaustive Result handler starts only
-    /// after a postfix `?` whose next token is a payload name. `?.` remains
-    /// optional chaining, and a bare `?` keeps the ordinary propagation path.
+    /// after a postfix `?`, payload name, and branch arrow. `?.` and `?(…)`
+    /// remain their existing postfix forms, while a bare `?` keeps propagation.
     pub(in crate::Parser) fn result_handler_follows(&self) -> bool {
         matches!(self.peek().kind, TokKind::Question)
             && matches!(self.peek2().kind, TokKind::Ident(_))
+            && Self::at_unified_arrow_token(&self.peek3().kind)
     }
 
     /// D-RESULT-DECON2=B: lower
@@ -19,6 +20,23 @@ impl<'a> Parser<'a> {
         &mut self,
         subject: Expr,
         question_span: Span,
+    ) -> Result<Expr, Diagnostic> {
+        let check_duplicate_failure = self.result_handler_depth == 0;
+        self.result_handler_depth += 1;
+        let result = self.parse_result_handler_inner(
+            subject,
+            question_span,
+            check_duplicate_failure,
+        );
+        self.result_handler_depth -= 1;
+        result
+    }
+
+    fn parse_result_handler_inner(
+        &mut self,
+        subject: Expr,
+        question_span: Span,
+        check_duplicate_failure: bool,
     ) -> Result<Expr, Diagnostic> {
         let (ok_binding, ok_binding_span) =
             self.expect_ident("for the success payload binding after `?`")?;
@@ -68,7 +86,7 @@ impl<'a> Parser<'a> {
         self.expect_unified_arrow("after the failure payload binding")?;
         let (err_body, err_value) = self.parse_result_handler_branch()?;
 
-        if self.result_handler_separator_ahead() {
+        if check_duplicate_failure && self.result_handler_separator_ahead() {
             return Err(Diagnostic::error(
                 "E0003",
                 "a Result handler cannot have two failure branches".to_string(),

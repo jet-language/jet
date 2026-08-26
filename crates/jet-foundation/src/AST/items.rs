@@ -54,10 +54,6 @@ pub enum Item {
     /// `migration TypeName { rename a -> b }`
     /// block — declares field renames on a `#PublishedSchema` struct.
     Migration(MigrationDecl),
-    /// D-STATE-HOME1=A (amends D-STATE-NS1): top-level state companions are
-    /// recognized only for the E0157 rewrite. Accepted source stores the one
-    /// bounded fact set in `StructDef::state`.
-    StateDecl(StateDecl),
     /// D-PROTO1 / D-PROTO2, amended by D-ARROW-CONTROL1:
     /// `protocol Name { client: Msg(…) }` declares an ordered exchange and expands (R11) into
     /// `#SingleUse` `.Client`/`.Server` handle types with typestate-checked send/recv
@@ -109,10 +105,6 @@ pub struct MarkerDecl {
     /// its declaration facts; present means the body may reject or emit
     /// checked Jet items through the same typed template model as derives.
     pub body: Option<Vec<DeriveBodyItem>>,
-    /// Retired checked-text declaration payload. New source declarations
-    /// never populate this field; it remains only while the checked-text
-    /// lowering path is removed by its owning change.
-    pub text: Option<MarkerTextDecl>,
     pub span: Span,
 }
 
@@ -126,13 +118,6 @@ pub struct UserPolicyDecl {
     pub name_span: Span,
     pub params: Vec<Param>,
     pub body: Vec<Stmt>,
-    pub span: Span,
-}
-
-#[derive(Debug, Clone)]
-pub struct MarkerTextDecl {
-    pub check: Expr,
-    pub hole: Expr,
     pub span: Span,
 }
 
@@ -850,6 +835,17 @@ pub struct TraitMethodSig {
     pub declared_return_view_provenance: Option<super::ViewProvenanceMap>,
 }
 
+impl TraitMethodSig {
+    /// Project the one Result-shaped failure carrier for a trait callable.
+    pub fn failure_contract(&self) -> super::FailureContract {
+        super::FailureContract::from_return_type(self.return_type.as_ref())
+    }
+
+    pub fn effective_return_type(&self) -> Type {
+        self.failure_contract().effective_type()
+    }
+}
+
 /// S28: `impl Trait { … }` inside a struct or enum body.
 #[derive(Debug, Clone)]
 pub struct TraitImplBlock {
@@ -1182,6 +1178,19 @@ pub struct Func {
 }
 
 impl Func {
+    /// Project the declaration into the one structured failure fact consumed
+    /// by sema, tooling, and every execution tier.
+    pub fn failure_contract(&self) -> super::FailureContract {
+        super::FailureContract::from_return_type(self.return_type.as_ref())
+    }
+
+    /// Every callable has a Result-shaped carrier. An omitted return contract
+    /// is the default `Unit ! Err` route; an explicit prefix contract remains
+    /// typed, including `!Never`.
+    pub fn effective_return_type(&self) -> Type {
+        self.failure_contract().effective_type()
+    }
+
     /// D-ENTRY-SCRIPT1=B: build the ordinary function used for a script's
     /// implicit entry. Keeping this as a normal `Func` preserves one entry
     /// mechanism through sema, TIR, AOT, JIT, and interpreter lowering.

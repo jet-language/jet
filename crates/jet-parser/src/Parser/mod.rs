@@ -78,6 +78,7 @@ fn parse_for_check_inner(
         diags: Vec::new(),
         pending_type_gt: false,
         depth: 0,
+        result_handler_depth: 0,
         type_generic_depth: 0,
         type_generic_chain: Vec::new(),
         type_generic_truncated: false,
@@ -126,6 +127,7 @@ fn parse_inner(
         diags: Vec::new(),
         pending_type_gt: false,
         depth: 0,
+        result_handler_depth: 0,
         type_generic_depth: 0,
         type_generic_chain: Vec::new(),
         type_generic_truncated: false,
@@ -257,6 +259,9 @@ struct Parser<'a> {
     pending_type_gt: bool,
     /// Current recursive parser nesting depth.
     depth: usize,
+    /// Nested compact Result handlers leave the next `!` for their caller.
+    /// Only the outermost handler diagnoses an extra failure role.
+    result_handler_depth: usize,
     /// Nesting depth inside generic type arguments (M9 E0909).
     type_generic_depth: usize,
     type_generic_chain: Vec<String>,
@@ -1553,6 +1558,7 @@ fn run() {
             diags: Vec::new(),
             pending_type_gt: false,
             depth: 0,
+            result_handler_depth: 0,
             type_generic_depth: 0,
             type_generic_chain: Vec::new(),
             type_generic_truncated: false,

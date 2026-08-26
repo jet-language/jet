@@ -196,17 +196,12 @@ fn emit_struct_command_entry(
         } else {
             format!("{param_rust}::{}", mangle(&function.name))
         };
+        let function_return_type = function.effective_return_type();
         let invoke = emit_entry_invocation(
             &callable,
             Some(&call_args),
-            function
-                .return_type
-                .as_ref()
-                .and_then(|ty| entry_error(cx, ty)),
-            function
-                .return_type
-                .as_ref()
-                .is_some_and(jet_foundation::AST::type_is_app),
+            entry_error(cx, &function_return_type),
+            jet_foundation::AST::type_is_app(&function_return_type),
             false,
             "                    ",
         );
@@ -1220,6 +1215,7 @@ pub(crate) fn emit_cli_entry_if_needed(
             output.kind == crate::AST::OutputKind::Service,
         )
     } else if let Some(run_fn) = run_fn {
+        let run_return_type = run_fn.effective_return_type();
         let params = cx.sigs.get("run").cloned().unwrap_or_else(|| {
             run_fn
                 .params
@@ -1230,14 +1226,8 @@ pub(crate) fn emit_cli_entry_if_needed(
         (
             mangle("run"),
             params,
-            run_fn
-                .return_type
-                .as_ref()
-                .and_then(|ty| entry_error(cx, ty)),
-            run_fn
-                .return_type
-                .as_ref()
-                .is_some_and(crate::AST::type_is_app),
+            entry_error(cx, &run_return_type),
+            crate::AST::type_is_app(&run_return_type),
             false,
         )
     } else {
@@ -1461,14 +1451,9 @@ fn emit_job_wrapper(
             .collect()
     });
     let callable = mangle(&function.name);
-    let entry_error = function
-        .return_type
-        .as_ref()
-        .and_then(|ty| entry_error(cx, ty));
-    let serve_app = function
-        .return_type
-        .as_ref()
-        .is_some_and(crate::AST::type_is_app);
+    let function_return_type = function.effective_return_type();
+    let entry_error = entry_error(cx, &function_return_type);
+    let serve_app = crate::AST::type_is_app(&function_return_type);
     out.push_str(&format!(
         "fn {wrapper}(__program: &str, __argv: &[String]) {{\n"
     ));
@@ -1809,18 +1794,14 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
                 for p in &f.params {
                     walk(&p.ty, seen, out_members);
                 }
-                if let Some(ret) = &f.return_type {
-                    walk(ret, seen, out_members);
-                }
+                walk(&f.effective_return_type(), seen, out_members);
             }
             Item::Impl(i) => {
                 for m in &i.methods {
                     for p in &m.params {
                         walk(&p.ty, seen, out_members);
                     }
-                    if let Some(ret) = &m.return_type {
-                        walk(ret, seen, out_members);
-                    }
+                    walk(&m.effective_return_type(), seen, out_members);
                 }
             }
             Item::CodeModule(m) => {

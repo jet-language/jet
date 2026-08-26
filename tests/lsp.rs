@@ -2945,6 +2945,54 @@ fn lsp_hover_returns_signature() {
 }
 
 #[test]
+fn lsp_hover_projects_typestate_graph_facts() {
+    let source = "struct Door {\n    state { Closed, Open, Orphan }\n}\nimpl Door {\n    #Transition(_, Closed) fn close() Door -[]> { return Door{} }\n    #Transition(Closed, Open) fn open(self: ^Door) Door -[]> { return self }\n}\nfn run() {}\n";
+    let uri = "file:///tmp/lsp_typestate_graph_test.jet";
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec!["hoverProvider".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":1,"character":13}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "state `Door.State.Closed` (nonterminal; reachable)".to_string()
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":1,"character":27}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "state `Door.State.Orphan` (terminal; unreachable)".to_string()
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
 fn lsp_late_cancel_does_not_poison_a_reused_request_id() {
     let source = "fn add(a: Int, b: Int) Int { return a + b; }\n";
     let uri = "file:///tmp/lsp_cancel_test.jet";

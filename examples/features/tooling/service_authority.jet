@@ -4,7 +4,7 @@ use core.testing as testing
 
 fn orders_worker() {}
 
-fn state_label(delivery: Delivery) String -> {
+fn state_label(delivery: ^Delivery) String -> {
     state :: delivery.status() ?? panic("status")
     if state == {
         .Pending -> { return "pending" }
@@ -28,9 +28,9 @@ fn run() {
     tree.start() ?? panic("start")
 
     first :: tree.send_durable(endpoint, "order", key: "order-1") ?? panic("first")
-    print("first:{state_label(first)}")
+    print("first:{state_label(^first)}")
     duplicate :: tree.send_durable(endpoint, "order", key: "order-1") ?? panic("duplicate")
-    print("duplicate:{state_label(duplicate)}")
+    print("duplicate:{state_label(^duplicate)}")
     delivered :: tree.receive(endpoint) ?? panic("deliver")
     print("delivered:{delivered}")
     tree.append_event("committed") ?? panic("event")

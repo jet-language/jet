@@ -107,10 +107,15 @@ pub(crate) fn context_is_member_access(src: &str, offset: usize) -> Option<Strin
         i -= 1;
     }
     if i > 0 && bytes[i - 1] == b'.' {
-        // Find the word before the `.`
+        // Find the dotted receiver before the `.`. This keeps `Door.State`
+        // intact so the nested typestate owner is a real completion scope.
         i -= 1;
         let end = i;
-        while i > 0 && (bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_') {
+        while i > 0
+            && (bytes[i - 1].is_ascii_alphanumeric()
+                || bytes[i - 1] == b'_'
+                || bytes[i - 1] == b'.')
+        {
             i -= 1;
         }
         if i < end {
@@ -317,23 +322,36 @@ pub(crate) fn compute_completions(
     }
 
     // Member completion: `expr.`
-    if let Some((receiver_name, prefix)) = context_is_compiler_fact_access(src, offset) {
-        let is_type = db.defs.iter().any(|def| {
-            def.name == receiver_name
-                && matches!(&def.kind, SymKind::Struct { .. } | SymKind::Type { .. })
-        }) || receiver_name
-            .chars()
-            .next()
-            .is_some_and(|character| character.is_ascii_uppercase());
-        if is_type && Syntax::COMPILER_FACT_LAYOUT.starts_with(&prefix) {
-            items.push(CompletionItem {
-                label: Syntax::COMPILER_FACT_LAYOUT.to_string(),
-                kind: ck::PROPERTY,
-                detail: Some(format!("compiler fact: {}", Syntax::TYPE_LAYOUT_INFO)),
-                documentation: Some(
+    if let Some((_receiver_name, prefix)) = context_is_compiler_fact_access(src, offset) {
+        for fact in Syntax::fact_read_members().filter(|fact| fact.starts_with(&prefix)) {
+            let detail = match fact.as_str() {
+                Syntax::COMPILER_FACT_LAYOUT => {
+                    format!("compiler fact: {}", Syntax::TYPE_LAYOUT_INFO)
+                }
+                Syntax::COMPILER_FACT_ORIGIN => "compiler fact: OriginInfo?".to_string(),
+                _ => {
+                    let kind = Syntax::fact_read_kind(&fact)
+                        .and_then(|read| read.reflection_kind())
+                        .unwrap_or("typed");
+                    format!("compiler fact: {kind}")
+                }
+            };
+            let documentation = match fact.as_str() {
+                Syntax::COMPILER_FACT_LAYOUT => {
                     "Focused layout facts; byte values remain unknown when the target layout is not guaranteed."
-                        .to_string(),
-                ),
+                        .to_string()
+                }
+                Syntax::COMPILER_FACT_ORIGIN => {
+                    "Optional tracked origin, derived from sema flow; movement and ambiguity are never reconstructed at runtime."
+                        .to_string()
+                }
+                _ => format!("Registered compiler fact {}.", fact),
+            };
+            items.push(CompletionItem {
+                label: fact,
+                kind: ck::PROPERTY,
+                detail: Some(detail),
+                documentation: Some(documentation),
                 insert_text: None,
                 insert_text_format: 1,
                 auto_import: None,
@@ -374,6 +392,18 @@ pub(crate) fn compute_completions(
                         semantic_owner(ty)
                     }
                     _ => None,
+                })
+                .or_else(|| {
+                    let anchor = jet_semindex::SemanticVisibilityAnchor {
+                        module_path: current_path,
+                        offset: Some(offset),
+                        session_top_level: false,
+                    };
+                    (!db
+                        .symbols
+                        .complete_visible_at("", Some(&receiver_name), anchor)
+                        .is_empty())
+                    .then_some(receiver_name.clone())
                 })
         };
         if let Some(owner) = owner {

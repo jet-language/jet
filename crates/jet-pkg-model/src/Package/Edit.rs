@@ -344,7 +344,22 @@ fn remove_from_block(raw: &str, key: &str, name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::block_line_range;
+    use super::{add_authority_hold, block_line_range};
+
+    #[test]
+    fn authority_hold_edit_preserves_comments_and_reparses() {
+        let raw = "name: \"app\"\nversion: \"0.1.0\"\n\n// keep this review note\nauthority: .{\n    holds: .{ allow: [FS] },\n}\n";
+        let updated = add_authority_hold(raw, "Net");
+
+        assert!(updated.contains("// keep this review note"));
+        assert!(updated.contains("allow: [FS, Net]"));
+        let facts = crate::PackageFacts::parse(&updated, "package.jet")
+            .expect("the comment-preserving authority edit must remain valid");
+        assert_eq!(
+            facts.authority.holds.allow,
+            Some(vec!["FS".to_string(), "Net".to_string()])
+        );
+    }
 
     #[test]
     fn block_line_range_checks_started_state_for_hostile_nesting() {

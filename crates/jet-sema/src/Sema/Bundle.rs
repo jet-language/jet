@@ -1052,7 +1052,6 @@ fn builtin_type_registry() -> TypeRegistry {
     );
     TypeRegistry {
         types,
-        text_heads: HashMap::new(),
         unit_types,
         unit_facts,
         literal_facts: HashMap::new(),
@@ -1400,31 +1399,6 @@ fn declare_item_names_scoped(
                 }
             }
         }
-        Item::StateDecl(state) => {
-            let visibility = NameVisibility::from_flags(state.is_pub, state.is_package_pub);
-            let state_name = scoped_name(name_prefix, &state.type_name);
-            let state_path = scoped_path(path_prefix, &state.type_name);
-            declare_name(
-                ledger,
-                module,
-                state_name.clone(),
-                state_path.clone(),
-                "state",
-                state.type_name_span,
-                visibility,
-            );
-            for (name, span) in &state.states {
-                declare_name(
-                    ledger,
-                    module,
-                    format!("{state_name}.State.{name}"),
-                    format!("{state_path}.State.{name}"),
-                    "state",
-                    *span,
-                    visibility,
-                );
-            }
-        }
         Item::ProtocolDecl(protocol) => {
             let visibility = NameVisibility::from_flags(protocol.is_pub, protocol.is_package_pub);
             declare_name(
@@ -1435,19 +1409,6 @@ fn declare_item_names_scoped(
                 "protocol",
                 protocol.name_span,
                 visibility,
-            );
-        }
-        Item::MarkerDecl(declaration) if declaration.text.is_some() => {
-            // D-BOUND-SINK1=A: a checked text head is a public nominal library
-            // type even though ordinary marker declarations are not types.
-            declare_name(
-                ledger,
-                module,
-                scoped_name(name_prefix, &declaration.name),
-                scoped_path(path_prefix, &declaration.name),
-                "checked_text_head",
-                declaration.name_span,
-                NameVisibility::Public,
             );
         }
         _ => {}
@@ -1461,6 +1422,161 @@ fn declare_item_names(
     item: &Item,
 ) {
     declare_item_names_scoped(ledger, module, module_alias, None, item);
+}
+
+fn state_marker_path(expr: &Expr) -> Option<(String, Span)> {
+    match expr {
+        Expr::Ident(name, span) => Some((name.clone(), *span)),
+        Expr::Field(base, member, span) => {
+            Some((format!("{}.{}", state_marker_path(base)?.0, member), *span))
+        }
+        _ => None,
+    }
+}
+
+fn record_state_marker_references_for_method(
+    ledger: &mut jet_foundation::Names::NameLedger,
+    module_idx: usize,
+    source_module: &str,
+    owner: &str,
+    method: &Func,
+) {
+    for marker in &method.markers {
+        let slots: &[usize] = match marker.name.as_str() {
+            Syntax::KW_STATE => &[0],
+            Syntax::KW_TRANSITION => &[0, 1],
+            _ => &[],
+        };
+        for &slot in slots {
+            let Some((raw, span)) = marker.args.get(slot).and_then(state_marker_path) else {
+                continue;
+            };
+            if raw == crate::Syntax::STATE_ENTRY {
+                continue;
+            }
+            let leaf = raw.rsplit('.').next().unwrap_or(raw.as_str());
+            let candidates = [
+                if raw.contains(".State.") {
+                    raw.clone()
+                } else {
+                    format!("{owner}.State.{raw}")
+                },
+                format!("{owner}.State.{leaf}"),
+            ];
+            let Some(candidate) = candidates
+                .iter()
+                .find(|candidate| ledger.declaration(module_idx, candidate).is_some())
+            else {
+                continue;
+            };
+            let Some(declaration) = ledger.declaration(module_idx, candidate) else {
+                continue;
+            };
+            let target_module = declaration.module;
+            ledger.record_reference(
+                source_module.to_string(),
+                span.start,
+                span.end,
+                jet_foundation::Names::NameReference {
+                    module_path: ledger
+                        .module_path(target_module)
+                        .unwrap_or(source_module)
+                        .to_string(),
+                    kind: "state".to_string(),
+                    def_span: declaration.span,
+                    semantic_identity: ledger.semantic_identity(target_module, candidate),
+                },
+            );
+        }
+    }
+}
+
+fn record_state_marker_references_in_items(
+    ledger: &mut jet_foundation::Names::NameLedger,
+    module_idx: usize,
+    source_module: &str,
+    items: &[Item],
+    prefix: Option<&str>,
+) {
+    for item in items {
+        match item {
+            Item::Struct(definition) => {
+                let owner = scoped_name(prefix, &definition.name);
+                for method in &definition.methods {
+                    record_state_marker_references_for_method(
+                        ledger,
+                        module_idx,
+                        source_module,
+                        &owner,
+                        method,
+                    );
+                }
+                for implementation in &definition.trait_impls {
+                    for method in &implementation.methods {
+                        record_state_marker_references_for_method(
+                            ledger,
+                            module_idx,
+                            source_module,
+                            &owner,
+                            method,
+                        );
+                    }
+                }
+            }
+            Item::Impl(implementation) => {
+                let owner = scoped_name(prefix, &implementation.type_name);
+                for method in &implementation.methods {
+                    record_state_marker_references_for_method(
+                        ledger,
+                        module_idx,
+                        source_module,
+                        &owner,
+                        method,
+                    );
+                }
+            }
+            Item::Enum(definition) => {
+                let owner = scoped_name(prefix, &definition.name);
+                for method in &definition.methods {
+                    record_state_marker_references_for_method(
+                        ledger,
+                        module_idx,
+                        source_module,
+                        &owner,
+                        method,
+                    );
+                }
+            }
+            Item::CodeModule(module) => {
+                let module_name = scoped_name(prefix, &module.name);
+                if let Some(body) = &module.body {
+                    record_state_marker_references_in_items(
+                        ledger,
+                        module_idx,
+                        source_module,
+                        body,
+                        Some(&module_name),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+pub(crate) fn record_state_marker_references(
+    bundle: &ProgramBundle,
+    ledger: &mut jet_foundation::Names::NameLedger,
+) {
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        record_state_marker_references_in_items(
+            ledger,
+            module_idx,
+            &module.display,
+            &module.items,
+            None,
+        );
+    }
 }
 
 fn populate_name_ledger(

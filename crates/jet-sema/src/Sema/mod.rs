@@ -89,6 +89,18 @@ pub(crate) struct MethodSig {
     pub(crate) return_view_provenance: crate::AST::ViewProvenanceCell,
 }
 
+impl MethodSig {
+    /// Keep method calls on the same shared callable failure projection as
+    /// free functions and trait methods.
+    pub(crate) fn failure_contract(&self) -> crate::AST::FailureContract {
+        crate::AST::FailureContract::from_return_type(self.return_type.as_ref())
+    }
+
+    pub(crate) fn effective_return_type(&self) -> Type {
+        self.failure_contract().effective_type()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum TypeDef {
     Struct {
@@ -242,9 +254,6 @@ impl UnitFact {
 
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
-    /// D-BOUND-SINK1=A: source-declared checked text head contracts. The
-    /// nominal type is erased to `String` only after its encoder is checked.
-    text_heads: HashMap<String, TextHeadContract>,
     /// D-QUANTITY-PRINT1: all concrete types minted by `#UnitFamily`.
     unit_types: HashSet<String>,
     /// #603: the one normalized source of truth for concrete unit conversion,
@@ -265,39 +274,9 @@ pub(crate) struct TypeRegistry {
     field_defaults: HashMap<String, HashMap<String, crate::AST::Expr>>,
 }
 
-pub(crate) fn checked_text_type(name: &str) -> crate::AST::Type {
-    crate::AST::Type::Apply {
-        name: crate::Syntax::TYPE_CHECKED_TEXT.to_string(),
-        args: vec![crate::AST::Type::Named(name.to_string())],
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct TextHeadContract {
-    pub(crate) declaration: crate::AST::MarkerTextDecl,
-    pub(crate) funcs: HashMap<String, Func>,
-    pub(crate) sigs: HashMap<String, crate::AST::FuncSig>,
-    pub(crate) type_params: HashMap<String, Vec<crate::AST::TypeParam>>,
-    pub(crate) globals: HashMap<String, crate::Comptime::CtValue>,
-    pub(crate) core_imports: HashMap<String, String>,
-    pub(crate) base_dir: std::path::PathBuf,
-}
-
 impl TypeRegistry {
     pub(crate) fn contains(&self, name: &str) -> bool {
-        self.types.contains_key(name) || self.text_heads.contains_key(name)
-    }
-
-    pub(crate) fn text_head(&self, name: &str) -> Option<&TextHeadContract> {
-        self.text_heads.get(name)
-    }
-
-    pub(crate) fn register_text_head(
-        &mut self,
-        name: impl Into<String>,
-        contract: TextHeadContract,
-    ) {
-        self.text_heads.insert(name.into(), contract);
+        self.types.contains_key(name)
     }
 
     /// A struct the user declared, so codegen emits a `__jet_<Name>` Rust type
@@ -1507,10 +1486,6 @@ pub(crate) struct Checker<'a> {
     module_idx: usize,
     imports: &'a HashMap<String, usize>,
     core_imports: &'a HashMap<String, String>,
-    /// D-BOUND-SINK1=A: the declaring module's namespace while a library-owned
-    /// hole encoder is checked in a consumer. Consumer locals remain ordinary
-    /// checker lookups; only contract-owned names use this overlay.
-    text_head_context: Option<&'a TextHeadContract>,
     /// D-MOD2: inline code module aliases in scope (alias → module name).
     code_modules: &'a HashMap<String, String>,
     code_module_identities: &'a HashMap<String, String>,

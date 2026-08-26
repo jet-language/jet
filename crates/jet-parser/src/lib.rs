@@ -195,6 +195,7 @@ mod generic_module_tests {
                     Expr::If {
                         cond: err_cond,
                         then_body,
+                        then_value,
                         ..
                     } if matches!(
                         err_cond.as_ref(),
@@ -202,7 +203,11 @@ mod generic_module_tests {
                             pattern: Pattern::Err { binding, .. },
                             ..
                         } if binding == "error"
-                    ) && then_body.len() == 1
+                    ) && then_body.is_empty()
+                        && matches!(
+                            then_value.as_ref(),
+                            Expr::Call(call) if call.name == "print"
+                        )
                 )
         ));
     }

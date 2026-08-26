@@ -723,6 +723,63 @@ fn tool_profile_reports_drift_without_prompt_and_yes_moves_pin() {
     assert_eq!(String::from_utf8_lossy(&tool.stdout).trim(), "omp version one");
 }
 
+#[cfg(unix)]
+#[test]
+fn managed_tool_projection_write_failure_is_registered_and_actionable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = Scratch::new("tool-write-root");
+    let project = Scratch::new("tool-write-project");
+    let fixtures = Scratch::new("tool-write-fixtures");
+    let home = Scratch::new("tool-write-home");
+    write_native_omp_fixture(&fixtures.path, "1.0.0", "#!/bin/sh\necho omp version one\n");
+
+    let installed = jetpack()
+        .args([
+            "tool",
+            "install",
+            "omp@releases#1.0.0",
+            "--no-color",
+            "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        installed.status.success(),
+        "install failed: {}",
+        String::from_utf8_lossy(&installed.stderr)
+    );
+
+    let bin_dir = home.join(".jet/bin");
+    let mut permissions = fs::metadata(&bin_dir).unwrap().permissions();
+    let original_mode = permissions.mode();
+    permissions.set_mode(original_mode & !0o222);
+    fs::set_permissions(&bin_dir, permissions).unwrap();
+
+    let failed = jetpack()
+        .args(["tool", "uninstall", "omp", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    fs::set_permissions(&bin_dir, fs::Permissions::from_mode(original_mode)).unwrap();
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert_eq!(failed.status.code(), Some(2), "stderr: {stderr}");
+    assert!(stderr.contains("Error [E1340]"), "stderr: {stderr}");
+    assert!(stderr.contains("managed tool `omp`"), "stderr: {stderr}");
+    assert!(stderr.contains("managed by jetpack"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("jetpack update tools -y"),
+        "stderr: {stderr}"
+    );
+}
+
 #[test]
 fn declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_generation() {
     let (base, _project, root) = core_hello_project("user-tools-declarative");

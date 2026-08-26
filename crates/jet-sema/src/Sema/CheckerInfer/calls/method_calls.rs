@@ -629,15 +629,11 @@ impl<'a> Checker<'a> {
             if let (Some(type_name), false) = (type_name, shadowed) {
                 let is_builtin =
                     Syntax::typed_head_kind(&type_name).is_some_and(|kind| kind.is_typed_text());
-                let declared = self.text_head_contract(&type_name);
                 let checked = self.checked_text_type_name(&type_name);
                 let is_checked = checked.is_some();
-                if is_builtin || declared.is_some() || is_checked {
+                if is_builtin || is_checked {
                     let result = checked
                         .map(|(canonical, _)| Type::Named(canonical))
-                        .or_else(|| {
-                            declared.map(|(canonical, _)| crate::Sema::checked_text_type(&canonical))
-                        })
                         .unwrap_or_else(|| Type::Named(type_name.clone()));
                     *resolved_ret_out = Some(result.clone());
                     if args.len() != 1 {
@@ -802,7 +798,7 @@ impl<'a> Checker<'a> {
         // for real submodules (e.g. `core.encoding.json`), never plain field access.
         if let Expr::Field(base, leaf, _) = &**receiver {
             if let Expr::Ident(alias, alias_span) = &**base {
-                if let Some(ns) = self.text_head_core_import(alias) {
+                if let Some(ns) = self.core_imports.get(alias).cloned() {
                     self.record_import_alias_reference(alias, *alias_span);
                     if ns == "core.net.tls" && leaf == "ClientConfig" && method == "default" {
                         if !args.is_empty() {
@@ -1362,7 +1358,7 @@ impl<'a> Checker<'a> {
             return ret;
         }
         if let Expr::Ident(alias, alias_span) = &**receiver {
-            if let Some(module) = self.text_head_core_import(alias) {
+            if let Some(module) = self.core_imports.get(alias).cloned() {
                 let ret = self.infer_core_call(
                     &module,
                     method,
@@ -4791,7 +4787,7 @@ impl<'a> Checker<'a> {
                             self.infer(&mut arg.expr);
                             self.expected_type = old;
                         }
-                        let ret = msig.return_type.clone();
+                        let ret = Some(msig.effective_return_type());
                         *resolved_ret_out = ret.clone();
                         return ret;
                     }
@@ -5364,7 +5360,7 @@ impl<'a> Checker<'a> {
         }
         // D-APILABEL1=A: bind before inference — see `bind_method_args`.
         if !self.bind_method_args(method, &msig, args, span) {
-            let ret = msig.return_type.clone().map(|t| self.resolve_type(t));
+            let ret = Some(self.resolve_type(msig.effective_return_type()));
             *resolved_ret_out = ret.clone();
             return ret;
         }
@@ -5443,7 +5439,7 @@ impl<'a> Checker<'a> {
             pre_inferred_method.as_deref(),
             Some(call_access),
         )?;
-        let ret = msig.return_type.clone().map(|t| self.resolve_type(t));
+        let ret = Some(self.resolve_type(msig.effective_return_type()));
         *resolved_ret_out = ret.clone();
         ret
     }

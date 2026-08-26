@@ -24,6 +24,139 @@ use crate::AST::{ImportKind, Item, ProgramBundle};
 use jet_foundation::Authority::{answer, parse_right, root as effect_root, Holds, Verdict};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+/// The application-boundary view of one checked program.
+///
+/// Keep the four roles separate. `required_effects` is a sema fact;
+/// `granted_effects` and `denied_effects` are policy facts; `authority` names
+/// the source of that policy. Consumers must not infer one role from another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectProjection {
+    pub required_effects: EffectSet,
+    pub granted_effects: EffectSet,
+    pub denied_effects: EffectSet,
+    pub authority: String,
+}
+
+impl EffectProjection {
+    /// Required effects with no policy verdict at the application boundary.
+    pub fn undecided(&self) -> EffectSet {
+        let empty = Holds::new();
+        self.required_effects
+            .iter()
+            .filter(|effect| {
+                answer(&self.granted_effects, &self.denied_effects, effect)
+                    == Verdict::Missing
+                    && answer(&empty, &self.denied_effects, effect) != Verdict::Denied
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub fn is_allowed(&self) -> bool {
+        self.undecided().is_empty()
+            && self
+                .required_effects
+                .iter()
+                .all(|effect| answer(&self.granted_effects, &self.denied_effects, effect) != Verdict::Denied)
+    }
+}
+
+fn policy_effects(names: impl IntoIterator<Item = String>) -> EffectSet {
+    names
+        .into_iter()
+        .filter_map(|name| parse_right(&name))
+        .collect()
+}
+
+/// Project the application policy without changing the sema effect fact.
+///
+/// The package manifest is optional for single-file programs. Such programs
+/// retain an explicit `application default` authority identity so JSON and
+/// inspect consumers can distinguish absent policy from an empty grant.
+pub fn project_application_effects(
+    required_effects: &EffectSet,
+    manifest: Option<&PackageFacts>,
+) -> EffectProjection {
+    let Some(manifest) = manifest else {
+        return EffectProjection {
+            required_effects: required_effects.clone(),
+            granted_effects: EffectSet::new(),
+            denied_effects: EffectSet::new(),
+            authority: "application default".to_string(),
+        };
+    };
+
+    let granted_effects = manifest
+        .authority
+        .holds
+        .allow
+        .clone()
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let denied_effects = manifest
+        .authority
+        .holds
+        .deny
+        .clone()
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+
+    EffectProjection {
+        required_effects: required_effects.clone(),
+        granted_effects: policy_effects(granted_effects),
+        denied_effects: policy_effects(denied_effects),
+        authority: "package.jet authority.holds".to_string(),
+    }
+}
+
+/// Compute the application-boundary projection from the exact selected entry
+/// rather than the broader per-package provenance aggregate.
+pub fn project_program_effects(
+    bundle: &ProgramBundle,
+    summaries: &HashMap<String, EffectSummary>,
+    default_entry: &str,
+    manifest: Option<&PackageFacts>,
+) -> EffectProjection {
+    project_application_effects(&program_effects(bundle, summaries, default_entry), manifest)
+}
+
+/// Structured authority failure for JSON, redirected, and non-interactive
+/// invocations. The same code covers denial and missing policy; the role rows
+/// in the message keep the distinction explicit for machine consumers.
+pub fn application_policy_diagnostic(
+    projection: &EffectProjection,
+    denied: &EffectSet,
+) -> Diagnostic {
+    let missing = projection.undecided();
+    let denied_text = if denied.is_empty() {
+        "none".to_string()
+    } else {
+        crate::Sema::show_set(denied)
+    };
+    let missing_text = if missing.is_empty() {
+        "none".to_string()
+    } else {
+        crate::Sema::show_set(&missing)
+    };
+    let required_text = crate::Sema::show_set(&projection.required_effects);
+    Diagnostic::error(
+        "E1803",
+        if denied.is_empty() {
+            format!("application authority is undecided for `{missing_text}`")
+        } else {
+            format!("application authority denies `{denied_text}`")
+        },
+        format!(
+            "required_effects={required_text}; denied_effects={denied_text}; undecided_effects={missing_text}; authority={}",
+            projection.authority
+        ),
+        "declare the effect in `authority.holds.allow`, deny it deliberately, or approve it once or for the project in an interactive terminal".to_string(),
+        None,
+    )
+}
+
 fn is_memory_right(name: &str) -> bool {
     name == "Mem.Rc" || crate::Sema::memory_allocation_bound(name).is_some()
 }
@@ -310,6 +443,51 @@ pub fn summary_json_for_program(
     render_effect_json(&program_effects(bundle, summaries, default_entry))
 }
 
+/// Human application-boundary summary with explicit policy roles.
+pub fn summary_line_for_program_with_authority(
+    bundle: &ProgramBundle,
+    summaries: &HashMap<String, EffectSummary>,
+    default_entry: &str,
+    manifest: Option<&PackageFacts>,
+) -> String {
+    let projection = project_application_effects(
+        &program_effects(bundle, summaries, default_entry),
+        manifest,
+    );
+    format!(
+        "required effects: {}; granted effects: {}; denied effects: {}; authority: {}",
+        render_effect_names(&projection.required_effects),
+        render_effect_names(&projection.granted_effects),
+        render_effect_names(&projection.denied_effects),
+        projection.authority,
+    )
+}
+
+pub fn render_effect_projection_line(projection: &EffectProjection) -> String {
+    format!(
+        "required effects: {}; granted effects: {}; denied effects: {}; authority: {}",
+        render_effect_names(&projection.required_effects),
+        render_effect_names(&projection.granted_effects),
+        render_effect_names(&projection.denied_effects),
+        projection.authority,
+    )
+}
+
+/// Machine application-boundary summary. The legacy `effects` field remains
+/// for existing consumers; the role-specific fields are the canonical view
+/// for new CLI, inspect, and Canvas consumers.
+pub fn summary_json_for_program_with_authority(
+    bundle: &ProgramBundle,
+    summaries: &HashMap<String, EffectSummary>,
+    default_entry: &str,
+    manifest: Option<&PackageFacts>,
+) -> String {
+    render_effect_projection_json(&project_application_effects(
+        &program_effects(bundle, summaries, default_entry),
+        manifest,
+    ))
+}
+
 fn render_effect_line(effects: &EffectSet) -> String {
     if effects.is_empty() {
         "effects: none".to_string()
@@ -325,6 +503,14 @@ fn render_effect_line(effects: &EffectSet) -> String {
     }
 }
 
+fn render_effect_names(effects: &EffectSet) -> String {
+    if effects.is_empty() {
+        "none".to_string()
+    } else {
+        effects.iter().map(String::as_str).collect::<Vec<_>>().join(", ")
+    }
+}
+
 fn render_effect_json(effects: &EffectSet) -> String {
     let effects = effects
         .iter()
@@ -336,6 +522,36 @@ fn render_effect_json(effects: &EffectSet) -> String {
         true,
         "build.effects",
         &format!(",\"effects\":[{effects}]"),
+    )
+}
+
+pub fn render_effect_projection_json(projection: &EffectProjection) -> String {
+    let required = projection
+        .required_effects
+        .iter()
+        .map(|effect| jet_foundation::JSON::quote(effect))
+        .collect::<Vec<_>>()
+        .join(",");
+    let granted = projection
+        .granted_effects
+        .iter()
+        .map(|effect| jet_foundation::JSON::quote(effect))
+        .collect::<Vec<_>>()
+        .join(",");
+    let denied = projection
+        .denied_effects
+        .iter()
+        .map(|effect| jet_foundation::JSON::quote(effect))
+        .collect::<Vec<_>>()
+        .join(",");
+    jet_foundation::Report::render_status_json(
+        "ok",
+        true,
+        "build.effects",
+        &format!(
+            ",\"effects\":[{required}],\"required_effects\":[{required}],\"granted_effects\":[{granted}],\"denied_effects\":[{denied}],\"authority\":{}",
+            jet_foundation::JSON::quote(&projection.authority),
+        ),
     )
 }
 
@@ -556,5 +772,36 @@ mod tests {
             summary_json_for_entry(&summaries, "run")
                 .contains("\"action\":\"build.effects\"")
         );
+    }
+
+    #[test]
+    fn application_projection_keeps_required_granted_denied_and_authority_distinct() {
+        let mut manifest = PackageFacts::default();
+        manifest.authority.holds.allow = Some(vec!["FS".to_string()]);
+        manifest.authority.holds.deny = Some(vec!["Panic".to_string()]);
+        manifest.authority.grants = vec![("netdep".to_string(), vec!["Net".to_string()])];
+        let required = EffectSet::from([
+            "FS.Read".to_string(),
+            "Net".to_string(),
+            "Panic".to_string(),
+        ]);
+
+        let projection = project_application_effects(&required, Some(&manifest));
+        assert_eq!(projection.required_effects, required);
+        assert!(projection.granted_effects.contains("FS"));
+        assert!(!projection.granted_effects.contains("Net"));
+        assert!(projection.denied_effects.contains("Panic"));
+        assert_eq!(projection.authority, "package.jet authority.holds");
+        assert!(projection.undecided().contains("Net"));
+
+        let json = render_effect_projection_json(&projection);
+        for field in [
+            "required_effects",
+            "granted_effects",
+            "denied_effects",
+            "authority",
+        ] {
+            assert!(json.contains(&format!("\"{field}\"")), "missing {field}: {json}");
+        }
     }
 }

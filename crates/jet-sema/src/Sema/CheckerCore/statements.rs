@@ -421,6 +421,310 @@ impl<'a> Checker<'a> {
         self.leave_source_nesting();
     }
 
+    pub(crate) fn check_return_expr(
+        &mut self,
+        expr: &mut Option<Expr>,
+        span: &crate::Diagnostics::Span,
+        return_type: Option<Type>,
+    ) {
+        // D-ENC-DYN1=A+: the declared return type may be a `Data` alias
+        // (`JSON`/`TOML`/…); canonicalize it so it unifies with the returned value.
+        let resolved_ret = return_type
+            .or_else(|| self.ret.clone())
+            .map(|t| self.resolve_type(t));
+        // D-STREAMYIELD1: a generator (`Stream<T> ->`) yields values; `return`
+        // only ever ends the stream early — bare `return;` is fine, `return
+        // value;` is E0806 (a generator body yields, it doesn't return a value).
+        if let Some(Type::Apply { name, args }) = &resolved_ret {
+            if name == Syntax::TYPE_STREAM && args.len() == 1 {
+                if let Some(e) = expr {
+                    self.infer(e);
+                    self.diags.push(Diagnostic::error(
+                                    "E0806",
+                                    format!("`{}` yields values, so `return` can't carry one", self.fn_name),
+                                    "a generator body produces values with `yield`; `return` only ends the stream early".to_string(),
+                                    "write `yield ...;` to hand back a value, or a bare `return;` to end the stream".to_string(),
+                                    Some(e.span()),
+                                ));
+                }
+                return;
+            }
+        }
+        match (&mut *expr, resolved_ret) {
+            (Some(e), Some(rt)) => {
+                // A direct `return value?` in a fallible function returns
+                // the propagated success value. Desugar it through the
+                // existing `Ok` constructor so inference checks the success
+                // payload while `infer_try` still records the error conversion.
+                if matches!(&rt, Type::Result { .. }) && matches!(e.without_parens(), Expr::Try(..))
+                {
+                    let span = e.span();
+                    let inner = std::mem::replace(e, Expr::Absent(span));
+                    *e = Expr::Ok(Box::new(inner), span);
+                }
+                let string_view_return = matches!(
+                    &rt,
+                    Type::Apply { name, args }
+                        if name == "View"
+                            && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
+                );
+                // D-SHAPE-PLACE1=A: a bare maximal place is a read
+                // window. At a named `View<T>` return boundary, make
+                // that local acquisition explicit in the AST before
+                // inference; E2305 then checks today's provenance gate.
+                let bare_place_return = {
+                    let transparent = e.without_parens();
+                    matches!(&rt, Type::Apply { name, .. } if name == "View")
+                        && !string_view_return
+                        && !matches!(transparent, Expr::Copy(..) | Expr::Place(..))
+                        && self.place_from_expr(transparent).is_some()
+                };
+                if bare_place_return {
+                    let span = e.span();
+                    let inner = std::mem::replace(e, Expr::Absent(span));
+                    *e = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
+                }
+                let saved_expected = self.expected_type.clone();
+                self.expected_type = Some(rt.clone());
+                // Spawned task returns are checked separately by E1102.
+                self.borrow_ctx = self.is_task_spawn;
+                let saved_string_view_read = self.allow_string_view_read;
+                if string_view_return {
+                    self.allow_string_view_read = true;
+                }
+                let mut et = self.infer(e);
+                self.report_lending_view_escape(e, "be returned");
+                self.allow_string_view_read = saved_string_view_read;
+                self.expected_type = saved_expected;
+                if let Some(source) = et.as_ref() {
+                    if source != &rt && source.numeric_widening_to(&rt).is_some() {
+                        let source = source.clone();
+                        self.widen_numeric_expr(e, &source, &rt);
+                        et = Some(rt.clone());
+                    }
+                }
+                // #1164: direct `View`/`ViewMut` returns use the
+                // dedicated path below. Aggregates that contain view
+                // fields need the walk. Non-view returns must not
+                // re-check string-view idents as view escapes — the
+                // E2307 "needs owned String" path already teaches.
+                let direct_view_return = matches!(
+                    &rt,
+                    Type::Apply { name, .. }
+                        if matches!(name.as_str(), "View" | "ViewMut")
+                );
+                if !direct_view_return && self.type_contains_view_boundary(&rt) {
+                    self.check_aggregate_view_return(e);
+                }
+                // D-ALLOC2: E0631 — returning an arena `view` would let
+                // it outlive the arena (the arena drops at scope end).
+                if let Expr::Ident(n, nspan) = &*e {
+                    if self.is_arena_view(n) || self.is_fixed_backing_view(n) {
+                        self.report_view_escape(n, "be returned", *nspan);
+                    }
+                }
+                // D-DYNARRAY1: E2305 — returning a `View<T>` whose owner
+                // list is local to this function would outlive it. Two
+                // shapes: an already-bound view name (`return window`),
+                // and a fresh range place made right in the
+                // `return` (`return incidents[0..2]`) — the latter
+                // needs `view_call_source` directly.
+                if string_view_return {
+                    if let Expr::Ident(n, nspan) = &*e {
+                        if self.is_string_view(n) {
+                            self.check_named_string_view_binding_return(n, *nspan);
+                        } else {
+                            self.report_string_view_boundary(e.span());
+                        }
+                    } else {
+                        let sources: Vec<_> = self
+                            .view_call_sources(e)
+                            .into_iter()
+                            .filter(|(path, ..)| path.is_empty())
+                            .collect();
+                        if sources.is_empty() {
+                            self.report_string_view_boundary(e.span());
+                        } else {
+                            for (_, place, _, access) in sources {
+                                self.check_named_view_return(&place, access, Vec::new(), e.span());
+                            }
+                        }
+                    }
+                } else if matches!(&rt, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut"))
+                {
+                    if let Expr::Ident(n, nspan) = &*e {
+                        if self.is_list_view(n) {
+                            self.check_named_view_binding_return(n, *nspan);
+                        } else {
+                            self.report_view_return_boundary(e.span());
+                        }
+                    } else {
+                        let sources: Vec<_> = self
+                            .view_call_sources(e)
+                            .into_iter()
+                            .filter(|(path, ..)| path.is_empty())
+                            .collect();
+                        if sources.is_empty() {
+                            self.report_view_return_boundary(e.span());
+                        } else {
+                            for (_, place, _, access) in sources {
+                                self.check_named_view_return(&place, access, Vec::new(), e.span());
+                            }
+                        }
+                    }
+                }
+                // D-MEM-COPYSEM1: default owning returns have already
+                // become `Expr::Copy` in `self.infer(e)`. Declared
+                // view returns still use the boundary checks above;
+                // an explicit-copy policy leaves the original read
+                // in place so its registered E2307 refusal remains.
+                // Returning a borrowed parameter would move out of a
+                // borrow in the generated Rust (I2) — require a copy.
+                self.reject_borrowed_param_subplace(
+                    e,
+                    et.as_ref(),
+                    "be returned as an owned value",
+                );
+                if et
+                    .as_ref()
+                    .is_some_and(crate::Sema::Diagnostics::contains_expiring_secret_loan)
+                {
+                    self.diags.push(Diagnostic::error(
+                        "E0201",
+                        "an ExpiringSecret loan cannot be returned".to_string(),
+                        "the callback parameter is valid only while `.with` is running".to_string(),
+                        "return a non-secret result computed from the loan".to_string(),
+                        Some(e.span()),
+                    ));
+                }
+                if let Expr::Ident(n, nspan) = &*e {
+                    if let Some(info) = self.lookup(n) {
+                        if !info.ty.is_scalar()
+                            && !matches!(
+                                &info.ty,
+                                Type::Named(name)
+                                    if self
+                                        .type_param_scope
+                                        .iter()
+                                        .any(|param| &param.name == name)
+                            )
+                            && matches!(
+                                info.param_conv,
+                                Some(AccessConvention::Read) | Some(AccessConvention::Write)
+                            )
+                        {
+                            let display_type = self.display_type(&info.ty).name();
+                            self.diags.push(Diagnostic::error(
+                                            "E0120",
+                                            format!(
+                                                "`{}` was not moved here, so it cannot be returned as-is",
+                                                n
+                                            ),
+                                            "this function has read access only and does not own the value"
+                                                .to_string(),
+                                            format!(
+                                                "return a copy: `return {}{};` — or take ownership with the move marker `^`: `{}: {}{}`. \
+                                                 There's no borrow-return in v1 — to share the value without a full \
+                                                 copy, store an owned field, or reach for `Shared<T>`/`Id<T>` \
+                                                 once a real program needs shared ownership",
+                                                Syntax::SIGIL_COPY,
+                                                n,
+                                                n,
+                                                Syntax::SIGIL_MOVE,
+                                                display_type
+                                            ),
+                                            Some(*nspan),
+                                        ));
+                        }
+                    }
+                }
+                if !string_view_return {
+                    self.note_move_if_direct_ident(e);
+                }
+                if let Some(et) = et {
+                    let http_handler_lambda = matches!(
+                        (&rt, &et),
+                        (Type::Named(name), Type::Fn { params, ret: Some(ret), .. })
+                            if name == "HTTPHandler"
+                                && params == &vec![Type::Named("HTTPRequest".to_string())]
+                                && ret.as_ref() == &Type::Result {
+                                    ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                                    err: Box::new(Type::Named("HTTPError".to_string())),
+                                }
+                    );
+                    let string_view_compatible = string_view_return && et == Type::String;
+                    let union_member_widen = matches!(
+                        &rt,
+                        Type::Union(members) if members.iter().any(|m| m == &et)
+                    );
+                    // D-APILABEL1=A: every return contract uses
+                    // shared assignability, including qualified
+                    // nominal types.
+                    let reported = self.check_type_assignable(&rt, &et, e.span());
+                    if et != rt
+                        && !reported
+                        && !http_handler_lambda
+                        && !string_view_compatible
+                        && !union_member_widen
+                    {
+                        let display_return = self.display_type(&rt);
+                        let display_actual = self.display_type(&et);
+                        self.diags.push(Diagnostic::error(
+                            "E0113",
+                            format!(
+                                "`{}` promises to return {}, but this returns {}",
+                                self.fn_name,
+                                display_return.show(),
+                                display_actual.show()
+                            ),
+                            "the value handed back must match the declared return type".to_string(),
+                            type_fix_hint(&display_return, &display_actual),
+                            Some(e.span()),
+                        ));
+                    }
+                }
+            }
+            (Some(e), None) => {
+                let ty_name = self.infer_name_or(e, "Int");
+                self.diags.push(Diagnostic::error(
+                                "E0113",
+                                format!("`{}` doesn't return a value", self.fn_name),
+                                "a function only hands back a value if it declares a return type before `->`"
+                                    .to_string(),
+                                format!(
+                                    "remove the value (`return;`), or declare `{}` as the return type before `->`",
+                                    ty_name
+                                ),
+                                Some(e.span()),
+                            ));
+            }
+            (None, Some(rt)) => {
+                // D-FAIL-EXIT1: implicit `fn run` is `Unit Err!`.
+                // A bare `return` is successful exit, same as falling off
+                // the end of the body.
+                let fallible_void = matches!(
+                    rt,
+                    Type::Result { ref ok, .. }
+                        if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
+                );
+                if !fallible_void {
+                    self.diags.push(Diagnostic::error(
+                        "E0113",
+                        format!(
+                            "`{}` promises to return {}, but this `return` is empty",
+                            self.fn_name,
+                            rt.show()
+                        ),
+                        "the value handed back must match the declared return type".to_string(),
+                        "add the value: `return ...;`".to_string(),
+                        Some(*span),
+                    ));
+                }
+            }
+            (None, None) => {}
+        }
+    }
+
     fn check_stmt_inner(&mut self, stmt: &mut Stmt) {
         // D-CONC-SHARE1=A (card #1561): a plain field write on a
         // `Shared<T>` handle is one atomic locked step. Rewrite before the
@@ -805,7 +1109,7 @@ impl<'a> Checker<'a> {
                         // D-TRACK-ORIGIN1=A: a mutable replacement ends the
                         // old value's provenance. Do not let a later fact read
                         // report metadata from the value that was replaced.
-                        self.flow.origins.remove(name);
+                        self.clear_origin(name);
                         // D-CONC-FREEZE1=A: rebinding a local replaces its
                         // frozen proof only after the write check above.
                         // A rejected write through a frozen target keeps
@@ -1499,315 +1803,7 @@ impl<'a> Checker<'a> {
                 self.infer_fallible_stmt(close);
             }
             Stmt::Return(expr, span) => {
-                // D-ENC-DYN1=A+: the declared return type may be a `Data` alias
-                // (`JSON`/`TOML`/…); canonicalize it so it unifies with the returned value.
-                let resolved_ret = self.ret.clone().map(|t| self.resolve_type(t));
-                // D-STREAMYIELD1: a generator (`Stream<T> ->`) yields values; `return`
-                // only ever ends the stream early — bare `return;` is fine, `return
-                // value;` is E0806 (a generator body yields, it doesn't return a value).
-                if let Some(Type::Apply { name, args }) = &resolved_ret {
-                    if name == Syntax::TYPE_STREAM && args.len() == 1 {
-                        if let Some(e) = expr {
-                            self.infer(e);
-                            self.diags.push(Diagnostic::error(
-                                    "E0806",
-                                    format!("`{}` yields values, so `return` can't carry one", self.fn_name),
-                                    "a generator body produces values with `yield`; `return` only ends the stream early".to_string(),
-                                    "write `yield ...;` to hand back a value, or a bare `return;` to end the stream".to_string(),
-                                    Some(e.span()),
-                                ));
-                        }
-                        return;
-                    }
-                }
-                match (&mut *expr, resolved_ret) {
-                    (Some(e), Some(rt)) => {
-                        // A direct `return value?` in a fallible function returns
-                        // the propagated success value. Desugar it through the
-                        // existing `Ok` constructor so inference checks the success
-                        // payload while `infer_try` still records the error conversion.
-                        if matches!(&rt, Type::Result { .. })
-                            && matches!(e.without_parens(), Expr::Try(..))
-                        {
-                            let span = e.span();
-                            let inner = std::mem::replace(e, Expr::Absent(span));
-                            *e = Expr::Ok(Box::new(inner), span);
-                        }
-                        let string_view_return = matches!(
-                            &rt,
-                            Type::Apply { name, args }
-                                if name == "View"
-                                    && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str")
-                        );
-                        // D-SHAPE-PLACE1=A: a bare maximal place is a read
-                        // window. At a named `View<T>` return boundary, make
-                        // that local acquisition explicit in the AST before
-                        // inference; E2305 then checks today's provenance gate.
-                        let bare_place_return = {
-                            let transparent = e.without_parens();
-                            matches!(&rt, Type::Apply { name, .. } if name == "View")
-                                && !string_view_return
-                                && !matches!(transparent, Expr::Copy(..) | Expr::Place(..))
-                                && self.place_from_expr(transparent).is_some()
-                        };
-                        if bare_place_return {
-                            let span = e.span();
-                            let inner = std::mem::replace(e, Expr::Absent(span));
-                            *e = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
-                        }
-                        let saved_expected = self.expected_type.clone();
-                        self.expected_type = Some(rt.clone());
-                        // Spawned task returns are checked separately by E1102.
-                        self.borrow_ctx = self.is_task_spawn;
-                        let saved_string_view_read = self.allow_string_view_read;
-                        if string_view_return {
-                            self.allow_string_view_read = true;
-                        }
-                        let mut et = self.infer(e);
-                        self.report_lending_view_escape(e, "be returned");
-                        self.allow_string_view_read = saved_string_view_read;
-                        self.expected_type = saved_expected;
-                        if let Some(source) = et.as_ref() {
-                            if source != &rt && source.numeric_widening_to(&rt).is_some() {
-                                let source = source.clone();
-                                self.widen_numeric_expr(e, &source, &rt);
-                                et = Some(rt.clone());
-                            }
-                        }
-                        // #1164: direct `View`/`ViewMut` returns use the
-                        // dedicated path below. Aggregates that contain view
-                        // fields need the walk. Non-view returns must not
-                        // re-check string-view idents as view escapes — the
-                        // E2307 "needs owned String" path already teaches.
-                        let direct_view_return = matches!(
-                            &rt,
-                            Type::Apply { name, .. }
-                                if matches!(name.as_str(), "View" | "ViewMut")
-                        );
-                        if !direct_view_return && self.type_contains_view_boundary(&rt) {
-                            self.check_aggregate_view_return(e);
-                        }
-                        // D-ALLOC2: E0631 — returning an arena `view` would let
-                        // it outlive the arena (the arena drops at scope end).
-                        if let Expr::Ident(n, nspan) = &*e {
-                            if self.is_arena_view(n) || self.is_fixed_backing_view(n) {
-                                self.report_view_escape(n, "be returned", *nspan);
-                            }
-                        }
-                        // D-DYNARRAY1: E2305 — returning a `View<T>` whose owner
-                        // list is local to this function would outlive it. Two
-                        // shapes: an already-bound view name (`return window`),
-                        // and a fresh range place made right in the
-                        // `return` (`return incidents[0..2]`) — the latter
-                        // needs `view_call_source` directly.
-                        if string_view_return {
-                            if let Expr::Ident(n, nspan) = &*e {
-                                if self.is_string_view(n) {
-                                    self.check_named_string_view_binding_return(n, *nspan);
-                                } else {
-                                    self.report_string_view_boundary(e.span());
-                                }
-                            } else {
-                                let sources: Vec<_> = self
-                                    .view_call_sources(e)
-                                    .into_iter()
-                                    .filter(|(path, ..)| path.is_empty())
-                                    .collect();
-                                if sources.is_empty() {
-                                    self.report_string_view_boundary(e.span());
-                                } else {
-                                    for (_, place, _, access) in sources {
-                                        self.check_named_view_return(
-                                            &place,
-                                            access,
-                                            Vec::new(),
-                                            e.span(),
-                                        );
-                                    }
-                                }
-                            }
-                        } else if matches!(&rt, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut"))
-                        {
-                            if let Expr::Ident(n, nspan) = &*e {
-                                if self.is_list_view(n) {
-                                    self.check_named_view_binding_return(n, *nspan);
-                                } else {
-                                    self.report_view_return_boundary(e.span());
-                                }
-                            } else {
-                                let sources: Vec<_> = self
-                                    .view_call_sources(e)
-                                    .into_iter()
-                                    .filter(|(path, ..)| path.is_empty())
-                                    .collect();
-                                if sources.is_empty() {
-                                    self.report_view_return_boundary(e.span());
-                                } else {
-                                    for (_, place, _, access) in sources {
-                                        self.check_named_view_return(
-                                            &place,
-                                            access,
-                                            Vec::new(),
-                                            e.span(),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        // D-MEM-COPYSEM1: default owning returns have already
-                        // become `Expr::Copy` in `self.infer(e)`. Declared
-                        // view returns still use the boundary checks above;
-                        // an explicit-copy policy leaves the original read
-                        // in place so its registered E2307 refusal remains.
-                        // Returning a borrowed parameter would move out of a
-                        // borrow in the generated Rust (I2) — require a copy.
-                        self.reject_borrowed_param_subplace(
-                            e,
-                            et.as_ref(),
-                            "be returned as an owned value",
-                        );
-                        if et
-                            .as_ref()
-                            .is_some_and(crate::Sema::Diagnostics::contains_expiring_secret_loan)
-                        {
-                            self.diags.push(Diagnostic::error(
-                                "E0201",
-                                "an ExpiringSecret loan cannot be returned".to_string(),
-                                "the callback parameter is valid only while `.with` is running"
-                                    .to_string(),
-                                "return a non-secret result computed from the loan".to_string(),
-                                Some(e.span()),
-                            ));
-                        }
-                        if let Expr::Ident(n, nspan) = &*e {
-                            if let Some(info) = self.lookup(n) {
-                                if !info.ty.is_scalar()
-                                    && !matches!(
-                                        &info.ty,
-                                        Type::Named(name)
-                                            if self
-                                                .type_param_scope
-                                                .iter()
-                                                .any(|param| &param.name == name)
-                                    )
-                                    && matches!(
-                                        info.param_conv,
-                                        Some(AccessConvention::Read)
-                                            | Some(AccessConvention::Write)
-                                    )
-                                {
-                                    let display_type = self.display_type(&info.ty).name();
-                                    self.diags.push(Diagnostic::error(
-                                            "E0120",
-                                            format!(
-                                                "`{}` was not moved here, so it cannot be returned as-is",
-                                                n
-                                            ),
-                                            "this function has read access only and does not own the value"
-                                                .to_string(),
-                                            format!(
-                                                "return a copy: `return {}{};` — or take ownership with the move marker `^`: `{}: {}{}`. \
-                                                 There's no borrow-return in v1 — to share the value without a full \
-                                                 copy, store an owned field, or reach for `Shared<T>`/`Id<T>` \
-                                                 once a real program needs shared ownership",
-                                                Syntax::SIGIL_COPY,
-                                                n,
-                                                n,
-                                                Syntax::SIGIL_MOVE,
-                                                display_type
-                                            ),
-                                            Some(*nspan),
-                                        ));
-                                }
-                            }
-                        }
-                        if !string_view_return {
-                            self.note_move_if_direct_ident(e);
-                        }
-                        if let Some(et) = et {
-                            let http_handler_lambda = matches!(
-                                (&rt, &et),
-                                (Type::Named(name), Type::Fn { params, ret: Some(ret), .. })
-                                    if name == "HTTPHandler"
-                                        && params == &vec![Type::Named("HTTPRequest".to_string())]
-                                        && ret.as_ref() == &Type::Result {
-                                            ok: Box::new(Type::Named("HTTPResponse".to_string())),
-                                            err: Box::new(Type::Named("HTTPError".to_string())),
-                                        }
-                            );
-                            let string_view_compatible = string_view_return && et == Type::String;
-                            let union_member_widen = matches!(
-                                &rt,
-                                Type::Union(members) if members.iter().any(|m| m == &et)
-                            );
-                            // D-APILABEL1=A: every return contract uses
-                            // shared assignability, including qualified
-                            // nominal types.
-                            let reported = self.check_type_assignable(&rt, &et, e.span());
-                            if et != rt
-                                && !reported
-                                && !http_handler_lambda
-                                && !string_view_compatible
-                                && !union_member_widen
-                            {
-                                let display_return = self.display_type(&rt);
-                                let display_actual = self.display_type(&et);
-                                self.diags.push(Diagnostic::error(
-                                    "E0113",
-                                    format!(
-                                        "`{}` promises to return {}, but this returns {}",
-                                        self.fn_name,
-                                        display_return.show(),
-                                        display_actual.show()
-                                    ),
-                                    "the value handed back must match the declared return type"
-                                        .to_string(),
-                                    type_fix_hint(&display_return, &display_actual),
-                                    Some(e.span()),
-                                ));
-                            }
-                        }
-                    }
-                    (Some(e), None) => {
-                        let ty_name = self.infer_name_or(e, "Int");
-                        self.diags.push(Diagnostic::error(
-                                "E0113",
-                                format!("`{}` doesn't return a value", self.fn_name),
-                                "a function only hands back a value if it declares a return type before `->`"
-                                    .to_string(),
-                                format!(
-                                    "remove the value (`return;`), or declare `{}` as the return type before `->`",
-                                    ty_name
-                                ),
-                                Some(e.span()),
-                            ));
-                    }
-                    (None, Some(rt)) => {
-                        // D-FAIL-EXIT1: implicit `fn run` is `Unit Err!`.
-                        // A bare `return` is successful exit, same as falling off
-                        // the end of the body.
-                        let fallible_void = matches!(
-                            rt,
-                            Type::Result { ref ok, .. }
-                                if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
-                        );
-                        if !fallible_void {
-                            self.diags.push(Diagnostic::error(
-                                "E0113",
-                                format!(
-                                    "`{}` promises to return {}, but this `return` is empty",
-                                    self.fn_name,
-                                    rt.show()
-                                ),
-                                "the value handed back must match the declared return type"
-                                    .to_string(),
-                                "add the value: `return ...;`".to_string(),
-                                Some(*span),
-                            ));
-                        }
-                    }
-                    (None, None) => {}
-                }
+                self.check_return_expr(expr, span, None);
             }
             // D-STREAMYIELD1: `yield expr` — legal only in a function whose return
             // type is `Stream<T>` (E0805 otherwise); `expr: T` (E0807 on mismatch).
@@ -2678,9 +2674,7 @@ impl<'a> Checker<'a> {
                 span,
                 ..
             } if name == crate::Syntax::MARKER_ARITHMETIC => {
-                let Some(mode) = args
-                    .first()
-                    .and_then(crate::AST::ArithmeticMode::from_expr)
+                let Some(mode) = args.first().and_then(crate::AST::ArithmeticMode::from_expr)
                 else {
                     self.diags.push(crate::Policy::marker_argument_shape_error(
                         crate::Syntax::MARKER_ARITHMETIC,
@@ -2689,11 +2683,12 @@ impl<'a> Checker<'a> {
                     self.check_block(body, true);
                     return;
                 };
-                self.arithmetic_policy_stack.push(crate::AST::ArithmeticPolicyFact {
-                    mode,
-                    scope_span: *span,
-                    operation_span: *span,
-                });
+                self.arithmetic_policy_stack
+                    .push(crate::AST::ArithmeticPolicyFact {
+                        mode,
+                        scope_span: *span,
+                        operation_span: *span,
+                    });
                 self.check_block(body, true);
                 self.arithmetic_policy_stack.pop();
             }
@@ -2917,6 +2912,23 @@ impl<'a> Checker<'a> {
                             }
                             bad = true;
                         }
+                    }
+                }
+                // D-AUTHORITY-MODEL1: a nested scope may attenuate the
+                // enclosing grant, but it cannot mint a right the outer
+                // scope did not hold. Check the declaration boundary before
+                // walking the body so an empty nested block cannot widen by
+                // accident.
+                if let Some(outer) = self.region_stack.last() {
+                    let widening = crate::Sema::effects_uncovered(&cap_set, &outer.caps);
+                    if !widening.is_empty() {
+                        self.diags.push(crate::Sema::e0712(
+                            &widening,
+                            &outer.caps,
+                            *caps_span,
+                            crate::Syntax::KW_FX,
+                        ));
+                        bad = true;
                     }
                 }
                 if let Some(binding) = binding {

@@ -900,11 +900,11 @@ fn run() {{
     print(result.success)
     print(result.output)
     if child.stdin.write("late") == {{
-        .Ok(_) -> {{ print("closed:accepted") }}
+        .Ok(_) -> {{ print("closed:accepted"); }}
         .Err(error) -> {{
             if error == {{
-                .Closed(_) -> {{ print("closed:typed") }}
-                else -> {{ print("closed:wrong") }}
+                .Closed(_) -> {{ print("closed:typed"); }}
+                else -> {{ print("closed:wrong"); }}
             }}
         }}
     }}

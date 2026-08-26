@@ -1,5 +1,5 @@
-use crate::Sema::Captures::stmt_refs_name;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+use crate::Sema::Captures::stmt_refs_name;
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::block_definitely_returns;
 use crate::Syntax;
@@ -12,9 +12,9 @@ impl<'a> Checker<'a> {
     }
 
     /// Check a block whose final unadorned expression is its value. The AST
-    /// keeps that expression as `Stmt::Expr`; the existing return checker is
-    /// invoked on a temporary return node so ownership, views, fallibility,
-    /// and expected-type conversions stay on one semantic path.
+    /// keeps that expression as `Stmt::Expr`; the shared return-value checker
+    /// validates its ownership, views, fallibility, and expected-type
+    /// conversions without changing the source node's statement kind.
     pub(crate) fn check_value_block(
         &mut self,
         stmts: &mut [Stmt],
@@ -87,9 +87,9 @@ impl<'a> Checker<'a> {
                     && !Self::is_diverging_tail(expr) =>
             {
                 let span = expr.span();
-                let mut checked = Stmt::Return(Some(expr.clone()), span);
-                self.check_stmt(&mut checked);
-                if let Stmt::Return(Some(value), _) = checked {
+                let mut value = Some(std::mem::replace(expr, Expr::Absent(span)));
+                self.check_return_expr(&mut value, &span, Some(expected.clone()));
+                if let Some(value) = value {
                     *expr = value;
                 }
             }
@@ -138,20 +138,14 @@ impl<'a> Checker<'a> {
             while at < bytes.len() && bytes[at].is_ascii_whitespace() {
                 at += 1;
             }
-            if bytes
-                .get(at..)
-                .is_some_and(|tail| tail.starts_with(b"//"))
-            {
+            if bytes.get(at..).is_some_and(|tail| tail.starts_with(b"//")) {
                 at += 2;
                 while at < bytes.len() && bytes[at] != b'\n' {
                     at += 1;
                 }
                 continue;
             }
-            if bytes
-                .get(at..)
-                .is_some_and(|tail| tail.starts_with(b"/*"))
-            {
+            if bytes.get(at..).is_some_and(|tail| tail.starts_with(b"/*")) {
                 at += 2;
                 while at + 1 < bytes.len() && &bytes[at..at + 2] != b"*/" {
                     at += 1;
@@ -188,21 +182,15 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if arms.is_empty()
-                || !arms.iter().all(|arm| {
-                    matches!(
-                        arm.body.as_slice(),
-                        [Stmt::Return(Some(_), _)]
-                    )
-                })
+                || !arms
+                    .iter()
+                    .all(|arm| matches!(arm.body.as_slice(), [Stmt::Return(Some(_), _)]))
             {
                 continue;
             }
-            let Some(edit) = self.redundant_arm_table_edit(
-                arms,
-                *span,
-                default,
-                *default_return_span,
-            ) else {
+            let Some(edit) =
+                self.redundant_arm_table_edit(arms, *span, default, *default_return_span)
+            else {
                 continue;
             };
             let mut diagnostic = Diagnostic::from_row("L0513", &[], Some(*span));
@@ -232,18 +220,14 @@ impl<'a> Checker<'a> {
             edits.push((return_span.start, return_span.end, String::new()));
         }
 
-        let close = source
-            .get(switch_span.start..switch_span.end)?
-            .rfind('}')?
-            + switch_span.start;
+        let close = source.get(switch_span.start..switch_span.end)?.rfind('}')? + switch_span.start;
         let default_text = source.get(default.span().start..default.span().end)?;
-        let prefix = if close > switch_span.start
-            && !source.as_bytes()[close - 1].is_ascii_whitespace()
-        {
-            " "
-        } else {
-            ""
-        };
+        let prefix =
+            if close > switch_span.start && !source.as_bytes()[close - 1].is_ascii_whitespace() {
+                " "
+            } else {
+                ""
+            };
         edits.push((
             close,
             close,

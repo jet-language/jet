@@ -4040,7 +4040,7 @@ impl<'a> Checker<'a> {
         if place.projections.is_empty() {
             // D-TRACK-ORIGIN1=A: moving a whole binding ends access to its
             // origin fact; no stale metadata survives a move.
-            self.flow.origins.remove(&name);
+            self.clear_origin(&name);
         }
     }
 

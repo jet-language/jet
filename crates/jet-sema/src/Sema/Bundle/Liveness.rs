@@ -293,7 +293,6 @@ fn export_kind(kind: &str) -> bool {
             | "module"
             | "file_module"
             | "extern"
-            | "checked_text_head"
     )
 }
 

@@ -58,8 +58,8 @@ fn run() {{
     print(result.output.contains("size:30x100"))
     print(result.output)
     if child.stdin.write("late") == {{
-        .Ok(_) -> {{ print("closed:accepted") }}
-        .Err(_) -> {{ print("closed:error") }}
+        .Ok(_) -> {{ print("closed:accepted"); }}
+        .Err(_) -> {{ print("closed:error"); }}
     }}
 }}
 "#,
@@ -106,8 +106,8 @@ fn run() {{
     print(result.output.contains("input:typed"))
     print(result.output.contains("size:30x100"))
     if child.stdin.write("late") == {{
-        .Ok(_) -> {{ print(false) }}
-        .Err(_) -> {{ print(true) }}
+        .Ok(_) -> {{ print(false); }}
+        .Err(_) -> {{ print(true); }}
     }}
 }}
 "#,

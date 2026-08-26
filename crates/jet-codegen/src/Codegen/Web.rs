@@ -1646,10 +1646,82 @@ fn web_distinct_convert_supported(op: &TIR::TNumericOp, fallible: bool) -> bool 
     }
 }
 
-/// The web engines can marshal the settled knowledge-gate operation through
-/// their existing integer addition lowering.
+/// The web engines can marshal every lexical arithmetic operation through the
+/// shared fixed-width Prelude helpers. Explicit `checked(...)` remains a
+/// separate fallible surface and is intentionally not admitted here.
 fn web_overflow_opt_supported(prefix: &str, op: &str) -> bool {
-    prefix == "wrapping" && op == "add"
+    matches!(prefix, "checked_policy" | "wrapping" | "saturating")
+        && matches!(op, "add" | "sub" | "mul" | "pow")
+}
+
+/// D-WRAP-SCOPE1=A / I9: wasm only marshals the policy-selected operation to
+/// the same embedded Prelude methods used by native emission.
+fn wasm_overflow_opt_call(
+    prefix: &str,
+    op: &str,
+    lhs: &str,
+    rhs: &str,
+    line: u32,
+) -> Option<String> {
+    let file = mangle_generated("source_file");
+    Some(match (prefix, op) {
+        ("checked_policy", "add") => format!("({lhs}).jet_add({rhs}, {file}, {line})"),
+        ("checked_policy", "sub") => format!("({lhs}).jet_sub({rhs}, {file}, {line})"),
+        ("checked_policy", "mul") => format!("({lhs}).jet_mul({rhs}, {file}, {line})"),
+        ("checked_policy", "pow") => {
+            format!("({lhs}).jet_pow(({rhs}) as i128, {file}, {line})")
+        }
+        ("wrapping", "add") => format!("({lhs}).jet_wrapping_add({rhs})"),
+        ("wrapping", "sub") => format!("({lhs}).jet_wrapping_sub({rhs})"),
+        ("wrapping", "mul") => format!("({lhs}).jet_wrapping_mul({rhs})"),
+        ("wrapping", "pow") => {
+            format!("({lhs}).jet_wrapping_pow(({rhs}) as i128, {file}, {line})")
+        }
+        ("saturating", "add") => format!("({lhs}).jet_saturating_add({rhs})"),
+        ("saturating", "sub") => format!("({lhs}).jet_saturating_sub({rhs})"),
+        ("saturating", "mul") => format!("({lhs}).jet_saturating_mul({rhs})"),
+        ("saturating", "pow") => {
+            format!("({lhs}).jet_saturating_pow(({rhs}) as i128, {file}, {line})")
+        }
+        _ => return None,
+    })
+}
+
+/// D-WRAP-SCOPE1=A / I9: JS carries the same fixed-width policy fact as
+/// BigInt arguments to its one web-side Prelude adapter.
+fn js_overflow_opt_call(
+    prefix: &str,
+    op: &str,
+    lhs: &str,
+    rhs: &str,
+    ty: &Type,
+    line: u32,
+) -> Option<String> {
+    let (bits, signed) = match ty {
+        Type::IntN { bits, signed } => (*bits, *signed),
+        Type::Named(name) => match name.as_str() {
+            "U8" => (8, false),
+            "I8" => (8, true),
+            "U16" => (16, false),
+            "I16" => (16, true),
+            "U32" => (32, false),
+            "I32" => (32, true),
+            "U64" => (64, false),
+            "I64" => (64, true),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let mode = match prefix {
+        "checked_policy" => "checked",
+        "wrapping" => "wrapping",
+        "saturating" => "saturating",
+        _ => return None,
+    };
+    let file = mangle_generated("source_file");
+    Some(format!(
+        "jet_fixed_policy({lhs}, {rhs}, {op:?}, {bits}, {signed}, {mode:?}, {file}, {line})"
+    ))
 }
 
 fn web_shared_host_call_supported(host: &TIR::THostCall) -> bool {
@@ -6353,11 +6425,11 @@ fn wasm_emit_expr(
             op,
             lhs,
             rhs,
-            ..
+            line,
         } if web_overflow_opt_supported(prefix, op) => {
             let lhs = wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?;
             let rhs = wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?;
-            format!("({lhs} + {rhs})")
+            wasm_overflow_opt_call(prefix, op, &lhs, &rhs, *line).ok_or(())?
         }
         TIR::TExprKind::OptionLift2 { f, a, b } => jet_format!(
             "jet_option_lift2(({}).clone(), ({}).clone(), || Err(JetAbsent), |{jet_prefix}value| Ok({jet_prefix}value), || {{ let {jet_prefix}f = ({}); move |{jet_prefix}a, {jet_prefix}b| ({jet_prefix}f)({jet_prefix}a, {jet_prefix}b) }})",
@@ -8601,11 +8673,11 @@ fn tir_js_expr(
             op,
             lhs,
             rhs,
-            ..
+            line,
         } if web_overflow_opt_supported(prefix, op) => {
             let lhs = tir_js_expr(lhs, funcs, file_prefix)?;
             let rhs = tir_js_expr(rhs, funcs, file_prefix)?;
-            format!("({lhs} + {rhs})")
+            js_overflow_opt_call(prefix, op, &lhs, &rhs, &expr.ty, *line).ok_or(())?
         }
         E::Field { recv, field, .. } => format!(
             "{}.{}",
@@ -10099,6 +10171,36 @@ const JS_POWER_PRELUDE: &str = concat!(
     "  const count = BigInt(right);\n",
     "  if (count < 0n) jet_runtime_stop(\"E3010\", file, line, \"invalid shift count\");\n",
     "  return left_shift ? (BigInt(left) << count) : (BigInt(left) >> count);\n",
+    "}\n\n",
+    // D-WRAP-SCOPE1=A: the JS adapter keeps fixed-width policy arithmetic in
+    // one helper. The mode and width are settled by sema/TIR; this function
+    // only marshals the operands and applies the embedded Prelude rule.
+    "function jet_fixed_policy_step(raw, bits, signed, mode, file, line) {\n",
+    "  const min = signed ? -(1n << BigInt(bits - 1)) : 0n;\n",
+    "  const max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;\n",
+    "  if (mode === \"wrapping\") return signed ? BigInt.asIntN(bits, raw) : BigInt.asUintN(bits, raw);\n",
+    "  if (mode === \"saturating\") return raw < min ? min : raw > max ? max : raw;\n",
+    "  if (raw < min || raw > max) jet_runtime_stop(\"E3010\", file, line, \"fixed-width arithmetic overflow\");\n",
+    "  return raw;\n",
+    "}\n\n",
+    "function jet_fixed_policy_pow(base, exponent, bits, signed, mode, file, line) {\n",
+    "  if (exponent < 0n) jet_runtime_stop(\"E3010\", file, line, \"a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)\");\n",
+    "  let result = 1n;\n",
+    "  let factor = base;\n",
+    "  let remaining = exponent;\n",
+    "  while (remaining > 0n) {\n",
+    "    if ((remaining & 1n) !== 0n) result = jet_fixed_policy_step(result * factor, bits, signed, mode, file, line);\n",
+    "    remaining >>= 1n;\n",
+    "    if (remaining > 0n) factor = jet_fixed_policy_step(factor * factor, bits, signed, mode, file, line);\n",
+    "  }\n",
+    "  return result;\n",
+    "}\n\n",
+    "function jet_fixed_policy(left, right, op, bits, signed, mode, file, line) {\n",
+    "  const a = BigInt(left);\n",
+    "  const b = BigInt(right);\n",
+    "  if (op === \"pow\") return jet_fixed_policy_pow(a, b, bits, signed, mode, file, line);\n",
+    "  const raw = op === \"add\" ? a + b : op === \"sub\" ? a - b : a * b;\n",
+    "  return jet_fixed_policy_step(raw, bits, signed, mode, file, line);\n",
     "}\n\n"
 );
 

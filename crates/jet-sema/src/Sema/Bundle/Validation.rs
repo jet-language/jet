@@ -1965,7 +1965,6 @@ fn check_func_body_bundle_scoped(
         module_idx,
         imports: &scoped_imports,
         core_imports: &scoped_core_imports,
-        text_head_context: None,
         code_modules: &st.code_modules,
         code_module_identities: &st.code_module_identities,
         unqualified: &scoped_unqualified,
@@ -2046,7 +2045,14 @@ fn check_func_body_bundle_scoped(
         fallback_is_shape_miss: false,
         in_comptime: false,
         compiler_api_allowed: st.allow_compiler_api && f.name == "build",
-        ret: f.return_type.clone(),
+        // Error-conversion bodies are checked as ordinary Rust-shaped helper
+        // functions, not as public Jet callables. Every other callable uses
+        // the one shared Result carrier, including an omitted return type.
+        ret: if f.name.starts_with("__errconv_") {
+            f.return_type.clone()
+        } else {
+            Some(f.effective_return_type())
+        },
         fn_name: f.name.clone(),
         current_param_names: f
             .params
@@ -2429,7 +2435,7 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
                 }
             })
             .collect(),
-        ret: sig.return_type.clone().map(Box::new),
+        ret: Some(Box::new(sig.effective_return_type())),
         // D-CABI-CALLBACK1 / D-EFF2: a function sema proved effect-free
         // (`pure fn`, or an allocation-free panic-free scalar body) publishes
         // the empty effect bound, so its value satisfies `-[]>` callable

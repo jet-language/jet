@@ -714,7 +714,6 @@ impl<'a> Parser<'a> {
             name_span,
             params,
             body,
-            text: None,
             span: Span::new(start.start, end),
         })
     }
@@ -1008,7 +1007,7 @@ mod marker_decl_tests {
     }
 
     #[test]
-    fn retired_checked_text_head_declaration_is_rejected() {
+    fn former_text_contract_is_rejected() {
         let source = concat!(
             "\nmarker Selector",
             " on [.Text] {\n",
@@ -1120,10 +1119,6 @@ mod state_section_tests {
             state.states.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
             ["Open", "Closed"]
         );
-        assert!(program
-            .items
-            .iter()
-            .all(|item| !matches!(item, AST::Item::StateDecl(_))));
     }
 
     #[test]

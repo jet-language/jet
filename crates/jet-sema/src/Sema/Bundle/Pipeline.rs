@@ -306,53 +306,6 @@ fn is_c_import_after_validation(import: &crate::AST::ImportDecl) -> bool {
     })
 }
 
-/// D-BOUND-SINK1=A: keep each declared text head's compile-time contract
-/// attached to the module that authored it. The first pass publishes every
-/// head name before module checking; the per-module refresh below captures
-/// comptime constants after they have been evaluated.
-fn register_text_head_contracts(
-    state: &mut crate::Sema::ModuleState,
-    module: &crate::AST::LoadedModule,
-    core_imports: &HashMap<String, String>,
-) {
-    let (funcs, _externs, globals) =
-        super::super::Registration::comptime_context_from_items(&module.items);
-    let sigs: HashMap<String, crate::AST::FuncSig> = funcs
-        .iter()
-        .map(|(name, function)| (name.clone(), super::super::func_to_sig(function)))
-        .collect();
-    let type_params: HashMap<String, Vec<crate::AST::TypeParam>> = funcs
-        .iter()
-        .map(|(name, function)| (name.clone(), function.type_params.clone()))
-        .collect();
-    let base_dir = module
-        .path
-        .parent()
-        .map(|path| path.to_path_buf())
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    for declaration in module.items.iter().filter_map(|item| match item {
-        Item::MarkerDecl(declaration) => declaration.text.as_ref().map(|text| {
-            (
-                declaration.name.clone(),
-                crate::Sema::TextHeadContract {
-                    declaration: text.clone(),
-                    funcs: funcs.clone(),
-                    sigs: sigs.clone(),
-                    type_params: type_params.clone(),
-                    globals: globals.clone(),
-                    core_imports: core_imports.clone(),
-                    base_dir: base_dir.clone(),
-                },
-            )
-        }),
-        _ => None,
-    }) {
-        state
-            .registry
-            .register_text_head(declaration.0, declaration.1);
-    }
-}
-
 pub(super) fn check_bundle_opts_for_output(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
@@ -608,10 +561,6 @@ fn check_bundle_opts_for_output_inner(
                             state.states.iter().map(|(name, _)| name.clone()).collect(),
                         )
                     }),
-                    Item::StateDecl(state) => Some((
-                        state.type_name.clone(),
-                        state.states.iter().map(|(name, _)| name.clone()).collect(),
-                    )),
                     _ => None,
                 })
                 .collect(),
@@ -841,12 +790,6 @@ fn check_bundle_opts_for_output_inner(
         .iter()
         .map(|module| crate::AST::core_import_maps(&module.imports).1)
         .collect();
-    for (state, (module, core_imports)) in states
-        .iter_mut()
-        .zip(bundle.modules.iter().zip(&ct_core_imports))
-    {
-        register_text_head_contracts(state, module, core_imports);
-    }
     let mut top_level_embed_inputs = Vec::new();
 
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
@@ -879,7 +822,6 @@ fn check_bundle_opts_for_output_inner(
         // Checker references use the state snapshot; refresh it after root
         // expansion so generated nominal declarations are visible there too.
         states[idx].items = module.items.clone();
-        register_text_head_contracts(&mut states[idx], module, &ct_core_imports[idx]);
         super::super::Registration::resolve_comptime_declaration_values(
             &mut module.items,
             &base,
@@ -1036,7 +978,6 @@ fn check_bundle_opts_for_output_inner(
                         }
                         TypeRegistry {
                             types,
-                            text_heads: st.registry.text_heads.clone(),
                             unit_types: st.registry.unit_types.clone(),
                             unit_facts: st.registry.unit_facts.clone(),
                             literal_facts: st.registry.literal_facts.clone(),
@@ -1092,8 +1033,6 @@ fn check_bundle_opts_for_output_inner(
                 Item::ErrorConv(_) => {}
                 // D-MIGRATE1: migration decls are handled by the schema diff pass; no registration needed.
                 Item::Migration(_) => {}
-                // D-STATE1: state-set decls are sema-only (I3); no type to register.
-                Item::StateDecl(_) => {}
                 // D-PROTO1/D-PROTO2: expanded before registration; declaration erases.
                 Item::ProtocolDecl(_) => {}
                 // D-METADERIVE1=A: user-authored derive blocks are expanded below; skip here.
@@ -1225,13 +1164,6 @@ fn check_bundle_opts_for_output_inner(
                                             .map(|(name, _)| name.clone())
                                             .collect::<Vec<_>>()
                                     }),
-                                Item::StateDecl(state) if state.type_name == s.name => Some(
-                                    state
-                                        .states
-                                        .iter()
-                                        .map(|(name, _)| name.clone())
-                                        .collect::<Vec<_>>(),
-                                ),
                                 _ => None,
                             })
                             .unwrap_or_default();
@@ -1410,13 +1342,6 @@ fn check_bundle_opts_for_output_inner(
                                     .map(|(name, _)| name.clone())
                                     .collect::<Vec<_>>()
                             }),
-                        Item::StateDecl(state) if state.type_name == target.name => Some(
-                            state
-                                .states
-                                .iter()
-                                .map(|(name, _)| name.clone())
-                                .collect::<Vec<_>>(),
-                        ),
                         _ => None,
                     })
                     .unwrap_or_default();
