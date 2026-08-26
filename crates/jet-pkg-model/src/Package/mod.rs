@@ -13,6 +13,10 @@
 pub mod Blocks;
 mod Convert;
 mod Discovery;
+// Card #2179 owns the durable-send lifecycle that edits authority holds in a
+// package manifest. This module is the producer; its consumer has not shipped,
+// so nothing calls it yet. That card removes this allow.
+#[allow(dead_code)]
 mod Edit;
 
 pub use Blocks::{

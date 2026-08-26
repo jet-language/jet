@@ -199,7 +199,6 @@ fn insert_inline_field(
         separator,
         field_prefix,
         effect,
-        &line[close..close],
         &line[close..]
     )
 }
