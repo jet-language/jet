@@ -446,13 +446,15 @@ fn validate_web_func_tir(
         } else if bucket == WebBucket::JS {
             web_stmts_supported(&tir.body) && web_func_guarantees_return(f, &tir)
         } else {
-            web_wasm_stmts_supported(
+            let stmts = web_wasm_stmts_supported(
                 &tir.body,
                 bundle,
                 file_prefix,
                 &tir.web_param_reconstructions,
-            ) && web_func_guarantees_return(f, &tir)
-                && web_wasm_abi_supported(f, &tir, bundle)
+            );
+            let returns = web_func_guarantees_return(f, &tir);
+            let abi = web_wasm_abi_supported(f, &tir, bundle);
+            stmts && returns && abi
         };
         if supported {
             cx.current_type_params.borrow_mut().clear();
@@ -674,7 +676,10 @@ fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc, bundle: &ProgramBundle) ->
     params_supported
         // D-JSBIND1: String / [Int] / [String] / [String:Int] params/returns
         // cross the export boundary as packed (ptr,len) u64 ownership transfers.
-        && tir.ret
+        // `TFunc::ret` is the effective failure carrier used by hosted tiers;
+        // this boundary emits the source function's success payload and keeps
+        // its existing `#WasmExport` ABI contract.
+        && f.return_type
             .as_ref()
             .map(|ty| {
                 is_string_like(ty)
@@ -6480,7 +6485,12 @@ fn wasm_emit_expr(
                 TIR::TTryConvert::DefaultErr => {
                     format!("({value}).map_err(jet_err_from_message)")
                 }
-                TIR::TTryConvert::Typed(conv_fn) => format!("({value}).map_err({conv_fn})"),
+                TIR::TTryConvert::Typed(conv_fn) => match web_error_conversion_pair(conv_fn) {
+                    Some((source, target)) if target == Syntax::TYPE_ERR => format!(
+                        "({value}).map_err(|error| {{ let mut converted = {conv_fn}(error); jet_err_apply_conversion(&mut converted, {source:?}.to_string(), {target:?}.to_string()); converted }})"
+                    ),
+                    _ => format!("({value}).map_err({conv_fn})"),
+                },
                 TIR::TTryConvert::WidenUnion { enum_name, tag } => {
                     format!("({value}).map_err(|e| {}::{tag}(e))", mangle_path(enum_name))
                 }

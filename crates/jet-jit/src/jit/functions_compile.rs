@@ -13,7 +13,7 @@ use jet_codegen::Codegen::TIR::{
 use jet_foundation::AST::Type;
 use std::collections::{HashMap, HashSet};
 
-use super::lower_ctx::{error_conversion_metadata, LowerCtx};
+use super::lower_ctx::LowerCtx;
 use super::runtime_host::HostFns;
 use super::types_meta::{
     clif_ty, fn_value_signature, func_has_receiver, func_signature, interrupt_callback_signature,
@@ -515,7 +515,6 @@ fn lower_spawn_function(
             stack_guard: false,
             next_var: 0,
             method_struct: None,
-            error_conversion: None,
             ret_clif: if clif_ty(&lam.ret).is_some() {
                 // Spawn bodies use a packed i64 ABI (Float → bitcast bits).
                 Some(types::I64)
@@ -866,7 +865,6 @@ pub(crate) fn lower_shared_transaction_lambda(
             stack_guard: false,
             next_var: 0,
             method_struct: None,
-            error_conversion: None,
             ret_clif: Some(types::I64),
             ret_range: false,
             ret_cell_layout: 0,
@@ -1150,7 +1148,6 @@ fn lower_callable_lambda_with_env(
             stack_guard: false,
             next_var: 0,
             method_struct: None,
-            error_conversion: None,
             ret_clif,
             ret_range: false,
             ret_cell_layout: 0,
@@ -1362,7 +1359,6 @@ pub(crate) fn lower_option_lift2_factory(
             stack_guard: false,
             next_var: 0,
             method_struct: None,
-            error_conversion: None,
             ret_clif: meta.clif_ty(&body.ty),
             ret_range: false,
             ret_cell_layout: 0,
@@ -1512,7 +1508,6 @@ fn lower_function(
             stack_guard: true,
             next_var: 0,
             method_struct,
-            error_conversion: error_conversion_metadata(&tir.name),
             ret_clif: tir.ret.as_ref().and_then(|ret| meta.clif_ty(ret)),
             ret_range: tir.ret.as_ref().is_some_and(|ret| {
                 matches!(ret, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
@@ -1784,7 +1779,6 @@ fn lower_generator_body(
             stack_guard: false,
             next_var: 0,
             method_struct: None,
-            error_conversion: None,
             ret_clif: Some(types::I64),
             ret_range: false,
             ret_cell_layout: 0,

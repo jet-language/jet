@@ -190,6 +190,11 @@ fn run() {
 "#,
         )
         .unwrap();
+        fs::write(
+            scratch.join("package.jet"),
+            "name: \"compiler_speed\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO] } }\n",
+        )
+        .unwrap();
 
         let cold = build(&scratch);
         assert_eq!(
@@ -245,6 +250,17 @@ fn run() {
             .map(|entry| entry.path().join("libjet_runtime.rlib"))
             .find(|path| path.is_file())
             .expect("cold build published a runtime object");
+        let core_rlib = fs::read_dir(scratch.join("runtime-cache"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path().join("libjet_runtime_core.rlib"))
+            .find(|path| path.is_file())
+            .expect("cold build published a Core object");
+        assert_ne!(
+            runtime_rlib.parent(),
+            core_rlib.parent(),
+            "runtime and Core objects must have independent cache entries"
+        );
         fs::write(&runtime_rlib, b"corrupt runtime object").unwrap();
         fs::write(
             scratch.join("main.jet"),

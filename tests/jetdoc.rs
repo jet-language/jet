@@ -31,6 +31,11 @@ impl Scratch {
         fs::copy(source, &destination).expect("copy jetdoc fixture");
         destination
     }
+
+    fn copy_fixture_package(&self, entry: &str) -> PathBuf {
+        self.copy_fixture("package.jet");
+        self.copy_fixture(entry)
+    }
 }
 
 impl Drop for Scratch {
@@ -70,7 +75,7 @@ fn json_and_local_outputs_are_stable_and_complete() {
         "\"kind\":\"trait_impl\"",
         "\"doctests\"",
         "answer()",
-        "\"failure_contract\":\"Result<Int, Err>\"",
+        "\"failure_contract\":\"Int !\"",
         "\"failure_source\":\"implicit default !Err\"",
         "\"examples\":[\"`answer()`\"]",
         "\"expression\":\"1 + 1\",\"expected\":\"2\"",
@@ -105,7 +110,7 @@ fn json_and_local_outputs_are_stable_and_complete() {
     assert!(html.contains("../run.jet#L35"));
     assert!(html.contains("run.jet#L"));
     assert!(markdown.contains("Examples:\n\n- `answer()`"));
-    assert!(markdown.contains("failure: Result<Int, Err> (implicit default !Err)"));
+    assert!(markdown.contains("failure: Int ! (implicit default !Err)"));
     assert!(markdown.contains("## Doctests"));
     assert!(markdown.contains("1 + 1 // => 2"));
     assert!(markdown.contains("[Source](../run.jet#L35)"));
@@ -155,6 +160,34 @@ fn fixture_outputs_match_stable_goldens() {
 }
 
 #[test]
+fn package_outputs_match_stable_goldens() {
+    let scratch = Scratch::new();
+    let entry = scratch.copy_fixture_package("undocumented.jet");
+    let entry = entry.to_string_lossy().into_owned();
+
+    let json = jet_doc(&["doc", "--json", &entry], &scratch.0);
+    assert!(json.status.success(), "{}", String::from_utf8_lossy(&json.stderr));
+    assert_eq!(
+        json.stdout,
+        include_bytes!("fixtures/jetdoc/package-undocumented.json").as_slice(),
+        "package JSON output drifted"
+    );
+
+    let local = jet_doc(&["doc", &entry], &scratch.0);
+    assert!(local.status.success(), "{}", String::from_utf8_lossy(&local.stderr));
+    assert_eq!(
+        fs::read(scratch.0.join("docs/index.md")).expect("Markdown output"),
+        include_bytes!("fixtures/jetdoc/package-undocumented.md").as_slice(),
+        "package Markdown output drifted"
+    );
+    assert_eq!(
+        fs::read(scratch.0.join("docs/index.html")).expect("HTML output"),
+        include_bytes!("fixtures/jetdoc/package-undocumented.html").as_slice(),
+        "package HTML output drifted"
+    );
+}
+
+#[test]
 fn nested_state_docs_stay_on_the_struct_item() {
     let scratch = Scratch::new();
     let entry = scratch.0.join("nested_state.jet");
@@ -174,4 +207,60 @@ fn nested_state_docs_stay_on_the_struct_item() {
     assert!(json.contains("\"kind\":\"struct\""));
     assert!(json.contains("\"signature\":\"struct Door { state { Closed, Open } }\""));
     assert!(!json.contains("\"kind\":\"state\""));
+}
+
+#[test]
+fn checked_text_contract_is_rendered_in_generated_docs() {
+    let scratch = Scratch::new();
+    let entry = scratch.0.join("checked_text.jet");
+    fs::write(
+        &entry,
+        r#"#PubFile
+#Error
+enum PatternError { Bad }
+
+/// A checked pattern.
+Pattern :: distinct String
+
+impl Pattern.CheckedText {
+    type Error = PatternError
+
+    fn check(text: String) () !PatternError -[]> {
+        return
+    }
+
+    fn encode_hole<T: Printable>(value: T) String -[]> {
+        return ""
+    }
+}
+
+fn run() {}
+"#,
+    )
+    .expect("write checked-text docs fixture");
+    let entry = entry.to_string_lossy().into_owned();
+
+    let json = jet_doc(&["doc", "--json", &entry], &scratch.0);
+    assert!(
+        json.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&json.stdout),
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let json = String::from_utf8(json.stdout).expect("UTF-8 docs JSON");
+    assert!(json.contains("Pattern :: distinct String"), "{json}");
+    assert!(json.contains("implements CheckedText"));
+    assert!(json.contains("type Error = PatternError"));
+    assert!(json.contains("encode_hole"));
+
+    let rendered = jet_doc(&["doc", &entry], &scratch.0);
+    assert!(rendered.status.success(), "{}", String::from_utf8_lossy(&rendered.stderr));
+    let markdown = fs::read_to_string(scratch.0.join("docs/index.md")).expect("Markdown output");
+    let html = fs::read_to_string(scratch.0.join("docs/index.html")).expect("HTML output");
+    for output in [&markdown, &html] {
+        assert!(output.contains("Pattern :: distinct String"), "{output}");
+        assert!(output.contains("implements CheckedText"), "{output}");
+        assert!(output.contains("type Error = PatternError"), "{output}");
+        assert!(output.contains("encode_hole"), "{output}");
+    }
 }

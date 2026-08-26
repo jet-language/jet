@@ -2,6 +2,10 @@
 
 Generated from the checked semantic graph.
 
+## Effect Roles
+
+required effects: none; granted effects: none; denied effects: none; authority: application default
+
 ## Modules
 
 - `undocumented` — `undocumented.jet` ([source](../undocumented.jet#L1))

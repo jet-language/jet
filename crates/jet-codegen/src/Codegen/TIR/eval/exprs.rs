@@ -7675,22 +7675,13 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                         let other = if let Some((source, target)) =
                                             default_conversion
                                         {
-                                            if let Some(error) = other.to_jet_err() {
-                                                let converted =
-                                                    jet_foundation::Outcome::jet_err_from_conversion(
-                                                        jet_foundation::Outcome::jet_err_message(
-                                                            &error,
-                                                        ),
-                                                        jet_foundation::Outcome::jet_err_code(
-                                                            &error,
-                                                        ),
-                                                        jet_foundation::Outcome::jet_err_cause(
-                                                            &error,
-                                                        ),
-                                                        source,
-                                                        target,
-                                                    );
-                                                CtValue::from_jet_err(&converted)
+                                            if let Some(mut error) = other.to_jet_err() {
+                                                jet_foundation::Outcome::jet_err_apply_conversion(
+                                                    &mut error,
+                                                    source,
+                                                    target,
+                                                );
+                                                CtValue::from_jet_err(&error)
                                             } else {
                                                 other
                                             }
@@ -9293,33 +9284,29 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 // D-TEXTHEAD-TYPE1=A: the generated `Type.from` facade is an
                 // AOT-only Rust method. The interpreter executes its ordinary
                 // CheckedText implementation directly, preserving the same
-                // Result carrier and the typed check failure.
-                if method.name == "from"
-                    && argv.len() == 1
-                    && matches!(
-                        &expr.ty,
-                        Type::Result { ok, .. }
-                            if matches!(ok.as_ref(), Type::Named(name) if self
-                                .distinct_bases
-                                .get(name)
-                                .is_some_and(|base| *base == Type::String))
-                    )
-                {
+                // Result carrier and the typed check failure. The source call
+                // may have no resolved return fact in a fragment; the ordinary
+                // `Type::check` symbol is the already-registered trait fact.
+                if method.name == "from" && argv.len() == 1 {
                     let type_name = match owner {
                         crate::Codegen::TIR::TStaticOwner::User(name) => name,
                         _ => "",
                     };
-                    let check_name = format!("{type_name}::check");
-                    if let Some(check) = self.funcs.get(&check_name).copied() {
-                        let text = argv.remove(0);
-                        return match self.run_func(check, vec![text.clone()], &mut HashMap::new())? {
-                            CtValue::Present(_) => Ok(CtValue::Present(Box::new(text))),
-                            CtValue::Failed(error) => Ok(CtValue::Failed(error)),
-                            other => Err(unsupported(
-                                &format!("CheckedText.check returned {:?}", other.jet_type()),
-                                self.span(),
-                            )),
-                        };
+                    if !type_name.is_empty() {
+                        let check_name = format!("{type_name}::check");
+                        if let Some(check) = self.funcs.get(&check_name).copied() {
+                            let text = argv.remove(0);
+                            return match self
+                                .run_func(check, vec![text.clone()], &mut HashMap::new())?
+                            {
+                                CtValue::Present(_) => Ok(CtValue::Present(Box::new(text))),
+                                CtValue::Failed(error) => Ok(CtValue::Failed(error)),
+                                other => Err(unsupported(
+                                    &format!("CheckedText.check returned {:?}", other.jet_type()),
+                                    self.span(),
+                                )),
+                            };
+                        }
                     }
                 }
                 match owner {

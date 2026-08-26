@@ -60,7 +60,7 @@ use crate::Diagnostics::Span;
 use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, Call, CallArg, ContractClause, CtValue, EnumLitArg, Expr, IndexKind,
-    OrFallback, Stmt, StrPart, TryConvert, Type, TypedLitBody,
+    OrFallback, Pattern, Stmt, StrPart, TryConvert, Type, TypedLitBody,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
@@ -1368,6 +1368,154 @@ struct ExprIfWork<'a> {
     else_lowered: Vec<TStmt>,
 }
 
+struct ResultHandlerAst<'a> {
+    subject: &'a Expr,
+    ok_pattern: &'a Pattern,
+    ok_body: &'a [Stmt],
+    ok_value: &'a Expr,
+    err_pattern: &'a Pattern,
+    err_body: &'a [Stmt],
+    err_value: &'a Expr,
+    terminal: &'a Expr,
+    ok_cond_span: Span,
+    err_cond_span: Span,
+    inner_span: Span,
+    outer_span: Span,
+}
+
+/// Recognize the parser's fixed two-pattern Result handler shape. The receiver
+/// is evaluated once into an ordinary local before the existing `.Ok`/`.Err`
+/// conditions are lowered, so every backend observes one source evaluation.
+fn result_handler_ast(expr: &Expr) -> Option<ResultHandlerAst<'_>> {
+    let Expr::If {
+        cond: ok_cond,
+        then_body: ok_body,
+        then_value: ok_value,
+        else_body: outer_else_body,
+        else_value: outer_else_value,
+        span: outer_span,
+    } = expr
+    else {
+        return None;
+    };
+    if !outer_else_body.is_empty() {
+        return None;
+    }
+    let Expr::PatternTest {
+        subject: ok_subject,
+        pattern: ok_pattern @ Pattern::Ok { .. },
+        span: ok_cond_span,
+    } = ok_cond.as_ref()
+    else {
+        return None;
+    };
+    let Expr::If {
+        cond: err_cond,
+        then_body: err_body,
+        then_value: err_value,
+        else_body: err_else_body,
+        else_value: terminal,
+        span: inner_span,
+    } = outer_else_value.as_ref()
+    else {
+        return None;
+    };
+    if !err_else_body.is_empty() || !matches!(terminal.as_ref(), Expr::NoElse(_)) {
+        return None;
+    }
+    let Expr::PatternTest {
+        subject: err_subject,
+        pattern: err_pattern @ Pattern::Err { .. },
+        span: err_cond_span,
+    } = err_cond.as_ref()
+    else {
+        return None;
+    };
+    // The parser clones the exact receiver into both pattern tests. A source
+    // span is sufficient here: two distinct source expressions cannot occupy
+    // the same span, while the synthetic local used below deliberately gets a
+    // different span for the second read so this rewrite does not recurse.
+    if ok_subject.span() != err_subject.span() {
+        return None;
+    }
+    Some(ResultHandlerAst {
+        subject: ok_subject,
+        ok_pattern,
+        ok_body,
+        ok_value,
+        err_pattern,
+        err_body,
+        err_value,
+        terminal,
+        ok_cond_span: *ok_cond_span,
+        err_cond_span: *err_cond_span,
+        inner_span: *inner_span,
+        outer_span: *outer_span,
+    })
+}
+
+fn lower_result_handler_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
+    let shape = result_handler_ast(expr)?;
+    let base_env = clone_env(env);
+    let subject = super::control_flow::lower_if_let_subject(shape.subject, cx, env, false);
+    let temp = jet_format!("{jet_prefix}result_handler_{}", shape.subject.span().start);
+    let temp_local = TLocal::generated(&temp);
+
+    let lowered = {
+        let mut handler_env = clone_env(env);
+        handler_env.bind(&temp, temp_local.clone(), Some(subject.ty.clone()));
+        let ok_subject = Expr::Ident(temp.clone(), shape.subject.span());
+        // Keep the two synthetic local nodes at different spans. This preserves
+        // the ordinary lowering path for the rewritten nested if instead of
+        // recognizing it as another compact handler.
+        let err_subject = Expr::Ident(temp.clone(), shape.err_cond_span);
+        let err_cond = Expr::PatternTest {
+            subject: Box::new(err_subject),
+            pattern: shape.err_pattern.clone(),
+            span: shape.err_cond_span,
+        };
+        let err_if = Expr::If {
+            cond: Box::new(err_cond),
+            then_body: shape.err_body.to_vec(),
+            then_value: Box::new(shape.err_value.clone()),
+            else_body: Vec::new(),
+            else_value: Box::new(shape.terminal.clone()),
+            span: shape.inner_span,
+        };
+        let rewritten = Expr::If {
+            cond: Box::new(Expr::PatternTest {
+                subject: Box::new(ok_subject),
+                pattern: shape.ok_pattern.clone(),
+                span: shape.ok_cond_span,
+            }),
+            then_body: shape.ok_body.to_vec(),
+            then_value: Box::new(shape.ok_value.clone()),
+            else_body: Vec::new(),
+            else_value: Box::new(err_if),
+            span: shape.outer_span,
+        };
+        // The synthetic AST is compiler-private. Isolate its pointer cache so
+        // temporary node addresses cannot leak into the surrounding lowering.
+        let _cache_scope = ExprCacheScope::enter();
+        lower_expr(&rewritten, cx, &mut handler_env)
+    };
+    *env = base_env;
+    Some(canonicalize_pre_tier_expr(TExpr {
+        ty: lowered.ty.clone(),
+        kind: TExprKind::InlineBlock(vec![
+            TStmt::Let {
+                name: temp,
+                kw: "let",
+                let_ty: crate::Codegen::TIR::TLetTy::inferred(),
+                init: subject,
+                gc_promotion: None,
+                gc_transferred: false,
+            },
+            TStmt::ExprStmt(lowered),
+        ]),
+    }))
+}
+
 fn condition_terms<'a>(cond: &'a Expr) -> Vec<&'a Expr> {
     let mut work = TirWorklist::new();
     work.push(cond);
@@ -1512,6 +1660,10 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 );
             }
             ExprWork::BuildIf(expr) => {
+                if let Some(handler) = lower_result_handler_expr(expr, cx, env) {
+                    expr_cache_put(expr, handler, cx);
+                    continue;
+                }
                 let Expr::If {
                     cond,
                     then_body,

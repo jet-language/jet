@@ -21,11 +21,21 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 PERF_DIR="$ROOT/tools/perf"
 CORPUS="$PERF_DIR/corpus.tsv"
+FIXTURE_PACKAGE="$PERF_DIR/package.jet"
 SCALE_CORPUS="$PERF_DIR/construct-scale.tsv"
 BASELINE="$PERF_DIR/baseline.json"
 TMP_ROOT=${TMPDIR:-"$HOME/.cache/jet-test-scratch"}
 JET_ENV="$ROOT/scripts/agent/jet-env"
 JET_BIN="$ROOT/target/debug/jet"
+
+# Materialize the core toolchain once. Re-entering `jet-env` for every AOT
+# sample adds an environment-launch measurement to the compiler stage and
+# makes clean samples bimodal; the measured command must be the same production
+# compiler inside the already-pinned shell.
+if [ "${JET_ENV_DISABLE:-0}" != "1" ]; then
+    exec "$JET_ENV" "$ROOT/tools/perf/dashboard.sh" "$@"
+fi
+
 TIME_BIN=${TIME_BIN:-}
 if [ -z "$TIME_BIN" ]; then
     TIME_BIN=$(type -P time 2>/dev/null || true)
@@ -50,6 +60,7 @@ PARITY_CASE_COUNT=0
 [ -x "$TIME_BIN" ] || { echo "missing GNU time: $TIME_BIN" >&2; exit 1; }
 [ -x "$TIMEOUT_BIN" ] || { echo "missing timeout: $TIMEOUT_BIN" >&2; exit 1; }
 [ -f "$CORPUS" ] || { echo "missing compiler-speed corpus: $CORPUS" >&2; exit 1; }
+[ -f "$FIXTURE_PACKAGE" ] || { echo "missing compiler-speed fixture package: $FIXTURE_PACKAGE" >&2; exit 1; }
 [ -x "$ROOT/target/debug/jet" ] || {
     echo "missing fresh compiler binary: $ROOT/target/debug/jet" >&2
     echo "build Jet before running the compiler-speed dashboard" >&2
@@ -447,8 +458,13 @@ prepare_fixture() {
     fixture_program=$2
     fixture_expected=$3
     mkdir -p "$fixture_work"
+    cp "$FIXTURE_PACKAGE" "$fixture_work/package.jet"
     cp "$ROOT/$fixture_program" "$fixture_work/run.jet"
     cp "$ROOT/$fixture_expected" "$fixture_work/expected.out"
+    printf '%s\n' \
+        'name: "compiler_speed_fixture"' \
+        'version: "0.1.0"' \
+        'authority: .{ holds: { allow: [IO, Mem.Alloc] } }' > "$fixture_work/package.jet"
 }
 
 check_trial_output() {
@@ -505,16 +521,31 @@ run_aot_trial() {
     trial_stats=$4
     trial_phases=$5
     mkdir -p "$trial_work/timing" "$trial_cache"
-    if run_timed "$trial_stats" "$trial_output.build.stdout" "$trial_output.build.stderr" \
-        env \
-        JET_CACHE_DIR="$trial_cache/build" \
-        JET_TIMING=1 \
-        JET_TIMING_DIR="$trial_work/timing" \
-        NO_COLOR=1 \
-        "$JET_ENV" bash -c "cd '$trial_work' && exec jet build --profile=release --verbose run.jet"; then
-        trial_status=0
+    if [ "${JET_ENV_DISABLE:-0}" = "1" ]; then
+        if run_timed "$trial_stats" "$trial_output.build.stdout" "$trial_output.build.stderr" \
+            env \
+            JET_CACHE_DIR="$trial_cache/build" \
+            JET_ROOT="$trial_work" \
+            JET_TIMING=1 \
+            JET_TIMING_DIR="$trial_work/timing" \
+            NO_COLOR=1 \
+            sh -c "cd '$trial_work' && exec '$JET_BIN' build --profile=release --verbose run.jet"; then
+            trial_status=0
+        else
+            trial_status=$?
+        fi
     else
-        trial_status=$?
+        if run_timed "$trial_stats" "$trial_output.build.stdout" "$trial_output.build.stderr" \
+            env \
+            JET_CACHE_DIR="$trial_cache/build" \
+            JET_TIMING=1 \
+            JET_TIMING_DIR="$trial_work/timing" \
+            NO_COLOR=1 \
+            "$JET_ENV" bash -c "cd '$trial_work' && exec jet build --profile=release --verbose run.jet"; then
+            trial_status=0
+        else
+            trial_status=$?
+        fi
     fi
     [ "$trial_status" -eq 0 ] || report_trial_failure "$trial_status" "$trial_work" "$trial_output.build.stderr"
     [ -x "$trial_work/build/run" ] || { echo "missing AOT artifact: $trial_work/build/run" >&2; exit 1; }
@@ -615,6 +646,17 @@ phase_average() {
     awk -F "$TAB" -v wanted="$phase_wanted" '$1 == wanted { total += $2; count++ } END { if (count == 0) print 0; else printf "%.0f\n", total / count }' "$phase_file_path"
 }
 
+required_phase_average() {
+    phase_file_path=$1
+    phase_wanted=$2
+    phase_count=$(awk -F "$TAB" -v wanted="$phase_wanted" '$1 == wanted { count++ } END { print count + 0 }' "$phase_file_path")
+    [ "$phase_count" -eq "$SAMPLES" ] || {
+        echo "missing required compiler phase: $phase_wanted (expected $SAMPLES samples, got $phase_count)" >&2
+        exit 1
+    }
+    phase_average "$phase_file_path" "$phase_wanted"
+}
+
 safe_id() {
     printf '%s' "$1" | tr '/.' '__'
 }
@@ -638,6 +680,16 @@ parity_require_status() {
     parity_label=$2
     [ "$parity_status" -eq 0 ] || {
         echo "parity command failed: $parity_label (exit $parity_status)" >&2
+        exit 1
+    }
+}
+
+parity_compare_status() {
+    parity_left=$1
+    parity_right=$2
+    parity_label=$3
+    [ "$parity_left" -eq "$parity_right" ] || {
+        echo "parity exit mismatch: $parity_label ($parity_left -> $parity_right)" >&2
         exit 1
     }
 }
@@ -721,6 +773,8 @@ parity_run_case() {
     parity_run_process "$parity_root/aot.status" "$parity_root/aot.stdout" "$parity_root/aot.stderr" "$parity_root" \
         env NO_COLOR=1 "$parity_root/build/run"
     parity_require_status "$(sed -n '1p' "$parity_root/aot.status")" "$parity_id/aot"
+    parity_compare_status "$(sed -n '1p' "$parity_root/jit.status")" "$(sed -n '1p' "$parity_root/dev.status")" "$parity_id/jit-dev"
+    parity_compare_status "$(sed -n '1p' "$parity_root/jit.status")" "$(sed -n '1p' "$parity_root/aot.status")" "$parity_id/jit-aot"
 
     parity_compare "$parity_root/expected.out" "$parity_root/jit.stdout" "$parity_id/expected-jit-stdout"
     parity_compare "$parity_root/jit.stdout" "$parity_root/dev.stdout" "$parity_id/jit-dev-stdout"
@@ -816,6 +870,10 @@ parity_check_diagnostic() {
             }
         done
     done
+    parity_compare_status "$(sed -n '1p' "$parity_root/jit.status")" "$(sed -n '1p' "$parity_root/dev.status")" "$parity_id/jit-dev"
+    parity_compare_status "$(sed -n '1p' "$parity_root/jit.status")" "$(sed -n '1p' "$parity_root/aot.status")" "$parity_id/jit-aot"
+    parity_compare "$parity_root/jit.stderr" "$parity_root/dev.stderr" "$parity_id/jit-dev-stderr"
+    parity_compare "$parity_root/jit.stderr" "$parity_root/aot.stderr" "$parity_id/jit-aot-stderr"
     PARITY_CASE_COUNT=$((PARITY_CASE_COUNT + 1))
 }
 
@@ -968,7 +1026,7 @@ measure_state() {
         state_linker_backend_sha256="$TRIAL_LINKER_BACKEND_SHA256"
         state_profile="release"
         state_artifact_bytes="$TRIAL_ARTIFACT_BYTES"
-        state_phase_text="parse_us=$(phase_average "$state_phases" parse);sema_us=$(phase_average "$state_phases" sema);ffi_us=$(phase_average "$state_phases" ffi);tir_us=$(phase_average "$state_phases" tir);emission_us=$(phase_average "$state_phases" emission);build_plan_us=$(phase_average "$state_phases" build_plan);backend_us=$(phase_average "$state_phases" backend);link_us=$(phase_average "$state_phases" link)"
+        state_phase_text="parse_us=$(required_phase_average "$state_phases" parse);sema_us=$(required_phase_average "$state_phases" sema);ffi_us=$(phase_average "$state_phases" ffi);tir_us=$(required_phase_average "$state_phases" tir);emission_us=$(required_phase_average "$state_phases" emission);build_plan_us=$(phase_average "$state_phases" build_plan);backend_us=$(required_phase_average "$state_phases" backend);link_us=$(required_phase_average "$state_phases" link)"
     fi
     state_artifact_source="$state_work"
     if [ "$state_kind" = "clean" ]; then

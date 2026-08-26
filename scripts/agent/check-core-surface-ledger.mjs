@@ -3200,8 +3200,8 @@ function validateCoreApiGate(ledger) {
     }
   }
   const hover = read("tests/lsp/02_hover.json");
-  if (hover.includes("=>") || !hover.includes("-> Int")) {
-    throw new Error("hover fixture teaches retired `=>`; use `->`");
+  if (hover.includes("=>") || !hover.includes("-[IO]>")) {
+    throw new Error("hover fixture teaches a retired arrow or misses `-[IO]>`");
   }
   for (const [path, markers] of [
     ["tests/ui/variadic_not_last.stderr", ["E1310", "variadic parameter"]],
@@ -3281,9 +3281,12 @@ function validateCoreApiGate(ledger) {
     if (!["pending-fixture", "measured"].includes(workflow.evidence.status)) {
       throw new Error("invalid Core API workflow evidence status: " + workflow.id);
     }
-    validateInventoryEvidence(workflow);
-    validateJetWin(workflow);
-    validateMeasuredEvidence(workflow);
+    if (workflow.evidence.status === "pending-fixture") {
+      validateInventoryEvidence(workflow);
+      validateJetWin(workflow);
+    } else {
+      validateMeasuredEvidence(workflow);
+    }
   }
   if (stable(Array.from(workflowIds).sort()) !== stable(Array.from(rowIds).sort())) {
     throw new Error("Core API workflow manifest row coverage drifted");
@@ -3983,7 +3986,7 @@ function hostileFixtures() {
   }));
 
   results.push(rejects("Core API fixture loses independent acceptance",
-    "Core API fixture review is not accepted", function () {
+    "Core API fixture lacks accepted independent review", function () {
     const broken = clone(ledger);
     broken.coreApiGate.fixtureContract.tasks[0].independentFixtureReview.minimal = false;
     validateCoreApiGate(broken);

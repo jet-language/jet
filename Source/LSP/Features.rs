@@ -479,6 +479,20 @@ pub(crate) fn compute_definition(
             return Some((target.module_path.clone(), target.def_span.into()));
         }
     }
+    // State labels may repeat across distinct owning structs. A declaration
+    // cursor already carries the exact nested-section anchor, so do not fall
+    // back to the first matching leaf spelling in the module.
+    if let Some(definition) = db.defs.iter().find(|definition| {
+        definition.module_path == path
+            && definition.def_span.start <= offset
+            && offset <= definition.def_span.end
+            && matches!(
+                &definition.kind,
+                SymKind::EnumVariant { parent } if parent.ends_with(".State")
+            )
+    }) {
+        return Some((definition.module_path.clone(), definition.def_span));
+    }
     let name = find_ident_at(tokens, offset)?;
     // Look for a top-level or local def with this name
     // Prefer defs in same module, then other modules

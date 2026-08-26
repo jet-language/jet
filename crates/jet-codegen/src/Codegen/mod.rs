@@ -56,6 +56,7 @@ static CACHED_RUNTIME_FINGERPRINT: OnceLock<String> = OnceLock::new();
 struct CoreEmissionFingerprintKey {
     used_core: Vec<String>,
     active_os: String,
+    edition: String,
     force_corelib: bool,
     test_harness: bool,
 }
@@ -433,15 +434,11 @@ fn push_comparable_primitive_impls(out: &mut String) {
 /// is decided by build facts alone — never by user source text — so the native
 /// builder compiles it once into a content-addressed rlib and links it
 /// (`Source/RuntimeCache.rs`).
-fn push_cached_runtime_begin(out: &mut String, bundle: &ProgramBundle, link: Option<&FfiLink>) {
+fn push_cached_runtime_begin(out: &mut String, link: Option<&FfiLink>) {
     if link.is_some() {
         push_ffi_reporter(out, link);
     }
     out.push_str(CACHED_RUNTIME_BEGIN);
-    // `Prelude/CoreLib/Top/EncodingCodecs.rs` reads this constant and is emitted
-    // inside this block, so the constant belongs to the cached crate. The build
-    // cache still keys the edition through `manifest_fingerprint`.
-    push_package_edition(out, bundle);
     push_cached_runtime_body(out, link);
 }
 
@@ -461,7 +458,7 @@ fn push_cached_runtime_body(out: &mut String, link: Option<&FfiLink>) {
 
 /// The fixed part of the block on its own — what `cached_runtime_fingerprint`
 /// hashes. Program assemblers use `push_cached_runtime_begin` instead, because
-/// the Core closure joins them inside the same markers.
+/// the Core closure follows them in its own marker pair.
 fn push_cached_runtime(out: &mut String, link: Option<&FfiLink>) {
     if link.is_some() {
         push_ffi_reporter(out, link);
@@ -1098,12 +1095,20 @@ fn force_corelib_prelude(bundle: &ProgramBundle) -> bool {
 /// JetStd kernel would let scheduler/UI/app edits reuse the wrong digest.
 fn core_runtime_body(bundle: &ProgramBundle, test_harness: bool) -> String {
     let force_corelib = force_corelib_prelude(bundle);
-    core_runtime_body_for(
+    if !force_corelib && !core_needs_embedded_runtime(&bundle.used_core) {
+        return String::new();
+    }
+    let mut body = String::new();
+    // `Prelude/CoreLib/Top/EncodingCodecs.rs` reads this constant. It belongs
+    // to the Core closure, whose identity includes the package edition.
+    push_package_edition(&mut body, bundle);
+    body.push_str(&core_runtime_body_for(
         &bundle.used_core,
         bundle.active_os,
         force_corelib,
         test_harness,
-    )
+    ));
+    body
 }
 
 fn core_runtime_body_for(
@@ -1156,6 +1161,7 @@ pub fn corelib_emission_fingerprint(bundle: &ProgramBundle, test_harness: bool) 
     let cache_key = CoreEmissionFingerprintKey {
         used_core,
         active_os: bundle.active_os.name().to_string(),
+        edition: bundle.edition.clone(),
         force_corelib: force_corelib_prelude(bundle),
         test_harness,
     };
@@ -3119,6 +3125,10 @@ mod tests {
             crate::SHA256::sha256_hex(runtime_source.as_bytes()),
             "native cache identity must hash the emitted fixed runtime"
         );
+        assert!(
+            !runtime_source.contains("__JET_PACKAGE_EDITION"),
+            "package-specific edition data must not poison the fixed runtime object"
+        );
 
         let files = HashSet::from(["core.files::read".to_string()]);
         let net = HashSet::from(["core.net::tcp_connect".to_string()]);
@@ -3144,6 +3154,7 @@ mod tests {
         push_core_runtime(&mut emitted, &bundle, false);
         assert!(emitted.contains(scheduler_prelude_for_emit(true)));
         assert!(emitted.contains(UI_PRELUDE));
+        assert!(body.contains("__JET_PACKAGE_EDITION"));
         assert!(body.contains("fn jet_deadline_exceeded"));
         assert!(body.contains("fn jet_seeded_rng_int"));
         assert!(emitted.contains(body.as_str()));
@@ -5019,7 +5030,7 @@ fn emit_bundle_dbg_inner(
             out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
         }
         push_program_allocator_prelude(&mut out, bundle);
-        push_cached_runtime_begin(&mut out, bundle, link);
+        push_cached_runtime_begin(&mut out, link);
         out.push_str(CACHED_RUNTIME_END);
         push_core_runtime(&mut out, bundle, false);
         out.push('\n');
@@ -5307,7 +5318,7 @@ fn emit_bundle_tests_cov_inner(
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_cached_runtime_begin(&mut out, bundle, link);
+    push_cached_runtime_begin(&mut out, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(REPORT_PRELUDE);
@@ -5599,7 +5610,7 @@ pub fn emit_bundle_fuzz(
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
     }
-    push_cached_runtime_begin(&mut out, bundle, link);
+    push_cached_runtime_begin(&mut out, link);
     out.push_str(TEST_PRELUDE);
     out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(REPORT_PRELUDE);

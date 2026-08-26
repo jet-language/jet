@@ -402,6 +402,38 @@ fn platform_tier_gate_exercises_native_lease_diagnostics_and_audit() {
 }
 
 #[test]
+fn platform_store_lease_projection_rejects_invalid_identity_in_doctor_and_audit() {
+    // Criterion 6: a raw lease-directory scan would silently classify this
+    // node. The production Store projection must reject it in both readers.
+    let root = Scratch::new("platform-invalid-lease-identity");
+    let malformed = root.join("leases").join("not-a-lease");
+    fs::create_dir_all(&malformed).unwrap();
+
+    let doctor = jetpack()
+        .args(["doctor", "--json", "--offline"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(doctor.status.code(), Some(2));
+    let doctor_json = String::from_utf8_lossy(&doctor.stdout);
+    assert!(doctor_json.contains("\"name\":\"leases\""), "{doctor_json}");
+    assert!(doctor_json.contains("\"status\":\"broken\""), "{doctor_json}");
+    assert!(doctor_json.contains("invalid identity"), "{doctor_json}");
+
+    let audit = jetpack()
+        .args(["audit", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(audit.status.code(), Some(2));
+    let audit_stderr = String::from_utf8_lossy(&audit.stderr);
+    assert!(audit_stderr.contains("Error [E1340]:"), "{audit_stderr}");
+    assert!(audit_stderr.contains("invalid identity"), "{audit_stderr}");
+    assert!(audit_stderr.contains("More: jet-lang.dev/e/E1340"), "{audit_stderr}");
+    assert!(malformed.is_dir(), "diagnostics mutated the lease projection");
+}
+
+#[test]
 fn audit_reports_stale_executable_lease_golden() {
     let root = Scratch::new("audit-stale-lease-golden");
     let stale = root.join("leases").join("4294967294-1-audit-stale");

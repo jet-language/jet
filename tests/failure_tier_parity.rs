@@ -19,7 +19,8 @@ impl StoreFailure -> Err {
 fn read() Int !StoreFailure -> Err(StoreFailure.Missing)
 
 fn run() ! {
-    read()
+    value :: read()
+    return Ok(())
 }
 "#;
 

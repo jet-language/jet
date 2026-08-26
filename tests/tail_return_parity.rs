@@ -22,12 +22,22 @@ fn early(flag: Bool) String -> {
     "late"
 }
 
-@expected :: "{label(1)}|{label(2)}|{early(true)}|{early(false)}"
+@expected_one :: label(1)
+@expected_other :: label(2)
+@expected_early :: early(true)
+@expected_late :: early(false)
 
 fn run() {
-    actual :: "{label(1)}|{label(2)}|{early(true)}|{early(false)}"
-    print("{@expected}")
-    print("{actual}")
+    #FX(authority: IO) {
+        print(@expected_one)
+        print(@expected_other)
+        print(@expected_early)
+        print(@expected_late)
+        print(label(1))
+        print(label(2))
+        print(early(true))
+        print(early(false))
+    }
 }
 "#;
 

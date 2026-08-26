@@ -732,8 +732,8 @@ fn run() {
         assert!(hover.contains(&symbol.summary));
         assert!(symbol
             .signature
-            .contains("failure: Result<Int, Err> (implicit default !Err)"));
-        assert!(hover.contains("failure: Result<Int, Err> (implicit default !Err)"));
+            .contains("failure: Int ! (implicit default !Err)"));
+        assert!(hover.contains("failure: Int ! (implicit default !Err)"));
         assert_eq!(
             completion.detail.as_deref(),
             Some(symbol.signature.as_str())

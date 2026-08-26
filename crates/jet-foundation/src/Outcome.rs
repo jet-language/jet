@@ -151,8 +151,8 @@ pub fn jet_err_from_conversion(
     source: String,
     target: String,
 ) -> JetErr {
-    let mut error = jet_err_with_identity(message, code, cause, source.clone());
-    jet_err_record_conversion(&mut error, source, target);
+    let mut error = jet_err(message, code, cause);
+    jet_err_apply_conversion(&mut error, source, target);
     error
 }
 
@@ -174,6 +174,16 @@ pub fn jet_err_add_context(error: &mut JetErr, text: String, file: String, line:
 
 pub fn jet_err_record_conversion(error: &mut JetErr, source: String, target: String) {
     error.conversions.push(JetErrorConversion { source, target });
+}
+
+/// Apply one declared conversion to an existing structured error. The
+/// conversion boundary owns the source identity and history; the converted
+/// error keeps its message, code, cause, context, and any earlier metadata.
+pub fn jet_err_apply_conversion(error: &mut JetErr, source: String, target: String) {
+    if error.typed_identity.is_none() {
+        error.typed_identity = Some(source.clone());
+    }
+    jet_err_record_conversion(error, source, target);
 }
 
 /// D-FAIL-ERROR1=A: the only String-to-default-error conversion.
@@ -869,11 +879,10 @@ mod err_tests {
             Err(JetAbsent),
             "IoError".to_string(),
         );
-        let mut error = jet_err_with_identity(
+        let mut error = jet_err(
             "loading config".to_string(),
             Ok("CFG404".to_string()),
             Ok(cause),
-            "ConfigError".to_string(),
         );
         jet_err_add_context(
             &mut error,
@@ -881,7 +890,7 @@ mod err_tests {
             "config.jet".to_string(),
             42,
         );
-        jet_err_record_conversion(
+        jet_err_apply_conversion(
             &mut error,
             "IoError".to_string(),
             "ConfigError".to_string(),

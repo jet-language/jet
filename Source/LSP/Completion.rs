@@ -230,6 +230,16 @@ fn semantic_owner(ty: &AST::Type) -> Option<String> {
     }
 }
 
+/// The `State` segment is an erased fact plane, not a runtime member. Keep it
+/// available as the first completion step of the canonical `Type.State.Name`
+/// path without inventing a second type symbol.
+fn has_state_plane(db: &SymbolDB, type_name: &str) -> bool {
+    let owner = format!("{type_name}.State");
+    db.members
+        .iter()
+        .any(|member| member.owner == owner.as_str())
+}
+
 fn semantic_completion_kind(symbol: &jet_semindex::SemanticSymbol) -> u8 {
     use jet_semindex::SemanticSymbolKind;
     match symbol.kind {
@@ -383,6 +393,19 @@ pub(crate) fn compute_completions(
                 items.push(item);
             }
             return items;
+        }
+        if has_state_plane(db, &receiver_name) && "State".starts_with(&prefix) {
+            items.push(CompletionItem {
+                label: "State".to_string(),
+                kind: ck::PROPERTY,
+                detail: Some(format!("erased state facts owned by `{receiver_name}`")),
+                documentation: Some(format!(
+                    "The nested typestate fact plane for `{receiver_name}`."
+                )),
+                insert_text: None,
+                insert_text_format: 1,
+                auto_import: None,
+            });
         }
         let owner = if receiver_name == crate::Syntax::DURATION_TYPE
             || crate::AST::numeric_type_from_name(&receiver_name).is_some()

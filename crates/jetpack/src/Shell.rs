@@ -614,6 +614,18 @@ fn report_nix_projection_error(theme: &Theme, program: &str, error: &NixProjecti
     }
 }
 
+fn command_lookup_directory(cwd: Option<&Path>) -> PathBuf {
+    let process_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    cwd.map(|path| {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            process_dir.join(path)
+        }
+    })
+    .unwrap_or(process_dir)
+}
+
 fn run_command_in_mode(
     env: &Env,
     cmd_args: &[String],
@@ -629,9 +641,10 @@ fn run_command_in_mode(
     let Some((program, rest)) = cmd_args.split_first() else {
         return 0;
     };
+    let caller_dir = command_lookup_directory(cwd);
     let stable_program = match env.cache_leases.iter().try_fold(
         None,
-        |stable_program, lease| match lease.executable_for_command(program) {
+        |stable_program, lease| match lease.executable_for_command_at(program, &caller_dir) {
             Ok(Some(path)) => Ok(stable_program.or(Some(path))),
             Ok(None) => Ok(stable_program),
             Err(error) => Err(error),

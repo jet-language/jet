@@ -685,6 +685,76 @@ fn extract_report_opening_codes(text: &str) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn diagnostic_snapshots_keep_the_complete_registered_product() {
+    for row in jet_foundation::Registry::diagnostic_rows() {
+        assert!(!row.code.is_empty(), "diagnostic row lost its code");
+        assert!(!row.what.is_empty(), "{} lost its What", row.code);
+        assert!(!row.why.is_empty(), "{} lost its Why", row.code);
+        assert!(!row.fix.is_empty(), "{} lost its Fix", row.code);
+    }
+
+    for path in report_snapshot_paths() {
+        let snapshot = read(&path);
+        let lines: Vec<&str> = snapshot.lines().collect();
+        for (start, line) in lines.iter().enumerate() {
+            let Some(code) = extract_report_opening_codes(line).into_iter().next() else {
+                continue;
+            };
+            let row = jet_foundation::Registry::diagnostic(&code).unwrap_or_else(|| {
+                panic!(
+                    "{} snapshot uses unregistered diagnostic code {code}",
+                    path.display()
+                )
+            });
+            let end = lines
+                .iter()
+                .enumerate()
+                .skip(start + 1)
+                .find_map(|(index, line)| {
+                    extract_report_opening_codes(line)
+                        .first()
+                        .map(|_| index)
+                })
+                .unwrap_or(lines.len());
+            let report = &lines[start..end];
+            let what = line
+                .split_once("]: ")
+                .or_else(|| line.split_once("): "))
+                .map(|(_, what)| what.trim())
+                .unwrap_or("");
+            assert!(!what.is_empty(), "{} lost What for {code}", path.display());
+            assert!(
+                report
+                    .iter()
+                    .any(|line| line.strip_prefix(" Why: ").is_some_and(|why| !why.is_empty())),
+                "{} lost Why for {code}",
+                path.display()
+            );
+            assert!(
+                report
+                    .iter()
+                    .any(|line| line.strip_prefix(" Fix: ").is_some_and(|fix| !fix.is_empty())),
+                "{} lost Fix for {code}",
+                path.display()
+            );
+            let more = format!("More: jet-lang.dev/e/{code}");
+            assert!(
+                report.iter().any(|line| *line == more),
+                "{} lost snapshot link for {code}",
+                path.display()
+            );
+            assert!(
+                !row.what.trim().is_empty()
+                    && !row.why.trim().is_empty()
+                    && !row.fix.trim().is_empty(),
+                "{} has an incomplete registered product",
+                code
+            );
+        }
+    }
+}
+
 fn rendered_report_codes() -> BTreeSet<String> {
     report_snapshot_paths()
         .into_iter()

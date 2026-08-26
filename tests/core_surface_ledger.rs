@@ -157,7 +157,7 @@ fn core_surface_ledger_checker_rejects_hostile_fixtures() {
         "stale owner: cluster claims a closed card",
         "unratified scope exclusion",
         "Core API workflow omits its Jet win",
-        "Core API fixture review is not accepted",
+        "Core API fixture lacks accepted independent review",
         "Core API fixture execution contract drifted",
         "Core API fixture receipt projection drifted",
         "Core API fixture selection contract drifted",
@@ -206,7 +206,7 @@ fn core_api_syntax_is_taught_by_reference_editor_and_diagnostic_surfaces() {
         assert!(lsp.contains(marker), "editor coverage lost `{marker}`");
     }
     let hover = source("tests/lsp/02_hover.json");
-    assert!(hover.contains("-> Int") && !hover.contains("=>"));
+    assert!(hover.contains("-[IO]>") && !hover.contains("=>"));
 
     for (path, markers) in [
         (

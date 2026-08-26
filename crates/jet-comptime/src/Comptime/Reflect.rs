@@ -2008,7 +2008,18 @@ fn reflected_facts(registry: &jet_foundation::Facts::FactRegistry) -> Vec<CtValu
 
 /// Build the `TypeInfo` handle passed into a user derive body for `struct` targets.
 pub fn build_struct_type_info(s: &StructDef) -> CtValue {
-    build_struct_type_info_with_states(s, &[])
+    let states = s
+        .state
+        .as_ref()
+        .map(|state| {
+            state
+                .states
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    build_struct_type_info_with_states(s, &states)
 }
 
 pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> CtValue {

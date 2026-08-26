@@ -293,7 +293,7 @@ fn pattern_subject_is_owned_self(subject: &Expr, env: &LowerEnv) -> bool {
     }
 }
 
-fn lower_if_let_subject(subject: &Expr, cx: &Cx, env: &mut LowerEnv, cached: bool) -> TExpr {
+pub(super) fn lower_if_let_subject(subject: &Expr, cx: &Cx, env: &mut LowerEnv, cached: bool) -> TExpr {
     // Sema protects ordinary owning-position field reads with an implicit `Copy`
     // whose span is exactly the wrapped field span. A take-self method owns that
     // field, so an if-let may move it. Preserve an explicitly written `~field`

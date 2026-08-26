@@ -1448,6 +1448,8 @@ fn signature_help_response(
             param_contract,
             param_variadic,
             ret,
+            failure_contract,
+            failure_source,
             effects,
             effect_via,
             ..
@@ -1474,6 +1476,11 @@ fn signature_help_response(
                 );
                 label.push_str("]>");
             }
+            label.push_str("\nfailure: ");
+            label.push_str(failure_contract);
+            label.push_str(" (");
+            label.push_str(failure_source);
+            label.push(')');
             let parameter_parts: Vec<&String> = parts
                 .iter()
                 .filter(|part| part.as_str() != "/" && part.as_str() != "*")

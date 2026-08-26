@@ -474,11 +474,25 @@ impl CacheLease {
         &self,
         requested: &str,
     ) -> std::io::Result<Option<PathBuf>> {
+        let caller_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        self.executable_for_command_at(requested, &caller_dir)
+    }
+
+    pub(crate) fn executable_for_command_at(
+        &self,
+        requested: &str,
+        caller_dir: &Path,
+    ) -> std::io::Result<Option<PathBuf>> {
         self.require_consumable()?;
-        if let Some((member, file)) = self.executable_file(requested) {
+        let requested_path = Path::new(requested);
+        let resolved_path = if requested_path.is_absolute() {
+            requested_path.to_path_buf()
+        } else {
+            caller_dir.join(requested_path)
+        };
+        if let Some((member, file)) = self.executable_file_at(requested, &resolved_path) {
             return Ok(Some(self.executable_file_path(member, file)));
         }
-        let requested_path = Path::new(requested);
         let path_is_lease_owned = [
             Some(self.out.as_path()),
             Some(self.lease_root.as_path()),
@@ -489,7 +503,7 @@ impl CacheLease {
             .into_iter()
             .flatten()
             .chain(self.leased_output_roots.iter().map(|(root, _)| root.as_path()))
-            .any(|root| requested_path.starts_with(root));
+            .any(|root| resolved_path.starts_with(root));
         if path_is_lease_owned {
             return Err(std::io::Error::other(
                 "caller requested a path inside an executable lease that is not a recorded member",
@@ -499,8 +513,15 @@ impl CacheLease {
     }
 
     fn executable_file(&self, requested: &str) -> Option<(&std::ffi::OsString, &fs::File)> {
+        self.executable_file_at(requested, Path::new(requested))
+    }
+
+    fn executable_file_at(
+        &self,
+        requested: &str,
+        requested_path: &Path,
+    ) -> Option<(&std::ffi::OsString, &fs::File)> {
         if requested.is_empty() || requested.contains('/') || requested.contains('\\') {
-            let requested_path = Path::new(requested);
             let member = requested_path.file_name()?;
             let bin = self.bin_relative.as_ref()?;
             let matches_root = |root: Option<&Path>| {

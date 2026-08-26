@@ -32,6 +32,22 @@ fn run() -[IO]> {
     tir_support::assert_tiers_agree("result_handler_tiers", src, "ok: 7\nerror\n");
 }
 
+#[test]
+fn result_handler_evaluates_effectful_receiver_once_on_all_tiers() {
+    let src = r#"
+fn classify(ok: Bool) Int !Err -[IO]> {
+    print("source")
+    if ok { return 7 }
+    return Err("bad")
+}
+
+fn run() -[IO]> {
+    classify(false) ? ok -> print("ok: {ok}") ! error -> print(error)
+}
+"#;
+    tir_support::assert_tiers_agree("result_handler_effectful_receiver", src, "source\nerror\n");
+}
+
 /// D-RESULT-DECON2=B: a diverging arm keeps the ordinary exhaustive-chain
 /// rule, so the surviving branch still has its value on every tier.
 #[test]

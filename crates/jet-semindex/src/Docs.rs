@@ -153,8 +153,8 @@ pub fn build_doc_graph(bundle: &ProgramBundle, index: &SemIndex) -> DocGraph {
         );
     }
 
-    enrich_callable_contracts(&mut graph.items, index);
-    enrich_type_contracts(&mut graph.items, index);
+    enrich_callable_contracts(&mut graph.items, index, bundle);
+    enrich_type_contracts(&mut graph.items, index, bundle);
 
     graph.modules.sort_by(|left, right| {
         left.path
@@ -1105,15 +1105,14 @@ fn add_item(
     });
 }
 
-fn enrich_callable_contracts(items: &mut [DocItem], index: &SemIndex) {
+fn enrich_callable_contracts(items: &mut [DocItem], index: &SemIndex, bundle: &ProgramBundle) {
     for item in items.iter_mut().filter(|item| item.kind == "function") {
         let Some(definition) = index.definitions().iter().find(|definition| {
             matches!(
                 &definition.kind,
                 crate::Types::SymbolKind::Function { .. }
             ) && definition.name == item.name
-                && item.source.start <= definition.def_span.start
-                && definition.def_span.end <= item.source.end
+                && definition_belongs_to_doc_item(definition, item, bundle)
         }) else {
             continue;
         };
@@ -1130,11 +1129,15 @@ fn enrich_callable_contracts(items: &mut [DocItem], index: &SemIndex) {
     }
 }
 
-fn enrich_type_contracts(items: &mut [DocItem], index: &SemIndex) {
+fn enrich_type_contracts(
+    items: &mut [DocItem],
+    index: &SemIndex,
+    bundle: &ProgramBundle,
+) {
     for item in items.iter_mut().filter(|item| item.kind == "distinct") {
         let Some(definition) = index.definitions().iter().find(|definition| {
             definition.name == item.name
-                && definition.module_path == item.module
+                && definition_belongs_to_doc_item(definition, item, bundle)
                 && definition.nominal_base.is_some()
         }) else {
             continue;
@@ -1144,6 +1147,25 @@ fn enrich_type_contracts(items: &mut [DocItem], index: &SemIndex) {
             item.signature.push_str(&render_trait_contract(contract));
         }
     }
+}
+
+/// Semindex definitions retain the checked source/display path. Documentation
+/// deliberately emits a stable project-relative path, so compare the two
+/// through the bundle instead of assuming their spellings are identical.
+fn definition_belongs_to_doc_item(
+    definition: &crate::Types::SymbolDef,
+    item: &DocItem,
+    bundle: &ProgramBundle,
+) -> bool {
+    let same_module = definition.module_path == item.module
+        || bundle.modules.iter().any(|module| {
+            (module.display == definition.module_path || module.alias == definition.module_path)
+                && stable_module_path(&bundle.project_root, &module.path, &module.display)
+                    == item.module
+        });
+    same_module
+        && item.source.start <= definition.def_span.start
+        && definition.def_span.end <= item.source.end
 }
 
 fn render_trait_contract(contract: &TraitContractFact) -> String {

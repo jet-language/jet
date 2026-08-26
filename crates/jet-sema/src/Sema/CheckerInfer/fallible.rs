@@ -1004,6 +1004,19 @@ impl<'a> Checker<'a> {
     pub(crate) fn infer_fallible_stmt(&mut self, expr: &mut Expr) -> Option<Type> {
         self.normalize_imported_core_expr(expr);
         self.normalize_prelude_expr(expr);
+        // A statement may call a valueless function for its effect. `infer`
+        // quite correctly rejects that same call in value position with
+        // E0116; use the shared call checker directly here so statement
+        // position keeps the call's real result (`Unit` for a valueless call)
+        // without inventing a second call path.
+        if let Expr::Call(call) = expr {
+            self.clear_uninit_mut_args(&call.args);
+            return match self.check_call(call, false) {
+                Some(Some(ty)) => Some(ty),
+                Some(None) => Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+                None => None,
+            };
+        }
         self.infer(expr)
     }
 }

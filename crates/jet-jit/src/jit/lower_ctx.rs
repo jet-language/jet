@@ -127,10 +127,6 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) next_var: u32,
     /// Owning struct for inherent methods (`Point::dist_sq` → `Point`).
     pub(crate) method_struct: Option<String>,
-    /// Source and target of the declared conversion body being lowered.
-    /// Conversion construction uses the shared Prelude carrier so JIT keeps
-    /// typed identity and conversion history with AOT and Web.
-    pub(crate) error_conversion: Option<(String, String)>,
     /// CLIF return type of the function being lowered (`None` = returns void).
     /// Drives the dummy value `emit_trap_check` returns on the trap-unwind path.
     pub(crate) ret_clif: Option<types::Type>,
@@ -2802,6 +2798,18 @@ impl LowerCtx<'_, '_> {
                         format!("jit typed Result conversion unknown `{conv_fn}`")
                     })?;
                 let converted = self.call_host(func_id, &[err_payload]);
+                if jet_codegen::Codegen::TIR::try_target_is_default_error(inner, convert) {
+                    if let Some((source, target)) = error_conversion_metadata(conv_fn) {
+                        let source_handle = self.runtime.heap.alloc_string(source);
+                        let target_handle = self.runtime.heap.alloc_string(target);
+                        let source = self.b.ins().iconst(types::I64, source_handle);
+                        let target = self.b.ins().iconst(types::I64, target_handle);
+                        let apply = self
+                            .module
+                            .declare_func_in_func(self.host.err_apply_conversion, self.b.func);
+                        self.b.ins().call(apply, &[converted, source, target]);
+                    }
+                }
                 let tag = self.b.ins().iconst(types::I8, 0);
                 self.call_host(self.host.result_new_i64, &[tag, converted])
             }
@@ -18675,19 +18683,7 @@ impl LowerCtx<'_, '_> {
                     let message = field("message")?;
                     let code = field("code")?;
                     let cause = field("cause")?;
-                    let conversion = self.error_conversion.clone();
-                    if let Some((source, target)) = conversion {
-                        let source_handle = self.runtime.heap.alloc_string(source);
-                        let target_handle = self.runtime.heap.alloc_string(target);
-                        let source = self.b.ins().iconst(types::I64, source_handle);
-                        let target = self.b.ins().iconst(types::I64, target_handle);
-                        Ok(self.call_host(
-                            self.host.err_from_conversion,
-                            &[message, code, cause, source, target],
-                        ))
-                    } else {
-                        Ok(self.call_host(self.host.err_new, &[message, code, cause]))
-                    }
+                    Ok(self.call_host(self.host.err_new, &[message, code, cause]))
                 } else {
                     let type_name: std::borrow::Cow<'_, str> = if let Some((_, concrete)) =
                         as_trait.as_ref()
@@ -19385,14 +19381,13 @@ impl LowerCtx<'_, '_> {
                     // Result carrier instead of inventing a second checker.
                     if method.name == "from"
                         && args.len() == 1
-                        && matches!(owner, TStaticOwner::User(_))
                         && matches!(
-                            &expr.ty,
-                            Type::Result { ok, .. }
-                                if matches!(ok.as_ref(), Type::Named(name) if self
+                            owner,
+                            TStaticOwner::User(name)
+                                if self
                                     .meta
                                     .distinct_base(name)
-                                    .is_some_and(|base| *base == Type::String))
+                                    .is_some_and(|base| *base == Type::String)
                         )
                     {
                         let check_method = TMethodRef::bare("check");

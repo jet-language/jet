@@ -15,12 +15,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-// v6: the canonical Prelude/runtime and selected Core closure compile as one
-// crate. Their generated Rust is one mutually dependent namespace; splitting
-// it into two crates creates orphan-rule and cross-closure failures.
-const CACHE_SCHEMA: &[u8] = b"jet-runtime-core-rlib-v6";
+// v7: the fixed Prelude/runtime and selected Core closure are separate crates.
+// Core depends on runtime, so a Core-only change does not rebuild the fixed
+// runtime object.
+const CACHE_SCHEMA: &[u8] = b"jet-runtime-core-rlib-v7";
 const RUNTIME_CRATE_NAME: &str = "jet_runtime";
+const CORE_CRATE_NAME: &str = "jet_runtime_core";
 const RUNTIME_CRATE_PREFIX: &str = "#![allow(warnings)]\n";
+const CORE_CRATE_PREFIX: &str =
+    "#![allow(warnings)]\nextern crate jet_runtime;\nuse jet_runtime::*;\n";
 const BEGIN: &str = crate::Codegen::CACHED_RUNTIME_BEGIN;
 const END: &str = crate::Codegen::CACHED_RUNTIME_END;
 const CORE_BEGIN: &str = crate::Codegen::CACHED_CORE_BEGIN;
@@ -50,8 +53,9 @@ impl std::fmt::Display for Error {
 pub struct PreparedRuntime {
     rust: String,
     runtime_rlib: Option<PathBuf>,
+    core_rlib: Option<PathBuf>,
     cache_hit: bool,
-    _runtime_lock: Option<BuildLock>,
+    _runtime_locks: Vec<BuildLock>,
 }
 
 impl PreparedRuntime {
@@ -59,8 +63,9 @@ impl PreparedRuntime {
         Self {
             rust: rust.to_string(),
             runtime_rlib: None,
+            core_rlib: None,
             cache_hit: false,
-            _runtime_lock: None,
+            _runtime_locks: Vec::new(),
         }
     }
 
@@ -84,6 +89,11 @@ impl PreparedRuntime {
             command
                 .arg("--extern")
                 .arg(format!("{RUNTIME_CRATE_NAME}={}", rlib.display()));
+        }
+        if let Some(rlib) = &self.core_rlib {
+            command
+                .arg("--extern")
+                .arg(format!("{CORE_CRATE_NAME}={}", rlib.display()));
         }
     }
 }
@@ -189,15 +199,11 @@ fn prepare_at_uncounted(
     };
     let rustc_version = rustc_identity(rustc, rustc_env)?;
     let compile_flags = runtime_compile_flags(rustc_flags);
-    let mut closure = split.runtime;
-    if let Some(core) = split.core {
-        closure.push_str(&core);
-    }
-    let exported = export_runtime_source(&closure);
-    let key = cache_key(
+    let exported_runtime = export_runtime_source(&split.runtime);
+    let runtime_key = cache_key(
         RUNTIME_CRATE_NAME,
-        &closure,
-        &exported,
+        &split.runtime,
+        &exported_runtime,
         RUNTIME_CRATE_PREFIX,
         None,
         rustc,
@@ -207,9 +213,9 @@ fn prepare_at_uncounted(
     );
     let Some(runtime) = compile_artifact(
         root,
-        &key,
+        &runtime_key,
         RUNTIME_CRATE_NAME,
-        &exported,
+        &exported_runtime,
         RUNTIME_CRATE_PREFIX,
         None,
         rustc,
@@ -219,11 +225,47 @@ fn prepare_at_uncounted(
     else {
         return Ok(PreparedRuntime::inline(generated));
     };
+    let runtime_cache_hit = runtime.cache_hit;
+    let runtime_path = runtime.path.clone();
+    let mut locks = vec![runtime.lock];
+    let (core_rlib, core_cache_hit) = if let Some(core) = split.core {
+        let exported_core = export_runtime_source(&core);
+        let core_key = cache_key(
+            CORE_CRATE_NAME,
+            &core,
+            &exported_core,
+            CORE_CRATE_PREFIX,
+            Some(&runtime_key),
+            rustc,
+            &rustc_version,
+            &compile_flags,
+            rustc_env,
+        );
+        let Some(core) = compile_artifact(
+            root,
+            &core_key,
+            CORE_CRATE_NAME,
+            &exported_core,
+            CORE_CRATE_PREFIX,
+            Some((RUNTIME_CRATE_NAME, &runtime_path)),
+            rustc,
+            &compile_flags,
+            rustc_env,
+        )?
+        else {
+            return Ok(PreparedRuntime::inline(generated));
+        };
+        locks.push(core.lock);
+        (Some(core.path), core.cache_hit)
+    } else {
+        (None, true)
+    };
     Ok(PreparedRuntime {
         rust: split.program,
-        runtime_rlib: Some(runtime.path),
-        cache_hit: runtime.cache_hit,
-        _runtime_lock: Some(runtime.lock),
+        runtime_rlib: Some(runtime_path),
+        core_rlib,
+        cache_hit: runtime_cache_hit && core_cache_hit,
+        _runtime_locks: locks,
     })
 }
 
@@ -430,6 +472,7 @@ fn split_generated(generated: &str) -> Result<Option<SplitGenerated>, Error> {
     match &core {
         Some((_, core_after)) => {
             let core_begin = core_begin.expect("core marker present");
+            program.push_str("extern crate jet_runtime_core;\nuse jet_runtime_core::*;\n");
             program.push_str(&generated[after_runtime..core_begin]);
             program.push_str(&generated[*core_after..]);
         }
@@ -689,7 +732,11 @@ fn is_cache_entry(path: &Path) -> bool {
 /// successful publish, so cache hits do not reorder victims or make pruning
 /// depend on directory-lock churn.
 fn entry_age(path: &Path) -> SystemTime {
-    ["artifact.sha256", "libjet_runtime.rlib"]
+    [
+        "artifact.sha256",
+        "libjet_runtime.rlib",
+        "libjet_runtime_core.rlib",
+    ]
         .iter()
         .filter_map(|name| fs::symlink_metadata(path.join(name)).ok())
         .filter_map(|metadata| metadata.modified().ok())
@@ -1441,7 +1488,7 @@ mod tests {
             "linker-only inputs must not invalidate runtime work"
         );
 
-        let combined = cache_key_with_schema(
+        let runtime_with_extra_source = cache_key_with_schema(
             CACHE_SCHEMA,
             RUNTIME_CRATE_NAME,
             "fn runtime() {}fn core() {}",
@@ -1466,8 +1513,8 @@ mod tests {
             &[],
         );
         assert_ne!(
-            combined, changed_core,
-            "Core changes must invalidate the combined closure"
+            runtime_with_extra_source, changed_core,
+            "source changes must invalidate the runtime artifact"
         );
     }
 
@@ -1485,7 +1532,7 @@ mod tests {
     }
 
     #[test]
-    fn split_extracts_core_into_one_runtime_closure() {
+    fn split_extracts_core_for_a_separate_runtime_closure() {
         let generated = format!(
             "#![allow(warnings)]\n{BEGIN}fn runtime() {{}}\n{END}{CORE_BEGIN}fn core() {{}}\n{CORE_END}fn main() {{ core(); }}\n"
         );
@@ -1493,7 +1540,8 @@ mod tests {
         assert_eq!(split.runtime, "fn runtime() {}\n");
         assert_eq!(split.core.as_deref(), Some("fn core() {}\n"));
         assert!(split.program.contains("extern crate jet_runtime;"));
-        assert!(!split.program.contains("jet_runtime_core"));
+        assert!(split.program.contains("extern crate jet_runtime_core;"));
+        assert!(split.program.contains("use jet_runtime_core::*;"));
         assert!(split.program.contains("fn main() { core(); }"));
         assert!(!split.program.contains("fn runtime()"));
         assert!(!split.program.contains("fn core()"));
@@ -1690,7 +1738,7 @@ use std::fmt::Debug;
 
     #[cfg(unix)]
     #[test]
-    fn hostile_cache_invalidation_matrix_reuses_unaffected_combined_closure() {
+    fn hostile_cache_invalidation_matrix_reuses_unaffected_separate_closures() {
         use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join(format!(
@@ -1726,7 +1774,11 @@ use std::fmt::Debug;
         .unwrap();
         assert!(!first.cache_hit());
         drop(first);
-        assert_eq!(fs::read(&count).unwrap().len(), 1, "one combined cold build");
+        assert_eq!(
+            fs::read(&count).unwrap().len(),
+            2,
+            "runtime and Core need separate cold builds"
+        );
 
         let linker_changed = prepare_at(
             &root.join("cache"),
@@ -1748,7 +1800,7 @@ use std::fmt::Debug;
         drop(linker_changed);
         assert_eq!(
             fs::read(&count).unwrap().len(),
-            1,
+            2,
             "linker-only change must affect final link work only"
         );
 
@@ -1766,7 +1818,7 @@ use std::fmt::Debug;
             "program/generated-code changes must reuse the runtime/Core closure"
         );
         drop(program_hit);
-        assert_eq!(fs::read(&count).unwrap().len(), 1);
+        assert_eq!(fs::read(&count).unwrap().len(), 2);
 
         let core_changed = generated.replace("fn core() {}", "fn core_changed() {}");
         let core_miss = prepare_at(
@@ -1781,8 +1833,8 @@ use std::fmt::Debug;
         drop(core_miss);
         assert_eq!(
             fs::read(&count).unwrap().len(),
-            2,
-            "Core-only change must rebuild the combined closure"
+            3,
+            "Core-only change must rebuild only the Core closure"
         );
 
         let runtime_changed = generated.replace("fn runtime() {}", "fn runtime_changed() {}");
@@ -1798,8 +1850,8 @@ use std::fmt::Debug;
         drop(runtime_miss);
         assert_eq!(
             fs::read(&count).unwrap().len(),
-            3,
-            "runtime change must rebuild the combined closure"
+            5,
+            "runtime change must rebuild runtime and its dependent Core closure"
         );
 
         let compile_changed = prepare_at(
@@ -1814,8 +1866,8 @@ use std::fmt::Debug;
         drop(compile_changed);
         assert_eq!(
             fs::read(&count).unwrap().len(),
-            4,
-            "compile flag change must rebuild the combined closure"
+            7,
+            "compile flag change must rebuild both closures"
         );
         let _ = fs::remove_dir_all(root);
     }
@@ -1982,6 +2034,24 @@ use std::fmt::Debug;
         .unwrap();
         assert!(warm.cache_hit(), "second preparation must reuse the closure rlib");
         drop(warm);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn debug_generated_runtime_cache_rejection() {
+        let Some(source) = std::env::var_os("JET_RUNTIME_DEBUG_SOURCE") else {
+            return;
+        };
+        let generated = fs::read_to_string(source).unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "jet-runtime-cache-debug-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let prepared = prepare_at(&root.join("cache"), OsStr::new("rustc"), &generated, &[], &[])
+            .unwrap();
+        assert!(prepared.is_split());
+        drop(prepared);
         let _ = fs::remove_dir_all(root);
     }
 }

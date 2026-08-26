@@ -3198,6 +3198,127 @@ fn lsp_definition_returns_location() {
 }
 
 #[test]
+fn lsp_checked_text_contract_survives_editor_navigation() {
+    let jet = jet_bin();
+    if !jet.exists() {
+        return;
+    }
+    let source = r#"#Error
+enum PatternError { Bad }
+Pattern :: distinct String
+impl Pattern.CheckedText {
+    type Error = PatternError
+    fn check(text: String) () !PatternError -[]> {
+        return
+    }
+    fn encode_hole<T: Printable>(value: T) String -[]> {
+        return ""
+    }
+}
+fn use_pattern(value: Pattern) Pattern {
+    return value
+}
+fn run() {
+    
+}
+"#;
+    let uri = format!(
+        "file://{}",
+        std::env::temp_dir()
+            .join("lsp_checked_text_test.jet")
+            .display()
+    );
+
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec![
+                    "hoverProvider".to_string(),
+                    "completionProvider".to_string(),
+                    "definitionProvider".to_string(),
+                    "referencesProvider".to_string(),
+                    "renameProvider".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":2,"character":1}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "type Pattern :: distinct String".to_string(),
+                    "implements CheckedText".to_string(),
+                    "type Error = PatternError".to_string(),
+                    "encode_hole".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":15,"character":4}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "Pattern".to_string(),
+                    "implements CheckedText".to_string(),
+                    "encode_hole".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":11,"character":23}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "range".to_string(),
+                    "nominal_base".to_string(),
+                    "CheckedText".to_string(),
+                    "encode_hole".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":5,"method":"textDocument/references","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":2,"character":1}},"context":{{"includeDeclaration":true}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "nominal_base".to_string(),
+                    "CheckedText".to_string(),
+                    "Pattern".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":6,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":2,"character":1}},"newName":"Pattern2"}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "changes".to_string(),
+                    "Pattern2".to_string(),
+                    "nominal_base".to_string(),
+                    "CheckedText".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
 fn lsp_definition_uses_build_graph_generated_source() {
     let jet = jet_bin();
     if !jet.exists() {

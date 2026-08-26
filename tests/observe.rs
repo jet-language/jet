@@ -631,7 +631,8 @@ fn get_user() Int ! -> {
 }
 
 fn run() ! {
-    get_user()
+    value :: get_user()
+    print(value)
 }
 "#;
     let generated = jet::compile(src).expect("the converted default report must compile");
