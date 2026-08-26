@@ -289,7 +289,6 @@ pub(crate) fn foreign_type_map(
         module.items.iter().any(|item| match item {
             Item::Struct(structure) => structure.name == name,
             Item::Enum(enumeration) => enumeration.name == name,
-            Item::MarkerDecl(declaration) => declaration.text.is_some() && declaration.name == name,
             _ => false,
         })
     };
@@ -322,20 +321,6 @@ pub(crate) fn foreign_type_map(
                 }
                 Item::Distinct(d) if bundle.name_ledger.visible(module_idx, target, &d.name) => {
                     if let Some(identity) = bundle.name_ledger.nominal_identity(target, &d.name) {
-                        map.insert(identity, rust_mod.clone());
-                    }
-                }
-                Item::MarkerDecl(declaration)
-                    if declaration.text.is_some()
-                        && bundle
-                            .name_ledger
-                            .visible(module_idx, target, &declaration.name)
-                        && !is_local(&declaration.name) =>
-                {
-                    if let Some(identity) = bundle
-                        .name_ledger
-                        .nominal_identity(target, &declaration.name)
-                    {
                         map.insert(identity, rust_mod.clone());
                     }
                 }
@@ -397,19 +382,6 @@ pub(crate) fn foreign_type_map(
                 }
                 Item::Distinct(d) if bundle.name_ledger.visible(module_idx, target, &d.name) => {
                     if let Some(identity) = bundle.name_ledger.nominal_identity(target, &d.name) {
-                        map.insert(identity, rust_mod.clone());
-                    }
-                }
-                Item::MarkerDecl(declaration)
-                    if declaration.text.is_some()
-                        && bundle
-                            .name_ledger
-                            .visible(module_idx, target, &declaration.name) =>
-                {
-                    if let Some(identity) = bundle
-                        .name_ledger
-                        .nominal_identity(target, &declaration.name)
-                    {
                         map.insert(identity, rust_mod.clone());
                     }
                 }
@@ -1737,6 +1709,7 @@ pub(crate) fn emit_program_items(
     emit_tuple_structs(cx, &tuple_shapes, out);
     emit_anonymous_unions(cx, items, out);
     emit_synthetic_display_trait(out, include_runtime_owned_traits);
+    emit_synthetic_checked_text_trait(out, include_runtime_owned_traits);
     emit_synthetic_operator_traits(out, include_runtime_owned_traits);
     emit_synthetic_close_trait(out);
     emit_synthetic_foreign_close_impls(cx, items, out);

@@ -1052,6 +1052,7 @@ fn builtin_type_registry() -> TypeRegistry {
     );
     TypeRegistry {
         types,
+        error_types: HashSet::new(),
         unit_types,
         unit_facts,
         literal_facts: HashMap::new(),
@@ -1469,10 +1470,18 @@ fn record_state_marker_references_for_method(
             else {
                 continue;
             };
-            let Some(declaration) = ledger.declaration(module_idx, candidate) else {
+            let Some((target_module, def_span, semantic_identity)) = ledger
+                .declaration(module_idx, candidate)
+                .map(|declaration| {
+                    (
+                        declaration.module,
+                        declaration.span,
+                        ledger.semantic_identity(declaration.module, candidate),
+                    )
+                })
+            else {
                 continue;
             };
-            let target_module = declaration.module;
             ledger.record_reference(
                 source_module.to_string(),
                 span.start,
@@ -1483,8 +1492,8 @@ fn record_state_marker_references_for_method(
                         .unwrap_or(source_module)
                         .to_string(),
                     kind: "state".to_string(),
-                    def_span: declaration.span,
-                    semantic_identity: ledger.semantic_identity(target_module, candidate),
+                    def_span,
+                    semantic_identity,
                 },
             );
         }

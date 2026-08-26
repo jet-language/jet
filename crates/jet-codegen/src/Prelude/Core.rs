@@ -1,4 +1,17 @@
 
+/// D-TEXTHEAD-TYPE1=A: one shared validation-and-wrap route for every
+/// String-backed CheckedText. Engines only marshal into this Prelude function.
+pub fn jet_checked_text_from<T, E>(
+    text: String,
+    check: fn(String) -> Result<(), E>,
+    wrap: fn(String) -> T,
+) -> Result<T, E> {
+    match check(text.clone()) {
+        Ok(()) => Ok(wrap(text)),
+        Err(error) => Err(error),
+    }
+}
+
 /// D-PERSIST-DEVSTATE1=A: AOT's persistent slot is an interior-mutable
 /// Prelude cell. The generated module binding stays safe Rust; the execution
 /// engine only reads and writes this one storage abstraction.

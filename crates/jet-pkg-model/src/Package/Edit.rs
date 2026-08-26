@@ -353,7 +353,7 @@ mod tests {
 
         assert!(updated.contains("// keep this review note"));
         assert!(updated.contains("allow: [FS, Net]"));
-        let facts = crate::PackageFacts::parse(&updated, "package.jet")
+        let facts = crate::Package::PackageFacts::parse(&updated, "package.jet")
             .expect("the comment-preserving authority edit must remain valid");
         assert_eq!(
             facts.authority.holds.allow,

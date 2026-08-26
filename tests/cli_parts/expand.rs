@@ -261,6 +261,48 @@ fn expand_callable_signature_uses_one_checked_fact_document() {
 }
 
 #[test]
+fn expand_origin_projects_the_folded_origin_info_fact() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/tooling/provenance_track.jet");
+    let out = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "origin"])
+        .arg(&fixture)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("speed.@origin"), "{text}");
+    assert!(text.contains("OriginInfo?"), "{text}");
+    assert!(text.contains("tracked: true"), "{text}");
+
+    let json = Command::new(jet())
+        .args(["inspect", "expand", "--facts", "origin", "--json"])
+        .arg(&fixture)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        json.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    let json_text = String::from_utf8_lossy(&json.stdout);
+    assert!(parse_json(&json_text).is_ok(), "{json_text}");
+    assert!(json_text.contains("\"fact\":\"@origin\""), "{json_text}");
+    assert!(
+        json_text.contains("\"type\":\"OriginInfo?\""),
+        "{json_text}"
+    );
+}
+
+#[test]
 fn expand_derive_lens_projects_derived_capabilities() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples/features/types/auto_derive_policy/run.jet");

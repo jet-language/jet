@@ -10,7 +10,7 @@ use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
 use crate::Syntax;
 use crate::AST::{
     noelse_terminated, AccessConvention, BinOp, Call, CallArg, CallArgFlags, EnumLitArg, Expr,
-    IndexKind, Lambda, LambdaBody, LambdaMeta, LambdaParam, OrFallback, StrPart, Type,
+    IndexKind, Lambda, LambdaBody, LambdaMeta, LambdaParam, OrFallback, StrPart, TryConvert, Type,
     TypedLitBody, UnOp,
 };
 use jet_foundation::Prelude as CorePrelude;
@@ -1270,6 +1270,40 @@ impl<'a> Checker<'a> {
     /// appears (`borrow_ctx`): a struct-field read in owning position is
     /// rewritten to `.clone()` so the generated Rust never moves a field out
     /// of its struct.
+    /// D-FAILURE-FOUNDATION1=A: a call is a value-producing expression at the
+    /// source level, but its Result carrier is transparent in ordinary value
+    /// positions. Elaborate that one rule into the existing `Try` node so
+    /// lowering, conversion, context frames, and all engines keep one path.
+    fn auto_propagate_call(&mut self, e: &mut Expr, result: Option<Type>) -> Option<Type> {
+        if self.failure_auto_depth != 0
+            || !matches!(
+                e.without_parens(),
+                Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
+            )
+            || !matches!(result, Some(Type::Result { .. }))
+            || self
+                .expected_type
+                .as_ref()
+                .is_some_and(|expected| matches!(expected, Type::Result { .. }))
+        {
+            return result;
+        }
+        let span = e.span();
+        let inner = std::mem::replace(e, Expr::Absent(span));
+        let mut wrapped = Expr::Try(Box::new(inner), span, TryConvert::None, None);
+        let result = match &mut wrapped {
+            Expr::Try(inner, try_span, convert, note) => {
+                self.failure_auto_depth += 1;
+                let result = self.infer_try(inner, *try_span, convert, note);
+                self.failure_auto_depth -= 1;
+                result
+            }
+            _ => unreachable!("automatic failure propagation builds a Try node"),
+        };
+        *e = wrapped;
+        result
+    }
+
     pub(crate) fn infer(&mut self, e: &mut Expr) -> Option<Type> {
         if !self.enter_source_nesting(e.span()) {
             return None;
@@ -1280,17 +1314,12 @@ impl<'a> Checker<'a> {
         if matches!(e, Expr::If { .. }) && noelse_terminated(e) {
             self.check_noelse_dispatch_chain(e);
         }
-        if let Some(result) = self.fold_reflect_call(e) {
-            if result
-                .as_ref()
-                .is_some_and(crate::Sema::type_uses_default_int)
-            {
-                self.uses_exact_int = true;
-            }
-            self.leave_source_nesting();
-            return result;
-        }
-        let result = self.infer_checked(e);
+        let result = if let Some(result) = self.fold_reflect_call(e) {
+            result
+        } else {
+            self.infer_checked(e)
+        };
+        let result = self.auto_propagate_call(e, result);
         if result
             .as_ref()
             .is_some_and(crate::Sema::type_uses_default_int)

@@ -1636,6 +1636,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 Some(ty) => cx.rust_type(ty),
                 None => emit_static_owner(owner, cx),
             };
+            // `Type.raw(String)` is the unsafe constructor for a checked
+            // String-backed distinct. The value form already owns the Rust
+            // `raw(&self)` method, so the static form must use the transparent
+            // tuple constructor rather than inventing an overloaded method.
+            if method.rust() == "raw"
+                && args.len() == 1
+                && matches!(owner_type, Some(Type::Named(_)))
+            {
+                return format!("{}({})", owner, arg_str);
+            }
             let type_args = if type_args.is_empty() {
                 String::new()
             } else {

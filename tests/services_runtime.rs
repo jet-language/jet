@@ -356,7 +356,8 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
 
     // A validly framed but altered receipt field must not become a restart
     // alias. The receipt id is the existing length-framed SHA-256 identity
-    // for the authority, route, message, and key.
+    // for the logical store, route, message, and key; provider authority and
+    // generation are restartable signing facts.
     let corrupt_store = dir.join("authority-corrupt.log");
     let corrupt_id = run_restart_process(&bin, &corrupt_store, "send", None);
     let mut corrupt = fs::read(&corrupt_store).unwrap();

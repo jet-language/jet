@@ -3305,18 +3305,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         };
                     });
                 }
-                // D-BOUND-SINK1=A: sema has already checked the declared head and
-                // encoded every hole. The nominal carrier is erased here to the
-                // ordinary String expression on every execution tier.
-                if call.name == Syntax::BUILTIN_CHECKED_TEXT_WRAP && call.args.len() == 1 {
-                    return in_own_frame(|| {
-                        let value = lower_expr(&call.args[0].expr, cx, env);
-                        return TExpr {
-                            ty: Type::String,
-                            kind: value.kind,
-                        };
-                    });
-                }
                 // D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: the synthetic typed-head call sema rewrote a typed
                 // text literal into (mirrors D-UNITLIT1's rewrite pattern). Args
                 // alternate literal-segment, hole, literal-segment, ..., always closing

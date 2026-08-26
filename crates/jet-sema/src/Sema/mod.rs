@@ -254,6 +254,9 @@ impl UnitFact {
 
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
+    /// D-FAILURE-FOUNDATION1=A: user-named types carrying `#Error` may be
+    /// used as explicit callable failure domains.
+    error_types: HashSet<String>,
     /// D-QUANTITY-PRINT1: all concrete types minted by `#UnitFamily`.
     unit_types: HashSet<String>,
     /// #603: the one normalized source of truth for concrete unit conversion,
@@ -277,6 +280,39 @@ pub(crate) struct TypeRegistry {
 impl TypeRegistry {
     pub(crate) fn contains(&self, name: &str) -> bool {
         self.types.contains_key(name)
+    }
+
+    pub(crate) fn is_error_type(&self, name: &str) -> bool {
+        self.error_types.contains(name)
+    }
+
+    /// Validate the error side of a prefix failure contract. Anonymous unions
+    /// are valid only when every member is itself an allowed domain; aliases
+    /// are followed with a cycle guard so invalid shapes fail in sema rather
+    /// than at codegen.
+    pub(crate) fn is_error_domain(&self, ty: &Type) -> bool {
+        fn visit(registry: &TypeRegistry, ty: &Type, seen: &mut HashSet<String>) -> bool {
+            match ty {
+                Type::Named(name) => {
+                    if name == crate::Syntax::TYPE_ERR
+                        || name == crate::Syntax::TYPE_NEVER
+                        || crate::Sema::Diagnostics::is_core_error_family_type(name)
+                        || registry.is_error_type(name)
+                    {
+                        return true;
+                    }
+                    let Some((params, target)) = registry.type_alias(name) else {
+                        return false;
+                    };
+                    params.is_empty() && seen.insert(name.clone()) && visit(registry, target, seen)
+                }
+                Type::Union(members) => {
+                    !members.is_empty() && members.iter().all(|member| visit(registry, member, seen))
+                }
+                _ => false,
+            }
+        }
+        visit(self, ty, &mut HashSet::new())
     }
 
     /// A struct the user declared, so codegen emits a `__jet_<Name>` Rust type
@@ -1388,7 +1424,7 @@ pub(crate) struct ModuleState {
     core_imports: HashMap<String, String>,
     tests: HashMap<String, Span>,
     trait_reg: TraitRegistry,
-    /// D-STATE-DECL: declared typestate labels by owning type.
+    /// D-STATE-HOME1=A: declared typestate labels by owning struct.
     declared_states: HashMap<String, Vec<String>>,
     /// D-STATE-TERMINAL1: checked typestate graph facts used by reflection.
     /// These facts are erased before code generation.
@@ -1647,6 +1683,10 @@ pub(crate) struct Checker<'a> {
     /// is a fallible fallback with an ambient `err`; `Some(false)` has no
     /// failure report and rejects the spelling with E0408 or E0409.
     pub(crate) fallback_has_err: Option<bool>,
+    /// D-FAILURE-FOUNDATION1=A: while non-fallback inference is checking the
+    /// source of an inserted propagation node, suppress another insertion.
+    /// This keeps the elaboration finite and leaves `??` as local handling.
+    pub(crate) failure_auto_depth: usize,
     /// D-CHOOSE-TEST1=A: distinguishes a pure pattern miss from an absent
     /// Optional while `fallback_has_err == Some(false)`.
     pub(crate) fallback_is_shape_miss: bool,

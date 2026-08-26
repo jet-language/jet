@@ -1836,7 +1836,7 @@ Error [E0731]: `Reviewed` is a tag, but `derive` needs a trait
  Fix: declare `Reviewed` as a `trait` with the method(s) it should provide
 ```
 
-## Typestate diagnostics (D-STATE1 / D-STATE-DECL / D-STATE-REQ / D-STATE-TRANS)
+## Typestate diagnostics (D-STATE1 / D-STATE-HOME1 / D-STATE-REQ / D-STATE-TRANS)
 
 A value moves through named **states**. Operations declare the state they need with
 `#State(S)` and the state they advance the value to with `#Transition(From, To)`.

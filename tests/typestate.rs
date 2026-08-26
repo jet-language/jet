@@ -235,6 +235,41 @@ fn member_collision_in_separate_impl_is_e0167() {
     );
 }
 
+#[test]
+fn generic_struct_state_set_is_shared_by_separate_impl() {
+    let source = r#"
+struct Box<T> {
+    state { Empty, Full }
+    value: T
+}
+
+impl Box {
+    #Transition(_, Empty) fn new(value: ^T) Box<T> -[]> {
+        return Box<T>{ value: value }
+    }
+    #Transition(Empty, Full) fn fill(self: ^Box<T>) Box<T> -[]> {
+        return self
+    }
+    #State(Full) fn read(self) T -[]> {
+        return self.value
+    }
+}
+
+fn run() {
+    box := Box<Int>.new(1)
+    box = box.fill()
+    print(box.read())
+}
+"#;
+    let compiled = jet::compile(source).unwrap_or_else(|diags| panic!("{diags:#?}"));
+    assert!(!compiled.rust.contains("Empty"), "state labels must erase");
+    assert!(!compiled.rust.contains("Full"), "state labels must erase");
+    assert!(
+        !compiled.rust.contains("discriminant"),
+        "typestate must not add a tag"
+    );
+}
+
 /// D-STATE-TERMINAL1: a state with no outgoing transition is a valid terminal fact.
 #[test]
 fn terminal_state_has_no_unreachable_lint() {

@@ -99,7 +99,7 @@ registry already holds every signature.
 | `enum` nested groups | D-TAG1 | runtime variant trees with subtree matching | yes | yes | yes | items pipeline |
 | `trait` | S28/S48 | contract + dyn type | yes (auto-boxed) | partial (`implements`) | yes | `Traits.rs` registry |
 | `tag` | D-QUAL2/D-QUAL4 | erased qualifier | as `#Tag T` prefix only | no | yes (see F4) | `Traits.rs` `local_tags` |
-| `state T { … }` | D-STATE1/D-STATE-DECL | compile-time state set | **no** (probe: E0107) | no | yes | `Sema/State.rs` |
+| `struct T { state { … } }` | D-STATE1/D-STATE-HOME1 | compile-time state set owned by `T` | **no** (probe: E0107) | reflected through `T.State` | yes | `Sema/State.rs` |
 | `protocol` | D-PROTO1/2 | generated `.Client`/`.Server` handles + typestate | yes (generated) | partial | yes | `Sema/Protocol.rs` |
 | `#UnitFamily(F) { a, b }` | D-QUAL3 | one `#Numeric` distinct per member | yes (`Usd`) | yes (as distincts) | yes | `Sema/Bundle.rs` |
 | dimensions (`Length`, `Time`, …) | D-SHAPE-QUANTITY1 | compile-time exponent vectors | only via `Quantity<Dim,·>` bound | no | **no** (probe: `Mass` fails) | `Syntax.rs` `PHYSICAL_DIMENSIONS` |
@@ -253,7 +253,7 @@ groups already have. Option (b) is the fallback if the owner wants the
 qualifier plane visually distinct. Option (c) is the floor.
 
 **Evidence.** The four mechanisms, from behavior: `tag X` — erased
-qualifier, flat set (`local_tags`). `state T { A, B }` — erased label set,
+qualifier, flat set (`local_tags`). `struct T { state { A, B } }` — erased label set,
 membership checked at calls (E0150). Taint kinds — closed 4-set, erased,
 dataflow-propagated (D-TAINT1/2). Effect leaves — dotted names under closed
 roots with ancestor subsumption; D-EFFTREE1 says verbatim this is "the same

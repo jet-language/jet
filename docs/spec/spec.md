@@ -4037,6 +4037,9 @@ time the bundle compiled at all) — the same side-channel `jet inspect semindex
   target-aware engine computes size, alignment, stride, and field offsets for
   Jet-owned physical layouts; default-layout byte facts remain optional, and
   the lens names the registered diagnostic and reason when they are absent.
+- `origin` (D-TRACK-ORIGIN1=A) — typed `#Track` provenance rows. The projection
+  is the folded `OriginInfo?` value behind `value.@origin`; it carries no
+  runtime metadata channel and never reconstructs movement or ambiguity.
 - `derive` (D-ONCE-DERIVE1) — behavior already attached to structs,
   enums, and distinct types, with their checked identity and source span.
 - `templates` (D-STRUCT-ONCE1=A) — marker applications and the checked

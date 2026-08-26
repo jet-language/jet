@@ -2606,6 +2606,9 @@ pub(crate) fn emit_trait_impl(
     if let Some(s) = migration_struct {
         emit_migration_step_fns(cx, s, migration_style.as_deref(), out);
     }
+    if block.trait_name == crate::Generics::CHECKED_TEXT {
+        emit_checked_text_facade(type_name, out);
+    }
     emit_representation_bridges(cx, &block.trait_name, type_name, &tp_impl, &tp_use, out);
 }
 
@@ -2828,6 +2831,9 @@ pub(crate) fn emit_external_trait_impl(
     if let Some(s) = migration_struct {
         emit_migration_step_fns(cx, s, migration_style.as_deref(), out);
     }
+    if trait_name == crate::Generics::CHECKED_TEXT {
+        emit_checked_text_facade(&i.type_name, out);
+    }
     emit_representation_bridges(cx, trait_name, &i.type_name, &tp_impl, &tp_use, out);
 }
 
@@ -2955,6 +2961,16 @@ fn emit_trait_method(
         f.name,
         type_name
     );
+}
+
+/// Expose the two canonical constructors owned by an ordinary CheckedText
+/// implementation. Validation and wrapping remain in the shared Prelude
+/// helper; this block only provides the nominal type's source-facing facade.
+fn emit_checked_text_facade(type_name: &str, out: &mut String) {
+    let rust_name = mangle_path(type_name);
+    out.push_str(&format!(
+        "impl {rust_name} {{\n    pub fn from(text: String) -> Result<Self, <Self as __jet_CheckedText>::Error> {{ jet_checked_text_from(text, <Self as __jet_CheckedText>::check, {rust_name}) }}\n    pub fn encode_hole<T: JetShow>(value: T) -> String {{ <Self as __jet_CheckedText>::encode_hole(value) }}\n}}\n\n"
+    ));
 }
 
 /// D-DIST1/D-DIST3 (ratified 2026-06-19/20): emit a `#[repr(transparent)]`

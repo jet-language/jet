@@ -132,6 +132,13 @@ pub(crate) fn register_distinct(
                 }),
         },
     );
+    if d
+        .type_markers
+        .iter()
+        .any(|marker| marker.name == Syntax::MARKER_ERROR)
+    {
+        registry.error_types.insert(d.name.clone());
+    }
 }
 
 /// D-TYPEALIAS1 / D-ALIAS-OP1=B: register `alias Name<T> :: …` — generic shortcuts only.
@@ -1170,6 +1177,13 @@ pub(crate) fn register_struct(
                     .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA),
         },
     );
+    if s
+        .type_markers
+        .iter()
+        .any(|marker| marker.name == Syntax::MARKER_ERROR)
+    {
+        registry.error_types.insert(s.name.clone());
+    }
     if !computed_fields.is_empty() {
         registry
             .computed_fields
@@ -1644,6 +1658,13 @@ pub(crate) fn register_enum(
             c_layout_tag: e.c_layout_tag(),
         },
     );
+    if e
+        .type_markers
+        .iter()
+        .any(|marker| marker.name == Syntax::MARKER_ERROR)
+    {
+        registry.error_types.insert(e.name.clone());
+    }
 }
 
 pub(crate) fn register_type_methods(

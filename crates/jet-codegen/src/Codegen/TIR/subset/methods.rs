@@ -205,15 +205,19 @@ pub(crate) fn method_call_in_subset(
                 return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
             }
         }
-        // D-BOUND-SINK1=A: a source-declared checked text head has the same
-        // audited static `.raw(String)` escape as the built-ins. Sema admits
-        // this shape only for a declared head; no sink registry is consulted
-        // here. Keep the qualified import form (`lib.Pattern.raw`) on the
-        // same structural path.
-        if args.len() == 1
-            && crate::Codegen::TIR::is_checked_text_head_static(receiver, resolved_ret.as_ref(), cx)
-        {
-            return expr_in_subset(&args[0].expr, cx, locals);
+        // A checked text type is an ordinary String-backed distinct. Sema owns
+        // the CheckedText and unsafe-region proof; TIR only admits the
+        // resulting static construction shape.
+        if args.len() == 1 {
+            if let Some(type_name) = static_call_type_name(receiver, locals) {
+                if cx
+                    .distinct_type_identity(&type_name)
+                    .and_then(|identity| cx.distinct_types.get(&identity))
+                    .is_some_and(|(base, _)| *base == Type::String)
+                {
+                    return expr_in_subset(&args[0].expr, cx, locals);
+                }
+            }
         }
     }
 
@@ -1409,6 +1413,13 @@ pub(crate) fn static_method_call_in_subset(
 ) -> bool {
     if locals.contains(type_name) {
         return false;
+    }
+    let is_string_distinct = cx
+        .distinct_type_identity(type_name)
+        .and_then(|identity| cx.distinct_types.get(&identity))
+        .is_some_and(|(base, _)| *base == Type::String);
+    if is_string_distinct && matches!(method, "from" | "encode_hole" | "raw") {
+        return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     if type_name == "FieldError" && method == "under" && args.len() == 2 {
         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));

@@ -5,7 +5,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{assert_tiers_agree, build_and_run, compile, have_rustc};
+use tir_support::{assert_tiers_agree, build_and_run, compile, have_rustc, jit_run_with_env};
 
 /// D-OPDEF1=A: user arithmetic/equality/order reuse ordinary trait methods.
 #[test]
@@ -316,4 +316,36 @@ fn run() {
         src,
         "44\n206\n144\n243\n100\n44\n255\n44\n",
     );
+}
+
+/// D-WRAP-SCOPE1=A: a checked island overrides an enclosing wrapping policy,
+/// and the runtime value prevents comptime folding from hiding the trap.
+#[test]
+fn nested_checked_arithmetic_policy_still_traps() {
+    let src = r#"
+use core.sys as env
+
+fn run() {
+    raw :: Int.parse(env.get("JET_ARITHMETIC_VALUE") ?? "0") ?? 0
+    value :: U8.from_int(raw) ?? U8{0}
+    #Arithmetic(.Wrapping) {
+        print(value + U8{100})
+        #Arithmetic(.Checked) {
+            print(value + U8{100})
+        }
+    }
+}
+"#;
+    let (code, stdout, stderr) = jit_run_with_env(
+        "tir_nested_checked_arithmetic_policy",
+        src,
+        &[("JET_ARITHMETIC_VALUE", "200")],
+    );
+    assert_eq!(
+        code, 70,
+        "checked island must trap: stdout={stdout} stderr={stderr}"
+    );
+    assert_eq!(stdout, "44\n");
+    assert!(stderr.contains("Stop [E3010]"), "{stderr}");
+    assert!(stderr.contains("overflow"), "{stderr}");
 }

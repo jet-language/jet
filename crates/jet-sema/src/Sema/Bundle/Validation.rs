@@ -2042,6 +2042,7 @@ fn check_func_body_bundle_scoped(
         no_prelude,
         in_pre_clause: false,
         fallback_has_err: None,
+        failure_auto_depth: 0,
         fallback_is_shape_miss: false,
         in_comptime: false,
         compiler_api_allowed: st.allow_compiler_api && f.name == "build",
@@ -2142,6 +2143,22 @@ fn check_func_body_bundle_scoped(
     ] {
         if active && !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Function) {
             ck.diags.push(Diagnostic::error("E0355", format!("`#{name}` cannot attach to a function"), "the compiler-owned applicability registry is shared by parser, sema, formatter, semantic index, and explain".to_string(), "move the rule to one of its registered sites".to_string(), Some(span)));
+        }
+    }
+    // D-FAILURE-FOUNDATION1=A: an explicit `!` contract may name only the
+    // shared default domain, a Core error, a `#Error` type, an allowed union,
+    // or `Never`. Keep this in sema so no backend has to guess whether a
+    // source type is a failure domain.
+    if !f.name.starts_with("__errconv_") {
+        if let Some(crate::AST::Type::Result { err, .. }) = f.return_type.as_ref() {
+            if !st.registry.is_error_domain(err) {
+                let domain = err.show();
+                ck.diags.push(Diagnostic::from_row(
+                    "E2417",
+                    &[("domain", domain.as_str())],
+                    Some(f.return_type_span.unwrap_or(f.name_span)),
+                ));
+            }
         }
     }
     ck.check_params_and_body(f, owner_type);

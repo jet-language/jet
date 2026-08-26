@@ -386,6 +386,11 @@ fn push_cached_runtime_traits(out: &mut String) {
     out.push_str("pub trait __jet_Display {\n");
     out.push_str("    fn display(&self) -> String;\n");
     out.push_str("}\n\n");
+    out.push_str("pub trait __jet_CheckedText {\n");
+    out.push_str("    type Error;\n");
+    out.push_str("    fn check(text: String) -> Result<(), Self::Error>;\n");
+    out.push_str("    fn encode_hole<T: JetShow>(value: T) -> String;\n");
+    out.push_str("}\n\n");
     out.push_str("pub trait __jet_Equatable: Sized { fn equal(&self, rhs: &Self) -> bool; }\n");
     for ty in [
         "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char",
@@ -2220,6 +2225,23 @@ pub(crate) fn emit_synthetic_display_trait(out: &mut String, include_runtime_own
     out.push_str("}\n\n");
 }
 
+/// The ordinary CheckedText trait is compiler-emitted only because it is a
+/// canonical Prelude declaration. Implementations still come from the normal
+/// trait registry and normal trait-impl emitter.
+pub(crate) fn emit_synthetic_checked_text_trait(
+    out: &mut String,
+    include_runtime_owned: bool,
+) {
+    if !include_runtime_owned {
+        return;
+    }
+    out.push_str("pub trait __jet_CheckedText {\n");
+    out.push_str("    type Error;\n");
+    out.push_str("    fn check(text: String) -> Result<(), Self::Error>;\n");
+    out.push_str("    fn encode_hole<T: JetShow>(value: T) -> String;\n");
+    out.push_str("}\n\n");
+}
+
 /// `include_runtime_owned` is false for the root program: the cached runtime
 /// block already defines the `__jet_Display`/`__jet_Equatable`/`__jet_Comparable`
 /// traits (`push_cached_runtime_traits`), and a second root copy would be a
@@ -2919,6 +2941,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     emit_anonymous_unions(&cx, &prog.items, &mut out);
 
     emit_synthetic_display_trait(&mut out, true);
+    emit_synthetic_checked_text_trait(&mut out, true);
     emit_synthetic_operator_traits(&mut out, true);
     emit_synthetic_close_trait(&mut out);
     emit_synthetic_foreign_close_impls(&cx, &prog.items, &mut out);
@@ -3850,9 +3873,11 @@ mod tests {
         push_cached_runtime(&mut block, None);
         let mut module_local = String::new();
         emit_synthetic_display_trait(&mut module_local, true);
+        emit_synthetic_checked_text_trait(&mut module_local, true);
         emit_synthetic_operator_traits(&mut module_local, true);
         let mut root = String::new();
         emit_synthetic_display_trait(&mut root, false);
+        emit_synthetic_checked_text_trait(&mut root, false);
         emit_synthetic_operator_traits(&mut root, false);
         for line in module_local.lines().filter(|line| !root.contains(*line)) {
             assert!(
@@ -4243,6 +4268,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     emit_anonymous_unions(&cx, &prog.items, &mut out);
 
     emit_synthetic_display_trait(&mut out, true);
+    emit_synthetic_checked_text_trait(&mut out, true);
     emit_synthetic_operator_traits(&mut out, true);
     emit_synthetic_close_trait(&mut out);
     emit_synthetic_foreign_close_impls(&cx, &prog.items, &mut out);

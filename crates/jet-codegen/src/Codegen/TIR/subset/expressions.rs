@@ -284,7 +284,6 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 && Syntax::typed_head_kind(&c.name)
                     .is_some_and(|kind| kind.is_interpolated_template())
                 && !cx.type_names.contains(&c.name);
-            let is_checked_text_wrap = c.name == Syntax::BUILTIN_CHECKED_TEXT_WRAP;
             // D-REGEX-LIT1=D: sema rewrites a checked Regex typed literal to
             // this compiler-owned one-argument constructor.
             let is_regex_literal_ctor = !locals.contains(&c.name)
@@ -343,7 +342,6 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 || is_math_ctor
                 || is_precise_ctor
                 || is_typed_text_ctor
-                || is_checked_text_wrap
                 || is_regex_literal_ctor
                 || is_measurement
                 || is_extern

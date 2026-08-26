@@ -160,9 +160,6 @@ pub(crate) struct Cx {
     /// identities and convenience leaves also live in `type_names`; this set
     /// preserves source lookup precedence when a local shadows an import.
     pub(crate) local_type_names: HashSet<String>,
-    /// D-BOUND-SINK1=A: checked text-head names are nominal in sema but erase
-    /// to the one Prelude `String` representation in every backend.
-    pub(crate) checked_text_heads: HashSet<String>,
     /// D-DIST1 (c109 Phase 23): distinct-type name -> (base type, is_numeric). A
     /// distinct type renders to a `#[repr(transparent)]` newtype `__jet_<Name>(pub
     /// Base)`; the TIR reads the base type to give `.raw()` (`(recv).0`) its total
@@ -940,6 +937,18 @@ impl Cx {
             return self.foreign_type_identity(alias, leaf);
         }
         self.foreign_type_identity("", name)
+    }
+
+    /// Resolve a source-facing type spelling to the ordinary distinct-type
+    /// entry. This is used only for backend representation facts; checked-text
+    /// eligibility is owned by sema's ordinary trait registry.
+    pub(crate) fn distinct_type_identity(&self, name: &str) -> Option<String> {
+        if self.distinct_types.contains_key(name) {
+            return Some(name.to_string());
+        }
+        let (alias, leaf) = name.split_once('.')?;
+        self.foreign_type_identity(alias, leaf)
+            .filter(|identity| self.distinct_types.contains_key(identity))
     }
 
     pub(crate) fn quantity_dimension(&self, ty: &Type) -> Option<crate::AST::Dimension> {
@@ -1785,16 +1794,6 @@ impl Cx {
                     .collect();
                 self.expand_type_aliases(&Generics::substitute_type(target, &subst))
             }
-            Type::Named(name) if self.checked_text_heads.contains(name) => Type::Apply {
-                name: Syntax::TYPE_CHECKED_TEXT.to_string(),
-                args: vec![Type::Named(name.clone())],
-            },
-            // The carrier's argument is the nominal head identity, not another
-            // runtime value. Preserve it while expanding surrounding types.
-            Type::Apply { name, args } if name == Syntax::TYPE_CHECKED_TEXT => Type::Apply {
-                name: name.clone(),
-                args: args.clone(),
-            },
             Type::Apply { name, args } => Type::Apply {
                 name: name.clone(),
                 args: args.iter().map(|a| self.expand_type_aliases(a)).collect(),
@@ -1874,8 +1873,6 @@ impl Cx {
             Type::Float32 => "f32".to_string(),
             Type::Bool => "bool".to_string(),
             Type::String => "String".to_string(),
-            Type::Named(name) if self.checked_text_heads.contains(name) => "String".to_string(),
-            Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => "String".to_string(),
             Type::Char => "char".to_string(),
             // D-SOA1 / D-SOA-TIER1=A: a `[S]` of a `#layout(columnar)` struct
             // lowers to the Prelude `JetColumnList<S>`, not `Vec<S>`.
@@ -3484,59 +3481,6 @@ pub(crate) fn register_bundle_reflect_paths(
     for (name, path) in &paths {
         cx.reflect_paths.insert(name.clone(), path.clone());
     }
-
-    // D-BOUND-SINK1=A: the source-facing aliases and the canonical semantic
-    // identities of checked text heads all share the erased String ABI. The
-    // ledger supplies every visible spelling; codegen never rebuilds imports.
-    let checked_paths: HashMap<String, String> = bundle
-        .modules
-        .iter()
-        .enumerate()
-        .flat_map(|(owner, module)| {
-            module.items.iter().filter_map(move |item| {
-                let Item::MarkerDecl(declaration) = item else {
-                    return None;
-                };
-                declaration.text.as_ref()?;
-                let path = bundle
-                    .name_ledger
-                    .declaration_path(owner, &declaration.name)?;
-                let identity = bundle
-                    .name_ledger
-                    .nominal_identity(owner, &declaration.name)?;
-                Some((path.to_string(), identity))
-            })
-        })
-        .collect();
-    for identity in checked_paths.values() {
-        cx.checked_text_heads.insert(identity.clone());
-        cx.type_names.insert(identity.clone());
-    }
-    for (name, path) in paths {
-        let Some(identity) = checked_paths.get(&path) else {
-            continue;
-        };
-        cx.checked_text_heads.insert(name.clone());
-        cx.checked_text_heads.insert(identity.clone());
-        cx.type_names.insert(name);
-        cx.type_names.insert(identity.clone());
-    }
-    for item in &bundle.modules[module_idx].items {
-        let Item::MarkerDecl(declaration) = item else {
-            continue;
-        };
-        if declaration.text.is_some() {
-            cx.checked_text_heads.insert(declaration.name.clone());
-            cx.type_names.insert(declaration.name.clone());
-            if let Some(identity) = bundle
-                .name_ledger
-                .nominal_identity(module_idx, &declaration.name)
-            {
-                cx.checked_text_heads.insert(identity.clone());
-                cx.type_names.insert(identity);
-            }
-        }
-    }
 }
 
 fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
@@ -4193,7 +4137,6 @@ pub(crate) fn build_cx_items(
         const_values: HashMap::new(),
         type_names: HashSet::new(),
         local_type_names: HashSet::new(),
-        checked_text_heads: HashSet::new(),
         distinct_types: HashMap::new(),
         distinct_ranges: HashMap::new(),
         unit_facts: HashMap::new(),
@@ -4959,11 +4902,6 @@ pub(crate) fn build_cx_items(
                     .or_default()
                     .push(m.clone());
             }
-            Item::MarkerDecl(declaration) if declaration.text.is_some() => {
-                cx.type_names.insert(declaration.name.clone());
-                cx.local_type_names.insert(declaration.name.clone());
-                cx.checked_text_heads.insert(declaration.name.clone());
-            }
             Item::EffectDecl(_)
             | Item::MarkerDecl(_)
             | Item::FactDecl(_)
@@ -5611,7 +5549,6 @@ pub(crate) fn field_type_cloneable(
         // every canonical spelling, so records containing it can satisfy the
         // generated decoder's existing result-retention path.
         Type::Named(n) if is_json_type_name(n) || n == "Tensor" => true,
-        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => true,
         Type::Named(n) => types.contains(n),
         // `JetTask` implements no `Clone`: a handle owns one join slot.
         // D-PIN1=A: a pin is an exclusive window, so it is no more cloneable
@@ -5671,7 +5608,6 @@ pub(crate) fn field_type_rust_eq_compatible(
         Type::List(inner) => field_type_rust_eq_compatible(inner, types, param_names),
         // c148: recognize both single-char heuristic and declared multi-char params.
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
-        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => true,
         Type::Named(n) => types.contains(n),
         // D-TUPLE-DESTRUCT1: `Task<T>`/`Sender<T>`/`Receiver<T>` wrap an opaque
         // runtime handle (`JetTask`/`JetSender`/`JetReceiver`) — none implement
@@ -5760,7 +5696,6 @@ pub(crate) fn field_type_hashable(
         }
         Type::List(inner) => field_type_hashable(inner, types, param_names),
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
-        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => true,
         Type::Named(n) => types.contains(n),
         // D-TUPLE-DESTRUCT1: same opaque-handle exclusion as the backend
         // equality compatibility walk above.

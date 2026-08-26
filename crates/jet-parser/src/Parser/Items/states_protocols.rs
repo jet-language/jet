@@ -1142,6 +1142,10 @@ mod state_section_tests {
             ("alias Door :: state { Open };\nfn run() {}\n", "alias"),
             ("impl Door { state { Open } }\nfn run() {}\n", "impl"),
             ("module Door<T> { state { Open } }\nfn run() {}\n", "module"),
+            (
+                "fn run() { value :: { state { Open } } }\n",
+                "anonymous shape",
+            ),
         ] {
             let (tokens, lex_diags) = Lexer::lex(source);
             assert!(lex_diags.is_empty(), "{owner}: {lex_diags:?}");

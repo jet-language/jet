@@ -1837,6 +1837,26 @@ fn fmt_compact_result_handler_expands_long_branches_deterministically() {
     );
 }
 
+#[test]
+fn fmt_result_handler_expands_blocked_nested_and_commented_branches() {
+    let blocked = "fn pick(value: Int !String) String -> value ? ok -> { saved :: ok; saved } ! error -> { saved_error :: error; saved_error }\n";
+    let nested = "fn pick(value: Int !String) Int -> value ? ok -> value ? inner -> inner ! inner_error -> inner_error ! error -> 0\n";
+    let commented = "fn pick(value: Int !String) String -> value ? ok -> ok /* keep this branch readable */ ! error -> error\n";
+
+    for (source, label) in [(blocked, "blocked"), (nested, "nested"), (commented, "commented")] {
+        let out = jet::format_source(source).expect("Result handler should format");
+        assert!(
+            out.contains("\n! error ->"),
+            "{label} handler should use the deterministic two-arm layout:\n{out}"
+        );
+        assert_eq!(
+            out,
+            jet::format_source(&out).expect("expanded handler should be idempotent"),
+            "{label} handler formatting should be stable"
+        );
+    }
+}
+
 // ── Marker / turbofish round-trip survival (the c-fmt data-loss regression) ──
 //
 // `fmt_is_idempotent_on_examples` only checks that fmt(fmt(x)) == fmt(x); it does

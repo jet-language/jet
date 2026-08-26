@@ -366,6 +366,16 @@ impl<'a> Parser<'a> {
     /// retired leading dot first. Both paths parse the same `{ … }` body.
     pub(super) fn struct_lit_inferred(&mut self, dot_start: usize) -> Result<Expr, Diagnostic> {
         self.expect(TokKind::LBrace, "to open an inferred struct literal")?;
+        if self.at_state_section() {
+            let diagnostic = self.reject_state_section("anonymous shape");
+            // Consume the inferred literal's closing brace as recovery. The
+            // enclosing function body must remain balanced so this forbidden
+            // shape produces only its registered eligibility diagnostic.
+            if matches!(self.peek().kind, TokKind::RBrace) {
+                self.bump();
+            }
+            return Err(diagnostic);
+        }
         if matches!(self.peek().kind, TokKind::RBrace) {
             let end = self.bump().span.end;
             return Ok(Expr::StructLit {

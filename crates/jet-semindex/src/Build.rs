@@ -389,7 +389,7 @@ fn definition_matches_target(definition: &SymDef, target: &DefinitionAnchor) -> 
             | (SymKind::Tag, "tag")
             | (SymKind::Type { .. }, "type" | "state" | "protocol")
             | (SymKind::Const, "const")
-            | (SymKind::EnumVariant { .. }, "enum_variant" | "variant")
+            | (SymKind::EnumVariant { .. }, "enum_variant" | "variant" | "state")
             | (SymKind::Field { .. }, "field")
             | (SymKind::Local { .. }, "local")
             | (SymKind::Param { .. }, "param") => true,
@@ -826,7 +826,6 @@ fn state_marker_path(expr: &AST::Expr) -> Option<(String, Span)> {
 }
 
 fn collect_state_marker_references_for_method(
-    owner: &str,
     method: &AST::Func,
     mp: &str,
     ctx: &mut WalkCtx<'_>,
@@ -847,30 +846,23 @@ fn collect_state_marker_references_for_method(
             ctx.db.refs.push(scoped_ref(raw, span, mp, ctx));
         }
     }
-    let _ = owner;
 }
 
 fn collect_state_marker_references(item: &Item, mp: &str, ctx: &mut WalkCtx<'_>) {
     match item {
         Item::Struct(definition) => {
             for method in &definition.methods {
-                collect_state_marker_references_for_method(&definition.name, method, mp, ctx);
+                collect_state_marker_references_for_method(method, mp, ctx);
             }
             for implementation in &definition.trait_impls {
                 for method in &implementation.methods {
-                    collect_state_marker_references_for_method(
-                        &definition.name,
-                        method,
-                        mp,
-                        ctx,
-                    );
+                    collect_state_marker_references_for_method(method, mp, ctx);
                 }
             }
         }
         Item::Impl(implementation) => {
             for method in &implementation.methods {
                 collect_state_marker_references_for_method(
-                    &implementation.type_name,
                     method,
                     mp,
                     ctx,
@@ -879,7 +871,7 @@ fn collect_state_marker_references(item: &Item, mp: &str, ctx: &mut WalkCtx<'_>)
         }
         Item::Enum(definition) => {
             for method in &definition.methods {
-                collect_state_marker_references_for_method(&definition.name, method, mp, ctx);
+                collect_state_marker_references_for_method(method, mp, ctx);
             }
         }
         _ => {}

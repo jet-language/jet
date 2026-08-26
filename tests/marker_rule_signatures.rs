@@ -70,10 +70,16 @@ fn run() {
     assert!(valid.is_empty(), "{valid:?}");
 
     let wrong_site = codes("#Arithmetic(.Wrapping) struct Bad { value: U8 }\nfn run() {}");
-    assert!(wrong_site.iter().any(|code| code == "E0355"), "{wrong_site:?}");
+    assert!(
+        wrong_site.iter().any(|code| code == "E0355"),
+        "{wrong_site:?}"
+    );
 
     let wrong_mode = codes("#Arithmetic(.Other) fn bad() {}\nfn run() {}");
-    assert!(wrong_mode.iter().any(|code| code == "E0930"), "{wrong_mode:?}");
+    assert!(
+        wrong_mode.iter().any(|code| code == "E0930"),
+        "{wrong_mode:?}"
+    );
 }
 
 #[test]

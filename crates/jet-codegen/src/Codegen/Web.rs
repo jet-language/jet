@@ -6426,6 +6426,7 @@ fn wasm_emit_expr(
             lhs,
             rhs,
             line,
+            ..
         } if web_overflow_opt_supported(prefix, op) => {
             let lhs = wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?;
             let rhs = wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?;
@@ -8674,6 +8675,7 @@ fn tir_js_expr(
             lhs,
             rhs,
             line,
+            ..
         } if web_overflow_opt_supported(prefix, op) => {
             let lhs = tir_js_expr(lhs, funcs, file_prefix)?;
             let rhs = tir_js_expr(rhs, funcs, file_prefix)?;

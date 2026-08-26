@@ -378,9 +378,30 @@ pub(crate) fn run_output(args: &[String], json: bool) {
     let callable_identity = format!("{}::{}", module.alias, output.semantic_name);
     let mut effects = output.effects.clone();
     effects.sort();
+    let required_effects = effects.iter().cloned().collect::<jet::Sema::EffectSet>();
+    let manifest = path
+        .parent()
+        .and_then(jet::Loader::find_manifest_root)
+        .and_then(|root| jet::Loader::manifest_path(&root))
+        .and_then(|manifest_path| fs::read_to_string(&manifest_path).ok())
+        .and_then(|raw| jet::Package::PackageFacts::parse(&raw, "package.jet").ok());
+    let authority =
+        jet::EffectBudget::project_application_effects(&required_effects, manifest.as_ref());
 
     if json {
         let effect_values = effects
+            .iter()
+            .map(|effect| format!("\"{}\"", json_escape(effect)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let granted_values = authority
+            .granted_effects
+            .iter()
+            .map(|effect| format!("\"{}\"", json_escape(effect)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let denied_values = authority
+            .denied_effects
             .iter()
             .map(|effect| format!("\"{}\"", json_escape(effect)))
             .collect::<Vec<_>>()
@@ -392,7 +413,7 @@ pub(crate) fn run_output(args: &[String], json: bool) {
                 true,
                 "inspect.output",
                 &format!(
-                    ",\"output\":{{\"binding\":\"{}\",\"kind\":\"{}\",\"name\":\"{}\",\"entry\":\"{}\",\"source_path\":\"{}\",\"callable_identity\":\"{}\",\"effects\":[{}],\"selection_reason\":\"{}\"}}",
+                    ",\"output\":{{\"binding\":\"{}\",\"kind\":\"{}\",\"name\":\"{}\",\"entry\":\"{}\",\"source_path\":\"{}\",\"callable_identity\":\"{}\",\"effects\":[{}],\"required_effects\":[{}],\"granted_effects\":[{}],\"denied_effects\":[{}],\"authority\":\"{}\",\"selection_reason\":\"{}\"}}",
                     json_escape(binding),
                     json_escape(output.kind.as_str()),
                     json_escape(&output.output_name),
@@ -400,6 +421,10 @@ pub(crate) fn run_output(args: &[String], json: bool) {
                     json_escape(&output.source_path),
                     json_escape(&callable_identity),
                     effect_values,
+                    effect_values,
+                    granted_values,
+                    denied_values,
+                    json_escape(&authority.authority),
                     json_escape(&output.selection_reason),
                 ),
             )
@@ -414,13 +439,40 @@ pub(crate) fn run_output(args: &[String], json: bool) {
         println!("source path: {}", output.source_path);
         println!("callable identity: {callable_identity}");
         println!(
-            "effects: {}",
+            "required effects: {}",
             if effects.is_empty() {
                 "none".to_string()
             } else {
                 effects.join(", ")
             }
         );
+        println!(
+            "granted effects: {}",
+            if authority.granted_effects.is_empty() {
+                "none".to_string()
+            } else {
+                authority
+                    .granted_effects
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        );
+        println!(
+            "denied effects: {}",
+            if authority.denied_effects.is_empty() {
+                "none".to_string()
+            } else {
+                authority
+                    .denied_effects
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        );
+        println!("authority: {}", authority.authority);
         println!("selection reason: {}", output.selection_reason);
     }
 }

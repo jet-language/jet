@@ -13,7 +13,7 @@ use std::process::exit;
 
 use jet::ExitCodes;
 use jet::Sema::SemIndexEffectFacts;
-use jet::AST::{Binding, Item, ProgramBundle, Stmt};
+use jet::AST::{Binding, Expr, Item, ProgramBundle, Stmt};
 use jet_foundation::Layout::{TargetLayout, TargetLayoutEngine};
 use jet_semindex::{ExpandLens, ExpandProjection, ExpandValue, SemIndex};
 
@@ -819,6 +819,212 @@ fn render_layout_json(
                 ("span", expand_span(row.span, location)),
                 ("layout", ct_to_expand(&row.layout)),
                 ("byte_facts", layout_byte_fact_json(&row.layout)),
+            ])
+        })
+        .collect()
+}
+
+struct OriginRow {
+    module: String,
+    source: String,
+    receiver: String,
+    span: jet::Diagnostics::Span,
+    origin: jet::CtValue,
+}
+
+fn collect_origin_binding(
+    module: &str,
+    source: &str,
+    binding: &Binding,
+    rows: &mut Vec<OriginRow>,
+) {
+    if !binding.is_comptime {
+        return;
+    }
+    let Expr::Field(inner, field, span) = binding.init.without_parens() else {
+        return;
+    };
+    if field != jet::Syntax::COMPILER_FACT_ORIGIN {
+        return;
+    }
+    let receiver = match inner.without_parens() {
+        Expr::Ident(name, _) if !name.is_empty() => name.clone(),
+        _ => "value".to_string(),
+    };
+    let Some(origin) = binding.ct.clone() else {
+        return;
+    };
+    rows.push(OriginRow {
+        module: module.to_string(),
+        source: source.to_string(),
+        receiver,
+        span: *span,
+        origin,
+    });
+}
+
+fn collect_origin_stmts(
+    module: &str,
+    source: &str,
+    statements: &[Stmt],
+    rows: &mut Vec<OriginRow>,
+) {
+    for statement in statements {
+        match statement {
+            Stmt::Val(binding) => collect_origin_binding(module, source, binding, rows),
+            Stmt::CountedLoop { init, body, .. } => {
+                collect_origin_binding(module, source, init, rows);
+                collect_origin_stmts(module, source, body, rows);
+            }
+            Stmt::While { body, .. }
+            | Stmt::Loop { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
+            | Stmt::Reactive { body, .. }
+            | Stmt::Shield { body, .. }
+            | Stmt::Switched { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::Policy { body, .. }
+            | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
+            | Stmt::AuthorityScope { body, .. }
+            | Stmt::ComptimeBlock { body, .. }
+            | Stmt::ContextBlock { body, .. }
+            | Stmt::Live { body, .. }
+            | Stmt::AssumeDet { body, .. }
+            | Stmt::Transact { body, .. }
+            | Stmt::ScopeMember { body, .. } => collect_origin_stmts(module, source, body, rows),
+            Stmt::For { body, .. } => collect_origin_stmts(module, source, body, rows),
+            Stmt::Switch {
+                arms, else_body, ..
+            }
+            | Stmt::ComptimeSwitch {
+                arms, else_body, ..
+            } => {
+                for arm in arms {
+                    collect_origin_stmts(module, source, &arm.body, rows);
+                }
+                if let Some(body) = else_body {
+                    collect_origin_stmts(module, source, body, rows);
+                }
+            }
+            Stmt::ComptimeIf {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_origin_stmts(module, source, then_body, rows);
+                if let Some(body) = else_body {
+                    collect_origin_stmts(module, source, body, rows);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_origin_func(
+    module: &str,
+    source: &str,
+    function: &jet::AST::Func,
+    rows: &mut Vec<OriginRow>,
+) {
+    collect_origin_stmts(module, source, &function.body, rows);
+}
+
+fn collect_origin_items(module: &str, source: &str, items: &[Item], rows: &mut Vec<OriginRow>) {
+    for item in items {
+        match item {
+            Item::Func(function) => collect_origin_func(module, source, function, rows),
+            Item::Impl(definition) => {
+                for function in &definition.methods {
+                    collect_origin_func(module, source, function, rows);
+                }
+            }
+            Item::Struct(definition) => {
+                for function in &definition.methods {
+                    collect_origin_func(module, source, function, rows);
+                }
+                for implementation in &definition.trait_impls {
+                    for function in &implementation.methods {
+                        collect_origin_func(module, source, function, rows);
+                    }
+                }
+            }
+            Item::Enum(definition) => {
+                for function in &definition.methods {
+                    collect_origin_func(module, source, function, rows);
+                }
+                for implementation in &definition.trait_impls {
+                    for function in &implementation.methods {
+                        collect_origin_func(module, source, function, rows);
+                    }
+                }
+            }
+            Item::CodeModule(definition) => {
+                if let Some(body) = &definition.body {
+                    collect_origin_items(module, source, body, rows);
+                }
+            }
+            Item::GenericModule(definition) => {
+                collect_origin_items(module, source, &definition.body, rows);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_origin_rows(bundle: &ProgramBundle) -> Vec<OriginRow> {
+    let mut rows = Vec::new();
+    for module in &bundle.modules {
+        collect_origin_items(&module.display, &module.source, &module.items, &mut rows);
+    }
+    rows.sort_by(|a, b| {
+        a.module
+            .cmp(&b.module)
+            .then(a.span.start.cmp(&b.span.start))
+            .then(a.receiver.cmp(&b.receiver))
+    });
+    rows
+}
+
+fn render_origin(
+    bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    _index: &SemIndex,
+) -> Vec<String> {
+    collect_origin_rows(bundle)
+        .into_iter()
+        .map(|row| {
+            let (line, column) = jet::Diagnostics::span_line_col(&row.source, row.span.start);
+            format!(
+                "{}:{}:{}   {}.@origin   OriginInfo?={}",
+                row.module,
+                line,
+                column,
+                row.receiver,
+                row.origin.jet_show()
+            )
+        })
+        .collect()
+}
+
+fn render_origin_json(
+    bundle: &ProgramBundle,
+    _facts: &SemIndexEffectFacts,
+    _index: &SemIndex,
+) -> Vec<ExpandValue> {
+    collect_origin_rows(bundle)
+        .into_iter()
+        .map(|row| {
+            let location = Some(jet::Diagnostics::span_line_col(&row.source, row.span.start));
+            expand_object(vec![
+                ("receiver", expand_string(&row.receiver)),
+                ("fact", expand_string("@origin")),
+                ("type", expand_string("OriginInfo?")),
+                ("source", expand_string(&row.module)),
+                ("span", expand_span(row.span, location)),
+                ("value", ct_to_expand(&row.origin)),
             ])
         })
         .collect()

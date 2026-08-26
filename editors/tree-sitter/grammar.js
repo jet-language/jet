@@ -1319,8 +1319,8 @@ module.exports = grammar({
         ),
       ),
 
-    // D-LAYOUT-FACTS1=B: `@layout` is a compiler-owned member after a type
-    // expression. `@name` remains a comptime splice in expression position.
+    // D-FACT-READ1: every registered `@fact` is a compiler-owned member after
+    // an expression. `@name` remains a comptime splice in expression position.
     compiler_fact: ($) => seq("@", field("name", $.identifier)),
 
     // Postfix deref `p.*` (D-CAP7).

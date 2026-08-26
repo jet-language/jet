@@ -492,8 +492,25 @@ impl<'a> Checker<'a> {
                 if string_view_return {
                     self.allow_string_view_read = true;
                 }
-                let mut et = self.infer(e);
-                self.report_lending_view_escape(e, "be returned");
+                        let mut et = self.infer(e);
+                        // D-FAILURE-FOUNDATION1=A: the public return contract
+                        // is the shared Result carrier, but source authors
+                        // return its success payload directly. Preserve an
+                        // already-carried result (calls, `Ok`, `Err`, and
+                        // explicit propagation); lift every matching payload
+                        // through the existing `Ok` constructor.
+                        if let (Type::Result { ok, .. }, Some(actual)) = (&rt, et.as_ref()) {
+                            let payload_matches = actual == ok.as_ref()
+                                || matches!(ok.as_ref(), Type::Union(members) if members.iter().any(|member| member == actual))
+                                || actual.numeric_widening_to(ok).is_some();
+                            if payload_matches && !matches!(actual, Type::Result { .. }) {
+                                let value_span = e.span();
+                                let value = std::mem::replace(e, Expr::Absent(value_span));
+                                *e = Expr::Ok(Box::new(value), value_span);
+                                et = self.infer(e);
+                            }
+                        }
+                        self.report_lending_view_escape(e, "be returned");
                 self.allow_string_view_read = saved_string_view_read;
                 self.expected_type = saved_expected;
                 if let Some(source) = et.as_ref() {

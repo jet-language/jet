@@ -21,7 +21,9 @@ use crate::Codegen::TIR::lower::lower_bin_match_pattern_bindings;
 use crate::Codegen::TIR::lower::lower_str_match_pattern_bindings;
 use crate::Codegen::TIR::lower::str_match_pattern_cond_expr;
 use crate::Codegen::TIR::lower::struct_pattern_field_type;
-use crate::Codegen::TIR::lower::{deferred_stmt, LowerBody, LowerStmtPlan};
+use crate::Codegen::TIR::lower::{
+    deferred_stmt, lower_return_value, LowerBody, LowerStmtPlan,
+};
 use crate::Codegen::TIR::lower_enum_match;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_fallible_match;
@@ -55,18 +57,13 @@ pub(crate) fn lower_value_block(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> 
         return crate::Codegen::TIR::lower_stmts(stmts, cx, env);
     };
     let mut lowered = crate::Codegen::TIR::lower_stmts(prefix, cx, env);
-    let normalized = crate::Codegen::TIR::normalize_eval_fragment_return(expr, env.ret_ty.as_ref());
-    let mut value = lower_owned_expr(normalized.as_ref().unwrap_or(expr), cx, env);
-    if let Some(want) = &env.ret_ty {
-        value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
-    }
     lowered.push(TStmt::SourceSpan(expr.span()));
     if cx.debug_linemap {
         lowered.push(TStmt::LineMarker(
             crate::Diagnostics::span_line_col(&cx.src, expr.span().start).0,
         ));
     }
-    lowered.push(TStmt::Return(Some(value)));
+    lowered.push(lower_return_value(expr, cx, env));
     lowered
 }
 

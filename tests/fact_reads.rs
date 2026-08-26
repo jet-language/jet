@@ -196,6 +196,24 @@ fn tracked_binding_origin_reads_the_track_marker() {
 }
 
 #[test]
+fn origin_fact_uses_the_stable_origin_info_schema() {
+    let output =
+        jet::compile("fn run() {\n    #Track tracked :: 1.0\n    @origin :: tracked.@origin\n}\n")
+            .expect("origin fact should compile");
+    assert_eq!(
+        jet::Syntax::fact_read_kind("@origin"),
+        Some(jet_foundation::Registry::FactRead::Origin)
+    );
+    for field in ["tracked", "source", "line", "column", "ambiguity"] {
+        assert!(
+            output.rust.contains(field),
+            "OriginInfo field missing from generated Core declaration: {field}"
+        );
+    }
+    assert!(!has_runtime_fact_dispatch(&output.rust));
+}
+
+#[test]
 fn parser_preserves_the_typed_fact_fixture() {
     let (tokens, lexer_diagnostics) = jet::Lexer::lex(FIXTURE);
     assert!(lexer_diagnostics.is_empty(), "lex: {lexer_diagnostics:?}");

@@ -13,7 +13,7 @@
 - Local C oracle: `corpus/oracle.c`, SHA-256
   `07bac2a1e5bef83b2a6718f8b0f8f1e6691d9e8df12ba6222533e0561405f891`.
 - Jet port and executable entry: `run.jet`, SHA-256
-  `4510be1687b99a67d842aa0a20ddf6840787238aa00ca1b31b7089ddd96e3e71`.
+  `2d92655e02a6323168d7b97b3de97829c989b34d405127bb8105d35c5b515149`.
 - Golden output: `../../expected/ports/murmur3_x86_32.out`, SHA-256
   `521dca7f6ed0f4380b682fa6b6a5fca87afb575f1e3bfe2aa069435fd2ea5f52`.
 
@@ -28,8 +28,11 @@ cross-file compiler seam.
 - Input is an owned `[U8]` byte list.
 - Seed and result are `U32`.
 - Block loads are little-endian.
-- `wrapping(...)` marks every fixed-width unsigned multiplication and addition
-  that can overflow.
+- One visible `#Arithmetic(.Wrapping)` region marks every fixed-width add,
+  subtract, multiply, and power operation that can overflow. Division,
+  remainder, shifts, indexing, and conversions keep their checked rules.
+- `Reader.read_u32_le` supplies the block load, and fixed-width
+  `rotate_left` supplies the standard rotation operation.
 - The pilot excludes the upstream 128-bit APIs, platform-specific unaligned
   reads, allocator/runtime integration, and unrelated macros or tests.
 

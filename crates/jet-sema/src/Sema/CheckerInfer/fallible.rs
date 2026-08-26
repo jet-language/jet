@@ -152,7 +152,12 @@ impl<'a> Checker<'a> {
                 call.range_checked = true;
             }
         }
-        let inner_ty = self.infer(inner)?;
+        // The explicit operator owns this call. Do not let the default
+        // callable rule insert a second `Try` around its operand.
+        self.failure_auto_depth += 1;
+        let inner_ty = self.infer(inner);
+        self.failure_auto_depth -= 1;
+        let inner_ty = inner_ty?;
         match inner_ty {
             Type::Result { ok, err } => {
                 let ret = self.resolve_type(self.ret.clone().unwrap_or(Type::Int));
@@ -533,7 +538,18 @@ impl<'a> Checker<'a> {
         span: Span,
         is_option: &mut bool,
     ) -> Option<Type> {
-        let val_ty = self.infer(value)?;
+        let suppress_auto = matches!(
+            value.as_ref().without_parens(),
+            Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
+        );
+        if suppress_auto {
+            self.failure_auto_depth += 1;
+        }
+        let val_ty = self.infer(value);
+        if suppress_auto {
+            self.failure_auto_depth -= 1;
+        }
+        let val_ty = val_ty?;
         *is_option = matches!(val_ty, Type::Option(_));
         let payload = match &val_ty {
             Type::Result { ok, .. } if !*is_option => (**ok).clone(),
@@ -958,14 +974,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn infer_fallible_stmt(&mut self, expr: &mut Expr) -> Option<Type> {
         self.normalize_imported_core_expr(expr);
         self.normalize_prelude_expr(expr);
-        match expr {
-            Expr::Call(call) => match self.check_call(call, false) {
-                Some(Some(t)) => Some(t),
-                _ => None,
-            },
-            Expr::MethodCall { .. } => self.infer(expr),
-            _ => self.infer(expr),
-        }
+        self.infer(expr)
     }
 }
 

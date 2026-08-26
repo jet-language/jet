@@ -1320,6 +1320,28 @@ fn mark_resource_bindings_mutable(stmts: &mut [TStmt], targets: &HashSet<String>
     }
 }
 
+/// Lower one checked value at a return boundary. Explicit returns and a
+/// value-expected block's final expression share this TIR path so special
+/// return handling cannot drift between the two spellings.
+pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt {
+    if let Expr::Ident(name, _) = e {
+        if env.gc_return && env.is_gc(name) {
+            return TStmt::Return(Some(TExpr {
+                ty: env.ty_of(name).unwrap_or(Type::Int),
+                kind: TExprKind::Local(env.local_of(name)),
+            }));
+        }
+    }
+    in_own_frame(|| {
+        let normalized = normalize_eval_fragment_return(e, env.ret_ty.as_ref());
+        let mut value = lower_owned_expr(normalized.as_ref().unwrap_or(e), cx, env);
+        if let Some(want) = &env.ret_ty {
+            value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
+        }
+        TStmt::Return(Some(value))
+    })
+}
+
 #[inline(never)]
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
     // Child blocks are heap tasks. A nested source block therefore resumes its
@@ -2990,23 +3012,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 });
             }
         },
-        Stmt::Return(Some(Expr::Ident(name, _)), _) if env.gc_return && env.is_gc(name) => {
-            TStmt::Return(Some(TExpr {
-                ty: env.ty_of(name).unwrap_or(Type::Int),
-                kind: TExprKind::Local(env.local_of(name)),
-            }))
-        }
         Stmt::Return(Some(e), _) => {
-            return in_own_frame(|| {
-                LowerStmtPlan::ready({
-                    let normalized = normalize_eval_fragment_return(e, env.ret_ty.as_ref());
-                    let mut value = lower_owned_expr(normalized.as_ref().unwrap_or(e), cx, env);
-                    if let Some(want) = &env.ret_ty {
-                        value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
-                    }
-                    TStmt::Return(Some(value))
-                })
-            });
+            return LowerStmtPlan::ready(lower_return_value(e, cx, env));
         }
         Stmt::Return(None, _) => {
             if matches!(
