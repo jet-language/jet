@@ -44,8 +44,18 @@ provider, lease, Hangar, offline, and clean paths in
 Windows CI. Missing offline output fails with E1315 without leaving a partial
 Hangar entry. Its success and failure rows run with an empty tool directory, so
 an installed Nix or shell command cannot make the lane pass by accident. The
-private lease snapshot is the non-Linux executable handoff; hostile child
-confinement remains the Epoch 8 #398 platform family, including #891.
+private lease snapshot is staging, not a consumer-facing executable path.
+Linux hands executables through the unprivileged read-only lease mount and
+inherited descriptors. macOS and Windows use the administrator-approved
+protected lease service from D-JPK-EXECLEASE1; a stopped or unverifiable
+service rejects the child before spawn. No platform falls back to the raw
+Store output path, and the lease remains live through the complete child
+process tree. The
+native lane also plants an interrupted lease and runs production recovery: the
+stale container is removed while the last good Hangar object remains. Doctor
+reports active and stale lease containers without repairing them, and audit
+uses the strict read-only Store projection, closure proof, output digest, and
+lease inventory before it prints provenance.
 
 JP0 stop-line now enforces three truth boundaries:
 
@@ -68,14 +78,18 @@ JP0 stop-line now enforces three truth boundaries:
   child names, types, metadata, and ctime before and after traversal. Local
   outputs are copied into per-realization sealed private snapshots. Executable
   files and executable symlink targets use lease-owned inherited file
-  descriptors on Linux; macOS and Windows use the sealed private snapshot
-  path. Linux lease-owned `PATH` wrappers live on a read-only private mount
-  pinned by an inherited directory descriptor and are revalidated before
-  handoff. Nested shell execution resolves to exact leased executable members,
-  so wrapper chmod/replacement or a same-UID rename/symlink swap cannot
-  redirect execution. Every realization
+  descriptors on Linux. macOS and Windows use the protected service's
+  caller-unwritable executable copy. Linux lease-owned `PATH` wrappers live on
+  a read-only private mount pinned by an inherited directory descriptor and
+  are revalidated before handoff. Nested shell execution resolves to exact
+  leased executable members, so wrapper chmod/replacement or a same-UID
+  rename/symlink swap cannot redirect execution. Every realization
   carries a mandatory typed lease: missing outputs are explicitly
-  non-consumable and cannot fall back to raw paths. Leases hold no object lock.
+  non-consumable and cannot fall back to raw paths. The lease container also
+  owns an inheritable kernel lifetime lock. A launched process tree keeps that
+  lock through its descendants; recovery removes only lock-idle containers, so
+  parent crashes, stale PIDs, PID reuse, reboot, and interrupted setup cannot
+  publish a partial executable or remove a live snapshot. Leases hold no object lock.
   JetOS retains original provider/output provenance alongside the snapshot,
   queries the original Nix output's full `nix-store -qR` closure, copies every
   member into generation-owned paths, and rewrites absolute store symlinks
@@ -350,6 +364,10 @@ live acceptance, and documentation. Work order is binding.
   registers JetOS generations through the generic external-root API.
 - Atomic root update, the ratified plan-before-apply mutation UX for `jetpack hangar clean`,
   why-live/why-dead, and stale-lease recovery.
+- One kernel-locked executable lease container protocol for running consumers,
+  interrupted setup, cleanup, restart, and rollback. Recovery removes only an
+  idle container; doctor and audit inspect the same ownership state without
+  deleting or publishing anything.
 - Verify, quarantine, repair from ordered caches, then deterministic rebuild.
 - Hangar receipt substrate: immutable connected package-realization objects,
   lock digest projections, atomic publication, and fail-closed corruption/path
@@ -414,8 +432,8 @@ a bad payload cannot consume a newer receipt and freeze a valid one.
   platform, policy, and toolchain facts. A cache reader therefore cannot
   relabel an output with a different dependency closure or worker/build record.
 - The read-only audit uses the checked Store projection and stops with a repair
-  path when Hangar metadata or closure state is malformed; it never presents a
-  partial inventory as a clean trust report.
+  path when Hangar metadata, output digest, closure state, or lease state is
+  malformed; it never presents a partial inventory as a clean trust report.
 - Trust material created for Hangar archives, native cache bindings, and the
   optional shared-store broker reads exactly 32 bytes from the platform OS
   CSPRNG. A failed or unsupported CSPRNG is a hard error with explicit-key

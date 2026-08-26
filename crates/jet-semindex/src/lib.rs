@@ -4,6 +4,7 @@
 #![deny(warnings)]
 
 mod Build;
+mod Docs;
 mod JSON;
 mod SemanticOps;
 mod Symbols;
@@ -15,6 +16,8 @@ pub use Build::{
     binder_active_parameter, build_index, build_symbol_db, function_parameter_parts,
     structural_nodes_from_parsed, HoverEntry, InlayHint, SymDef, SymKind, SymRef, SymbolDB,
 };
+pub use Docs::{build_doc_graph, DocExpectation, DocGraph, DocImpl, DocItem, DocModule, DocSource,
+    DocTest, DOC_SCHEMA_VERSION};
 pub use SemanticOps::{
     review_semantic_ops, review_semantic_ops_with_receipts, semantic_blame,
     semantic_blame_for_file, semantic_ops_for_file, semantic_rename_ops, ReviewOpKind,

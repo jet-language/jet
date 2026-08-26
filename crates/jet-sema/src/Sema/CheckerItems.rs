@@ -373,11 +373,9 @@ impl<'a> Checker<'a> {
                         }
                     }
                     if method == "raw" {
-                        self.require_knowledge_gate(
-                            crate::Sema::KnowledgePlane::Range,
-                            crate::Sema::KnowledgeGate::RawProjection,
-                            span,
-                        );
+                        if !self.in_unsafe {
+                            self.diags.push(Diagnostic::from_row("E0387", &[], Some(span)));
+                        }
                         return Some(nominal);
                     }
                     return Some(Type::Result {

@@ -261,6 +261,7 @@ pub fn render_e1292() -> &'static str {
         " What: Jet could not create the package-signing key\n",
         " Why: the operating system could not provide cryptographic randomness\n",
         " Fix: retry as a new operation on a supported host; no key files were created\n",
+        " More: jet-lang.dev/e/E1292\n",
     )
 }
 

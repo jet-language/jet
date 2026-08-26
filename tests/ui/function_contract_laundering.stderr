@@ -5,6 +5,7 @@ Error [E0120]: `action` was not moved here, so it cannot be returned as-is
     |                                                         ^^^^^^
  Why: this function has read access only and does not own the value
  Fix: return a copy: `return ~action;` — or take ownership with the move marker `^`: `action: ^fn(Bool) => Int`. There's no borrow-return in v1 — to share the value without a full copy, store an owned field, or reach for `Shared<T>`/`Id<T>` once a real program needs shared ownership
+More: jet-lang.dev/e/E0120
 
 Error [E0120]: `action` was not moved here, so it cannot be returned as-is
   --> tests/ui/function_contract_laundering.jet:3:80
@@ -13,6 +14,7 @@ Error [E0120]: `action` was not moved here, so it cannot be returned as-is
     |                                                                                ^^^^^^
  Why: this function has read access only and does not own the value
  Fix: return a copy: `return ~action;` — or take ownership with the move marker `^`: `action: ^fn(*, force: Bool) => Int`. There's no borrow-return in v1 — to share the value without a full copy, store an owned field, or reach for `Shared<T>`/`Id<T>` once a real program needs shared ownership
+More: jet-lang.dev/e/E0120
 
 Error [E0771]: this needs fn(*, force: Bool) => Int, but the function value is fn(Bool) => Int
   --> tests/ui/function_contract_laundering.jet:8:20
@@ -21,3 +23,4 @@ Error [E0771]: this needs fn(*, force: Bool) => Int, but the function value is f
     |                    ^^^^^
  Why: public labels and parameter zones are part of a function's callable type
  Fix: use `fn(*, force: Bool) => Int` here
+More: jet-lang.dev/e/E0771

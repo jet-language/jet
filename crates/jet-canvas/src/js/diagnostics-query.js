@@ -148,7 +148,7 @@
       || (currentSourceId && payloadSourceId && currentSourceId !== payloadSourceId)
     ) {
       setCanvasState("stale", "Diagnostic result is stale", "Canvas kept the current source and previous diagnostics. Check the current source again.", [
-        { label: "Open source", run: openSourceRecovery },
+        { label: "Open Source", run: openSourceRecovery },
         { label: "Retry", primary: true, run: () => checkCurrentSource() }
       ]);
       setSaveState("source unchanged", "error");
@@ -167,7 +167,7 @@
     if (entries.length) {
       const first = entries[0];
       setCanvasState("invalid", "Source needs a fix", "Canvas kept the last valid source. Fix the diagnostic in Code view, then check again.", [
-        { label: "Open source", run: openSourceRecovery },
+        { label: "Open Source", run: openSourceRecovery },
         { label: "Dismiss", run: clearCanvasState }
       ]);
       setSaveState("source unchanged", "error");
@@ -513,7 +513,7 @@
               ? "The project changed. Canvas kept the current source and previous results; reload, then search again."
               : "Canvas kept the current source and previous results. Retry when the query service is available.",
             [
-              { label: "Show source", run: openSourceRecovery },
+              { label: "Show Source", run: openSourceRecovery },
               { label: "Retry", primary: true, run: () => postQuery(body) }
             ]
           );
@@ -536,7 +536,7 @@
           // result stale and the toast names the discarded response.
           if (window.__jetCanvasDebugState?.state !== "stale") {
             setCanvasState("stale", "Search results are stale", "The source or project changed while Canvas searched. Previous results stay visible; search again for the current revision.", [
-              { label: "Show source", run: openSourceRecovery },
+              { label: "Show Source", run: openSourceRecovery },
               { label: "Retry", primary: true, run: () => postQuery(body) }
             ]);
             setSaveState("source unchanged", "error");
@@ -574,7 +574,7 @@
           offline ? "Search is offline" : "Search unavailable",
           "Canvas kept the current source and previous results. Reconnect or retry when the query service is available.",
           [
-            { label: "Show source", run: openSourceRecovery },
+            { label: "Show Source", run: openSourceRecovery },
             { label: "Retry", primary: true, run: () => postQuery(body) }
           ]
         );
@@ -655,7 +655,7 @@
             return null;
           }
           setCanvasState("stale", "Source control is stale", "The source changed while Canvas read Git state. The current source stays visible; reload source control.", [
-            { label: "Open source", run: openSourceRecovery },
+            { label: "Open Source", run: openSourceRecovery },
             { label: "Retry", primary: true, run: loadSourceControl }
           ]);
           return null;

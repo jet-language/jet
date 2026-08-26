@@ -892,7 +892,7 @@ pub(crate) fn run_compile_cmd(
     // build exactly as `jet build` does: otherwise `jet run` folds
     // `@build.settings.*` from manifest declarations while `jet build` and
     // `jet explain` fold the contributed value.
-    let package_manifest = load_pkg_manifest(file);
+    let mut package_manifest = load_pkg_manifest(file);
     // `jet build` already stages the entry, so only `jet run` has to ask.
     let selects_build_entry = cmd == "run"
         && jet::Driver::selects_build_entry(
@@ -3829,11 +3829,8 @@ fn collect_item_implicit_copy_spans(
             if let Some(body) = &definition.body {
                 collect_derive_body_implicit_copy_spans(body, spans);
             }
-            if let Some(text) = &definition.text {
-                for expression in [&text.check, &text.hole] {
-                    collect_expr_implicit_copy_spans(expression, spans);
-                }
-            }
+            // A marker carries no checked-text clause yet; card #2185 owns
+            // adding that field, and this walk returns with it.
         }
         _ => {}
     }
@@ -6312,6 +6309,7 @@ pub(crate) fn build(
             eprintln!(
                 " Fix: run from `nix develop`, or install a C toolchain (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`)."
             );
+            eprintln!("More: jet-lang.dev/e/L2101");
             exit(ExitCodes::USER_ERROR);
         }
         let detail = format!(

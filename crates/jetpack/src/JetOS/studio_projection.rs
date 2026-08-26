@@ -61,11 +61,11 @@ pub(super) fn write_studio_app_projection(
 
     fs::write(
         desktop_dir.join("jetos-studio.desktop"),
-        "[Desktop Entry]\nName=jetos Studio\nComment=Edit jetos system source\nExec=/run/current-system/sw/bin/jetos-studio\nType=Application\nCategories=System;Settings;\n",
+        "[Desktop Entry]\nName=Jetos Studio\nComment=Edit jetos system source\nExec=/run/current-system/sw/bin/jetos-studio\nType=Application\nCategories=System;Settings;\n",
     )?;
     fs::write(
         autostart_dir.join("jetos-studio-first-boot.desktop"),
-        "[Desktop Entry]\nName=jetos Studio First Boot\nComment=Open the jetos control center on first boot\nExec=/run/current-system/sw/bin/jetos-studio-first-boot\nType=Application\nX-GNOME-Autostart-enabled=true\nX-KDE-autostart-condition=true\nOnlyShowIn=GNOME;KDE;XFCE;Hyprland;niri;\n",
+        "[Desktop Entry]\nName=Jetos Studio First Boot\nComment=Open the jetos control center on first boot\nExec=/run/current-system/sw/bin/jetos-studio-first-boot\nType=Application\nX-GNOME-Autostart-enabled=true\nX-KDE-autostart-condition=true\nOnlyShowIn=GNOME;KDE;XFCE;Hyprland;niri;\n",
     )
 }
 
@@ -343,7 +343,7 @@ fn studio_index_html(dir: &Path, generation: &str, system: &SystemPlan) -> Strin
         .iter()
         .map(|opt| {
             format!(
-                "<div class=\"setting-control\"><label><span>{}</span><input data-setting-key=\"{}\" value=\"{}\"></label><button type=\"button\" data-stage-setting=\"{}\">Stage change</button></div>",
+                "<div class=\"setting-control\"><label><span>{}</span><input data-setting-key=\"{}\" value=\"{}\"></label><button type=\"button\" data-stage-setting=\"{}\">Stage Change</button></div>",
                 html_escape(&opt.key),
                 html_escape(&opt.key),
                 html_escape(&opt.value),
@@ -358,7 +358,7 @@ fn studio_index_html(dir: &Path, generation: &str, system: &SystemPlan) -> Strin
 <head>
 <meta charset=\"utf-8\">
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-<title>jetos Studio - {host}</title>
+<title>Jetos Studio - {host}</title>
 <style>
 :root {{ --paper: #eef3f6; --panel: #fbfdfe; --ink: #142430; --muted: #607482; --nav: #132b3a; --accent: #32769a; --ok: #1b7f70; --warn: #b56f1c; --line: #c8d4dc; font-family: \"IBM Plex Sans\", Inter, ui-sans-serif, system-ui, sans-serif; background: var(--paper); color: var(--ink); }}
 body {{ margin: 0; min-height: 100vh; background: var(--paper); }}
@@ -409,7 +409,7 @@ pre {{ margin: 0; padding: 16px; min-height: 96px; max-height: 300px; overflow: 
 <body>
 <main id=\"studio\" data-host=\"{host}\" data-protocol=\"local-projection-service\" data-source-truth=\"jet-source-transactions\">
 <aside>
-<h1>jetos Studio</h1>
+<h1>Jetos Studio</h1>
 <div class=\"host\">
 <span class=\"pill\">{host}</span>
 <span>{target}</span>
@@ -420,27 +420,27 @@ pre {{ margin: 0; padding: 16px; min-height: 96px; max-height: 300px; overflow: 
 <div id=\"dashboard\" class=\"page active\" data-page-kind=\"dashboard\">
 <div class=\"hero\">
 <h2>Dashboard</h2>
-<div class=\"lineage\" aria-label=\"Source to built generation\">
+<div class=\"lineage\" aria-label=\"Source to Built Generation\">
 <span><small>Source</small>config.jet</span>
 <span><small>Plan</small>plan.json</span>
 <span><small>Proof</small>proof.txt</span>
 <span><small>Generation</small>{generation}</span>
 </div>
 <div class=\"status\">
-<span class=\"pill\">selected host: {host}</span>
-<span class=\"pill\">generation: {generation}</span>
-<span class=\"pill\">rollback: not evaluated</span>
+<span class=\"pill\">Selected Host: {host}</span>
+<span class=\"pill\">Generation: {generation}</span>
+<span class=\"pill\">Rollback: not evaluated</span>
 </div>
 <div class=\"metrics\">
-<div class=\"metric\">Services configured<strong data-live-count=\"services\">{enabled_services}/{service_total}</strong></div>
+<div class=\"metric\">Services Configured<strong data-live-count=\"services\">{enabled_services}/{service_total}</strong></div>
 <div class=\"metric\">Packages<strong data-live-count=\"packages\">{package_total}</strong></div>
 <div class=\"metric\">Options<strong data-live-count=\"options\">{option_total}</strong></div>
-<div class=\"metric\">Projection alerts<strong>0</strong></div>
+<div class=\"metric\">Projection Alerts<strong>0</strong></div>
 </div>
 </div>
 <div class=\"grid\">
-<article class=\"panel\"><header><h2>Service configuration</h2></header><div class=\"empty\">Runtime health is not projected yet.</div><table data-live-services>{services}</table></article>
-<article class=\"panel\"><header><h2>Proof/rollback status</h2></header><pre data-live-proof>plan.json proof.txt provenance.json vm-proof.txt
+<article class=\"panel\"><header><h2>Service Configuration</h2></header><div class=\"empty\">Runtime health is not projected yet.</div><table data-live-services><thead><tr><th>Name</th><th>Enabled</th><th>Fields</th></tr></thead><tbody>{services}</tbody></table></article>
+<article class=\"panel\"><header><h2>Proof/Rollback Status</h2></header><pre data-live-proof>plan.json proof.txt provenance.json vm-proof.txt
 last run: generation built
 status: {proof_status}
 rollback: not evaluated
@@ -450,48 +450,48 @@ proof required: check, plan, build, proof</pre></article>
 <div id=\"settings\" class=\"page\" data-page-kind=\"settings\">
 <div class=\"grid\">
 <article class=\"panel\"><header><h2>Settings</h2></header><div id=\"settings-controls\" class=\"form\">{settings_controls}</div></article>
-<article class=\"panel\"><header><h2>Exact Jet diff</h2></header><pre id=\"tx-output\"></pre></article>
+<article class=\"panel\"><header><h2>Exact Jet Diff</h2></header><pre id=\"tx-output\"></pre></article>
 </div>
 </div>
-<div id=\"monitoring\" class=\"page\" data-page-kind=\"monitoring\"><div class=\"grid\"><article class=\"panel\"><header><h2>Monitoring</h2></header><table data-live-services>{services}</table></article><article class=\"panel\"><header><h2>Artifacts</h2></header><pre data-live-proof>provenance: ../provenance.json
+<div id=\"monitoring\" class=\"page\" data-page-kind=\"monitoring\"><div class=\"grid\"><article class=\"panel\"><header><h2>Monitoring</h2></header><table data-live-services><thead><tr><th>Name</th><th>Enabled</th><th>Fields</th></tr></thead><tbody>{services}</tbody></table></article><article class=\"panel\"><header><h2>Artifacts</h2></header><pre data-live-proof>provenance: ../provenance.json
 proof: ../proof.txt
 vm proof: ../vm-proof.txt</pre></article></div></div>
-<div id=\"services\" class=\"page\" data-page-kind=\"services\"><article class=\"panel\"><header><h2>Services</h2></header><table data-live-services>{services}</table></article></div>
-<div id=\"packages\" class=\"page\" data-page-kind=\"packages\"><article class=\"panel\"><header><h2>Packages</h2></header><table data-live-packages>{packages}</table></article></div>
+<div id=\"services\" class=\"page\" data-page-kind=\"services\"><article class=\"panel\"><header><h2>Services</h2></header><table data-live-services><thead><tr><th>Name</th><th>Enabled</th><th>Fields</th></tr></thead><tbody>{services}</tbody></table></article></div>
+<div id=\"packages\" class=\"page\" data-page-kind=\"packages\"><article class=\"panel\"><header><h2>Packages</h2></header><table data-live-packages><thead><tr><th>Package</th><th>Version</th></tr></thead><tbody>{packages}</tbody></table></article></div>
 <div id=\"secrets\" class=\"page\" data-page-kind=\"secrets\" data-secret-policy=\"no-plaintext\"><article class=\"panel\"><header><h2>Secrets</h2></header><pre>plaintext: never projected
 runtime path: /run/jetos-secrets/*
-transactions: audited rekey/add only</pre><table>{options}</table></article></div>
+transactions: audited rekey/add only</pre><table><thead><tr><th>Option</th><th>Value</th></tr></thead><tbody>{options}</tbody></table></article></div>
 <div id=\"fleet\" class=\"page\" data-page-kind=\"fleet\" data-fleet-mode=\"adaptive\"><article class=\"panel\"><header><h2>Fleet</h2></header><pre>single host default: true
 rollout gate: proof-before-switch
 rollback on failed health window</pre></article></div>
 <div id=\"generations\" class=\"page\" data-page-kind=\"generations\"><article class=\"panel\"><header><h2>Generations</h2></header><pre data-live-generations>current generation: {generation}
-Rollback restores source through the same Changeset review and Apply gate.</pre><div class=\"actions\"><button data-changeset-action=\"stage-rollback\">Stage last source rollback</button><button data-run=\"generations\">List generations</button></div></article></div>
+Rollback restores source through the same Changeset review and Apply gate.</pre><div class=\"actions\"><button data-changeset-action=\"stage-rollback\">Stage Last Source Rollback</button><button data-run=\"generations\">List Generations</button></div></article></div>
 <div id=\"changeset\" class=\"page\" data-page-kind=\"changeset\" data-apply-gate=\"single-source-transaction\">
 <div class=\"grid\">
 <article class=\"panel\"><header><h2>Changeset</h2></header><pre id=\"changeset-diff\">No staged changes.</pre></article>
-<article class=\"panel\"><header><h2>Impact ledger</h2></header><pre id=\"changeset-impact\">generation delta: current -> candidate
+<article class=\"panel\"><header><h2>Impact Ledger</h2></header><pre id=\"changeset-impact\">generation delta: current -> candidate
 proof requirements: check, plan, build, proof
 source transaction: config.jet only</pre>
 <div class=\"actions\">
 <button data-changeset-action=\"apply\">Apply to config.jet</button>
 <button data-run=\"build\">Build only</button>
-<button data-pipeline=\"build-switch\">Build and switch</button>
+<button data-pipeline=\"build-switch\">Build and Switch</button>
 <button data-changeset-action=\"discard\">Discard</button>
 </div></article>
 </div>
 </div>
 <div id=\"proof-provenance\" class=\"page\" data-page-kind=\"proof-provenance\">
 <div class=\"grid\">
-<article class=\"panel\"><header><h2>Packages</h2></header><table data-live-packages>{packages}</table></article>
-<article class=\"panel\"><header><h2>Services</h2></header><table data-live-services>{services}</table></article>
-<article class=\"panel\"><header><h2>Options</h2></header><table data-live-options>{options}</table></article>
+<article class=\"panel\"><header><h2>Packages</h2></header><table data-live-packages><thead><tr><th>Package</th><th>Version</th></tr></thead><tbody>{packages}</tbody></table></article>
+<article class=\"panel\"><header><h2>Services</h2></header><table data-live-services><thead><tr><th>Name</th><th>Enabled</th><th>Fields</th></tr></thead><tbody>{services}</tbody></table></article>
+<article class=\"panel\"><header><h2>Options</h2></header><table data-live-options><thead><tr><th>Option</th><th>Value</th></tr></thead><tbody>{options}</tbody></table></article>
 <article class=\"panel\"><header><h2>Source</h2></header>
 <div class=\"form\">
 <label>Option<input id=\"tx-key\" value=\"network.hostName\"></label>
 <label>Value<input id=\"tx-value\" value=\"{host}\"></label>
 </div>
 <div class=\"actions\">
-<button data-stage-source=\"true\">Stage edit</button>
+<button data-stage-source=\"true\">Stage Edit</button>
 <a href=\"/canvas\" data-open-canvas=\"source\">Open Canvas</a>
 </div>
 <pre id=\"source-tx-output\"></pre>
@@ -503,7 +503,7 @@ source transaction: config.jet only</pre>
 <button data-run=\"plan\">Plan</button>
 <button data-run=\"build\">Build</button>
 <button data-run=\"proof\">Proof</button>
-<button data-run=\"generations\">List generations</button>
+<button data-run=\"generations\">List Generations</button>
 </div>
 <pre id=\"run-output\">plan.json proof.txt provenance.json vm-proof.txt</pre>
 </article>
@@ -574,7 +574,8 @@ function installPageRegistry(registry, projection) {{
 }}
 function replaceRows(selector, rows, fields) {{
   for (const table of document.querySelectorAll(selector)) {{
-    table.replaceChildren();
+    const body = table.tBodies[0] || table.createTBody();
+    body.replaceChildren();
     for (const row of rows) {{
       const tr = document.createElement('tr');
       for (const field of fields) {{
@@ -582,7 +583,7 @@ function replaceRows(selector, rows, fields) {{
         td.textContent = String(field(row) ?? '');
         tr.append(td);
       }}
-      table.append(tr);
+      body.append(tr);
     }}
   }}
 }}
@@ -613,7 +614,7 @@ function renderSettings(_page, projection) {{
     label.append(name, input);
     const stage = document.createElement('button');
     stage.type = 'button';
-    stage.textContent = 'Stage change';
+    stage.textContent = 'Stage Change';
     stage.dataset.stageSetting = option.key;
     stage.addEventListener('click', () => stageSetting(option.key, input.value));
     row.append(label, stage);

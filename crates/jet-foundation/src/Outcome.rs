@@ -942,9 +942,9 @@ impl JetRuntimeDiagnosticRow {
         }
 
         (
-            jet_render_diagnostic_template(self.what, holes),
-            jet_render_diagnostic_template(self.why, holes),
-            jet_render_diagnostic_template(self.fix, holes),
+            jet_sentence_case_line(&jet_render_diagnostic_template(self.what, holes)),
+            jet_sentence_case_line(&jet_render_diagnostic_template(self.why, holes)),
+            jet_sentence_case_line(&jet_render_diagnostic_template(self.fix, holes)),
         )
     }
 }
@@ -994,6 +994,99 @@ pub fn jet_render_diagnostic_template(template: &str, holes: &[(&str, &str)]) ->
         index += character.len_utf8();
     }
     out
+}
+
+/// Keep the first ordinary prose word in sentence case while preserving the
+/// case of a leading flag, identifier, ref, path, keyword, or code fragment.
+/// Runtime-built diagnostic facts use this same product rule as table rows.
+pub fn jet_sentence_case_line(input: &str) -> String {
+    let Some((start, end)) = first_diagnostic_prose_token(input) else {
+        return input.to_string();
+    };
+    let Some(first) = input[start..end].chars().next() else {
+        return input.to_string();
+    };
+    if !first.is_ascii_uppercase() {
+        return input.to_string();
+    }
+    let mut output = input.to_string();
+    output.replace_range(start..start + first.len_utf8(), &first.to_ascii_lowercase().to_string());
+    output
+}
+
+/// D-DIAG-URL1: every human-readable diagnostic ends with this stable lookup
+/// line. The code is kept as data so custom project reports use the same
+/// shape without duplicating the host string.
+pub fn jet_diagnostic_more_line(code: &str) -> String {
+    format!("More: jet-lang.dev/e/{code}")
+}
+
+fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {
+    let mut offset = 0;
+    while offset < input.len() {
+        let rest = &input[offset..];
+        let ch = rest.chars().next()?;
+        if ch.is_whitespace() || matches!(ch, '*' | '~' | '_') {
+            offset += ch.len_utf8();
+            continue;
+        }
+        if matches!(ch, '`' | '"' | '\'') {
+            let after = &rest[ch.len_utf8()..];
+            if let Some(close) = after.find(ch) {
+                offset += ch.len_utf8() + close + ch.len_utf8();
+                continue;
+            }
+        }
+        if ch == '{' {
+            if let Some(close) = rest.find('}') {
+                offset += close + 1;
+                continue;
+            }
+        }
+        let start = offset;
+        let end = rest
+            .find(|value: char| {
+                value.is_whitespace()
+                    || matches!(value, ',' | '.' | ';' | ':' | '(' | ')' | '[' | ']' | '!')
+            })
+            .map_or(input.len(), |relative| offset + relative);
+        let token = &input[start..end];
+        if token.is_empty() {
+            offset += ch.len_utf8();
+            continue;
+        }
+        offset = end;
+        if diagnostic_token_keeps_case(token) {
+            continue;
+        }
+        return Some((start, end));
+    }
+    None
+}
+
+fn diagnostic_token_keeps_case(token: &str) -> bool {
+    if matches!(token.chars().next(), Some('-' | '#' | '@'))
+        || token == "C"
+        || matches!(
+            token,
+            "App" | "Hangar" | "Jet" | "Jetpack" | "Nix" | "Runtime" | "Store"
+        )
+    {
+        return true;
+    }
+    let has_digit = token.chars().any(|ch| ch.is_ascii_digit());
+    let has_structural_case = token
+        .chars()
+        .any(|ch| matches!(ch, '_' | '/' | '\\' | '@' | '#'));
+    let all_code = token
+        .chars()
+        .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'));
+    let camel_case = token
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_uppercase())
+        && token.chars().skip(1).any(|ch| ch.is_ascii_uppercase());
+    has_digit || has_structural_case || all_code || camel_case || token.starts_with("C-")
 }
 
 /// Shared wording for a checked list position. Collection adapters marshal
@@ -1080,7 +1173,10 @@ pub fn jet_render_runtime_stop_from_row(
             what: what.clone(),
             why: why.to_string(),
             fix: fix.to_string(),
-            rendered: format!("Internal error: {what}\n Why: {why}\n Fix: {fix}\n"),
+            rendered: format!(
+                "Internal error: {what}\n Why: {why}\n Fix: {fix}\n{}\n",
+                jet_diagnostic_more_line(code)
+            ),
             exit_code: 101,
         };
     };
@@ -1111,8 +1207,9 @@ pub fn jet_render_runtime_stop_from_row(
     } else {
         row_what
     };
-    let why = row_why;
-    let fix = row_fix;
+    let what = jet_sentence_case_line(&what);
+    let why = jet_sentence_case_line(&row_why);
+    let fix = jet_sentence_case_line(&row_fix);
 
     let show_context = jet_runtime_stop_has_context(code);
     let mut rendered = format!("Stop [{code}]: {what}\n");
@@ -1142,6 +1239,8 @@ pub fn jet_render_runtime_stop_from_row(
         rendered.push_str(&format!("locals: {locals}\n"));
     }
     rendered.push_str(&format!(" Why: {why}\n Fix: {fix}\n"));
+    rendered.push_str(&jet_diagnostic_more_line(code));
+    rendered.push('\n');
 
     JetRuntimeDiagnostic {
         code,
@@ -1222,6 +1321,9 @@ pub fn jet_render_runtime_sentry(
             format!("satisfy obligation `{obligation}` before the raw access"),
         ),
     };
+    let what = jet_sentence_case_line(&what);
+    let why = jet_sentence_case_line(&why);
+    let fix = jet_sentence_case_line(&fix);
     let mut rendered = format!("Runtime fault [{code}]: {what}\n");
     if !file.is_empty() {
         rendered.push_str(&format!(
@@ -1229,6 +1331,8 @@ pub fn jet_render_runtime_sentry(
         ));
     }
     rendered.push_str(&format!(" Why: {why}\n Fix: {fix}\n"));
+    rendered.push_str(&jet_diagnostic_more_line(code));
+    rendered.push('\n');
     JetRuntimeDiagnostic {
         code,
         source: "runtime",

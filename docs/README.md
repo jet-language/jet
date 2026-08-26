@@ -39,6 +39,8 @@ These are binding. When they disagree with anything else, they win.
   codegen) + rules R1–R12.
 - [diagnostics.md](spec/diagnostics.md) — error voice + exact render format;
   snapshot-pinned.
+- [ui-case-law.md](spec/ui-case-law.md) — case law for human-readable UI text;
+  machine output is excluded.
 - [roadmap.md](spec/roadmap.md) — what's active / not yet verified, plus Epoch 1 & 2 development highlights (completed work).
 - Tower — the owner's live decision queue; ratified syntax lives in
   [syntax-decisions.md](spec/syntax-decisions.md).

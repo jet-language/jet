@@ -3617,23 +3617,11 @@ fn web_compute_wasm_bridge_roundtrip() {
 
 #[test]
 fn web_compute_webgpu_calls_use_the_browser_prelude() {
-    let source = r#"#Target(Web)
-use core.compute as compute
-
-#Target(JS)
-fn run() {
-    seed :: compute.matrix(1, 1, 2.0) ?? panic("seed")
-    tile :: compute.matmul_f32_tile(seed, seed) ?? panic("tile")
-    gpu :: compute.on_device(tile, compute.device_webgpu()) ?? panic("webgpu")
-    doubled :: compute.add(gpu, gpu) ?? panic("add")
-    print(compute.to_list(doubled))
-    print(compute.placement(doubled))
-}
-"#;
+    let source = include_str!("../examples/features/web/web_compute_webgpu.jet");
     let dir = build_web_fixture(
         "compute_webgpu_browser_prelude",
         source,
-        "tests/fixtures/compute_webgpu_browser_prelude.jet",
+        "examples/features/web/web_compute_webgpu.jet",
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(

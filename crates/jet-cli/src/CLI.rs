@@ -352,98 +352,98 @@ const REGISTRY_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec {
         name: "publish",
         usage: "publish [--force] [--no-sign]",
-        summary: "Publish the current package",
+        summary: "publish the current package",
         handler: HandlerKey::Publish,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "yank",
         usage: "yank <version> [--message <reason>]",
-        summary: "Stop new installs of a published version",
+        summary: "stop new installs of a published version",
         handler: HandlerKey::Yank,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "keygen",
         usage: "keygen [--registry <name>] [--force]",
-        summary: "Create a package-signing key",
+        summary: "create a package-signing key",
         handler: HandlerKey::Keygen,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "key",
         usage: "key backup [<dest>] [--registry <name>]",
-        summary: "Manage the package-signing key",
+        summary: "manage the package-signing key",
         handler: HandlerKey::Key,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "vendor",
         usage: "vendor [--vendor-dir <path>]",
-        summary: "Copy dependencies into vendor/",
+        summary: "copy dependencies into vendor/",
         handler: HandlerKey::Vendor,
         also_canonical_top_level: false,
     },
 ];
 const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "live", usage: "live <pid>", summary: "Watch a running Jet process", handler: HandlerKey::Live, also_canonical_top_level: false },
-    NestedCommandSpec { name: "graph", usage: "graph <file.jet>", summary: "Show the build graph", handler: HandlerKey::Graph, also_canonical_top_level: false },
-    NestedCommandSpec { name: "query", usage: "query build <file.jet>", summary: "Search code and build information", handler: HandlerKey::Query, also_canonical_top_level: false },
-    NestedCommandSpec { name: "explain-build", usage: "explain-build <target|action|file> <file.jet>", summary: "Explain why a target, action, or file is rebuilt", handler: HandlerKey::ExplainBuild, also_canonical_top_level: false },
-    NestedCommandSpec { name: "compiler", usage: "compiler <lex|parse|check|source-map> <file>", summary: "Read compiler facts as versioned JSON", handler: HandlerKey::Compiler, also_canonical_top_level: false },
-    NestedCommandSpec { name: "impact", usage: "impact <file.jet> <symbol>", summary: "Show code affected by a symbol", handler: HandlerKey::Impact, also_canonical_top_level: false },
-    NestedCommandSpec { name: "dossier", usage: "dossier <file.jet> [symbol]", summary: "Show everything known about a file or symbol", handler: HandlerKey::Dossier, also_canonical_top_level: false },
-    NestedCommandSpec { name: "guarantees", usage: "guarantees [--json] <file.jet>", summary: "Show memory-safety guarantees by component", handler: HandlerKey::Guarantees, also_canonical_top_level: false },
-    NestedCommandSpec { name: "provenance", usage: "provenance [--json] [<dependency>]", summary: "Read dependency provenance", handler: HandlerKey::Provenance, also_canonical_top_level: false },
-    NestedCommandSpec { name: "digest", usage: "digest [--json] [--list-topics] [--topic <name>]", summary: "Write the one-file LLM surface digest", handler: HandlerKey::Digest, also_canonical_top_level: false },
-    NestedCommandSpec { name: "env", usage: "env [--json] [<env.jet|config.jet>]", summary: "List typed environment reads in a config surface", handler: HandlerKey::InspectEnv, also_canonical_top_level: false },
-    NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "Search the code index", handler: HandlerKey::Semindex, also_canonical_top_level: false },
-    NestedCommandSpec { name: "output", usage: "output <file.jet> [<address>]", summary: "Inspect one selected Output", handler: HandlerKey::Output, also_canonical_top_level: false },
-    NestedCommandSpec { name: "expand", usage: "expand [--facts <inline|memory|web|effects|layout|derive|templates|callable-signature>] [--json] <file.jet>", summary: "Show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
-    NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe, also_canonical_top_level: false },
-    NestedCommandSpec { name: "gates", usage: "gates [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "Read the complete compile-time gate ledger", handler: HandlerKey::Gates, also_canonical_top_level: false },
-    NestedCommandSpec { name: "authority", usage: "authority [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "Read rights-bearing gates from the ledger", handler: HandlerKey::Authority, also_canonical_top_level: false },
-    NestedCommandSpec { name: "schema", usage: "schema status\nschema squash --before <version>", summary: "Inspect saved data schema versions", handler: HandlerKey::Schema, also_canonical_top_level: false },
-    NestedCommandSpec { name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: HandlerKey::Codemod, also_canonical_top_level: false },
-    NestedCommandSpec { name: "audit", usage: "audit copies [--json] [<entry.jet>]\naudit memory [--json]\naudit [--advisory-db <path>]", summary: "Inspect implicit copies, exercised memory witnesses, or dependencies", handler: HandlerKey::Audit, also_canonical_top_level: true },
-    NestedCommandSpec { name: "sbom", usage: "sbom [--cyclonedx]", summary: "Create a software bill of materials", handler: HandlerKey::Sbom, also_canonical_top_level: false },
-    NestedCommandSpec { name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "Generate Jet bindings from a foreign header", handler: HandlerKey::Bind, also_canonical_top_level: false },
-    NestedCommandSpec { name: "logs", usage: "logs <pkg>", summary: "Show recent package build logs", handler: HandlerKey::Logs, also_canonical_top_level: false },
-    NestedCommandSpec { name: "info", usage: "info <source>.<package>", summary: "Show package details", handler: HandlerKey::Info, also_canonical_top_level: false },
-    NestedCommandSpec { name: "outdated", usage: "outdated", summary: "List dependencies with available updates", handler: HandlerKey::Outdated, also_canonical_top_level: false },
+    NestedCommandSpec { name: "live", usage: "live <pid>", summary: "watch a running Jet process", handler: HandlerKey::Live, also_canonical_top_level: false },
+    NestedCommandSpec { name: "graph", usage: "graph <file.jet>", summary: "show the build graph", handler: HandlerKey::Graph, also_canonical_top_level: false },
+    NestedCommandSpec { name: "query", usage: "query build <file.jet>", summary: "search code and build information", handler: HandlerKey::Query, also_canonical_top_level: false },
+    NestedCommandSpec { name: "explain-build", usage: "explain-build <target|action|file> <file.jet>", summary: "explain why a target, action, or file is rebuilt", handler: HandlerKey::ExplainBuild, also_canonical_top_level: false },
+    NestedCommandSpec { name: "compiler", usage: "compiler <lex|parse|check|source-map> <file>", summary: "read compiler facts as versioned JSON", handler: HandlerKey::Compiler, also_canonical_top_level: false },
+    NestedCommandSpec { name: "impact", usage: "impact <file.jet> <symbol>", summary: "show code affected by a symbol", handler: HandlerKey::Impact, also_canonical_top_level: false },
+    NestedCommandSpec { name: "dossier", usage: "dossier <file.jet> [symbol]", summary: "show everything known about a file or symbol", handler: HandlerKey::Dossier, also_canonical_top_level: false },
+    NestedCommandSpec { name: "guarantees", usage: "guarantees [--json] <file.jet>", summary: "show memory-safety guarantees by component", handler: HandlerKey::Guarantees, also_canonical_top_level: false },
+    NestedCommandSpec { name: "provenance", usage: "provenance [--json] [<dependency>]", summary: "read dependency provenance", handler: HandlerKey::Provenance, also_canonical_top_level: false },
+    NestedCommandSpec { name: "digest", usage: "digest [--json] [--list-topics] [--topic <name>]", summary: "write the one-file LLM surface digest", handler: HandlerKey::Digest, also_canonical_top_level: false },
+    NestedCommandSpec { name: "env", usage: "env [--json] [<env.jet|config.jet>]", summary: "list typed environment reads in a config surface", handler: HandlerKey::InspectEnv, also_canonical_top_level: false },
+    NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "search the code index", handler: HandlerKey::Semindex, also_canonical_top_level: false },
+    NestedCommandSpec { name: "output", usage: "output <file.jet> [<address>]", summary: "inspect one selected Output", handler: HandlerKey::Output, also_canonical_top_level: false },
+    NestedCommandSpec { name: "expand", usage: "expand [--facts <inline|memory|web|effects|layout|derive|templates|callable-signature>] [--json] <file.jet>", summary: "show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
+    NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "review unsafe code and its safeguards", handler: HandlerKey::Unsafe, also_canonical_top_level: false },
+    NestedCommandSpec { name: "gates", usage: "gates [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "read the complete compile-time gate ledger", handler: HandlerKey::Gates, also_canonical_top_level: false },
+    NestedCommandSpec { name: "authority", usage: "authority [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "read rights-bearing gates from the ledger", handler: HandlerKey::Authority, also_canonical_top_level: false },
+    NestedCommandSpec { name: "schema", usage: "schema status\nschema squash --before <version>", summary: "inspect saved data schema versions", handler: HandlerKey::Schema, also_canonical_top_level: false },
+    NestedCommandSpec { name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "preview or apply code changes", handler: HandlerKey::Codemod, also_canonical_top_level: false },
+    NestedCommandSpec { name: "audit", usage: "audit copies [--json] [<entry.jet>]\naudit memory [--json]\naudit [--advisory-db <path>]", summary: "inspect implicit copies, exercised memory witnesses, or dependencies", handler: HandlerKey::Audit, also_canonical_top_level: true },
+    NestedCommandSpec { name: "sbom", usage: "sbom [--cyclonedx]", summary: "create a software bill of materials", handler: HandlerKey::Sbom, also_canonical_top_level: false },
+    NestedCommandSpec { name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "generate Jet bindings from a foreign header", handler: HandlerKey::Bind, also_canonical_top_level: false },
+    NestedCommandSpec { name: "logs", usage: "logs <pkg>", summary: "show recent package build logs", handler: HandlerKey::Logs, also_canonical_top_level: false },
+    NestedCommandSpec { name: "info", usage: "info <source>.<package>", summary: "show package details", handler: HandlerKey::Info, also_canonical_top_level: false },
+    NestedCommandSpec { name: "outdated", usage: "outdated", summary: "list dependencies with available updates", handler: HandlerKey::Outdated, also_canonical_top_level: false },
     // #1659 criterion 5: reserved words and sigils, including the five
     // teaching-reserved words (copy/mut/take/const/unsafe) that reject valid
     // identifiers with a redirect to their current spelling.
-    NestedCommandSpec { name: "reserved", usage: "reserved [--json]", summary: "List reserved words and sigils", handler: HandlerKey::Reserved, also_canonical_top_level: false },
+    NestedCommandSpec { name: "reserved", usage: "reserved [--json]", summary: "list reserved words and sigils", handler: HandlerKey::Reserved, also_canonical_top_level: false },
     // D-ONCE-LAW1=A (#1728): the one registration table, read out. Every
     // registered truth shows its home, its renderers, and the guard that
     // proves there is no second copy.
-    NestedCommandSpec { name: "facts", usage: "facts [--json]", summary: "List every registered truth and its guard", handler: HandlerKey::Facts, also_canonical_top_level: false },
-    NestedCommandSpec { name: "structure", usage: "structure [--json] <file.jet>", summary: "Inspect liveness, lifecycle, and import-edge facts", handler: HandlerKey::Structure, also_canonical_top_level: false },
+    NestedCommandSpec { name: "facts", usage: "facts [--json]", summary: "list every registered truth and its guard", handler: HandlerKey::Facts, also_canonical_top_level: false },
+    NestedCommandSpec { name: "structure", usage: "structure [--json] <file.jet>", summary: "inspect liveness, lifecycle, and import-edge facts", handler: HandlerKey::Structure, also_canonical_top_level: false },
 ];
 const GC_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
     name: "report",
     usage: "report",
-    summary: "Show values moved into automatic memory management",
+    summary: "show values moved into automatic memory management",
     handler: HandlerKey::GcReport,
     also_canonical_top_level: true,
 }];
 const PROJECT_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
     name: "parts",
     usage: "parts",
-    summary: "List loaded and skipped project modules",
+    summary: "list loaded and skipped project modules",
     handler: HandlerKey::ProjectParts,
     also_canonical_top_level: false,
 }];
 const SELF_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "toolchain", usage: "toolchain", summary: "Show the Jet version selected for this project", handler: HandlerKey::Toolchain, also_canonical_top_level: false },
-    NestedCommandSpec { name: "upgrade", usage: "upgrade", summary: "Show how to install a newer Jet release", handler: HandlerKey::Upgrade, also_canonical_top_level: false },
-    NestedCommandSpec { name: "doctor", usage: "doctor", summary: "Find and fix toolchain problems", handler: HandlerKey::Doctor, also_canonical_top_level: false },
-    NestedCommandSpec { name: "completions", usage: "completions", summary: "Print shell completions", handler: HandlerKey::Completions, also_canonical_top_level: false },
-    NestedCommandSpec { name: "man", usage: "man", summary: "Print the Jet manual", handler: HandlerKey::Man, also_canonical_top_level: false },
-    NestedCommandSpec { name: "devtools", usage: "devtools", summary: "Run Jet maintenance tools", handler: HandlerKey::Devtools, also_canonical_top_level: false },
-    NestedCommandSpec { name: "lsp", usage: "lsp", summary: "Start the language server", handler: HandlerKey::Lsp, also_canonical_top_level: false },
-    NestedCommandSpec { name: "exec", usage: "exec --workspace <dir> [--exec <path>] [--read <path>] [--write <path>] -- <program> [args]", summary: "Execute one command in an authority-bound workspace", handler: HandlerKey::Exec, also_canonical_top_level: false },
+    NestedCommandSpec { name: "toolchain", usage: "toolchain", summary: "show the Jet version selected for this project", handler: HandlerKey::Toolchain, also_canonical_top_level: false },
+    NestedCommandSpec { name: "upgrade", usage: "upgrade", summary: "show how to install a newer Jet release", handler: HandlerKey::Upgrade, also_canonical_top_level: false },
+    NestedCommandSpec { name: "doctor", usage: "doctor", summary: "find and fix toolchain problems", handler: HandlerKey::Doctor, also_canonical_top_level: false },
+    NestedCommandSpec { name: "completions", usage: "completions", summary: "print shell completions", handler: HandlerKey::Completions, also_canonical_top_level: false },
+    NestedCommandSpec { name: "man", usage: "man", summary: "print the Jet manual", handler: HandlerKey::Man, also_canonical_top_level: false },
+    NestedCommandSpec { name: "devtools", usage: "devtools", summary: "run Jet maintenance tools", handler: HandlerKey::Devtools, also_canonical_top_level: false },
+    NestedCommandSpec { name: "lsp", usage: "lsp", summary: "start the language server", handler: HandlerKey::Lsp, also_canonical_top_level: false },
+    NestedCommandSpec { name: "exec", usage: "exec --workspace <dir> [--exec <path>] [--read <path>] [--write <path>] -- <program> [args]", summary: "execute one command in an authority-bound workspace", handler: HandlerKey::Exec, also_canonical_top_level: false },
 ];
 // D-ENVHOOK1=A / D-ENV-FILES1=A / D-ENV-PROFILE1=C: these are the shipped
 // `jetpack env` subverbs exposed through Jet's environment front door. `env`
@@ -453,28 +453,28 @@ const ENV_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec {
         name: "test",
         usage: "test [-- command]",
-        summary: "Run environment checks in a clean environment",
+        summary: "run environment checks in a clean environment",
         handler: HandlerKey::Env,
         also_canonical_top_level: true,
     },
     NestedCommandSpec {
         name: "hook",
         usage: "hook <bash|zsh|fish>",
-        summary: "Print the shell auto-activation hook",
+        summary: "print the shell auto-activation hook",
         handler: HandlerKey::Env,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "sync",
         usage: "sync",
-        summary: "Apply typed managed environment files",
+        summary: "apply typed managed environment files",
         handler: HandlerKey::Env,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "info",
         usage: "info",
-        summary: "Show the typed environment plan",
+        summary: "show the typed environment plan",
         handler: HandlerKey::Env,
         also_canonical_top_level: false,
     },
@@ -483,28 +483,28 @@ const SHARED_STORE_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec {
         name: "install",
         usage: "install",
-        summary: "Install the optional shared package broker",
+        summary: "install the optional shared package broker",
         handler: HandlerKey::SharedStore,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "enroll",
         usage: "enroll <uid> [--read-only]",
-        summary: "Grant a user shared-store broker access",
+        summary: "grant a user shared-store broker access",
         handler: HandlerKey::SharedStore,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "status",
         usage: "status",
-        summary: "Show shared-store broker configuration",
+        summary: "show shared-store broker configuration",
         handler: HandlerKey::SharedStore,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "broker",
         usage: "broker [--fd <n>]",
-        summary: "Serve one shared-store broker request",
+        summary: "serve one shared-store broker request",
         handler: HandlerKey::SharedStore,
         also_canonical_top_level: false,
     },
@@ -517,28 +517,28 @@ const OS_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec {
         name: "push",
         usage: "push",
-        summary: "Deploy one or more Jetos machines",
+        summary: "deploy one or more Jetos machines",
         handler: HandlerKey::Push,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "bridge",
         usage: "bridge",
-        summary: "Convert an existing system configuration to Jet",
+        summary: "convert an existing system configuration to Jet",
         handler: HandlerKey::Bridge,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "services",
         usage: "services",
-        summary: "Manage development services",
+        summary: "manage development services",
         handler: HandlerKey::Services,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "config",
         usage: "config",
-        summary: "Manage Jet settings and trust",
+        summary: "manage Jet settings and trust",
         handler: HandlerKey::Config,
         also_canonical_top_level: false,
     },
@@ -552,42 +552,42 @@ const PERF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec {
         name: "run",
         usage: "run",
-        summary: "Run a program and write a .jettrace",
+        summary: "run a program and write a .jettrace",
         handler: HandlerKey::Perf,
         also_canonical_top_level: true,
     },
     NestedCommandSpec {
         name: "test",
         usage: "test",
-        summary: "Run tests and write a .jettrace",
+        summary: "run tests and write a .jettrace",
         handler: HandlerKey::Perf,
         also_canonical_top_level: true,
     },
     NestedCommandSpec {
         name: "attach",
         usage: "attach",
-        summary: "Attach to a running process and write a .jettrace",
+        summary: "attach to a running process and write a .jettrace",
         handler: HandlerKey::Perf,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "view",
         usage: "view",
-        summary: "Show a .jettrace summary",
+        summary: "show a .jettrace summary",
         handler: HandlerKey::Perf,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "compare",
         usage: "compare",
-        summary: "Compare two .jettrace artifacts",
+        summary: "compare two .jettrace artifacts",
         handler: HandlerKey::Perf,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "export",
         usage: "export",
-        summary: "Export a loss-declared projection of a .jettrace",
+        summary: "export a loss-declared projection of a .jettrace",
         handler: HandlerKey::Perf,
         also_canonical_top_level: false,
     },
@@ -602,6 +602,19 @@ pub fn command_groups() -> impl Iterator<Item = &'static CommandSpec> {
 
 pub fn command_group(name: &str) -> Option<&'static CommandSpec> {
     command_groups().find(|group| group.name == name)
+}
+
+pub fn command_group_label(name: &str) -> String {
+    name.split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().chain(chars).collect(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 /// #1659 criterion 1: the one renderer for a group's nested-action usage
@@ -682,7 +695,7 @@ pub fn moved_command_group(name: &str) -> Option<&'static str> {
 pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "registry",
-        summary: "Publish and manage packages",
+        summary: "publish and manage packages",
         headline: false,
         actions: REGISTRY_ACTIONS,
         exhaustive: true,
@@ -690,7 +703,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "inspect",
-        summary: "Explore code, builds, packages, and bindings",
+        summary: "explore code, builds, packages, and bindings",
         headline: false,
         actions: INSPECT_ACTIONS,
         exhaustive: true,
@@ -698,7 +711,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "project",
-        summary: "Inspect project files and modules",
+        summary: "inspect project files and modules",
         headline: false,
         actions: PROJECT_ACTIONS,
         exhaustive: true,
@@ -706,7 +719,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "self",
-        summary: "Manage the Jet installation and editor tools",
+        summary: "manage the Jet installation and editor tools",
         headline: false,
         actions: SELF_ACTIONS,
         exhaustive: true,
@@ -714,7 +727,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "diff",
-        summary: "Compare two Jet programs by meaning",
+        summary: "compare two Jet programs by meaning",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -722,7 +735,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "merge",
-        summary: "Merge Jet programs without losing code structure",
+        summary: "merge Jet programs without losing code structure",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -730,7 +743,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "review",
-        summary: "Review meaning, authority, and proof changes",
+        summary: "review meaning, authority, and proof changes",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -738,7 +751,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "run",
-        summary: "Run a program or project",
+        summary: "run a program or project",
         headline: true,
         actions: &[],
         exhaustive: false,
@@ -746,7 +759,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "jobs",
-        summary: "List project #Job functions (<file.jet> -- <job>)",
+        summary: "list project #Job functions (<file.jet> -- <job>)",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -754,7 +767,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "check",
-        summary: "Check code without creating a binary",
+        summary: "check code without creating a binary",
         headline: true,
         actions: &[],
         exhaustive: false,
@@ -762,7 +775,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fill",
-        summary: "Propose checked code for typed goals",
+        summary: "propose checked code for typed goals",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -770,7 +783,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "test",
-        summary: "Run tests",
+        summary: "run tests",
         headline: true,
         actions: &[],
         exhaustive: false,
@@ -778,7 +791,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "prove",
-        summary: "Create a proof report for code and tests",
+        summary: "create a proof report for code and tests",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -788,7 +801,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     // receipts and does not perform a check, test, build, or proof.
     CommandSpec {
         name: "status",
-        summary: "Show what the project has proved",
+        summary: "show what the project has proved",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -796,7 +809,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "build",
-        summary: "Create a native executable",
+        summary: "create a native executable",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -804,15 +817,23 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "dev",
-        summary: "Watch and run a program; optionally open the Canvas IDE",
+        summary: "watch and run a program; optionally open the Canvas IDE",
         headline: false,
         actions: &[],
         exhaustive: false,
         usage: Some("dev [<file.jet|dir>] [--canvas] [-- <args>]"),
     },
     CommandSpec {
+        name: "learn",
+        summary: "run the offline first learning arc",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("learn [--check] [--watch=off]"),
+    },
+    CommandSpec {
         name: "try",
-        summary: "Speculatively apply a plan and re-check its claims",
+        summary: "speculatively apply a plan and re-check its claims",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -820,7 +841,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "debug",
-        summary: "Debug a program from Jet source",
+        summary: "debug a program from Jet source",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -828,7 +849,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "repl",
-        summary: "Try Jet code interactively",
+        summary: "try Jet code interactively",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -836,7 +857,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "notebook",
-        summary: "Open a Jet notebook (.jetnb) or Jupyter adapter",
+        summary: "open a Jet notebook (.jetnb) or Jupyter adapter",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -844,7 +865,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "import",
-        summary: "Convert supported source code into editable Jet",
+        summary: "convert supported source code into editable Jet",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -852,7 +873,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "new",
-        summary: "Create a Jet project",
+        summary: "create a Jet project",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -860,7 +881,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fmt",
-        summary: "Format Jet and configured project files",
+        summary: "format Jet and configured project files",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -868,7 +889,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fix",
-        summary: "Apply safe automatic fixes, including `fix memory`",
+        summary: "apply safe automatic fixes, including `fix memory`",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -876,7 +897,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "audit",
-        summary: "Inspect implicit copies, exercised memory witnesses, or dependencies",
+        summary: "inspect implicit copies, exercised memory witnesses, or dependencies",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -884,15 +905,23 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "lint",
-        summary: "Run optional code-quality checks",
+        summary: "run optional code-quality checks",
         headline: false,
         actions: &[],
         exhaustive: false,
         usage: Some("lint --a11y|--complexity <file.jet>"),
     },
     CommandSpec {
+        name: "doc",
+        summary: "generate reference documentation",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("doc [--json|--check] [<file.jet|dir>]"),
+    },
+    CommandSpec {
         name: "explain",
-        summary: "Explain a diagnostic code, build fact, or generic-module value",
+        summary: "explain a diagnostic code, build fact, or generic-module value",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -900,7 +929,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "env",
-        summary: "Open the project development shell",
+        summary: "open the project development shell",
         headline: false,
         actions: ENV_ACTIONS,
         exhaustive: false,
@@ -908,7 +937,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "shared-store",
-        summary: "Manage the optional shared package broker",
+        summary: "manage the optional shared package broker",
         headline: false,
         actions: SHARED_STORE_ACTIONS,
         exhaustive: true,
@@ -916,7 +945,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "cache",
-        summary: "Manage host-owned binary-cache bindings",
+        summary: "manage host-owned binary-cache bindings",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -924,7 +953,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "remote",
-        summary: "Manage host-owned remote builders",
+        summary: "manage host-owned remote builders",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -934,7 +963,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     // actions (see OS_ACTIONS below) — declared once there, not here too.
     CommandSpec {
         name: "trust",
-        summary: "Review or change trusted authority",
+        summary: "review or change trusted authority",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -942,7 +971,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "image",
-        summary: "Build a declared container image",
+        summary: "build a declared container image",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -950,7 +979,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "os",
-        summary: "Manage Jetos machines and images",
+        summary: "manage Jetos machines and images",
         headline: false,
         actions: OS_ACTIONS,
         exhaustive: false,
@@ -958,7 +987,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "add",
-        summary: "Add and download a dependency",
+        summary: "add and download a dependency",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -966,7 +995,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "remove",
-        summary: "Remove a dependency",
+        summary: "remove a dependency",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -974,7 +1003,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fetch",
-        summary: "Download locked dependencies",
+        summary: "download locked dependencies",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -982,7 +1011,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "search",
-        summary: "Search the local package catalog",
+        summary: "search the local package catalog",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -990,7 +1019,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "find",
-        summary: "Find code by type, effect, or example",
+        summary: "find code by type, effect, or example",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1000,7 +1029,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "update",
-        summary: "Update dependency or toolchain pins",
+        summary: "update dependency or toolchain pins",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1008,7 +1037,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "init",
-        summary: "Create package settings in this directory",
+        summary: "create package settings in this directory",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1016,7 +1045,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "split",
-        summary: "Extract closed Package facts into Configs or members",
+        summary: "extract closed Package facts into Configs or members",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1024,7 +1053,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fold",
-        summary: "Reverse a recorded Package source transition",
+        summary: "reverse a recorded Package source transition",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1033,7 +1062,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     // #1659 criterion 1: `config` is a `jet os` nested action (OS_ACTIONS).
     CommandSpec {
         name: "gc",
-        summary: "Show values moved into automatic memory management",
+        summary: "show values moved into automatic memory management",
         headline: false,
         actions: GC_ACTIONS,
         exhaustive: false,
@@ -1041,7 +1070,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "clean",
-        summary: "Remove unused package-store data",
+        summary: "remove unused package-store data",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1052,7 +1081,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     // inspect` nested actions (INSPECT_ACTIONS) — declared once there.
     CommandSpec {
         name: "emit",
-        summary: "Print generated build output",
+        summary: "print generated build output",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1060,7 +1089,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "eval",
-        summary: "Evaluate pure Jet and print the value (`--json` for JSON)",
+        summary: "evaluate pure Jet and print the value (`--json` for JSON)",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1068,7 +1097,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "budget",
-        summary: "Check performance limits or update baselines",
+        summary: "check performance limits or update baselines",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1076,7 +1105,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "perf",
-        summary: "Collect and inspect performance traces",
+        summary: "collect and inspect performance traces",
         headline: false,
         actions: PERF_ACTIONS,
         exhaustive: true,
@@ -1084,7 +1113,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "report",
-        summary: "Write a private local report bundle",
+        summary: "write a private local report bundle",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1092,7 +1121,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fuzz",
-        summary: "Find failing inputs for property tests",
+        summary: "find failing inputs for property tests",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1100,7 +1129,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "version",
-        summary: "Show the Jet version",
+        summary: "show the Jet version",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1108,7 +1137,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "help",
-        summary: "Show command help",
+        summary: "show command help",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1346,7 +1375,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--quiet", help: "suppress non-error status output" },
     FlagSpec { long: "--color", help: "color: auto | always | never" },
     FlagSpec { long: "--version", help: "print compiler version" },
-    FlagSpec { long: "--check", help: "with fmt: exit 1 if any file would change (CI gate)" },
+    FlagSpec { long: "--check", help: "with fmt/learn: check without changing files (CI gate)" },
     FlagSpec { long: "--lang", help: "with fmt: delegate non-Jet files to the environment formatter for this language" },
     FlagSpec { long: "--restore-role-files", help: "with init: restore the exact pre-package.jet role files" },
     FlagSpec { long: "--diff", help: "with fmt --check: also print unified diffs for each changed file" },
@@ -1397,7 +1426,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--trace-tiers", help: "with run/dev: print per-function Cranelift vs interpreter tier selection; with test: print AOT marker" },
     FlagSpec { long: "--restart", help: "with dev: always rerun from scratch after a save" },
     FlagSpec { long: "--swap", help: "with dev: hot-swap compatible edits and restart after type changes" },
-    FlagSpec { long: "--watch", help: "with run/dev: re-run on dependency changes; --watch=off runs once" },
+    FlagSpec { long: "--watch", help: "with run/dev/learn: re-run on dependency changes; --watch=off runs once" },
     FlagSpec { long: CANVAS_FLAG, help: "with dev: open the full Canvas IDE over this dev session" },
     FlagSpec { long: "--canvas-host", help: "with dev: with --canvas, bind host (loopback by default)" },
     FlagSpec { long: "--canvas-port", help: "with dev: with --canvas, bind an explicit port" },
@@ -1537,7 +1566,7 @@ pub fn flags_for_command(name: &str) -> Vec<(&'static str, &'static str)> {
 /// No command or retired route gets a hand-authored usage row.
 pub fn usage_page(version: &str) -> String {
     let mut output = format!(
-        "Welcome to {lang}! (v{version})\n\nusage:\n",
+        "Welcome to {lang}! (v{version})\n\nUsage:\n",
         lang = crate::Syntax::LANG_NAME,
     );
     for command in COMMANDS
@@ -1551,10 +1580,13 @@ pub fn usage_page(version: &str) -> String {
         ));
     }
     for group in command_groups() {
-        output.push_str(&format!("\n{} commands:\n", group.name));
+        output.push_str(&format!(
+            "\n{} Commands:\n",
+            command_group_label(group.name)
+        ));
         output.push_str(&command_group_usage(group.name));
     }
-    output.push_str("\nflags:\n");
+    output.push_str("\nFlags:\n");
     for flag in FLAGS.iter() {
         output.push_str(&format!("  {:<28} {}\n", flag.long, flag.help));
     }
@@ -2154,23 +2186,23 @@ pub fn man_page(version: &str) -> String {
         bin = BINARY_NAME,
         ver = version,
     ));
-    out.push_str(".SH NAME\n");
+    out.push_str(".SH Name\n");
     out.push_str(&format!(
         "{bin} \\- the Jet compiler and project tool\n",
         bin = BINARY_NAME
     ));
-    out.push_str(".SH SYNOPSIS\n");
+    out.push_str(".SH Synopsis\n");
     out.push_str(&format!(
         ".B {bin}\n.RI [ command ] \" \" [ args ...]\n",
         bin = BINARY_NAME
     ));
-    out.push_str(".SH DESCRIPTION\n");
+    out.push_str(".SH Description\n");
     out.push_str(&format!(
         "{bin} builds, checks, runs, and tests Jet programs, and manages Jet projects \
 and their dependencies. Output is plain when piped and colored on a terminal.\n",
         bin = BINARY_NAME
     ));
-    out.push_str(".SH COMMANDS\n");
+    out.push_str(".SH Commands\n");
     for c in COMMANDS {
         if !is_canonical_top_level(c.name) {
             continue;
@@ -2187,16 +2219,16 @@ and their dependencies. Output is plain when piped and colored on a terminal.\n"
             }
         }
     }
-    out.push_str(".SH FLAGS\n");
+    out.push_str(".SH Flags\n");
     for f in FLAGS.iter() {
         out.push_str(&format!(".TP\n.B {}\n{}\n", f.long, roff_escape(f.help)));
     }
-    out.push_str(".SH FILES\n");
+    out.push_str(".SH Files\n");
     out.push_str(&format!(
         ".TP\n.B {manifest}\nThe project manifest.\n",
         manifest = crate::Syntax::PAYLOAD_FILE
     ));
-    out.push_str(".SH SEE ALSO\n");
+    out.push_str(".SH See Also\n");
     out.push_str(&format!("{bin}-explain(1)\n", bin = BINARY_NAME));
     out
 }
@@ -2679,6 +2711,30 @@ mod tests {
             }
         }
         assert_eq!(command_group_usage("no-such-group"), "");
+    }
+
+    #[test]
+    fn help_copy_uses_sentence_case_descriptions_and_title_case_chrome() {
+        let starts_lowercase = |text: &str| {
+            text.chars()
+                .next()
+                .is_some_and(|character| character.is_lowercase())
+        };
+        assert!(COMMANDS.iter().all(|command| starts_lowercase(command.summary)));
+        assert!(command_groups()
+            .flat_map(|group| group.actions.iter())
+            .all(|action| starts_lowercase(action.summary)));
+        assert!(FLAGS.iter().all(|flag| starts_lowercase(flag.help)));
+
+        let help = usage_page("test");
+        assert!(help.contains("\nUsage:\n"));
+        assert!(help.contains("\nFlags:\n"));
+        for group in command_groups() {
+            assert!(help.contains(&format!(
+                "\n{} Commands:\n",
+                command_group_label(group.name)
+            )));
+        }
     }
 
     #[test]

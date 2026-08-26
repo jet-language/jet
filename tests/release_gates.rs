@@ -567,6 +567,13 @@ fn ci_test_shards_cover_every_workspace_target_exactly_once() {
         "the union of all CI test shards must equal the exact workspace test-target inventory \
          (nothing silently skipped, nothing duplicated)"
     );
+    assert_eq!(
+        got.iter()
+            .filter(|target| target.as_str() == "-p jet --test grammar")
+            .count(),
+        1,
+        "CI grammar drift tests must remain on exactly one production shard"
+    );
 }
 
 /// #2075: the shard split is weighted by measured cost, and the weight table is
@@ -694,6 +701,196 @@ fn ci_runs_repository_no_nix_dogfood_gate() {
         workflow.contains("scripts/agent/verify-full.sh"),
         "CI must invoke verify-full, which owns the repository no-Nix dogfood gate"
     );
+}
+
+#[test]
+fn ci_change_gate_runs_grammar_and_documentation_build() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
+        .expect("read .github/workflows/ci.yml");
+    let mut in_job = false;
+    let mut job = String::new();
+    for line in workflow.lines() {
+        if line == "  change-gate:" {
+            in_job = true;
+        } else if in_job && line.starts_with("  ") && !line.starts_with("    ") {
+            break;
+        }
+        if in_job {
+            job.push_str(line);
+            job.push('\n');
+        }
+    }
+    assert!(!job.is_empty(), "CI must define the change-gate job");
+
+    assert!(
+        job.contains("ref: ${{ github.sha }}"),
+        "change-gate must check out the event's exact candidate revision"
+    );
+    assert!(
+        job.contains("cargo test --test grammar --locked -- --nocapture"),
+        "change-gate must invoke tests/grammar.rs directly; the broad test inventory is not enough"
+    );
+    assert!(
+        job.contains("RUSTDOCFLAGS: \"-D warnings\"")
+            && job.contains("cargo doc --workspace --no-deps --locked"),
+        "change-gate must build workspace documentation with warnings denied"
+    );
+    assert!(
+        !job.contains("if:")
+            && !job.contains("continue-on-error")
+            && !job.contains("|| true")
+            && !job.contains("|| :"),
+        "grammar and documentation checks must not have a skip or false-green path"
+    );
+}
+
+#[test]
+fn ci_warning_free_gate_is_strict_and_curated() {
+    let workflow = fs::read_to_string(root().join(".github/workflows/ci.yml"))
+        .expect("read .github/workflows/ci.yml");
+    let verify = fs::read_to_string(root().join("scripts/agent/verify-full.sh"))
+        .expect("read scripts/agent/verify-full.sh");
+    let gate = workflow
+        .split("  rust-lint:\n")
+        .nth(1)
+        .and_then(|rest| rest.split("  verify-tests:\n").next())
+        .expect("CI must define a rust-lint job before verify-tests");
+
+    assert!(
+        gate.contains("cargo fmt --all -- --check"),
+        "D-CI2 rust-lint job must run rustfmt in check mode"
+    );
+    assert!(
+        gate.contains("ref: ${{ github.sha }}"),
+        "D-CI2 rust-lint job must lint the event's exact candidate revision"
+    );
+    assert!(
+        gate.contains("cargo clippy --workspace --all-targets --locked"),
+        "D-CI2 rust-lint job must lint every workspace target from the lockfile"
+    );
+    assert!(
+        gate.contains("RUSTFLAGS: \"-D warnings\"") && gate.contains("-D warnings"),
+        "D-CI2 rust-lint job must deny Rust warnings"
+    );
+    assert!(
+        gate.contains("-D clippy::correctness") && gate.contains("-D clippy::suspicious"),
+        "D-CI2 rust-lint job must deny correctness and suspicious Clippy lints"
+    );
+    assert!(
+        gate.contains("-A clippy::style"),
+        "D-CI2 rust-lint job must leave house-conflicting style lints advisory"
+    );
+    assert!(
+        !gate.contains("continue-on-error") && !gate.contains("if: always()"),
+        "D-CI2 lint failures must block the change gate"
+    );
+    assert!(
+        verify.contains("D-CI2=A") && verify.contains("-D warnings"),
+        "the production test path must inherit the warning wall"
+    );
+
+    let jit = fs::read_to_string(root().join("crates/jet-jit/src/lib.rs"))
+        .expect("read jet-jit lint policy");
+    assert!(
+        jit.contains("#![expect(") && jit.contains("reason = \"#804:"),
+        "intentional Rust lint exceptions must use card-referenced #[expect]"
+    );
+}
+
+#[test]
+fn ci_gate_evidence_preserves_success_and_failure_receipts() {
+    let root = root();
+    let scratch = common::test_scratch_root(&format!("ci-evidence-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    fs::create_dir_all(&scratch).unwrap();
+    let script = root.join("tools/ci/ci-evidence.sh");
+    let candidate = "0123456789abcdef0123456789abcdef01234567";
+
+    let success_dir = scratch.join("success");
+    let success = Command::new("bash")
+        .arg(&script)
+        .args(["--report-dir", success_dir.to_str().unwrap(), "--", "bash", "-c"])
+        .arg("printf 'gate-ok\\n'")
+        .env("GITHUB_SHA", candidate)
+        .env("RUNNER_OS", "Linux")
+        .env("RUNNER_ARCH", "X64")
+        .current_dir(&root)
+        .output()
+        .expect("run CI evidence success path");
+    assert!(
+        success.status.success(),
+        "successful gate must stay successful:\n{}",
+        String::from_utf8_lossy(&success.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&success.stdout),
+        "gate-ok\n",
+        "evidence wrapper must preserve gate stdout"
+    );
+    let success_receipt = fs::read_to_string(success_dir.join("receipt.txt")).unwrap();
+    assert!(success_receipt.contains("schema=jet.ci-evidence.v1"));
+    assert!(success_receipt.contains("status=pass"));
+    assert!(success_receipt.contains(&format!("candidate_commit={candidate}")));
+    assert!(success_receipt.contains("command_exit=0"));
+    assert!(success_receipt.contains("support_matrix=Linux/X64"));
+    assert!(success_receipt.contains("artifact_name=not-published"));
+    assert!(success_receipt.contains("provenance=github-actions:local/1"));
+    assert!(success_receipt.contains("source_manifest_sha256="));
+    assert!(success_receipt.contains("toolchain_sha256="));
+    assert_eq!(
+        fs::read_to_string(success_dir.join("command.stdout")).unwrap(),
+        "gate-ok\n"
+    );
+
+    let failure_dir = scratch.join("failure");
+    let failure = Command::new("bash")
+        .arg(&script)
+        .args(["--report-dir", failure_dir.to_str().unwrap(), "--", "bash", "-c"])
+        .arg("printf 'gate-failed\\n' >&2; exit 23")
+        .env("GITHUB_SHA", candidate)
+        .env("RUNNER_OS", "Linux")
+        .env("RUNNER_ARCH", "X64")
+        .current_dir(&root)
+        .output()
+        .expect("run CI evidence failure path");
+    assert_eq!(failure.status.code(), Some(23));
+    let failure_receipt = fs::read_to_string(failure_dir.join("receipt.txt")).unwrap();
+    assert!(failure_receipt.contains("status=fail"));
+    assert!(failure_receipt.contains("command_exit=23"));
+    assert_eq!(
+        fs::read_to_string(failure_dir.join("command.stderr")).unwrap(),
+        "gate-failed\n"
+    );
+    assert!(
+        failure_dir.join("toolchain.txt").is_file(),
+        "failed gates must retain toolchain evidence"
+    );
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn ci_workflow_uploads_candidate_bound_evidence_without_false_green_controls() {
+    let root = root();
+    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
+        .expect("read .github/workflows/ci.yml");
+    let verify = fs::read_to_string(root.join("scripts/agent/verify-full.sh"))
+        .expect("read scripts/agent/verify-full.sh");
+    assert!(workflow.contains("tools/ci/ci-evidence.sh"));
+    assert!(workflow.contains("Failure propagation canary"));
+    assert!(workflow.contains("command_exit=23"));
+    assert!(workflow.contains("Finalize durable gate evidence"));
+    assert!(workflow.contains("JOB_STATUS: ${{ job.status }}"));
+    assert!(workflow.contains("if: always()"));
+    assert!(workflow.contains("if-no-files-found: error"));
+    assert!(workflow.contains("ci-gate-evidence-shard-${{ matrix.shard }}-${{ github.sha }}"));
+    assert!(!workflow.contains("continue-on-error"));
+    assert!(verify.contains("tools/ci/test-shards.sh"));
+    assert!(verify.contains("cargo test $test_target --no-run"));
+    assert!(verify.contains("test_targets_repeat"));
+    assert!(verify.contains("test-target inventory is nondeterministic"));
+    assert!(verify.contains("CARGO_BUILD_JOBS"));
+    assert!(!verify.contains("tmp_parent=\"${JET_VERIFY_TMPDIR:-/tmp}\""));
 }
 
 // ============================================================================

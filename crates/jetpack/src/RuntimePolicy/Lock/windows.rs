@@ -280,6 +280,23 @@ pub(super) fn unlock(lock: &LockFile) -> io::Result<()> {
     }
 }
 
+pub(super) fn set_inheritable(lock: &LockFile) -> io::Result<()> {
+    // SAFETY: raw handle belongs to the live lock file; this changes only its
+    // inheritance flag for the next child launch.
+    if unsafe {
+        SetHandleInformation(
+            lock.file.as_raw_handle().cast(),
+            HANDLE_FLAG_INHERIT,
+            HANDLE_FLAG_INHERIT,
+        )
+    } != 0
+    {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

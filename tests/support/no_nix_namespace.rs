@@ -239,7 +239,11 @@ fi
             .arg(bootstrap_mount.as_deref().unwrap_or_else(|| Path::new("")))
             .arg(bootstrap_shell.as_deref().unwrap_or_else(|| Path::new("")))
             .arg(subject_binary.as_os_str())
-            .arg(bootstrap_subject.as_deref().unwrap_or_else(|| Path::new("")))
+            .arg(
+                bootstrap_subject
+                    .as_deref()
+                    .unwrap_or_else(|| Path::new("")),
+            )
             .arg(true_binary.as_os_str())
             .env(CHILD_MARKER, "1");
         let status = command

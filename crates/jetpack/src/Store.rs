@@ -121,6 +121,180 @@ pub(crate) fn list_read_only(roots: &Roots) -> Vec<StoreEntry> {
     jet_pkg_model::Store::list(roots)
 }
 
+/// Strictly read the committed package projection without taking the Hangar
+/// lock or replaying a migration. Audit uses this boundary so observation
+/// cannot publish a repaired projection as a side effect.
+pub(crate) fn list_read_only_checked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
+    jet_pkg_model::Store::list_checked(roots)
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct LeaseInventory {
+    pub active: usize,
+    pub stale: usize,
+}
+
+#[derive(Debug)]
+struct LeaseNode {
+    path: PathBuf,
+    stale: bool,
+}
+
+/// Read executable-lease ownership without changing the lease directory.
+/// Recovery and doctor share the same parser and kernel-lock rule so a lease
+/// cannot be healthy to one command and stale to the other.
+pub(crate) fn inspect_leases(roots: &Roots) -> std::io::Result<LeaseInventory> {
+    let nodes = lease_nodes_unlocked(roots)?;
+    Ok(LeaseInventory {
+        active: nodes.iter().filter(|node| !node.stale).count(),
+        stale: nodes.iter().filter(|node| node.stale).count(),
+    })
+}
+
+/// Produce the audit projection without a lock, migration, journal replay, or
+/// cleanup. A malformed object or committed closure cannot be omitted from a
+/// successful report.
+pub(crate) fn audit_read_only(roots: &Roots) -> std::io::Result<AuditSnapshot> {
+    let graph = Closure::closure_graph_read_only(roots)?;
+    let entries = list_read_only_checked(roots)?;
+    let known = entries
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect::<BTreeSet<_>>();
+
+    let hangar = roots.hangar_dir();
+    match fs::read_dir(&hangar) {
+        Ok(directory) => {
+            for entry in directory {
+                let entry = entry?;
+                if !entry.file_type()?.is_dir() {
+                    continue;
+                }
+                let name = entry.file_name();
+                if matches!(
+                    name.to_str(),
+                    Some(
+                        "build-scratch"
+                            | "failed-scratch"
+                            | "objects"
+                            | ".stage"
+                            | "cas"
+                            | "referrers"
+                            | "closure-db"
+                            | "lifecycle-db"
+                            | "quarantine"
+                            | "receipts"
+                            | "stage"
+                            | ".archive-stage"
+                            | "reproducibility-staging"
+                            | "unreproducible"
+                    )
+                ) {
+                    continue;
+                }
+                let id = name.to_string_lossy().into_owned();
+                if !known.contains(id.as_str()) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Hangar object `{id}` has missing or malformed metadata"),
+                    ));
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    for record in graph.records.values() {
+        if !known.contains(record.id.as_str()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "closure graph has package record `{}` but its metadata projection is missing",
+                    record.id
+                ),
+            ));
+        }
+    }
+
+    for entry in &entries {
+        let record = graph.records.get(&entry.id).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("closure graph has no package record for `{}`", entry.id),
+            )
+        })?;
+        let metadata_path = hangar.join(&entry.id).join("meta.json");
+        let metadata = fs::read_to_string(&metadata_path)?;
+        if metadata != record.package_meta {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "metadata projection for `{}` disagrees with the committed closure record",
+                    entry.id
+                ),
+            ));
+        }
+        let mut expected_outputs = entry.named_outputs.clone();
+        expected_outputs.insert("out".to_string(), entry.envelope.output_hash.clone());
+        let expected_references = entry.references.iter().cloned().collect::<BTreeSet<_>>();
+        if record.primary != entry.envelope.output_hash
+            || record.outputs != expected_outputs
+            || record.references != expected_references
+            || (!record.producer_record.is_empty()
+                && record.producer_record != entry.producer_record)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "closure graph for `{}` disagrees with its metadata projection",
+                    entry.id
+                ),
+            ));
+        }
+        if entry.envelope.output_hash.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar object `{}` has no output digest", entry.id),
+            ));
+        }
+        let actual = Ingest::try_entry_output_hash(roots, entry).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar object `{}` could not be hashed: {error}", entry.id),
+            )
+        })?;
+        if actual != entry.envelope.output_hash {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Hangar object `{}` failed its content digest: expected {}, got {actual}",
+                    entry.id, entry.envelope.output_hash
+                ),
+            ));
+        }
+        if !entry.producer_record.is_empty() {
+            ProducerRecord::decode(&entry.producer_record).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Hangar object `{}` has an invalid producer record: {error}", entry.id),
+                )
+            })?;
+        }
+    }
+
+    Ok(AuditSnapshot {
+        entries,
+        leases: inspect_leases(roots)?,
+    })
+}
+
+#[derive(Debug)]
+pub(crate) struct AuditSnapshot {
+    pub entries: Vec<StoreEntry>,
+    pub leases: LeaseInventory,
+}
+
 pub fn list_checked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         // Listing is a checked engine boundary, not the model-only view. Run
@@ -235,6 +409,13 @@ pub fn recover_hangar(roots: &Roots) -> std::io::Result<usize> {
         let archive = Archive::recover_archive_staging_unlocked(roots)?;
         let repairs = Archive::recover_repair_quarantine_unlocked(roots)?;
         let build_debug = super::BuildDebug::recover_scratch(&roots.hangar_dir())?;
+        // The authenticated protocol owns receipt validation and only removes
+        // a snapshot after its inherited owner lock is idle.  The existing
+        // lease-container sweep then removes the now-empty container.
+        let _authenticated_leases = super::RuntimePolicy::ExecutableLeaseProtocol::open(
+            &roots.root,
+        )?
+        .recover_stale_leases()?;
         let leases = recover_stale_leases_unlocked(roots)?;
         let closure = Closure::recover_closure_journal_unlocked(roots)?;
         let migrated = Closure::migrate_closure_graph_unlocked(roots)?.0;
@@ -252,10 +433,35 @@ pub fn recover_hangar(roots: &Roots) -> std::io::Result<usize> {
 const LEASE_NAME_MAX: usize = 256;
 
 fn recover_stale_leases_unlocked(roots: &Roots) -> std::io::Result<usize> {
+    let nodes = lease_nodes_unlocked(roots)?;
+    let mut swept = 0;
+    for node in nodes.into_iter().filter(|node| node.stale) {
+        let metadata = match fs::symlink_metadata(&node.path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            make_tree_writable_for_removal(&node.path)?;
+            fs::remove_dir_all(&node.path)?;
+        } else if metadata.file_type().is_symlink() || metadata.is_file() {
+            fs::remove_file(&node.path)?;
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar lease `{}` is not removable", node.path.display()),
+            ));
+        }
+        swept += 1;
+    }
+    Ok(swept)
+}
+
+fn lease_nodes_unlocked(roots: &Roots) -> std::io::Result<Vec<LeaseNode>> {
     let leases = roots.root.join("leases");
     let metadata = match fs::symlink_metadata(&leases) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error),
     };
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -264,57 +470,62 @@ fn recover_stale_leases_unlocked(roots: &Roots) -> std::io::Result<usize> {
             "Hangar lease directory is not a real directory; repair the path before recovery",
         ));
     }
-    let current = std::process::id();
-    let mut swept = 0;
+    let mut nodes = Vec::new();
     for entry in fs::read_dir(&leases)? {
         let entry = entry?;
         let name = entry.file_name();
-        let text = name.to_string_lossy();
+        let text = name.to_str().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Hangar lease name is not valid UTF-8",
+            )
+        })?;
         if text.len() > LEASE_NAME_MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Hangar lease name exceeds the recovery bound",
             ));
         }
-        let Some(pid) = text
-            .split('-')
-            .next()
-            .and_then(|value| value.parse::<u32>().ok())
-        else {
+        if !lease_name_is_valid(text) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Hangar lease `{text}` has an invalid owner id"),
+                format!("Hangar lease `{text}` has an invalid identity"),
             ));
-        };
-        if pid == current || lease_process_is_alive(pid) {
-            continue;
         }
         let path = entry.path();
         let metadata = fs::symlink_metadata(&path)?;
-        if metadata.file_type().is_symlink() || metadata.is_file() {
-            fs::remove_file(&path)?;
-        } else if metadata.is_dir() {
-            make_tree_writable_for_removal(&path)?;
-            fs::remove_dir_all(&path)?;
-        } else {
+        if !metadata.is_dir() && !metadata.file_type().is_symlink() && !metadata.is_file() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Hangar lease `{}` is not removable", path.display()),
+                format!("Hangar lease `{}` is not a supported filesystem node", path.display()),
             ));
         }
-        swept += 1;
+        let stale = if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            let lock = path.join(".locks").join("live.lock");
+            !matches!(
+                super::RuntimePolicy::lock_state(&lock)?,
+                super::RuntimePolicy::LockState::Held
+            )
+        } else {
+            true
+        };
+        nodes.push(LeaseNode { path, stale });
     }
-    Ok(swept)
+    Ok(nodes)
 }
 
-#[cfg(unix)]
-fn lease_process_is_alive(pid: u32) -> bool {
-    PathBuf::from(format!("/proc/{pid}")).is_dir()
-}
-
-#[cfg(not(unix))]
-fn lease_process_is_alive(pid: u32) -> bool {
-    pid == std::process::id()
+fn lease_name_is_valid(name: &str) -> bool {
+    let mut fields = name.splitn(3, '-');
+    let Some(pid) = fields.next().and_then(|value| value.parse::<u32>().ok()) else {
+        return false;
+    };
+    let Some(_sequence) = fields.next().and_then(|value| value.parse::<u64>().ok()) else {
+        return false;
+    };
+    let Some(entry_id) = fields.next() else {
+        return false;
+    };
+    pid != 0 && !entry_id.is_empty()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

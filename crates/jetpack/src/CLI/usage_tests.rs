@@ -167,15 +167,15 @@ pub(super) fn usage_with_color(color: bool) -> String {
   --no-deps                            (hangar export/dump) select one object
   --allow-unsigned                     (hangar import/restore) explicit local escape hatch
 ",
-        title = h(&format!("{bin} — Jet's package manager (Phase 1)")),
-        envs = h("environments:"),
-        manifest = h("manifest:"),
-        store = h("store:"),
-        machines = h("machines:"),
-        trust = h("trust:"),
-        refs = h("refs:"),
-        components = h("components:"),
-        flags = h("flags:"),
+        title = h(&format!("{bin} — Jet's Package Manager (Phase 1)")),
+        envs = h("Environments:"),
+        manifest = h("Manifest:"),
+        store = h("Store:"),
+        machines = h("Machines:"),
+        trust = h("Trust:"),
+        refs = h("Refs:"),
+        components = h("Components:"),
+        flags = h("Flags:"),
     )
 }
 
@@ -372,6 +372,81 @@ mod tests {
     fn usage_uses_shared_accent_role_only_when_colored() {
         assert!(usage_with_color(true).contains("\x1b[1;96m"));
         assert!(!usage_with_color(false).contains('\x1b'));
+    }
+
+    #[test]
+    fn both_cli_help_surfaces_apply_the_case_law() {
+        let jetpack = usage_with_color(false);
+        let jet = jet_cli::CLI::usage_page("test");
+
+        for header in [
+            "Environments:",
+            "Manifest:",
+            "Store:",
+            "Machines:",
+            "Trust:",
+            "Refs:",
+            "Components:",
+            "Flags:",
+        ] {
+            assert!(jetpack.lines().any(|line| line == header));
+        }
+        for header in [
+            "Usage:",
+            "Registry Commands:",
+            "Inspect Commands:",
+            "Project Commands:",
+            "Self Commands:",
+            "Env Commands:",
+            "Shared-Store Commands:",
+            "Os Commands:",
+            "Gc Commands:",
+            "Perf Commands:",
+            "Flags:",
+        ] {
+            assert!(jet.lines().any(|line| line == header));
+        }
+
+        let description_initial = |help: &str, phrase: &str| {
+            let line = help
+                .lines()
+                .find(|line| line.contains(phrase))
+                .unwrap_or_else(|| panic!("missing help description: {phrase}"));
+            line[line.find(phrase).unwrap()..]
+                .chars()
+                .next()
+                .unwrap()
+        };
+        for (jetpack_description, jet_description) in [
+            ("enter the default project environment", "run a program or project"),
+            ("list globally installed tools", "run tests"),
+            (
+                "plan a source-backed package generation",
+                "create a proof report",
+            ),
+            ("show realized packages", "manage the Jet installation and editor tools"),
+            ("choose terminal color policy", "with test: run tests in random"),
+        ] {
+            let jetpack_initial = description_initial(&jetpack, jetpack_description);
+            let jet_initial = description_initial(&jet, jet_description);
+            assert_eq!(jetpack_initial.is_lowercase(), jet_initial.is_lowercase());
+            assert!(jetpack_initial.is_lowercase());
+            assert!(jet_initial.is_lowercase());
+        }
+
+        for token in [
+            "jetpack tool install <ref>",
+            "jetpack hangar list",
+            "jetpack profile plan <name>",
+            "<Component>",
+            "fastfetch@nixpkgs",
+            "--offline",
+        ] {
+            assert!(jetpack.contains(token), "jetpack help lost `{token}`");
+        }
+        for token in ["jet run", "jet inspect", "jet self", "--json", "#Job"] {
+            assert!(jet.contains(token), "jet help lost `{token}`");
+        }
     }
 
     #[test]

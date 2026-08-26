@@ -446,27 +446,27 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 <div id="shell">
   <header id="topbar">
     <div id="brand"><strong>Jet Canvas</strong><span>Source-backed editor</span></div>
-    <div class="toolbar-group" aria-label="View controls">
+    <div class="toolbar-group" aria-label="View Controls">
       <button id="graph-back" class="icon-button" title="Back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
       <button id="graph-forward" class="icon-button" title="Forward" aria-label="Forward"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
-      <button id="fit" class="icon-button" title="Fit graph" aria-label="Fit graph"><svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+      <button id="fit" class="icon-button" title="Fit Graph" aria-label="Fit Graph"><svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
       <span class="zoom-readout" id="toolbar-zoom">100%</span>
     </div>
-    <div id="lens-switch" class="lens-switch toolbar-group" role="group" aria-label="Canvas lens"><button id="view-code" data-view-mode="code">Code</button><button id="view-split" data-view-mode="split">Split</button><button id="view-graph" data-view-mode="graph">Graph</button><button id="review-view-button" data-view-mode="review">Review</button></div>
-    <div class="toolbar-group" aria-label="Edit controls">
+    <div id="lens-switch" class="lens-switch toolbar-group" role="group" aria-label="Canvas Lens"><button id="view-code" data-view-mode="code">Code</button><button id="view-split" data-view-mode="split">Split</button><button id="view-graph" data-view-mode="graph">Graph</button><button id="review-view-button" data-view-mode="review">Review</button></div>
+    <div class="toolbar-group" aria-label="Edit Controls">
       <button id="undo-edit" class="icon-button" title="Undo" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14l-5-5 5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/></svg></button>
       <button id="redo-edit" class="icon-button" title="Redo" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h2"/></svg></button>
-      <button id="org-align" class="icon-button" title="Align selected nodes" aria-label="Align selected nodes"><svg viewBox="0 0 24 24"><path d="M6 4v16"/><path d="M10 7h8"/><path d="M10 12h6"/><path d="M10 17h10"/></svg></button>
-      <button id="org-distribute" class="icon-button" title="Distribute selected nodes" aria-label="Distribute selected nodes"><svg viewBox="0 0 24 24"><path d="M4 4v16"/><path d="M20 4v16"/><path d="M8 9h3v6H8z"/><path d="M13 9h3v6h-3z"/></svg></button>
-      <button id="org-tidy" class="icon-button" title="Tidy graph" aria-label="Tidy graph"><svg viewBox="0 0 24 24"><path d="M4 7h6v6H4z"/><path d="M14 4h6v6h-6z"/><path d="M14 14h6v6h-6z"/><path d="M10 10l4-3"/><path d="M10 13l4 4"/></svg></button>
+      <button id="org-align" class="icon-button" title="Align Selected Nodes" aria-label="Align Selected Nodes"><svg viewBox="0 0 24 24"><path d="M6 4v16"/><path d="M10 7h8"/><path d="M10 12h6"/><path d="M10 17h10"/></svg></button>
+      <button id="org-distribute" class="icon-button" title="Distribute Selected Nodes" aria-label="Distribute Selected Nodes"><svg viewBox="0 0 24 24"><path d="M4 4v16"/><path d="M20 4v16"/><path d="M8 9h3v6H8z"/><path d="M13 9h3v6h-3z"/></svg></button>
+      <button id="org-tidy" class="icon-button" title="Tidy Graph" aria-label="Tidy Graph"><svg viewBox="0 0 24 24"><path d="M4 7h6v6H4z"/><path d="M14 4h6v6h-6z"/><path d="M14 14h6v6h-6z"/><path d="M10 10l4-3"/><path d="M10 13l4 4"/></svg></button>
     </div>
-    <div class="toolbar-group" aria-label="Run controls">
-      <button id="check-current" title="Check current source" aria-label="Check current source">Check</button>
-      <button id="run-current" class="primary" title="Run current entry" aria-label="Run current entry" data-capability="runtime_output" hidden inert>Run</button>
-      <details id="debug-menu" class="toolbar-menu" data-capability="runtime_output" hidden inert><summary class="icon-button" title="Debug controls" aria-label="Debug controls"><svg viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><path d="M7 10h10"/><path d="M12 6v14"/><path d="M5 14h14"/><path d="M8 22h8"/><path d="M4 18l4-4"/><path d="M20 18l-4-4"/></svg></summary><div class="toolbar-popover debug-controls">
-      <select id="debug-session" aria-label="Debug session"><option value="none">No live session</option></select>
+    <div class="toolbar-group" aria-label="Run Controls">
+      <button id="check-current" title="Check Current Source" aria-label="Check Current Source">Check</button>
+      <button id="run-current" class="primary" title="Run Current Entry" aria-label="Run Current Entry" data-capability="runtime_output" hidden inert>Run</button>
+      <details id="debug-menu" class="toolbar-menu" data-capability="runtime_output" hidden inert><summary class="icon-button" title="Debug Controls" aria-label="Debug Controls"><svg viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><path d="M7 10h10"/><path d="M12 6v14"/><path d="M5 14h14"/><path d="M8 22h8"/><path d="M4 18l4-4"/><path d="M20 18l-4-4"/></svg></summary><div class="toolbar-popover debug-controls">
+      <select id="debug-session" aria-label="Debug Session"><option value="none">No live session</option></select>
       <span id="debug-liveness" class="tag" role="status">Runtime idle</span>
-      <button id="debug-start" type="button" aria-label="Start debug">Start debug</button>
+      <button id="debug-start" type="button" aria-label="Start Debug">Start Debug</button>
       <button id="debug-break">Break</button>
       <button id="debug-watch">Watch</button>
       <button id="debug-step">Step</button>
@@ -476,8 +476,8 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       </div></details>
     </div>
     <div class="toolbar-spacer"></div>
-    <div class="toolbar-group" aria-label="Source and navigation">
-      <details class="toolbar-menu"><summary id="more-tools-toggle" class="icon-button" title="More tools" aria-label="More tools"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></summary><div class="toolbar-popover">
+    <div class="toolbar-group" aria-label="Source and Navigation">
+      <details class="toolbar-menu"><summary id="more-tools-toggle" class="icon-button" title="More Tools" aria-label="More Tools"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></summary><div class="toolbar-popover">
         <select id="graph-select" aria-label="Graph"></select>
         <button id="reload">Reload</button>
         <button id="source-diff">Diff</button>
@@ -492,15 +492,15 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
         <button id="keyboard-help" type="button" aria-haspopup="dialog" aria-controls="keyboard-cheat-sheet">Keyboard</button>
       </div></details>
       <button id="toolbar-search" class="icon-button" title="Search" aria-label="Search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></button>
-      <button id="developer-mode" class="icon-button" title="Developer details" aria-label="Developer details"><svg viewBox="0 0 24 24"><path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/><path d="M14 4l-4 16"/></svg></button>
-      <details class="toolbar-menu dev-only"><summary class="icon-button" title="Detail filters" aria-label="Detail filters"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M7 12h10"/><path d="M10 17h4"/></svg></summary><div id="detail-toggles" class="detail-toggles toolbar-popover" aria-label="Detail toggles"><label class="detail-toggle"><input id="toggle-types" data-detail-toggle="types" type="checkbox">Types</label><label class="detail-toggle"><input id="toggle-diagnostics" data-detail-toggle="diagnostics" type="checkbox">Diagnostics</label><label class="detail-toggle"><input id="toggle-effects" data-detail-toggle="effects" type="checkbox">Effects</label><label class="detail-toggle"><input id="toggle-debug" data-detail-toggle="debug" type="checkbox">Debug</label><label class="detail-toggle"><input id="toggle-package" data-detail-toggle="package" type="checkbox">Package</label></div></details>
+      <button id="developer-mode" class="icon-button" title="Developer Details" aria-label="Developer Details"><svg viewBox="0 0 24 24"><path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/><path d="M14 4l-4 16"/></svg></button>
+      <details class="toolbar-menu dev-only"><summary class="icon-button" title="Detail Filters" aria-label="Detail Filters"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M7 12h10"/><path d="M10 17h4"/></svg></summary><div id="detail-toggles" class="detail-toggles toolbar-popover" aria-label="Detail Toggles"><label class="detail-toggle"><input id="toggle-types" data-detail-toggle="types" type="checkbox">Types</label><label class="detail-toggle"><input id="toggle-diagnostics" data-detail-toggle="diagnostics" type="checkbox">Diagnostics</label><label class="detail-toggle"><input id="toggle-effects" data-detail-toggle="effects" type="checkbox">Effects</label><label class="detail-toggle"><input id="toggle-debug" data-detail-toggle="debug" type="checkbox">Debug</label><label class="detail-toggle"><input id="toggle-package" data-detail-toggle="package" type="checkbox">Package</label></div></details>
     </div>
     <span id="jump">loading graph</span>
   </header>
   <main id="workbench">
-    <header id="workbench-header" aria-label="Jet project workbench">
+    <header id="workbench-header" aria-label="Jet Project Workbench">
       <div class="workbench-heading"><span>Project IDE</span><strong>Canvas Workbench</strong></div>
-      <div class="workbench-map" aria-label="Workbench regions">
+      <div class="workbench-map" aria-label="Workbench Regions">
         <span><b>Project</b><span>Files · Outputs</span></span>
         <span><b>Editor</b><span>Code · Graph</span></span>
         <span><b>Runtime</b><span><span id="workbench-preview-label" data-capability="preview" hidden inert>Preview · </span>Problems</span></span>
@@ -520,7 +520,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
           <section id="output-panel" class="component-tree-section" data-canvas-panel="output" hidden>
             <details open>
               <summary><span>Outputs</span><span id="output-count" class="count">0</span></summary>
-              <div id="output-list" class="project-list" aria-label="Project outputs"></div>
+              <div id="output-list" class="project-list" aria-label="Project Outputs"></div>
             </details>
           </section>
           <section id="graphs-panel" class="component-tree-section" data-canvas-panel="graphs">
@@ -537,35 +537,35 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
           </section>
         </div>
       </section>
-      <section id="status-panel" class="panel" data-canvas-panel="status"><details open><summary><span>Status</span><span id="status-count" class="count">clean</span></summary><div id="status-summary" class="status-grid"></div><div id="package-summary" class="project-section dev-only package-detail"></div><div id="dependency-summary" class="project-section dev-only package-detail"></div><div id="dev-summary" class="project-section dev-only package-detail"></div><div id="diagnostics-summary" class="project-section dev-only diagnostic-detail"></div><div id="trust-summary" class="project-section dev-only package-detail"></div><div id="session-views" class="project-section" aria-label="Session views"><div data-session-view="text"></div><div data-session-view="graph"></div><div data-session-view="designer" data-capability="designer" hidden inert></div><div data-session-view="preview" data-capability="preview" hidden inert></div><div data-session-view="terminal" data-capability="terminal" hidden inert></div><div data-session-view="debugger" data-capability="runtime_output" hidden inert></div><div data-session-view="tests" data-capability="diagnostics" hidden inert></div><div data-session-view="custom servers" data-capability="service" hidden inert></div></div></details></section>
+      <section id="status-panel" class="panel" data-canvas-panel="status"><details open><summary><span>Status</span><span id="status-count" class="count">Clean</span></summary><div id="status-summary" class="status-grid"></div><div id="package-summary" class="project-section dev-only package-detail"></div><div id="dependency-summary" class="project-section dev-only package-detail"></div><div id="dev-summary" class="project-section dev-only package-detail"></div><div id="diagnostics-summary" class="project-section dev-only diagnostic-detail"></div><div id="trust-summary" class="project-section dev-only package-detail"></div><div id="session-views" class="project-section" aria-label="Session Views"><div data-session-view="text"></div><div data-session-view="graph"></div><div data-session-view="designer" data-capability="designer" hidden inert></div><div data-session-view="preview" data-capability="preview" hidden inert></div><div data-session-view="terminal" data-capability="terminal" hidden inert></div><div data-session-view="debugger" data-capability="runtime_output" hidden inert></div><div data-session-view="tests" data-capability="diagnostics" hidden inert></div><div data-session-view="custom servers" data-capability="service" hidden inert></div></div></details></section>
       <section id="search-panel" class="panel" data-canvas-panel="search"><details><summary><span>Search</span></summary><input id="canvas-search" class="search" placeholder="Find in graph"><div id="search-results" class="search-results"></div></details></section>
     </aside>
     <section id="stage">
-      <div id="canvas-dock" aria-label="Canvas panels"><button id="dock-graphs">Graphs</button><button id="dock-details">Inspector</button></div>
-      <div id="graph-strip" aria-label="Graph tabs"></div>
-      <div id="wire-status" role="status" aria-label="Canvas hover details" aria-live="polite"><span id="wire-status-dot"></span><b>Ready</b><span>Hover a node or pin for details</span></div>
-      <div id="graph-overview" aria-label="Graph overview"></div>
-      <section id="review-view" aria-label="Git text review">
+      <div id="canvas-dock" aria-label="Canvas Panels"><button id="dock-graphs">Graphs</button><button id="dock-details">Inspector</button></div>
+      <div id="graph-strip" aria-label="Graph Tabs"></div>
+      <div id="wire-status" role="status" aria-label="Canvas Hover Details" aria-live="polite"><span id="wire-status-dot"></span><b>Ready</b><span>Hover a node or pin for details</span></div>
+      <div id="graph-overview" aria-label="Graph Overview"></div>
+      <section id="review-view" aria-label="Git Text Review">
         <header id="review-head">
           <div>
             <div class="review-eyebrow">Canvas M3 · source truth</div>
-            <h1>Review changes</h1>
+            <h1>Review Changes</h1>
             <p>Read the Git text diff first. Select a hunk to see its current source span and graph projection.</p>
-            <div id="review-dev-facts" class="review-dev" aria-label="Review developer facts"></div>
+            <div id="review-dev-facts" class="review-dev" aria-label="Review Developer Facts"></div>
           </div>
           <div class="review-head-actions">
-            <div id="review-summary" class="review-summary" aria-label="Review summary"></div>
+            <div id="review-summary" class="review-summary" aria-label="Review Summary"></div>
             <button id="review-refresh" type="button">Refresh</button>
           </div>
         </header>
         <div id="review-body">
-          <aside id="review-files" aria-label="Changed files"><div id="review-file-list" class="review-file-list"></div></aside>
+          <aside id="review-files" aria-label="Changed Files"><div id="review-file-list" class="review-file-list"></div></aside>
           <section id="review-pane" aria-live="polite"><div id="review-content"></div></section>
         </div>
       </section>
       <canvas id="jet-canvas-view" width="1400" height="900" tabindex="0" aria-label="Jet source graph. Press question mark for keyboard shortcuts."></canvas>
-      <pre id="source-view" aria-label="Jet source"></pre>
-      <textarea id="source-editor" aria-label="Editable Jet source"></textarea>
+      <pre id="source-view" aria-label="Jet Source"></pre>
+      <textarea id="source-editor" aria-label="Editable Jet Source"></textarea>
       <canvas id="minimap" width="190" height="124"></canvas>
       <div id="hud"><span id="zoom-label">100%</span><span id="graph-meta">0 nodes</span></div>
     </section>
@@ -573,7 +573,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <section id="problems-panel" class="panel" data-canvas-panel="problems" data-capability="diagnostics" hidden inert><details open><summary><span>Problems</span><span id="problems-count" class="count">0</span></summary><div id="problems-list" class="problem-list"></div></details></section>
       <section id="details" class="panel" data-canvas-panel="details"></section>
       <section id="proof-panel" class="panel" data-canvas-panel="proof"><details open><summary><span>Proof</span><span id="proof-state" class="count">unknown</span></summary><div id="proof-rail" class="proof-rail"></div></details></section>
-      <section id="preview-panel" class="panel" data-canvas-panel="preview" data-capability="preview" hidden inert><details open><summary><span>App preview</span><span class="count">last good</span></summary><div id="preview-status" class="tag">waiting for session</div><a id="preview-link" href="/" target="_blank" rel="noreferrer">Preview is starting</a></details></section>
+      <section id="preview-panel" class="panel" data-canvas-panel="preview" data-capability="preview" hidden inert><details open><summary><span>App Preview</span><span class="count">last good</span></summary><div id="preview-status" class="tag">waiting for session</div><a id="preview-link" href="/" target="_blank" rel="noreferrer">Preview is starting</a></details></section>
     </aside>
   </main>
   <footer id="statusbar"><span id="source-id">source</span><span id="revision">revision</span><span id="session-id">session</span><span id="schema">canvas v1</span><span id="scm-state">git</span><span id="toast"></span></footer>
@@ -582,15 +582,15 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 <dialog id="keyboard-cheat-sheet" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="keyboard-cheat-sheet-title" aria-describedby="keyboard-cheat-sheet-note">
   <header class="keyboard-cheat-sheet-head">
     <div>
-      <h2 id="keyboard-cheat-sheet-title">Canvas keyboard shortcuts</h2>
+      <h2 id="keyboard-cheat-sheet-title">Canvas Keyboard Shortcuts</h2>
       <p>Use these commands while graph focus is active. Text fields keep their normal editing keys.</p>
     </div>
-    <button id="keyboard-cheat-sheet-close" type="button" aria-label="Close keyboard shortcuts">Close</button>
+    <button id="keyboard-cheat-sheet-close" type="button" aria-label="Close Keyboard Shortcuts">Close</button>
   </header>
   <p id="keyboard-cheat-sheet-note" class="keyboard-cheat-sheet-note">Jet source stays canonical. Layout, selection, and shortcut help are local Canvas state.</p>
   <div class="keyboard-shortcuts">
     <section class="keyboard-shortcut-group" aria-labelledby="keyboard-shortcuts-view">
-      <h3 id="keyboard-shortcuts-view">View and search</h3>
+      <h3 id="keyboard-shortcuts-view">View and Search</h3>
       <div class="keyboard-shortcut-row"><kbd>?</kbd><span>Open keyboard shortcuts</span></div>
       <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + `</kbd><span>Toggle graph and Code</span></div>
       <div class="keyboard-shortcut-row"><kbd>/</kbd><span>Focus Canvas search</span></div>
@@ -608,7 +608,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <div class="keyboard-shortcut-row"><kbd>Esc</kbd><span>Close transient UI or clear selection</span></div>
     </section>
     <section class="keyboard-shortcut-group" aria-labelledby="keyboard-shortcuts-layout">
-      <h3 id="keyboard-shortcuts-layout">Arrange and navigate</h3>
+      <h3 id="keyboard-shortcuts-layout">Arrange and Navigate</h3>
       <div class="keyboard-shortcut-row"><kbd>Arrow keys</kbd><span>Nudge selected nodes</span></div>
       <div class="keyboard-shortcut-row"><kbd>Shift + Arrow</kbd><span>Nudge farther</span></div>
       <div class="keyboard-shortcut-row"><kbd>Alt + A</kbd><span>Align top</span></div>
@@ -619,7 +619,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <div class="keyboard-shortcut-row"><kbd>Alt + B / G</kbd><span>Save / go to bookmark</span></div>
     </section>
     <section class="keyboard-shortcut-group" aria-labelledby="keyboard-shortcuts-source">
-      <h3 id="keyboard-shortcuts-source">Source authoring</h3>
+      <h3 id="keyboard-shortcuts-source">Source Authoring</h3>
       <div class="keyboard-shortcut-row"><kbd>C</kbd><span>Add source-backed comment</span></div>
       <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + C</kbd><span>Copy selection</span></div>
       <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + V</kbd><span>Paste selection</span></div>
@@ -631,7 +631,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
   </div>
   <footer class="keyboard-cheat-sheet-foot"><span>Press <kbd>?</kbd> again after closing to reopen.</span></footer>
 </dialog>
-<div id="first-run-tour" role="dialog" aria-modal="false" aria-label="Canvas first run" aria-describedby="tour-detail">
+<div id="first-run-tour" role="dialog" aria-modal="false" aria-label="Canvas First Run" aria-describedby="tour-detail">
   <b>Canvas edits Jet source.</b>
   <span>Use Code, Split, or Graph, then right-click or drag from a pin and release on empty space.</span>
   <button id="tour-dismiss">Dismiss</button>

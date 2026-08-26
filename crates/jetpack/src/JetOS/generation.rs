@@ -356,7 +356,7 @@ pub(super) fn build_generation(
     // Tier 2 close: erase any leftover pinned status and leave one ledger
     // summary, matching jetpack realization's region→ledger settle (D-FE-CLI1).
     live.collapse(&format!(
-        "generation ready · {} package(s) {}",
+        "Generation Ready · {} package(s) {}",
         realized.len(),
         theme.green("✓")
     ));

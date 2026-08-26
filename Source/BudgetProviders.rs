@@ -248,8 +248,8 @@ pub struct ProviderDiagnostic {
 impl ProviderDiagnostic {
     pub fn render(&self) -> String {
         format!(
-            "# Error [{}]: {}\n\nWhat: {}\nWhy: {}\nFix: {}\n",
-            self.code, self.what, self.what, self.why, self.fix
+            "# Error [{}]: {}\n\nWhat: {}\nWhy: {}\nFix: {}\nMore: jet-lang.dev/e/{}\n",
+            self.code, self.what, self.what, self.why, self.fix, self.code
         )
     }
 }

@@ -6,6 +6,10 @@ snapshot in tests/ui/.
 
 Vocabulary: [Jet vocabulary](vocabulary.md).
 
+User-facing case follows the [UI case law](ui-case-law.md). Under
+D-CASE-PROSE1=A, the What, Why, and Fix payload lines are sentence case;
+machine-parsed output is excluded.
+
 ## The contract
 
 The complete typed row projection is generated at
@@ -110,6 +114,10 @@ Sentence capitalization throughout — `Error` / `Why:` / `Fix:` (owner,
 2026-06-11). M0 snapshots using the old lowercase form are re-blessed as
 part of M1.
 
+What, Why, and Fix are sentence case. A leading identifier, flag, path, ref,
+keyword, or quoted code fragment keeps its own case; sentence capitalization
+starts at the first ordinary prose word.
+
 ```
 Error [E0102]: nothing named `pirnt` exists here
   --> tests/ui/unknown_function.jet:2:5
@@ -118,9 +126,13 @@ Error [E0102]: nothing named `pirnt` exists here
     |     ^^^^^
  Why: only functions that have been defined (or built in, like `print`) can be called
  Fix: did you mean `print`?
+More: jet-lang.dev/e/E0102
 ```
 
 Diagnostics without a span (e.g. E0101) omit the location/source block.
+Every human-readable diagnostic ends with `More: jet-lang.dev/e/<CODE>`, after
+any optional detail block. The line is a fixed lookup label; it does not alter
+the machine-readable report or the What, Why, and Fix payloads.
 Multiple diagnostics are separated by one blank line. Every stage reports
 all the problems it can in one run (M1 error recovery): the lexer skips
 past bad characters, the parser re-syncs at statement boundaries, and
@@ -394,6 +406,7 @@ reports, not compiler warnings.
 | E0311 | sema  | static/instance method confusion or missing receiver method |
 | E0312 | sema  | value `==` unsupported (field detail)     |
 | E0313 | sema  | destructuring target's shape doesn't match the value (S74) |
+| E0387 | sema  | checked text raw construction requires an audited `#Unsafe` region |
 | E0315 | sema  | list-pattern arity ≠ a known-length list literal (S74) |
 | E0316 | sema  | D-PATR: range pattern on non-integer field, or `lo > hi` (empty range) |
 | E0317 | sema  | D-PATO: or-pattern alternatives bind different names or types |

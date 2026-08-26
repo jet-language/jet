@@ -78,7 +78,13 @@ pub(super) fn plan_downloads(
     let mut pending = Vec::new();
 
     for spec in specs {
-        let uses_nix = Provider::uses_nix_provider(spec, table, flags.offline, &store_dir);
+        let uses_nix = Provider::uses_nix_provider_for_project(
+            spec,
+            table,
+            flags.offline,
+            &store_dir,
+            project_dir.as_deref(),
+        );
         if uses_nix && fixtures.is_some() {
             continue;
         }
@@ -101,7 +107,8 @@ pub(super) fn plan_downloads(
         // realization still proves the complete closure before reuse.
         if matches!(scope, RealizeScope::Use | RealizeScope::UserProfile)
             && Store::find_by_reference_read_only(roots, &spec.raw).is_some_and(|entry| {
-                !uses_nix || nix_catalog_cache_entry_matches(&entry, flags.local_nix_catalog.is_some())
+                !uses_nix
+                    || nix_catalog_cache_entry_matches(&entry, flags.local_nix_catalog.is_some())
             })
         {
             continue;
@@ -121,7 +128,11 @@ pub(super) fn plan_downloads(
         let cached = expectation.as_ref().is_some_and(|expectation| {
             Store::cache_candidate_matches(roots, &spec.raw, expectation)
                 && (!uses_nix
-                    || nix_catalog_cache_matches(roots, &spec.raw, flags.local_nix_catalog.is_some()))
+                    || nix_catalog_cache_matches(
+                        roots,
+                        &spec.raw,
+                        flags.local_nix_catalog.is_some(),
+                    ))
         });
         // A non-Nix project ref may have a fully verified Hangar closure but
         // no provider metadata left to derive a fresh expectation offline.
@@ -140,16 +151,22 @@ pub(super) fn plan_downloads(
         return Ok(Provider::DownloadPlan::default());
     }
 
-    let uses_nix = pending
-        .iter()
-        .any(|spec| Provider::uses_nix_provider(spec, table, flags.offline, &store_dir));
+    let uses_nix = pending.iter().any(|spec| {
+        Provider::uses_nix_provider_for_project(
+            spec,
+            table,
+            flags.offline,
+            &store_dir,
+            project_dir.as_deref(),
+        )
+    });
     let nix_index_client = if uses_nix && fixtures.is_none() {
         Some(
             match flags.local_nix_catalog.as_deref() {
                 Some(catalog) => NixIndexClient::from_local_catalog(catalog, flags.offline),
                 None => NixIndexClient::from_roots_with_mode(roots, flags.offline),
             }
-                .map_err(ProviderError::NixIndex),
+            .map_err(ProviderError::NixIndex),
         )
     } else {
         None
@@ -297,9 +314,9 @@ pub(super) fn realize_ref_outcome(
     let mut spinner = if style == RowStyle::Silent {
         None
     } else if theme.color {
-        Some(theme.spinner(&format!("resolving {} …", spec.raw)))
+        Some(theme.spinner(&format!("Resolving {} …", spec.raw)))
     } else {
-        theme.status(&format!("resolving {} …", theme.bold(&spec.raw)));
+        theme.status(&format!("Resolving {} …", theme.bold(&spec.raw)));
         None
     };
     // The provider writes store/source-cache records under the hangar (U2). The
@@ -310,7 +327,13 @@ pub(super) fn realize_ref_outcome(
         RealizeScope::Project => current_project_dir(),
         RealizeScope::UserProfile | RealizeScope::Use => None,
     };
-    let uses_nix = Provider::uses_nix_provider(spec, table, flags.offline, &store_dir);
+    let uses_nix = Provider::uses_nix_provider_for_project(
+        spec,
+        table,
+        flags.offline,
+        &store_dir,
+        project_dir.as_deref(),
+    );
     let recorded_project_candidate = scope == RealizeScope::Project
         && !uses_nix
         && Store::find_by_reference_read_only(roots, &spec.raw).is_some();
@@ -371,16 +394,15 @@ pub(super) fn realize_ref_outcome(
                 nix_index: None,
                 nix_roots: None,
             };
-            Provider::cache_expectation(spec, table, &probe)
-                .is_some_and(|expectation| {
-                    Store::cache_candidate_matches(roots, &spec.raw, &expectation)
-                        && (!uses_nix
-                            || nix_catalog_cache_matches(
-                                roots,
-                                &spec.raw,
-                                flags.local_nix_catalog.is_some(),
-                            ))
-                })
+            Provider::cache_expectation(spec, table, &probe).is_some_and(|expectation| {
+                Store::cache_candidate_matches(roots, &spec.raw, &expectation)
+                    && (!uses_nix
+                        || nix_catalog_cache_matches(
+                            roots,
+                            &spec.raw,
+                            flags.local_nix_catalog.is_some(),
+                        ))
+            })
         });
     let indexed_nix = flags.offline
         && uses_nix
@@ -467,7 +489,7 @@ pub(super) fn realize_ref_outcome(
                 Some(catalog) => NixIndexClient::from_local_catalog(catalog, flags.offline),
                 None => NixIndexClient::from_roots_with_mode(roots, flags.offline),
             }
-                .map_err(ProviderError::NixIndex),
+            .map_err(ProviderError::NixIndex),
         )
     } else {
         None
@@ -522,7 +544,9 @@ pub(super) fn realize_ref_outcome(
     let progress = live.as_deref().map(|live| live.progress_handle());
     let realize = || match recorded_reuse {
         Some(realized) => Ok(realized),
-        None => Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table }),
+        None => {
+            Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table })
+        }
     };
     let result = match progress {
         Some(progress) => Store::with_progress(progress, realize),
@@ -562,7 +586,7 @@ pub(super) fn realize_ref_outcome(
             // satisfied, and how long a from-source build took.
             let elapsed = started.elapsed();
             let state = if source_state == Provider::SourceState::Built && elapsed.as_secs() >= 1 {
-                format!("built {}", Output::human_duration(elapsed))
+                format!("Built {}", Output::human_duration(elapsed))
             } else {
                 source_state.label().to_string()
             };
@@ -577,7 +601,7 @@ pub(super) fn realize_ref_outcome(
             let line = theme.render_row(&entry.name, name_w, &version, &state);
             let line = catalog_status
                 .as_ref()
-                .map(|status| format!("{line} [{status}]") )
+                .map(|status| format!("{line} [{status}]"))
                 .unwrap_or(line);
             match style {
                 RowStyle::Ledger => {
@@ -751,7 +775,7 @@ pub(super) fn realize_adapter(
     table: &RefSpec::SourceTable,
     consume: bool,
 ) -> Option<(Store::StoreEntry, Provider::SourceState, Store::CacheLease)> {
-    theme.status(&format!("adapting {} …", theme.bold(&plan.name)));
+    theme.status(&format!("Adapting {} …", theme.bold(&plan.name)));
     let store_dir = roots.hangar_dir();
     let project_dir = current_project_dir();
     let fixtures = if flags.offline {
@@ -1337,10 +1361,18 @@ fn manifest_channel_ref(exact: &str, policy: RefSpec::ChannelPolicy) -> String {
     match policy {
         RefSpec::ChannelPolicy::Pinned => exact,
         RefSpec::ChannelPolicy::Manual => {
-            format!("{exact}{}{}", Syntax::REF_CHANNEL_MARKER, Syntax::REF_CHANNEL_LATEST)
+            format!(
+                "{exact}{}{}",
+                Syntax::REF_CHANNEL_MARKER,
+                Syntax::REF_CHANNEL_LATEST
+            )
         }
         RefSpec::ChannelPolicy::Automatic => {
-            format!("{exact}{}{}", Syntax::REF_CHANNEL_MARKER, Syntax::REF_CHANNEL_AUTO)
+            format!(
+                "{exact}{}{}",
+                Syntax::REF_CHANNEL_MARKER,
+                Syntax::REF_CHANNEL_AUTO
+            )
         }
     }
 }

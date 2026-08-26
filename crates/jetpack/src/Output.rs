@@ -462,7 +462,7 @@ impl Theme {
     /// supplies the package), while `completed/total` counts only nodes that
     /// finished before this current edge. A failing first node therefore stays
     /// at `completed 0/N` rather than claiming work that never completed.
-    /// State is an actual phase (`resolving`, `building`, `substituting`), not
+    /// State is an actual phase (`Resolving`, `Building`, `Substituting`), not
     /// an animation label inferred after the fact.
     pub fn render_dependency_status(
         &self,
@@ -499,7 +499,7 @@ impl Theme {
         transferred: Option<u64>,
         total_bytes: Option<u64>,
     ) -> String {
-        let (done, total, noun) = if phase == "resolving" {
+        let (done, total, noun) = if phase == "Resolving" {
             (package_done, package_total, "packages")
         } else {
             (object_done, object_total, "objects")
@@ -515,9 +515,7 @@ impl Theme {
         let total_bytes = total_bytes
             .map(human_size)
             .unwrap_or_else(|| "?".to_string());
-        format!(
-            "{phase:<12} {done}/{total} {noun}  {transferred} / {total_bytes}"
-        )
+        format!("{phase:<12} {done}/{total} {noun}  {transferred} / {total_bytes}")
     }
 
     /// Dependency-chain progress for long realization/build phases. TTY output
@@ -553,10 +551,10 @@ impl Theme {
         eprintln!("{pad}{}", self.render_ready_row(name, name_w, version));
     }
 
-    /// `N packages ready ✓` / `1 package ready ✓`.
+    /// `N Packages Ready ✓` / `1 Package Ready ✓`.
     pub fn render_ready_summary(&self, count: usize) -> String {
-        let noun = if count == 1 { "package" } else { "packages" };
-        format!("{count} {noun} ready {}", self.green("✓"))
+        let noun = if count == 1 { "Package" } else { "Packages" };
+        format!("{count} {noun} Ready {}", self.green("✓"))
     }
 
     pub fn ready_summary(&self, count: usize) {
@@ -686,7 +684,7 @@ impl Theme {
             );
             return false;
         }
-        eprint!("  {}  {} - continue? [Y/n] ", self.gutter(), summary);
+        eprint!("  {}  {} - Continue? [Y/n] ", self.gutter(), summary);
         use std::io::Write;
         let _ = std::io::stderr().flush();
         let mut answer = String::new();
@@ -702,6 +700,71 @@ impl Theme {
             self.status("download cancelled.");
         }
         apply
+    }
+
+    /// Choose the explicit local-unofficial catalog used to bootstrap a project
+    /// before an official signed registry exists. A remembered choice remains
+    /// explicit because this prompt is the authority grant.
+    pub fn choose_local_catalog(&self, detected: Option<&str>, assume_yes: bool) -> Option<String> {
+        self.status("package catalog setup");
+        self.detail("no official signed Jetpack registry is configured yet");
+        self.detail("local catalogs leave package-name mappings unverified; downloaded Nix cache bytes still require valid signatures");
+
+        if let Some(path) = detected {
+            self.detail(&format!("found local catalog: {}", self.bold(path)));
+            if assume_yes {
+                self.status("using and remembering the detected local catalog (--yes)");
+                return Some(path.to_string());
+            }
+            if !std::io::stdin().is_terminal() {
+                self.error_coded(
+                    "E1340",
+                    "the detected local catalog needs approval and cannot prompt here",
+                    "local-unofficial catalogs require an explicit first-use choice",
+                    "rerun in a terminal, pass -y, or pass --local-nix-catalog <dir>",
+                );
+                return None;
+            }
+            eprint!(
+                "  {}  Use and remember this catalog for this project? [Y/n] ",
+                self.gutter()
+            );
+            use std::io::Write;
+            let _ = std::io::stderr().flush();
+            let mut answer = String::new();
+            if std::io::stdin().read_line(&mut answer).is_err() {
+                self.status("catalog setup cancelled.");
+                return None;
+            }
+            let answer = answer.trim();
+            if answer.is_empty()
+                || answer.eq_ignore_ascii_case("y")
+                || answer.eq_ignore_ascii_case("yes")
+            {
+                return Some(path.to_string());
+            }
+            self.status("catalog setup cancelled.");
+            return None;
+        }
+
+        if assume_yes || !std::io::stdin().is_terminal() {
+            self.error_coded(
+                "E1340",
+                "this environment needs a package catalog",
+                "no official signed registry or local catalog was found",
+                "run in a terminal to choose a local catalog, or pass --local-nix-catalog <dir>",
+            );
+            return None;
+        }
+        eprint!("  {}  Local catalog directory: ", self.gutter());
+        use std::io::Write;
+        let _ = std::io::stderr().flush();
+        let mut answer = String::new();
+        if std::io::stdin().read_line(&mut answer).is_err() || answer.trim().is_empty() {
+            self.status("catalog setup cancelled.");
+            return None;
+        }
+        Some(answer.trim().to_string())
     }
 
     /// The threshold rule — the one visual signature of entering/leaving a
@@ -1166,11 +1229,11 @@ mod tests {
             assert!(!theme.color, "NO_COLOR must disable color");
             let mut live = theme.live_region();
             assert!(!live.tty, "piped stderr must not use live cursor control");
-            live.set_dependency_status("resolving", 0, 2, "jetpack", "ripgrep", "fetching");
-            live.finish(&theme.render_row("ripgrep", 8, "15.2.0", "substituted"));
-            live.set_dependency_status("admitting", 1, 2, "jetpack", "jq", "writing");
-            live.finish(&theme.render_row("jq", 8, "1.8.2", "substituted"));
-            live.collapse("build ready ✓");
+            live.set_dependency_status("Resolving", 0, 2, "jetpack", "ripgrep", "Fetching");
+            live.finish(&theme.render_row("ripgrep", 8, "15.2.0", "Substituted"));
+            live.set_dependency_status("Admitting", 1, 2, "jetpack", "jq", "Writing");
+            live.finish(&theme.render_row("jq", 8, "1.8.2", "Substituted"));
+            live.collapse("Build Ready ✓");
             return;
         }
 
@@ -1194,18 +1257,18 @@ mod tests {
         let expected = [
             format!(
                 "{pad}{}",
-                theme.render_dependency_status("resolving", 0, 2, "jetpack", "ripgrep", "fetching")
+                theme.render_dependency_status("Resolving", 0, 2, "jetpack", "ripgrep", "Fetching")
             ),
             format!(
                 "{pad}{}",
-                theme.render_row("ripgrep", 8, "15.2.0", "substituted")
+                theme.render_row("ripgrep", 8, "15.2.0", "Substituted")
             ),
             format!(
                 "{pad}{}",
-                theme.render_dependency_status("admitting", 1, 2, "jetpack", "jq", "writing")
+                theme.render_dependency_status("Admitting", 1, 2, "jetpack", "jq", "Writing")
             ),
-            format!("{pad}{}", theme.render_row("jq", 8, "1.8.2", "substituted")),
-            format!("  {}  build ready ✓", theme.gutter()),
+            format!("{pad}{}", theme.render_row("jq", 8, "1.8.2", "Substituted")),
+            format!("  {}  Build Ready ✓", theme.gutter()),
         ]
         .join("\n")
             + "\n";
@@ -1221,8 +1284,8 @@ mod tests {
     fn progress_chain_has_deterministic_plain_fallback() {
         let theme = Theme { color: false };
         assert_eq!(
-            theme.render_progress_chain("realize", 2, 5, "ripgrep", "nixpkgs"),
-            "▸ realize 2/5 ripgrep -> nixpkgs"
+            theme.render_progress_chain("Realize", 2, 5, "ripgrep", "nixpkgs"),
+            "▸ Realize 2/5 ripgrep -> nixpkgs"
         );
     }
 
@@ -1230,8 +1293,8 @@ mod tests {
     fn dependency_status_uses_real_edge_direction_and_stable_plain_text() {
         let theme = Theme { color: false };
         assert_eq!(
-            theme.render_dependency_status("building", 2, 5, "nixpkgs", "ripgrep", "resolving",),
-            "building completed 2/5 · current: nixpkgs -> ripgrep · resolving"
+            theme.render_dependency_status("Building", 2, 5, "nixpkgs", "ripgrep", "Resolving",),
+            "Building completed 2/5 · current: nixpkgs -> ripgrep · Resolving"
         );
     }
 
@@ -1239,8 +1302,8 @@ mod tests {
     fn dependency_status_handles_first_party_node_without_invented_parent() {
         let theme = Theme { color: false };
         assert_eq!(
-            theme.render_dependency_status("building", 0, 1, "", "local-app", "building"),
-            "building completed 0/1 · current: local-app · building"
+            theme.render_dependency_status("Building", 0, 1, "", "local-app", "Building"),
+            "Building completed 0/1 · current: local-app · Building"
         );
     }
 
@@ -1267,7 +1330,7 @@ mod tests {
         let theme = Theme { color: false };
         assert_eq!(
             theme.render_aggregate_progress(
-                "admitting",
+                "Admitting",
                 2,
                 3,
                 31,
@@ -1275,10 +1338,10 @@ mod tests {
                 Some(340_000_000),
                 Some(1_200_000_000),
             ),
-            "admitting    31/48 objects  340 MB / 1.2 GB"
+            "Admitting    31/48 objects  340 MB / 1.2 GB"
         );
         assert!(theme
-            .render_aggregate_progress("resolving", 0, 2, 0, 0, Some(0), None)
+            .render_aggregate_progress("Resolving", 0, 2, 0, 0, Some(0), None)
             .ends_with("0 B / ?"));
     }
 
@@ -1306,8 +1369,8 @@ mod tests {
     #[test]
     fn ready_summary_pluralizes() {
         let theme = Theme { color: false };
-        assert_eq!(theme.render_ready_summary(1), "1 package ready ✓");
-        assert_eq!(theme.render_ready_summary(2), "2 packages ready ✓");
+        assert_eq!(theme.render_ready_summary(1), "1 Package Ready ✓");
+        assert_eq!(theme.render_ready_summary(2), "2 Packages Ready ✓");
     }
 
     // -- Tier 2: progress bar / live header --
@@ -1335,8 +1398,8 @@ mod tests {
     fn live_header_reads_as_building_k_of_n() {
         let theme = Theme { color: false };
         assert_eq!(
-            theme.render_live_header("building", 31, 42, "linux"),
-            "building 31/42 · linux"
+            theme.render_live_header("Building", 31, 42, "linux"),
+            "Building 31/42 · linux"
         );
     }
 

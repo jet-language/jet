@@ -472,15 +472,15 @@ pub(super) fn compose_env_scoped(
     let mut completed_steps = 0usize;
     for spec in plan.refs.iter() {
         if aggregate_mode {
-            live.set_aggregate_status("resolving", completed_steps, total_steps);
+            live.set_aggregate_status("Resolving", completed_steps, total_steps);
         } else if live_tty {
             live.set_dependency_status(
-                "resolving",
+                "Resolving",
                 completed_steps,
                 total_steps,
                 spec.source.label(),
                 &spec.package,
-                "resolving",
+                "Resolving",
             );
         }
         let style = if live_mode {
@@ -505,10 +505,24 @@ pub(super) fn compose_env_scoped(
                     live.finish(&line);
                 }
                 completed_steps += 1;
+                let leased_output = match lease.stable_path(&entry.out) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        live.clear();
+                        theme.error_coded(
+                            "E1335",
+                            "the realized package output could not be confined to its executable lease",
+                            &error.to_string(),
+                            "re-realize the package so Jetpack can hand only its verified lease to the child",
+                        );
+                        failed = true;
+                        continue;
+                    }
+                };
                 // A `library` package realizes with an empty `bin` (U10) — it
                 // stages source for import and contributes nothing to PATH.
-                if !entry.bin.is_empty() {
-                    bin_dirs.push(entry.bin);
+                if let Some(bin) = lease.projected_bin_dir() {
+                    bin_dirs.push(bin.to_string_lossy().into_owned());
                 }
                 let mut invalid_metadata = None;
                 for (file, variable) in [
@@ -520,12 +534,14 @@ pub(super) fn compose_env_scoped(
                     ("perl5lib", "PERL5LIB"),
                     ("composer-autoload", "COMPOSER_AUTOLOAD"),
                 ] {
-                    if let Ok(value) =
-                        std::fs::read_to_string(std::path::Path::new(&entry.out).join(file))
-                    {
+                    if let Ok(value) = std::fs::read_to_string(leased_output.join(file)) {
                         let value = value.trim();
                         if !value.is_empty() {
-                            if let Some(value) = resolve_provider_paths(&entry.out, file, value) {
+                            if let Some(value) = resolve_provider_paths(
+                                &leased_output.to_string_lossy(),
+                                file,
+                                value,
+                            ) {
                                 provider_vars
                                     .entry(variable.to_string())
                                     .or_default()
@@ -551,7 +567,10 @@ pub(super) fn compose_env_scoped(
                 if let Ok(producer) = Store::ProducerRecord::decode(&entry.producer_record) {
                     nix_vars.extend(Provider::nix_runtime_environment(&producer));
                 }
-                realized_outputs.push((entry.name.clone(), entry.out.clone()));
+                realized_outputs.push((
+                    entry.name.clone(),
+                    leased_output.to_string_lossy().into_owned(),
+                ));
                 realized_refs.push(entry.reference);
                 cache_leases.push(lease);
             }
@@ -564,7 +583,7 @@ pub(super) fn compose_env_scoped(
         live.clear();
         if total_steps > 1 {
             theme.progress_chain(
-                "adapt",
+                "Adapt",
                 plan.refs.len() + idx + 1,
                 total_steps,
                 &adapter.name,
@@ -573,8 +592,8 @@ pub(super) fn compose_env_scoped(
         }
         match realize_adapter(theme, roots, flags, adapter, &plan.table, true) {
             Some((entry, _state, lease)) => {
-                if !entry.bin.is_empty() {
-                    bin_dirs.push(entry.bin);
+                if let Some(bin) = lease.projected_bin_dir() {
+                    bin_dirs.push(bin.to_string_lossy().into_owned());
                 }
                 realized_refs.push(entry.reference);
                 cache_leases.push(lease);
@@ -754,14 +773,6 @@ fn reject_unprompted_acquisition(
         .filter(|spec| ref_needs_acquisition(spec, &plan.table))
         .cloned()
         .collect::<Vec<_>>();
-    let mut download = plan_downloads(theme, roots, flags, &plan.table, &specs, scope)?;
-    if !plan.adapters.is_empty() {
-        download.packages = download.packages.saturating_add(plan.adapters.len());
-        download.bytes = None;
-    }
-    if download.packages == 0 {
-        return Ok(());
-    }
     let label = match scope {
         RealizeScope::Project => plan
             .environment
@@ -771,6 +782,18 @@ fn reject_unprompted_acquisition(
         RealizeScope::Use => "use".to_string(),
         RealizeScope::UserProfile => "tool".to_string(),
     };
+    if !specs.is_empty() || !plan.adapters.is_empty() {
+        theme.status(&format!("Resolving {label} package plan..."));
+    }
+    let mut download = plan_downloads(theme, roots, flags, &plan.table, &specs, scope)?;
+    if !plan.adapters.is_empty() {
+        download.packages = download.packages.saturating_add(plan.adapters.len());
+        download.bytes = None;
+    }
+    if download.packages == 0 {
+        return Ok(());
+    }
+
     if theme.confirm_download(&label, download.packages, download.bytes, flags.assume_yes) {
         Ok(())
     } else {
@@ -1251,8 +1274,8 @@ enum WorkspaceAction {
 impl WorkspaceAction {
     fn present(self) -> &'static str {
         match self {
-            Self::Build => "building",
-            Self::Test => "testing",
+            Self::Build => "Building",
+            Self::Test => "Testing",
         }
     }
 
@@ -1456,20 +1479,20 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let total_steps = plan.refs.len() + plan.adapters.len();
     let mut completed_steps = 0usize;
     // Tier 2 (D-FE-CLI1): a multi-package build gets the live region —
-    // finished rows promote up out of a pinned `building K/N` + progress bar
-    // status, which collapses to `build ready ✓` on success. A single
+    // finished rows promote up out of a pinned `Building K/N` + progress bar
+    // status, which collapses to `Build Ready ✓` on success. A single
     // package stays the plain quiet ledger row (nothing to promote out of).
     let live_mode = total_steps > 1;
     let mut live = theme.live_region();
     for spec in &plan.refs {
         let style = if live_mode {
             live.set_dependency_status(
-                "building",
+                "Building",
                 completed_steps,
                 total_steps,
                 spec.source.label(),
                 &spec.package,
-                "resolving",
+                "Resolving",
             );
             RowStyle::Silent
         } else {
@@ -1511,12 +1534,12 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     for adapter in &plan.adapters {
         if total_steps > 1 {
             live.set_dependency_status(
-                "building",
+                "Building",
                 completed_steps,
                 total_steps,
                 "adapter",
                 &adapter.name,
-                "adapting",
+                "Adapting",
             );
             // Adapter realization owns its diagnostic/ledger output today;
             // erase the pinned projection before handing control to it.
@@ -1552,11 +1575,11 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
         // Tier 2 (D-FE-CLI1): collapse the live region to its one-line close
         // before the T4 source-state summary.
         if live_mode {
-            live.collapse(&format!("build ready {}", theme.green("✓")));
+            live.collapse(&format!("Build Ready {}", theme.green("✓")));
         }
         // T4: per-run source-state summary (mirrors the D-JPK-CACHE1 example).
         theme.status(&format!(
-            "built {} package(s): {} built, {} cached, {} substituted",
+            "Built {} package(s): {} built, {} cached, {} substituted",
             plan.refs.len() + plan.adapters.len(),
             built,
             cached,

@@ -26,6 +26,22 @@ fn run() {
     tir_support::assert_tiers_agree("result_handler_tiers", src, "ok: 7\nerror: bad\n");
 }
 
+/// D-RESULT-DECON2=B: a diverging arm keeps the ordinary exhaustive-chain
+/// rule, so the surviving branch still has its value on every tier.
+#[test]
+fn result_handler_preserves_diverging_arm_on_all_tiers() {
+    let src = r#"
+fn choose(ok: Bool) Int !String -> if ok -> Ok(7) else -> Err("bad")
+
+fn run() {
+    value :: choose(true)
+    result :: value ? ok -> ok + 1 ! error -> panic(error)
+    print("{result}")
+}
+"#;
+    tir_support::assert_tiers_agree("result_handler_diverging", src, "8\n");
+}
+
 /// D-TAIL-RETURN1=A / I9: a braced function tail, value arm table, and
 /// explicit early return all lower through the same checked block-value path.
 #[test]
@@ -55,6 +71,68 @@ fn run() {
         src,
         "one\nother\nearly\nlate\n",
     );
+}
+
+#[test]
+fn value_block_tails_report_unit_and_lint_old_arm_table_shape() {
+    let invalid = r#"
+fn semicolon() Int -> {
+    1;
+}
+
+fn declaration() Int -> {
+    value :: 1
+}
+"#;
+    let diagnostics = jet::compile_with_path(invalid, "tail_value_errors.jet")
+        .expect_err("unit-valued tails must be rejected in value blocks");
+    let missing_values: Vec<_> = diagnostics.iter().filter(|d| d.code == "E0114").collect();
+    assert_eq!(missing_values.len(), 2, "diagnostics: {diagnostics:?}");
+    assert!(missing_values
+        .iter()
+        .all(|diagnostic| diagnostic.span.is_some()));
+
+    let lintable = r#"
+fn label(value: Int) String -> {
+    if value == {
+        // Keep the arm comment.
+        1 -> return /* keep value comment */ "one"
+    }
+    // Keep the fallback comment.
+    return "other" // Keep the tail comment.
+}
+"#;
+    let output = jet::compile_with_path(lintable, "redundant_tail_return.jet")
+        .expect("the old arm-table spelling should still compile");
+    let lint = output
+        .lints
+        .iter()
+        .find(|diagnostic| diagnostic.code == "L0513")
+        .expect("the redundant arm-table fallback must be linted");
+    let edit = lint.edit.as_ref().expect("L0513 must carry its source fix");
+    let fixed = jet::FixEngine::apply_edits(lintable, std::slice::from_ref(edit))
+        .expect("the generated L0513 edit must apply");
+    assert!(fixed.contains("else -> { \"other\" }"), "fixed source:\n{fixed}");
+    assert!(fixed.contains("Keep the arm comment"), "fixed source:\n{fixed}");
+    assert!(fixed.contains("keep value comment"), "fixed source:\n{fixed}");
+    assert!(fixed.contains("Keep the fallback comment"), "fixed source:\n{fixed}");
+    assert!(fixed.contains("Keep the tail comment"), "fixed source:\n{fixed}");
+    assert!(!fixed.contains("return"), "fixed source:\n{fixed}");
+
+    let effectful = r#"
+fn label(value: Int) String -> {
+    if value == {
+        1 -> { print("side"); return "one" }
+    }
+    return "other"
+}
+"#;
+    let effectful_output = jet::compile_with_path(effectful, "effectful_tail_return.jet")
+        .expect("effectful arm-table source should compile");
+    assert!(!effectful_output
+        .lints
+        .iter()
+        .any(|diagnostic| diagnostic.code == "L0513"));
 }
 
 /// D-FAIL-ERROR1=A: the labelled/string shape builds a default `Err` value;

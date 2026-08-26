@@ -397,3 +397,76 @@ option.
 | `list.map` / `list.filter` | Eager plain collection. | `.lazy` for a deferred view. |
 | `time.now` | Current Unix time in milliseconds from the ambient standard clock. | `time.clock(seed)` or an injected `Clock` for deterministic/reproducible code. |
 | `crypto` | Typed safe values and fail-closed defaults. | `crypto.expert` inside the audited raw-byte boundary. |
+
+## Competitive Core API gate (D-STDRUBRIC1=A, card #1398)
+
+This is the one Core API superiority gate. Python is the calibration arm. The
+release claim covers every language recorded in the Core surface ledger, not
+Python alone.
+
+The only workflow inventory is
+[`docs/reference/core-surface-ledger.json`](../reference/core-surface-ledger.json).
+The checker reads its `rows` and requires one `coreApiGate.workflowManifest`
+entry for every row. It does not copy the inventory into another policy or
+benchmark document.
+
+### Frozen task record
+
+Before comparison, each workflow records these fields:
+
+| Field | Required content |
+|---|---|
+| `task` | Stable task identity and ledger-row link. |
+| `input` | Same input for every language arm, with the fixture status frozen before the run. |
+| `outcome` | Same semantic result, exit behavior, and normal language contract. |
+| `allowedDependency` | Standard-library or shipped-Core boundary. Required imports count. |
+| `toolVersions` | Pinned competitor and runner versions. |
+| `sourceBoundary` | User-authored source paths. Generated output, expected output, and reference source are excluded. |
+| `competingCoreWorkflow` | The exact workflow named by the ledger row. |
+| `cases` | Applicable `beginner`, `expert-policy`, `failure`, and `lifecycle` arms. |
+
+A design decline stays in the manifest as a scored loss. Only a ratified
+product-scope decision can set `scope.excluded` to true.
+
+### Score record
+
+Each matched task reports:
+
+- raw source counts for every arm, including imports, required policy, and
+  required error handling;
+- mandatory concept IDs, hidden facts, and nonlocal lookups;
+- every extra Jet construct, classified as `task-essential`, `clarity-bearing`,
+  `guarantee-bearing`, `expert-control`, or `incidental-ceremony`;
+- the extra construct's span and source cost, one or more claimed
+  `claimedClarity`, `reasoningBenefit`, `localFactBenefit`, `guaranteeBenefit`,
+  or `expertControlBenefit` fields, the rejected shorter form, lost value, and
+  reviewer verdict;
+- the measured reasoning burden; a worse burden needs a compensating product
+  win in the same evidence record;
+- at least one measured or independently reviewed Jet win;
+- independent acceptance that each competing fixture is idiomatic and minimal
+  for the same task, input, outcome, and normal language contract.
+
+Raw counts are evidence, not a universal ratio. An increase passes only when it
+improves clarity, local reasoning, a named guarantee, or expert control.
+Incidental ceremony fails. A worse reasoning burden needs a compensating
+product win. Python does not imitate a Jet-only guarantee.
+
+Readability and reasonability use the structured evidence record plus an
+independent review. Runtime, memory, artifact, safety, diagnosis, bounds, and
+audit properties use machine measurements. The gate fails on stale fixtures,
+unexplained ceremony, missing evidence, a missing Jet win, or an unowned loss.
+Every failure names card `#1398` as the release-gate owner.
+
+The gate reuses the existing agent corpus manifest, receipt, runner, and
+`#769` scoring contract. It adds no benchmark runner and no second scoring
+model:
+
+~~~sh
+node scripts/agent/check-core-surface-ledger.mjs --check
+node scripts/agent/check-core-surface-ledger.mjs --core-api-release-check
+~~~
+
+`--check` proves the source-derived inventory and frozen record shape. The
+release check stays blocked until every manifest entry has complete measured
+evidence and an accepted Jet win.

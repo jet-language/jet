@@ -763,7 +763,6 @@ pub(crate) fn is_covered_numeric_method(method: &str, nargs: usize) -> bool {
                 "is_nan"
                     | "is_infinite"
                     | "is_finite"
-                    | "origin"
                     | "count_ones"
                     | "count_zeros"
                     | "leading_zeros"

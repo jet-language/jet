@@ -9,6 +9,9 @@ full expert control behind explicit opt-in. You write Jet; the compiler checks
 everything in plain language, then generates Rust for speed. No hidden `unsafe`,
 no exceptions, no hidden control flow.
 
+Jet's [release policy](docs/spec/release-policy.md) explains 1.0 stability,
+feature-complete scope, and release cadence.
+
 <!-- Stable IDs bind advertised claims to docs/spec/feature-claims.json. -->
 <!-- FEATURE_CLAIMS:BEGIN -->
 <!-- FEATURE_CLAIM: claim.syntax-law | Unbuilt syntax notes are machine inventoried. -->

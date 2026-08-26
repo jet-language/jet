@@ -1503,6 +1503,37 @@ mod tests {
         assert_eq!(fs::read_to_string(stable).unwrap(), "trusted");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn lease_recovery_waits_for_descendant_then_reclaims_idle_container() {
+        let (roots, _g) = temp_roots();
+        let ingested = ingest_fixture(&roots, "lease-tree", &[("out", "trusted")], Vec::new());
+        let hit = find_verified_by_reference(
+            &roots,
+            &ingested.entry.reference,
+            &test_expectation(Path::new(&ingested.entry.out)),
+        )
+        .unwrap()
+        .unwrap();
+        let lease_root = hit.lease.snapshot_root.parent().unwrap().to_path_buf();
+        hit.lease.mark_process_handoff();
+
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "/bin/sleep 2 >/dev/null 2>&1 &"])
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        drop(hit);
+
+        assert!(lease_root.exists());
+        assert_eq!(recover_hangar(&roots).unwrap(), 0);
+        assert!(lease_root.exists());
+
+        std::thread::sleep(Duration::from_secs(2));
+        assert_eq!(recover_hangar(&roots).unwrap(), 1);
+        assert!(!lease_root.exists());
+    }
+
     #[test]
     fn realization_type_distinguishes_fresh_cached_and_missing_outputs() {
         let (roots, _g) = temp_roots();
@@ -1614,6 +1645,9 @@ mod tests {
         let hit = find_verified_by_reference(&roots, "fd-view@mine", &test_expectation(&out))
             .unwrap()
             .unwrap();
+        let projected_bin = hit.lease.projected_bin_dir().unwrap();
+        assert!(projected_bin.starts_with("/proc/self/fd/"));
+        assert!(!projected_bin.starts_with(&out));
         let stable_tool = hit.lease.stable_path(&tool.to_string_lossy()).unwrap();
 
         let moved = roots.root.join("fd-view-original");

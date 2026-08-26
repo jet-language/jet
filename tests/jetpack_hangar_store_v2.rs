@@ -1455,7 +1455,7 @@ fn manual_external_root_cli_is_atomic_and_reports_stale_etag() {
 }
 
 #[test]
-fn hangar_recovery_reclaims_crashed_stages_and_dead_leases_without_following_escape() {
+fn hangar_recovery_reclaims_crashed_stages_and_idle_leases_without_following_escape() {
     let root = Scratch::new("hangar-v2-recovery-root");
     let roots = jetpack::Store::Roots {
         root: root.path.clone(),

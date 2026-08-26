@@ -53,6 +53,126 @@ fn every_typed_diagnostic_row_is_complete() {
 }
 
 #[test]
+fn every_typed_diagnostic_line_uses_ratified_sentence_case() {
+    let mut rows = 0;
+    let mut violations = Vec::new();
+    for (line_index, raw) in jet_foundation::Registry::DIAGNOSTIC_SOURCE.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with("//") {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.first().copied() != Some("diagnostic") {
+            continue;
+        }
+        rows += 1;
+        for (name, value) in [("What", fields[7]), ("Why", fields[8]), ("Fix", fields[9])] {
+            if let Some((start, end)) = first_diagnostic_prose_token(value) {
+                let token = &value[start..end];
+                if token.chars().next().is_some_and(|ch| ch.is_ascii_uppercase())
+                    && !diagnostic_token_keeps_case(token)
+                {
+                    violations.push(format!(
+                        "Diagnostics.jet:{} {} {} starts with uppercase prose `{token}`",
+                        line_index + 1,
+                        fields[1],
+                        name
+                    ));
+                }
+            }
+        }
+    }
+    assert_eq!(
+        rows,
+        jet_foundation::Registry::diagnostic_rows().len(),
+        "table validator must inspect every typed diagnostic row"
+    );
+    assert!(
+        violations.is_empty(),
+        "ratified sentence-case violations (D-CASE-PROSE1):\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn diagnostic_case_validator_preserves_code_fragments_and_flags() {
+    let source = jet_foundation::Registry::DIAGNOSTIC_SOURCE;
+    assert!(source.contains("`--offline` forbids network access"));
+    assert!(source.contains("D-PATR: range"));
+    assert!(source.contains("C-style"));
+    assert!(!source.contains("`--offline` Forbids Network Access"));
+    assert!(!source.contains("D-patr: Range"));
+}
+
+fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {
+    let mut offset = 0;
+    while offset < input.len() {
+        let rest = &input[offset..];
+        let ch = rest.chars().next()?;
+        if ch.is_whitespace() || matches!(ch, '*' | '~' | '_') {
+            offset += ch.len_utf8();
+            continue;
+        }
+        if matches!(ch, '`' | '"' | '\'') {
+            let after = &rest[ch.len_utf8()..];
+            if let Some(close) = after.find(ch) {
+                offset += ch.len_utf8() + close + ch.len_utf8();
+                continue;
+            }
+        }
+        if ch == '{' {
+            if let Some(close) = rest.find('}') {
+                offset += close + 1;
+                continue;
+            }
+        }
+        let start = offset;
+        let end = rest
+            .find(|value: char| {
+                value.is_whitespace()
+                    || matches!(value, ',' | '.' | ';' | ':' | '(' | ')' | '[' | ']' | '!')
+            })
+            .map_or(input.len(), |relative| offset + relative);
+        let token = &input[start..end];
+        if token.is_empty() {
+            offset += ch.len_utf8();
+            continue;
+        }
+        offset = end;
+        if diagnostic_token_keeps_case(token) {
+            continue;
+        }
+        return Some((start, end));
+    }
+    None
+}
+
+fn diagnostic_token_keeps_case(token: &str) -> bool {
+    if matches!(token.chars().next(), Some('-' | '#' | '@'))
+        || token == "C"
+        || matches!(
+            token,
+            "App" | "Hangar" | "Jet" | "Jetpack" | "Nix" | "Runtime" | "Store"
+        )
+    {
+        return true;
+    }
+    let has_digit = token.chars().any(|ch| ch.is_ascii_digit());
+    let has_structural_case = token
+        .chars()
+        .any(|ch| matches!(ch, '_' | '/' | '\\' | '@' | '#'));
+    let all_code = token
+        .chars()
+        .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'));
+    let camel_case = token
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_uppercase())
+        && token.chars().skip(1).any(|ch| ch.is_ascii_uppercase());
+    has_digit || has_structural_case || all_code || camel_case || token.starts_with("C-")
+}
+
+#[test]
 fn typed_row_holes_and_structured_fixes_have_one_projection() {
     let source_markers = jet_foundation::Registry::DIAGNOSTIC_SOURCE
         .lines()

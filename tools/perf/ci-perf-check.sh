@@ -13,6 +13,26 @@ BASELINE="$PERF_DIR/baseline.json"
 THRESH=${1:-}
 TAB=$(printf '\t')
 
+# CI evidence must name the exact checked-out candidate. The explicit override
+# is for CI wrappers; local runs fall back to the checked-out revision. A
+# mismatched GitHub SHA is a stale checkout, not a usable performance result.
+candidate_commit=${JET_CI_CANDIDATE_COMMIT:-${GITHUB_SHA:-}}
+if [ -z "$candidate_commit" ]; then
+    candidate_commit=$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null || true)
+fi
+case "$candidate_commit" in
+    ''|*[!0-9a-fA-F]*) echo "missing or invalid candidate commit identity" >&2; exit 1 ;;
+esac
+[ "${#candidate_commit}" -eq 40 ] || {
+    echo "candidate commit identity must be a 40-character SHA-1" >&2
+    exit 1
+}
+if [ -n "${GITHUB_SHA:-}" ] && [ "$candidate_commit" != "$GITHUB_SHA" ]; then
+    echo "candidate commit does not match GITHUB_SHA: $candidate_commit != $GITHUB_SHA" >&2
+    exit 1
+fi
+printf 'candidate_commit=%s\n' "$candidate_commit" >&2
+
 [ -s "$BASELINE" ] || { echo "missing baseline: $BASELINE" >&2; exit 1; }
 
 json_string() {
@@ -229,4 +249,4 @@ expected_rows=$((4 * 6))
     exit 1
 }
 [ "$FAIL" -eq 0 ] || { echo "perf gate FAILED" >&2; exit 1; }
-echo "perf gate OK (latency ${latency_threshold}%, memory ${memory_threshold}%, variance ${variance_budget}%, rows ${ROW_COUNT})"
+echo "perf gate OK (candidate ${candidate_commit}, latency ${latency_threshold}%, memory ${memory_threshold}%, variance ${variance_budget}%, rows ${ROW_COUNT})"

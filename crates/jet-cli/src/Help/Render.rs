@@ -224,7 +224,7 @@ pub fn render_categorized(
     let width = w(width);
     let theme = Theme::new(color);
     let mut out = String::new();
-    out.push_str(&top(width, "jet ? — command palette", color));
+    out.push_str(&top(width, "jet ? — Command Palette", color));
     out.push('\n');
     let hint = if color {
         theme.dim("type to search · ↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1")
@@ -327,7 +327,7 @@ pub fn render_result_list(
     let width = w(width);
     let theme = Theme::new(color);
     let mut out = String::new();
-    out.push_str(&top(width, "find a command", color));
+    out.push_str(&top(width, "Find a Command", color));
     out.push('\n');
     let query_line = if color {
         format!("{} {}", theme.accent(">"), theme.bold(query))
@@ -393,9 +393,9 @@ pub fn render_result_list(
     if show_example {
         let ex = example.unwrap();
         let ex_line = if color {
-            format!("{} {}", theme.dim("example"), theme.bold(ex))
+            format!("{} {}", theme.dim("Example"), theme.bold(ex))
         } else {
-            format!("example  {}", ex)
+            format!("Example  {}", ex)
         };
         out.push_str(&selected_row(width, &ex_line, false, color));
         out.push('\n');
@@ -421,7 +421,7 @@ pub fn render_detail(entry: &Entry, width: usize, color: bool) -> String {
     let mut out = String::new();
     out.push_str(&top(
         width,
-        &format!("jet {}  ⇥ collapse", entry.symbol.name),
+        &format!("jet {}  ⇥ Collapse", entry.symbol.name),
         color,
     ));
     out.push('\n');
@@ -461,7 +461,7 @@ pub fn render_detail(entry: &Entry, width: usize, color: bool) -> String {
     if !entry.see_also.is_empty() {
         out.push_str(&selected_row(
             width,
-            &format!("See also  {}", entry.see_also.join(" · ")),
+            &format!("See Also  {}", entry.see_also.join(" · ")),
             false,
             color,
         ));
@@ -596,9 +596,9 @@ pub fn render_reference(
     let search = if query.is_empty() {
         String::new()
     } else {
-        format!(" · search: {}", theme.bold(query))
+        format!(" · Search: {}", theme.bold(query))
     };
-    let header = format!("{} reference{}", theme.accent("jet ?"), search);
+    let header = format!("{} Reference{}", theme.accent("jet ?"), search);
     let mut lines = vec![pad(&header, width)];
 
     let mut left_rows: Vec<String> = Vec::new();
@@ -845,8 +845,8 @@ mod tests {
     fn reference_view_has_header_and_footer() {
         let index = build_index();
         let out = render_reference(&index, 0, index.first(), 80, 12, false, "run");
-        assert!(out.starts_with("jet ? reference"));
-        assert!(out.contains("search: run"));
+        assert!(out.starts_with("jet ? Reference"));
+        assert!(out.contains("Search: run"));
         assert!(out.contains("Esc back"));
         assert_eq!(out.lines().count(), 12);
         assert!(out.lines().all(|line| cols(line) == 80));

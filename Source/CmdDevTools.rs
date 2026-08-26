@@ -1094,6 +1094,7 @@ pub(crate) fn run_completions(args: &[String]) {
         eprintln!("Error [E2102]: completions arguments don't match `{USAGE}`.");
         eprintln!(" Why: a completion script needs one supported shell and, optionally, one compiled Jet program.");
         eprintln!(" Fix: run `{USAGE}`.");
+        eprintln!("More: jet-lang.dev/e/E2102");
         exit(ExitCodes::USAGE);
     }
     let shell = shell.unwrap();
@@ -1180,6 +1181,7 @@ fn completion_metadata_error(program: &str, why: &str) -> ! {
     eprintln!("Error [E2103]: couldn't read command metadata from `{program}`.");
     eprintln!(" Why: {why}.");
     eprintln!(" Fix: rebuild the program with this Jet toolchain, then try again.");
+    eprintln!("More: jet-lang.dev/e/E2103");
     exit(ExitCodes::USER_ERROR);
 }
 
@@ -4417,6 +4419,7 @@ fn run_com_bind(args: &[&String]) {
         eprintln!("Error [E3260]: `com.*` needs a Windows host.");
         eprintln!(" Why: COM type libraries, apartments, and IDispatch are Windows facilities.");
         eprintln!(" Fix: run `jet inspect bind com` and build the COM module on a Windows host.");
+        eprintln!("More: jet-lang.dev/e/E3260");
         exit(ExitCodes::USER_ERROR)
     }
     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {

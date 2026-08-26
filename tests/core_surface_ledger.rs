@@ -151,3 +151,61 @@ fn core_surface_ledger_checker_rejects_hostile_fixtures() {
         );
     }
 }
+
+#[test]
+fn core_api_syntax_is_taught_by_reference_editor_and_diagnostic_surfaces() {
+    let syntax = source("docs/reference/syntax-surface.jet");
+    for marker in [
+        "values: ...String",
+        "[...tags",
+        "user.[name, email]",
+        "Stream<Int>",
+        "yield i",
+        "delay: Int",
+        "pub policy audit",
+        "wrap(call)",
+        "#Policy(",
+    ] {
+        assert!(syntax.contains(marker), "syntax reference lost `{marker}`");
+    }
+
+    let lsp = source("tests/lsp.rs");
+    for marker in [
+        "lsp_completion_returns_items",
+        "lsp_signature_help_returns_active_parameter",
+        "rest: ...String",
+        "lsp_hover_returns_signature",
+        "fn connect(host: String, /",
+    ] {
+        assert!(lsp.contains(marker), "editor coverage lost `{marker}`");
+    }
+    let hover = source("tests/lsp/02_hover.json");
+    assert!(hover.contains("-> Int") && !hover.contains("=>"));
+
+    for (path, markers) in [
+        (
+            "tests/ui/variadic_not_last.stderr",
+            &["E1310", "variadic parameter"][..],
+        ),
+        (
+            "tests/ui/spread_bad_call.stderr",
+            &["E1312", "call spread"][..],
+        ),
+        (
+            "tests/ui/yield_type_mismatch.stderr",
+            &["E0807", "Stream<Int"][..],
+        ),
+        (
+            "tests/ui/user_policy_bad_args.stderr",
+            &["policy `audit`", "Fix:"][..],
+        ),
+    ] {
+        let diagnostics = source(path);
+        for marker in markers {
+            assert!(
+                diagnostics.contains(marker),
+                "diagnostic teaching lost `{marker}` from {path}"
+            );
+        }
+    }
+}

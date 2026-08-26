@@ -231,6 +231,7 @@ fn jet_job_unknown(argv: &[String], jobs: &[(&str, JetJobScope)], name: &str) ->
     eprintln!("Error [E1294]: {}", jet_job_unknown_what(name));
     eprintln!(" Why: {JET_JOB_UNKNOWN_WHY}");
     eprintln!(" Fix: {JET_JOB_UNKNOWN_FIX}");
+    eprintln!("More: jet-lang.dev/e/E1294");
     eprintln!("{}", jet_job_declared_detail(&dispatchable));
     eprintln!("\nUsage: {program} <job> [options]");
     std::process::exit(2)

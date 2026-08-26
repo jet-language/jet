@@ -1240,6 +1240,7 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
         );
         let _ = writeln!(out_sink, " Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran");
         let _ = writeln!(out_sink, " Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`");
+        let _ = writeln!(out_sink, "More: jet-lang.dev/e/E1803");
         return;
     }
 
@@ -1309,7 +1310,7 @@ fn cmd_run_transcript(session: &Session) -> String {
         .iter()
         .any(|turn| turn.input.contains("#FX"))
     {
-        return "Error [E1803]: `:run` will not replay effectful turns\n Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran\n Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`\n".to_string();
+        return "Error [E1803]: `:run` will not replay effectful turns\n Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran\n Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`\nMore: jet-lang.dev/e/E1803\n".to_string();
     }
 
     let import_src = session.import_src();
@@ -3144,7 +3145,7 @@ fn help_text(color: bool) -> String {
     use std::fmt::Write as _;
 
     let mut out = String::new();
-    writeln!(out, "{}", bold("REPL meta-commands", color)).unwrap();
+    writeln!(out, "{}", bold("REPL Meta-Commands", color)).unwrap();
     writeln!(out, "  {}          end the session", bold(":quit", color)).unwrap();
     writeln!(
         out,
@@ -3629,10 +3630,10 @@ fn run_transcript_with(inputs: &[&str], project_dir: Option<&str>, flags: ReplFl
                                 )),
                             }
                         } else {
-                            out.push_str("REPL meta-commands\n");
+                            out.push_str("REPL Meta-Commands\n");
                         }
                     }
-                    "help" => out.push_str("REPL meta-commands\n"),
+                    "help" => out.push_str("REPL Meta-Commands\n"),
                     _ => out.push_str(&format!("unknown meta-command `:{}`\n", cmd)),
                 }
             }
@@ -3816,10 +3817,7 @@ fn run_transcript_with(inputs: &[&str], project_dir: Option<&str>, flags: ReplFl
                             d
                         };
                         if d.code == "E1801" {
-                            out.push_str(&format!(
-                                "Error [{}]: {}\n Why: {}\n Fix: {}\n",
-                                d.code, d.what, d.why, d.fix
-                            ));
+                            out.push_str(&d.render("", ""));
                         } else {
                             out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
                         }

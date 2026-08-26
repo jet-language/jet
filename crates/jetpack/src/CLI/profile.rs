@@ -658,7 +658,8 @@ fn build_generation(
                 package.raw
             )));
         }
-        let nodes = collect_output_nodes(lease.original_output(), &package.raw)?;
+        let leased_output = lease.stable_path(&entry.out)?;
+        let nodes = collect_output_nodes(&leased_output, &package.raw)?;
         realized.push(RealizedProfilePackage {
             fact: package.clone(),
             entry,

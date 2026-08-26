@@ -1915,10 +1915,7 @@ pub fn stale_manifest_name_diagnostic(start: &Path) -> Option<(PathBuf, Diagnost
 /// message in that case).
 pub fn stale_manifest_name_message(start: &Path) -> Option<String> {
     let (_, diagnostic) = stale_manifest_name_diagnostic(start)?;
-    Some(format!(
-        "Error [{}]: {}\n Why: {}\n Fix: {}\n",
-        diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix,
-    ))
+    Some(diagnostic.render("", ""))
 }
 
 /// Dry-resolve path dependencies to catch version conflicts (E1201).

@@ -21,7 +21,13 @@ case "${1:-}" in
     shift
     ;;
 esac
-tmp_parent="${JET_VERIFY_TMPDIR:-/tmp}"
+tmp_parent="${JET_VERIFY_TMPDIR:-${TMPDIR:-$HOME/.cache/jet-test-scratch}}"
+case "$tmp_parent" in
+  /tmp|/tmp/*)
+    echo "error: verify-full scratch must not use /tmp; use $HOME/.cache/jet-test-scratch" >&2
+    exit 1
+    ;;
+esac
 mkdir -p -- "$tmp_parent"
 tmp="$(mktemp -d "$tmp_parent/jet-verify.XXXXXX")"
 oracle_cache_dir="$repo/.tmp/jet-test-scratch/verify-oracles-$$"
@@ -47,8 +53,29 @@ export TMP="$tmp"
 export TEMP="$tmp"
 export JET_VERIFY_TMPDIR="$tmp"
 export JET_DEV_ORACLE_CACHE_DIR="$oracle_cache_dir"
-export JET_TEST_JOBS="${JET_TEST_JOBS:-16}"
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$JET_TEST_JOBS}"
+export JET_TEST_JOBS="${JET_TEST_JOBS:-6}"
+requested_build_jobs="${CARGO_BUILD_JOBS:-$JET_TEST_JOBS}"
+case "$requested_build_jobs" in
+  ''|*[!0-9]*)
+    echo "error: CARGO_BUILD_JOBS must be a non-negative integer" >&2
+    exit 1
+    ;;
+esac
+if [ "$requested_build_jobs" -gt 6 ]; then
+  requested_build_jobs=6
+fi
+export CARGO_BUILD_JOBS="$requested_build_jobs"
+
+# D-CI2=A: every workspace test shard inherits the warning wall. The separate
+# rust-lint job owns rustfmt and Clippy; this keeps the real test path strict.
+case " ${RUSTFLAGS:-} " in
+  *" -D warnings "*) ;;
+  *) export RUSTFLAGS="${RUSTFLAGS:-} -D warnings" ;;
+esac
+
+export JET_CI_EVIDENCE_DIR="${JET_CI_EVIDENCE_DIR:-$repo/.tmp/ci-evidence/${JET_TEST_SHARD:-all}-$$}"
+mkdir -p -- "$JET_CI_EVIDENCE_DIR"
+export JET_TOWER_HYGIENE_REPORT="${JET_TOWER_HYGIENE_REPORT:-$JET_CI_EVIDENCE_DIR/tower-hygiene.txt}"
 
 case "$probe_mode" in
   exit)
@@ -177,6 +204,15 @@ if [ -n "${JET_TEST_SHARD:-}" ]; then
   test_targets="$("$repo/tools/ci/test-shards.sh" "$JET_TEST_SHARD" "$shard_count")"
 else
   test_targets="$("$repo/tools/ci/test-shards.sh" 0 1)"
+fi
+if [ -n "${JET_TEST_SHARD:-}" ]; then
+  test_targets_repeat="$("$repo/tools/ci/test-shards.sh" "$JET_TEST_SHARD" "$shard_count")"
+else
+  test_targets_repeat="$("$repo/tools/ci/test-shards.sh" 0 1)"
+fi
+if [ "$test_targets" != "$test_targets_repeat" ]; then
+  echo "error: test-target inventory is nondeterministic; refusing a release gate with unstable shard evidence" >&2
+  exit 1
 fi
 if [ -z "$test_targets" ]; then
   echo "error: test-target inventory selected no targets; refusing a false-green verify-full run" >&2

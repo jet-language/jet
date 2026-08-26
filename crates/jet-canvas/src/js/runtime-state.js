@@ -207,7 +207,7 @@
   const NODE_ARCHETYPE_STYLES = {
     entry: { accent: "#b83647", header: "#b83647", header2: "#6f1e2b", label: "Entry", glyph: "ƒ", subtitle: "" },
     function_exec: { accent: "#4f83b6", header: "#315d84", header2: "#1f3e5b", label: "Function", glyph: "ƒ", subtitle: "" },
-    function_pure: { accent: "#4f9e5a", header: "#357745", header2: "#234f31", label: "Pure function", glyph: "ƒ", subtitle: "" },
+    function_pure: { accent: "#4f9e5a", header: "#357745", header2: "#234f31", label: "Pure Function", glyph: "ƒ", subtitle: "" },
     control: { accent: "#f2f4f8", header: "#2c333d", header2: "#151a21", label: "Control", glyph: "◇", subtitle: "" },
     value: { accent: "#8a8f98", header: "#252b34", header2: "#151a21", label: "Value", glyph: "•", subtitle: "" }
   };

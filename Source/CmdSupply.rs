@@ -219,6 +219,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             eprintln!(
                 " Fix: commit or stash all uncommitted changes, then run `jet registry publish` again."
             );
+            eprintln!("More: jet-lang.dev/e/E2605");
             eprintln!("      use `jet registry publish --force` to bypass with an explicit warning banner.");
             eprintln!();
             eprintln!("  uncommitted changes ({}):", dirty.len());
@@ -1224,6 +1225,7 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
             eprintln!(" Why: a yank marks one specific published version as deprecated;");
             eprintln!("      without a version the command doesn't know which one to yank.");
             eprintln!(" Fix: run `jet registry yank <version>`, e.g. `jet registry yank 1.2.3`.");
+            eprintln!("More: jet-lang.dev/e/E2606");
             exit(ExitCodes::USER_ERROR);
         }
     };

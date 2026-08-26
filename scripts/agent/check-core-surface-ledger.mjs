@@ -48,6 +48,19 @@ const CORE_TYPES_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs";
 const PREDICATES_PATH = "crates/jet-foundation/src/Syntax/predicates.rs";
 const POLICY_PATH = "crates/jet-foundation/src/Policy.rs";
 const SYNTAX_PATH = "crates/jet-foundation/src/Syntax/core_surface.rs";
+const CORE_API_LAWS_PATH = "docs/spec/stdlib-api-laws.md";
+const SYNTAX_REFERENCE_PATH = "docs/reference/syntax-surface.jet";
+const AGENT_MANIFEST_PATH = "tests/agent_workloads/manifest.tsv";
+const AGENT_RECEIPT_PATH = "tests/agent_workloads/baselines/receipt.tsv";
+// D-SERVICE1=D: fixed_sigs.rs retains private Prelude contracts under this
+// retired adapter name. It is not a user-facing Core module and must not enter
+// the public workflow inventory. Unknown names remain hard errors below.
+const PRIVATE_CORE_MODULES = new Set(["core.services"]);
+// Fake-data helpers are an internal deterministic test capability, not a
+// public collection container. Keep dispatch discovery strict without scoring
+// this private table as Core API.
+const PRIVATE_COLLECTION_METHOD_FUNCTIONS = new Set(["fake_method_return"]);
+const PRIVATE_CORE_TYPES = new Set(["Fake"]);
 
 // Every language the owner named on 2026-08-03, each with a recorded surface
 // read from that language's own primary source. Python keeps its interpreter
@@ -499,6 +512,7 @@ const TYPE_CONTAINER = {
   CompilerNode: "core.compiler",
   BuildContext: "core.compiler",
   Solver: "core.compute.solve",
+  Authority: "core.process",
   Digest256: "core.crypto",
   Digest512: "core.crypto",
   Clock: "core.time",
@@ -552,6 +566,7 @@ const COLLECTION_METHOD_FUNCTIONS = {
   clock_method_return: "Clock",
   rng_method_return: "Rng",
   solver_method_return: "Solver",
+  fake_method_return: null,
   duration_method_return: "Duration",
   task_method_return: "Task",
   receiver_method_return: "Receiver",
@@ -1133,6 +1148,7 @@ function fixedSignaturePairs(modules) {
     for (const raw of moduleIndexes.map(function (index) { return strings[index]; })) {
       const module = containerFor(canonicalModule(raw));
       if (!knownModules.has(module)) {
+        if (PRIVATE_CORE_MODULES.has(raw)) continue;
         throw new Error("fixed_sigs names an unknown Core module: " + raw);
       }
       for (const method of methods) pairs.add(module + "." + method);
@@ -1277,6 +1293,7 @@ function inlineTables(arms, source, constants) {
     }
     const type = Array.from(names).find(function (name) { return TYPE_CONTAINER[name]; });
     if (!type) {
+      if (Array.from(names).some(function (name) { return PRIVATE_CORE_TYPES.has(name); })) continue;
       unknown.push(Array.from(names).join("/") || arm.lhs.trim().slice(0, 60));
       continue;
     }
@@ -1322,6 +1339,7 @@ function collectionInventory() {
     const body = tableBody(name, sources);
     const sourceLine = lineAt(source, source.indexOf("fn " + name + "("));
     if (name === "result_method_return") continue;
+    if (PRIVATE_COLLECTION_METHOD_FUNCTIONS.has(name)) continue;
     if (container !== null) {
       const methods = Array.from(methodNames(body, constants)).sort();
       // A table that yields nothing is a reader that cannot read it. This is
@@ -2113,10 +2131,243 @@ function sourceFiles() {
     NUMERIC_PATH,
     CORE_TYPES_PATH,
     "docs/reference/python-surface.json",
+    CORE_API_LAWS_PATH,
+    SYNTAX_REFERENCE_PATH,
+    AGENT_MANIFEST_PATH,
+    AGENT_RECEIPT_PATH,
+    "tests/lsp.rs",
+    "tests/lsp/02_hover.json",
+    "tests/ui/variadic_not_last.stderr",
+    "tests/ui/spread_bad_call.stderr",
+    "tests/ui/yield_type_mismatch.stderr",
+    "tests/ui/user_policy_bad_args.stderr",
   ].concat(Object.values(SURFACE_FILES)).map(function (path) {
     const source = read(path);
     return { path: path, sha256: sha256(source), lineCount: source.split(/\r?\n/).length };
   });
+}
+
+function tsvRecords(path) {
+  const lines = read(path).split(/\r?\n/).filter(function (line) { return line.length > 0; });
+  if (lines.length < 2) throw new Error("empty frozen TSV manifest: " + path);
+  const header = lines[0].split("\t");
+  return lines.slice(1).map(function (line, index) {
+    const cells = line.split("\t");
+    if (cells.length !== header.length) {
+      throw new Error("malformed frozen TSV row " + path + ":" + (index + 2));
+    }
+    return Object.fromEntries(header.map(function (name, cell) {
+      return [name, cells[cell]];
+    }));
+  });
+}
+
+// Keep fixture source lookup aligned with the existing agent corpus runner's
+// adapter_stem mapping. This is only a path lookup; scoring stays in the
+// runner named by the frozen contract below.
+function agentAdapterStem(taskId) {
+  if (taskId === "repository-marker-scan" || taskId === "repository-marker-scan-empty") return "repository_marker_scan";
+  if (taskId === "repository-semantic-inspection") return "repository_semantic_inspection";
+  if (taskId === "repository-semantic-edit") return "repository_semantic_edit";
+  if (taskId === "git-diff-review" || taskId === "git-diff-empty") return "git_diff_review";
+  if (taskId === "build-test-failure-recovery") return "build_test_recovery";
+  if (taskId.startsWith("incident-report-")) return "incident_report";
+  if (taskId.startsWith("structured-data-")) return "structured_data";
+  if (taskId.startsWith("database-")) return "database_access";
+  if (taskId.startsWith("http-")) return "http_api";
+  if (taskId.startsWith("process-batch-")) return "process_batch";
+  if (taskId.startsWith("mcp-environment-")) return "mcp_resource";
+  if (taskId.startsWith("interactive-terminal-")) return "interactive_terminal";
+  if (taskId.startsWith("service-lifecycle-")) return "service_lifecycle";
+  if (taskId === "browser-automation-preflight") return "browser_automation_preflight";
+  if (taskId === "desktop-interaction-focus") return "desktop_interaction_focus";
+  if (taskId === "document-markdown-inspection") return "document_markdown_inspection";
+  if (taskId === "media-asset-inventory") return "media_asset_inventory";
+  throw new Error("frozen Core API fixture has no adapter stem: " + taskId);
+}
+
+function coreApiFixtureContract() {
+  const manifest = tsvRecords(AGENT_MANIFEST_PATH);
+  const receipts = tsvRecords(AGENT_RECEIPT_PATH);
+  const receiptByTask = new Map();
+  for (const receipt of receipts) {
+    if (!receiptByTask.has(receipt.task_id)) receiptByTask.set(receipt.task_id, []);
+    receiptByTask.get(receipt.task_id).push(receipt);
+  }
+  const suffix = { jet: "jet", bash: "bash", python: "py", node: "mjs" };
+  const tasks = manifest.map(function (row) {
+    const adapters = row.adapters.split(",").filter(Boolean);
+    const taskReceipts = receiptByTask.get(row.task_id) || [];
+    const toolVersions = Object.fromEntries(taskReceipts.map(function (receipt) {
+      return [receipt.adapter, receipt.tool_version];
+    }));
+    const sourceFiles = adapters.map(function (adapter) {
+      const path = "tests/agent_workloads/adapters/" +
+        agentAdapterStem(row.task_id) + "." + suffix[adapter];
+      if (!suffix[adapter] || !existsSync(join(ROOT, path))) {
+        throw new Error("frozen Core API fixture source is missing: " + path);
+      }
+      return path;
+    });
+    return {
+      task: row.task_id,
+      input: row.input,
+      outcome: row.declared_outcome,
+      allowedDependency: row.authority,
+      toolVersions: toolVersions,
+      sourceBoundary: {
+        userAuthored: sourceFiles,
+        generatedAndReferenceExcluded: [
+          "tests/agent_workloads/baselines",
+          "tests/agent_workloads/expected",
+        ],
+      },
+      adapters: adapters,
+      scoring: row.evidence,
+      runner: row.evidence,
+      receipts: taskReceipts.map(function (receipt) {
+        return {
+          adapter: receipt.adapter,
+          sourceTokens: Number(receipt.source_tokens),
+          exitCode: Number(receipt.exit_code),
+          outputStable: receipt.output_stable === "true",
+          scoring: receipt.scoring,
+          toolVersion: receipt.tool_version,
+          policyDigest: receipt.policy_digest,
+        };
+      }),
+    };
+  });
+  return {
+    manifest: AGENT_MANIFEST_PATH,
+    receipt: AGENT_RECEIPT_PATH,
+    runner: "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks",
+    scoring: "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed",
+    sourceBoundary: {
+      rule: "Only user-authored adapter source under tests/agent_workloads/adapters is compared.",
+      excluded: ["tests/agent_workloads/baselines", "tests/agent_workloads/expected"],
+    },
+    tasks: tasks,
+  };
+}
+
+function coreApiCaseKinds(row) {
+  const member = (row.source.member || "").toLowerCase();
+  const text = (row.container + " " + member + " " + row.workflow).toLowerCase();
+  const cases = ["beginner"];
+  if (/policy|limit|precision|bound|timeout|schedule|capacity|canonical|tls|auth|unsafe|raw|expert/.test(text)) {
+    cases.push("expert-policy");
+  }
+  if (/parse|decode|encode|read|write|open|load|save|query|find|get|try|error|invalid|validate|check/.test(text)) {
+    cases.push("failure");
+  }
+  if (/close|cancel|join|wait|start|stop|resume|pause|stream|task|watch|socket|reader|writer|transaction/.test(text)) {
+    cases.push("lifecycle");
+  }
+  return cases;
+}
+
+function coreApiWorkflowManifest(rows, surfaces) {
+  const languageVersions = Object.fromEntries(Object.entries(surfaces).map(function ([language, entry]) {
+    return [language, entry.surface.runtime];
+  }));
+  return rows.map(function (row) {
+    const competitorSources = Object.entries(row.competitors || {})
+      .filter(function ([, cell]) { return cell.status === "has"; })
+      .map(function ([language]) { return surfaces[language].path; })
+      .sort();
+    const jetSources = (row.evidence || [])
+      .filter(function (evidence) { return evidence.startsWith("source:"); })
+      .map(function (evidence) { return evidence.slice("source:".length); })
+      .sort();
+    const declined = row.declinedBy ? {
+      decision: row.declinedBy,
+      scored: true,
+      reason: "A design decline remains a scored comparison result.",
+    } : null;
+    return {
+      id: row.id,
+      task: "core-api/" + row.id,
+      input: {
+        kind: "frozen-ledger-workflow",
+        row: row.id,
+        sameInputsAcrossArms: true,
+        fixtureStatus: "not-bound",
+      },
+      outcome: {
+        workflow: row.workflow,
+        ledgerVerdict: row.verdict,
+        competingOperation: row.source.member,
+      },
+      allowedDependency: {
+        jet: "shipped Core API only",
+        competitors: "the recorded standard-library surface only",
+      },
+      toolVersions: languageVersions,
+      sourceBoundary: {
+        jet: jetSources,
+        competitors: competitorSources,
+        fixtureManifest: AGENT_MANIFEST_PATH,
+        userAuthoredRoot: "tests/agent_workloads/adapters",
+        generatedSourceExcluded: true,
+      },
+      competingCoreWorkflow: row.workflow,
+      cases: coreApiCaseKinds(row),
+      scope: {
+        excluded: false,
+        decline: declined,
+      },
+      evidence: {
+        status: "pending-fixture",
+        rawSourceCounts: null,
+        mandatoryConceptIds: null,
+        hiddenFacts: null,
+        nonlocalLookups: null,
+        extraConstructs: null,
+        reasoningBurden: null,
+        independentFixtureReview: null,
+        jetWin: null,
+      },
+    };
+  });
+}
+
+function coreApiGate(rows, surfaces) {
+  const workflows = coreApiWorkflowManifest(rows, surfaces);
+  const fixtureContract = coreApiFixtureContract();
+  const caseCounts = {};
+  for (const workflow of workflows) {
+    for (const kind of workflow.cases) caseCounts[kind] = (caseCounts[kind] || 0) + 1;
+  }
+  const pendingEvidenceCount = workflows.filter(function (workflow) {
+    return workflow.evidence.status !== "measured";
+  }).length;
+  return {
+    schemaVersion: 1,
+    ownerCard: 1398,
+    policyDocument: CORE_API_LAWS_PATH,
+    policyAnchor: "## Competitive Core API gate",
+    calibrationLanguage: "Python",
+    competingLanguages: Object.keys(surfaces).sort(),
+    inventory: {
+      source: "rows",
+      sourceFile: "docs/reference/core-surface-ledger.json",
+      rowIdField: "id",
+      workflowField: "workflow",
+      manualWorkflowInventory: false,
+      rule: "Every ledger row has one manifest entry; no workflow may be hidden by a fixture filter.",
+    },
+    fixtureContract: fixtureContract,
+    workflowManifest: workflows,
+    summary: {
+      workflowCount: workflows.length,
+      caseCounts: caseCounts,
+      pendingEvidenceCount: pendingEvidenceCount,
+      measuredEvidenceCount: workflows.length - pendingEvidenceCount,
+      releaseStatus: pendingEvidenceCount === 0 ? "ready" : "blocked-until-evidence-complete",
+      releaseOwner: "#1398",
+    },
+  };
 }
 
 function buildLedger() {
@@ -2170,6 +2421,7 @@ function buildLedger() {
       manualWorkflowInventory: false,
       rule: "Load rows from this file. Do not copy the inventory into a second workflow rubric.",
     },
+    coreApiGate: coreApiGate(rows, surfaces),
     inventory: { modules: modules, fixedSignaturePairs: fixedPairs, collections: collections },
     lossClusters: clusters,
     repeatedOperations: repeatedOperations(rows),
@@ -2213,6 +2465,157 @@ function buildLedger() {
 
 // ---------------------------------------------------------------------------
 // Validation. Truthfulness is gated; coverage is printed.
+
+function validateCoreApiGate(ledger) {
+  const gate = ledger.coreApiGate;
+  if (!gate || gate.schemaVersion !== 1) {
+    throw new Error("missing Core API gate schema");
+  }
+  if (gate.ownerCard !== 1398 || gate.policyDocument !== CORE_API_LAWS_PATH ||
+      gate.policyAnchor !== "## Competitive Core API gate") {
+    throw new Error("Core API gate is not attached to the existing Core API rubric");
+  }
+  if (gate.inventory.source !== "rows" || gate.inventory.manualWorkflowInventory !== false) {
+    throw new Error("Core API gate must consume ledger rows as its only workflow inventory");
+  }
+  const policy = readFileSync(join(ROOT, CORE_API_LAWS_PATH), "utf8");
+  if ((policy.match(/^## Competitive Core API gate\b.*$/gm) || []).length !== 1 ||
+      !policy.includes("Python is the calibration arm") ||
+      !policy.includes("Raw counts are evidence, not a universal ratio") ||
+      !policy.includes("Incidental ceremony fails") ||
+      !policy.includes("coreApiGate.workflowManifest")) {
+    throw new Error("Core API rubric is missing its single Python superiority gate");
+  }
+  const syntax = readFileSync(join(ROOT, SYNTAX_REFERENCE_PATH), "utf8");
+  for (const marker of [
+    "values: ...String",
+    "[...tags",
+    "Stream<Int>",
+    "yield i",
+    "delay: Int",
+    "pub policy audit",
+    "wrap(call)",
+    "#Policy(",
+  ]) {
+    if (!syntax.includes(marker)) {
+      throw new Error("syntax reference does not teach Core gate form: " + marker);
+    }
+  }
+  const editor = read("tests/lsp.rs");
+  for (const marker of [
+    "lsp_completion_returns_items",
+    "lsp_signature_help_returns_active_parameter",
+    "rest: ...String",
+    "lsp_hover_returns_signature",
+    "fn connect(host: String, /",
+  ]) {
+    if (!editor.includes(marker)) {
+      throw new Error("editor coverage does not teach Core gate form: " + marker);
+    }
+  }
+  const hover = read("tests/lsp/02_hover.json");
+  if (hover.includes("=>") || !hover.includes("-> Int")) {
+    throw new Error("hover fixture teaches retired `=>`; use `->`");
+  }
+  for (const [path, markers] of [
+    ["tests/ui/variadic_not_last.stderr", ["E1310", "variadic parameter"]],
+    ["tests/ui/spread_bad_call.stderr", ["E1312", "call spread"]],
+    ["tests/ui/yield_type_mismatch.stderr", ["E0807", "Stream<Int"]],
+    ["tests/ui/user_policy_bad_args.stderr", ["policy `audit`", "Fix:"]],
+  ]) {
+    const diagnostics = read(path);
+    for (const marker of markers) {
+      if (!diagnostics.includes(marker)) {
+        throw new Error("diagnostic coverage does not teach Core gate form: " + path + " " + marker);
+      }
+    }
+  }
+  const rowIds = new Set(ledger.rows.map(function (row) { return row.id; }));
+  const workflows = gate.workflowManifest;
+  if (!Array.isArray(workflows) || workflows.length !== rowIds.size) {
+    throw new Error("Core API gate workflow manifest does not cover every ledger row");
+  }
+  const workflowIds = new Set();
+  const caseCounts = {};
+  for (const workflow of workflows) {
+    if (workflowIds.has(workflow.id)) throw new Error("duplicate Core API workflow task: " + workflow.id);
+    workflowIds.add(workflow.id);
+    if (!rowIds.has(workflow.id)) {
+      throw new Error("Core API workflow task names a row outside the ledger: " + workflow.id);
+    }
+    for (const field of ["task", "input", "outcome", "allowedDependency", "toolVersions",
+      "sourceBoundary", "competingCoreWorkflow", "cases", "scope", "evidence"]) {
+      if (workflow[field] === undefined || workflow[field] === null) {
+        throw new Error("Core API workflow is missing " + field + ": " + workflow.id);
+      }
+    }
+    if (!workflow.input.sameInputsAcrossArms ||
+        !["not-bound", "fresh", "stale", "accepted"].includes(workflow.input.fixtureStatus)) {
+      throw new Error("Core API workflow input is not frozen before comparison: " + workflow.id);
+    }
+    if (!workflow.competingCoreWorkflow || !workflow.sourceBoundary.fixtureManifest ||
+        !workflow.sourceBoundary.userAuthoredRoot) {
+      throw new Error("Core API workflow lacks a source boundary: " + workflow.id);
+    }
+    if (workflow.scope.excluded && !workflow.scope.decline) {
+      throw new Error("Core API workflow is hidden without a ratified scope decision: " + workflow.id);
+    }
+    if (!workflow.scope.excluded && workflow.scope.decline && !workflow.scope.decline.scored) {
+      throw new Error("Core API design decline is not scored: " + workflow.id);
+    }
+    for (const kind of workflow.cases) caseCounts[kind] = (caseCounts[kind] || 0) + 1;
+    for (const field of ["rawSourceCounts", "mandatoryConceptIds", "hiddenFacts", "nonlocalLookups",
+      "extraConstructs", "reasoningBurden", "independentFixtureReview", "jetWin"]) {
+      if (!Object.prototype.hasOwnProperty.call(workflow.evidence, field)) {
+        throw new Error("Core API workflow evidence is missing " + field + ": " + workflow.id);
+      }
+    }
+    if (!["pending-fixture", "measured"].includes(workflow.evidence.status)) {
+      throw new Error("invalid Core API workflow evidence status: " + workflow.id);
+    }
+  }
+  if (stable(Array.from(workflowIds).sort()) !== stable(Array.from(rowIds).sort())) {
+    throw new Error("Core API workflow manifest row coverage drifted");
+  }
+  for (const kind of ["beginner", "expert-policy", "failure", "lifecycle"]) {
+    if (!caseCounts[kind]) throw new Error("Core API workflow inventory has no " + kind + " cases");
+  }
+  if (stable(gate.summary.caseCounts) !== stable(caseCounts)) {
+    throw new Error("Core API workflow case counts drifted");
+  }
+  const expectedPending = workflows.filter(function (workflow) {
+    return workflow.evidence.status !== "measured";
+  }).length;
+  if (gate.summary.pendingEvidenceCount !== expectedPending ||
+      gate.summary.measuredEvidenceCount !== workflows.length - expectedPending) {
+    throw new Error("Core API workflow evidence summary drifted");
+  }
+  const fixture = gate.fixtureContract;
+  if (!fixture || fixture.manifest !== AGENT_MANIFEST_PATH || fixture.receipt !== AGENT_RECEIPT_PATH ||
+      fixture.runner !== "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks") {
+    throw new Error("Core API gate does not reuse the frozen agent corpus contract");
+  }
+  if (!Array.isArray(fixture.tasks) || fixture.tasks.length === 0) {
+    throw new Error("Core API gate has no frozen fixture tasks");
+  }
+  const taskIds = new Set();
+  for (const task of fixture.tasks) {
+    if (taskIds.has(task.task)) throw new Error("duplicate Core API fixture task: " + task.task);
+    taskIds.add(task.task);
+    for (const field of ["input", "outcome", "allowedDependency", "toolVersions", "sourceBoundary",
+      "adapters", "scoring", "runner", "receipts"]) {
+      if (task[field] === undefined || task[field] === null) {
+        throw new Error("Core API fixture is missing " + field + ": " + task.task);
+      }
+    }
+    if (!task.sourceBoundary.userAuthored.length || !task.sourceBoundary.generatedAndReferenceExcluded.length) {
+      throw new Error("Core API fixture source boundary is incomplete: " + task.task);
+    }
+    if (task.scoring !== fixture.runner || task.runner !== fixture.runner) {
+      throw new Error("Core API fixture does not name its existing runner: " + task.task);
+    }
+  }
+}
 
 function validateSurfaces(ledger, surfaces) {
   surfaces = surfaces || loadSurfaces();
@@ -2425,6 +2828,7 @@ function loadJson(path) {
 
 function markdown(ledger) {
   const v = ledger.summary.verdicts;
+  const gate = ledger.coreApiGate;
   const lines = [
     "# Jet Core surface ledger",
     "",
@@ -2541,6 +2945,41 @@ function markdown(ledger) {
   }
   lines.push(
     "",
+    "## Competitive Core API gate",
+    "",
+    "The release gate is owned by card #" + gate.ownerCard + " and attached to " +
+      gate.policyDocument + " at `" + gate.policyAnchor + "`. Python is the calibration arm;",
+    "the claim covers all " + gate.competingLanguages.length + " recorded competitor languages.",
+    "",
+    "| Gate measure | Value |",
+    "| --- | ---: |",
+    "| Workflow manifest entries | " + gate.summary.workflowCount + " |",
+    "| Beginner cases | " + gate.summary.caseCounts.beginner + " |",
+    "| Expert-policy cases | " + gate.summary.caseCounts["expert-policy"] + " |",
+    "| Failure cases | " + gate.summary.caseCounts.failure + " |",
+    "| Lifecycle cases | " + gate.summary.caseCounts.lifecycle + " |",
+    "| Pending evidence records | " + gate.summary.pendingEvidenceCount + " |",
+    "| Measured evidence records | " + gate.summary.measuredEvidenceCount + " |",
+    "| Release status | `" + gate.summary.releaseStatus + "` |",
+    "",
+    "Every ledger row has one frozen task record with the same input and outcome",
+    "across language arms, allowed dependencies, tool versions, source boundary,",
+    "and competing workflow. Design declines remain scored; only ratified scope",
+    "decisions may exclude a workflow. The fixture contract reuses " +
+      gate.fixtureContract.manifest + ", " + gate.fixtureContract.receipt + ",",
+    "the existing " + gate.fixtureContract.runner + ", and the recorded #769",
+    "scoring contract. Raw source counts are evidence, not a universal ratio.",
+    "Incidental ceremony fails; accepted extra constructs need a clarity, local",
+    "reasoning, named guarantee, or expert-control benefit and an independent",
+    "fixture review.",
+    "",
+    "Run the structural check and the fail-closed release check:",
+    "",
+    "~~~sh",
+    "node scripts/agent/check-core-surface-ledger.mjs --check",
+    "node scripts/agent/check-core-surface-ledger.mjs --core-api-release-check",
+    "~~~",
+    "",
     "## Core domains not yet compared",
     "",
     "No competitor surface records a container for these Core modules, so no",
@@ -2585,6 +3024,7 @@ function check() {
   validateRows(stored);
   validateOwners(stored);
   validateCoverage(stored);
+  validateCoreApiGate(stored);
   compareLedger(stored, buildLedger());
   const v = stored.summary.verdicts;
   process.stdout.write("core surface ledger: source-derived, verified against " +
@@ -2597,6 +3037,86 @@ function check() {
     " types=" + (v.type_item || 0) +
     " not-compared=" + (v.not_compared || 0) +
     " clusters-needing-a-card=" + stored.summary.clustersNeedingCard + "\n");
+  process.stdout.write("core API gate: " + stored.coreApiGate.summary.releaseStatus +
+    " workflows=" + stored.coreApiGate.summary.workflowCount +
+    " pending-evidence=" + stored.coreApiGate.summary.pendingEvidenceCount + "\n");
+}
+
+function coreApiReleaseCheck() {
+  const stored = loadJson(LEDGER_PATH);
+  validateSurfaces(stored);
+  validateRows(stored);
+  validateOwners(stored);
+  validateCoverage(stored);
+  validateCoreApiGate(stored);
+  compareLedger(stored, buildLedger());
+
+  const failures = [];
+  const classifications = new Set([
+    "task-essential",
+    "clarity-bearing",
+    "guarantee-bearing",
+    "expert-control",
+    "incidental-ceremony",
+  ]);
+  for (const workflow of stored.coreApiGate.workflowManifest) {
+    const evidence = workflow.evidence;
+    if (workflow.input.fixtureStatus === "stale") {
+      failures.push({ task: workflow.task, reason: "fixture is stale", owner: "#1398" });
+    }
+    if (evidence.status !== "measured") {
+      failures.push({
+        task: workflow.task,
+        reason: "missing measured source-cost, concept, hidden-fact, lookup, ceremony, review, and Jet-win evidence",
+        owner: "#1398",
+      });
+      continue;
+    }
+    if (!evidence.rawSourceCounts || !Array.isArray(evidence.mandatoryConceptIds) ||
+        !Array.isArray(evidence.hiddenFacts) || !Array.isArray(evidence.nonlocalLookups) ||
+        !Array.isArray(evidence.extraConstructs) || !evidence.reasoningBurden ||
+        !evidence.independentFixtureReview || !evidence.jetWin) {
+      failures.push({ task: workflow.task, reason: "measured evidence record is incomplete", owner: "#1398" });
+    }
+    for (const construct of evidence.extraConstructs || []) {
+      if (!classifications.has(construct.classification)) {
+        failures.push({ task: workflow.task, reason: "extra construct has no valid classification", owner: "#1398" });
+      }
+      for (const field of ["span", "cost", "rejectedShorterForm", "lostValue", "reviewerVerdict"]) {
+        if (construct[field] === undefined || construct[field] === null || construct[field] === "") {
+          failures.push({ task: workflow.task, reason: "extra construct is missing " + field, owner: "#1398" });
+        }
+      }
+      if (!["claimedClarity", "reasoningBenefit", "localFactBenefit", "guaranteeBenefit",
+        "expertControlBenefit"].some(function (field) {
+        return construct[field] !== undefined && construct[field] !== null && construct[field] !== "";
+      })) {
+        failures.push({ task: workflow.task, reason: "extra construct has no claimed product benefit", owner: "#1398" });
+      }
+      if (construct.classification === "incidental-ceremony") {
+        failures.push({ task: workflow.task, reason: "incidental ceremony is unexplained", owner: "#1398" });
+      }
+    }
+    if (evidence.reasoningBurden && evidence.reasoningBurden.status === "worse" &&
+        evidence.jetWin.compensates !== true) {
+      failures.push({ task: workflow.task, reason: "worse reasoning burden has no compensating product win", owner: "#1398" });
+    }
+    if (evidence.independentFixtureReview.status !== "accepted") {
+      failures.push({ task: workflow.task, reason: "fixture lacks independent idiomatic/minimal acceptance", owner: "#1398" });
+    }
+    if (evidence.jetWin.status !== "accepted") {
+      failures.push({ task: workflow.task, reason: "missing evidence-backed Jet win", owner: "#1398" });
+    }
+  }
+  if (failures.length) {
+    const shown = failures.slice(0, 4).map(function (failure) {
+      return failure.task + ": " + failure.reason + " (owner " + failure.owner + ")";
+    });
+    throw new Error("core API release gate blocked; failures=" + failures.length + "\n- " +
+      shown.join("\n- ") + (failures.length > shown.length ? "\n- ..." : ""));
+  }
+  process.stdout.write("core API release gate: ready; workflows=" +
+    stored.coreApiGate.summary.workflowCount + "\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -2653,6 +3173,29 @@ function hostileFixtures() {
   const surfaces = loadSurfaces();
   const board = towerBoard();
   const results = [];
+
+  results.push(rejects("Core API workflow manifest drops a ledger row",
+    "Core API gate workflow manifest does not cover every ledger row", function () {
+    const broken = clone(ledger);
+    broken.coreApiGate.workflowManifest.pop();
+    validateCoreApiGate(broken);
+  }));
+
+  results.push(rejects("Core API workflow omits evidence fields",
+    "Core API workflow evidence is missing rawSourceCounts", function () {
+    const broken = clone(ledger);
+    delete broken.coreApiGate.workflowManifest[0].evidence.rawSourceCounts;
+    validateCoreApiGate(broken);
+  }));
+
+  results.push(rejects("Core API workflow hides an unratified decline",
+    "hidden without a ratified scope decision", function () {
+    const broken = clone(ledger);
+    const workflow = broken.coreApiGate.workflowManifest[0];
+    workflow.scope.excluded = true;
+    workflow.scope.decline = null;
+    validateCoreApiGate(broken);
+  }));
 
   results.push(holds("match parser keeps the arm after a block-bodied arm", function () {
     const sample = 'match (name, arity) {\n' +
@@ -2979,8 +3522,9 @@ const args = process.argv.slice(2);
 try {
   if (args.includes("--refresh")) refresh();
   else if (args.includes("--check")) check();
+  else if (args.includes("--core-api-release-check")) coreApiReleaseCheck();
   else if (args.includes("--hostile-fixtures")) hostileFixtures();
-  else throw new Error("usage: check-core-surface-ledger.mjs --refresh|--check|--hostile-fixtures");
+  else throw new Error("usage: check-core-surface-ledger.mjs --refresh|--check|--core-api-release-check|--hostile-fixtures");
 } catch (error) {
   process.stderr.write(error.message + "\n");
   process.exitCode = 1;

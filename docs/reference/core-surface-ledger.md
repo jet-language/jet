@@ -7,7 +7,7 @@ This page is the durable review index. The JSON file beside it is the
 machine-readable source that card #1398 reads. Do not keep a second
 hand-written workflow inventory.
 
-Generated on: 2026-08-17
+Generated on: 2026-08-26
 
 ## What decides a row
 
@@ -50,39 +50,39 @@ Generated on: 2026-08-17
 | --- | ---: |
 | Languages compared | 11 |
 | Shared containers | 51 |
-| Core modules | 78 |
-| Module members | 1118 |
-| Collection method rows | 734 |
-| Jet-side rows | 1870 |
-| Total rows | 9400 |
+| Core modules | 79 |
+| Module members | 1098 |
+| Collection method rows | 743 |
+| Jet-side rows | 1860 |
+| Total rows | 9389 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 472 |
-| Equal | 826 |
+| Jet wins | 484 |
+| Equal | 828 |
 | Jet loses (two or more languages agree) | 119 |
-| Single witness (recorded, not scored) | 7306 |
-| Exported type, not an operation | 155 |
-| Not compared | 417 |
+| Single witness (recorded, not scored) | 7305 |
+| Exported type, not an operation | 161 |
+| Not compared | 387 |
 | Deliberately declined | 105 |
 
 ## Competitors
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 342 | 10 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 366 | 27 |
+| Rust | standard-library source (rust-src component) | 1032 | 342 | 11 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 368 | 27 |
 | Swift | official documentation JSON (developer.apple.com) | 505 | 183 | 4 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 244 | 10 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 310 | 22 |
-| TypeScript | runtime introspection | 724 | 209 | 30 |
-| Ruby | runtime introspection | 1294 | 317 | 23 |
-| Elixir | runtime introspection | 1270 | 388 | 41 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 271 | 45 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 245 | 9 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 313 | 22 |
+| TypeScript | runtime introspection | 724 | 210 | 30 |
+| Ruby | runtime introspection | 1294 | 319 | 23 |
+| Elixir | runtime introspection | 1270 | 391 | 41 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 271 | 46 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 52 | 0 |
-| Python | runtime introspection | 1896 | 396 | 66 |
+| Python | runtime introspection | 1896 | 399 | 65 |
 
 ## Loss clusters
 
@@ -94,8 +94,8 @@ while losses remain.
 
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
-| core.files | 39 | #288 | done | closed |
-| core.tasks | 17 | #1468 | done | closed |
+| core.files | 38 | #288 | done | closed |
+| core.tasks | 18 | #1468 | done | closed |
 | core.time | 14 | #1466 | done | closed |
 | core.math | 10 | #1464 | done | closed |
 | core.net | 9 | #1469 | done | closed |
@@ -123,13 +123,46 @@ here. The skip is listed so it stays countable.
 | R | core.data | 592 |
 | R | core.math | 1176 |
 
+## Competitive Core API gate
+
+The release gate is owned by card #1398 and attached to docs/spec/stdlib-api-laws.md at `## Competitive Core API gate`. Python is the calibration arm;
+the claim covers all 11 recorded competitor languages.
+
+| Gate measure | Value |
+| --- | ---: |
+| Workflow manifest entries | 9389 |
+| Beginner cases | 9389 |
+| Expert-policy cases | 451 |
+| Failure cases | 1366 |
+| Lifecycle cases | 675 |
+| Pending evidence records | 9389 |
+| Measured evidence records | 0 |
+| Release status | `blocked-until-evidence-complete` |
+
+Every ledger row has one frozen task record with the same input and outcome
+across language arms, allowed dependencies, tool versions, source boundary,
+and competing workflow. Design declines remain scored; only ratified scope
+decisions may exclude a workflow. The fixture contract reuses tests/agent_workloads/manifest.tsv, tests/agent_workloads/baselines/receipt.tsv,
+the existing tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks, and the recorded #769
+scoring contract. Raw source counts are evidence, not a universal ratio.
+Incidental ceremony fails; accepted extra constructs need a clarity, local
+reasoning, named guarantee, or expert-control benefit and an independent
+fixture review.
+
+Run the structural check and the fail-closed release check:
+
+~~~sh
+node scripts/agent/check-core-surface-ledger.mjs --check
+node scripts/agent/check-core-surface-ledger.mjs --core-api-release-check
+~~~
+
 ## Core domains not yet compared
 
 No competitor surface records a container for these Core modules, so no
 row scores them. They are listed so the shortfall stays countable rather
 than invisible.
 
-`app`, `core.auth`, `core.compiler`, `core.compiler.lang`, `core.compute`, `core.compute.solve`, `core.crypto.vault`, `core.data.plot`, `core.data.sketch.cms`, `core.data.sketch.hll`, `core.data.sketch.reservoir`, `core.data.sketch.tdigest`, `core.encoding.cbor`, `core.encoding.jsonl`, `core.event`, `core.game`, `core.game.raylib`, `core.mem.scope`, `core.mod`, `core.net.ws`, `core.perf`, `core.plugin`, `core.reactive`, `core.reactive.loadable`, `core.services`, `core.ui`, `core.units`, `core.watcher`, `core.web.browser`, `core.web.devserver`, `core.web.storage`, `core.web.storage.local`, `core.web.storage.session`
+`app`, `core.auth`, `core.compiler`, `core.compiler.lang`, `core.compute`, `core.compute.solve`, `core.crypto.vault`, `core.data.plot`, `core.data.sketch.cms`, `core.data.sketch.hll`, `core.data.sketch.reservoir`, `core.data.sketch.tdigest`, `core.encoding.cbor`, `core.encoding.jsonl`, `core.event`, `core.game`, `core.game.raylib`, `core.mem.scope`, `core.mod`, `core.net.ws`, `core.perf`, `core.plugin`, `core.prelude`, `core.reactive`, `core.reactive.loadable`, `core.service`, `core.ui`, `core.units`, `core.watcher`, `core.web.browser`, `core.web.devserver`, `core.web.storage`, `core.web.storage.local`, `core.web.storage.session`
 
 ## Consumer
 

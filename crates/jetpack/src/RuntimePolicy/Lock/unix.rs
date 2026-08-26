@@ -143,6 +143,20 @@ mod supported {
         Ok(())
     }
 
+    pub fn set_inheritable(lock: &LockFile) -> io::Result<()> {
+        let fd = lock.owner.as_raw_fd();
+        // SAFETY: fd belongs to live File; descriptor flags are read only.
+        let flags = unsafe { fcntl(fd, F_GETFD) };
+        if flags < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: fd remains live; F_SETFD changes only descriptor flags.
+        if unsafe { fcntl(fd, F_SETFD, flags & !FD_CLOEXEC) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
     pub fn try_lock(lock: &LockFile) -> io::Result<bool> {
         // SAFETY: owner is live canonical-root directory descriptor.
         if unsafe { flock(lock.owner.as_raw_fd(), LOCK_EX | LOCK_NB) } == 0 {
@@ -188,7 +202,9 @@ pub(super) use supported::LockFile;
     target_os = "openbsd",
     target_os = "netbsd"
 ))]
-pub(super) use supported::{open, open_existing, try_lock, unlock, validate_path};
+pub(super) use supported::{
+    open, open_existing, set_inheritable, try_lock, unlock, validate_path,
+};
 
 #[cfg(not(any(
     target_os = "linux",
@@ -286,5 +302,19 @@ pub(super) fn try_lock(_file: &LockFile) -> io::Result<bool> {
     target_os = "netbsd"
 )))]
 pub(super) fn unlock(_file: &LockFile) -> io::Result<()> {
+    Err(unsupported())
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+)))]
+pub(super) fn set_inheritable(_file: &LockFile) -> io::Result<()> {
     Err(unsupported())
 }

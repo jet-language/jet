@@ -105,6 +105,33 @@ fn call_with_labels() {
     schedule("ping")                               // trailing defaults fill
 }
 
+// D-VARIADIC1 / D-ANY-JAI1 / D-VARARGBOUND1: a variadic tail is a final
+// named parameter. Call spread and list spread use the same `...` spelling.
+fn collect(prefix: String, values: ...String) [String] -> [prefix, ...values]
+fn spread_values() {
+    tags :: ["one", "two"]
+    collect("tag:", ...tags)
+    all :: [...tags, "three"]
+}
+
+// D-SPREAD1: member spread expands named members into a list; call fan-out is
+// retired, so `user.[name, email]` is not a call over several arguments.
+fn member_spread(user: User) [String] -> user.[name, email]
+
+// D-CALLPOLICY1=E / D-STRUCT-POLICY1=A: typed callable policies preserve the
+// wrapped function's labels, defaults, zones, effects, errors, variadics, and
+// returned-view contract. `apply` selects or replaces the declared chain.
+pub policy audit(topic: String, prefix: String{"audit"}) {
+    wrap(call) {
+        return "{prefix}:{topic}:{call()}"
+    }
+}
+#Policy(audit("users.load")) fn audited_load() String -> "ok"
+fn use_policy() {
+    selected :: apply(audit("users.load"), audited_load)
+    selected()
+}
+
 // S83 / D-CHOOSE-HEADS1=A: multi-head functions use one exhaustive enum table.
 // Same name, different parameter patterns, dispatched by argument shape; the
 // first matching declaration-order head wins.
@@ -426,9 +453,11 @@ fn fixed_size_list() {
     [t0, t1, t2] :: tripled
 }
 
-// Generators (D-ONCE-WORD1 / D-CONC-STREAM1): one `yield` hands one value to
-// one ordinary consumer pull. The producer resumes after that value is
-// accepted. A consumer `break` drops the iterator; task cancellation and
+// Generators (D-ONCE-WORD1 / D-CONC-STREAM1): the manifest records this
+// concept as `Stream<T>` plus `yield`; a future spelling ballot may rename the
+// type, but it must not create a second workflow row. One `yield` hands one
+// value to one ordinary consumer pull. The producer resumes after that value
+// is accepted. A consumer `break` drops the iterator; task cancellation and
 // deferred cleanup follow D-CANCELMODEL1=C at the next wait point.
 fn numbers(n: Int) Stream<Int> -> {
     i := 0

@@ -91,7 +91,7 @@ pub const CATEGORIES: &[&str] = &[
 
 fn category_for(cmd: &str) -> &'static str {
     match cmd {
-        "run" | "check" | "test" | "build" | "debug" | "eval" | "emit" => "Build & Run",
+        "run" | "check" | "test" | "build" | "debug" | "eval" | "emit" | "learn" => "Build & Run",
         "dev" => "Development Server",
         "devtools" => "Reference",
         "new" | "fmt" | "fix" | "lint" | "env" | "init" | "config" | "toolchain" => {
@@ -120,6 +120,7 @@ fn example_for(cmd: &str) -> Option<String> {
         "run" => Some("jet run".to_string()),
         "check" | "build" => Some(format!("jet {} examples/features/basics/hello.jet", cmd)),
         "dev" => Some("jet dev run.jet".to_string()),
+        "learn" => Some("jet learn".to_string()),
         "notebook" => Some("jet notebook analysis.jetnb".to_string()),
         "explain" => Some("jet explain E0102".to_string()),
         "new" => Some("jet new web-api".to_string()),
@@ -131,6 +132,7 @@ fn see_also_for(cmd: &str) -> Vec<&'static str> {
     match cmd {
         "run" => vec!["build", "test", "dev"],
         "dev" => vec!["run"],
+        "learn" => vec!["dev", "explain"],
         "build" => vec!["run", "check"],
         "test" => vec!["run", "check"],
         "add" => vec!["fetch", "update"],
@@ -155,6 +157,7 @@ fn keywords_for(cmd: &str) -> Vec<&'static str> {
             "start a web app",
         ],
         "run" => vec!["watch", "run on save"],
+        "learn" => vec!["kata", "exercise", "hint", "offline"],
         "add" => vec!["add a dependency", "dependency"],
         "explain" => vec!["understand an error message", "error", "diagnostic"],
         _ => Vec::new(),

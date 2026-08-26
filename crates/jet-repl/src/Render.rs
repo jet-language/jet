@@ -194,7 +194,7 @@ pub fn pin_label(session: &Session, turn: &ReplTurn) -> String {
         }
     }
     if turn.summary.is_empty() {
-        "ok".to_string()
+        "OK".to_string()
     } else {
         turn.summary.clone()
     }

@@ -20,8 +20,8 @@ use crate::Store::{
     admit_nix_closure_with_progress, current_progress, plan_nix_downloads, AdmittedNixClosure,
     NixOutputRequest, Roots, StoreError,
 };
-use crate::SHA256;
 use crate::Syntax;
+use crate::SHA256;
 use crate::{ProviderFactValue, ProviderFacts};
 use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -30,6 +30,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod adapter;
 mod cran;
 mod fetch;
 mod luarocks;
@@ -37,13 +38,12 @@ pub(crate) mod native;
 mod package;
 mod remote;
 mod script_registry;
-mod adapter;
 pub(crate) use adapter::{adapter_recipe_to_build, realize_adapter, stage_adapter_source};
 mod core;
-pub(crate) use core::{active_tmp_marker_is_live, CoreProvider};
-pub use core::{sweep_build_scratch, ACTIVE_TMP_MARKER, BUILD_SCRATCH_DIR};
 #[cfg(test)]
 pub(crate) use core::build_rlib_from_cargo;
+pub(crate) use core::{active_tmp_marker_is_live, CoreProvider};
+pub use core::{sweep_build_scratch, ACTIVE_TMP_MARKER, BUILD_SCRATCH_DIR};
 use cran::CranProvider;
 use luarocks::LuaRocksProvider;
 use native::NativeProvider;
@@ -322,7 +322,7 @@ pub fn validate_cache_authority(
     let Some(project) = ctx.project_dir else {
         return Ok(());
     };
-    match resolve_kind(spec, table, ctx.offline, ctx.store_dir) {
+    match resolve_kind_in_context(spec, table, ctx) {
         ProviderKind::Cran => {
             let Some((_, _, repository, locked, _)) =
                 super::Lock::cran_realization(project, &spec.raw)
@@ -342,10 +342,9 @@ pub fn validate_cache_authority(
             ensure_locked_authority("LuaRocks", &repository, &locked, &current)
         }
         ProviderKind::RubyGems | ProviderKind::Cpan | ProviderKind::Packagist => {
-            let kind = script_registry_kind(resolve_kind(spec, table, ctx.offline, ctx.store_dir))
-                .ok_or_else(|| {
-                    ProviderError::Registry("script registry", "unknown provider".into())
-                })?;
+            let kind = script_registry_kind(resolve_kind_in_context(spec, table, ctx)).ok_or_else(
+                || ProviderError::Registry("script registry", "unknown provider".into()),
+            )?;
             let Some((_, _, repository, locked, _)) =
                 super::Lock::registry_realization(project, kind.label(), &spec.raw)
             else {
@@ -385,7 +384,7 @@ pub fn cache_expectation(
     table: &SourceTable,
     ctx: &Ctx,
 ) -> Option<super::Store::CacheExpectation> {
-    match resolve_kind(spec, table, ctx.offline, ctx.store_dir) {
+    match resolve_kind_in_context(spec, table, ctx) {
         ProviderKind::Core => {
             let upstream = table.upstream(spec.source.label())?;
             let repo = source_repo(upstream, &spec.package, ctx).ok()?;
@@ -522,7 +521,7 @@ pub fn cache_expectation(
         }
         ProviderKind::RubyGems | ProviderKind::Cpan | ProviderKind::Packagist => {
             let project = ctx.project_dir?;
-            let kind = script_registry_kind(resolve_kind(spec, table, ctx.offline, ctx.store_dir))?;
+            let kind = script_registry_kind(resolve_kind_in_context(spec, table, ctx))?;
             let (output, source_hash, _repository, _locked_authority, env) =
                 super::Lock::registry_realization(project, kind.label(), &spec.raw)?;
             let authority = script_registry::cache_authority(kind, ctx).ok()?;
@@ -565,7 +564,7 @@ pub(crate) fn core_build_identity(
     table: &SourceTable,
     ctx: &Ctx,
 ) -> Result<Option<String>, String> {
-    if resolve_kind(spec, table, ctx.offline, ctx.store_dir) != ProviderKind::Core {
+    if resolve_kind_in_context(spec, table, ctx) != ProviderKind::Core {
         return Ok(None);
     }
     let upstream = table.upstream(spec.source.label()).ok_or_else(|| {
@@ -1036,8 +1035,7 @@ pub(crate) fn record_nix_lock_after_store(
     };
     let nix_realization = producer.provider == "nix"
         && entry.cache_identity.source_fingerprint == entry.envelope.output_hash
-        && entry.cache_identity.recipe_fingerprint
-            == SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes());
+        && entry.cache_identity.recipe_fingerprint == SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes());
     let local_native = producer.provider == "jetpackage"
         && producer
             .facts
@@ -1121,7 +1119,7 @@ pub(crate) fn record_nix_lock_after_store(
 }
 
 /// How a dependency was realized, for the `jet build` per-package report
-/// (`built | substituted | cached`, mirroring the D-JPK-CACHE1 example output).
+/// (`Built | Substituted | Cached`, mirroring the D-JPK-CACHE1 example output).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceState {
     /// Compiled from source by the first-party core provider this run.
@@ -1138,10 +1136,10 @@ pub enum SourceState {
 impl SourceState {
     pub fn label(self) -> &'static str {
         match self {
-            SourceState::Built => "built",
-            SourceState::Downloaded => "downloaded",
-            SourceState::Cached => "cached",
-            SourceState::Substituted => "substituted",
+            SourceState::Built => "Built",
+            SourceState::Downloaded => "Downloaded",
+            SourceState::Cached => "Cached",
+            SourceState::Substituted => "Substituted",
         }
     }
 }
@@ -1335,10 +1333,10 @@ fn locked_nix_index_key_for_project(
         .into_iter()
         .find_map(|name| super::Lock::locked_source_channel(project, name))
         .ok_or_else(|| {
-        ProviderError::Channel(format!(
-            "Nix source `{source_name}` has no exact lock entry; run `jetpack update` first"
-        ))
-    })?;
+            ProviderError::Channel(format!(
+                "Nix source `{source_name}` has no exact lock entry; run `jetpack update` first"
+            ))
+        })?;
     let prefix = "github:NixOS/nixpkgs#";
     let revision = locked.exact.strip_prefix(prefix).ok_or_else(|| {
         ProviderError::Unsupported(format!(
@@ -1534,13 +1532,9 @@ impl Provider for NixProvider {
                 store_path: store_path.clone(),
             })
             .collect::<Vec<_>>();
-        let admitted = admit_nix_closure_with_progress(
-            roots,
-            &requests,
-            ctx.offline,
-            current_progress(),
-        )
-            .map_err(|error| nix_cache_error(roots, error))?;
+        let admitted =
+            admit_nix_closure_with_progress(roots, &requests, ctx.offline, current_progress())
+                .map_err(|error| nix_cache_error(roots, error))?;
         let realized = realization_from_index(spec, &key, verified, admitted)?;
         finalize_nix_realization(spec, table, ctx, realized)
     }
@@ -1577,10 +1571,10 @@ fn realize_from_local_nix(
     .map_err(|error| ProviderError::BuildFailed(format!("local Nix fallback failed: {error}")))?;
     let native_document = invocation.stdout.clone();
     let mut realized = parse_realization(spec, &invocation.stdout)?;
-    realized
-        .producer
-        .facts
-        .insert(NIX_NATIVE_FORMAT.to_string(), "jet-local-nix-v1".to_string());
+    realized.producer.facts.insert(
+        NIX_NATIVE_FORMAT.to_string(),
+        "jet-local-nix-v1".to_string(),
+    );
     realized
         .producer
         .facts
@@ -1724,10 +1718,7 @@ fn realization_from_index(
         ("nix.drv_path".into(), verified.record.drv_path.clone()),
         ("nix.reference".into(), spec.raw.clone()),
         ("build.sandbox".into(), "non-executing".into()),
-        (
-            "build.sandbox_policy".into(),
-            catalog_policy.into(),
-        ),
+        ("build.sandbox_policy".into(), catalog_policy.into()),
         (NIX_NATIVE_FORMAT.into(), "jet-nixpkgs-index-v1".into()),
         (NIX_NATIVE_DOCUMENT.into(), verified.record.canonical_json()),
         ("nix.index.tier".into(), verified.trust.label().into()),
@@ -1758,10 +1749,7 @@ fn realization_from_index(
         ("nix.drv_path".into(), verified.record.drv_path.clone()),
         ("nix.reference".into(), spec.raw.clone()),
         ("build.sandbox".into(), "non-executing".into()),
-        (
-            "build.sandbox_policy".into(),
-            catalog_policy.into(),
-        ),
+        ("build.sandbox_policy".into(), catalog_policy.into()),
     ]);
     for (name, store_path) in &verified.record.outputs {
         let object = admitted.outputs.get(name).ok_or_else(|| {
@@ -1874,7 +1862,6 @@ fn realization_from_index(
         producer,
     })
 }
-
 
 /// Pick the provider for an already-resolved kind. Direct external roots use
 /// an explicit fail-closed boundary until their native realization path exists;
@@ -1992,6 +1979,27 @@ pub fn uses_nix_provider(
     )
 }
 
+/// Resolve an inferred project source without probing its remote when the
+/// checked-in lock already proves that the source is indexed nixpkgs.
+pub fn uses_nix_provider_for_project(
+    spec: &RefSpec,
+    table: &SourceTable,
+    offline: bool,
+    cache_dir: &Path,
+    project_dir: Option<&Path>,
+) -> bool {
+    has_locked_nix_index_key(spec, table, project_dir, host_nix_system())
+        || uses_nix_provider(spec, table, offline, cache_dir)
+}
+
+fn resolve_kind_in_context(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> ProviderKind {
+    if has_locked_nix_index_key(spec, table, ctx.project_dir, host_nix_system()) {
+        ProviderKind::Nix
+    } else {
+        resolve_kind(spec, table, ctx.offline, ctx.store_dir)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct DownloadPlan {
     pub packages: usize,
@@ -2021,7 +2029,7 @@ pub(crate) fn plan_downloads(
     let mut nix_paths = Vec::new();
 
     for spec in specs {
-        match resolve_kind(spec, table, ctx.offline, ctx.store_dir) {
+        match resolve_kind_in_context(spec, table, ctx) {
             ProviderKind::Nix => {
                 let index = ctx.nix_index.ok_or_else(|| {
                     ProviderError::Unsupported(format!(
@@ -2105,7 +2113,7 @@ pub fn needs_nix_bridge(
     cache_dir: &Path,
     project_dir: Option<&Path>,
 ) -> Option<NixBridgeNeed> {
-    if uses_nix_provider(spec, table, offline, cache_dir)
+    if uses_nix_provider_for_project(spec, table, offline, cache_dir, project_dir)
         && !has_locked_nix_index_key(spec, table, project_dir, host_nix_system())
     {
         Some(NixBridgeNeed {
@@ -2122,7 +2130,7 @@ pub fn needs_nix_bridge(
 /// fail-closed integrity behavior when no generic cache binding exists.
 pub(crate) fn can_repair_indexed_nix(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> bool {
     ctx.fixtures.is_none()
-        && uses_nix_provider(spec, table, ctx.offline, ctx.store_dir)
+        && resolve_kind_in_context(spec, table, ctx) == ProviderKind::Nix
         && locked_nix_index_key(spec, table, ctx, host_nix_system().unwrap_or_default()).is_ok()
 }
 
@@ -2133,7 +2141,7 @@ pub(crate) fn realize(
     table: &SourceTable,
     ctx: &Ctx,
 ) -> Result<Realized, ProviderError> {
-    let kind = resolve_kind(spec, table, ctx.offline, ctx.store_dir);
+    let kind = resolve_kind_in_context(spec, table, ctx);
     let mut realized = if let Some(index) = ctx.nix_index {
         match index
             .resolve_native_recipe(&spec.package)
@@ -2148,9 +2156,6 @@ pub(crate) fn realize(
     refresh_provider_facts(&mut realized.producer, &realized.reference)?;
     Ok(realized)
 }
-
-
-
 
 /// U9 remote probe: classify an `…@github`/git upstream as `Core` (it carries a
 /// `package.jet` or migration-era `pkg.jet`) or `Nix` (it does not), peeking
@@ -2801,8 +2806,14 @@ mod tests {
             nix_roots: None,
         };
 
-        assert_eq!(nix_identity_parts(&bare, &table), nix_identity_parts(&explicit, &table));
-        assert_eq!(nix_identity_parts(&explicit, &table), nix_identity_parts(&legacy, &table));
+        assert_eq!(
+            nix_identity_parts(&bare, &table),
+            nix_identity_parts(&explicit, &table)
+        );
+        assert_eq!(
+            nix_identity_parts(&explicit, &table),
+            nix_identity_parts(&legacy, &table)
+        );
         assert_eq!(
             nix_cache_identity("sha256:output", "linux-x86_64", &bare, &table, &ctx),
             nix_cache_identity("sha256:output", "linux-x86_64", &explicit, &table, &ctx)
@@ -2863,12 +2874,18 @@ mod tests {
             "nix.fallback.document.sha256",
             "nix.fallback.proof.sha256",
         ] {
-            assert!(facts.get(key).is_some_and(|value| !value.is_empty()), "{key}");
+            assert!(
+                facts.get(key).is_some_and(|value| !value.is_empty()),
+                "{key}"
+            );
         }
         assert!(facts["nix.fallback.graph"].contains("\"nodes\":[\"dep\"]"));
         assert!(facts["nix.fallback.losses"].contains("shellHook"));
         assert!(facts["nix.fallback.proof"].contains("proof-signature"));
-        assert_eq!(facts["nix.fallback.selected_outputs"], facts["nix.fallback.outputs"]);
+        assert_eq!(
+            facts["nix.fallback.selected_outputs"],
+            facts["nix.fallback.outputs"]
+        );
     }
 
     #[test]

@@ -526,7 +526,7 @@
       return `<section class="action-category"><h3>${escapeHtml(category)}</h3>${body}</section>`;
     }).join("");
     const countTag = contextMenuState.pin ? `<span class="tag">${matches.length}/${contextMenuState.actions.length}</span>` : "";
-    const emptyState = `<div class="action-empty" data-action-empty="true"><b>${query ? "No matching checked actions" : "No compatible checked actions"}</b><span>Canvas only inserts checked, source-backed actions. Open Jet source to add or repair one.</span><button type="button" data-menu-empty-source>Open source</button><button type="button" data-menu-empty-close>Close</button></div>`;
+    const emptyState = `<div class="action-empty" data-action-empty="true"><b>${query ? "No Matching Checked Actions" : "No Compatible Checked Actions"}</b><span>Canvas only inserts checked, source-backed actions. Open Jet source to add or repair one.</span><button type="button" data-menu-empty-source>Open Source</button><button type="button" data-menu-empty-close>Close</button></div>`;
     contextMenu.innerHTML = `<div class="action-palette-head"><div class="menu-title">${escapeHtml(contextMenuState.title)}</div><div class="action-context">${port}<span>${escapeHtml(context)}</span>${countTag}</div><input id="action-palette-search" placeholder="Search actions" value="${escapeAttr(query)}"></div><div class="action-results">${matches.length ? categories : emptyState}</div>`;
     const input = document.getElementById("action-palette-search");
     if (input) {
@@ -565,7 +565,7 @@
         if (!availability.available) {
           const reason = availability.reason || "This action is unavailable here.";
           setCanvasState("permission", "Action unavailable", `${action && action.title ? action.title + ": " : ""}${reason} Jet source stayed unchanged.`, [
-            { label: "Open source", run: openSourceRecovery },
+            { label: "Open Source", run: openSourceRecovery },
             { label: "Close", primary: true, run: closeContextMenu }
           ]);
           showToast(reason, { isError: true });
@@ -617,14 +617,14 @@
   function openPinMenu(pin, x, y, graphPoint) {
     if (pin && pin.role === "arm") {
       openActionPalette(x, y, "Pattern arm", [
-        { title: "Edit pattern", detail: pin.pattern_source || "pattern", group: "Patterns", run: () => editPatternArm(pin) },
-        { title: "Remove arm", detail: "delete source body", group: "Patterns", run: () => removePatternArm(pin) }
+        { title: "Edit Pattern", detail: pin.pattern_source || "pattern", group: "Patterns", run: () => editPatternArm(pin) },
+        { title: "Remove Arm", detail: "delete source body", group: "Patterns", run: () => removePatternArm(pin) }
       ], { pin, context: "Pattern arm" });
       return true;
     }
     if (pin && pin.append_op === "remove_multi_input_element") {
       openActionPalette(x, y, "Input element", [
-        { title: "Remove element", detail: pin.name || "item", group: "Pins", run: () => removeMultiInputElement(pin) }
+        { title: "Remove Element", detail: pin.name || "item", group: "Pins", run: () => removeMultiInputElement(pin) }
       ], { pin, context: "Input element" });
       return true;
     }
@@ -667,9 +667,9 @@
       run: entry.run ? () => entry.run() : () => runPalette(entry, pin)
     }));
     actions.unshift({
-      title: "Create function accepting " + (pin.type || "Value"),
+      title: "Create Function Accepting " + (pin.type || "Value"),
       detail: pin.name || "value",
-      group: "function",
+      group: "Function",
       run: () => {
         const base = String(pin.name || "value").replace(/[^A-Za-z0-9_]/g, "_").replace(/^[^A-Za-z_]+/, "") || "value";
         const name = window.prompt("Function name", "use_" + base);
@@ -678,9 +678,9 @@
     });
     if (pin.direction === "input") {
       actions.unshift({
-        title: "Promote pin to binding",
+        title: "Promote Pin to Binding",
         detail: pin.type || "value",
-        group: "refactor",
+        group: "Refactor",
         run: () => {
           const name = window.prompt("Binding name", pin.name || "value");
           const graph = latestDoc ? currentGraph(latestDoc) : null;

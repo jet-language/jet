@@ -257,6 +257,8 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUSTFLAGS: "-D warnings"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -271,7 +273,7 @@ jobs:
         run: nix flake check
 
       - name: Cargo check
-        run: nix develop -c cargo check
+        run: nix develop .#full -c cargo check --workspace --all-targets --locked
 
       - name: Install aarch64 cross tools
         run: |
@@ -281,6 +283,36 @@ jobs:
 
       - name: aarch64 freestanding QEMU smoke
         run: nix develop .#full -c bash tools/ci/aarch64-qemu-freestanding.sh
+
+  # D-CI1=A: grammar drift and the Rust documentation build are explicit
+  # change-gate inputs. The direct grammar target must fail if tests/grammar.rs
+  # is removed from the candidate, even when the broad test inventory changes.
+  change-gate:
+    name: Change gate (grammar + documentation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout candidate revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Grammar drift gate
+        env:
+          JET_REQUIRE_RUSTC: "1"
+        run: nix develop .#full -c cargo test --test grammar --locked -- --nocapture
+
+      - name: Documentation build gate
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: nix develop .#full -c cargo doc --workspace --no-deps --locked
 
   # D-WASISRV1=A: the server example is a real WASI Preview 2 Component.
   # Build it with the target toolchain, then grant wasmtime TCP access and
@@ -325,6 +357,37 @@ jobs:
             curl --fail --silent --max-time 5 http://127.0.0.1:18080/ | grep -Fx "hello from wasip2"
           '
 
+  rust-lint:
+    name: Rustfmt and Clippy
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTFLAGS: "-D warnings"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Rustfmt gate (D-CI2)
+        run: nix develop .#full -c cargo fmt --all -- --check
+
+      - name: Curated Clippy gate (D-CI2)
+        run: >-
+          nix develop .#full -c cargo clippy --workspace --all-targets --locked --
+          -D warnings
+          -A clippy::all
+          -A clippy::style
+          -D clippy::correctness
+          -D clippy::suspicious
+
   # #211 (D-CI1=A): the complete cargo test-target inventory (every lib/bin/
   # test target `cargo metadata` names across the whole workspace — not just
   # the "."/jet-driver/jetpack-bin/jetos default-members plain `cargo test`
@@ -344,12 +407,45 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5]
     env:
+      RUSTFLAGS: "-D warnings"
       JET_REQUIRE_RUSTC: "1"
       JET_TEST_SHARD: ${{ matrix.shard }}
       JET_TEST_SHARD_COUNT: "6"
+      JET_CI_EVIDENCE_DIR: ${{ github.workspace }}/ci-evidence/shard-${{ matrix.shard }}
+      JET_CI_ARTIFACT_NAME: ci-gate-evidence-shard-${{ matrix.shard }}-${{ github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Start durable gate evidence
+        if: always()
+        run: |
+          mkdir -p "$JET_CI_EVIDENCE_DIR"
+          {
+            echo "schema=jet.ci-evidence.v1"
+            echo "status=started"
+            echo "candidate_commit=$GITHUB_SHA"
+            echo "runner_os=$RUNNER_OS"
+            echo "runner_arch=$RUNNER_ARCH"
+            echo "workflow=$GITHUB_WORKFLOW"
+            echo "job=$GITHUB_JOB"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "run_attempt=$GITHUB_RUN_ATTEMPT"
+            echo "event=$GITHUB_EVENT_NAME"
+            echo "ref=$GITHUB_REF"
+          } >"$JET_CI_EVIDENCE_DIR/job.txt"
+
+      - name: Failure propagation canary
+        run: |
+          set +e
+          bash tools/ci/ci-evidence.sh \
+            --report-dir "$JET_CI_EVIDENCE_DIR/canary" \
+            -- bash -c 'printf "expected canary failure\\n" >&2; exit 23'
+          status=$?
+          set -e
+          test "$status" -eq 23
+          grep -Fxq "status=fail" "$JET_CI_EVIDENCE_DIR/canary/receipt.txt"
+          grep -Fxq "command_exit=23" "$JET_CI_EVIDENCE_DIR/canary/receipt.txt"
 
       - name: Install Nix
         uses: cachix/install-nix-action@v27
@@ -358,7 +454,31 @@ jobs:
             experimental-features = nix-command flakes
 
       - name: Verify suite shard (D-CI1)
-        run: nix develop .#full -c scripts/agent/verify-full.sh
+        run: bash tools/ci/ci-evidence.sh --report-dir "$JET_CI_EVIDENCE_DIR" -- nix develop .#full -c scripts/agent/verify-full.sh
+
+      - name: Finalize durable gate evidence
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "schema=jet.ci-evidence.v1"
+            echo "status=$JOB_STATUS"
+            echo "candidate_commit=$GITHUB_SHA"
+            echo "runner_os=$RUNNER_OS"
+            echo "runner_arch=$RUNNER_ARCH"
+            echo "artifact_name=$JET_CI_ARTIFACT_NAME"
+            echo "receipt=$JET_CI_EVIDENCE_DIR/receipt.txt"
+          } >"$JET_CI_EVIDENCE_DIR/job-final.txt"
+
+      - name: Upload durable gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-gate-evidence-shard-${{ matrix.shard }}-${{ github.sha }}
+          path: ci-evidence/shard-${{ matrix.shard }}/
+          retention-days: 30
+          if-no-files-found: error
 
   nightly-fuzz:
     name: Nightly rotating-seed fuzz + perf ratchet
@@ -384,5 +504,12 @@ jobs:
           echo "nightly fuzz seed: $seed"
           FUZZ_SEED="$seed" nix develop -c cargo test --release --test fuzz_sema -- --nocapture
 
+      - name: Build Jet for perf gates
+        env:
+          CARGO_BUILD_JOBS: "6"
+        run: nix develop .#full -c cargo build
+
       - name: Perf ratchet
-        run: nix develop -c sh tools/perf/ci-perf-check.sh
+        run: |
+          nix develop -c sh tools/perf/ci-perf-check.sh
+          nix develop .#full -c bash tools/perf/web-bundle-check.sh

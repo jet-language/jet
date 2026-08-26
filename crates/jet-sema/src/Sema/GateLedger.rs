@@ -437,6 +437,24 @@ fn visit_expression_value(source: &str, expression: &Expr, ledger: &mut GateLedg
             ));
         }
         Expr::MethodCall {
+            receiver,
+            method,
+            method_span,
+            ..
+        } if method == "raw" && is_static_type_receiver(receiver) => {
+            ledger.push(source_entry(
+                GateKind::Unsafe,
+                "security",
+                "expression",
+                source,
+                *method_span,
+                "Type.raw",
+                Some("#Unsafe(\"reason\")".to_string()),
+                "checked text raw construction requires an audited unsafe region",
+                "recorded",
+            ));
+        }
+        Expr::MethodCall {
             method,
             method_span,
             ..
@@ -484,6 +502,15 @@ fn visit_expression_value(source: &str, expression: &Expr, ledger: &mut GateLedg
             ));
         }
         _ => {}
+    }
+}
+
+fn is_static_type_receiver(receiver: &Expr) -> bool {
+    match receiver {
+        Expr::Ident(name, _) => name.chars().next().is_some_and(|c| c.is_ascii_uppercase()),
+        Expr::Field(base, _, _) => matches!(base.as_ref(), Expr::Ident(name, _)
+            if name.chars().next().is_some_and(|c| c.is_ascii_uppercase())),
+        _ => false,
     }
 }
 

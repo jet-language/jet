@@ -30,6 +30,7 @@ mod CmdBudget;
 mod CmdCodemod;
 mod CmdCompile;
 mod CmdDevTools;
+mod CmdDoc;
 mod CmdDossier;
 mod CmdExec;
 mod CmdExpand;
@@ -39,6 +40,7 @@ mod CmdGc;
 mod CmdImpact;
 mod CmdImport;
 mod CmdInspect;
+mod CmdLearn;
 mod CmdMemory;
 mod CmdNotebook;
 mod CmdPerf;
@@ -73,12 +75,14 @@ use CmdDevTools::{
     run_eval_expression, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y,
     run_lint_complexity, run_repl, watch_policy_from, WatchPolicy,
 };
+use CmdDoc::run_doc;
 use CmdDossier::{run_dossier, run_module_explain};
 use CmdExec::run_exec;
 use CmdExpand::run_expand;
 use CmdFill::run_fill;
 use CmdImpact::run_impact;
 use CmdInspect::{run_digest, run_env, run_guarantees, run_output, run_provenance};
+use CmdLearn::run as run_learn;
 use CmdPkg::{run_add, run_fetch, run_remove, run_update};
 use CmdProve::run_prove;
 use CmdRemote::run_remote;
@@ -607,16 +611,12 @@ fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Opt
             }
             "--color=never" => fwd.push("--no-color".to_string()),
             s if s.starts_with("--") => {
-                eprintln!(
-                    "Error [E2102]: `{}` isn't a flag `jet run …@nixpkgs` understands",
-                    s
-                );
-                eprintln!(
-                    " Why: this form forwards only package-run flags before `--`; tool arguments go after `--`"
-                );
-                eprintln!(
-                    " Fix: write `jet run {}@nixpkgs -- {}` to pass it to the tool.",
-                    package, s
+                emit_cli_report(
+                    "E2102",
+                    format!("`{s}` isn't a flag `jet run …@nixpkgs` understands"),
+                    "this form forwards only package-run flags before `--`; tool arguments go after `--`".to_string(),
+                    format!("write `jet run {package}@nixpkgs -- {s}` to pass it to the tool."),
+                    false,
                 );
                 return Some(ExitCodes::USAGE);
             }
@@ -666,18 +666,17 @@ Get started:
 // a command token, so there is no `fix_edits` entry for `jet fix` to apply.
 fn unknown_subcommand(cmd: &str) -> ! {
     let bin = jet::Syntax::BINARY_NAME;
-    eprintln!("Error [E2101]: `{}` isn't a {} command.", cmd, bin);
-    eprintln!(
-        " Why: every {} run starts with a command like `run`, `check`, or `new`.",
-        bin
+    let fix = match jet::CLI::closest_command(cmd) {
+        Some(close) => format!("did you mean `{bin} {close}`? Run `{bin} help` to see them all."),
+        None => format!("run `{bin} help` to see every command."),
+    };
+    emit_cli_report(
+        "E2101",
+        format!("`{cmd}` isn't a {bin} command."),
+        format!("every {bin} run starts with a command like `run`, `check`, or `new`."),
+        fix,
+        false,
     );
-    match jet::CLI::closest_command(cmd) {
-        Some(close) => eprintln!(
-            " Fix: did you mean `{} {}`? Run `{} help` to see them all.",
-            bin, close, bin
-        ),
-        None => eprintln!(" Fix: run `{} help` to see every command.", bin),
-    }
     exit(ExitCodes::USAGE);
 }
 
@@ -987,34 +986,32 @@ fn check_flags(raw: &[String], subcmd: &str) {
             continue;
         }
         if head == "--emit-rust" {
-            eprintln!("Error [E2102]: `--emit-rust` isn't a flag {bin} understands");
-            eprintln!(" Why: generated output belongs to the `emit` command");
-            eprintln!(
-                " Fix: run `{bin} emit --rust <file.{}>`",
-                jet::Syntax::FILE_EXT
+            emit_cli_report(
+                "E2102",
+                format!("`--emit-rust` isn't a flag {bin} understands"),
+                "generated output belongs to the `emit` command".to_string(),
+                format!("run `{bin} emit --rust <file.{}>`", jet::Syntax::FILE_EXT),
+                false,
             );
             exit(ExitCodes::USAGE);
         }
-        eprintln!("Error [E2102]: `{}` isn't a flag {} understands", head, bin);
-        eprintln!(" Why: flags before `--` belong to {}; everything after `--` is forwarded to your program", bin);
-        match jet::CLI::closest_flag(head) {
-            Some(close) if matches!(subcmd, "run" | "test") => eprintln!(
-                " Fix: did you mean `{}`? Or use `{} {} <file> -- {}` to pass it to your program",
-                close, bin, subcmd, head
+        let fix = match jet::CLI::closest_flag(head) {
+            Some(close) if matches!(subcmd, "run" | "test") => format!(
+                "did you mean `{close}`? Or use `{bin} {subcmd} <file> -- {head}` to pass it to your program"
             ),
-            Some(close) => eprintln!(
-                " Fix: did you mean `{}`? (run `{} help` for the flags)",
-                close, bin
+            Some(close) => format!("did you mean `{close}`? (run `{bin} help` for the flags)"),
+            None if matches!(subcmd, "run" | "test") => format!(
+                "use `{bin} {subcmd} <file> -- {head}` to pass this flag to your program"
             ),
-            None if matches!(subcmd, "run" | "test") => eprintln!(
-                " Fix: use `{} {} <file> -- {}` to pass this flag to your program",
-                bin, subcmd, head
-            ),
-            None => eprintln!(
-                " Fix: drop the flag, or run `{} help` to see the flags",
-                bin
-            ),
-        }
+            None => format!("drop the flag, or run `{bin} help` to see the flags"),
+        };
+        emit_cli_report(
+            "E2102",
+            format!("`{head}` isn't a flag {bin} understands"),
+            format!("flags before `--` belong to {bin}; everything after `--` is forwarded to your program"),
+            fix,
+            false,
+        );
         exit(ExitCodes::USAGE);
     }
 }
@@ -1959,6 +1956,7 @@ fn main() {
             print!("{}", usage());
             exit(ExitCodes::OK);
         }
+        "learn" => run_learn(&raw[1..], mode),
         "jobs" => {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             let member_flag = flag_value(&raw, "-p");
@@ -2792,9 +2790,9 @@ fn main() {
         Some(f) if cmd == "build" => named_build_entry.as_deref().unwrap_or(f.as_str()),
         Some(f) => f.as_str(),
         None => {
-            // No target: try project-root mode for run/build/test/check/dev.
+            // No target: try project-root mode for run/build/test/check/dev/doc.
             match cmd {
-                "run" | "build" | "test" | "check" | "dev" => {
+                "run" | "build" | "test" | "check" | "dev" | "doc" => {
                     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                     if let Some(entry) = resolve_bare_entry(cmd, &cwd, bare_member_flag) {
                         let entry = if matches!(cmd, "run" | "dev")
@@ -2806,6 +2804,14 @@ fn main() {
                         };
                         let entry_str = entry.to_string_lossy().to_string();
                         match cmd {
+                            "doc" => {
+                                run_doc(
+                                    &entry_str,
+                                    mode,
+                                    jet_argv.iter().any(|arg| arg == "--check"),
+                                );
+                                return;
+                            }
                             "test" => {
                                 // Spec S43: bare `jet test` collects every
                                 // `#Test` in the package, so the target is the
@@ -3041,16 +3047,20 @@ fn main() {
         "emit" => {
             let rust_flag = jet_argv.iter().any(|a| a == "--rust");
             if !rust_flag {
-                eprintln!(
-                    "usage: {} emit --rust <file.{}>",
-                    jet::Syntax::BINARY_NAME,
-                    jet::Syntax::FILE_EXT
-                );
-                eprintln!(" Why: `emit` needs a mode flag; today only `--rust` is supported");
-                eprintln!(
-                    " Fix: run `{} emit --rust <file.{}>` to print the generated Rust",
-                    jet::Syntax::BINARY_NAME,
-                    jet::Syntax::FILE_EXT
+                emit_cli_report(
+                    "E2102",
+                    format!(
+                        "usage: {} emit --rust <file.{}>",
+                        jet::Syntax::BINARY_NAME,
+                        jet::Syntax::FILE_EXT
+                    ),
+                    "`emit` needs a mode flag; today only `--rust` is supported".to_string(),
+                    format!(
+                        "run `{} emit --rust <file.{}>` to print the generated Rust",
+                        jet::Syntax::BINARY_NAME,
+                        jet::Syntax::FILE_EXT
+                    ),
+                    false,
                 );
                 exit(ExitCodes::USAGE);
             }
@@ -3090,22 +3100,33 @@ fn main() {
                 mode,
             );
         }
+        "doc" => {
+            run_doc(
+                target,
+                mode,
+                jet_argv.iter().any(|arg| arg == "--check"),
+            );
+        }
         // D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y` — opt-in accessibility
         // lints (E2930/E2931), never blocking `jet build`/`jet run`.
         "lint" => {
             if a11y == complexity {
-                eprintln!(
-                    "usage: {} lint --a11y|--complexity <file.{}>",
-                    jet::Syntax::BINARY_NAME,
-                    jet::Syntax::FILE_EXT
-                );
-                eprintln!(" Why: `lint` needs exactly one category flag");
-                eprintln!(
-                    " Fix: run `{} lint --a11y <file.{}>` or `{} lint --complexity <file.{}>`",
-                    jet::Syntax::BINARY_NAME,
-                    jet::Syntax::FILE_EXT,
-                    jet::Syntax::BINARY_NAME,
-                    jet::Syntax::FILE_EXT,
+                emit_cli_report(
+                    "E2102",
+                    format!(
+                        "usage: {} lint --a11y|--complexity <file.{}>",
+                        jet::Syntax::BINARY_NAME,
+                        jet::Syntax::FILE_EXT
+                    ),
+                    "`lint` needs exactly one category flag".to_string(),
+                    format!(
+                        "run `{} lint --a11y <file.{}>` or `{} lint --complexity <file.{}>`",
+                        jet::Syntax::BINARY_NAME,
+                        jet::Syntax::FILE_EXT,
+                        jet::Syntax::BINARY_NAME,
+                        jet::Syntax::FILE_EXT,
+                    ),
+                    false,
                 );
                 exit(ExitCodes::USAGE);
             }
@@ -3964,9 +3985,7 @@ fn machine_report_path_from_path(path: &Path) -> ReportPath {
 /// diagnostics. These carry no source span, so the full linked renderer isn't
 /// used.
 fn print_toolchain_diag(d: &jet::Diagnostics::Diagnostic) {
-    eprintln!("Error [{}]: {}", d.code, d.what);
-    eprintln!(" Why: {}", d.why);
-    eprintln!(" Fix: {}", d.fix);
+    eprint!("{}", d.render("", ""));
 }
 
 /// D-JPK-TOOLCHAIN1=A (#179): hand off to the project's pinned `jet` toolchain
@@ -4168,7 +4187,7 @@ fn report_transition_error(error: &jetpack::Transition::TransitionError) -> ! {
             "fix the named package or role file, then rerun the transition with `--check` first.",
         )
     };
-    eprintln!("Error [{code}]: {message}\n Why: {why}\n Fix: {fix}");
+    emit_cli_report(code, message.to_string(), why.to_string(), fix.to_string(), false);
     exit(ExitCodes::USER_ERROR);
 }
 

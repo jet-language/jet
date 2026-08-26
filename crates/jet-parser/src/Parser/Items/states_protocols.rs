@@ -1098,6 +1098,7 @@ mod marker_decl_tests {
 
 #[cfg(test)]
 mod state_section_tests {
+    use crate::Diagnostics::Span;
     use crate::{AST, Lexer, Parser};
 
     #[test]
@@ -1153,7 +1154,13 @@ mod state_section_tests {
             assert_eq!(diagnostics.len(), 1, "{owner}: {diagnostics:?}");
             assert_eq!(diagnostics[0].code, "E0158", "{owner}: {diagnostics:?}");
             assert!(diagnostics[0].what.contains(owner), "{owner}: {diagnostics:?}");
-            assert!(diagnostics[0].span.is_some(), "{owner}: {diagnostics:?}");
+            let start = source.find("state {").expect("state section start");
+            let end = start + source[start..].find('}').expect("state section end") + 1;
+            assert_eq!(
+                diagnostics[0].span,
+                Some(Span::new(start, end)),
+                "{owner}: {diagnostics:?}"
+            );
         }
     }
 }

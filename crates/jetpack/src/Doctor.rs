@@ -106,6 +106,7 @@ pub fn run(project: &Path, online: bool) -> Report {
     Report {
         checks: vec![
             check_hangar(&roots),
+            check_leases(&roots),
             check_registry(online),
             check_locks(project, &roots),
             check_cache(&roots),
@@ -258,6 +259,32 @@ fn check_hangar(roots: &Store::Roots) -> Check {
         "hangar",
         format!("{objects} object(s) readable and content-verified"),
     )
+}
+
+fn check_leases(roots: &Store::Roots) -> Check {
+    match Store::inspect_leases(roots) {
+        Ok(inventory) if inventory.stale > 0 => degraded(
+            "leases",
+            format!(
+                "{} stale executable lease(s) found; {} active lease(s) remain",
+                inventory.stale, inventory.active
+            ),
+            "run `jetpack hangar recover`, then rerun `jetpack doctor`",
+        ),
+        Ok(inventory) if inventory.active > 0 => ok(
+            "leases",
+            format!(
+                "{} active executable lease(s); no stale leases found",
+                inventory.active
+            ),
+        ),
+        Ok(_) => ok("leases", "no active or stale executable leases"),
+        Err(error) => broken(
+            "leases",
+            format!("executable lease state could not be inspected ({})", error.kind()),
+            "restore read access to the Jetpack lease directory, then rerun `jetpack doctor`",
+        ),
+    }
 }
 
 fn registry_endpoints() -> Vec<(String, String)> {
@@ -685,6 +712,30 @@ mod tests {
                 .contains("could not be probed"));
         }
         fs::remove_dir_all(policy_root).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn lease_health_uses_kernel_state_and_is_read_only() {
+        let root = scratch("leases");
+        let leases = root.join("leases");
+        let live = leases.join(format!("{}-1-live", std::process::id()));
+        fs::create_dir_all(&live).unwrap();
+        let _live_lock = super::super::RuntimePolicy::acquire_lease_lock(&live, "live").unwrap();
+        let stale = leases.join("4294967294-2-stale");
+        fs::create_dir_all(stale.join("snapshot")).unwrap();
+        fs::write(stale.join("snapshot/partial"), "interrupted").unwrap();
+        let roots = Store::Roots {
+            root: root.clone(),
+            dev_mode: false,
+        };
+        let before = tree(&root);
+        let check = check_leases(&roots);
+        assert_eq!(check.health, Health::Degraded);
+        assert!(check.detail.contains("1 stale executable lease"));
+        assert!(check.detail.contains("1 active lease"));
+        assert_eq!(tree(&root), before);
+        drop(_live_lock);
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -311,7 +311,7 @@ pub struct JetTaskDeadline {
 impl JetTaskDeadline {
     pub fn render(&self) -> String {
         format!(
-            "Error [E3003]: {}\n Why: {}\n Fix: {}",
+            "Error [E3003]: {}\n Why: {}\n Fix: {}\nMore: jet-lang.dev/e/E3003",
             self.what, self.why, self.fix
         )
     }

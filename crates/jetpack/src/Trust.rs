@@ -967,7 +967,7 @@ pub fn gate_build_identity(
     }
     theme.note("first build for this exact action graph:");
     theme.detail(&format!("build identity: {identity}"));
-    eprint!("  trust this build? [y/N] ");
+    eprint!("  Trust This Build? [y/N] ");
     {
         use std::io::Write;
         let _ = std::io::stderr().flush();
@@ -1082,7 +1082,7 @@ fn gate_with_hash(
         "\n  {}",
         theme.gray("a yes is remembered for this exact env; any change asks again.")
     );
-    eprint!("  trust this environment? [y/N] ");
+    eprint!("  Trust This Environment? [y/N] ");
     {
         use std::io::Write;
         let _ = std::io::stderr().flush();
@@ -1155,7 +1155,7 @@ pub fn gate_flake(
         "first entry to this project's foreign flake: {}",
         flake_path.display()
     ));
-    eprint!("  trust this flake? [y/N] ");
+    eprint!("  Trust This Flake? [y/N] ");
     {
         use std::io::Write;
         let _ = std::io::stderr().flush();

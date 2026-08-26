@@ -123,7 +123,7 @@
     if (statusbar && !document.getElementById("save-state")) {
       const saved = document.createElement("span");
       saved.id = "save-state";
-      saved.textContent = "source saved";
+      saved.textContent = "Source Saved";
       saved.style.color = "#8fb2dc";
       statusbar.appendChild(saved);
     }
@@ -189,7 +189,17 @@
   function setSaveState(label, kind = "saved") {
     const saved = document.getElementById("save-state");
     if (!saved) return;
-    saved.textContent = label;
+    const displayLabel = {
+      "source saved": "Source Saved",
+      "source unchanged": "Source Unchanged",
+      "source unavailable": "Source Unavailable",
+      "local draft": "Local Draft",
+      "project saved": "Project Saved",
+      "project unchanged": "Project Unchanged",
+      saving: "Saving",
+      loading: "Loading"
+    }[label] || label;
+    saved.textContent = displayLabel;
     saved.style.color = kind === "error" ? "#fecaca" : kind === "draft" ? "#fde68a" : "#8fb2dc";
     saved.dataset.state = kind;
   }
@@ -203,7 +213,7 @@
     const actionsEl = document.getElementById("canvas-state-actions");
     if (!state || !titleEl || !detailEl || !actionsEl) return;
     const stateActions = actions.length ? actions : [
-      { label: "Open source", run: openSourceRecovery },
+      { label: "Open Source", run: openSourceRecovery },
       { label: "Retry", primary: true, run: () => typeof loadGraph === "function" && loadGraph() }
     ];
     state.dataset.state = kind || "info";
@@ -211,19 +221,26 @@
     detailEl.textContent = detail || "";
     actionsEl.innerHTML = "";
     state.setAttribute("aria-hidden", "false");
+    const actionLabels = {
+      "Open source": "Open Source",
+      "Show source": "Show Source",
+      "Try again": "Try Again",
+      "Close preview": "Close Preview"
+    };
     for (const action of stateActions) {
+      const displayLabel = actionLabels[action.label] || action.label;
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = action.label;
-      button.setAttribute("aria-label", action.label);
-      button.dataset.canvasStateAction = action.label;
+      button.textContent = displayLabel;
+      button.setAttribute("aria-label", displayLabel);
+      button.dataset.canvasStateAction = displayLabel;
       button.style.cssText = "min-height:27px;padding:0 8px";
       if (action.primary) button.classList.add("primary");
       button.addEventListener("click", () => action.run && action.run());
       actionsEl.appendChild(button);
     }
     state.style.display = "grid";
-    const snapshot = { kind: kind || "info", title: title || "Canvas", detail: detail || "", actions: stateActions.map((action) => action.label) };
+    const snapshot = { kind: kind || "info", title: title || "Canvas", detail: detail || "", actions: stateActions.map((action) => actionLabels[action.label] || action.label) };
     const history = window.__jetCanvasCanvasStateHistory || [];
     history.push(snapshot);
     if (history.length > 32) history.shift();
@@ -242,10 +259,10 @@
 
   const TOUR_STEPS = [
     { title: "Read the graph", detail: "Files, functions, and variables live in the left rail. Select a node to inspect its source-backed details. The graph is a view of Jet source, not a second file.", target: "left-drawer" },
-    { title: "Edit, then save", detail: "Canvas selects the example value in Inspector. Change it, then Apply; the checked, formatted result is written to Jet source immediately.", action: "Open example editor", target: "details" },
-    { title: "Check and fix", detail: "Check runs Jet diagnostics. Problems stay in the panel with what, why, and fix text. Rejected edits leave the last valid source intact.", action: "Check source", target: "check-current" },
-    { title: "Run and inspect", detail: "Run opens a command card with its authority. Execute it there; the Run HUD and Details panel show the real receipt and output.", action: "Prepare run", target: "run-current", capability: "runtime_output" },
-    { title: "Undo and keep control", detail: "Undo restores exact validated source. Reload reprojects from disk. Canvas saves source edits; local layout and tour state stay separate.", action: "Undo last edit", target: "undo-edit" }
+    { title: "Edit, Then Save", detail: "Canvas selects the example value in Inspector. Change it, then Apply; the checked, formatted result is written to Jet source immediately.", action: "Open Example Editor", target: "details" },
+    { title: "Check and Fix", detail: "Check runs Jet diagnostics. Problems stay in the panel with what, why, and fix text. Rejected edits leave the last valid source intact.", action: "Check Source", target: "check-current" },
+    { title: "Run and Inspect", detail: "Run opens a command card with its authority. Execute it there; the Run HUD and Details panel show the real receipt and output.", action: "Prepare Run", target: "run-current", capability: "runtime_output" },
+    { title: "Undo and Keep Control", detail: "Undo restores exact validated source. Reload reprojects from disk. Canvas saves source edits; local layout and tour state stay separate.", action: "Undo Last Edit", target: "undo-edit" }
   ];
   let tourStep = 0;
 
@@ -355,10 +372,10 @@
   function runTourAction() {
     const step = availableTourSteps()[tourStep];
     if (!step) return;
-    if (step.action === "Open example editor") prepareTourEdit();
-    else if (step.action === "Check source") showCheckAuthority();
-    else if (step.action === "Prepare run") runCurrentGraph();
-    else if (step.action === "Undo last edit") {
+    if (step.action === "Open Example Editor") prepareTourEdit();
+    else if (step.action === "Check Source") showCheckAuthority();
+    else if (step.action === "Prepare Run") runCurrentGraph();
+    else if (step.action === "Undo Last Edit") {
       const restore = undoTransaction();
       if (restore && typeof restore.then === "function") restore.then(renderTour);
     }
@@ -368,10 +385,10 @@
   ensureCanvasChrome();
   window.addEventListener("offline", () => {
     setCanvasState("offline", "Offline", "Canvas cannot write while disconnected. Jet source stays visible; reconnect, then retry.", [
-      { label: "Show source", run: openSourceRecovery },
+      { label: "Show Source", run: openSourceRecovery },
       { label: "Retry", primary: true, run: loadGraph }
     ]);
-    setSaveState("source unchanged", "error");
+    setSaveState("Source Unchanged", "error");
   });
   window.addEventListener("online", () => {
     const state = window.__jetCanvasCanvasState;
@@ -430,8 +447,8 @@
       button.setAttribute("data-sidebar-graph", graph.graph_id);
       if (callback) {
         button.setAttribute("data-callback-handler", callback.function);
-        button.title = "Open callback handler: " + callback.function;
-        button.innerHTML = "<span>" + escapeHtml(graph.title) + " <span class=\"tag\">handler</span></span><span class=\"count\">" + graph.nodes.length + "</span>";
+        button.title = "Open Callback Handler: " + callback.function;
+        button.innerHTML = "<span>" + escapeHtml(graph.title) + " <span class=\"tag\">Handler</span></span><span class=\"count\">" + graph.nodes.length + "</span>";
       } else {
         button.innerHTML = "<span>" + escapeHtml(graph.title) + "</span><span class=\"count\">" + graph.nodes.length + "</span>";
       }
@@ -803,7 +820,7 @@
     const jumpButton = (span, label) => {
       if (!span || !Number.isFinite(span.start)) return "";
       const index = jumps.push({ span, label }) - 1;
-      return `<button type="button" data-trait-jump="${index}">${escapeHtml(label || "Open source")}</button>`;
+        return `<button type="button" data-trait-jump="${index}">${escapeHtml(label || "Open Source")}</button>`;
     };
     const implsFor = (trait) => implementations.filter((impl) => {
       return impl.trait === trait.trait && traitScope(impl) === traitScope(trait);
@@ -829,18 +846,18 @@
           const present = (impl.associated_types || []).includes(name);
           return `<div class="pin-row"><div class="lane-head"><b>type ${escapeHtml(name)}</b><span class="tag">${present ? "Implemented" : "Required"}</span></div></div>`;
         }).join("");
-        return `<div class="signature-board" data-trait-implementation="${escapeAttr(String(impl.type || ""))}"><div class="signature-head"><div><span class="sig-eyebrow">Implementation</span><b>${escapeHtml(impl.type || "Type")}</b><code>${escapeHtml(traitQualifiedName(trait))}</code></div>${jumpButton(impl.source_span, "Open source")}</div><div class="lane-meta">${implemented.length}/${requiredMethods.length} required methods</div><div class="pin-list">${methodStatus || "<div class=\"pin-empty\">No required methods</div>"}${assocStatus}</div></div>`;
+        return `<div class="signature-board" data-trait-implementation="${escapeAttr(String(impl.type || ""))}"><div class="signature-head"><div><span class="sig-eyebrow">Implementation</span><b>${escapeHtml(impl.type || "Type")}</b><code>${escapeHtml(traitQualifiedName(trait))}</code></div>${jumpButton(impl.source_span, "Open Source")}</div><div class="lane-meta">${implemented.length}/${requiredMethods.length} required methods</div><div class="pin-list">${methodStatus || "<div class=\"pin-empty\">No required methods</div>"}${assocStatus}</div></div>`;
       }).join("");
       const methodRows = methods.map((method) => {
         const label = traitMethodRequired(method) ? "Required" : "Default";
-        return `<div class="pin-row"><div class="lane-head"><b>${escapeHtml(method.name || "method")}</b><span class="tag">${label}</span></div><code>${escapeHtml(method.signature || "")}</code>${jumpButton(method.source_span, "Open source")}</div>`;
+        return `<div class="pin-row"><div class="lane-head"><b>${escapeHtml(method.name || "method")}</b><span class="tag">${label}</span></div><code>${escapeHtml(method.signature || "")}</code>${jumpButton(method.source_span, "Open Source")}</div>`;
       }).join("");
       const assocRows = associatedTypes.length
-        ? `<div class="tag">Associated types: ${escapeHtml(associatedTypes.join(", "))}</div>`
+        ? `<div class="tag">Associated Types: ${escapeHtml(associatedTypes.join(", "))}</div>`
         : "";
       const create = associatedTypes.length
         ? `<div class="tag">Add associated type choices in source before creating an implementation.</div>`
-        : `<div class="edit-grid"><label><span>Type name</span><input data-trait-type="${traitIndex}" placeholder="${escapeAttr(traitScope(trait) ? "Type in " + traitScope(trait) : "Type name")}"></label><button class="primary" type="button" data-trait-create="${traitIndex}">Add implementation</button></div>`;
+        : `<div class="edit-grid"><label><span>Type Name</span><input data-trait-type="${traitIndex}" placeholder="${escapeAttr(traitScope(trait) ? "Type in " + traitScope(trait) : "Type name")}"></label><button class="primary" type="button" data-trait-create="${traitIndex}">Add Implementation</button></div>`;
       stateTraits.push({
         name: trait.trait,
         scope: traitScope(trait),
@@ -848,7 +865,7 @@
         methods: methods.map((method) => method.name),
         implementations: impls.map((impl) => ({ type: impl.type, methods: (impl.methods || []).slice() }))
       });
-      return `<div class="signature-board" data-trait="${escapeAttr(traitQualifiedName(trait))}"><div class="signature-head"><div><span class="sig-eyebrow">Trait</span><b>${escapeHtml(trait.trait || "Trait")}</b><code>${escapeHtml(traitScope(trait) || "file scope")}</code></div>${jumpButton(trait.source_span, "Open source")}</div><div class="lane-head"><b>Methods</b><span class="lane-meta">${requiredMethods.length} required · ${methods.length - requiredMethods.length} default</span></div><div class="pin-list">${methodRows || "<div class=\"pin-empty\">No methods</div>"}</div>${assocRows}${implRows || "<div class=\"pin-empty\">No implementation</div>"}${create}</div>`;
+      return `<div class="signature-board" data-trait="${escapeAttr(traitQualifiedName(trait))}"><div class="signature-head"><div><span class="sig-eyebrow">Trait</span><b>${escapeHtml(trait.trait || "Trait")}</b><code>${escapeHtml(traitScope(trait) || "file scope")}</code></div>${jumpButton(trait.source_span, "Open Source")}</div><div class="lane-head"><b>Methods</b><span class="lane-meta">${requiredMethods.length} required · ${methods.length - requiredMethods.length} default</span></div><div class="pin-list">${methodRows || "<div class=\"pin-empty\">No methods</div>"}</div>${assocRows}${implRows || "<div class=\"pin-empty\">No implementation</div>"}${create}</div>`;
     }).join("");
 
     panel.innerHTML = `<section class="project-section"><div class="lane-head"><h3>Traits</h3><span class="lane-meta">${traits.length}</span></div>${traitRows || "<div class=\"tag\">no traits</div>"}</section>`;
@@ -917,7 +934,7 @@
     const jumpButton = (span, label) => {
       if (!span || !Number.isFinite(span.start)) return "";
       const index = jumps.push({ span, label }) - 1;
-      return `<button type="button" data-event-jump="${index}">${escapeHtml(label || "Open source")}</button>`;
+      return `<button type="button" data-event-jump="${index}">${escapeHtml(label || "Open Source")}</button>`;
     };
     const stateEvents = dispatchers.map((fact) => ({
       kind: fact.kind,
@@ -931,9 +948,9 @@
     const rows = dispatchers.map((fact) => {
       const type = fact.receiver_type || (fact.kind.endsWith("create") ? "new event value" : "checked event call");
       const scope = fact.scope ? `scope ${fact.scope}` : "scope from source";
-      return `<div class="signature-board" data-event-kind="${escapeAttr(fact.kind)}"><div class="signature-head"><div><span class="sig-eyebrow">${escapeHtml(eventFactLabel(fact))}</span><b>${escapeHtml(fact.receiver || fact.kind)}</b><code>${escapeHtml(type)}</code></div>${jumpButton(fact.source_span, "Open source")}</div><div class="lane-meta">${escapeHtml(scope)} · source-backed · ${escapeHtml(fact.lifetime || "EventScope-owned")}</div><code>${escapeHtml(fact.source || "")}</code></div>`;
+      return `<div class="signature-board" data-event-kind="${escapeAttr(fact.kind)}"><div class="signature-head"><div><span class="sig-eyebrow">${escapeHtml(eventFactLabel(fact))}</span><b>${escapeHtml(fact.receiver || fact.kind)}</b><code>${escapeHtml(type)}</code></div>${jumpButton(fact.source_span, "Open Source")}</div><div class="lane-meta">${escapeHtml(scope)} · source-backed · ${escapeHtml(fact.lifetime || "EventScope-owned")}</div><code>${escapeHtml(fact.source || "")}</code></div>`;
     }).join("");
-    panel.innerHTML = `<section class="project-section"><div class="lane-head"><h3>Events</h3><span class="lane-meta">${dispatchers.length}</span></div><div class="edit-grid"><button type="button" data-event-actions>Open event actions</button></div>${rows || "<div class=\"tag\">no core.event calls</div>"}</section>`;
+    panel.innerHTML = `<section class="project-section"><div class="lane-head"><h3>Events</h3><span class="lane-meta">${dispatchers.length}</span></div><div class="edit-grid"><button type="button" data-event-actions>Open Event Actions</button></div>${rows || "<div class=\"tag\">no core.event calls</div>"}</section>`;
     panel.querySelectorAll("[data-event-jump]").forEach((button) => {
       button.addEventListener("click", () => {
         const target = jumps[Number(button.getAttribute("data-event-jump"))];
@@ -1018,7 +1035,7 @@
     if (devSummary) devSummary.hidden = !hasDevCapability;
     if (hasDevCapability) syncProjectPanel(devSummary, "Dev", devRows, "no env or services");
     syncProjectPanel(diagnosticsSummary, "Diagnostics", diagRows, "clean");
-    syncProjectPanel(trustSummary, "Source internals", lockRows, "source files only");
+    syncProjectPanel(trustSummary, "Source Internals", lockRows, "source files only");
     if (typeof syncCanvasCapabilities === "function") syncCanvasCapabilities(project);
     if (statusSummary) {
       const packageName = (project.packages || [])[0] && ((project.packages || [])[0].name || (project.packages || [])[0].path);
@@ -1029,7 +1046,7 @@
         { label: packageName || project.mode || "Single file", value: sourceFiles + " source file" + (sourceFiles === 1 ? "" : "s"), detail: "", editable: false, layout: "card", className: "status-card" },
         { label: diagCount === 0 ? "Clean" : diagCount + " issue" + (diagCount === 1 ? "" : "s"), value: (project.mode || "file") + " mode", detail: "", editable: false, layout: "card", className: "status-card" }
       ], { fieldsClass: "status-list" });
-      if (statusCount) statusCount.textContent = diagCount === 0 ? "clean" : String(diagCount);
+      if (statusCount) statusCount.textContent = diagCount === 0 ? "Clean" : String(diagCount);
     }
     window.__jetCanvasWorkspacePanels = {
       packages: packageRows.length,
@@ -1225,7 +1242,7 @@
         }
       });
       actions.push({
-        title: "set " + name,
+        title: "Set " + name,
         detail: name + " : " + type,
         group: "Variables",
         kind: "variable_set",
@@ -1392,16 +1409,16 @@
 
   function nodeContextActions(graph, node) {
     const actions = [
-      { title: "Copy", detail: "selection", group: "edit", run: copySelection },
-      { title: "Paste as staged", detail: "local selection", group: "edit", run: pasteAsStaged },
-      { title: "Duplicate", detail: "selection", group: "edit", run: duplicateSelection },
-      { title: "Add comment", detail: "around selection", group: "Comment", run: addCommentAroundSelection },
-      { title: "Jump source", detail: "span", group: "source", run: () => { const s = node.source_span || { start: 0, end: 0 }; setSourceHash(s); setViewMode("code"); } },
-      { title: "Find references", detail: "search index", group: "query", run: () => postQuery({ op: "references", symbol: node.title }) },
-      { title: nodeBreakpoint(node) ? "Remove breakpoint" : "Set breakpoint", detail: "local span", group: "debug", run: () => toggleBreakpoint(node) }
+      { title: "Copy", detail: "selection", group: "Edit", run: copySelection },
+      { title: "Paste as Staged", detail: "local selection", group: "Edit", run: pasteAsStaged },
+      { title: "Duplicate", detail: "selection", group: "Edit", run: duplicateSelection },
+      { title: "Add Comment", detail: "around selection", group: "Comment", run: addCommentAroundSelection },
+      { title: "Jump Source", detail: "span", group: "Source", run: () => { const s = node.source_span || { start: 0, end: 0 }; setSourceHash(s); setViewMode("code"); } },
+      { title: "Find References", detail: "search index", group: "Query", run: () => postQuery({ op: "references", symbol: node.title }) },
+      { title: nodeBreakpoint(node) ? "Remove Breakpoint" : "Set Breakpoint", detail: "local span", group: "Debug", run: () => toggleBreakpoint(node) }
     ];
-    if ((node.edit_affordances || []).includes("add_pattern_arm")) actions.unshift({ title: "Add pattern arm", detail: "source transaction", group: "Patterns", run: () => addPatternArm(node) });
-    if ((node.edit_affordances || []).includes("append_multi_input")) actions.unshift({ title: "Append input", detail: "source transaction", group: "Pins", run: () => appendMultiInput(node) });
+    if ((node.edit_affordances || []).includes("add_pattern_arm")) actions.unshift({ title: "Add Pattern Arm", detail: "source transaction", group: "Patterns", run: () => addPatternArm(node) });
+    if ((node.edit_affordances || []).includes("append_multi_input")) actions.unshift({ title: "Append Input", detail: "source transaction", group: "Pins", run: () => appendMultiInput(node) });
     const stateBadge = ((node.badges || []).find((badge) => badge === "#Off" || badge === "#DebugOnly")) || "";
     if (!node.staged && node.source_span && node.kind !== "entry") {
       actions.unshift({
@@ -1411,8 +1428,8 @@
         run: () => toggleSwitchState(node)
       });
     }
-    if (node.staged) actions.unshift({ title: "Delete staged node", detail: "local view", group: "edit", run: () => { removeStagedNode(node.node_id); drawGraph(latestDoc); } });
-    if (graphForFunctionName(node.title)) actions.unshift({ title: "Open function", detail: "function", group: "graph", run: () => openFunctionGraph(node.title) });
+    if (node.staged) actions.unshift({ title: "Delete Staged Node", detail: "local view", group: "Edit", run: () => { removeStagedNode(node.node_id); drawGraph(latestDoc); } });
+    if (graphForFunctionName(node.title)) actions.unshift({ title: "Open Function", detail: "function", group: "Graph", run: () => openFunctionGraph(node.title) });
     return actions;
   }
 
@@ -1428,9 +1445,9 @@
       button.type = "button";
       button.className = "graph-tab" + (graph.graph_id === selectedGraphId ? " is-active" : "");
       button.setAttribute("data-graph-tab", graph.graph_id);
-      button.title = callback ? "Open callback handler: " + callback.function : "Open graph: " + graph.title;
+      button.title = callback ? "Open Callback Handler: " + callback.function : "Open Graph: " + graph.title;
       if (callback) button.setAttribute("data-callback-handler", callback.function);
-      button.innerHTML = "<span class=\"graph-tab-kind\">" + (callback ? "callback" : "fn") + "</span><span class=\"graph-tab-title\">" + escapeHtml(graph.title) + "</span><span class=\"graph-tab-count\">" + graph.nodes.length + "</span>";
+      button.innerHTML = "<span class=\"graph-tab-kind\">" + (callback ? "Callback" : "Fn") + "</span><span class=\"graph-tab-title\">" + escapeHtml(graph.title) + "</span><span class=\"graph-tab-count\">" + graph.nodes.length + "</span>";
       button.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
@@ -1446,23 +1463,23 @@
     const sourceTransactionOnly = options.sourceTransactionOnly === true;
     const graph = currentGraphOrNull();
     const actions = [
-      { title: "Fit graph", detail: "viewport", group: "view", run: fitGraph },
-      { title: "New function", detail: "source", group: "function", run: createCanvasFunction },
-      { title: "New callback", detail: "source handler", group: "function", run: createCanvasCallback },
-      { title: "Show source", detail: "toggle", group: "Execution", run: () => setViewMode("code") },
+      { title: "Fit Graph", detail: "viewport", group: "View", run: fitGraph },
+      { title: "New Function", detail: "source", group: "Function", run: createCanvasFunction },
+      { title: "New Callback", detail: "source handler", group: "Function", run: createCanvasCallback },
+      { title: "Show Source", detail: "toggle", group: "Execution", run: () => setViewMode("code") },
       { title: "Paste", detail: "selection", group: "Execution", run: pasteSelection },
-      { title: "Paste as staged", detail: "local selection", group: "Execution", run: pasteAsStaged },
+      { title: "Paste as Staged", detail: "local selection", group: "Execution", run: pasteAsStaged },
       { title: "Duplicate", detail: "selection", group: "Execution", run: duplicateSelection },
-      { title: "Add comment", detail: "local view", group: "Comment", run: addCommentAroundSelection },
-      { title: "Align top", detail: "local view", group: "Execution", run: () => alignSelectedNodes("y") },
-      { title: "Align left", detail: "local view", group: "Execution", run: () => alignSelectedNodes("x") },
-      { title: "Auto tidy", detail: "local view", group: "Execution", run: tidyGraphLayout },
-      { title: "Straighten wires", detail: "Blueprint curves", group: "Execution", run: () => { wireStyle = "bezier"; showToast("Wires use Blueprint curves"); drawGraph(latestDoc); } },
-      { title: "Add reroute knot", detail: "local view", group: "Execution", run: addRerouteKnot },
-      { title: "Bookmark graph", detail: "local editor state", group: "navigation", run: bookmarkCurrentGraph }
+      { title: "Add Comment", detail: "local view", group: "Comment", run: addCommentAroundSelection },
+      { title: "Align Top", detail: "local view", group: "Execution", run: () => alignSelectedNodes("y") },
+      { title: "Align Left", detail: "local view", group: "Execution", run: () => alignSelectedNodes("x") },
+      { title: "Auto Tidy", detail: "local view", group: "Execution", run: tidyGraphLayout },
+      { title: "Straighten Wires", detail: "Blueprint curves", group: "Execution", run: () => { wireStyle = "bezier"; showToast("Wires use Blueprint curves"); drawGraph(latestDoc); } },
+      { title: "Add Reroute Knot", detail: "local view", group: "Execution", run: addRerouteKnot },
+      { title: "Bookmark Graph", detail: "local editor state", group: "Navigation", run: bookmarkCurrentGraph }
     ];
     if (canvasCapability("runtime_output")) {
-      actions.push({ title: "Run graph", detail: "debug overlay", group: "run", run: runCurrentGraph });
+      actions.push({ title: "Run Graph", detail: "debug overlay", group: "Run", run: runCurrentGraph });
     }
     actions.push(...variableActionsForGraph(graph));
     actions.push(...traitMethodActions(latestDoc));

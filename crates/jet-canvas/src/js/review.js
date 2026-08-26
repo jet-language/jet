@@ -173,7 +173,11 @@
   }
 
   function reviewStatusLabel(status) {
-    return status === "unprojectable" ? "text only" : status || "clean";
+    if (status === "unprojectable") return "Text Only";
+    if (status === "added") return "Added";
+    if (status === "modified") return "Modified";
+    if (status === "deleted") return "Deleted";
+    return status ? String(status).replace(/^./, (letter) => letter.toUpperCase()) : "Clean";
   }
 
   function reviewGitFileStatus(status) {
@@ -345,7 +349,7 @@
     reviewFileList.innerHTML = files.length ? files.map((file) => {
       const active = file.path === reviewState.selectedPath ? " is-active" : "";
       const status = reviewGitFileStatus(file.status);
-      return `<button class="review-file${active}" type="button" data-review-file="${escapeAttr(file.path)}"><i class="review-file-mark"></i><span class="review-file-name">${escapeHtml(file.path)}</span><span class="review-file-status">${escapeHtml(status)}</span><span class="review-file-meta">${file.hunks.length} hunk${file.hunks.length === 1 ? "" : "s"}</span></button>`;
+      return `<button class="review-file${active}" type="button" data-review-file="${escapeAttr(file.path)}"><i class="review-file-mark"></i><span class="review-file-name">${escapeHtml(file.path)}</span><span class="review-file-status">${escapeHtml(reviewStatusLabel(status))}</span><span class="review-file-meta">${file.hunks.length} hunk${file.hunks.length === 1 ? "" : "s"}</span></button>`;
     }).join("") : `<div class="tag">No changed files.</div>`;
   }
 
@@ -385,7 +389,7 @@
     }
     const status = reviewGitFileStatus(file.status);
     const devFacts = developerMode && file.revision ? `current file ${file.revision}` : "";
-    reviewContent.innerHTML = `<div class="review-file-head"><div class="review-file-title"><h2>${escapeHtml(file.path)}</h2><p>${escapeHtml(status)} file · ${file.hunks.length} hunk${file.hunks.length === 1 ? "" : "s"} · Git text truth</p></div><div class="review-file-facts"><span>${escapeHtml(file.status || "dirty")}</span><span class="review-dev">${escapeHtml(devFacts)}</span></div></div><div class="review-legend"><span class="review-status-added"><i></i>added</span><span class="review-status-modified"><i></i>modified</span><span class="review-status-deleted"><i></i>deleted</span><span class="review-status-unprojectable"><i></i>text only</span></div><div class="review-hunks">${file.hunks.length ? file.hunks.map((hunk) => reviewHunkHtml(file, hunk)).join("") : `<div class="review-empty" data-review-empty="unprojectable"><h2>Git returned no text hunks</h2><p>This file is dirty, but Canvas cannot render a text hunk for it. The Git status remains visible.</p></div>`}</div>`;
+    reviewContent.innerHTML = `<div class="review-file-head"><div class="review-file-title"><h2>${escapeHtml(file.path)}</h2><p>${escapeHtml(reviewStatusLabel(status))} file · ${file.hunks.length} hunk${file.hunks.length === 1 ? "" : "s"} · Git text truth</p></div><div class="review-file-facts"><span>${escapeHtml(reviewStatusLabel(file.status || "dirty"))}</span><span class="review-dev">${escapeHtml(devFacts)}</span></div></div><div class="review-legend"><span class="review-status-added"><i></i>Added</span><span class="review-status-modified"><i></i>Modified</span><span class="review-status-deleted"><i></i>Deleted</span><span class="review-status-unprojectable"><i></i>Text Only</span></div><div class="review-hunks">${file.hunks.length ? file.hunks.map((hunk) => reviewHunkHtml(file, hunk)).join("") : `<div class="review-empty" data-review-empty="unprojectable"><h2>Git returned no text hunks</h2><p>This file is dirty, but Canvas cannot render a text hunk for it. The Git status remains visible.</p></div>`}</div>`;
   }
 
   function reviewRenderEmpty(title, message, state) {

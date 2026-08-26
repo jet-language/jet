@@ -8,7 +8,7 @@
 
 mod common;
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -482,9 +482,25 @@ fn readme_subcommands_exist_in_cli() {
 }
 
 // ---------------------------------------------------------------------------
-// Check 5: Every examples/features/<topic>/*.jet has a matching expected
-// output. `expected/` mirrors the <topic>/ tree (D-REPO-EXAMPLES1=A).
+// Check 5: Every executable examples/features entry has a matching expected
+// output or a canonical harness proof. `expected/` mirrors the <topic>/ tree
+// (D-REPO-EXAMPLES1=A). `package.jet` is a manifest, `run.jet` is the nested
+// entry, and service/browser entries use the same proof paths as their real
+// runners.
 // ---------------------------------------------------------------------------
+/// The same derived service fact used by the golden runner. Service entries
+/// have no terminating stdout golden because they serve until stopped.
+fn example_serves_until_stopped(path: &Path) -> bool {
+    let Some(path) = path.to_str() else {
+        return false;
+    };
+    let Ok(mut bundle) = jet::Loader::load_entry(path) else {
+        return false;
+    };
+    let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    jet::AST::bundle_serves_until_stopped(&bundle)
+}
+
 #[test]
 fn every_feature_example_has_expected_output() {
     // FEATURE_CLAIM: claim.examples-spec / expected-output-pairs
@@ -493,6 +509,8 @@ fn every_feature_example_has_expected_output() {
     let expected_dir = ex_dir.join("expected");
 
     let mut missing: Vec<String> = Vec::new();
+
+    let web_build = fs::read_to_string(root.join("tests/web_build.rs")).unwrap();
 
     for topic_entry in fs::read_dir(&ex_dir).unwrap().flatten() {
         let topic_path = topic_entry.path();
@@ -514,27 +532,57 @@ fn every_feature_example_has_expected_output() {
             let ext = path.extension().and_then(|e| e.to_str());
 
             if ext == Some("jet") {
+                if path.file_name().and_then(|name| name.to_str()) == Some("package.jet") {
+                    continue;
+                }
                 let name = path.file_stem().unwrap().to_string_lossy().into_owned();
                 let stem = format!("{}/{}", topic, name);
                 let out = expected_topic_dir.join(format!("{}.out", name));
                 let errout = expected_topic_dir.join(format!("{}.err.out", name));
-                if !out.is_file() && !errout.is_file() {
+                let stderrout = expected_topic_dir.join(format!("{}.stderr.out", name));
+                let webout = expected_topic_dir.join(format!("{}.web.out", name));
+                let harnessout = expected_topic_dir.join(format!("{}.harness.out", name));
+                let source = fs::read_to_string(&path).unwrap();
+                let is_service = example_serves_until_stopped(&path);
+                let is_web_harness = topic == "web"
+                    && name == "web_compute_webgpu"
+                    && source.contains("#Target(JS)")
+                    && web_build.contains(
+                        "include_str!(\"../examples/features/web/web_compute_webgpu.jet\")",
+                    );
+                if !out.is_file()
+                    && !errout.is_file()
+                    && !stderrout.is_file()
+                    && !webout.is_file()
+                    && !harnessout.is_file()
+                    && !is_service
+                    && !is_web_harness
+                {
                     missing.push(format!(
-                        "examples/features/{}.jet → missing expected/{}.out or .err.out",
-                        stem, stem
+                        "examples/features/{}.jet → missing expected output or canonical harness proof",
+                        stem
                     ));
                 }
             } else if path.is_dir() {
                 let name = path.file_name().unwrap().to_string_lossy().into_owned();
                 let stem = format!("{}/{}", topic, name);
-                let main = path.join("main.jet");
-                if main.is_file() {
+                let run = path.join("run.jet");
+                if run.is_file() {
                     let out = expected_topic_dir.join(format!("{}.out", name));
                     let errout = expected_topic_dir.join(format!("{}.err.out", name));
-                    if !out.is_file() && !errout.is_file() {
+                    let stderrout = expected_topic_dir.join(format!("{}.stderr.out", name));
+                    let webout = expected_topic_dir.join(format!("{}.web.out", name));
+                    let harnessout = expected_topic_dir.join(format!("{}.harness.out", name));
+                    if !out.is_file()
+                        && !errout.is_file()
+                        && !stderrout.is_file()
+                        && !webout.is_file()
+                        && !harnessout.is_file()
+                        && !example_serves_until_stopped(&run)
+                    {
                         missing.push(format!(
-                            "examples/features/{}/main.jet → missing expected/{}.out or .err.out",
-                            stem, stem
+                            "examples/features/{}/run.jet → missing expected output or service proof",
+                            stem
                         ));
                     }
                 }
@@ -547,6 +595,307 @@ fn every_feature_example_has_expected_output() {
         "feature examples without a matching expected output:\n{}",
         missing.join("\n")
     );
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SurfaceUse {
+    name: &'static str,
+    spelling: &'static str,
+}
+
+/// These are the user-facing capability bits retained in AST, not derived
+/// bookkeeping such as ownership facts or lowering scratch flags. A new
+/// capability field must add one row here so its example reachability is
+/// visible in the same guard as marker reachability.
+const AST_CAPABILITY_SURFACES: &[SurfaceUse] = &[
+    SurfaceUse {
+        name: "is_package_pub",
+        spelling: "pub(package)",
+    },
+    SurfaceUse {
+        name: "Func::is_unsafe",
+        spelling: "#Unsafe",
+    },
+    SurfaceUse {
+        name: "Func::is_pure",
+        spelling: "-[]>",
+    },
+    SurfaceUse {
+        name: "Func::is_sanitizer",
+        spelling: "#Sanitizer",
+    },
+    SurfaceUse {
+        name: "Func::is_reactive",
+        spelling: "#Reactive",
+    },
+    SurfaceUse {
+        name: "Func::is_replayable",
+        spelling: "#Replayable",
+    },
+    SurfaceUse {
+        name: "Func::is_job",
+        spelling: "#Job",
+    },
+    SurfaceUse {
+        name: "Func::is_must_use",
+        spelling: "#MustUse",
+    },
+    SurfaceUse {
+        name: "Func::is_inline",
+        spelling: "#Inline",
+    },
+    SurfaceUse {
+        name: "Func::is_inline_always",
+        spelling: "#Inline(Always)",
+    },
+    SurfaceUse {
+        name: "StructDef::is_published_schema",
+        spelling: "#PublishedSchema",
+    },
+    SurfaceUse {
+        name: "StructDef/EnumDef::is_single_use",
+        spelling: "#SingleUse",
+    },
+    SurfaceUse {
+        name: "StructDef/EnumDef::is_must_use",
+        spelling: "#MustUse",
+    },
+    SurfaceUse {
+        name: "Field::redact",
+        spelling: "#Redact",
+    },
+    SurfaceUse {
+        name: "ConstDef::is_persist",
+        spelling: "#Persist",
+    },
+];
+
+/// Current zero-use marker inventory. Each row has a card or retirement
+/// disposition; the set comparison below is the CI ratchet that rejects a
+/// new zero-use marker and rejects stale inventory rows.
+const MARKER_ZERO_USE_TRIAGE: &[(&str, &str)] = &[
+    ("Replayable", "card #349"),
+    ("Undo", "card #1820"),
+    ("Close", "card #1893"),
+    ("Error", "cards #2172/#2175"),
+    ("Encode", "card #1830"),
+    ("Equatable", "card #1300"),
+    ("CodableAsBase", "card #1830"),
+    ("DenyUnknownFields", "card #1818"),
+    ("Discriminant", "card #1300"),
+    ("Untagged", "card #1830"),
+    ("Flatten", "card #1830"),
+    ("Flag", "card #1277"),
+    ("Local", "card #1459"),
+    ("Shared", "card #1561"),
+    ("allow", "card #1748"),
+    ("wire", "card #1830"),
+];
+
+const AST_ZERO_USE_TRIAGE: &[(&str, &str)] = &[
+    ("Func::is_replayable", "card #349"),
+    ("Func::is_sanitizer", "retired source surface; card #1459"),
+];
+
+fn collect_feature_jet_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if path.file_name().and_then(|name| name.to_str()) != Some("expected") {
+                collect_feature_jet_files(&path, files);
+            }
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("jet") {
+            files.push(path);
+        }
+    }
+}
+
+fn strip_jet_comments_and_strings(source: &str) -> String {
+    enum Mode {
+        Normal,
+        LineComment,
+        BlockComment(usize),
+        String { quote: char, triple: bool },
+    }
+
+    let mut mode = Mode::Normal;
+    let mut chars = source.chars().peekable();
+    let mut clean = String::with_capacity(source.len());
+
+    while let Some(ch) = chars.next() {
+        match &mut mode {
+            Mode::Normal => match ch {
+                '/' if chars.peek() == Some(&'/') => {
+                    chars.next();
+                    mode = Mode::LineComment;
+                    clean.push(' ');
+                }
+                '/' if chars.peek() == Some(&'*') => {
+                    chars.next();
+                    mode = Mode::BlockComment(1);
+                    clean.push(' ');
+                }
+                '"' => {
+                    let triple = if chars.peek() == Some(&'"') {
+                        let mut lookahead = chars.clone();
+                        lookahead.next();
+                        lookahead.peek() == Some(&'"')
+                    } else {
+                        false
+                    };
+                    if triple {
+                        chars.next();
+                        chars.next();
+                    }
+                    mode = Mode::String {
+                        quote: '"',
+                        triple,
+                    };
+                    clean.push(' ');
+                }
+                '\'' => {
+                    mode = Mode::String {
+                        quote: '\'',
+                        triple: false,
+                    };
+                    clean.push(' ');
+                }
+                _ => clean.push(ch),
+            },
+            Mode::LineComment => {
+                if ch == '\n' {
+                    mode = Mode::Normal;
+                    clean.push('\n');
+                }
+            }
+            Mode::BlockComment(depth) => {
+                if ch == '/' && chars.peek() == Some(&'*') {
+                    chars.next();
+                    *depth += 1;
+                } else if ch == '*' && chars.peek() == Some(&'/') {
+                    chars.next();
+                    *depth -= 1;
+                    if *depth == 0 {
+                        mode = Mode::Normal;
+                    }
+                } else if ch == '\n' {
+                    clean.push('\n');
+                }
+            }
+            Mode::String { quote, triple } => {
+                if ch == '\\' {
+                    chars.next();
+                } else if ch == *quote {
+                    if *triple {
+                        if chars.peek() == Some(&'"') {
+                            chars.next();
+                            if chars.peek() == Some(&'"') {
+                                chars.next();
+                                mode = Mode::Normal;
+                            }
+                        }
+                    } else {
+                        mode = Mode::Normal;
+                    }
+                }
+            }
+        }
+    }
+    clean
+}
+
+fn marker_used(clean_source: &str, name: &str) -> bool {
+    let needle = format!("#{name}");
+    clean_source.match_indices(&needle).any(|(offset, _)| {
+        let before = clean_source[..offset].chars().next_back();
+        let after = clean_source[offset + needle.len()..].chars().next();
+        !before.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            && !after.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    })
+}
+
+fn surface_used(clean_source: &str, spelling: &str) -> bool {
+    if let Some(name) = spelling.strip_prefix('#') {
+        marker_used(clean_source, name)
+    } else {
+        clean_source.contains(spelling)
+    }
+}
+
+#[test]
+fn ast_capabilities_and_active_markers_have_zero_use_inventories() {
+    use jet_foundation::Policy::RuleStatus;
+
+    let mut files = Vec::new();
+    collect_feature_jet_files(&root().join("examples/features"), &mut files);
+    files.sort();
+    let clean_sources: Vec<String> = files
+        .iter()
+        .map(|path| {
+            strip_jet_comments_and_strings(
+                &fs::read_to_string(path).expect("feature source is readable"),
+            )
+        })
+        .collect();
+
+    let mut marker_use: BTreeMap<&str, bool> = BTreeMap::new();
+    for row in jet_foundation::Registry::marker_rows() {
+        let Some(rule) = row.rule else {
+            continue;
+        };
+        if !matches!(rule.status, RuleStatus::Active) {
+            continue;
+        }
+        marker_use.insert(
+            rule.name,
+            clean_sources.iter().any(|source| marker_used(source, rule.name)),
+        );
+    }
+    let marker_zero: BTreeSet<_> = marker_use
+        .iter()
+        .filter_map(|(name, used)| (!used).then_some((*name).to_string()))
+        .collect();
+    let marker_triage: BTreeSet<_> = MARKER_ZERO_USE_TRIAGE
+        .iter()
+        .map(|(name, _)| (*name).to_string())
+        .collect();
+    assert_eq!(
+        marker_zero, marker_triage,
+        "active marker zero-use inventory changed; add a card/retirement row before adding or removing a marker"
+    );
+    for (name, disposition) in MARKER_ZERO_USE_TRIAGE {
+        assert!(
+            (*disposition).contains("card #") || (*disposition).contains("retired"),
+            "marker #{name} has no triage disposition: {disposition}"
+        );
+    }
+
+    let ast_zero: BTreeSet<_> = AST_CAPABILITY_SURFACES
+        .iter()
+        .filter_map(|surface| {
+            (!clean_sources
+                .iter()
+                .any(|source| surface_used(source, surface.spelling)))
+            .then_some(surface.name.to_string())
+        })
+        .collect();
+    let ast_triage: BTreeSet<_> = AST_ZERO_USE_TRIAGE
+        .iter()
+        .map(|(name, _)| (*name).to_string())
+        .collect();
+    assert_eq!(
+        ast_zero, ast_triage,
+        "AST capability zero-use inventory changed; add a card/retirement row before adding or removing a capability"
+    );
+    for (name, disposition) in AST_ZERO_USE_TRIAGE {
+        assert!(
+            (*disposition).contains("card #") || (*disposition).contains("retired"),
+            "AST capability {name} has no triage disposition: {disposition}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

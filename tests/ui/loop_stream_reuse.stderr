@@ -5,6 +5,7 @@ Error [E0068]: This callable uses the retired result-arrow shape.
     |                  ^^
  Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
  Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+More: jet-lang.dev/e/E0068
 
 Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
   --> tests/ui/loop_stream_reuse.jet:1:33
@@ -13,6 +14,7 @@ Error [E0080]: A braced callable with a non-unit success result needs `->` befor
     |                                 ^
  Why: The body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
  Fix: Write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) Error! { ... }` bare.
+More: jet-lang.dev/e/E0080
 
 Error [E0121]: `s` was given away earlier, so it can't be used here
   --> tests/ui/loop_stream_reuse.jet:12:15
@@ -21,6 +23,7 @@ Error [E0121]: `s` was given away earlier, so it can't be used here
     |               ^
  Why: after a value moves to another name, the old name no longer gives access to it
  Fix: `s` is one-pass and cannot be copied — create a fresh source for the second drive
+More: jet-lang.dev/e/E0121
 
 Error [E0107]: nothing named `x` exists here
   --> tests/ui/loop_stream_reuse.jet:12:28
@@ -29,3 +32,4 @@ Error [E0107]: nothing named `x` exists here
     |                            ^
  Why: a name must be declared before it's used
  Fix: did you mean `s`?
+More: jet-lang.dev/e/E0107

@@ -311,7 +311,7 @@ impl<'a> AdmissionTransaction<'a> {
         let mut scheduled = queue.clone();
         let mut fetched = BTreeMap::new();
         if let Some(progress) = progress.as_ref() {
-            progress.phase("substituting");
+            progress.phase("Substituting");
             progress.object_progress(0, scheduled.len());
         }
 
@@ -410,7 +410,7 @@ impl<'a> AdmissionTransaction<'a> {
         }
 
         if let Some(progress) = progress.as_ref() {
-            progress.phase("admitting");
+            progress.phase("Admitting");
             progress.object_progress(0, fetched.len());
         }
         let closure_receipt = self.publish(&mut fetched, &requests, store_dir, progress)?;

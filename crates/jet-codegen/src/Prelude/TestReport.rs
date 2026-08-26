@@ -150,6 +150,7 @@ impl JetTestFailure {
                 out.push_str(&format!("    {}\n", line));
             }
         }
+        out.push_str(&format!("  More: jet-lang.dev/e/{}\n", self.code));
         out
     }
 

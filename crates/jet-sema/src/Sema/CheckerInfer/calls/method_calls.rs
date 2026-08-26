@@ -652,11 +652,9 @@ impl<'a> Checker<'a> {
                         self.check_type_assignable(&Type::String, &t, args[0].expr.span());
                     }
                     if is_checked {
-                        self.require_knowledge_gate(
-                            crate::Sema::KnowledgePlane::Range,
-                            crate::Sema::KnowledgeGate::RawProjection,
-                            span,
-                        );
+                        if !self.in_unsafe {
+                            self.diags.push(Diagnostic::from_row("E0387", &[], Some(span)));
+                        }
                     }
                     return Some(result);
                 }

@@ -104,6 +104,14 @@ impl Env {
             }
         }
         for dir in &self.bin_dirs {
+            let candidate = Path::new(dir);
+            if self
+                .cache_leases
+                .iter()
+                .any(|lease| candidate.starts_with(lease.original_output()))
+            {
+                continue;
+            }
             if seen.insert(dir.as_str()) {
                 parts.push(dir);
             }
@@ -130,6 +138,9 @@ impl Env {
     }
 
     fn apply_to_base(&self, cmd: &mut Command, base_path: &str) {
+        for lease in &self.cache_leases {
+            lease.mark_process_handoff();
+        }
         cmd.env("PATH", self.composed_path(base_path));
         for (name, value) in &self.vars {
             cmd.env(name, value);

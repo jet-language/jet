@@ -76,10 +76,10 @@ pub(super) fn serve_studio(
         .unwrap_or_else(|_| addr.to_string());
     let url = format!("http://{local}/studio/");
     println!("{url}");
-    theme.ok("jetos Studio service listening");
+    theme.ok("Jetos Studio Service Listening");
     if open_browser {
         match std::process::Command::new("xdg-open").arg(&url).spawn() {
-            Ok(_) => theme.ok("opened jetos Studio"),
+            Ok(_) => theme.ok("Opened Jetos Studio"),
             Err(_) => {
                 theme.detail("open the printed Studio URL in a browser.");
             }

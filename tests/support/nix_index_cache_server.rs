@@ -266,10 +266,7 @@ impl NixIndexCacheServer {
             .target_signature_url
             .strip_prefix(&self.endpoint)
             .expect("index signature belongs to server");
-        let mut signature = self
-            .signed_index
-            .index_signature
-            .clone();
+        let mut signature = self.signed_index.index_signature.clone();
         signature.push(b'!');
         self.routes
             .lock()

@@ -94,7 +94,6 @@ fn marshallable_ty(ty: &Type) -> bool {
         | Type::String
         | Type::Bool
         | Type::Char => true,
-        Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => true,
         Type::Named(n) if matches!(n.as_str(), "Int" | "String" | "Bool" | "Char" | "Unit") => true,
         _ => false,
     }

@@ -125,7 +125,7 @@ pub(super) fn cmd_studio(theme: &Theme, parsed: &Parsed) -> i32 {
     }
     if headless {
         println!("{}", app.display());
-        theme.ok("jetos Studio app ready");
+        theme.ok("Jetos Studio App Ready");
         return 0;
     }
     let context = studio_context(parsed);

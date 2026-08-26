@@ -632,7 +632,6 @@ fn web_close_key_for_name(type_name: &str) -> String {
 
 fn is_string_like(ty: &Type) -> bool {
     matches!(ty, Type::String)
-        || matches!(ty, Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT)
 }
 
 fn is_list_string(ty: &Type) -> bool {
@@ -4231,7 +4230,6 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
             Some("JetMeasurement")
         }
         Type::String => Some("String"),
-        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => Some("String"),
         Type::List(inner) if matches!(**inner, Type::Int | Type::InlineRange { .. }) => {
             Some("Vec<JetWasmInt>")
         }
@@ -4270,7 +4268,6 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
         Type::Float | Type::Float32 => "f64".to_string(),
         Type::Bool => "bool".to_string(),
         Type::String => "String".to_string(),
-        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => "String".to_string(),
         Type::List(inner) if matches!(**inner, Type::IntN { .. }) => "Vec<i64>".to_string(),
         Type::List(inner) => format!("Vec<{}>", wasm_storage_ty(inner)?),
         Type::FixedList { elem, len, .. } => {
@@ -4340,7 +4337,6 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
                 .unwrap_or_default();
             format!("fn({}){ret}", params.join(", "))
         }
-        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => "String".to_string(),
         Type::Union(members) => mangle_path(&crate::AST::union_enum_name(members)),
         Type::Named(name) if name == Syntax::TYPE_ERR => "JetErr".to_string(),
         Type::Named(name) if bundle_has_named_web_type(bundle, name) => {
@@ -4359,17 +4355,6 @@ fn wasm_param_rust_ty(ty: &Type, conv: AccessConvention, bundle: &ProgramBundle)
         (AccessConvention::Read, Type::String) => Some("&String".to_string()),
         (AccessConvention::Write, Type::String) => Some("&mut String".to_string()),
         (AccessConvention::Move, Type::String) => Some("String".to_string()),
-        (AccessConvention::Read, Type::Apply { name, .. }) if name == Syntax::TYPE_CHECKED_TEXT => {
-            Some("&String".to_string())
-        }
-        (AccessConvention::Write, Type::Apply { name, .. })
-            if name == Syntax::TYPE_CHECKED_TEXT =>
-        {
-            Some("&mut String".to_string())
-        }
-        (AccessConvention::Move, Type::Apply { name, .. }) if name == Syntax::TYPE_CHECKED_TEXT => {
-            Some("String".to_string())
-        }
         (AccessConvention::Read, Type::List(inner))
             if matches!(**inner, Type::Int | Type::InlineRange { .. }) =>
         {
@@ -4424,18 +4409,6 @@ fn wasm_export_arg_expr(name: &str, ty: &Type, conv: AccessConvention) -> String
     match (conv, ty) {
         (AccessConvention::Read, Type::String) => format!("&{name}"),
         (AccessConvention::Write, Type::String) => format!("&mut {name}"),
-        (
-            AccessConvention::Read,
-            Type::Apply {
-                name: type_name, ..
-            },
-        ) if type_name == Syntax::TYPE_CHECKED_TEXT => format!("&{name}"),
-        (
-            AccessConvention::Write,
-            Type::Apply {
-                name: type_name, ..
-            },
-        ) if type_name == Syntax::TYPE_CHECKED_TEXT => format!("&mut {name}"),
         (AccessConvention::Read, Type::List(inner)) if is_list_int(ty) || is_string_like(inner) => {
             format!("&{name}")
         }
@@ -4488,9 +4461,6 @@ fn wasm_edge_ok_json_expr(ty: &Type, value: &str) -> Option<String> {
         Type::Int | Type::IntN { .. } | Type::Bool => Some(format!("{value}.to_string()")),
         Type::Float | Type::Float32 => Some(format!("jet_wasm_json_float({value})")),
         Type::String => Some(format!("jet_wasm_json(&{value})")),
-        Type::Apply { name, .. } if name == Syntax::TYPE_CHECKED_TEXT => {
-            Some(format!("jet_wasm_json(&{value})"))
-        }
         Type::List(inner) if matches!(**inner, Type::Int) => {
             Some(format!("jet_wasm_json_list_int(&{value})"))
         }

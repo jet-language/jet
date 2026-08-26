@@ -632,7 +632,7 @@
       || (clipboardState.revision && clipboardState.revision !== latestDoc.revision)
       || graphChanged) {
       setCanvasState("stale", "Selection is stale", "The source or graph changed after copy. Copy the current selection again; the source was not changed.", [
-        { label: "Show source", run: openSourceRecovery },
+        { label: "Show Source", run: openSourceRecovery },
         { label: "Reload", primary: true, run: () => loadGraph() }
       ]);
       showToast("Selection is stale; copy the current selection again", { isError: true });
@@ -1052,12 +1052,12 @@
           || actionEntries.find((item) => item.action_id === "canvas.command:dev");
         if (ready) renderCommandAuthority(ready);
         else setCanvasState("permission", "Run is unavailable", "Canvas could not load run authority. Jet source stays unchanged; retry the action catalog.", [
-          { label: "Open source", run: openSourceRecovery },
+          { label: "Open Source", run: openSourceRecovery },
           { label: "Retry", primary: true, run: runCurrentGraph }
         ]);
       }).catch((error) => {
         setCanvasState("error", "Run is unavailable", "Canvas could not load run authority. Jet source stays unchanged.", [
-          { label: "Open source", run: openSourceRecovery },
+          { label: "Open Source", run: openSourceRecovery },
           { label: "Retry", primary: true, run: runCurrentGraph }
         ]);
         showToast(String(error), { isError: true });
@@ -1092,8 +1092,8 @@
       if (window.__jetCanvasCanvasState && window.__jetCanvasCanvasState.kind === "permission") clearCanvasState();
     } else {
       setCanvasState("permission", "Permission needed", `${item.title}: ${item.denied_reason || "This command is unavailable here."} Jet source stays unchanged.`, [
-        { label: "Open source", run: openSourceRecovery },
-        { label: "Try again", primary: true, run: () => renderCommandAuthority(item) }
+        { label: "Open Source", run: openSourceRecovery },
+        { label: "Try Again", primary: true, run: () => renderCommandAuthority(item) }
       ]);
     }
     showToast(item.available ? item.title + " ready" : item.denied_reason || "Command unavailable");
@@ -1104,8 +1104,8 @@
     if (!latestDoc || !item) return;
     if (!item.available) {
       setCanvasState("permission", "Permission needed", `${item.title}: ${item.denied_reason || "This command is unavailable here."} Jet source stays unchanged.`, [
-        { label: "Open source", run: openSourceRecovery },
-        { label: "Try again", primary: true, run: () => renderCommandAuthority(item) }
+        { label: "Open Source", run: openSourceRecovery },
+        { label: "Try Again", primary: true, run: () => renderCommandAuthority(item) }
       ]);
       return;
     }
@@ -1131,12 +1131,12 @@
         runHud.classList.remove("is-running");
         const doc = result.json || {};
         runHud.textContent = doc.success ? item.title + " passed" : item.title + " failed";
-        details.innerHTML = `<h2>Receipt</h2><div class="signature-source"><code>${escapeHtml((doc.command || []).join(" "))}</code><span>${escapeHtml(doc.success ? "success" : "failed")} · ${escapeHtml(String(doc.exit_code ?? "?"))} · ${escapeHtml(String(doc.elapsed_ms || 0))}ms</span></div><div class="inline-row"><b>stdout</b><code>${escapeHtml(doc.stdout || "")}</code></div><div class="inline-row"><b>stderr</b><code>${escapeHtml(doc.stderr || "")}</code></div>`;
+        details.innerHTML = `<h2>Receipt</h2><div class="signature-source"><code>${escapeHtml((doc.command || []).join(" "))}</code><span>${escapeHtml(doc.success ? "Success" : "Failed")} · ${escapeHtml(String(doc.exit_code ?? "?"))} · ${escapeHtml(String(doc.elapsed_ms || 0))}ms</span></div><div class="inline-row"><b>Stdout</b><code>${escapeHtml(doc.stdout || "")}</code></div><div class="inline-row"><b>Stderr</b><code>${escapeHtml(doc.stderr || "")}</code></div>`;
         const hasDiagnostics = doc.action_id === "canvas.command:check"
           ? acceptDiagnosticsPayload(doc, "Check")
           : false;
         if (!doc.success && !hasDiagnostics) setCanvasState("error", item.title + " failed", "Jet source was not changed. Read the receipt, fix the source if needed, then retry.", [
-          { label: "Open source", run: openSourceRecovery },
+          { label: "Open Source", run: openSourceRecovery },
           { label: "Retry", primary: true, run: () => renderCommandAuthority(item) }
         ]);
         else if (doc.action_id !== "canvas.command:check") clearCanvasState();
@@ -1146,7 +1146,7 @@
         runHud.classList.remove("is-running");
         runHud.textContent = item.title + " failed";
         setCanvasState(navigator.onLine === false ? "offline" : "error", navigator.onLine === false ? "Offline" : item.title + " failed", "Jet source stays visible and unchanged. Retry when the connection is ready.", [
-          { label: "Open source", run: openSourceRecovery },
+          { label: "Open Source", run: openSourceRecovery },
           { label: "Retry", primary: true, run: () => renderCommandAuthority(item) }
         ]);
         setSaveState("source unchanged", "error");
@@ -1158,7 +1158,7 @@
     if (!latestDoc) return;
     const item = actionEntries.find((entry) => entry.action_id === "canvas.command:check") || {
       action_id: "canvas.command:check",
-      title: "Check project",
+      title: "Check Project",
       command: ["jet", "check"],
       writes: "none",
       requires_confirmation: false,
@@ -1171,7 +1171,7 @@
     if (!latestDoc) return;
     const fallback = {
       action_id: "canvas.command:check",
-      title: "Check project",
+      title: "Check Project",
       command: ["jet", "check"],
       writes: "none",
       requires_confirmation: false,

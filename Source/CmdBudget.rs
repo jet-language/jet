@@ -51,7 +51,7 @@ pub(crate) fn run(raw: &[String]) -> i32 {
     let options = match parse(raw) {
         Ok(options) => options,
         Err(message) => {
-            eprintln!("Error [E2102]: {message}\n Fix: {USAGE}");
+            eprintln!("Error [E2102]: {message}\n Fix: {USAGE}\nMore: jet-lang.dev/e/E2102");
             return 2;
         }
     };
@@ -803,7 +803,7 @@ fn emit_stored_build_gates(stored: &StoredBuildReport) -> i32 {
                 "regressed"
             };
             eprintln!(
-                "Error [{code}]: performance budget {} {state}\n --> {}\n Why: {}\n Fix: {}",
+                "Error [{code}]: performance budget {} {state}\n --> {}\n Why: {}\n Fix: {}\nMore: jet-lang.dev/e/{code}",
                 fact.name,
                 fact.source,
                 fact.reason,
@@ -831,7 +831,7 @@ fn emit_stored_build_gates(stored: &StoredBuildReport) -> i32 {
     }
 }
 fn build_gate_tool_failure(why: &str) -> i32 {
-    eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry");
+    eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry\nMore: jet-lang.dev/e/E2908");
     1
 }
 
@@ -3014,7 +3014,7 @@ fn emit_check(options: &Options, built: &BuiltReport, id: &str, path: &str, crea
             "Error"
         };
         eprintln!(
-            "{severity} [{code}]: {message}\n --> {}:{}:{}\n Why: {}\n Fix: {fix}",
+            "{severity} [{code}]: {message}\n --> {}:{}:{}\n Why: {}\n Fix: {fix}\nMore: jet-lang.dev/e/{code}",
             row.source, row.line, row.column, row.reason
         );
         emit_annotation(options, severity, code, row, &message, &fix);
@@ -3404,7 +3404,7 @@ fn tool_failure(options: &Options, why: &str) -> i32 {
                 .json()
         )
     } else {
-        eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry\nbudget command failed before a valid report was produced")
+        eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry\nMore: jet-lang.dev/e/E2908\nbudget command failed before a valid report was produced")
     }
     1
 }
@@ -3412,7 +3412,7 @@ fn tool_failure_with_report(options: &Options, id: &str, why: &str) -> i32 {
     if options.json {
         return tool_failure(options, why);
     }
-    eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry\nbudget command failed · report {id} was not accepted");
+    eprintln!("Error [E2908]: performance budget operation failed\n Why: {why}\n Fix: correct the named failure and retry\nMore: jet-lang.dev/e/E2908\nbudget command failed · report {id} was not accepted");
     1
 }
 

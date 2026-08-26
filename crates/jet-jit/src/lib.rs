@@ -12,8 +12,14 @@
 // This module includes shared Prelude source that several hosts compile,
 // each using a different subset, so dead-code reports here are about the
 // other hosts' usage, not about this one. Scoped to the module, never the crate.
-#![allow(dead_code)]
-#![allow(non_snake_case)]
+#![expect(
+    dead_code,
+    reason = "#804: shared Prelude host adapters are compiled by multiple tiers"
+)]
+#![expect(
+    non_snake_case,
+    reason = "#804: shared Prelude symbols retain canonical Jet names"
+)]
 
 /// D-JOB-SUBCMD1=C: the JIT and interpreter import the same Prelude selector
 /// as generated AOT mains. Their only extra work is mapping the selected name

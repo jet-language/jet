@@ -436,7 +436,7 @@ fn top_level_help_flag_prints_full_usage() {
         assert!(out.status.success(), "{flag}: {:?}", out);
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(
-            stdout.contains("usage:"),
+            stdout.contains("Usage:"),
             "{flag} did not print full usage: {stdout}"
         );
         assert!(
@@ -444,7 +444,7 @@ fn top_level_help_flag_prints_full_usage() {
             "{flag} usage missing a real command: {stdout}"
         );
         assert!(
-            stdout.contains("inspect commands:"),
+            stdout.contains("Inspect Commands:"),
             "{flag} usage missing the inspect group: {stdout}"
         );
         assert!(

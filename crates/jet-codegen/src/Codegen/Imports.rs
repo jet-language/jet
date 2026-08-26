@@ -185,9 +185,6 @@ pub(crate) fn selective_nominal_targets(
                     .distinct_defs()
                     .iter()
                     .any(|member| member.name == leaf),
-                Item::MarkerDecl(definition) => {
-                    definition.text.is_some() && definition.name == leaf
-                }
                 _ => false,
             });
             if is_nominal && bundle.name_ledger.visible(module_idx, target, leaf) {

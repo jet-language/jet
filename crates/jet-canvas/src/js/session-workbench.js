@@ -96,13 +96,14 @@
       identity.dataset.sourceRevision = currentRevision;
     }
     if (footerSession) {
-      footerSession.textContent = `session ${shortId}`;
+      footerSession.textContent = `Session ${shortId}`;
       footerSession.title = session.id;
     }
     document.querySelectorAll("[data-session-view]").forEach((view) => {
       const name = view.getAttribute("data-session-view") || "view";
-      view.textContent = `${name} · ${shortId} · ${String(currentRevision).slice(-12)}`;
-      view.title = `${name} · ${session.id} · ${currentRevision}`;
+      const displayName = { "custom servers": "Custom Servers" }[name] || name;
+      view.textContent = `${displayName} · ${shortId} · ${String(currentRevision).slice(-12)}`;
+      view.title = `${displayName} · ${session.id} · ${currentRevision}`;
       view.dataset.sessionId = session.id;
       view.dataset.sourceRevision = currentRevision;
       view.dataset.sessionState = session.state || "starting";
@@ -111,7 +112,7 @@
     const port = session.listeners && session.listeners.application && session.listeners.application.port;
     if (preview && port) {
       preview.href = `${location.protocol}//${location.hostname}:${port}/`;
-      preview.textContent = `Open app preview · localhost:${port}`;
+      preview.textContent = `Open App Preview · localhost:${port}`;
     }
     const previewState = document.getElementById("preview-status");
     if (previewState) {

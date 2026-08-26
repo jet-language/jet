@@ -515,7 +515,7 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
                     format!(" {version}")
                 };
                 theme.status(&format!(
-                    "installed {}{ver}  ->  {}   (generation \"{}\", generation {})",
+                    "Installed {}{ver}  ->  {}   (generation \"{}\", generation {})",
                     theme.bold(spec.short_name()),
                     link.display(),
                     Syntax::TOOL_PROFILE_NAME,
@@ -1867,28 +1867,34 @@ fn write_generation_locked(
     let gen = next_generation()?;
     let gen_dir = generations_dir().join(gen.to_string());
     fs::create_dir(&gen_dir)?;
-    let mut generation_tools = tools.to_vec();
-    materialize_generation_bins(&gen_dir, &mut generation_tools, live)?;
-    let meta = format_generation_meta(gen, &generation_tools)?;
-    write_synced(&gen_dir.join("meta.json"), meta.as_bytes())?;
-    validate_generation_bins(gen, &generation_tools)?;
-    let witness = generation_record_witness(&meta, gen).map_err(io::Error::other)?;
-    write_synced(
-        &gen_dir.join(PROFILE_COMPLETE_FILE),
-        format!("{witness}\n").as_bytes(),
-    )?;
-    Store::sync_store_directory(&gen_dir)?;
-    Store::sync_store_directory(&generations_dir())?;
-    profile_failpoint("after-generation")?;
+    let result = (|| {
+        let mut generation_tools = tools.to_vec();
+        materialize_generation_bins(&gen_dir, &mut generation_tools, live)?;
+        let meta = format_generation_meta(gen, &generation_tools)?;
+        write_synced(&gen_dir.join("meta.json"), meta.as_bytes())?;
+        validate_generation_bins(gen, &generation_tools)?;
+        let witness = generation_record_witness(&meta, gen).map_err(io::Error::other)?;
+        write_synced(
+            &gen_dir.join(PROFILE_COMPLETE_FILE),
+            format!("{witness}\n").as_bytes(),
+        )?;
+        Store::sync_store_directory(&gen_dir)?;
+        Store::sync_store_directory(&generations_dir())?;
+        profile_failpoint("after-generation")?;
 
-    if !generation_tools.is_empty() {
-        ensure_generation_roots(gen, &generation_tools, &witness)?;
-        profile_failpoint("after-root-commit")?;
+        if !generation_tools.is_empty() {
+            ensure_generation_roots(gen, &generation_tools, &witness)?;
+            profile_failpoint("after-root-commit")?;
+        }
+        profile_failpoint("before-pointer")?;
+        publish_generation(gen, &witness, &generation_tools)?;
+        profile_failpoint("after-pointer")?;
+        Ok(gen)
+    })();
+    if result.is_err() && !gen_dir.join(PROFILE_COMPLETE_FILE).is_file() {
+        let _ = fs::remove_dir_all(&gen_dir);
     }
-    profile_failpoint("before-pointer")?;
-    publish_generation(gen, &witness, &generation_tools)?;
-    profile_failpoint("after-pointer")?;
-    Ok(gen)
+    result
 }
 
 fn next_generation() -> io::Result<u64> {
@@ -1934,6 +1940,7 @@ fn recover_profile_state() -> io::Result<()> {
             Err(error) => return Err(error),
         }
     }
+    recover_projection_staging()?;
 
     migrate_legacy_generations_locked()?;
 
@@ -1995,6 +2002,38 @@ fn recover_profile_state() -> io::Result<()> {
             &generation_record_witness(&metadata, selected).map_err(io::Error::other)?,
             &tools,
         )?;
+    }
+    Ok(())
+}
+
+fn recover_projection_staging() -> io::Result<()> {
+    let directory = user_bin_dir();
+    let metadata = match fs::symlink_metadata(&directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(io::Error::other("managed tool bin directory is not a real directory"));
+    }
+    for entry in fs::read_dir(&directory)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with(".projection-") || !name.ends_with(".partial") {
+            continue;
+        }
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(io::Error::other(format!(
+                "managed projection staging `{}` is not a regular file",
+                path.display()
+            )));
+        }
+        fs::remove_file(path)?;
     }
     Ok(())
 }
@@ -2157,6 +2196,32 @@ fn materialize_generation_bins(
                 "profile tool has mismatched bin/member pairs",
             ));
         }
+        let live_lease = live
+            .filter(|(receipt, _)| {
+                receipt.reference == tool.reference
+                    && receipt.output_hash == tool.output_hash
+                    && receipt.store_root.to_string_lossy() == tool.store_root
+            })
+            .map(|(_, lease)| lease);
+        let fallback_lease = if live_lease.is_none() {
+            let roots = Store::Roots {
+                root: PathBuf::from(&tool.store_root),
+                dev_mode: true,
+            };
+            let entry = Store::list_checked(&roots)?
+                .into_iter()
+                .find(|entry| {
+                    entry.reference == tool.reference
+                        && entry.envelope.output_hash == tool.output_hash
+                })
+                .ok_or_else(|| io::Error::other("profile StoreEntry authority is unavailable"))?;
+            Some(Store::snapshot_lease(&roots, &entry)?)
+        } else {
+            None
+        };
+        let source_lease = live_lease
+            .or(fallback_lease.as_ref())
+            .ok_or_else(|| io::Error::other("profile executable lease is unavailable"))?;
         let mut member_digests = Vec::with_capacity(tool.bins.len());
         for (bin, member) in tool.bins.iter().zip(&tool.members) {
             validate_bin_name(bin).map_err(io::Error::other)?;
@@ -2166,25 +2231,7 @@ fn materialize_generation_bins(
                 return Err(io::Error::other(format!("duplicate profile bin `{bin}`")));
             }
             let destination = bin_dir.join(physical);
-            let proof = if let Some((_receipt, lease)) = live.filter(|(receipt, _)| {
-                receipt.reference == tool.reference
-                    && receipt.output_hash == tool.output_hash
-                    && receipt.store_root.to_string_lossy() == tool.store_root
-            }) {
-                lease.copy_profile_executable(member, &destination)?
-            } else {
-                let roots = Store::Roots {
-                    root: PathBuf::from(&tool.store_root),
-                    dev_mode: true,
-                };
-                Store::copy_profile_store_member(
-                    &roots,
-                    &tool.reference,
-                    &tool.output_hash,
-                    member,
-                    &destination,
-                )?
-            };
+            let proof = source_lease.copy_profile_executable(member, &destination)?;
             #[cfg(unix)]
             if proof.mode & 0o111 == 0 {
                 return Err(io::Error::other("profile projection is not executable"));
@@ -2282,6 +2329,32 @@ fn publish_generation(generation: u64, witness: &str, tools: &[InstalledTool]) -
         .flat_map(|tool| tool.bins.iter())
         .map(|bin| ProfileDispatch::physical_bin_name(bin))
         .collect::<BTreeSet<_>>();
+    for tool in tools {
+        for bin in &tool.bins {
+            let path = user_bin_dir().join(ProfileDispatch::physical_bin_name(bin));
+            install_profile_projection(generation, bin)
+                .map_err(|error| managed_tool_write_error(bin, &path, error))?;
+        }
+    }
+    Store::sync_store_directory(&user_bin_dir())?;
+
+    let pointer = ProfileDispatch::format_current_pointer(&ProfileDispatch::CurrentPointer {
+        generation,
+        witness: witness.to_string(),
+    })?;
+    atomic_write_current_pointer(pointer.as_bytes())?;
+    profile_failpoint("after-current-pointer")?;
+    let profile = format!(
+        "{{\n  \"name\": \"{}\",\n  \"current\": {},\n  \"witness\": {}\n}}\n",
+        Syntax::TOOL_PROFILE_NAME,
+        generation,
+        json_str(witness),
+    );
+    atomic_write_profile_pointer(profile.as_bytes())?;
+    // Install and publish every new projection before retiring names that
+    // belong only to the previous generation. A crash, antivirus hold, or
+    // interrupted cleanup therefore leaves the last published name usable;
+    // stale names are harmless and are removed on the next successful publish.
     for bin in previous.iter().flat_map(|tool| &tool.bins) {
         let physical = ProfileDispatch::physical_bin_name(bin);
         if active.contains(&physical) {
@@ -2306,28 +2379,7 @@ fn publish_generation(generation: u64, witness: &str, tools: &[InstalledTool]) -
             Err(error) => return Err(error),
         }
     }
-    for tool in tools {
-        for bin in &tool.bins {
-            let path = user_bin_dir().join(ProfileDispatch::physical_bin_name(bin));
-            install_profile_projection(generation, bin)
-                .map_err(|error| managed_tool_write_error(bin, &path, error))?;
-        }
-    }
-    Store::sync_store_directory(&user_bin_dir())?;
-
-    let pointer = ProfileDispatch::format_current_pointer(&ProfileDispatch::CurrentPointer {
-        generation,
-        witness: witness.to_string(),
-    })?;
-    atomic_write_current_pointer(pointer.as_bytes())?;
-    profile_failpoint("after-current-pointer")?;
-    let profile = format!(
-        "{{\n  \"name\": \"{}\",\n  \"current\": {},\n  \"witness\": {}\n}}\n",
-        Syntax::TOOL_PROFILE_NAME,
-        generation,
-        json_str(witness),
-    );
-    atomic_write_profile_pointer(profile.as_bytes())
+    Store::sync_store_directory(&user_bin_dir())
 }
 
 fn managed_tool_write_error(bin: &str, path: &Path, error: io::Error) -> io::Error {
@@ -2373,8 +2425,22 @@ fn install_profile_projection(generation: u64, bin: &str) -> io::Result<()> {
         ".projection-{physical}-{}.partial",
         std::process::id()
     ));
-    if fs::symlink_metadata(&partial).is_ok() {
-        fs::remove_file(&partial)?;
+    match fs::symlink_metadata(&partial) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(io::Error::other(format!(
+                "managed projection staging `{}` is a symlink",
+                partial.display()
+            )))
+        }
+        Ok(metadata) if metadata.is_file() => fs::remove_file(&partial)?,
+        Ok(_) => {
+            return Err(io::Error::other(format!(
+                "managed projection staging `{}` is not a regular file",
+                partial.display()
+            )))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
     if let Err(error) = fs::hard_link(&source, &partial) {
         if error.kind() == io::ErrorKind::PermissionDenied {

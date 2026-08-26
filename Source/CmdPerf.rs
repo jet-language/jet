@@ -31,6 +31,14 @@ pub(crate) enum Outcome {
     Exit(i32),
 }
 
+fn perf_error(what: impl Into<String>) {
+    crate::emit_cli_diagnostic("E2102", what.into());
+}
+
+fn perf_error_with_fix(what: impl Into<String>, fix: impl Into<String>) {
+    crate::emit_cli_diagnostic_with_fix("E2102", what.into(), fix.into());
+}
+
 struct CaptureBundle {
     samples: Vec<TraceSample>,
     allocations: Vec<TraceAllocation>,
@@ -112,9 +120,13 @@ pub(crate) fn run(raw: &[String]) -> Outcome {
         "compare" => Outcome::Exit(compare(&rest)),
         "export" => Outcome::Exit(export(&rest)),
         other => {
-            eprintln!("Error [E2101]: `{other}` isn't a jet perf command.");
-            eprintln!(" Why: jet perf accepts only commands in its named area.");
-            eprintln!(" Fix: run `jet perf help`.");
+            crate::emit_cli_report(
+                "E2101",
+                format!("`{other}` isn't a jet perf command."),
+                "jet perf accepts only commands in its named area.".to_string(),
+                "run `jet perf help`.".to_string(),
+                false,
+            );
             Outcome::Exit(ExitCodes::USAGE)
         }
     }
@@ -125,15 +137,17 @@ fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
     let parsed = match parse_session_args(args) {
         Ok(parsed) => parsed,
         Err(message) => {
-            eprintln!("Error [E2102]: {message}");
-            eprintln!(" Fix: jet perf {action} <file.jet> [--out <path.jettrace>]");
+            perf_error_with_fix(
+                message,
+                format!("run `jet perf {action} <file.jet> [--out <path.jettrace>]`"),
+            );
             return ExitCodes::USAGE;
         }
     };
     let exe = match std::env::current_exe() {
         Ok(path) => path,
         Err(error) => {
-            eprintln!("Error [E2102]: cannot resolve jet executable: {error}");
+            perf_error(format!("cannot resolve jet executable: {error}"));
             return ExitCodes::USAGE;
         }
     };
@@ -150,7 +164,7 @@ fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
     {
         Ok(child) => child,
         Err(error) => {
-            eprintln!("Error [E2102]: cannot start `jet {action}`: {error}");
+            perf_error(format!("cannot start `jet {action}`: {error}"));
             return ExitCodes::USAGE;
         }
     };
@@ -182,7 +196,7 @@ fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
                 std::thread::sleep(Duration::from_millis(25));
             }
             Err(error) => {
-                eprintln!("Error [E2102]: cannot wait for `jet {action}`: {error}");
+                perf_error(format!("cannot wait for `jet {action}`: {error}"));
                 let _ = child.kill();
                 let _ = child.wait();
                 return ExitCodes::USAGE;
@@ -221,7 +235,7 @@ fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
             }
         }
         Err(message) => {
-            eprintln!("Error [E2102]: {message}");
+            perf_error(message);
             return ExitCodes::USAGE;
         }
     }
@@ -343,7 +357,7 @@ fn attach(args: &[String]) -> i32 {
         }
         if arg == "--out" {
             let Some(value) = args.get(i + 1) else {
-                eprintln!("Error [E2102]: `--out` needs a path");
+                perf_error("`--out` needs a path");
                 return ExitCodes::USAGE;
             };
             out = Some(value.clone());
@@ -357,7 +371,7 @@ fn attach(args: &[String]) -> i32 {
         }
         if arg == "--source" {
             let Some(value) = args.get(i + 1) else {
-                eprintln!("Error [E2102]: `--source` needs a `.jet` path");
+                perf_error("`--source` needs a `.jet` path");
                 return ExitCodes::USAGE;
             };
             source = Some(value.clone());
@@ -368,7 +382,7 @@ fn attach(args: &[String]) -> i32 {
             match parse_capture_allowlist(value) {
                 Ok(items) => capture_allowlist = items,
                 Err(message) => {
-                    eprintln!("Error [E2102]: {message}");
+                    perf_error(message);
                     return ExitCodes::USAGE;
                 }
             }
@@ -377,13 +391,13 @@ fn attach(args: &[String]) -> i32 {
         }
         if arg == "--capture" {
             let Some(value) = args.get(i + 1) else {
-                eprintln!("Error [E2102]: `--capture` needs a comma-separated allowlist");
+                perf_error("`--capture` needs a comma-separated allowlist");
                 return ExitCodes::USAGE;
             };
             match parse_capture_allowlist(value) {
                 Ok(items) => capture_allowlist = items,
                 Err(message) => {
-                    eprintln!("Error [E2102]: {message}");
+                    perf_error(message);
                     return ExitCodes::USAGE;
                 }
             }
@@ -391,28 +405,32 @@ fn attach(args: &[String]) -> i32 {
             continue;
         }
         if arg.starts_with('-') {
-            eprintln!("Error [E2102]: unknown `jet perf attach` flag `{arg}`");
+            perf_error(format!("unknown `jet perf attach` flag `{arg}`"));
             return ExitCodes::USAGE;
         }
         if pid.is_some() {
-            eprintln!("Error [E2102]: `jet perf attach` takes one process id");
+            perf_error("`jet perf attach` takes one process id");
             return ExitCodes::USAGE;
         }
         let Ok(value) = arg.parse::<u32>() else {
-            eprintln!("Error [E2102]: `{arg}` isn't a process id");
+            perf_error(format!("`{arg}` isn't a process id"));
             return ExitCodes::USAGE;
         };
         pid = Some(value);
         i += 1;
     }
     let Some(pid) = pid else {
-        eprintln!("Error [E2102]: `jet perf attach` needs a process id");
-        eprintln!(" Fix: jet perf attach <pid> --source <file.jet>");
+        perf_error_with_fix(
+            "`jet perf attach` needs a process id",
+            "run `jet perf attach <pid> --source <file.jet>`",
+        );
         return ExitCodes::USAGE;
     };
     if !process_exists(pid) {
-        eprintln!("Error [E2102]: process {pid} is not running or not visible to this user");
-        eprintln!(" Fix: start the program with `jet run --observe`, then attach to that pid");
+        perf_error_with_fix(
+            format!("process {pid} is not running or not visible to this user"),
+            "start the program with `jet run --observe`, then attach to that pid",
+        );
         return ExitCodes::USAGE;
     }
 
@@ -420,7 +438,7 @@ fn attach(args: &[String]) -> i32 {
         Ok(capture) => Some(capture),
         Err(_) if !jet::DevServer::BrowserTrace::relay_path(pid).exists() => None,
         Err(message) => {
-            eprintln!("Error [E2102]: {message}");
+            perf_error(message);
             return ExitCodes::USAGE;
         }
     };
@@ -431,13 +449,13 @@ fn attach(args: &[String]) -> i32 {
                 .iter()
                 .any(|source| source.path == path)
         }) {
-            eprintln!("Error [E2102]: `--source` does not match the devserver browser session");
+            perf_error("`--source` does not match the devserver browser session");
             return ExitCodes::USAGE;
         }
         let browser = match capture_browser(browser_capture) {
             Ok(bundle) => bundle,
             Err(message) => {
-                eprintln!("Error [E2102]: {message}");
+                perf_error(message);
                 return ExitCodes::USAGE;
             }
         };
@@ -445,7 +463,7 @@ fn attach(args: &[String]) -> i32 {
         match merge_host_onto_browser(pid, source.as_deref(), browser) {
             Ok(bundle) => bundle,
             Err(message) => {
-                eprintln!("Error [E2102]: {message}");
+                perf_error(message);
                 return ExitCodes::USAGE;
             }
         }
@@ -473,20 +491,23 @@ fn attach(args: &[String]) -> i32 {
                 ) {
                     Ok(bundle) => bundle,
                     Err(message) => {
-                        eprintln!("Error [E2102]: {message}");
+                        perf_error(message);
                         return ExitCodes::USAGE;
                     }
                 }
             }
             (Some(_), Err(message)) => {
-                eprintln!("Error [E2102]: {message}");
-                eprintln!(" Fix: start the program with `jet run --observe`, then attach");
+                perf_error_with_fix(message, "start the program with `jet run --observe`, then attach");
                 return ExitCodes::USAGE;
             }
             (None, Ok(_)) => {
-                eprintln!("Error [E2102]: live observe snapshot found, but `--source` is required");
-                eprintln!(" Why: domain capture must attribute facts to a Jet symbol identity");
-                eprintln!(" Fix: jet perf attach {pid} --source <file.jet>");
+                crate::emit_cli_report(
+                    "E2102",
+                    "live observe snapshot found, but `--source` is required".to_string(),
+                    "domain capture must attribute facts to a Jet symbol identity".to_string(),
+                    format!("run `jet perf attach {pid} --source <file.jet>`"),
+                    false,
+                );
                 return ExitCodes::USAGE;
             }
             (None, Err(_)) => CaptureBundle::empty(),
@@ -508,7 +529,7 @@ fn attach(args: &[String]) -> i32 {
             ExitCodes::OK
         }
         Err(message) => {
-            eprintln!("Error [E2102]: {message}");
+            perf_error(message);
             ExitCodes::USAGE
         }
     }
@@ -1734,7 +1755,7 @@ fn view(args: &[String]) -> i32 {
                 "jet" => FramesMode::Jet,
                 "all" => FramesMode::All,
                 _ => {
-                    eprintln!("Error [E2102]: `--frames` accepts only `jet` or `all`");
+                    perf_error("`--frames` accepts only `jet` or `all`");
                     return ExitCodes::USAGE;
                 }
             };
@@ -1743,14 +1764,14 @@ fn view(args: &[String]) -> i32 {
         }
         if arg == "--frames" {
             let Some(value) = args.get(i + 1) else {
-                eprintln!("Error [E2102]: `--frames` needs `jet` or `all`");
+                perf_error("`--frames` needs `jet` or `all`");
                 return ExitCodes::USAGE;
             };
             frames = match value.as_str() {
                 "jet" => FramesMode::Jet,
                 "all" => FramesMode::All,
                 _ => {
-                    eprintln!("Error [E2102]: `--frames` accepts only `jet` or `all`");
+                    perf_error("`--frames` accepts only `jet` or `all`");
                     return ExitCodes::USAGE;
                 }
             };
@@ -1758,27 +1779,27 @@ fn view(args: &[String]) -> i32 {
             continue;
         }
         if arg.starts_with('-') {
-            eprintln!("Error [E2102]: unknown `jet perf view` flag `{arg}`");
-            eprintln!(
-                " Fix: jet perf view <path{ARTIFACT_EXT_TRACE}> [--json|--html] [--frames=jet|all]"
+            perf_error_with_fix(
+                format!("unknown `jet perf view` flag `{arg}`"),
+                format!("run `jet perf view <path{ARTIFACT_EXT_TRACE}> [--json|--html] [--frames=jet|all]`"),
             );
             return ExitCodes::USAGE;
         }
         if path.is_some() {
-            eprintln!("Error [E2102]: `jet perf view` takes one trace path");
+            perf_error("`jet perf view` takes one trace path");
             return ExitCodes::USAGE;
         }
         path = Some(arg.to_string());
         i += 1;
     }
     let Some(path) = path else {
-        eprintln!("Error [E2102]: `jet perf view` needs a {ARTIFACT_EXT_TRACE} path");
+        perf_error(format!("`jet perf view` needs a {ARTIFACT_EXT_TRACE} path"));
         return ExitCodes::USAGE;
     };
     let trace = match read_verified(&path) {
         Ok(trace) => trace,
         Err(message) => {
-            eprintln!("Error [E2102]: {message}");
+            perf_error(message);
             return ExitCodes::USAGE;
         }
     };
@@ -2071,7 +2092,7 @@ fn compare(args: &[String]) -> i32 {
         }
         if arg == "--baseline" {
             let Some(value) = args.get(i + 1) else {
-                eprintln!("Error [E2102]: `--baseline` needs a pinned baseline name");
+                perf_error("`--baseline` needs a pinned baseline name");
                 return ExitCodes::USAGE;
             };
             baseline_name = Some(value.clone());
@@ -2079,9 +2100,9 @@ fn compare(args: &[String]) -> i32 {
             continue;
         }
         if arg.starts_with('-') {
-            eprintln!("Error [E2102]: unknown `jet perf compare` flag `{arg}`");
-            eprintln!(
-                " Fix: jet perf compare base{ARTIFACT_EXT_TRACE} head{ARTIFACT_EXT_TRACE} [--baseline <name>] [--override-identity]"
+            perf_error_with_fix(
+                format!("unknown `jet perf compare` flag `{arg}`"),
+                format!("run `jet perf compare base{ARTIFACT_EXT_TRACE} head{ARTIFACT_EXT_TRACE} [--baseline <name>] [--override-identity]`"),
             );
             return ExitCodes::USAGE;
         }
@@ -2089,23 +2110,23 @@ fn compare(args: &[String]) -> i32 {
         i += 1;
     }
     if paths.len() != 2 {
-        eprintln!("Error [E2102]: `jet perf compare` needs two {ARTIFACT_EXT_TRACE} paths");
-        eprintln!(
-            " Fix: jet perf compare base{ARTIFACT_EXT_TRACE} head{ARTIFACT_EXT_TRACE} [--baseline <name>] [--override-identity]"
+        perf_error_with_fix(
+            format!("`jet perf compare` needs two {ARTIFACT_EXT_TRACE} paths"),
+            format!("run `jet perf compare base{ARTIFACT_EXT_TRACE} head{ARTIFACT_EXT_TRACE} [--baseline <name>] [--override-identity]`"),
         );
         return ExitCodes::USAGE;
     }
     let base = match read_verified(&paths[0]) {
         Ok(trace) => trace,
         Err(message) => {
-            eprintln!("Error [E2102]: base trace: {message}");
+            perf_error(format!("base trace: {message}"));
             return ExitCodes::USAGE;
         }
     };
     let head = match read_verified(&paths[1]) {
         Ok(trace) => trace,
         Err(message) => {
-            eprintln!("Error [E2102]: head trace: {message}");
+            perf_error(format!("head trace: {message}"));
             return ExitCodes::USAGE;
         }
     };
@@ -2116,22 +2137,33 @@ fn compare(args: &[String]) -> i32 {
     let identity_mismatch = base_tool != head_tool || base_hw != head_hw;
     if identity_mismatch && !override_identity {
         if base_tool != head_tool {
-            eprintln!("Error [E2102]: toolchain identity mismatch between traces");
-            eprintln!(" Why: compare requires matching toolchain digests (D-PERFSESSION1)");
+            crate::emit_cli_report(
+                "E2102",
+                "toolchain identity mismatch between traces".to_string(),
+                "compare requires matching toolchain digests (D-PERFSESSION1)".to_string(),
+                "recapture both traces on the same machine/toolchain, or pass `--override-identity`".to_string(),
+                false,
+            );
         } else {
-            eprintln!("Error [E2102]: hardware identity mismatch between traces");
-            eprintln!(" Why: compare requires matching hardware fingerprints (D-PERFSESSION1)");
+            crate::emit_cli_report(
+                "E2102",
+                "hardware identity mismatch between traces".to_string(),
+                "compare requires matching hardware fingerprints (D-PERFSESSION1)".to_string(),
+                "recapture both traces on the same machine/toolchain, or pass `--override-identity`".to_string(),
+                false,
+            );
         }
-        eprintln!(
-            " Fix: recapture both traces on the same machine/toolchain, or pass `--override-identity`"
-        );
         return ExitCodes::USER_ERROR;
     }
     if let Some(name) = &baseline_name {
         if let Err(message) = require_pinned_baseline(name) {
-            eprintln!("Error [E2102]: {message}");
-            eprintln!(" Why: `--baseline` selects a D-PERFBUDGET-BASELINE1 pinned name");
-            eprintln!(" Fix: create the baseline with `jet budget update --baseline {name}`, or omit `--baseline`");
+            crate::emit_cli_report(
+                "E2102",
+                message,
+                "`--baseline` selects a D-PERFBUDGET-BASELINE1 pinned name".to_string(),
+                format!("create the baseline with `jet budget update --baseline {name}`, or omit `--baseline`"),
+                false,
+            );
             return ExitCodes::USER_ERROR;
         }
     }
@@ -2301,29 +2333,29 @@ fn export(args: &[String]) -> i32 {
                 continue;
             }
             _ if arg.starts_with('-') => {
-                eprintln!("Error [E2102]: unknown `jet perf export` flag `{arg}`");
-                eprintln!(
-                    " Fix: jet perf export <path{ARTIFACT_EXT_TRACE}> [--json|--pprof|--otel|--chrome|--emit-profile-map]"
+                perf_error_with_fix(
+                    format!("unknown `jet perf export` flag `{arg}`"),
+                    format!("run `jet perf export <path{ARTIFACT_EXT_TRACE}> [--json|--pprof|--otel|--chrome|--emit-profile-map]"),
                 );
                 return ExitCodes::USAGE;
             }
             _ => {}
         }
         if path.is_some() {
-            eprintln!("Error [E2102]: `jet perf export` takes one trace path");
+            perf_error("`jet perf export` takes one trace path");
             return ExitCodes::USAGE;
         }
         path = Some(arg.to_string());
         i += 1;
     }
     let Some(path) = path else {
-        eprintln!("Error [E2102]: `jet perf export` needs a {ARTIFACT_EXT_TRACE} path");
+        perf_error(format!("`jet perf export` needs a {ARTIFACT_EXT_TRACE} path"));
         return ExitCodes::USAGE;
     };
     let trace = match read_verified(&path) {
         Ok(trace) => trace,
         Err(message) => {
-            eprintln!("Error [E2102]: {message}");
+            perf_error(message);
             return ExitCodes::USAGE;
         }
     };

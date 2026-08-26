@@ -127,6 +127,48 @@ fn platform_tier_gate_runs_native_package_offline_and_cleans_store() {
 }
 
 #[test]
+fn platform_tier_gate_recovers_hostile_partial_lease_without_losing_good_output() {
+    let root = Scratch::new("platform-hostile-lease-root");
+    let fixtures = Scratch::new("platform-hostile-lease-fixtures");
+    let staging = Scratch::new("platform-hostile-lease-staging");
+    let missing_tools = Scratch::new("platform-hostile-lease-missing-tools");
+    write_native_jetpack_fixture(&fixtures.path, &root.path, &staging.path);
+    let (good_object, _) = write_hangar_meta(
+        &root.path,
+        "platform-hostile-good",
+        "platform-hostile-good",
+        "1.0",
+        None,
+    );
+    let interrupted = root
+        .join("leases")
+        .join("4294967294-1-platform-hostile-good");
+    fs::create_dir_all(interrupted.join("snapshot/bin")).unwrap();
+    fs::write(interrupted.join("snapshot/bin/partial"), "interrupted").unwrap();
+
+    let recover = jetpack()
+        .args(["hangar", "recover", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .env("PATH", &missing_tools.path)
+        .output()
+        .unwrap();
+    assert!(
+        recover.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
+    assert!(
+        !interrupted.exists(),
+        "recovery left an interrupted hostile lease"
+    );
+    assert!(
+        good_object.join("meta.json").is_file(),
+        "recovery removed the last good Hangar object"
+    );
+}
+
+#[test]
 fn platform_tier_gate_reports_missing_offline_component() {
     let root = Scratch::new("platform-failure-root");
     let fixtures = Scratch::new("platform-failure-fixtures");

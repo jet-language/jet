@@ -1,4 +1,5 @@
 use super::*;
+use std::cell::Cell;
 
 pub fn find_by_reference(roots: &Roots, reference: &str) -> Option<StoreEntry> {
     list(roots)
@@ -290,7 +291,16 @@ pub struct CacheLease {
     files: Vec<(PathBuf, fs::File)>,
     executables: Vec<(std::ffi::OsString, fs::File)>,
     out: PathBuf,
+    lease_root: PathBuf,
+    lease_lock_path: PathBuf,
+    live_lock: Option<crate::RuntimePolicy::FileLock>,
+    handed_off: Cell<bool>,
+    protocol_lease_id: String,
+    protocol_generation: u64,
+    protocol_owner_scope: String,
+    protocol_owner_lock: Option<crate::RuntimePolicy::FileLock>,
     pub(crate) snapshot_root: PathBuf,
+    snapshot_dir_handle: Option<fs::File>,
     bin_relative: Option<PathBuf>,
     expected_digest: String,
     package: String,
@@ -337,12 +347,49 @@ pub enum ConsumptionStatus {
 }
 
 impl CacheLease {
+    pub(crate) fn mark_process_handoff(&self) {
+        self.handed_off.set(true);
+    }
+
     pub fn status(&self) -> &ConsumptionStatus {
         &self.status
     }
 
     pub fn wrapper_dir(&self) -> Option<&Path> {
         self.wrapper_root.as_deref()
+    }
+
+    /// Return the lease-owned bin directory for PATH projection. On Linux the
+    /// protected wrapper directory is the only path form that may cross the
+    /// child boundary; the private snapshot path remains an internal source
+    /// for validation and fd-backed handoff.
+    pub(crate) fn projected_bin_dir(&self) -> Option<PathBuf> {
+        self.require_consumable().ok()?;
+        let bin = self.bin_relative.as_ref()?;
+        #[cfg(target_os = "linux")]
+        if let Some(wrapper) = &self.wrapper_root {
+            let _ = bin;
+            return Some(wrapper.clone());
+        }
+        #[cfg(unix)]
+        if self.projected_bin_root.as_ref() == Some(&self.snapshot_root) {
+            if let Some(directory) = &self.snapshot_dir_handle {
+                use std::os::fd::AsRawFd as _;
+                let prefix = if cfg!(target_os = "linux") {
+                    "/proc/self/fd"
+                } else {
+                    "/dev/fd"
+                };
+                return Some(PathBuf::from(format!(
+                    "{prefix}/{}",
+                    directory.as_raw_fd()
+                ))
+                .join(bin));
+            }
+        }
+        self.projected_bin_root
+            .as_ref()
+            .map(|root| root.join(bin))
     }
 
     pub(crate) fn nix_store_projection(&self) -> &[(String, PathBuf)] {
@@ -413,12 +460,17 @@ impl CacheLease {
             return None;
         }
         let (_, file) = self.executables.iter().find(|(member, _)| member == name)?;
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         {
             use std::os::fd::AsRawFd as _;
-            Some(PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())))
+            let prefix = if cfg!(target_os = "linux") {
+                "/proc/self/fd"
+            } else {
+                "/dev/fd"
+            };
+            Some(PathBuf::from(format!("{prefix}/{}", file.as_raw_fd())))
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(unix))]
         {
             let _ = file;
             let bin = self.bin_relative.as_ref()?;
@@ -470,12 +522,17 @@ impl CacheLease {
         }
         if output_root == &self.out {
             if let Some((_, file)) = self.files.iter().find(|(member, _)| member == relative) {
-                #[cfg(target_os = "linux")]
+                #[cfg(unix)]
                 {
                     use std::os::fd::AsRawFd as _;
-                    return Ok(PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())));
+                    let prefix = if cfg!(target_os = "linux") {
+                        "/proc/self/fd"
+                    } else {
+                        "/dev/fd"
+                    };
+                    return Ok(PathBuf::from(format!("{prefix}/{}", file.as_raw_fd())));
                 }
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(not(unix))]
                 let _ = file;
             }
         }
@@ -487,13 +544,34 @@ impl CacheLease {
                 .iter()
                 .find(|(name, _)| Some(name.as_os_str()) == relative.file_name())
             {
-                #[cfg(target_os = "linux")]
+                #[cfg(unix)]
                 {
                     use std::os::fd::AsRawFd as _;
-                    return Ok(PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd())));
+                    let prefix = if cfg!(target_os = "linux") {
+                        "/proc/self/fd"
+                    } else {
+                        "/dev/fd"
+                    };
+                    return Ok(PathBuf::from(format!("{prefix}/{}", file.as_raw_fd())));
                 }
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(not(unix))]
                 let _ = file;
+            }
+        }
+        #[cfg(unix)]
+        if output_root == &self.out {
+            if let Some(directory) = &self.snapshot_dir_handle {
+                use std::os::fd::AsRawFd as _;
+                let prefix = if cfg!(target_os = "linux") {
+                    "/proc/self/fd"
+                } else {
+                    "/dev/fd"
+                };
+                return Ok(PathBuf::from(format!(
+                    "{prefix}/{}",
+                    directory.as_raw_fd()
+                ))
+                .join(relative));
             }
         }
         Ok(lease_root.join(relative))
@@ -503,6 +581,15 @@ impl CacheLease {
     /// archive reader uses no-follow handles and rejects concurrent mutation.
     pub fn validate(&self) -> std::io::Result<()> {
         self.require_consumable()?;
+        if !self.protocol_lease_id.is_empty() {
+            crate::RuntimePolicy::ExecutableLeaseProtocol::open(&self.store_root)?.validate_snapshot(
+                &self.protocol_lease_id,
+                self.protocol_generation,
+                &self.protocol_owner_scope,
+                &self.snapshot_root,
+                &self.expected_digest,
+            )?;
+        }
         let actual = crate::Envelope::try_output_hash_of(&self.snapshot_root.to_string_lossy())
             .map_err(std::io::Error::other)?;
         if actual != self.expected_digest {
@@ -701,38 +788,6 @@ fn copy_open_profile_file(
     })
 }
 
-pub(crate) fn copy_profile_store_member(
-    roots: &Roots,
-    reference: &str,
-    output_hash: &str,
-    member: &str,
-    destination: &Path,
-) -> std::io::Result<ProfileExecutableProof> {
-    let entry = list_checked(roots)?
-        .into_iter()
-        .find(|entry| entry.reference == reference && entry.envelope.output_hash == output_hash)
-        .ok_or_else(|| std::io::Error::other("profile StoreEntry authority is unavailable"))?;
-    let source = Path::new(&entry.bin).join(member);
-    let path_metadata = fs::symlink_metadata(&source)?;
-    if !path_metadata.is_file() || path_metadata.file_type().is_symlink() {
-        return Err(std::io::Error::other(
-            "profile executable member is not a no-follow file",
-        ));
-    }
-    let source_file = fs::File::open(&source)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt as _;
-        let opened = source_file.metadata()?;
-        if path_metadata.dev() != opened.dev() || path_metadata.ino() != opened.ino() {
-            return Err(std::io::Error::other(
-                "profile executable changed while opening",
-            ));
-        }
-    }
-    copy_open_profile_file(&source_file, destination)
-}
-
 pub(crate) fn profile_file_proof(path: &Path) -> std::io::Result<ProfileExecutableProof> {
     let path_metadata = fs::symlink_metadata(path)?;
     if !path_metadata.is_file() || path_metadata.file_type().is_symlink() {
@@ -764,7 +819,33 @@ pub(crate) fn profile_file_proof(path: &Path) -> std::io::Result<ProfileExecutab
 
 impl Drop for CacheLease {
     fn drop(&mut self) {
-        let _ = remove_snapshot_node(&self.snapshot_root);
+        // The local copy must close before probing. A launched descendant may
+        // still hold the inherited lease handle, in which case recovery owns
+        // cleanup and this process must leave the whole container intact.
+        drop(self.live_lock.take());
+        let keep_for_descendant = self.handed_off.get()
+            && match crate::RuntimePolicy::lock_state(&self.lease_lock_path) {
+                Ok(crate::RuntimePolicy::LockState::Held) => true,
+                Ok(crate::RuntimePolicy::LockState::Idle)
+                | Ok(crate::RuntimePolicy::LockState::Absent) => false,
+                Err(_) => true,
+        };
+        if !keep_for_descendant {
+            if remove_snapshot_node(&self.lease_root).is_ok()
+                && !self.protocol_lease_id.is_empty()
+                && self.protocol_owner_lock.is_some()
+            {
+                if let Ok(protocol) =
+                    crate::RuntimePolicy::ExecutableLeaseProtocol::open(&self.store_root)
+                {
+                    let _ = protocol.release(
+                        &self.protocol_lease_id,
+                        self.protocol_generation,
+                        &self.protocol_owner_scope,
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -830,34 +911,49 @@ pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Resu
             "cache lease entry identity is not one path component",
         ));
     }
-    let snapshot_root = leases.join(format!(
+    let lease_name = format!(
         "{}-{}-{}",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed),
         entry.id
-    ));
+    );
+    if lease_name.len() > super::LEASE_NAME_MAX {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "cache lease identity exceeds the recovery bound",
+        ));
+    }
     if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
         crate::Provider::validate_nix_build_facts(&producer)?;
     }
-    match fs::symlink_metadata(&snapshot_root) {
-        Ok(metadata) => {
-            if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
-                return Err(std::io::Error::other(
-                    "cache lease snapshot is not a regular node",
-                ));
-            }
-            remove_snapshot_node(&snapshot_root)?;
+    let lease_root = leases.join(&lease_name);
+    fs::create_dir(&lease_root)?;
+    let lease_lock_path = lease_root.join(".locks").join("live.lock");
+    let mut live_lock = match crate::RuntimePolicy::acquire_lease_lock(&lease_root, "live") {
+        Ok(lock) => Some(lock),
+        Err(error) => {
+            let _ = fs::remove_dir_all(&lease_root);
+            return Err(error);
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-    if !Path::new(&entry.out).exists() {
-        Ingest::ensure_real_directory(&snapshot_root, "cache lease snapshot")?;
-        return Ok(CacheLease {
+    };
+    let snapshot_root = lease_root.join("snapshot");
+    let result = (|| {
+        if !Path::new(&entry.out).exists() {
+            Ingest::ensure_real_directory(&snapshot_root, "cache lease snapshot")?;
+            return Ok(CacheLease {
             files: Vec::new(),
             executables: Vec::new(),
             out: PathBuf::from(&entry.out),
+            lease_root: lease_root.clone(),
+            lease_lock_path: lease_lock_path.clone(),
+            live_lock: live_lock.take(),
+            handed_off: Cell::new(false),
+            protocol_lease_id: String::new(),
+            protocol_generation: 0,
+            protocol_owner_scope: String::new(),
+            protocol_owner_lock: None,
             snapshot_root,
+            snapshot_dir_handle: None,
             bin_relative: None,
             expected_digest: String::new(),
             package: entry.name.clone(),
@@ -875,10 +971,10 @@ pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Resu
             #[cfg(target_os = "linux")]
             nix_projection_bindings: Vec::new(),
             _wrapper_dir_handle: None,
-        });
-    }
-    let mut hardlinks = BTreeMap::new();
-    copy_snapshot_node(Path::new(&entry.out), &snapshot_root, &mut hardlinks)?;
+            });
+        }
+        let mut hardlinks = BTreeMap::new();
+        copy_snapshot_node(Path::new(&entry.out), &snapshot_root, &mut hardlinks)?;
     let digest = crate::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
         .map_err(std::io::Error::other)?;
     if digest != entry.envelope.output_hash {
@@ -891,6 +987,10 @@ pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Resu
     seal_local_output(&snapshot_root)?;
     let sealed_digest = crate::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
         .map_err(std::io::Error::other)?;
+    let snapshot_dir_handle = fs::File::open(&snapshot_root).and_then(|file| {
+        clear_close_on_exec(&file)?;
+        Ok(file)
+    })?;
     let mut files = Vec::new();
     open_snapshot_files(&snapshot_root, &snapshot_root, &mut files)?;
     let projections = nix_store_projection_for_entry(roots, entry, &snapshot_root)?;
@@ -963,12 +1063,42 @@ pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Resu
         projected_bin_root.as_deref().unwrap_or(&snapshot_root),
         bin_relative.as_deref(),
     )?;
+    let protocol = crate::RuntimePolicy::ExecutableLeaseProtocol::open(&roots.root)?;
+    let protocol_lease_id = protocol.new_lease_id()?;
+    let protocol_owner_scope =
+        crate::RuntimePolicy::ExecutableLeaseProtocol::owner_scope(&protocol_lease_id)?;
+    let protocol_members = executable_lease_members(&executables)?;
+    let (protocol_request, protocol_owner_lock) = protocol.prepare_snapshot(
+        &protocol_lease_id,
+        &protocol_owner_scope,
+        &snapshot_root,
+        &entry.name,
+        &entry.version,
+        &entry.reference,
+        &sealed_digest,
+        &protocol_members,
+    )?;
+    let protocol_frame = protocol.encode_request(&protocol_request)?;
+    let protocol_receipt = protocol.accept_snapshot(
+        &protocol_frame,
+        &sealed_digest,
+        &snapshot_root,
+    )?;
     let wrappers = create_exec_wrappers(&snapshot_root, &executables)?;
-    Ok(CacheLease {
+        Ok(CacheLease {
         files,
         executables,
         out: PathBuf::from(&entry.out),
+        lease_root: lease_root.clone(),
+        lease_lock_path: lease_lock_path.clone(),
+        live_lock: live_lock.take(),
+        handed_off: Cell::new(false),
+        protocol_lease_id,
+        protocol_generation: protocol_receipt.generation,
+        protocol_owner_scope,
+        protocol_owner_lock: Some(protocol_owner_lock),
         snapshot_root,
+        snapshot_dir_handle: Some(snapshot_dir_handle),
         bin_relative,
         expected_digest: sealed_digest,
         package: entry.name.clone(),
@@ -984,7 +1114,14 @@ pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Resu
         #[cfg(target_os = "linux")]
         nix_projection_bindings,
         _wrapper_dir_handle: wrappers.map(|wrapper| wrapper.directory),
-    })
+        })
+    })();
+    if result.is_err() {
+        drop(live_lock.take());
+        let _ = make_tree_writable_for_removal(&lease_root);
+        let _ = fs::remove_dir_all(&lease_root);
+    }
+    result
 }
 
 #[cfg(target_os = "linux")]
@@ -1306,6 +1443,40 @@ fn open_snapshot_executables(
     Ok(out)
 }
 
+fn executable_lease_members(
+    executables: &[(std::ffi::OsString, fs::File)],
+) -> std::io::Result<Vec<crate::RuntimePolicy::LeaseMember>> {
+    use std::io::{Read as _, Seek as _};
+
+    let mut members = Vec::with_capacity(executables.len());
+    for (name, file) in executables {
+        let name = name
+            .to_str()
+            .ok_or_else(|| std::io::Error::other("lease executable name is not UTF-8"))?;
+        let mut input = file.try_clone()?;
+        input.seek(std::io::SeekFrom::Start(0))?;
+        let mut hasher = SHA256::StreamingSha256::new();
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let count = input.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+        }
+        let digest = hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        members.push(crate::RuntimePolicy::LeaseMember {
+            name: name.to_string(),
+            digest: format!("sha256-{digest}"),
+        });
+    }
+    Ok(members)
+}
+
 #[cfg(target_os = "linux")]
 fn create_exec_wrappers(
     snapshot_root: &Path,
@@ -1419,9 +1590,10 @@ fn create_exec_wrappers(
     _snapshot_root: &Path,
     executables: &[(std::ffi::OsString, fs::File)],
 ) -> std::io::Result<Option<ExecWrappers>> {
-    // The private lease snapshot is the executable handoff on macOS/Windows.
-    // Epoch 8 owns stronger hostile-process confinement; refusing every
-    // executable here would make the tier-1 package path data-only.
+    // Unix callers use the inherited snapshot directory handle for a stable
+    // PATH projection. Windows keeps the sealed snapshot until its
+    // administrator-installed protected lease service supplies the
+    // caller-unwritable handoff required by D-JPK-EXECLEASE1.
     let _ = executables;
     Ok(None)
 }
@@ -1521,7 +1693,7 @@ pub(crate) fn open_snapshot_files(
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn clear_close_on_exec(file: &fs::File) -> std::io::Result<()> {
     use std::os::fd::AsRawFd as _;
     const F_SETFD: i32 = 2;
@@ -1535,7 +1707,7 @@ fn clear_close_on_exec(file: &fs::File) -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(unix))]
 fn clear_close_on_exec(_file: &fs::File) -> std::io::Result<()> {
     Ok(())
 }

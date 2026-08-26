@@ -5,6 +5,7 @@ Error [E0068]: This callable uses the retired result-arrow shape.
     |                   ^^
  Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
  Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+More: jet-lang.dev/e/E0068
 
 Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
   --> tests/ui/loop_task_list_field.jet:3:26
@@ -13,6 +14,7 @@ Error [E0080]: A braced callable with a non-unit success result needs `->` befor
     |                          ^
  Why: The body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
  Fix: Write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) Error! { ... }` bare.
+More: jet-lang.dev/e/E0080
 
 Error [E0120]: this loop can't take handles out of a field or index
   --> tests/ui/loop_task_list_field.jet:5:17
@@ -21,3 +23,4 @@ Error [E0120]: this loop can't take handles out of a field or index
     |                 ^^^^^^^
  Why: each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move marker `^`
  Fix: bind the list into a local this scope owns first (`hs := …`), then write `loop h in hs { … }`
+More: jet-lang.dev/e/E0120

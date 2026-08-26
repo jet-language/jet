@@ -29,3 +29,7 @@ pub(super) fn try_lock(_file: &LockFile) -> io::Result<bool> {
 pub(super) fn unlock(_file: &LockFile) -> io::Result<()> {
     Err(unsupported())
 }
+
+pub(super) fn set_inheritable(_file: &LockFile) -> io::Result<()> {
+    Err(unsupported())
+}

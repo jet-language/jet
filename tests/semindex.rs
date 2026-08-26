@@ -487,6 +487,13 @@ fn tracked_float_symbol_exposes_its_binding_site() {
     assert_eq!(speed.signature, "speed: Float");
     assert_eq!(span.start, binding_start);
     assert_eq!(&src[span.start..span.end], "speed");
+
+    let origin = symbols
+        .lookup("origin")
+        .into_iter()
+        .find(|symbol| symbol.kind == SemanticSymbolKind::Local)
+        .expect("origin fact binding");
+    assert_eq!(origin.signature, "origin: OriginInfo?");
 }
 
 #[test]
@@ -1383,6 +1390,7 @@ fn shape6_inspect_routes_and_retired_bare_snapshots() {
     let help = String::from_utf8(help.stdout).unwrap();
     for group_name in ["inspect", "registry"] {
         let group = jet::CLI::command_group(group_name).unwrap();
+        let group_label = jet::CLI::command_group_label(group_name);
         let expected_usage = group
             .actions
             .iter()
@@ -1394,7 +1402,7 @@ fn shape6_inspect_routes_and_retired_bare_snapshots() {
             })
             .collect::<String>();
         assert!(
-            help.contains(&format!("{group_name} commands:\n{expected_usage}")),
+            help.contains(&format!("{group_label} Commands:\n{expected_usage}")),
             "jet help did not render exact {group_name} usage"
         );
 

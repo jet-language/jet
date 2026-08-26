@@ -208,7 +208,7 @@ fn rustc_accepts(stem: &str, rust_code: &str) -> Result<(), String> {
     let bin = dir.join(format!("jet_fuzz_{stem}"));
     fs::write(&rs, rust_code).unwrap();
     let out = Command::new("rustc")
-        .args(["--edition", "2021"])
+        .args(["--edition", "2021", "-D", "warnings"])
         .arg(&rs)
         .arg("-o")
         .arg(&bin)

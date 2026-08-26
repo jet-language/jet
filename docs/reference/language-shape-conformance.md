@@ -22,6 +22,7 @@ production workspace-driver and focused build-entry proof.
 | Formatter | fmt stability suites; STABILITY fixtures |
 | Diagnostics | registered codes + UI snapshots (I4) |
 | Examples / goldens | `examples/features/**` + `*.expected_out` / `expected/` (I5) |
+| CI change gate | `.github/workflows/ci.yml` checks the exact candidate with locked `cargo test --test grammar` and `cargo doc --workspace --no-deps` (D-CI1) |
 | Package / Config | E4 card `#560`; workspace-driver and split-file package graph tests |
 | Inspect / LSP / Canvas | existing focused suites; Canvas remains E8 for unfinished UI |
 

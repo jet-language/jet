@@ -34,6 +34,10 @@ mod lock_platform;
 #[path = "RuntimePolicy/Lock/unsupported.rs"]
 mod lock_platform;
 
+#[path = "RuntimePolicy/ExecutableLease.rs"]
+pub(crate) mod executable_lease;
+pub(crate) use executable_lease::{ExecutableLeaseProtocol, LeaseMember};
+
 pub(crate) fn sandbox_backend_name() -> &'static str {
     #[cfg(windows)]
     {
@@ -85,6 +89,7 @@ pub fn all_verb_policies() -> Vec<VerbPolicy> {
 
 pub struct FileLock {
     file: lock_platform::LockFile,
+    release_on_drop: bool,
 }
 
 thread_local! {
@@ -110,17 +115,24 @@ impl Drop for LockGuard {
 
 impl Drop for FileLock {
     fn drop(&mut self) {
-        // Close also releases advisory locks. Explicit unlock shortens the
-        // handoff boundary and keeps that law visible at this abstraction.
-        let _ = lock_platform::unlock(&self.file);
-        // `LOCK_NB` waiters are not kernel-queued. Brief handoff grace stops a
-        // hot loop from reacquiring before an already-polling peer can run.
-        std::thread::sleep(Duration::from_millis(2));
+        if self.release_on_drop {
+            // Close also releases advisory locks. Explicit unlock shortens the
+            // handoff boundary and keeps that law visible at this abstraction.
+            let _ = lock_platform::unlock(&self.file);
+            // `LOCK_NB` waiters are not kernel-queued. Brief handoff grace stops a
+            // hot loop from reacquiring before an already-polling peer can run.
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
 }
 
 pub fn acquire_lock(root: &Path, scope: &str) -> io::Result<FileLock> {
     acquire_lock_with_timing(root, scope, LOCK_WAIT, LOCK_POLL)
+}
+
+pub(crate) fn lock_path_for_scope(root: &Path, scope: &str) -> PathBuf {
+    root.join(LOCK_DIR)
+        .join(format!("{}.lock", sanitize_scope(scope)))
 }
 
 fn acquire_lock_with_timing(
@@ -141,7 +153,7 @@ fn acquire_lock_with_timing_and_hook(
 ) -> io::Result<FileLock> {
     let dir = root.join(LOCK_DIR);
     fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("{}.lock", sanitize_scope(scope)));
+    let path = lock_path_for_scope(root, scope);
     before_open(&path)?;
     let file = lock_platform::open(&path)?;
     let deadline = Instant::now() + wait;
@@ -152,7 +164,10 @@ fn acquire_lock_with_timing_and_hook(
                     let _ = lock_platform::unlock(&file);
                     return Err(error);
                 }
-                return Ok(FileLock { file });
+                return Ok(FileLock {
+                    file,
+                    release_on_drop: true,
+                });
             }
             Ok(false) if Instant::now() < deadline => {
                 std::thread::sleep(poll.min(deadline.saturating_duration_since(Instant::now())));
@@ -166,6 +181,17 @@ fn acquire_lock_with_timing_and_hook(
             Err(e) => return Err(e),
         }
     }
+}
+
+/// Acquire a lease lifetime lock and leave its handle inheritable by every
+/// launched descendant. The owning process closes its copy after launch; the
+/// kernel lock remains held until the last descendant closes its inherited
+/// handle, which gives recovery a process-tree lifetime without PID guesses.
+pub(crate) fn acquire_lease_lock(root: &Path, scope: &str) -> io::Result<FileLock> {
+    let mut lock = acquire_lock(root, scope)?;
+    lock_platform::set_inheritable(&lock.file)?;
+    lock.release_on_drop = false;
+    Ok(lock)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

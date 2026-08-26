@@ -79,7 +79,8 @@ fn missing_engine_message(engine: &str, verb: &str) -> String {
         "Error [E1228]: `{verb}` needs the `{engine}` engine, which isn't installed\n \
          Why: `{verb}` is a jetpack engine verb — {bin} execs `{engine}` for it rather than \
          building package-manager logic into the compiler\n \
-         Fix: install the matching Jet toolchain (the `{engine}` binary ships alongside `{bin}`)\n",
+         Fix: install the matching Jet toolchain (the `{engine}` binary ships alongside `{bin}`)\n\
+         More: jet-lang.dev/e/E1228\n",
         bin = jet::Syntax::BINARY_NAME,
     )
 }
@@ -96,14 +97,16 @@ fn version_skew_message(engine: &str, jet_version: &str, engine_version: Option<
              Why: `{bin}` and `{engine}` ship as one toolchain and must match exactly, or the \
              engine may not understand what `{bin}` sends it\n \
              Fix: use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both \
-             binaries come from the same release\n"
+             binaries come from the same release\n \
+             More: jet-lang.dev/e/E1227\n"
         ),
         None => format!(
             "Error [E1227]: `{bin}` {jet_version} and `{engine}` disagree (no protocol reply)\n \
              Why: `{bin}` and `{engine}` ship as one toolchain and must match exactly; this \
              `{engine}` didn't answer the version handshake, so it predates this protocol\n \
              Fix: use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both \
-             binaries come from the same release\n"
+             binaries come from the same release\n \
+             More: jet-lang.dev/e/E1227\n"
         ),
     }
 }

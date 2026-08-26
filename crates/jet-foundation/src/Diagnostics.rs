@@ -235,9 +235,9 @@ impl Diagnostic {
             moment: row.moment,
             severity: row.severity,
             code,
-            what: rendered.what,
-            why: rendered.why,
-            fix: rendered.fix,
+            what: crate::Outcome::jet_sentence_case_line(&rendered.what),
+            why: crate::Outcome::jet_sentence_case_line(&rendered.why),
+            fix: crate::Outcome::jet_sentence_case_line(&rendered.fix),
             span,
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
@@ -291,9 +291,9 @@ impl Diagnostic {
             moment: row.moment,
             severity: row.severity,
             code,
-            what,
-            why,
-            fix,
+            what: crate::Outcome::jet_sentence_case_line(&what),
+            why: crate::Outcome::jet_sentence_case_line(&why),
+            fix: crate::Outcome::jet_sentence_case_line(&fix),
             span,
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
@@ -354,9 +354,9 @@ impl Diagnostic {
             moment: row.map_or(ReportMoment::Compile, |row| row.moment),
             severity: row.map_or(Severity::Error, |row| row.severity),
             code,
-            what,
-            why,
-            fix,
+            what: crate::Outcome::jet_sentence_case_line(&what),
+            why: crate::Outcome::jet_sentence_case_line(&why),
+            fix: crate::Outcome::jet_sentence_case_line(&fix),
             span,
             cause: Vec::new(),
             applicability: row.and_then(|row| row_applicability(row, edit.as_ref())),
@@ -588,6 +588,9 @@ impl Diagnostic {
 
     fn render_inner(&self, file: &str, src: &str, color: bool, hyperlinks: bool) -> String {
         let theme = Theme::new(color);
+        let what = crate::Outcome::jet_sentence_case_line(&self.what);
+        let why = crate::Outcome::jet_sentence_case_line(&self.why);
+        let fix = crate::Outcome::jet_sentence_case_line(&self.fix);
         let mut out = String::new();
         let label = match self.severity {
             Severity::Error => theme.error("Error"),
@@ -599,10 +602,10 @@ impl Diagnostic {
         {
             out.push_str(&format!(
                 "{} [{}] ({}): {}\n",
-                label, self.code, name, self.what
+                label, self.code, name, what
             ));
         } else {
-            out.push_str(&format!("{} [{}]: {}\n", label, self.code, self.what));
+            out.push_str(&format!("{} [{}]: {}\n", label, self.code, what));
         }
         if let Some(span) = self.span {
             let (line, col) = line_col(src, span.start);
@@ -648,14 +651,16 @@ impl Diagnostic {
                 out.push_str(&format!("    | {}\n", carets));
             }
         }
-        out.push_str(&format!(" {} {}\n", theme.bold("Why:"), self.why));
-        out.push_str(&format!(" {} {}\n", theme.bold("Fix:"), self.fix));
+        out.push_str(&format!(" {} {}\n", theme.bold("Why:"), why));
+        out.push_str(&format!(" {} {}\n", theme.bold("Fix:"), fix));
         if let Some(detail) = &self.detail {
             out.push_str(detail);
             if !detail.ends_with('\n') {
                 out.push('\n');
             }
         }
+        out.push_str(&crate::Outcome::jet_diagnostic_more_line(&self.code));
+        out.push('\n');
         out
     }
 
@@ -695,9 +700,9 @@ impl Diagnostic {
             self.moment.as_str(),
             sev,
             self.code.clone(),
-            self.what.clone(),
-            self.why.clone(),
-            self.fix.clone(),
+            crate::Outcome::jet_sentence_case_line(&self.what),
+            crate::Outcome::jet_sentence_case_line(&self.why),
+            crate::Outcome::jet_sentence_case_line(&self.fix),
         );
         report.applicability = self.applicability;
         report.detail = self.detail.clone();
@@ -1283,6 +1288,7 @@ mod renderer_tests {
                 "    |  \x1b[31m^^\x1b[0m\n",
                 " \x1b[1mWhy:\x1b[0m error why\n",
                 " \x1b[1mFix:\x1b[0m error fix\n",
+                "More: jet-lang.dev/e/E0001\n",
             )
         );
         assert_eq!(
@@ -1295,6 +1301,7 @@ mod renderer_tests {
                 "    |  \x1b[33m^^\x1b[0m\n",
                 " \x1b[1mWhy:\x1b[0m warning why\n",
                 " \x1b[1mFix:\x1b[0m warning fix\n",
+                "More: jet-lang.dev/e/L2001\n",
             )
         );
     }
@@ -1312,6 +1319,7 @@ mod renderer_tests {
                 "    |  ^^\n",
                 " Why: error why\n",
                 " Fix: error fix\n",
+                "More: jet-lang.dev/e/E0001\n",
             )
         );
         assert_eq!(
@@ -1324,8 +1332,31 @@ mod renderer_tests {
                 "    |  ^^\n",
                 " Why: warning why\n",
                 " Fix: warning fix\n",
+                "More: jet-lang.dev/e/L2001\n",
             )
         );
+    }
+
+    #[test]
+    fn runtime_text_obeys_case_law_and_more_line() {
+        assert_eq!(
+            crate::Outcome::jet_sentence_case_line("The compiler saw `TypeName`"),
+            "the compiler saw `TypeName`"
+        );
+        assert_eq!(
+            crate::Outcome::jet_sentence_case_line("`--offline` Forbids network access"),
+            "`--offline` forbids network access"
+        );
+        let diagnostic = Diagnostic::error(
+            "E0001",
+            "The dynamic what".into(),
+            "The dynamic why".into(),
+            "The dynamic fix".into(),
+            None,
+        );
+        let rendered = diagnostic.render("", "");
+        assert!(rendered.contains("Error [E0001]: the dynamic what"));
+        assert!(rendered.ends_with("More: jet-lang.dev/e/E0001\n"));
     }
 
     #[test]
@@ -1347,6 +1378,7 @@ mod renderer_tests {
                 "    |  ^^\n",
                 " Why: error why\n",
                 " Fix: error fix\n",
+                "More: jet-lang.dev/e/E0001\n",
             )
         );
     }

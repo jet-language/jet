@@ -360,7 +360,7 @@
     window.__jetCanvasLastTx = null;
     window.__jetCanvasLastTxResult = refusal;
     setCanvasState("error", "Convergence refused", reason, [
-      { label: "Show source", run: openSourceRecovery },
+      { label: "Show Source", run: openSourceRecovery },
       { label: "Close", primary: true, run: clearCanvasState }
     ]);
     showToast(reason, { isError: true });
@@ -398,7 +398,7 @@
         <label class="inline-row"><span><input type="radio" name="exec-convergence-strategy" data-exec-convergence-strategy="duplicate"${strategy === "duplicate" ? " checked" : ""}> Duplicate body</span><small><b>Warning:</b> copied source can drift. This choice is explicit and applies only after confirmation.</small></label>
         <label class="inline-row"><b>Helper name</b><input id="exec-convergence-function" data-exec-convergence-function value="${escapeHtml(functionName)}" spellcheck="false" autocomplete="off"><small>The name is part of the checked source transaction.</small></label>
       </div>
-      <div class="edit-grid"><button id="apply-exec-convergence">${applyLabel}</button><button id="close-exec-convergence-preview">Close preview</button><span class="tag">Source and undo history are unchanged until Apply.</span></div>`;
+      <div class="edit-grid"><button id="apply-exec-convergence">${applyLabel}</button><button id="close-exec-convergence-preview">Close Preview</button><span class="tag">Source and undo history are unchanged until Apply.</span></div>`;
     setDrawer("details");
     details.querySelectorAll("[data-exec-convergence-strategy]").forEach((input) => {
       input.addEventListener("change", () => {
@@ -504,7 +504,7 @@
     if (gesture && gesture.mode === "node") restoreNodeGesture(gesture);
     if (gesture && gesture.mode === "marquee") restoreMarqueeGesture(gesture);
     setCanvasState("stale", "Canvas gesture is stale", "The source or graph changed while this gesture was in progress. Nothing was saved; reload and retry.", [
-      { label: "Show source", run: openSourceRecovery },
+      { label: "Show Source", run: openSourceRecovery },
       { label: "Reload", primary: true, run: () => loadGraph() }
     ]);
     showToast("Canvas gesture is stale; reload and retry", { isError: true });
@@ -835,11 +835,11 @@
       selectedNodeId = comment.box.comment_id;
       const tintActions = COMMENT_TINTS.map((color) => ({ title: "Tint " + color, detail: "comment color", group: "Comment", run: () => setCommentTint(comment.box, color) }));
       openContextMenu(ev.clientX, ev.clientY, comment.box.title || "Comment", [
-        { title: "Rename comment", detail: "local view", group: "Comment", run: () => {
+        { title: "Rename Comment", detail: "local view", group: "Comment", run: () => {
           const title = window.prompt("Comment title", comment.box.title || "Comment");
           if (title !== null) { comment.box.title = title || "Comment"; saveEditorState(); drawGraph(latestDoc); }
         } },
-        { title: "Delete comment", detail: "local view", group: "Comment", run: () => {
+        { title: "Delete Comment", detail: "local view", group: "Comment", run: () => {
           editorState.commentBoxes = (editorState.commentBoxes || []).filter((box) => box.comment_id !== comment.box.comment_id);
           saveEditorState();
           drawGraph(latestDoc);

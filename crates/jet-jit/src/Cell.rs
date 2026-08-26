@@ -72,9 +72,6 @@ impl CellSchema {
             Type::Bool => Ok(Self::Bool),
             Type::Char => Ok(Self::Char),
             Type::String => Ok(Self::String),
-            Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => {
-                Ok(Self::String)
-            }
             Type::Option(inner) => Ok(Self::Option(
                 Box::new(Self::from_type(inner, meta)?),
                 inner.as_ref().clone(),
@@ -90,7 +87,13 @@ impl CellSchema {
                     .collect::<Result<_, String>>()?,
             }),
             Type::Tagged { inner, .. } => Self::from_type(inner, meta),
-            Type::Named(name) => Ok(Self::struct_schema(name, &[], meta)?.unwrap_or(Self::Handle)),
+            Type::Named(name) => {
+                if let Some(base) = meta.distinct_base(name) {
+                    Self::from_type(base, meta)
+                } else {
+                    Ok(Self::struct_schema(name, &[], meta)?.unwrap_or(Self::Handle))
+                }
+            }
             Type::Apply { name, args } => {
                 Ok(Self::struct_schema(name, args, meta)?.unwrap_or(Self::Handle))
             }

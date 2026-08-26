@@ -341,7 +341,7 @@ pub fn run(color: bool) -> io::Result<()> {
                     if shell_prefill || !io::stdout().is_terminal() {
                         println!("{}", cmd);
                     } else {
-                        eprintln!("selected: {cmd}");
+                        eprintln!("Selected: {cmd}");
                         eprintln!(
                             "not inserted into the prompt — install once, then open a new shell:"
                         );

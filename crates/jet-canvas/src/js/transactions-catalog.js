@@ -206,7 +206,7 @@
     const availability = actionAvailability(item, currentGraphOrNull());
     if (!availability.available) {
       setCanvasState("permission", "Library entry unavailable", `${availability.reason} Source was not changed.`, [
-        { label: "Open source", run: openSourceRecovery },
+        { label: "Open Source", run: openSourceRecovery },
         { label: "Close", primary: true, run: clearCanvasState }
       ]);
       return Promise.resolve({ ok: false, changed: false, code: availability.code, message: availability.reason });
@@ -215,7 +215,7 @@
     const body = transactionForPaletteInsert(item, null, viewportCenterGraphPoint());
     if (!body) {
       setCanvasState("error", "Library entry needs a compatible source action", "The checked action was kept visible. Source was not changed.", [
-        { label: "Open source", run: openSourceRecovery },
+        { label: "Open Source", run: openSourceRecovery },
         { label: "Close", primary: true, run: clearCanvasState }
       ]);
       return Promise.resolve({ ok: false, changed: false, code: "missing_insert_descriptor" });
@@ -270,7 +270,7 @@
             const message = String(result.json.message || "Source changed while this Canvas edit was prepared");
             const recovery = "Selection is stale; copy the current selection again. " + message + ". Canvas kept the current source; reload before retrying.";
             setCanvasState("stale", "Edit not applied", recovery, [
-              { label: "Show source", run: openSourceRecovery },
+              { label: "Show Source", run: openSourceRecovery },
               { label: "Reload", primary: true, run: () => loadGraph() }
             ]);
             setSaveState("source unchanged", "error");
@@ -281,7 +281,7 @@
             showToast(recovery, { isError: true });
           } else if (!acceptDiagnosticsPayload(result.json, "Transaction")) {
             setCanvasState("error", "Edit not saved", "Jet source stayed unchanged. Review the request, then retry or open Code.", [
-              { label: "Open source", run: openSourceRecovery },
+        { label: "Open Source", run: openSourceRecovery },
               { label: "Retry", primary: true, run: () => postTransaction(body) }
             ]);
             setSaveState("source unchanged", "error");
@@ -357,7 +357,7 @@
       })
       .catch((e) => {
         setCanvasState(navigator.onLine === false ? "offline" : "error", navigator.onLine === false ? "Offline" : "Edit failed", "Jet source was not changed. Keep the source visible, then retry when the connection is ready.", [
-          { label: "Open source", run: openSourceRecovery },
+        { label: "Open Source", run: openSourceRecovery },
           { label: "Retry", primary: true, run: () => postTransaction(body) }
         ]);
         setSaveState("source unchanged", "error");
@@ -387,7 +387,7 @@
             const message = String(result.json && result.json.message || ((action || "Restore") + " rejected"));
             const stale = result.json && result.json.kind === "conflict";
             setCanvasState(stale ? "stale" : "error", (action || "Restore") + " not applied", message + ". Canvas kept the current source and undo history. Reload before retry.", [
-              { label: "Open source", run: openSourceRecovery },
+        { label: "Open Source", run: openSourceRecovery },
               { label: "Reload", primary: true, run: () => loadGraph() }
             ]);
             setSaveState("source unchanged", "error");
@@ -429,7 +429,7 @@
         const failure = { ok: false, kind: "io", message: String(e) };
         window.__jetCanvasLastTxResult = failure;
         setCanvasState(navigator.onLine === false ? "offline" : "error", navigator.onLine === false ? "Offline" : "Restore failed", "Jet source was not changed. Undo history was preserved. Retry when the connection is ready.", [
-          { label: "Open source", run: openSourceRecovery },
+        { label: "Open Source", run: openSourceRecovery },
           { label: "Reload", primary: true, run: () => loadGraph() }
         ]);
         setSaveState("source unchanged", "error");
@@ -491,7 +491,7 @@
 
   function setTeachingEmptyCanvasState() {
     setCanvasState("empty", "No functions yet", "Add fn run() in Jet source. Canvas will project the source here; no graph file is created.", [
-      { label: "Open source", run: openSourceRecovery },
+        { label: "Open Source", run: openSourceRecovery },
       { label: "Reload", primary: true, run: () => loadGraph(currentCanvasSourceId()) }
     ]);
   }
@@ -565,7 +565,7 @@
     const previousRevision = latestDoc && latestDoc.revision;
     const previousDebugSession = debugSessionSnapshot();
     setCanvasState("loading", "Opening Canvas", "Reading Jet source and rebuilding the source-backed graph…", [
-      { label: "Show source", run: openSourceRecovery },
+      { label: "Show Source", run: openSourceRecovery },
       { label: "Retry", primary: true, run: () => loadGraph(sourceId) }
     ]);
     setSaveState("loading", "draft");
@@ -607,7 +607,7 @@
           details.textContent = (result.doc && result.doc.message || "Graph check failed")
             + (retained || restored ? " · last-good graph retained" : "");
           if (!hasDiagnostics) setCanvasState("error", "Canvas could not open", "The last source remains available. Fix the request or retry the graph projection.", [
-            { label: "Open source", run: openSourceRecovery },
+        { label: "Open Source", run: openSourceRecovery },
             { label: "Retry", primary: true, run: () => loadGraph(sourceId) }
           ]);
           setSaveState("source unchanged", "error");
@@ -693,7 +693,7 @@
           };
         }
         setCanvasState(offline ? "offline" : "error", offline ? "Offline" : "Canvas could not load", offline ? "Jet source stays visible. Reconnect, then retry the graph." : "Jet source stays visible. Retry the graph projection when the server is ready.", [
-          { label: "Show source", run: openSourceRecovery },
+          { label: "Show Source", run: openSourceRecovery },
           { label: "Retry", primary: true, run: () => loadGraph(requestedSourceId) }
         ]);
         setSaveState("source unchanged", "error");
@@ -781,7 +781,7 @@
         setCanvasState(offline ? "offline" : "error", offline ? "Offline" : "Checked actions unavailable", offline
           ? "Jet source and the current graph stay visible. Reconnect, then retry the checked action query."
           : "Jet source and the current graph stay visible. Retry the checked action query or open Code.", [
-          { label: "Open source", run: openSourceRecovery },
+        { label: "Open Source", run: openSourceRecovery },
           { label: "Retry", primary: true, run: () => loadCanvasActions(options) }
         ]);
         setSaveState("source unchanged", "error");
@@ -864,7 +864,7 @@
         setCanvasState(offline ? "offline" : "error", offline ? "Offline" : "Core library unavailable", offline
           ? "Jet source stays visible. Reconnect, then retry the library query."
           : "Checked source stays visible. Retry the library query or open Code.", [
-          { label: "Open source", run: openSourceRecovery },
+        { label: "Open Source", run: openSourceRecovery },
           { label: "Retry", primary: true, run: () => loadCoreCatalogActions(query) }
         ]);
         setSaveState("source unchanged", "error");

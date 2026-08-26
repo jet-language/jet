@@ -531,6 +531,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
                         " Fix: change {} so every return satisfies the claim, or correct the contract",
                         item.obligation.origin
                     );
+                    eprintln!("More: jet-lang.dev/e/E2950");
                 }
             }
         }

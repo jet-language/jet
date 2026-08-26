@@ -36,6 +36,26 @@ toolchain that still supports edition *N*. New syntax that would break old code
 lands only behind a *newer* edition; pinning an older edition opts out of it.
 A toolchain advertises the editions it supports in `jet --version`.
 
+## Stability and Release Cadence
+
+Jet 1.0 is feature-complete. This means the promised language surface, compiler,
+core library, package workflow, diagnostics, documentation, and supported
+execution tiers are shipped and have one defined meaning. It does not mean that
+Jet has no future work. Jet can add compatible features, improve performance,
+fix bugs, and publish new editions under this policy.
+
+Adopters can expect feature releases on a regular, predictable cadence. Feature
+releases follow normal SemVer forever (D-REL1); epoch names tell the story of a
+project era but never change the compiler version (D-REL2). Breaking syntax
+changes use opt-in editions (D-REL3). Once #1349 lands, LTS releases follow the
+cadence in D-ADOPT-LTS1. Jet does not offer an LTS branch before GA; the LTS
+window is set at GA (D-REL4). Only an explicit `jet fix` or edition upgrade
+rewrites source (D-REL5).
+
+A quiet period between releases means that the project is stable or that work
+is taking time to meet its quality bar. It does not mean that the project is
+abandoned. Low release volume signals stability, not abandonment.
+
 ### Environment safety correction (D-ENV-MUTATE1)
 
 `core.sys` mutations now change Jet's locked logical environment rather than

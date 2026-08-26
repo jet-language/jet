@@ -1,5 +1,5 @@
 use super::package_hangar_vendor::auto_clean_after_success;
-use super::parse::Parsed;
+use super::parse::{Flags, Parsed};
 use super::realize::{
     apply_locked_channels, classify_or_report, load_project_plan_with_selections, project_env_root,
     RealizeScope, RunPlan,
@@ -1410,6 +1410,117 @@ fn run_visible_command(theme: &Theme, env: &Env, refs: &[RefSpec::RefSpec], cmd:
     Shell::run_command(env, cmd)
 }
 
+fn plan_needs_package_catalog(plan: &RunPlan) -> bool {
+    plan.refs.iter().any(|spec| match &spec.source {
+        RefSpec::Source::Jetpack | RefSpec::Source::Nixpkgs => true,
+        RefSpec::Source::Named(name) => plan
+            .table
+            .source_ref(name)
+            .or_else(|| plan.table.upstream(name))
+            .is_some_and(|source| source.contains("NixOS/nixpkgs")),
+        _ => false,
+    })
+}
+
+fn project_catalog_binding(roots: &Store::Roots, project_dir: &Path) -> PathBuf {
+    let project = project_dir
+        .canonicalize()
+        .unwrap_or_else(|_| project_dir.to_path_buf());
+    let key = crate::SHA256::sha256_hex(project.to_string_lossy().as_bytes());
+    roots.root.join("config/local-catalogs").join(key)
+}
+
+fn remembered_project_catalog(roots: &Store::Roots, project_dir: &Path) -> Option<PathBuf> {
+    let path = std::fs::read_to_string(project_catalog_binding(roots, project_dir)).ok()?;
+    let catalog = PathBuf::from(path.trim());
+    catalog.is_dir().then_some(catalog)
+}
+
+fn detected_project_catalog(project_dir: &Path) -> Option<PathBuf> {
+    let catalog = project_dir.join("target-nixfeed/feed");
+    (catalog.join("index-v1").is_dir() || catalog.join("recipes-v1.json").is_file())
+        .then_some(catalog)
+}
+
+fn remember_project_catalog(
+    roots: &Store::Roots,
+    project_dir: &Path,
+    catalog: &Path,
+) -> std::io::Result<()> {
+    let binding = project_catalog_binding(roots, project_dir);
+    std::fs::create_dir_all(binding.parent().expect("catalog binding parent"))?;
+    std::fs::write(binding, format!("{}\n", catalog.display()))
+}
+
+fn configure_project_catalog(
+    theme: &Theme,
+    roots: &Store::Roots,
+    project_dir: &Path,
+    plan: &RunPlan,
+    flags: &mut Flags,
+) -> Result<(), i32> {
+    if flags.local_nix_catalog.is_some() || !plan_needs_package_catalog(plan) {
+        return Ok(());
+    }
+    let official_endpoint = roots.root.join("config/nix-index-v1.endpoint");
+    let official_key = roots.root.join("trust/nix-index-v1.ed25519.pub");
+    if official_endpoint.exists() || official_key.exists() {
+        return Ok(());
+    }
+    if let Some(catalog) = remembered_project_catalog(roots, project_dir) {
+        theme.detail(&format!(
+            "local unofficial catalog: {} (remembered for this project)",
+            catalog.display()
+        ));
+        flags.local_nix_catalog = Some(catalog);
+        return Ok(());
+    }
+
+    let detected = detected_project_catalog(project_dir);
+    let detected_text = detected
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned());
+    let Some(chosen) = theme.choose_local_catalog(detected_text.as_deref(), flags.assume_yes)
+    else {
+        return Err(2);
+    };
+    let chosen = PathBuf::from(chosen);
+    let chosen = if chosen.is_absolute() {
+        chosen
+    } else {
+        project_dir.join(chosen)
+    };
+    let catalog = match chosen.canonicalize() {
+        Ok(path) => path,
+        Err(error) => {
+            theme.error_coded(
+                "E1348",
+                "the selected local package catalog is unavailable",
+                &format!("`{}` could not be opened: {error}", chosen.display()),
+                "choose an existing catalog directory",
+            );
+            return Err(2);
+        }
+    };
+    if let Err(error) = crate::NixIndex::NixIndexClient::from_local_catalog(&catalog, flags.offline)
+    {
+        crate::CLI::report_provider_error(theme, &crate::Provider::ProviderError::NixIndex(error));
+        return Err(2);
+    }
+    if let Err(error) = remember_project_catalog(roots, project_dir, &catalog) {
+        theme.error_coded(
+            "E1348",
+            "the local package catalog choice could not be remembered",
+            &error.to_string(),
+            "check the user Hangar permissions and retry",
+        );
+        return Err(2);
+    }
+    theme.status("catalog saved for this project");
+    flags.local_nix_catalog = Some(catalog);
+    Ok(())
+}
+
 /// `jetpack env [<name>] [-- cmd]` — realize the project environment and drop into its
 /// shell (Scale-2; U §8). Unlike `run`, `env` is project-scoped: it never
 /// takes an explicit ref, it always composes the env declared by the project
@@ -1491,6 +1602,8 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         )));
     }
 
+    let mut flags = parsed.flags.clone();
+
     // U16: `-p` needs no manifest at all — a project with no `env.jet` and at
     // least one ad-hoc package still gets a (package-only) shell instead of
     // the usual "nothing to do" refusal, which only applies when neither is
@@ -1535,7 +1648,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
             ),
         });
     }
-    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table, &parsed.flags) {
+    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table, &flags) {
         return code;
     }
 
@@ -1550,8 +1663,11 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         &plan.table,
         &plan.secrets,
         &plan.environment,
-        parsed.flags.trust,
+        flags.trust,
     ) {
+        return code;
+    }
+    if let Err(code) = configure_project_catalog(theme, &roots, &project_dir, &plan, &mut flags) {
         return code;
     }
 
@@ -1564,18 +1680,11 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
 
-    let env = match compose_env_scoped(
-        theme,
-        &roots,
-        &parsed.flags,
-        &plan,
-        RealizeScope::Project,
-        true,
-    ) {
+    let env = match compose_env_scoped(theme, &roots, &flags, &plan, RealizeScope::Project, true) {
         Ok(env) => env,
         Err(code) => return code,
     };
-    if parsed.flags.prep {
+    if flags.prep {
         auto_clean_after_success(theme, &roots);
         return 0;
     }
@@ -1645,14 +1754,8 @@ pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
         secrets: Vec::new(),
         environment: ModuleEval::EnvironmentFacts::default(),
     };
-    let env = match compose_env_scoped(
-        theme,
-        &roots,
-        &parsed.flags,
-        &plan,
-        RealizeScope::Use,
-        true,
-    ) {
+    let env = match compose_env_scoped(theme, &roots, &parsed.flags, &plan, RealizeScope::Use, true)
+    {
         Ok(env) => env,
         Err(code) => return code,
     };

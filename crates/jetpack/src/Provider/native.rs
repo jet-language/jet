@@ -90,9 +90,7 @@ pub(crate) fn catalog_cache_expectation(
     }
 }
 
-pub(crate) fn catalog_download_size(
-    recipe: &NativeRecipe,
-) -> Result<Option<u64>, ProviderError> {
+pub(crate) fn catalog_download_size(recipe: &NativeRecipe) -> Result<Option<u64>, ProviderError> {
     let Some(path) = recipe.url.strip_prefix("file://") else {
         return Ok(None);
     };
@@ -597,7 +595,11 @@ fn fetch_artifact(facts: &ReleaseFacts, destination: &Path) -> Result<(), Provid
             native_error(detail)
         })?;
     }
-    validate_artifact_file(destination, |detail| native_error(detail), "release artifact")
+    validate_artifact_file(
+        destination,
+        |detail| native_error(detail),
+        "release artifact",
+    )
 }
 
 fn fetch_declared_artifact(url: &str, destination: &Path) -> Result<(), ProviderError> {
@@ -638,7 +640,11 @@ where
         .write(true)
         .create_new(true)
         .open(destination)
-        .map_err(|create_error| error(format!("could not create {label} staging file: {create_error}")))?;
+        .map_err(|create_error| {
+            error(format!(
+                "could not create {label} staging file: {create_error}"
+            ))
+        })?;
     let mut limited = response.take(MAX_ARTIFACT_BYTES.saturating_add(1));
     let mut buffer = [0u8; 64 * 1024];
     let mut total = 0u64;
@@ -663,20 +669,14 @@ where
     validate_artifact_file(destination, error, label)
 }
 
-fn validate_artifact_file<F>(
-    destination: &Path,
-    error: F,
-    label: &str,
-) -> Result<(), ProviderError>
+fn validate_artifact_file<F>(destination: &Path, error: F, label: &str) -> Result<(), ProviderError>
 where
     F: Fn(String) -> ProviderError,
 {
     let metadata = fs::symlink_metadata(destination)
         .map_err(|stat_error| error(format!("could not stat {label}: {stat_error}")))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() == 0 {
-        return Err(error(format!(
-            "{label} is not a non-empty regular file"
-        )));
+        return Err(error(format!("{label} is not a non-empty regular file")));
     }
     if metadata.len() > MAX_ARTIFACT_BYTES {
         return Err(error(format!("{label} exceeds its size bound")));

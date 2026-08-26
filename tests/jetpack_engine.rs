@@ -14,7 +14,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use jet_foundation::BuildEffect;
 
@@ -3534,8 +3534,8 @@ fn parent_env_unchanged_after_run() {
     // the raw fixture `out_dir` directly, only a sealed, hardlinked snapshot
     // copy under the hangar's `leases/` dir. The sealed, FD-pinned
     // exec-wrapper dir (`/proc/self/fd/N` on Linux, immutable and race-safe
-    // against parent rename/symlink swaps) leads PATH ahead of that snapshot
-    // bin dir.
+    // against parent rename/symlink swaps) is the only package executable
+    // path exposed to the child.
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fx");
     let out_dir = Scratch::new("out");
@@ -3566,10 +3566,72 @@ fn parent_env_unchanged_after_run() {
     );
     let bin = entries.next().unwrap_or_default();
     assert!(
-        bin.starts_with(&root.path.to_string_lossy().into_owned()) && bin.ends_with("/bin"),
-        "expected the leased snapshot bin dir (under JETPACK_ROOT) second, got: {child_path}"
+        !bin.starts_with(&root.path.to_string_lossy().into_owned()),
+        "raw package output escaped the lease handoff, got: {child_path}"
     );
     assert_eq!(std::env::var("PATH").unwrap_or_default(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn run_keeps_lease_for_background_descendant_until_hangar_recovery() {
+    let root = Scratch::new("lease-process-tree-root");
+    let fixtures = Scratch::new("lease-process-tree-fixtures");
+    let out_dir = Scratch::new("lease-process-tree-output");
+    write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
+
+    let run = jetpack()
+        .args([
+            "run",
+            "greet@nixpkgs",
+            "--no-color",
+            "--offline",
+            "--",
+            "/bin/sh",
+            "-c",
+            "/bin/sleep 2 >/dev/null 2>&1 &",
+        ])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let leases = root.path.join("leases");
+    let lease = fs::read_dir(&leases)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let recover_while_child_runs = jetpack()
+        .args(["hangar", "recover", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        recover_while_child_runs.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&recover_while_child_runs.stderr)
+    );
+    assert!(lease.exists(), "live descendant lease was reclaimed early");
+
+    std::thread::sleep(Duration::from_secs(2));
+    let recover_after_child_exit = jetpack()
+        .args(["hangar", "recover", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        recover_after_child_exit.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&recover_after_child_exit.stderr)
+    );
+    assert!(!lease.exists(), "idle descendant lease was not reclaimed");
 }
 
 #[test]
@@ -3581,7 +3643,10 @@ fn bad_ref_is_friendly_and_exits_2() {
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("missing a source"), "stderr: {stderr}");
-    assert!(stderr.contains("package@source#version"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("package@source#version"),
+        "stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -4245,8 +4310,15 @@ fn local_unofficial_nixpkgs_catalog_is_explicit_and_auditable() {
         String::from_utf8_lossy(&official.stdout),
         String::from_utf8_lossy(&official.stderr)
     );
-    assert_eq!(official.status.code(), Some(2), "official output: {official_text}");
-    assert!(official_text.contains("E1348"), "official output: {official_text}");
+    assert_eq!(
+        official.status.code(),
+        Some(2),
+        "official output: {official_text}"
+    );
+    assert!(
+        official_text.contains("E1348"),
+        "official output: {official_text}"
+    );
     assert!(
         !official_text.contains("local-unofficial"),
         "invalid official signature must not downgrade: {official_text}"
@@ -4272,8 +4344,14 @@ fn local_unofficial_nixpkgs_catalog_is_explicit_and_auditable() {
         String::from_utf8_lossy(&local.stderr)
     );
     assert!(local.status.success(), "local output: {local_text}");
-    assert!(local_text.contains("local-unofficial"), "local output: {local_text}");
-    assert!(local_text.contains("unverified"), "local output: {local_text}");
+    assert!(
+        local_text.contains("local-unofficial"),
+        "local output: {local_text}"
+    );
+    assert!(
+        local_text.contains("unverified"),
+        "local output: {local_text}"
+    );
     assert!(
         local_text.contains("name-to-store-path mapping is unverified"),
         "local output: {local_text}"
@@ -4286,8 +4364,14 @@ fn local_unofficial_nixpkgs_catalog_is_explicit_and_auditable() {
         .find(|entry| entry.reference == "ripgrep@nixpkgs")
         .expect("local catalog package entry");
     let lock = fs::read_to_string(project.join(".jet/lock")).unwrap();
-    assert!(lock.contains("catalog-tier = \"local-unofficial\""), "lock: {lock}");
-    assert!(lock.contains("catalog-trust = \"unverified\""), "lock: {lock}");
+    assert!(
+        lock.contains("catalog-tier = \"local-unofficial\""),
+        "lock: {lock}"
+    );
+    assert!(
+        lock.contains("catalog-trust = \"unverified\""),
+        "lock: {lock}"
+    );
     let receipt = fs::read_to_string(root.join("hangar/receipts").join(&entry.receipt)).unwrap();
     assert!(
         receipt.contains("636174616c6f672d7472757374"),
@@ -4311,10 +4395,99 @@ fn local_unofficial_nixpkgs_catalog_is_explicit_and_auditable() {
     );
     assert!(audit.status.success(), "audit output: {audit_text}");
     assert!(audit_text.contains(&entry.id), "audit output: {audit_text}");
-    assert!(audit_text.contains("signature-chain: none"), "audit output: {audit_text}");
+    assert!(
+        audit_text.contains("signature-chain: none"),
+        "audit output: {audit_text}"
+    );
     assert!(
         audit_text.contains("objects without a Nix index signature chain"),
         "audit output: {audit_text}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn env_wizard_detects_remembers_catalog_and_shows_progress() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = Scratch::new("env-catalog-wizard-project");
+    let root = Scratch::new("env-catalog-wizard-root");
+    let catalog = project.join("target-nixfeed/feed");
+    fs::create_dir_all(&catalog).unwrap();
+
+    let artifact = project.join("native-tool");
+    fs::write(&artifact, b"#!/bin/sh\necho native catalog\n").unwrap();
+    let mut permissions = fs::metadata(&artifact).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&artifact, permissions).unwrap();
+    let digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
+    fs::write(
+        catalog.join("recipes-v1.json"),
+        format!(
+            "{{\"schema\":1,\"recipes\":[{{\"name\":\"native-tool\",\"version\":\"1.0.0\",\"kind\":\"prebuilt\",\"url\":\"file://{}\",\"sha256\":\"{}\",\"bin\":\"native-tool\"}}]}}",
+            artifact.display(),
+            digest,
+        ),
+    )
+    .unwrap();
+
+    fs::write(
+        project.join("env.jet"),
+        "module env.dev { packages: [jetpack.native-tool] }\n",
+    )
+    .unwrap();
+    fs::create_dir_all(project.join(".jet")).unwrap();
+    fs::write(
+        project.join(".jet/lock"),
+        "version = 1\n\n[root]\ndependencies = []\n",
+    )
+    .unwrap();
+
+    let first = jetpack()
+        .args(["env", "--prep", "--no-color", "--trust", "--yes"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    let first_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(first.status.success(), "first env output: {first_text}");
+    assert!(
+        first_text.contains("package catalog setup"),
+        "first env output: {first_text}"
+    );
+    assert!(
+        first_text.contains("catalog saved for this project"),
+        "first env output: {first_text}"
+    );
+    assert!(
+        first_text.contains("resolving env.dev package plan"),
+        "first env output: {first_text}"
+    );
+
+    let second = jetpack()
+        .args(["env", "--prep", "--no-color", "--trust", "--yes"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    let second_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&second.stdout),
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert!(
+        second.status.success(),
+        "remembered env output: {second_text}"
+    );
+    assert!(
+        second_text.contains("remembered for this project"),
+        "remembered env output: {second_text}"
     );
 }
 
@@ -4389,7 +4562,10 @@ fn local_catalog_mixes_native_recipe_and_nix_mapping() {
         Some("local-unofficial-catalog")
     );
     assert_eq!(
-        native_producer.facts.get("nix.index.tier").map(String::as_str),
+        native_producer
+            .facts
+            .get("nix.index.tier")
+            .map(String::as_str),
         Some("local-unofficial")
     );
     assert_eq!(
@@ -4414,10 +4590,19 @@ fn local_catalog_mixes_native_recipe_and_nix_mapping() {
     );
 
     let lock = fs::read_to_string(project.join(".jet/lock")).unwrap();
-    assert!(lock.contains("catalog-tier = \"local-unofficial\""), "lock: {lock}");
-    assert!(lock.contains("catalog-trust = \"unverified\""), "lock: {lock}");
+    assert!(
+        lock.contains("catalog-tier = \"local-unofficial\""),
+        "lock: {lock}"
+    );
+    assert!(
+        lock.contains("catalog-trust = \"unverified\""),
+        "lock: {lock}"
+    );
     let receipt = fs::read_to_string(root.join("hangar/receipts").join(&native.receipt)).unwrap();
-    assert!(receipt.contains("756e7665726966696564"), "receipt: {receipt}");
+    assert!(
+        receipt.contains("756e7665726966696564"),
+        "receipt: {receipt}"
+    );
 
     let audit = jetpack()
         .args(["audit", "--no-color"])
@@ -4431,8 +4616,14 @@ fn local_catalog_mixes_native_recipe_and_nix_mapping() {
         String::from_utf8_lossy(&audit.stderr)
     );
     assert!(audit.status.success(), "audit output: {audit_text}");
-    assert!(audit_text.contains(&native.id), "audit output: {audit_text}");
-    assert!(audit_text.contains("signature-chain: none"), "audit output: {audit_text}");
+    assert!(
+        audit_text.contains(&native.id),
+        "audit output: {audit_text}"
+    );
+    assert!(
+        audit_text.contains("signature-chain: none"),
+        "audit output: {audit_text}"
+    );
 }
 
 #[test]
@@ -5302,7 +5493,12 @@ fn jetpack_env_propagates_child_exit_status() {
         .env("PATH", "/usr/bin:/bin")
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(17), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(17),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -5334,7 +5530,10 @@ fn jetpack_env_prep_materializes_without_entering() {
         "entry after prep failed: {}",
         String::from_utf8_lossy(&enter.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&enter.stdout).trim(), "hello from jet-pkgs");
+    assert_eq!(
+        String::from_utf8_lossy(&enter.stdout).trim(),
+        "hello from jet-pkgs"
+    );
 }
 
 #[test]
@@ -8594,11 +8793,37 @@ fn jet_audit_reads_without_exec() {
         report.contains("closure:"),
         "audit reports closure: {report}"
     );
+    assert!(
+        report.contains("Leases:"),
+        "audit reports executable lease state: {report}"
+    );
     // Audit must not run a build: it never prints the realize progress line.
     assert!(
         !report.contains("resolving"),
         "audit must not realize anything: {report}"
     );
+
+    // A partial committed journal must fail closed without being repaired by
+    // the read-only audit path.
+    let journal = root.join("hangar/closure-db/journal");
+    fs::create_dir_all(&journal).unwrap();
+    let partial = journal.join("00000000000000000099-corrupt.txn.partial");
+    fs::write(&partial, "interrupted").unwrap();
+    let broken = jetpack()
+        .args(["audit", "--no-color"])
+        .current_dir(&proj)
+        .env("JETPACK_ROOT", &root)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_eq!(broken.status.code(), Some(2));
+    let broken_report = String::from_utf8_lossy(&broken.stderr);
+    assert!(broken_report.contains("Error [E1340]:"), "{broken_report}");
+    assert!(
+        broken_report.contains("More: jet-lang.dev/e/E1340"),
+        "{broken_report}"
+    );
+    assert!(partial.is_file(), "audit repaired a partial journal");
 }
 
 #[test]

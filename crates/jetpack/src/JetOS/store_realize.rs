@@ -148,15 +148,15 @@ pub(super) fn realize_ref(
 ) -> Option<RealizedPackage> {
     if let Some((live, step, total)) = progress.as_mut() {
         live.set_dependency_status(
-            "building system",
+            "Building System",
             *step,
             *total,
             spec.source.label(),
             &spec.package,
-            "resolving",
+            "Resolving",
         );
     } else {
-        theme.status(&format!("resolving {} ...", theme.bold(&spec.raw)));
+        theme.status(&format!("Resolving {} ...", theme.bold(&spec.raw)));
     }
     let store_dir = roots.hangar_dir();
     let fixtures =
@@ -220,15 +220,15 @@ pub(super) fn try_realize_ref(
 ) -> Result<RealizedPackage, String> {
     if let Some((live, step, total)) = progress.as_mut() {
         live.set_dependency_status(
-            "building system",
+            "Building System",
             *step,
             *total,
             spec.source.label(),
             &spec.package,
-            "resolving",
+            "Resolving",
         );
     } else {
-        theme.status(&format!("resolving {} ...", theme.bold(&spec.raw)));
+        theme.status(&format!("Resolving {} ...", theme.bold(&spec.raw)));
     }
     let store_dir = roots.hangar_dir();
     let fixtures =

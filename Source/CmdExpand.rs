@@ -674,8 +674,8 @@ fn layout_byte_fact_diagnostic() -> jet::Diagnostics::Diagnostic {
 fn layout_unavailable_text() -> String {
     let diagnostic = layout_byte_fact_diagnostic();
     format!(
-        "unavailable[{}] {}; Why: {}; Fix: {}",
-        diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix
+        "unavailable[{}] {}; Why: {}; Fix: {}; More: jet-lang.dev/e/{}",
+        diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix, diagnostic.code
     )
 }
 

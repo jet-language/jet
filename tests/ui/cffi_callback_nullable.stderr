@@ -5,6 +5,7 @@ Error [E0066]: this function uses the retired effect-arrow spelling
     |                          ^
  Why: callable results use `->`, and an explicit effect ceiling uses the same arrow
  Fix: write `-[Effects]>`; use `-[]>` for an explicit purity bound
+More: jet-lang.dev/e/E0066
 
 Error [E0070]: this uses a retired arrow spelling
   --> tests/ui/cffi_callback_nullable.jet:4:47
@@ -13,6 +14,7 @@ Error [E0070]: this uses a retired arrow spelling
     |                                               ^^
  Why: callables, arms, and lambdas use one arrow: `->`
  Fix: replace `:>` or `=>` with `->`
+More: jet-lang.dev/e/E0070
 
 Error [E0068]: This callable uses the retired result-arrow shape.
   --> tests/ui/cffi_callback_nullable.jet:4:47
@@ -21,6 +23,7 @@ Error [E0068]: This callable uses the retired result-arrow shape.
     |                                               ^^
  Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
  Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+More: jet-lang.dev/e/E0068
 
 Error [E3203]: `fn(I32) =[]=> I32?` is not a C-compatible type for a foreign function parameter or return.
   --> tests/ui/cffi_callback_nullable.jet:4:17
@@ -29,3 +32,4 @@ Error [E3203]: `fn(I32) =[]=> I32?` is not a C-compatible type for a foreign fun
     |                 ^^^^^^^^^^^^^^^^^^^^
  Why: `#Extern` / `#Bindgen` functions must use types with a stable C ABI at the edge.
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
+More: jet-lang.dev/e/E3203

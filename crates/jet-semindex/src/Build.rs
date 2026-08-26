@@ -759,6 +759,7 @@ fn method_fact(
     let param_access = method_parameter_access(f);
     let param_defaults = method_parameter_defaults(f, source);
     let policies = callable_policies(f);
+    let return_type = Some(f.effective_return_type());
     MemberFact {
         owner: owner.to_string(),
         name: f.name.clone(),
@@ -770,7 +771,7 @@ fn method_fact(
             &params,
             &method_parameter_contract(f),
             &method_parameter_variadic(f),
-            &f.return_type,
+            &return_type,
             f.declared_effects.as_ref(),
             f.effect_via.as_ref(),
             f.return_view_provenance.as_ref(),
@@ -1654,7 +1655,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     params: params.clone(),
                     param_contract: method_parameter_contract(f),
                     param_variadic: method_parameter_variadic(f),
-                    ret: f.return_type.clone(),
+                    ret: Some(f.effective_return_type()),
                     effects: f.declared_effects.clone(),
                     effect_via: f.effect_via.clone(),
                     param_access: method_parameter_access(f),
@@ -1892,7 +1893,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .collect(),
                         param_contract: method_parameter_contract(meth),
                         param_variadic: method_parameter_variadic(meth),
-                        ret: meth.return_type.clone(),
+                        ret: Some(meth.effective_return_type()),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
                         param_access: method_parameter_access(meth),
@@ -1959,7 +1960,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             params: method_params(meth),
                             param_contract: method_parameter_contract(meth),
                             param_variadic: method_parameter_variadic(meth),
-                            ret: meth.return_type.clone(),
+                            ret: Some(meth.effective_return_type()),
                             effects: meth.declared_effects.clone(),
                             effect_via: meth.effect_via.clone(),
                             param_access: method_parameter_access(meth),
@@ -2072,7 +2073,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .collect(),
                         param_contract: method_parameter_contract(meth),
                         param_variadic: method_parameter_variadic(meth),
-                        ret: meth.return_type.clone(),
+                        ret: Some(meth.effective_return_type()),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
                         param_access: method_parameter_access(meth),
@@ -2101,6 +2102,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     record_func_type_nodes(meth, mp, ctx);
                     let method_identity =
                         callable_identity(&ctx.scope_identity, Some(&e.name), &meth.name, meth);
+                    let return_type = Some(meth.effective_return_type());
                     ctx.db.members.push(method_fact(
                         &ctx.scope_identity,
                         &e.name,
@@ -2120,7 +2122,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             params: method_params(meth),
                             param_contract: method_parameter_contract(meth),
                             param_variadic: method_parameter_variadic(meth),
-                            ret: meth.return_type.clone(),
+                            ret: return_type,
                             effects: meth.declared_effects.clone(),
                             effect_via: meth.effect_via.clone(),
                             param_access: method_parameter_access(meth),
@@ -2160,6 +2162,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 text: format!("trait `{}`", t.name),
             });
             for sig in &t.methods {
+                let return_type = Some(sig.effective_return_type());
                 let params: Vec<(String, AST::Type)> = sig
                     .params
                     .iter()
@@ -2175,7 +2178,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         params: params.clone(),
                         param_contract: parameter_contract(&sig.params),
                         param_variadic: parameter_variadic(&sig.params),
-                        ret: sig.return_type.clone(),
+                        ret: Some(sig.effective_return_type()),
                         effects: sig.declared_effects.clone(),
                         effect_via: None,
                         param_access: sig
@@ -2214,7 +2217,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         &params,
                         &parameter_contract(&sig.params),
                         &parameter_variadic(&sig.params),
-                        &sig.return_type,
+                        &return_type,
                         sig.declared_effects.as_ref(),
                         None,
                         None,
@@ -2290,7 +2293,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             .collect(),
                         param_contract: method_parameter_contract(meth),
                         param_variadic: method_parameter_variadic(meth),
-                        ret: meth.return_type.clone(),
+                        ret: Some(meth.effective_return_type()),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
                         param_access: method_parameter_access(meth),
@@ -2596,11 +2599,7 @@ fn hover_for_fn(f: &AST::Func) -> String {
             },
         )
     };
-    let ret = f
-        .return_type
-        .as_ref()
-        .map(|t| format!(" {}", t.name()))
-        .unwrap_or_default();
+    let ret = format!(" {}", f.effective_return_type().name());
     let policies = f
         .markers
         .iter()

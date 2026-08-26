@@ -5,6 +5,7 @@ Error [E0066]: this function uses the retired effect-arrow spelling
     |                       ^
  Why: callable results use `->`, and an explicit effect ceiling uses the same arrow
  Fix: write `-[Effects]>`; use `-[]>` for an explicit purity bound
+More: jet-lang.dev/e/E0066
 
 Error [E0068]: This callable uses the retired result-arrow shape.
   --> tests/ui/effect_out_of_set.jet:3:23
@@ -13,6 +14,7 @@ Error [E0068]: This callable uses the retired result-arrow shape.
     |                       ^
  Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
  Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+More: jet-lang.dev/e/E0068
 
 Error [E0065]: This function uses the retired `::` body marker.
   --> tests/ui/effect_out_of_set.jet:3:39
@@ -21,6 +23,7 @@ Error [E0065]: This function uses the retired `::` body marker.
     |                                       ^^
  Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
  Fix: Replace `::` with `->`; `jet fmt` applies this fix.
+More: jet-lang.dev/e/E0065
 
 Error [E0740]: `load` uses the effect `FS`, which its signature doesn't allow
   --> tests/ui/effect_out_of_set.jet:3:25
@@ -29,3 +32,4 @@ Error [E0740]: `load` uses the effect `FS`, which its signature doesn't allow
     |                         ^^^
  Why: the signature declares `-[Net]>`, so the body may only use those; `FS` is outside that set
  Fix: add `FS` to the effect list, or stop using it in `load`
+More: jet-lang.dev/e/E0740

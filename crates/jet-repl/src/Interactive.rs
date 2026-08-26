@@ -146,7 +146,7 @@ impl<R: Read> EffectPrompt for InteractiveEffectPrompt<'_, R> {
     ) -> PromptChoice {
         if reused {
             println!(
-                "Using session {}.{} authority for `{}`. [c] continue  [r] revoke",
+                "Using session {}.{} authority for `{}`. [c] Continue  [r] Revoke",
                 request.root, request.operation, request.resource
             );
             io::stdout().flush().ok();
@@ -193,9 +193,9 @@ impl<R: Read> EffectPrompt for InteractiveEffectPrompt<'_, R> {
             "Core effect {} requests runtime authority before this operation.",
             request.root
         );
-        println!("  operation: {}", request.operation.to_ascii_lowercase());
-        println!("  target:    {}", request.resource);
-        println!("  [o] once  [s] exact tuple for this session  [d] deny");
+        println!("  Operation: {}", request.operation.to_ascii_lowercase());
+        println!("  Target:    {}", request.resource);
+        println!("  [o] Once  [s] Exact Tuple for This Session  [d] Deny");
         io::stdout().flush().ok();
         loop {
             match self.reader.read_key() {
@@ -275,12 +275,12 @@ fn print_bindings_pane(session: &Session, changed: &HashSet<String>, color: bool
     let split = (width / 2).clamp(20, 48);
     println!(
         "{}",
-        Render::render_workspace_row("┌─ session", "bindings ─┐", split, color)
+        Render::render_workspace_row("┌─ Session", "Bindings ─┐", split, color)
     );
     if lines.is_empty() {
         println!(
             "{}",
-            Render::render_workspace_row("│", "(no bindings yet)", split, color)
+            Render::render_workspace_row("│", "(No Bindings Yet)", split, color)
         );
     } else {
         for l in &lines {
@@ -289,7 +289,7 @@ fn print_bindings_pane(session: &Session, changed: &HashSet<String>, color: bool
     }
     println!(
         "{}",
-        Render::render_workspace_row("└─ session", "bindings ─┘", split, color)
+        Render::render_workspace_row("└─ Session", "Bindings ─┘", split, color)
     );
 }
 
@@ -813,7 +813,7 @@ fn page_collection<R: Read>(reader: &mut KeyReader<R>, full: &str, color: bool) 
     const PAGE: usize = 10;
     let mut start = 0usize;
     loop {
-        println!("{}", dim("idx │ value", color));
+        println!("{}", dim("Index │ Value", color));
         for (offset, value) in rows.iter().skip(start).take(PAGE).enumerate() {
             println!("{:>3} │ {}", start + offset, value);
         }
@@ -1214,7 +1214,7 @@ fn completion_menu(
     let theme = Theme::new(color);
     let mut out = format!(
         "{}\r\n",
-        theme.accent("completion — ↑↓ move · Tab next · Enter insert · Esc close")
+        theme.accent("Completion — ↑↓ Move · Tab Next · Enter Insert · Esc Close")
     );
     for (index, symbol) in candidates.iter().enumerate() {
         let marker = if index == selected { ">" } else { " " };

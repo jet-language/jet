@@ -60,7 +60,7 @@ pub(super) fn cmd_list(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 0;
     }
-    theme.status(&format!("{} realized package(s):", entries.len()));
+    theme.status(&format!("{} Realized Package(s):", entries.len()));
     let name_w = entries
         .iter()
         .map(|e| e.name.len())
@@ -78,6 +78,10 @@ pub(super) fn cmd_list(theme: &Theme, parsed: &Parsed) -> i32 {
         })
         .max()
         .unwrap_or(1);
+    theme.detail(&format!(
+        "{:<name_w$}  {:<ver_w$}  Reference",
+        "Name", "Version"
+    ));
     for e in entries {
         let v = if e.version.is_empty() {
             "—"
@@ -439,11 +443,15 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
                 return 0;
             }
             if let Some(pool) = &report.shared_cas {
+                theme.detail("Root  Physical Use");
                 theme.detail(&format!(
-                    "shared CAS {}  {}",
+                    "Shared CAS {}  {}",
                     theme.bold(&pool.path.display().to_string()),
                     human_bytes(pool.bytes),
                 ));
+            }
+            if report.shared_cas.is_none() {
+                theme.detail("Root  Physical Use");
             }
             for entry in &report.roots {
                 theme.detail(&format!(
@@ -453,7 +461,7 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
                 ));
             }
             theme.status(&format!(
-                "machine Hangar physical use: {} across {} root(s)",
+                "Machine Hangar physical use: {} across {} root(s)",
                 human_bytes(report.total_bytes),
                 report.roots.len(),
             ));
@@ -504,11 +512,12 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
                 );
                 return 0;
             }
+            theme.detail("ID  Unique  Shared");
             for entry in &report.entries {
                 let tag = if entry.source_built { " (built)" } else { "" };
                 match (entry.unique_bytes, entry.shared_bytes) {
                     (Some(unique), Some(shared)) => theme.detail(&format!(
-                        "{}  unique {}, shared {}{}",
+                        "{}  {}  {}{}",
                         theme.bold(&entry.id),
                         human_bytes(unique),
                         human_bytes(shared),
@@ -527,12 +536,12 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
             ));
             match report.closure_physical_bytes {
                 Some(bytes) => theme.status(&format!(
-                    "closure physical use: {} (unique {}, shared {})",
+                    "Closure physical use: {} (unique {}, shared {})",
                     human_bytes(bytes),
                     human_bytes(report.unique_bytes.unwrap_or(0)),
                     human_bytes(report.shared_bytes.unwrap_or(0)),
                 )),
-                None => theme.status("closure physical use unavailable on this host."),
+                None => theme.status("Closure physical use unavailable on this host."),
             }
             theme.detail(
                 "closure boundary: root-inclusive Hangar objects only; metadata, receipts, index, snapshots, and scratch excluded.",
@@ -1607,8 +1616,8 @@ pub(super) fn cmd_vendor(theme: &Theme, parsed: &Parsed) -> i32 {
 /// untrusted builds.
 pub(super) fn cmd_audit(theme: &Theme) -> i32 {
     let roots = Store::resolve();
-    let entries = match Store::list_checked(&roots) {
-        Ok(entries) => entries,
+    let snapshot = match Store::audit_read_only(&roots) {
+        Ok(snapshot) => snapshot,
         Err(error) => {
             theme.error(
                 "could not read Hangar provenance",
@@ -1618,6 +1627,14 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
             return 2;
         }
     };
+    let Store::AuditSnapshot { entries, leases } = snapshot;
+    theme.detail(&format!(
+        "  Leases:      {} active, {} stale",
+        leases.active, leases.stale
+    ));
+    if leases.stale > 0 {
+        theme.detail("  lease-note:  stale executable leases await `jetpack hangar recover`");
+    }
     if entries.is_empty() {
         theme.status("audit: hangar is empty, nothing to read.");
         return 0;

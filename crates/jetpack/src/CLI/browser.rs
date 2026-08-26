@@ -167,7 +167,14 @@ fn browser_provision(theme: &Theme, parsed: &Parsed) -> i32 {
         );
         return 2;
     };
-    let output = PathBuf::from(lease.original_output());
+    let output = match lease.stable_path(lease.original_output().to_string_lossy().as_ref()) {
+        Ok(path) => path,
+        Err(error) => {
+            let failure = lease.consumption_failure(&error);
+            Store::report_integrity(theme, &failure);
+            return 2;
+        }
+    };
     let binary = match BrowserLock::find_engine_binary(&output, engine) {
         Ok(path) => path,
         Err(error) => {

@@ -4,6 +4,7 @@
 mod common;
 
 use std::fs;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -368,6 +369,127 @@ fn old_binding_migration_paths_stay_removed() {
         failures.is_empty(),
         "old binding migration path found:\n{}",
         failures.join("\n")
+    );
+}
+
+/// The small, explicit inventory of ratified spellings that are not shipped
+/// in the parser. The reference surface owns the future-facing notes; the
+/// two current-spec rows cover the retired S74 form and the UI-tree spelling.
+/// A new `RATIFIED, NOT YET IMPLEMENTED` note must enter this table with its
+/// disposition before the corpus can claim the surface is truthful.
+const RATIFIED_UNSHIPPED_SPELLINGS: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        "S74",
+        "Val(n) :: maybe_port() ?? return",
+        "docs/spec/syntax-decisions.md",
+        "retires S74's unbuilt pattern-left refutable binding",
+        "retired by D-CHOOSE-TEST1; card #1652",
+    ),
+    (
+        "D-ONCE-UITREE1",
+        ".Button.{ label: \"OK\" }",
+        "docs/spec/syntax-decisions.md",
+        "ratified-but-unbuilt `.Button.{ }` UI-tree spelling",
+        "deferred to the architecture result; card #1588 via #1736",
+    ),
+    (
+        "S56",
+        "#MyTrait struct Custom",
+        "docs/reference/syntax-surface.jet",
+        "# RATIFIED, NOT YET IMPLEMENTED (S56)",
+        "deferred to Epoch 3 typed reflection; card #756",
+    ),
+    (
+        "D-MIGRATE2A",
+        "migration ... add ...",
+        "docs/reference/syntax-surface.jet",
+        "# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)",
+        "tracked by the imported decision ledger; card #1735",
+    ),
+    (
+        "D-MIGRATE2D",
+        "migration ... remove ...",
+        "docs/reference/syntax-surface.jet",
+        "# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)",
+        "tracked by the imported decision ledger; card #1735",
+    ),
+    (
+        "D-MIGRATE2E",
+        "migration ... change ... via ...",
+        "docs/reference/syntax-surface.jet",
+        "# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)",
+        "tracked by the imported decision ledger; card #1735",
+    ),
+];
+
+fn ratified_reference_gap_ids(source: &str) -> BTreeSet<String> {
+    source
+        .lines()
+        .filter_map(|line| line.split_once("# RATIFIED, NOT YET IMPLEMENTED (")?.1.split_once(')'))
+        .flat_map(|(ids, _)| ids.split('/').map(|id| id.trim().to_string()))
+        .collect()
+}
+
+#[test]
+fn ratified_unshipped_spellings_are_listed_and_triaged() {
+    let reference = fs::read_to_string("docs/reference/syntax-surface.jet")
+        .expect("read syntax reference");
+    let spec = fs::read_to_string("docs/spec/syntax-decisions.md")
+        .expect("read syntax decisions");
+
+    let mut expected = ratified_reference_gap_ids(&reference);
+    expected.extend(
+        ["S74", "D-ONCE-UITREE1"]
+            .iter()
+            .copied()
+            .map(String::from),
+    );
+    let listed: BTreeSet<_> = RATIFIED_UNSHIPPED_SPELLINGS
+        .iter()
+        .map(|(id, ..)| (*id).to_string())
+        .collect();
+    assert_eq!(
+        listed, expected,
+        "ratified unshipped spelling inventory drifted; add or retire the row before changing the spec"
+    );
+
+    for (id, spelling, home, anchor, disposition) in RATIFIED_UNSHIPPED_SPELLINGS {
+        let source = if *home == "docs/spec/syntax-decisions.md" {
+            &spec
+        } else {
+            &reference
+        };
+        assert!(
+            source.contains(*anchor),
+            "{id} ({spelling}) has no source evidence in {home}: {anchor}"
+        );
+        assert!(
+            (*disposition).contains("card #")
+                && ((*disposition).contains("retired")
+                    || (*disposition).contains("deferred")
+                    || (*disposition).contains("tracked")),
+            "{id} ({spelling}) has no card-backed disposition: {disposition}"
+        );
+    }
+
+    let (tokens, lex_diags) = jet::Lexer::lex(
+        "fn run() { .Ok(age) :: parse_age() ?? return }\n",
+    );
+    assert!(
+        lex_diags.is_empty(),
+        "retired S74 spelling should lex before parser rejection: {lex_diags:#?}"
+    );
+    assert!(
+        jet::Parser::parse(&tokens).is_err(),
+        "retired S74 spelling gained a parser path"
+    );
+
+    let (tokens, _) = jet::Lexer::lex(
+        "fn run() { tree :: .Button.{ label: \"OK\" } }\n",
+    );
+    assert!(
+        jet::Parser::parse(&tokens).is_err(),
+        "ratified-but-unbuilt UI dot-construction gained a parser path"
     );
 }
 

@@ -456,24 +456,24 @@
     tools.className = "pin-tools";
     const name = document.createElement("input");
     name.setAttribute("data-param-name", String(i));
-    name.setAttribute("aria-label", "Input pin name");
-    name.title = "Input pin name";
+    name.setAttribute("aria-label", "Input Pin Name");
+    name.title = "Input Pin Name";
     name.value = pinName;
     const type = document.createElement("input");
     type.setAttribute("data-param-type", String(i));
-    type.setAttribute("aria-label", "Input pin type");
-    type.title = "Input pin type";
+    type.setAttribute("aria-label", "Input Pin Type");
+    type.title = "Input Pin Type";
     type.value = pinType;
     const fallback = document.createElement("input");
     fallback.setAttribute("data-param-default", String(i));
-    fallback.setAttribute("aria-label", "Default expression");
-    fallback.title = "Default expression";
+    fallback.setAttribute("aria-label", "Default Expression");
+    fallback.title = "Default Expression";
     fallback.placeholder = "default";
     fallback.value = defaultSource;
     const remove = document.createElement("button");
     remove.type = "button";
     remove.setAttribute("data-param-remove", String(i));
-    remove.title = "Remove input pin";
+    remove.title = "Remove Input Pin";
     remove.textContent = "-";
     tools.append(name, type, fallback, remove);
     row.appendChild(tools);
@@ -498,7 +498,7 @@
     const input = document.createElement("input");
     input.id = "function-return-type";
     input.setAttribute("aria-label", "Return type");
-    input.title = "Return type";
+    input.title = "Return Type";
     input.value = outType;
     tools.append(input);
     appendButton(tools, "set-function-output", "Set");
@@ -1063,7 +1063,7 @@
   function functionDetailDescriptors(graph, node, fnMeta) {
     const signatureOp = {
       id: "function-signature",
-      label: "Apply signature",
+      label: "Apply Signature",
       buttonId: "edit-function-signature",
       primary: true,
       run: (values, fields, context) => ({
@@ -1118,7 +1118,7 @@
       { key: "kind", label: "Type", value: nodeKindLabel(node, graph), editable: false },
       { key: "description", label: "Description", value: nodeDescription(node, graph), editable: false, multiline: true },
       { key: "pins", label: "Pins", value: String(pins.length), editable: false },
-      { key: "span", label: "Source span", value: String(span.start) + ".." + String(span.end), editable: false }
+      { key: "span", label: "Source Span", value: String(span.start) + ".." + String(span.end), editable: false }
     ];
   }
 
@@ -1360,7 +1360,7 @@
     appendText(headText, "code", "", fnMeta.signature || "");
     head.appendChild(headText);
     const createFunction = appendButton(head, "create-function", "New");
-    createFunction.title = "Create sibling function";
+    createFunction.title = "Create Sibling Function";
     board.appendChild(head);
     const meta = metadataDetailsHtml(fnMeta.meta);
     if (meta) board.appendChild(meta);
@@ -1437,7 +1437,7 @@
         appendText(item, "b", "", event.title || event.function);
         appendText(item, "span", "tag", "Callback handler");
         const openHandler = appendButton(item, "", "Open handler", "wide", { "data-event-handler": event.function });
-        openHandler.title = "Open callback handler: " + event.function;
+        openHandler.title = "Open Callback Handler: " + event.function;
         openHandler.addEventListener("click", () => openFunctionGraph(event.function));
         list.appendChild(item);
       }
@@ -1452,7 +1452,7 @@
     appendText(row, "code", "", expr.source);
     const operation = {
       id: "inline:" + expr.inline_expr_id,
-      label: "Apply expression",
+      label: "Apply Expression",
       buttonAttributes: { "data-inline-apply": expr.inline_expr_id },
       run: (values, fields, context) => ({
         schema_version: 1,
@@ -1484,7 +1484,7 @@
     const id = String(region.region_id);
     const operation = {
       id: "region:" + id,
-      label: "Apply comment",
+      label: "Apply Comment",
       buttonAttributes: { "data-region-apply": id },
       run: (values, fields, context) => ({
         schema_version: 1,
@@ -1601,7 +1601,7 @@
         primary: true,
         run: (values, fields, context) => ({ schema_version: 1, op: "rename_binding", revision: context.revision, from: node.title, to: values.name })
       };
-      renderFieldDescriptors(renameBox, [{ key: "name", id: "rename-to", label: "Rename binding", value: node.title, source: node.title, editable: true, apply_op: renameOp }], { state, fieldsClass: "", actionsClass: "edit-grid" });
+      renderFieldDescriptors(renameBox, [{ key: "name", id: "rename-to", label: "Rename Binding", value: node.title, source: node.title, editable: true, apply_op: renameOp }], { state, fieldsClass: "", actionsClass: "edit-grid" });
       const preview = appendButton(renameBox, "preview-rename", "Preview rename");
       preview.addEventListener("click", () => postQuery({ op: "preview_rename", symbol: node.title, to: document.getElementById("rename-to").value.trim() }));
       details.appendChild(renameBox);

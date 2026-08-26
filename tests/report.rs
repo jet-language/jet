@@ -216,17 +216,17 @@ fn report_is_registered_in_cli_surfaces() {
         ),
         (
             "completions_zsh.txt",
-            "'report:Write a private local report bundle'",
+            "'report:write a private local report bundle'",
         ),
         (
             "completions_fish.txt",
-            "-a report -d 'Write a private local report bundle'",
+            "-a report -d 'write a private local report bundle'",
         ),
         (
             "completions_powershell.txt",
             "'budget','perf','report','fuzz'",
         ),
-        ("man.txt", ".B report\nWrite a private local report bundle"),
+        ("man.txt", ".B report\nwrite a private local report bundle"),
     ] {
         let golden = fs::read_to_string(root.join(name)).unwrap();
         assert!(golden.contains(exact), "{name} is missing `{exact}`");

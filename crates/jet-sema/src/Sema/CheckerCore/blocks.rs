@@ -31,7 +31,11 @@ impl<'a> Checker<'a> {
         new_scope: bool,
         value_tail: Option<(&Type, Span)>,
     ) {
-        self.check_redundant_arm_table_return(stmts);
+        let redundant_tail_span = value_tail
+            .and_then(|_| Self::redundant_arm_table_parts(stmts).map(|(_, span, _, _)| span));
+        if redundant_tail_span.is_some() {
+            self.check_redundant_arm_table_return(stmts);
+        }
         if new_scope {
             self.push_scope();
         }
@@ -62,7 +66,16 @@ impl<'a> Checker<'a> {
                     self.check_stmt(&mut stmts[i]);
                 }
             } else {
+                let diagnostics_start = self.diags.len();
                 self.check_stmt(&mut stmts[i]);
+                if i + 2 == stmts.len() {
+                    if let Some(span) = redundant_tail_span {
+                        let checked = self.diags.split_off(diagnostics_start);
+                        self.diags.extend(checked.into_iter().filter(|diagnostic| {
+                            !(diagnostic.code == "E0003" && diagnostic.span == Some(span))
+                        }));
+                    }
+                }
             }
         }
         if stmts.is_empty() {
@@ -167,36 +180,49 @@ impl<'a> Checker<'a> {
     /// by a default return is the old spelling of one value table. The probe
     /// is deliberately strict: every arm must be a direct return, the table
     /// must have no explicit fallback, and the default must be the block tail.
-    fn check_redundant_arm_table_return(&mut self, stmts: &[Stmt]) {
-        for (index, pair) in stmts.windows(2).enumerate() {
-            if index + 2 != stmts.len() {
-                continue;
-            }
-            let [Stmt::Switch {
+    /// The shared probe behind both L0513 and its E0003 suppression: the last
+    /// two statements must be a fallback-free statement arm table whose arms
+    /// all return directly, followed by a default return. Both callers must
+    /// agree on what counts, so neither re-derives it.
+    fn redundant_arm_table_parts(
+        stmts: &[Stmt],
+    ) -> Option<(&[crate::AST::SwitchArm], Span, &Expr, Span)> {
+        let [
+            ..,
+            Stmt::Switch {
                 arms,
                 else_body: None,
                 span,
                 ..
-            }, Stmt::Return(Some(default), default_return_span)] = pair
-            else {
-                continue;
-            };
-            if arms.is_empty()
-                || !arms
-                    .iter()
-                    .all(|arm| matches!(arm.body.as_slice(), [Stmt::Return(Some(_), _)]))
-            {
-                continue;
-            }
-            let Some(edit) =
-                self.redundant_arm_table_edit(arms, *span, default, *default_return_span)
-            else {
-                continue;
-            };
-            let mut diagnostic = Diagnostic::from_row("L0513", &[], Some(*span));
-            diagnostic.set_structured_edit(edit);
-            self.diags.push(diagnostic);
+            },
+            Stmt::Return(Some(default), default_return_span),
+        ] = stmts
+        else {
+            return None;
+        };
+        if arms.is_empty()
+            || !arms
+                .iter()
+                .all(|arm| matches!(arm.body.as_slice(), [Stmt::Return(Some(_), _)]))
+        {
+            return None;
         }
+        Some((arms, *span, default, *default_return_span))
+    }
+
+    fn check_redundant_arm_table_return(&mut self, stmts: &[Stmt]) {
+        let Some((arms, span, default, default_return_span)) =
+            Self::redundant_arm_table_parts(stmts)
+        else {
+            return;
+        };
+        let Some(edit) = self.redundant_arm_table_edit(arms, span, default, default_return_span)
+        else {
+            return;
+        };
+        let mut diagnostic = Diagnostic::from_row("L0513", &[], Some(span));
+        diagnostic.set_structured_edit(edit);
+        self.diags.push(diagnostic);
     }
 
     fn redundant_arm_table_edit(
@@ -220,7 +246,7 @@ impl<'a> Checker<'a> {
             edits.push((return_span.start, return_span.end, String::new()));
         }
 
-        let close = source.get(switch_span.start..switch_span.end)?.rfind('}')? + switch_span.start;
+        let close = find_switch_close(source, switch_span.start)?;
         let default_text = source.get(default.span().start..default.span().end)?;
         let prefix =
             if close > switch_span.start && !source.as_bytes()[close - 1].is_ascii_whitespace() {
@@ -335,4 +361,72 @@ impl<'a> Checker<'a> {
                 .map(|(_, len)| *len)
                 .sum::<usize>()
     }
+}
+
+fn find_switch_close(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut depth = 0usize;
+    let mut index = start;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                index += 2;
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                index += 2;
+                while index + 1 < bytes.len()
+                    && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
+                {
+                    index += 1;
+                }
+                index = (index + 2).min(bytes.len());
+            }
+            b'"' => {
+                let triple = bytes.get(index..index + 3) == Some(b"\"\"\"");
+                index += if triple { 3 } else { 1 };
+                while index < bytes.len() {
+                    if triple && bytes.get(index..index + 3) == Some(b"\"\"\"") {
+                        index += 3;
+                        break;
+                    }
+                    if !triple && bytes[index] == b'"' {
+                        index += 1;
+                        break;
+                    }
+                    if bytes[index] == b'\\' && !triple {
+                        index = (index + 2).min(bytes.len());
+                    } else {
+                        index += 1;
+                    }
+                }
+            }
+            b'\'' => {
+                index += 1;
+                while index < bytes.len() {
+                    if bytes[index] == b'\\' {
+                        index = (index + 2).min(bytes.len());
+                    } else if bytes[index] == b'\'' {
+                        index += 1;
+                        break;
+                    } else {
+                        index += 1;
+                    }
+                }
+            }
+            b'{' => {
+                depth += 1;
+                index += 1;
+            }
+            b'}' if depth == 1 => return Some(index),
+            b'}' if depth > 1 => {
+                depth -= 1;
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+    None
 }
