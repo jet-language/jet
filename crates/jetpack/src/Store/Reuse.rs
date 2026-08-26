@@ -493,6 +493,7 @@ impl CacheLease {
         if let Some((member, file)) = self.executable_file_at(requested, &resolved_path) {
             return Ok(Some(self.executable_file_path(member, file)));
         }
+        let resolved_paths = path_variants(&resolved_path);
         let path_is_lease_owned = [
             Some(self.out.as_path()),
             Some(self.lease_root.as_path()),
@@ -503,7 +504,14 @@ impl CacheLease {
             .into_iter()
             .flatten()
             .chain(self.leased_output_roots.iter().map(|(root, _)| root.as_path()))
-            .any(|root| resolved_path.starts_with(root));
+            .any(|root| {
+                let roots = path_variants(root);
+                roots.iter().any(|root| {
+                    resolved_paths
+                        .iter()
+                        .any(|resolved| resolved.starts_with(root))
+                })
+            });
         if path_is_lease_owned {
             return Err(std::io::Error::other(
                 "caller requested a path inside an executable lease that is not a recorded member",
@@ -915,6 +923,47 @@ pub(crate) fn profile_file_proof(path: &Path) -> std::io::Result<ProfileExecutab
         digest: format!("sha256-{}", SHA256::sha256_file_hex(path)?),
         mode: 0,
     })
+}
+
+/// Return path spellings that can identify the same caller target. The
+/// lexical form catches missing nodes and `..` traversal; the canonical form
+/// catches caller-created symlink aliases into a protected lease.
+fn path_variants(path: &Path) -> Vec<PathBuf> {
+    let lexical = lexical_normalize(path);
+    let mut variants = vec![lexical];
+    if let Ok(canonical) = fs::canonicalize(path) {
+        if !variants.iter().any(|variant| variant == &canonical) {
+            variants.push(canonical);
+        }
+    }
+    variants
+}
+
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let absolute = path.is_absolute();
+    let mut normalized = PathBuf::new();
+    let mut normal_components = 0usize;
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if normal_components > 0 {
+                    normalized.pop();
+                    normal_components -= 1;
+                } else if !absolute {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                normalized.push(component.as_os_str());
+            }
+            std::path::Component::Normal(value) => {
+                normalized.push(value);
+                normal_components += 1;
+            }
+        }
+    }
+    normalized
 }
 
 impl Drop for CacheLease {

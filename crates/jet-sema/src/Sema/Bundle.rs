@@ -2178,17 +2178,26 @@ pub fn is_build_entry(func: &Func) -> bool {
         && func.params[0].ty == Type::Named(Syntax::TYPE_BUILD_CONTEXT.to_string())
 }
 
-/// D-BUILDENTRY1: does the build entry carry its one typed contract,
-/// `fn build(b: BuildContext) BuildPlan ?`? This is what `E3501` reports on.
-/// Build authority and graph handoff are one contract, so a build entry with
-/// any other return clause is selected, rejected, and never emitted.
+/// D-BUILDENTRY1: does the build entry carry its one typed success contract,
+/// `fn build(b: BuildContext) BuildPlan`? A bare return type uses the ordinary
+/// implicit `!Err` failure route; an explicit result remains available only when
+/// it names a non-default expert error domain. The retired `BuildPlan!` spelling
+/// therefore stays invalid and reaches `E3501`. Build authority and graph
+/// handoff are one contract, so a build entry with any other success type is
+/// selected, rejected, and never emitted.
 pub fn build_entry_signature_is_valid(func: &Func) -> bool {
     is_build_entry(func)
-        && matches!(
-            func.return_type.as_ref(),
-            Some(Type::Result { ok, .. })
-                if **ok == Type::Named(Syntax::TYPE_BUILD_PLAN.to_string())
-        )
+        && match func.return_type.as_ref() {
+            Some(Type::Named(name)) => name == Syntax::TYPE_BUILD_PLAN,
+            Some(Type::Result { ok, err }) => {
+                **ok == Type::Named(Syntax::TYPE_BUILD_PLAN.to_string())
+                    && !matches!(
+                        err.as_ref(),
+                        Type::Named(name) if name == Syntax::TYPE_ERR
+                    )
+            }
+            _ => false,
+        }
 }
 
 /// D-BUILDENTRY1 / I2 / I3 / I9: project a checked bundle down to the program

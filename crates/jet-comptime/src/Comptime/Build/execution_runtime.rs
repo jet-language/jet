@@ -1,6 +1,7 @@
 use super::actions_policy::{ActionCache, BuildAction, BuildCapability, LegacyWrapperKind};
 use super::cache_cas::{
-    atomic_restore_file, ensure_real_directory, remote_execution_identity, remote_policy_digest,
+    atomic_restore_file, ensure_real_directory, hex_decode, hex_encode, remote_execution_identity,
+    remote_policy_digest,
     secure_read_file, ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey,
     ActionOutcome, ActionOutputRecord, ActionResultRecord, CacheHitReason, CacheMissReason,
     ContentDigest, FrontEndCompletion, LocalCas, RemoteBuildBinding, RemoteCacheError,
@@ -80,7 +81,7 @@ pub struct BuildExecutionResult {
 pub type CompilerActionRunner<'a> =
     dyn Fn(&BuildAction, &[ActionInputSnapshot]) -> Result<Vec<Vec<u8>>, String> + Sync + 'a;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BuildExecutionError {
     MissingGrant {
         action: String,
@@ -91,16 +92,68 @@ pub enum BuildExecutionError {
         action: String,
         detail: String,
     },
-    ActionFailed {
-        action: String,
-        exit_code: i32,
-        stderr: String,
-    },
     ProbeFailed {
         probe: String,
         detail: String,
     },
+    /// The one structured action-failure route. The report is retained when
+    /// the action is local, restored from cache, or returned by a remote
+    /// worker; no runner reparses its display text.
+    Reported {
+        report: jet_foundation::Outcome::JetErrorReport,
+    },
     InvalidGraph(BuildError),
+}
+
+impl BuildExecutionError {
+    pub fn report(&self) -> Option<&jet_foundation::Outcome::JetErrorReport> {
+        match self {
+            Self::Reported { report } => Some(report),
+            _ => None,
+        }
+    }
+
+    pub fn is_reported_action_failure(&self) -> bool {
+        matches!(self, Self::Reported { .. })
+    }
+}
+
+fn action_failure_report(action: &str, exit_code: i32, stderr: &str) -> jet_foundation::Outcome::JetErrorReport {
+    let mut error = jet_foundation::Outcome::jet_err_with_identity(
+        format!("build action `{action}` exited with status {exit_code}"),
+        Ok("E3505".to_string()),
+        Err(jet_foundation::Outcome::JetAbsent),
+        "BuildAction::Failed".to_string(),
+    );
+    jet_foundation::Outcome::jet_err_set_details(
+        &mut error,
+        jet_foundation::Outcome::JetErrorDetails {
+            variant: "BuildActionFailure".to_string(),
+            fields: vec![
+                jet_foundation::Outcome::JetErrorField {
+                    name: "action".to_string(),
+                    value: report_json_string(action),
+                },
+                jet_foundation::Outcome::JetErrorField {
+                    name: "exit_code".to_string(),
+                    value: exit_code.to_string(),
+                },
+                jet_foundation::Outcome::JetErrorField {
+                    name: "stderr".to_string(),
+                    value: report_json_string(stderr),
+                },
+            ],
+            source_span: None,
+        },
+    );
+    jet_foundation::Outcome::jet_error_report(&error)
+}
+
+fn report_json_string(value: &str) -> String {
+    format!(
+        "\"{}\"",
+        jet_foundation::JSON::json_escape(value)
+    )
 }
 
 /// The one native child-isolation substrate shared by hermetic build actions
@@ -562,22 +615,26 @@ fn execute_one_action(
         // E4-JP2: no cache lookup may bypass parser/sema/policy/diagnostics.
         if cache_lookup_allowed {
             match read_action_record(records, &record_path, key.clone()) {
-                Ok(Some(record)) => match cas.restore_action_outputs(project_root, action, &record)
-                {
-                    Ok(()) => {
-                        write_last_rebuild_record(
-                            project_root,
-                            action,
-                            &key,
-                            ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
-                            None,
-                        )?;
-                        return Ok(ActionOutcome::RestoredFromCache);
+                Ok(Some(record)) => {
+                    if let Some(report) = record.failure_report {
+                        return Err(BuildExecutionError::Reported { report });
                     }
-                    Err(error) => {
-                        restore_failure = Some(cache_restore_miss_reason(&error));
+                    match cas.restore_action_outputs(project_root, action, &record) {
+                        Ok(()) => {
+                            write_last_rebuild_record(
+                                project_root,
+                                action,
+                                &key,
+                                ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
+                                None,
+                            )?;
+                            return Ok(ActionOutcome::RestoredFromCache);
+                        }
+                        Err(error) => {
+                            restore_failure = Some(cache_restore_miss_reason(&error));
+                        }
                     }
-                },
+                }
                 Ok(None) => {}
                 Err(error) => restore_failure = Some(cache_restore_miss_reason(&error)),
             }
@@ -589,13 +646,17 @@ fn execute_one_action(
         if let Some((transport, policy, _execute)) = &remote {
             match transport.download_action_record(&key, policy) {
                 Ok(record) => {
+                    if let Some(report) = record.failure_report {
+                        return Err(BuildExecutionError::Reported { report });
+                    }
                     if !matches!(
                         record.outcome,
                         ActionOutcome::Succeeded { .. } | ActionOutcome::RestoredFromCache
                     ) {
                         return Err(remote_action(
                             action,
-                            "remote cache record contains a failed outcome".to_string(),
+                            "remote cache record contains a failed outcome without a report"
+                                .to_string(),
                         ));
                     }
                     match restore_remote_outputs(
@@ -718,7 +779,9 @@ fn execute_one_action(
         );
         match remote_result {
             Ok(outcome) => return Ok(outcome),
-            Err(_error) if remote_binding.is_some_and(|binding| binding.fallback_local) => {}
+            Err(error)
+                if remote_binding.is_some_and(|binding| binding.fallback_local)
+                    && !error.is_reported_action_failure() => {}
             Err(error) => return Err(error),
         }
     }
@@ -796,12 +859,29 @@ fn execute_one_action(
     let code = output.status.code().unwrap_or(1);
     if !output.status.success() {
         let _ = fs::remove_dir_all(&sandbox);
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         write_last_rebuild_record(project_root, action, &key, rebuild_status, Some(code))?;
-        return Err(BuildExecutionError::ActionFailed {
-            action: action.name.clone(),
-            exit_code: code,
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
+        let report = action_failure_report(&action.name, code, &stderr);
+        if action.cache == ActionCache::Cached {
+            let record = ActionResultRecord {
+                key: key.clone(),
+                outcome: ActionOutcome::Failed { exit_code: code },
+                outputs: Vec::new(),
+                failure_report: Some(report.clone()),
+                provenance: ActionCacheProvenance::miss(rebuild_status_reason(rebuild_status)),
+            };
+            if let Some((transport, policy, _execute)) = &remote {
+                if policy
+                    .check(super::cache_cas::RemoteActionRequest::CacheWrite)
+                    .is_ok()
+                {
+                    publish_remote_outputs(transport, policy, project_root, &record)
+                        .map_err(|detail| remote_action(action, detail))?;
+                }
+            }
+            write_action_record(&record_path, &record).map_err(|e| io_action(action, e))?;
+        }
+        return Err(BuildExecutionError::Reported { report });
     }
     for declared in &action.outputs {
         let from = resolve_under(&sandbox, declared.as_str()).map_err(|e| io_action(action, e))?;
@@ -854,6 +934,7 @@ fn execute_remote_action(
     binding: &RemoteBuildBinding,
 ) -> Result<ActionOutcome, BuildExecutionError> {
     let request = remote_execution_request(action, key, binding);
+    let mut last_failure = None;
     let dispatch = scheduler.dispatch(&request, |builder| {
         let transport = RemoteCacheTransport::for_binding(&builder.binding)
             .map_err(RemoteAttemptError::rejected)?;
@@ -874,16 +955,22 @@ fn execute_remote_action(
             &builder.binding,
         ) {
             Ok(outcome) => Ok(outcome),
-            Err(failure) if failure.retryable => Err(RemoteAttemptError::worker_lost(format!(
-                "{:?}",
-                failure.error
-            ))),
-            Err(failure) => Err(RemoteAttemptError::rejected(format!("{:?}", failure.error))),
+            Err(failure) if failure.retryable => {
+                let detail = format!("{:?}", failure.error);
+                last_failure = Some(failure.error);
+                Err(RemoteAttemptError::worker_lost(detail))
+            }
+            Err(failure) => {
+                let detail = format!("{:?}", failure.error);
+                last_failure = Some(failure.error);
+                Err(RemoteAttemptError::rejected(detail))
+            }
         }
     });
-    dispatch
-        .map(|dispatch| dispatch.value)
-        .map_err(|error| remote_action(action, error.to_string()))
+    match dispatch {
+        Ok(dispatch) => Ok(dispatch.value),
+        Err(error) => Err(last_failure.unwrap_or_else(|| remote_action(action, error.to_string()))),
+    }
 }
 
 fn execute_remote_candidate(
@@ -993,6 +1080,7 @@ fn execute_remote_attempt(
                     key: result.key.clone(),
                     outcome: result.outcome,
                     outputs: result.outputs.clone(),
+                    failure_report: None,
                     provenance: ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
                 },
                 super::cache_cas::RemoteActionRequest::Execute,
@@ -1031,13 +1119,30 @@ fn execute_remote_attempt(
         ActionOutcome::Failed { exit_code } => {
             write_last_rebuild_record(project_root, action, key, rebuild_status, Some(exit_code))
                 .map_err(RemoteAttemptFailure::terminal)?;
-            Err(RemoteAttemptFailure::terminal(
-                BuildExecutionError::ActionFailed {
-                    action: action.name.clone(),
-                    exit_code,
-                    stderr: "remote execution failed".to_string(),
-                },
-            ))
+            let stderr = transport
+                .download_execution_blob(&result.stderr_digest, policy)
+                .map_err(|error| RemoteAttemptFailure::terminal(remote_action(action, error.to_string())))?;
+            let stderr = String::from_utf8_lossy(&stderr).trim().to_string();
+            let report = action_failure_report(&action.name, exit_code, &stderr);
+            if action.cache == ActionCache::Cached {
+                let record = ActionResultRecord {
+                    key: key.clone(),
+                    outcome: ActionOutcome::Failed { exit_code },
+                    outputs: Vec::new(),
+                    failure_report: Some(report.clone()),
+                    provenance: ActionCacheProvenance::miss(CacheMissReason::RemoteDenied),
+                };
+                if policy
+                    .check(super::cache_cas::RemoteActionRequest::CacheWrite)
+                    .is_ok()
+                {
+                    publish_remote_outputs(transport, policy, project_root, &record)
+                        .map_err(|detail| RemoteAttemptFailure::terminal(remote_action(action, detail)))?;
+                }
+                write_action_record(record_path, &record)
+                    .map_err(|error| RemoteAttemptFailure::terminal(io_action(action, error)))?;
+            }
+            Err(RemoteAttemptFailure::terminal(BuildExecutionError::Reported { report }))
         }
         ActionOutcome::RestoredFromCache => Err(RemoteAttemptFailure::terminal(remote_action(
             action,
@@ -1395,6 +1500,7 @@ fn publish_remote_outputs(
                 key: record.key.clone(),
                 outcome: record.outcome,
                 outputs,
+                failure_report: record.failure_report.clone(),
                 provenance: record.provenance.clone(),
             },
             policy,
@@ -1835,7 +1941,16 @@ fn remote_provenance_digest(plan: &BuildPlan, action: &BuildAction) -> ContentDi
 }
 
 fn write_action_record(path: &Path, record: &ActionResultRecord) -> io::Result<()> {
-    let mut text = format!("{}\n", record.key.as_str());
+    let mut text = format!(
+        "{}\noutcome={}\n",
+        record.key.as_str(),
+        encode_local_outcome(record.outcome)
+    );
+    if let Some(report) = &record.failure_report {
+        text.push_str("failure=");
+        text.push_str(&hex_encode(report.to_json().as_bytes()));
+        text.push('\n');
+    }
     for output in &record.outputs {
         text.push_str(&format!(
             "{}\t{}\t{}\n",
@@ -1851,6 +1966,37 @@ fn write_action_record(path: &Path, record: &ActionResultRecord) -> io::Result<(
         )
     })?;
     atomic_restore_file(root, path, text.as_bytes())
+}
+
+fn encode_local_outcome(outcome: ActionOutcome) -> String {
+    match outcome {
+        ActionOutcome::Succeeded { exit_code } => format!("succeeded:{exit_code}"),
+        ActionOutcome::Failed { exit_code } => format!("failed:{exit_code}"),
+        ActionOutcome::RestoredFromCache => "restored".to_string(),
+    }
+}
+
+fn parse_local_outcome(value: &str) -> io::Result<ActionOutcome> {
+    if value == "restored" {
+        return Ok(ActionOutcome::RestoredFromCache);
+    }
+    let (kind, code) = value.split_once(':').ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "action record outcome is malformed")
+    })?;
+    let exit_code = code.parse::<i32>().map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "action record outcome exit code is not a number",
+        )
+    })?;
+    match kind {
+        "succeeded" => Ok(ActionOutcome::Succeeded { exit_code }),
+        "failed" => Ok(ActionOutcome::Failed { exit_code }),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "action record outcome is unknown",
+        )),
+    }
 }
 
 fn cache_restore_miss_reason(error: &io::Error) -> CacheMissReason {
@@ -1880,8 +2026,43 @@ pub(super) fn read_action_record(
             "action record key does not match its cache path",
         ));
     }
+    let mut outcome = None;
+    let mut failure_report = None;
     let mut outputs = Vec::new();
     for line in lines {
+        if let Some(value) = line.strip_prefix("outcome=") {
+            if outcome.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "action record has duplicate outcome",
+                ));
+            }
+            outcome = Some(parse_local_outcome(value)?);
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("failure=") {
+            if failure_report.is_some() || value.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "action record has an invalid failure report",
+                ));
+            }
+            let bytes = hex_decode(value).map_err(|error| {
+                io::Error::new(io::ErrorKind::InvalidData, error)
+            })?;
+            let text = String::from_utf8(bytes).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "action failure report is not UTF-8")
+            })?;
+            failure_report = Some(
+                jet_foundation::Outcome::JetErrorReport::from_json(&text).map_err(|error| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("action failure report is invalid: {error}"),
+                    )
+                })?,
+            );
+            continue;
+        }
         let mut parts = line.split('\t');
         let invalid =
             || io::Error::new(io::ErrorKind::InvalidData, "malformed action output record");
@@ -1901,10 +2082,29 @@ pub(super) fn read_action_record(
             byte_len,
         });
     }
+    let outcome = outcome.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "action record has no outcome",
+        )
+    })?;
+    if matches!(outcome, ActionOutcome::Failed { .. }) != failure_report.is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "failed action record and failure report disagree",
+        ));
+    }
+    if failure_report.is_some() && !outputs.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "failed action record contains outputs",
+        ));
+    }
     Ok(Some(ActionResultRecord {
         key,
-        outcome: ActionOutcome::RestoredFromCache,
+        outcome,
         outputs,
+        failure_report,
         provenance: ActionCacheProvenance::hit(CacheHitReason::LocalActionRecordMatched),
     }))
 }

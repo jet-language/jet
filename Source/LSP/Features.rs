@@ -633,7 +633,8 @@ pub(crate) fn compute_references(
 
 #[cfg(test)]
 mod generic_instance_tests {
-    use super::{compute_references, compute_rename};
+    use super::{compute_definition, compute_references, compute_rename};
+    use crate::LSP::Completion::compute_completions;
 
     #[test]
     fn references_join_applicative_generic_module_aliases() {
@@ -780,6 +781,73 @@ mod generic_instance_tests {
         }
         let _ = std::fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn typestate_navigation_and_completion_keep_the_struct_owner() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_lsp_typestate_owner_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("main.jet");
+        let source = "struct Door {\n    state { Closed, Open }\n}\nimpl Door {\n    #Transition(_, Door.State.Closed) fn new() Door -[]> { return Door{} }\n    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) Door -[]> { return self }\n}\nfn run() {}\n";
+        std::fs::write(&path, source).unwrap();
+        let shown = path.to_string_lossy().into_owned();
+        let mut bundle = crate::Loader::load_entry(&shown).unwrap();
+        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+            &mut bundle,
+            crate::Sema::CompileMode::Check,
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "{diagnostics:#?}"
+        );
+        let db = jet_semindex::build_symbol_db(&bundle, &facts);
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(source);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:#?}");
+
+        let marker = source.find("Door.State.Closed").unwrap();
+        let closed = marker + "Door.State.".len();
+        let (definition_path, definition_span) =
+            compute_definition(&db, &tokens, source, &shown, closed).expect("state definition");
+        assert_eq!(definition_path, shown);
+        assert_eq!(&source[definition_span.start..definition_span.end], "Closed");
+
+        let references = compute_references(&db, &tokens, &shown, closed, true);
+        assert!(references.iter().any(|(path, span)| {
+            path == &shown && &source[span.start..span.end] == "Closed"
+        }));
+        assert!(references.iter().any(|(path, span)| {
+            path == &shown && &source[span.start..span.end] == "Door.State.Closed"
+        }));
+
+        let renamed = compute_rename(&db, &tokens, &shown, closed, "Sealed")
+            .expect("state rename");
+        assert!(renamed.iter().all(|(path, span)| {
+            path == &shown && &source[span.start..span.end] == "Closed"
+        }));
+
+        let completion_source = format!("{source}fn editor() {{\n    Door.State.\n}}\n");
+        let completion_offset = completion_source.find("Door.State.\n").unwrap() + "Door.State.".len();
+        let labels = compute_completions(
+            &db,
+            &completion_source,
+            completion_offset,
+            &shown,
+            None,
+            None,
+        )
+        .into_iter()
+        .map(|item| item.label)
+        .collect::<Vec<_>>();
+        assert!(labels.iter().any(|label| label == "Closed"), "{labels:?}");
+        assert!(labels.iter().any(|label| label == "Open"), "{labels:?}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
 
 // ── Rename ────────────────────────────────────────────────────────────────────
@@ -848,13 +916,12 @@ fn state_anchor_matches(
 }
 
 fn state_leaf_span(reference: &jet_semindex::SymRef) -> Option<Span> {
-    let leaf = reference.name.rsplit('.').next()?;
-    (reference.name.contains('.') && !leaf.is_empty()).then(|| {
-        Span::new(
-            reference.span.end.saturating_sub(leaf.len()),
-            reference.span.end,
-        )
-    })
+    let target = reference.target.as_ref().filter(|target| target.kind == "state")?;
+    let leaf_len = target.def_span.end.saturating_sub(target.def_span.start);
+    Some(Span::new(
+        reference.span.end.saturating_sub(leaf_len),
+        reference.span.end,
+    ))
 }
 
 /// Compute a workspace edit for renaming the symbol at `offset` to `new_name`.

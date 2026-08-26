@@ -151,6 +151,9 @@ pub enum StructuredDiagnostic {
         expected: Option<&'static str>,
         actual: Option<i128>,
     },
+    BuildError {
+        report: crate::Outcome::JetErrorReport,
+    },
     RuntimeHostFault {
         stdout: String,
     },
@@ -750,6 +753,14 @@ impl Diagnostic {
                 operation: (*operation).to_string(),
                 expected: (*expected).map(|value| value.to_string()),
                 actual: *actual,
+            });
+        }
+        if let Some(StructuredDiagnostic::BuildError {
+            report: error_report,
+        }) = &self.structured
+        {
+            report.extension = Some(ReportExtension::BuildError {
+                report: error_report.to_json(),
             });
         }
         report.json()

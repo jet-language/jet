@@ -188,6 +188,41 @@ fn package_outputs_match_stable_goldens() {
 }
 
 #[test]
+fn package_fixture_rejects_order_and_content_drift() {
+    let scratch = Scratch::new();
+    let entry = scratch.copy_fixture_package("ordered.jet");
+    let entry = entry.to_string_lossy().into_owned();
+
+    let first = jet_doc(&["doc", "--json", &entry], &scratch.0);
+    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
+    let second = jet_doc(&["doc", "--json", &entry], &scratch.0);
+    assert!(second.status.success(), "{}", String::from_utf8_lossy(&second.stderr));
+    assert_eq!(first.stdout, second.stdout, "package JSON order is not stable");
+
+    let json = String::from_utf8(first.stdout).expect("UTF-8 package docs JSON");
+    for needle in [
+        "\"summary\":\"Alpha API.\"",
+        "\"signature\":\"pub fn alpha() Int -> 6\\nfailure: Int ! (implicit default !Err)\"",
+        "\"summary\":\"Zulu API.\"",
+        "\"signature\":\"pub fn zulu() Int -> 7\\nfailure: Int ! (implicit default !Err)\"",
+        "\"link\":\"ordered.jet#L7\"",
+        "\"link\":\"ordered.jet#L4\"",
+    ] {
+        assert!(json.contains(needle), "package docs lack {needle}: {json}");
+    }
+    let order = [
+        "\"qualified_name\":\"alpha\"",
+        "\"qualified_name\":\"run\"",
+        "\"qualified_name\":\"zulu\"",
+    ];
+    let positions = order
+        .iter()
+        .map(|needle| json.find(needle).expect("ordered package item"))
+        .collect::<Vec<_>>();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
 fn nested_state_docs_stay_on_the_struct_item() {
     let scratch = Scratch::new();
     let entry = scratch.0.join("nested_state.jet");
@@ -225,7 +260,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = PatternError
 
-    fn check(text: String) () !PatternError -[]> {
+    fn check(text: String) !PatternError -[]> {
         return
     }
 

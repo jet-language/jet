@@ -14,11 +14,11 @@ fn read_store() Int !StoreErr -> {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() Int ! -> {
+fn get_user() Int -> {
     return Ok(read_store())
 }
 
-fn run() ! {
+fn run() {
     get_user()
 }
 "#;
@@ -120,7 +120,7 @@ fn read_store() Int !StoreErr -> {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() Int ! -> {
+fn get_user() Int -> {
     value :: read_store()
     return Ok(value)
 }

@@ -1,8 +1,8 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/build_plan_invalid.jet:2:27
+Error [E3501]: `fn build` must take one `BuildContext` and return `BuildPlan`.
+  --> tests/ui/build_plan_invalid.jet:2:4
     |
-  2 | fn build(b: BuildContext) => BuildPlan ! {
-    |                           ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
+  2 | fn build(b: BuildContext) BuildPlan! -> {
+    |    ^^^^^
+ Why: the build entry is a typed contract: its parameter is its authority and its result is the graph Jet executes
+ Fix: write `fn build(b: BuildContext) BuildPlan`
+More: jet-lang.dev/e/E3501

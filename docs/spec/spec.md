@@ -1088,12 +1088,14 @@ runtime path.
 
 ## M4 — errors as values (done)
 
-Failure-returning functions use the **`[Success?] [ErrorUnion!]`** suffix zone
-(S34): `T? E!` has an optional success, `E!` is unit-fallible, and bare `!`
-uses the default **`Err`** type. An ordinary `T E!` result has a non-optional
-success. `E` is any enum, struct, or `String` error type. Omitting
-the error side in a function return — **`T !`** — keeps the default-error
-meaning.
+Failure-returning functions use one shared Result carrier. A bare success type
+uses the ordinary implicit **`!Err`** route: `T` has a non-optional success and
+the default **`Err`** failure. Prefix **`?`** makes success optional, and prefix
+**`!`** names the error domain. Write **`?T !E`** for optional success with an
+explicit error, **`T !E`** for a non-optional success with an explicit error,
+**`!E`** for unit success with an explicit error, and bare **`!`** for unit
+success with the default `Err`. `E` is an allowed error domain. Omitting the
+error declaration on an ordinary return uses the same default-error meaning.
 Build outcomes with **`Ok(v)`** and **`Err(e)`**; test them with
 **`== .Ok(n)`** / **`== .Err(e)`** (same pattern machinery as M3 optionals).
 Cross-type **`?`** conversion uses one declared rail (D-ERR-CONV/D-FAIL-CONV1):
@@ -1110,11 +1112,11 @@ violations.
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
   enclosing function must return a compatible fallible type. On **`T?`**,
   `?` propagates `None` when the function returns an optional.
-- Return types follow **D-ERRSUFFIX1=B** like every other type position: the
-  failure surface is **`[Success?] [ErrorUnion!]`**. Write **`T? E!`** for an
-  optional success, **`T (E1 | E2)!`** for an explicit error union, and
-  **`E!`** for a unit-fallible result. Bare **`!`** keeps the default `Err`
-  error. Parentheses (`(T?)`) remain legal grouping, not required.
+- Return types use the prefix failure contract like every other type position.
+  Write **`T`** for the ordinary implicit `!Err` route, **`?T !E`** for an
+  optional success, **`T !(E1 | E2)`** for an explicit error union, and
+  **`!E`** for a unit-fallible result. Bare **`!`** keeps the default `Err`
+  error. Parentheses remain legal grouping where the type requires them.
 - **`?? <expr>`** (S35/S71) is the fallback operator on a fallible value or
   optional: yields the success payload or evaluates the right side. Precedence is
   looser than **`&&`** / **`||`**, so `a? ?? b` and `x == 1 || y ?? 0`
@@ -1129,7 +1131,7 @@ violations.
   name, **`it`** names the subject for pattern arms like **`it == .Ok(n)`**.
 - **`fn run()`** is fallible by default: `?` works inside it with no annotation.
   An unhandled entry error prints its full report and exits 1. An expert may
-  pin the family with **`fn run() StoreErr!`**.
+  pin the family with **`fn run() !StoreErr`**.
 
 At an explicit process stop, active `defer close(^resource)` actions run in
 reverse declaration order, `scope.guard` closures run in reverse registration
@@ -4402,7 +4404,7 @@ only on the Component.
 ## Programmable builds as Jet (D-BUILDENTRY1 and build-graph decisions)
 
 `jet build` checks the root program, then runs one optional package-local
-`fn build(b: BuildContext) BuildPlan !` through the same interpreter used by
+`fn build(b: BuildContext) BuildPlan` through the same interpreter used by
 comptime. The compiler discovers it in any source file in the package, or in
 the package's `package.jet`; two candidates name both sites and fail. An
 Output-level `entry:` remains an explicit override for rare layouts. For a
@@ -4424,7 +4426,7 @@ target_triple)` records the target identity; `b.probe(name, kind, value)`
 supports `find_program`, `pkg_config`, and `header` probe kinds.
 
 ```jet
-fn build(b: BuildContext) BuildPlan! -[Exec, FS]> {
+fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     #Impure("run declared toolchain probe and action") {
     shell :: b.probe("shell", "find_program", "sh")?
     native :: b.toolchain("native", "x86_64-linux")?

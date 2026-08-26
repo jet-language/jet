@@ -226,7 +226,8 @@ contributions to declared facts.
   registered, nameable, reflectable, prelude-visible. The build plane
   follows it exactly; facts erase like every other knowledge plane.
 - **Failure (one report, three routes, #1507).** `fn build` returns
-  `BuildPlan ?` — build failures are reports on the value route. Build
+  `BuildPlan` — build failures are reports on the value route through the
+  ordinary implicit Error contract. Build
   stops and exit codes ride D-FAIL-EXIT1's law. Nothing here invents an
   error shape.
 - **Authority (one model, #1500).** Rights are one fact family on this
@@ -445,7 +446,7 @@ a fact is written.
 | First fact | `{@build.package.version}` in a print | the version, folded, no manifest required (fallback `0.0.0`) |
 | Package | `name:`, `version:` in `package.jet` | real identity; `jet build <name>` finds it |
 | Settings | `settings: .{ tls: Bool = true }` | typed switches; `--set`, optimization bundles, `jet explain` |
-| Actions | `fn build(b) => BuildPlan ?` | probes, steps, generated code, computed contributions |
+| Actions | `fn build(b: BuildContext) BuildPlan ->` | probes, steps, generated code, computed contributions |
 | Fleet | option contributions with `.Force` | pinned facts across machines, one audit chain |
 
 Expert control at every rung: every fact is registered (nameable,

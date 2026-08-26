@@ -508,7 +508,7 @@ fn to_real(x: Int) Float {
 fn truncate(x: Float) U8 {
     return U8.from_float(x) ?? 255
 }
-fn narrow_float(x: Float) F32 String! {
+fn narrow_float(x: Float) F32 !String {
     return F32.from_float(x)
 }
 fn run() {

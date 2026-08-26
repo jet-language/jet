@@ -368,7 +368,7 @@ fn panic_context_uses_only_lexically_live_locals() {
     for (name, scoped_stmt, dead_names) in cases {
         let src = format!(
             r#"
-fn missing() (Int?) -> None
+fn missing() (?Int) -> None
 fn capture(live: Int) {{
     {scoped_stmt}
     _value :: missing() ?? panic("missing value")
@@ -476,21 +476,21 @@ enum ParseError {
     Empty
     BadDigit(String)
 }
-fn parse_age(raw: String) Int ParseError! -[]> {
+fn parse_age(raw: String) Int !ParseError -[]> {
     if raw == "" {
         return Err(ParseError.Empty)
     }
     return Ok(42)
 }
-fn load(raw: String) Int ParseError! -[]> {
+fn load(raw: String) Int !ParseError -[]> {
     n :: parse_age(raw)? "loading age"
     return Ok((n * 2))
 }
-fn double(raw: String) Int ParseError! -[]> {
+fn double(raw: String) Int !ParseError -[]> {
     n :: load(raw)? "doubling age"
     return Ok((n * 2))
 }
-fn run() ParseError! {
+fn run() !ParseError {
     n :: double("")?
     print(n)
 }
@@ -538,12 +538,12 @@ fn try_note_interpolation_is_lazy_on_success() {
     }
 
     let src = r#"
-fn present() String ! -> Ok("ok")
+fn present() String -> Ok("ok")
 fn note_value() String -[IO]> {
     print("evaluated")
     return "unexpected"
 }
-fn wrapped() String ! -[IO]> {
+fn wrapped() String -[IO]> {
     value :: present()? "never {note_value()}"
     return Ok(value)
 }
@@ -570,11 +570,11 @@ fn fallback_handles_locally_and_context_preserves_the_structured_cause() {
     // second crossing uses the canonical `?(text)` form; it adds one hop and
     // leaves both the typed code and nested cause on the same carrier.
     let src = r#"
-fn fail() String ! -> Err("outer", code: "E_OUTER", cause: Err("root"))
-fn pass_through() ! -[]> {
+fn fail() String -> Err("outer", code: "E_OUTER", cause: Err("root"))
+fn pass_through() -[]> {
     _ :: fail()?("loading")
 }
-fn run() ! {
+fn run() {
     recovered :: fail() ?? "fallback"
     print(recovered)
     _ :: pass_through()?
@@ -625,12 +625,12 @@ fn read_store() Int !IOError -> {
     }))
 }
 
-fn get_user() Int ! -> {
+fn get_user() Int -> {
     value :: read_store()?("loading store")
     return Ok(value)
 }
 
-fn run() ! {
+fn run() {
     value :: get_user()
     print(value)
 }
@@ -664,6 +664,69 @@ fn run() ! {
 }
 
 #[test]
+fn contextual_try_preserves_identity_cause_and_prior_context() {
+    let have_rustc = common::have_rustc();
+    if !have_rustc {
+        return;
+    }
+
+    let src = r#"
+impl IOError -> Err {
+    return Err("store unavailable", code: "E_STORE", cause: Err("disk offline"))
+}
+
+fn read_store() String !IOError -> {
+    return Err(IOError.InvalidInput(IOContext{
+        operation: .Read,
+        resource: None,
+        os_code: None,
+        cause: Val("disk offline"),
+    }))
+}
+
+fn load_store() String !Err -> {
+    value :: read_store()?("loading store")
+    return value
+}
+
+fn open_store() String !Err -> {
+    value :: load_store()?("opening store")
+    return value
+}
+
+fn run() !Err {
+    _ :: open_store()?("running store")
+}
+"#;
+    let (code, stdout, stderr) = build_and_run_debug("contextual_try_preserves_error", src);
+    assert_eq!(code, 1, "the contextual failure must escape: {stderr}");
+    assert!(stdout.is_empty(), "the failure must not print stdout: {stdout}");
+    assert!(
+        stderr.starts_with("Error [E_STORE]: store unavailable (type: IOError)\n  cause: disk offline\n"),
+        "typed identity and cause were not preserved: {stderr}"
+    );
+    let inner = stderr.find("context (").expect("inner context frame");
+    let middle = stderr[inner + 1..]
+        .find("context (")
+        .map(|offset| inner + 1 + offset)
+        .expect("middle context frame");
+    let outer = stderr[middle + 1..]
+        .find("context (")
+        .map(|offset| middle + 1 + offset)
+        .expect("outer context frame");
+    assert!(
+        stderr[inner..].contains(": loading store")
+            && stderr[middle..].contains(": opening store")
+            && stderr[outer..].contains(": running store"),
+        "context frames were not preserved in source order: {stderr}"
+    );
+    assert!(
+        stderr.contains("conversion: IOError -> Err\n"),
+        "conversion identity was lost: {stderr}"
+    );
+}
+
+#[test]
 fn uncaught_err_prints_propagation_chain() {
     let have_rustc = common::have_rustc();
     if !have_rustc {
@@ -673,16 +736,16 @@ fn uncaught_err_prints_propagation_chain() {
     // D-FAIL-CTX1=A: uncaught Err at `fn run() ?` prints the `?` journey
     // (file:line per frame, with notes) then the error text, exit 1.
     let src = r#"
-fn read_raw() String ! -> Err("file not found")
-fn parse_config() String ! -[]> {
+fn read_raw() String -> Err("file not found")
+fn parse_config() String -[]> {
     raw :: read_raw()? "reading raw config"
     return Ok(raw)
 }
-fn load_config() String ! -[]> {
+fn load_config() String -[]> {
     cfg :: parse_config()? "loading config"
     return Ok(cfg)
 }
-fn run() ! {
+fn run() {
     _ :: load_config()?
 }
 "#;
@@ -721,14 +784,14 @@ fn propagation_trace_collapses_repeated_frames() {
     // The journey only reaches stderr when the failure escapes the entry, so
     // `run` propagates instead of recovering.
     let src = r#"
-fn dive(n: Int) Int ! -[]> {
+fn dive(n: Int) Int -[]> {
     if n <= 0 {
         return Err("bottom")
     }
     v :: dive((n - 1))?
     return Ok(v)
 }
-fn run() ! {
+fn run() {
     v :: dive(4)?
     print(v)
 }

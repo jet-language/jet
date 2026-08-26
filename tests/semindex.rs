@@ -118,7 +118,7 @@ fn numeric_destination_conversions_and_parse_are_cataloged() {
         .lookup_qualified("F32.from_float")
         .expect("F32 narrowing catalog entry");
     assert!(
-        narrow.signature.ends_with("-> F32 String!"),
+        narrow.signature.ends_with("-> F32 !String"),
         "{}",
         narrow.signature
     );
@@ -176,7 +176,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = PatternError
 
-    fn check(text: String) () !PatternError -[]> {
+    fn check(text: String) !PatternError -[]> {
         return
     }
 
@@ -647,7 +647,7 @@ fn tracked_float_symbol_exposes_its_binding_site() {
         .into_iter()
         .find(|symbol| symbol.kind == SemanticSymbolKind::Local)
         .expect("origin fact binding");
-    assert_eq!(origin.signature, "origin: OriginInfo?");
+    assert_eq!(origin.signature, "origin: ?OriginInfo");
 
     let index = open(&path).expect("tracked-value semindex");
     let origin_read = index
@@ -657,14 +657,14 @@ fn tracked_float_symbol_exposes_its_binding_site() {
         .expect("typed @origin semindex reference");
     assert_eq!(origin_read.name, "@origin");
     assert_eq!(origin_read.kind, "Origin");
-    assert_eq!(origin_read.type_name, "OriginInfo?");
+    assert_eq!(origin_read.type_name, "?OriginInfo");
     assert!(index.to_json().contains(
-        "\"fact\":{\"name\":\"@origin\",\"kind\":\"Origin\",\"type\":\"OriginInfo?\"}"
+        "\"fact\":{\"name\":\"@origin\",\"kind\":\"Origin\",\"type\":\"?OriginInfo\"}"
     ));
     let fact_symbol = symbols
         .lookup("@origin")
         .into_iter()
-        .find(|symbol| symbol.signature == "@origin: OriginInfo?")
+        .find(|symbol| symbol.signature == "@origin: ?OriginInfo")
         .expect("typed @origin semantic symbol");
     assert_eq!(fact_symbol.kind, SemanticSymbolKind::Member);
 }

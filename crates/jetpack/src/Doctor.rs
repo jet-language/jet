@@ -272,7 +272,7 @@ fn check_leases(roots: &Store::Roots) -> Check {
         Ok(_) => ok("leases", "no active or stale executable leases"),
         Err(error) => broken(
             "leases",
-            format!("executable lease state could not be inspected ({})", error.kind()),
+            format!("executable lease state could not be inspected ({error})"),
             "restore read access to the Jetpack lease directory, then rerun `jetpack doctor`",
         ),
     }

@@ -23,26 +23,28 @@ fn classify(ok: Bool) Int !ClassifyError -> {
 }
 
 fn run() -[IO]> {
-    #FX(authority: IO) {
-        classify(true) ? ok -> { print("ok: {ok}"); ok } ! _error -> { print("error"); 0 }
-        classify(false) ? ok -> { print("ok: {ok}"); ok } ! _error -> { print("error"); 0 }
+    #FX(IO) {
+        classify(true) ? ok -> { print("ok"); print(ok); 0 } ! _error -> { print("error"); 0 }
+        classify(false) ? ok -> { print("ok"); print(ok); 0 } ! _error -> { print("error"); 0 }
     }
 }
 "#;
-    tir_support::assert_tiers_agree("result_handler_tiers", src, "ok: 7\nerror\n");
+    tir_support::assert_tiers_agree("result_handler_tiers", src, "ok\n7\nerror\n");
 }
 
 #[test]
 fn result_handler_evaluates_effectful_receiver_once_on_all_tiers() {
     let src = r#"
-fn classify(ok: Bool) Int !Err -[IO]> {
+fn classify(ok: Bool) Int -[IO]> {
     print("source")
     if ok { return 7 }
     return Err("bad")
 }
 
 fn run() -[IO]> {
-    classify(false) ? ok -> print("ok: {ok}") ! error -> print(error)
+    #FX(IO) {
+        classify(false) ? _ok -> print("ok") ! _error -> print("error")
+    }
 }
 "#;
     tir_support::assert_tiers_agree("result_handler_effectful_receiver", src, "source\nerror\n");
@@ -53,53 +55,55 @@ fn run() -[IO]> {
 #[test]
 fn result_handler_preserves_diverging_arm_on_all_tiers() {
     let src = r#"
-fn choose(ok: Bool) Int !Err -> {
+fn choose(ok: Bool) Int -> {
     if ok { return 7 }
     return Err("bad")
 }
 
 fn run() {
-    result :: choose(true) ? ok -> ok + 1 ! error -> panic(error)
-    print("{result}")
+    #FX(IO) {
+        result :: choose(true) ? ok -> ok + 1 ! _error -> return
+        print(result)
+    }
 }
 "#;
     tir_support::assert_tiers_agree("result_handler_diverging", src, "8\n");
 }
 
 /// D-RESULT-DECON2=B / I9: handler branches keep ordinary ownership, generic,
-/// nested, and value semantics. The owned String payloads force the AOT path
-/// to consume the Result once, while the same source runs through JIT and
+/// nested, and value semantics. The non-Copy String payload forces the AOT
+/// path to consume the Result once, while the same source runs through JIT and
 /// interpreter deopt without a handler-specific carrier.
 #[test]
 fn result_handler_preserves_ownership_generic_and_nested_values_on_all_tiers() {
     let src = r#"
-fn choose<T>(value: ^T, ok: Bool) T !String -> {
+fn choose<T>(value: ^T, ok: Bool) T -> {
     if ok { return value }
     return Err("bad")
 }
 
-fn consume(value: ^String) String -> value
-
-fn owned(ok: Bool) String !String -> {
-    return choose("owned", ok) ? success -> consume(^success) ! failure -> consume(^failure)
+fn owned(ok: Bool) String -> {
+    return choose("owned", ok) ? success -> success ! _failure -> "bad"
 }
 
-fn generic<T>(value: ^T, ok: Bool) T !String -> {
-    return choose(value, ok) ? success -> success ! failure -> panic(failure)
+fn generic<T>(value: ^T, ok: Bool) T -> {
+    return choose<T>(^value, ok) ? success -> success ! _failure -> return Err("bad")
 }
 
-fn nested(value: Int, ok: Bool) Int !String -> {
-    return choose(value, ok) ? success -> {
-        inner :: choose(success, ok) ? nested_success -> nested_success + 1 ! nested_failure -> 0
-    } ! failure -> 0
+fn nested(value: Int, ok: Bool) Int -> {
+    return choose<Int>(^value, ok) ? success -> {
+        choose<Int>(^success, ok) ? nested_success -> nested_success + 1 ! _nested_failure -> 0
+    } ! _failure -> 0
 }
 
 fn run() {
-    print(owned(true))
-    print(owned(false))
-    print(generic(4, true))
-    print(nested(4, true))
-    print(nested(4, false))
+    #FX(IO) {
+        print(owned(true))
+        print(owned(false))
+        print(generic(4, true))
+        print(nested(4, true))
+        print(nested(4, false))
+    }
 }
 "#;
     tir_support::assert_tiers_agree(
@@ -275,7 +279,7 @@ fn choose(flag: Bool) Int -> {
     if flag -> { return 1 } else -> { 2 }
 }
 
-fn fallback(value: Int?) Int -> {
+fn fallback(value: ?Int) Int -> {
     value ?? { return 9 }
 }
 
@@ -309,7 +313,7 @@ fn run() {}
         (
             "fallback_semicolon",
             r#"
-fn fallback(value: Int?) Int -> {
+fn fallback(value: ?Int) Int -> {
     value ?? { 1; }
 }
 fn run() {}
@@ -357,7 +361,7 @@ fn unreachable() Int -> {
     2;
 }
 
-fn fallback(value: Int?) Int -> {
+fn fallback(value: ?Int) Int -> {
     value ?? {
         if true {
             panic("missing")
@@ -408,11 +412,11 @@ fn make() Err {
     return Err("bad input", code: "E_BAD", cause: Err("root cause"))
 }
 
-fn typed(value: Err) Err! {
+fn typed(value: Err) !Err {
     return Err(value)
 }
 
-fn run() Err! {
+fn run() !Err {
     return typed(make())
 }
 "#;
@@ -432,7 +436,7 @@ fn run() Err! {
 #[test]
 fn default_err_value_runs_on_the_default_jit_edge() {
     let src = r#"
-fn run() Err! {
+fn run() !Err {
     return Err("unhandled", code: "E_RUN", cause: Err("root"))
 }
 "#;
@@ -480,9 +484,9 @@ fn run() {
 #[test]
 fn typed_error_union_widening_runs_on_jit_and_interpreter() {
     let src = r#"
-fn narrow() Int String! -> Err("narrow")
+fn narrow() Int !String -> Err("narrow")
 
-fn widen() Int (String | Bool)! -> narrow()?
+fn widen() Int !(String | Bool) -> narrow()
 
 fn run() {
     print(widen() ?? 7)
@@ -511,52 +515,52 @@ fn run() {
 #[test]
 fn implicit_failure_propagation_covers_call_positions() {
     let src = r#"
-struct Box {
+struct Holder {
     value: Int
 
-    fn bump(self, by: Int) Int ! -> {
+    fn bump(self, by: Int) Int -> {
         return add(self.value + by)
     }
 }
 
-fn source(value: Int) Int ! -> {
+fn source(value: Int) Int -> {
     if value == 0 {
         return Err("source failed")
     }
     return value
 }
 
-fn add(value: Int) Int ! -> return value + 1
+fn add(value: Int) Int -> value + 1
 
-fn is_zero(value: Int) Bool ! -> return value == 0
+fn is_zero(value: Int) Bool -> value == 0
 
-fn argument(value: Int) Int ! -> {
+fn argument(value: Int) Int -> {
     return add(source(value))
 }
 
-fn nested(value: Int) Int ! -> {
+fn nested(value: Int) Int -> {
     return source(value) + 1
 }
 
-fn branch(value: Int) Int ! -> {
+fn branch(value: Int) Int -> {
     if is_zero(value) {
         source(value)
     }
     return value
 }
 
-fn branch_value(value: Int) Int ! -> {
+fn branch_value(value: Int) Int -> {
     return if is_zero(value) -> { source(value) } else -> { value + 1 }
 }
 
-fn closure(value: Int) Int ! -> {
-    worker :: (n: Int) Int ! -> source(n) + 1
+fn closure(value: Int) Int -> {
+    worker :: (n: Int) Int -> source(n) + 1
     return worker(value)
 }
 
-fn method(value: Int) Int ! -> {
-    box :: Box{ value: source(value) }
-    return add(box.bump(1))
+fn method(value: Int) Int -> {
+    holder :: Holder{ value: source(value) }
+    return add(holder.bump(1))
 }
 
 fn run() {
@@ -617,7 +621,7 @@ struct Grid {
 impl Grid.Index {
     type Key = Int
     type Value = Int
-    fn get(self, key: Int) Int? {
+    fn get(self, key: Int) ?Int {
         if key < 0 || key >= self.cells.len() -> return None
         return Val(self.cells[key].value)
     }
@@ -1193,7 +1197,7 @@ use core.encoding.json as json
 
 #Codable
 struct MaybeRow {
-    value: Int? | String
+    value: ?Int | String
 }
 
 #Codable

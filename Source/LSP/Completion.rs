@@ -232,12 +232,56 @@ fn semantic_owner(ty: &AST::Type) -> Option<String> {
 
 /// The `State` segment is an erased fact plane, not a runtime member. Keep it
 /// available as the first completion step of the canonical `Type.State.Name`
-/// path without inventing a second type symbol.
-fn has_state_plane(db: &SymbolDB, type_name: &str) -> bool {
-    let owner = format!("{type_name}.State");
-    db.members
+/// path without inventing a second type symbol. `qualified_name` may carry a
+/// module alias while `MemberFact.owner` remains the local nominal owner, so
+/// return that local owner for the second completion step.
+fn state_plane_owner(db: &SymbolDB, type_name: &str) -> Option<String> {
+    let local_owner = format!("{type_name}.State");
+    if db
+        .members
         .iter()
-        .any(|member| member.owner == owner.as_str())
+        .any(|member| member.owner == local_owner.as_str())
+    {
+        return Some(local_owner);
+    }
+    let qualified_prefix = format!("{type_name}.State.");
+    db.symbols
+        .symbols()
+        .iter()
+        .find(|symbol| symbol.qualified_name.starts_with(&qualified_prefix))
+        .and_then(|symbol| symbol.owner.clone())
+}
+
+fn has_state_plane(db: &SymbolDB, type_name: &str) -> bool {
+    state_plane_owner(db, type_name).is_some()
+}
+
+fn semantic_member_owner(db: &SymbolDB, receiver_name: &str) -> Option<String> {
+    if let Some(definition) = db.defs.iter().find(|def| def.name == receiver_name) {
+        match &definition.kind {
+            SymKind::Struct { .. } | SymKind::Type { .. } => {
+                return Some(definition.name.clone());
+            }
+            SymKind::Local { ty: Some(ty), .. } | SymKind::Param { ty } => {
+                return semantic_owner(ty);
+            }
+            _ => {}
+        }
+    }
+    if let Some(owner) = state_plane_owner(db, receiver_name) {
+        return Some(
+            owner
+                .strip_suffix(".State")
+                .unwrap_or(owner.as_str())
+                .to_string(),
+        );
+    }
+    let qualified_prefix = format!("{receiver_name}.");
+    db.symbols
+        .symbols()
+        .iter()
+        .find(|symbol| symbol.qualified_name.starts_with(&qualified_prefix))
+        .and_then(|symbol| symbol.owner.clone())
 }
 
 fn semantic_completion_kind(symbol: &jet_semindex::SemanticSymbol) -> u8 {
@@ -412,28 +456,18 @@ pub(crate) fn compute_completions(
         {
             Some(receiver_name.clone())
         } else {
-            db.defs
-                .iter()
-                .find(|def| def.name == receiver_name)
-                .and_then(|def| match &def.kind {
-                    SymKind::Struct { .. } | SymKind::Type { .. } => Some(def.name.clone()),
-                    SymKind::Local { ty: Some(ty), .. } | SymKind::Param { ty } => {
-                        semantic_owner(ty)
-                    }
-                    _ => None,
-                })
-                .or_else(|| {
-                    let anchor = jet_semindex::SemanticVisibilityAnchor {
-                        module_path: current_path,
-                        offset: Some(offset),
-                        session_top_level: false,
-                    };
-                    (!db
-                        .symbols
-                        .complete_visible_at("", Some(&receiver_name), anchor)
-                        .is_empty())
+            semantic_member_owner(db, &receiver_name).or_else(|| {
+                let anchor = jet_semindex::SemanticVisibilityAnchor {
+                    module_path: current_path,
+                    offset: Some(offset),
+                    session_top_level: false,
+                };
+                (!db
+                    .symbols
+                    .complete_visible_at("", Some(&receiver_name), anchor)
+                    .is_empty())
                     .then_some(receiver_name.clone())
-                })
+            })
         };
         if let Some(owner) = owner {
             for symbol in db.symbols.complete_visible_at(

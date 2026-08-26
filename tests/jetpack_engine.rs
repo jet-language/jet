@@ -3699,6 +3699,40 @@ fn use_rejects_unrecorded_path_inside_lease() {
     assert!(stderr.contains("Error [E1340]:"), "stderr: {stderr}");
     assert!(stderr.contains("not a recorded member"), "stderr: {stderr}");
     assert!(!String::from_utf8_lossy(&output.stdout).contains("hello from jetpack"));
+
+    #[cfg(unix)]
+    {
+        let alias = root.path.join("lease-output-alias");
+        std::os::unix::fs::symlink(Path::new(&entry.out).join("bin"), &alias).unwrap();
+        let aliased = alias.join("omp");
+        let output = jetpack()
+            .args([
+                "use",
+                "omp@releases#1.0.0",
+                "-y",
+                "--no-color",
+                "--offline",
+                "--fixtures",
+            ])
+            .arg(&fixtures.path)
+            .args(["--", aliased.to_str().unwrap()])
+            .env("JETPACK_ROOT", &root.path)
+            .env("JETPACK_FIXTURES", &fixtures.path)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(126),
+            "symlink alias into a lease must fail before child launch: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("not a recorded member"),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("hello from jetpack"));
+    }
 }
 
 #[test]
@@ -3733,6 +3767,15 @@ fn use_fails_closed_when_executable_lease_service_key_is_invalid() {
     assert!(stderr.contains("Error [E1315]:"), "stderr: {stderr}");
     assert!(stderr.contains("32-byte file"), "stderr: {stderr}");
     assert!(!String::from_utf8_lossy(&output.stdout).contains("hello from jetpack"));
+    // Criterion 4: a failed Store lease publication must remove its private
+    // container. A bypassed or incomplete cleanup path leaves executable state
+    // behind even though the child never launched.
+    assert!(
+        fs::read_dir(root.path.join("leases"))
+            .map(|entries| entries.flatten().next().is_none())
+            .unwrap_or(true),
+        "failed lease setup left an executable container"
+    );
     let diagnostic = stderr
         .find("Error [E1315]:")
         .map(|offset| &stderr[offset..])

@@ -13,7 +13,7 @@ struct Wrap<T> {
 #Codable
 struct Tagged<K> {
     raw: Int
-    #Skip marker: K?
+    #Skip marker: ?K
 }
 
 fn run() {
@@ -74,7 +74,7 @@ struct Wrap<T> {
 #Codable
 struct Tagged<K> {
     raw: Int
-    #Skip marker: K?
+    #Skip marker: ?K
 }
 
 fn run() {
@@ -467,7 +467,7 @@ use core.encoding.json as json
 #Codable
 struct Record {
     base: Int
-    note: String?
+    note: ?String
     doubled: Int -> base * 2
 }
 
@@ -506,7 +506,7 @@ fn nested_pattern_subjects_clone_read_self_and_keep_take_self_by_value() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
-struct Inner { note: String? }
+struct Inner { note: ?String }
 struct Envelope {
     inner: Inner
 
@@ -559,7 +559,7 @@ use core.encoding.json as json
 struct Wire {
     first: String
     #Rename("wireSecond") second: String
-    maybe: String?
+    maybe: ?String
     last: Int
 }
 
@@ -705,7 +705,7 @@ pub struct Address { pub city: String }
 pub struct Order {
     pub shipping: Address
     pub quantities: [Int]
-    pub coupon: String?
+    pub coupon: ?String
     pub labels: [String:Int]
 }
 
@@ -1225,7 +1225,7 @@ migration Config {
     add host: String = "localhost"
 }
 
-fn run() [FieldError]! {
+fn run() ![FieldError] {
     old :: json.decode<Config>("{{\"port\":2}}")?
     print("json {old.port} {old.host}")
     toml_old :: toml.decode<Config>("port = 3\n")?

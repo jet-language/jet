@@ -1522,7 +1522,7 @@ fn run() {
 #[test]
 fn semantic_capture_walker_covers_fallback_and_scope_member_arguments() {
     let fallback = r#"
-fn missing() Int? -[]> { return null }
+fn missing() ?Int -[]> { return null }
 fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
 fn run() {
     values := [1, 2]
@@ -4151,7 +4151,7 @@ fn run() {
 /// The wrappers are spelled `JetOutcome<…>` now, not `Option`/`Result`.
 /// D-FAIL-CARRIER1=A / D-FAIL-MODEL1=A (ratified 2026-08-06,
 /// crates/jet-foundation/src/Outcome.rs:1-22) make one carrier serve both
-/// surface forms: `T?` is `JetOutcome<T, JetAbsent>` and `T E!` is
+/// surface forms: `T?` is `JetOutcome<T, JetAbsent>` and `T !E` is
 /// `JetOutcome<T, E>`. A raw `Option` here would be the second optional
 /// representation that decision exists to remove. The leaf-not-wrapper
 /// property is untouched by the rename, so the negative guards move to the
@@ -4161,15 +4161,15 @@ fn run() {
 fn wrapper_returned_view_aggregates_render_lifetimes_on_named_leaves() {
     let src = r#"
 struct Window { values: View<Int> }
-struct Holder { maybe: Window? }
-struct GenericHolder<T> { value: T, maybe: Window? }
+struct Holder { maybe: ?Window }
+struct GenericHolder<T> { value: T, maybe: ?Window }
 
-fn maybe(values: [Int]) (Window?) -[]> {
+fn maybe(values: [Int]) (?Window) -[]> {
     selected :: values[0..1]
     return Val(Window{ values: selected })
 }
 
-fn result(values: [Int]) Window String! -[]> {
+fn result(values: [Int]) Window !String -[]> {
     selected :: values[0..1]
     return Ok(Window{ values: selected })
 }
@@ -4808,7 +4808,7 @@ fn edit(values: &[Int]) Edit -[]> {
     return Edit{ values: &values[0..1] }
 }
 
-fn maybe(values: &[Int]) ViewMut<Int>? -[]> {
+fn maybe(values: &[Int]) ?ViewMut<Int> -[]> {
     return Val(&values[0..1])
 }
 
@@ -4892,7 +4892,7 @@ fn run() {
     assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
 
     let option_src = r#"
-fn maybe(values: &[Int]) ViewMut<Int>? -[]> {
+fn maybe(values: &[Int]) ?ViewMut<Int> -[]> {
     return Val(&values[0..1])
 }
 
@@ -5023,7 +5023,7 @@ fn run() {
 #[test]
 fn recursive_view_aggregate_graph_terminates_without_ice() {
     let src = r#"
-struct Node { next: Node?, values: View<Int> }
+struct Node { next: ?Node, values: View<Int> }
 
 fn node(values: [Int]) Node -[]> {
     selected :: values[0..1]

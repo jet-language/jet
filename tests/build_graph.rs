@@ -1059,6 +1059,7 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
         key: key.clone(),
         outcome: ActionOutcome::Succeeded { exit_code: 0 },
         outputs: vec![output.clone()],
+        failure_report: None,
         provenance: ActionCacheProvenance::hit(CacheHitReason::LocalActionRecordMatched),
     };
     transport.upload_action_record(&record, &policy).unwrap();
@@ -1595,6 +1596,203 @@ fn remote_driver_consumes_authenticated_worker_result() {
         b"remote worker output"
     );
     let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn build_failure_report_survives_local_remote_cache_and_replay() {
+    let false_path = std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+        .map(|directory| directory.join("false"))
+        .find(|path| path.is_file())
+        .expect("the test host needs a `false` executable");
+
+    let local_root = std::env::temp_dir().join(format!(
+        "jet_build_failure_report_{}_local",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&local_root);
+    fs::create_dir_all(&local_root).unwrap();
+    let mut local_context = BuildContext::new();
+    let local_action = local_context
+        .action(
+            "parity-failure",
+            ActionSpec::cached([false_path.to_string_lossy().to_string()])
+                .with_outputs(["build/failure"])
+                .with_cap(BuildCapability::Exec),
+        )
+        .unwrap();
+    let local_target = local_context
+        .add_executable("local-failure", TargetSpec::new().with_action(local_action))
+        .unwrap();
+    let local_plan = local_context.plan_with_default(local_target).unwrap();
+    let exec_grants = [BuildCapability::Exec]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    let local_error = execute_build_plan_with_front_end_and_remote(
+        &local_plan,
+        &local_root,
+        &exec_grants,
+        FrontEndCompletion::all_complete(),
+        None,
+    )
+    .unwrap_err();
+    let local_report = match local_error {
+        jet::Comptime::Build::BuildExecutionError::Reported { report } => report,
+        error => panic!("local action did not return its structured report: {error:?}"),
+    };
+    let local_replay_error = execute_build_plan_with_front_end_and_remote(
+        &local_plan,
+        &local_root,
+        &exec_grants,
+        FrontEndCompletion::all_complete(),
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(local_replay_error.report(), Some(&local_report));
+
+    let remote_project = std::env::temp_dir().join(format!(
+        "jet_build_failure_report_{}_remote",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&remote_project);
+    fs::create_dir_all(&remote_project).unwrap();
+    let remote_root = remote_project.join("remote-transport");
+    let mut remote_context = BuildContext::new();
+    let remote_action = remote_context
+        .action(
+            "parity-failure",
+            ActionSpec::cached(["remote-tool"])
+                .with_outputs(["build/failure"])
+                .with_cap(BuildCapability::Net),
+        )
+        .unwrap();
+    let remote_target = remote_context
+        .add_executable("remote-failure", TargetSpec::new().with_action(remote_action))
+        .unwrap();
+    let remote_plan = remote_context.plan_with_default(remote_target).unwrap();
+    let remote_grants = [BuildCapability::Net]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    let remote_key = remote_plan
+        .effective_action_key(
+            remote_action,
+            &[],
+            &remote_grants,
+            std::path::Path::new("remote-tool"),
+            &ContentDigest::from_bytes(b"remote-tool"),
+            &[],
+        )
+        .unwrap();
+    let binding = RemoteBuildBinding::new(
+        "builder-failure-report",
+        &remote_root,
+        b"failure-report-key",
+    )
+    .unwrap()
+    .with_trust_domain("trusted")
+    .with_worker_id("worker-failure-report")
+    .with_platform(format!(
+        "{}-{}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    ))
+    .with_abi("native")
+    .with_cache_read(true)
+    .with_cache_write(true)
+    .with_execute(true)
+    .with_timeout_ms(2_000);
+    let worker_binding = binding.clone();
+    let worker_key = remote_key.clone();
+    let worker = std::thread::spawn(move || {
+        let transport = RemoteCacheTransport::for_binding(&worker_binding).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            match transport.read_execution_request(&worker_key) {
+                Ok(request) => {
+                    let policy = RemoteCachePolicy::with_grants(
+                        false,
+                        false,
+                        true,
+                        request.sandbox.clone(),
+                    );
+                    let output = b"unused";
+                    let output_digest = transport.upload_execution_blob(output, &policy).unwrap();
+                    let (stdout_digest, stderr_digest) =
+                        remote_empty_log_digests(&transport, &policy);
+                    transport
+                        .publish_execution_result(
+                            &RemoteExecutionResult {
+                                key: request.key.clone(),
+                                attempt_id: request.attempt_id.clone(),
+                                execution_id: remote_execution_identity(&request),
+                                outcome: ActionOutcome::Failed { exit_code: 1 },
+                                outputs: vec![ActionOutputRecord {
+                                    path: request.outputs[0].clone(),
+                                    digest: output_digest,
+                                    byte_len: output.len() as u64,
+                                }],
+                                toolchain_digest: request.toolchain_digest.clone(),
+                                sandbox: request.sandbox.clone(),
+                                stdout_digest,
+                                stderr_digest,
+                                provenance_signer: request.sandbox.worker_id.clone(),
+                            },
+                            &policy,
+                        )
+                        .unwrap();
+                    return;
+                }
+                Err(RemoteCacheError::Io(error))
+                    if error.kind() == std::io::ErrorKind::NotFound
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(error) => panic!("remote failure worker could not read request: {error}"),
+            }
+        }
+    });
+    let remote_error = execute_build_plan_with_front_end_and_remote(
+        &remote_plan,
+        &remote_project,
+        &remote_grants,
+        FrontEndCompletion::all_complete(),
+        Some(&binding),
+    )
+    .unwrap_err();
+    worker.join().unwrap();
+    let remote_report = match remote_error {
+        jet::Comptime::Build::BuildExecutionError::Reported { report } => report,
+        error => panic!("remote action did not return its structured report: {error:?}"),
+    };
+    assert_eq!(remote_report, local_report);
+
+    let remote_local_record = remote_project
+        .join(".jet/build-cache/actions")
+        .join(remote_key.as_str().trim_start_matches("act-sha256:"));
+    let remote_cached_error = execute_build_plan_with_front_end_and_remote(
+        &remote_plan,
+        &remote_project,
+        &remote_grants,
+        FrontEndCompletion::all_complete(),
+        Some(&binding),
+    )
+    .unwrap_err();
+    assert_eq!(remote_cached_error.report(), Some(&local_report));
+    fs::remove_file(remote_local_record).unwrap();
+    let remote_replayed_error = execute_build_plan_with_front_end_and_remote(
+        &remote_plan,
+        &remote_project,
+        &remote_grants,
+        FrontEndCompletion::all_complete(),
+        Some(&binding),
+    )
+    .unwrap_err();
+    assert_eq!(remote_replayed_error.report(), Some(&local_report));
+
+    let _ = fs::remove_dir_all(local_root);
+    let _ = fs::remove_dir_all(remote_project);
 }
 
 #[test]

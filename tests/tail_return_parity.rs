@@ -3,11 +3,14 @@
 
 mod common;
 
-#[path = "tir_support/mod.rs"]
-mod tir_support;
-
 use std::fs;
 use std::process::Command;
+
+const PACKAGE_SOURCE: &str = r#"
+name: "tail_return_parity"
+version: "0.1.0"
+authority: .{ holds: { allow: [IO] } }
+"#;
 
 const COMPTIME_SOURCE: &str = r#"
 fn label(value: Int) String -> {
@@ -28,16 +31,14 @@ fn early(flag: Bool) String -> {
 @expected_late :: early(false)
 
 fn run() {
-    #FX(authority: IO) {
-        print(@expected_one)
-        print(@expected_other)
-        print(@expected_early)
-        print(@expected_late)
-        print(label(1))
-        print(label(2))
-        print(early(true))
-        print(early(false))
-    }
+    print(@expected_one)
+    print(@expected_other)
+    print(@expected_early)
+    print(@expected_late)
+    print(label(1))
+    print(label(2))
+    print(early(true))
+    print(early(false))
 }
 "#;
 
@@ -95,8 +96,7 @@ fn run() {
 
 #[test]
 fn block_values_arm_tables_and_early_returns_match_comptime_and_hosted_tiers() {
-    tir_support::assert_tiers_agree(
-        "tail_return_comptime_parity",
+    assert_packaged_cli_tiers_agree(
         COMPTIME_SOURCE,
         "one|other|early|late\none|other|early|late\n",
     );
@@ -136,4 +136,51 @@ fn block_values_arm_tables_and_early_returns_match_web_runtime() {
 
 fn have_tool(name: &str) -> bool {
     Command::new(name).arg("--version").output().is_ok()
+}
+
+fn assert_packaged_cli_tiers_agree(src: &str, expected_stdout: &str) {
+    let root = common::unique_tmp("jet_tail_return_parity");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("package.jet"), PACKAGE_SOURCE).unwrap();
+    fs::write(root.join("run.jet"), src).unwrap();
+
+    let modes = [
+        ("release", true, false),
+        ("default", false, false),
+        ("interpret", false, true),
+    ];
+    let mut baseline = None;
+    for (mode, release, interpret) in modes {
+        let cache = root.join(format!("cache-{mode}"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.arg("run");
+        if release {
+            command.arg("--release");
+        }
+        if interpret {
+            command.arg("--interpret");
+        }
+        let output = command
+            .arg("run.jet")
+            .current_dir(&root)
+            .env("JET_CACHE_DIR", &cache)
+            .env("JETPACK_ENV", "1")
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let result = (
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        );
+        assert_eq!(result.0, 0, "{mode} run failed:\n{}", result.2);
+        assert_eq!(result.1, expected_stdout, "{mode} output");
+        if let Some((baseline_mode, baseline_code, baseline_stdout)) = &baseline {
+            assert_eq!(result.0, *baseline_code, "{mode} exit code disagreed with {baseline_mode}");
+            assert_eq!(result.1, *baseline_stdout, "{mode} output disagreed with {baseline_mode}");
+        } else {
+            baseline = Some((mode, result.0, result.1));
+        }
+    }
+    let _ = fs::remove_dir_all(root);
 }

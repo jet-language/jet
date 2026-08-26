@@ -10,7 +10,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = TextError
 
-    fn check(text: String) () TextError! -[]> {
+    fn check(text: String) !TextError -[]> {
         if text == "" { return Err(TextError.Bad) }
         return Ok(())
     }

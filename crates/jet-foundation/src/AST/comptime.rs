@@ -792,6 +792,9 @@ pub enum CtReport {
 const ERROR_METADATA_TYPE: &str = "__jet_ErrorMetadata";
 const ERROR_CONTEXT_TYPE: &str = "__jet_ErrorContextFrame";
 const ERROR_CONVERSION_TYPE: &str = "__jet_ErrorConversion";
+const ERROR_DETAILS_TYPE: &str = "__jet_ErrorDetails";
+const ERROR_FIELD_TYPE: &str = "__jet_ErrorField";
+const ERROR_SPAN_TYPE: &str = "__jet_ErrorSpan";
 
 /// Compiler-only storage for the fields that the Prelude keeps beside the
 /// public `Err` fields. It uses the existing memo-storage lane so structural
@@ -804,7 +807,8 @@ fn error_metadata_value(error: &crate::Outcome::JetErr) -> Option<CtValue> {
     let typed_identity = crate::Outcome::jet_err_typed_identity(error);
     let context = crate::Outcome::jet_err_context(error);
     let conversions = crate::Outcome::jet_err_conversions(error);
-    if typed_identity.is_none() && context.is_empty() && conversions.is_empty() {
+    let details = crate::Outcome::jet_err_details(error);
+    if typed_identity.is_none() && context.is_empty() && conversions.is_empty() && details.is_none() {
         return None;
     }
 
@@ -837,13 +841,133 @@ fn error_metadata_value(error: &crate::Outcome::JetErr) -> Option<CtValue> {
             })
             .collect(),
     );
+    let mut fields = vec![
+        ("typed_identity".to_string(), typed_identity),
+        ("context_frames".to_string(), context),
+        ("conversion_history".to_string(), conversions),
+    ];
+    if let Some(details) = details {
+        let source_span = details.source_span.map_or_else(
+            || CtValue::absent(Type::Named(ERROR_SPAN_TYPE.to_string())),
+            |span| {
+                CtValue::Present(Box::new(CtValue::Struct {
+                    type_name: ERROR_SPAN_TYPE.to_string(),
+                    fields: vec![
+                        ("start".to_string(), CtValue::Int(span.start as i64)),
+                        ("end".to_string(), CtValue::Int(span.end as i64)),
+                    ],
+                }))
+            },
+        );
+        let detail_fields = CtValue::List(
+            details
+                .fields
+                .into_iter()
+                .map(|field| CtValue::Struct {
+                    type_name: ERROR_FIELD_TYPE.to_string(),
+                    fields: vec![
+                        ("name".to_string(), CtValue::Str(field.name)),
+                        ("value".to_string(), CtValue::Str(field.value)),
+                    ],
+                })
+                .collect(),
+        );
+        fields.push((
+            "details".to_string(),
+            CtValue::Present(Box::new(CtValue::Struct {
+                type_name: ERROR_DETAILS_TYPE.to_string(),
+                fields: vec![
+                    ("variant".to_string(), CtValue::Str(details.variant)),
+                    ("fields".to_string(), detail_fields),
+                    ("source_span".to_string(), source_span),
+                ],
+            })),
+        ));
+    }
     Some(CtValue::Struct {
         type_name: ERROR_METADATA_TYPE.to_string(),
-        fields: vec![
-            ("typed_identity".to_string(), typed_identity),
-            ("context_frames".to_string(), context),
-            ("conversion_history".to_string(), conversions),
-        ],
+        fields,
+    })
+}
+
+fn decode_error_details(value: &CtValue) -> Option<crate::Outcome::JetErrorDetails> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != ERROR_DETAILS_TYPE {
+        return None;
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value)
+    };
+    let CtValue::Str(variant) = field("variant")? else {
+        return None;
+    };
+    let CtValue::List(detail_fields) = field("fields")? else {
+        return None;
+    };
+    let detail_fields = detail_fields
+        .iter()
+        .map(|detail| {
+            let CtValue::Struct { type_name, fields } = detail else {
+                return None;
+            };
+            if type_name != ERROR_FIELD_TYPE {
+                return None;
+            }
+            let value = |name: &str| {
+                fields
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .map(|(_, value)| value)
+            };
+            let CtValue::Str(name) = value("name")? else {
+                return None;
+            };
+            let CtValue::Str(value) = value("value")? else {
+                return None;
+            };
+            Some(crate::Outcome::JetErrorField {
+                name: name.clone(),
+                value: value.clone(),
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let source_span = match field("source_span")? {
+        CtValue::Present(value) => {
+            let CtValue::Struct { type_name, fields } = value.as_ref() else {
+                return None;
+            };
+            if type_name != ERROR_SPAN_TYPE {
+                return None;
+            }
+            let value = |name: &str| {
+                fields
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .map(|(_, value)| value)
+            };
+            let CtValue::Int(start) = value("start")? else {
+                return None;
+            };
+            let CtValue::Int(end) = value("end")? else {
+                return None;
+            };
+            Some(crate::Outcome::JetErrorSpan {
+                start: usize::try_from(*start).ok()?,
+                end: usize::try_from(*end).ok()?,
+            })
+        }
+        CtValue::Failed(CtReport::Clean(_)) => None,
+        _ => return None,
+    };
+    Some(crate::Outcome::JetErrorDetails {
+        variant: variant.clone(),
+        fields: detail_fields,
+        source_span,
     })
 }
 
@@ -853,6 +977,7 @@ fn decode_error_metadata(
     Option<String>,
     Vec<crate::Outcome::JetErrorContextFrame>,
     Vec<crate::Outcome::JetErrorConversion>,
+    Option<crate::Outcome::JetErrorDetails>,
 )> {
     let CtValue::Struct { type_name, fields } = value else {
         return None;
@@ -938,7 +1063,17 @@ fn decode_error_metadata(
             .collect::<Option<Vec<_>>>()?,
         _ => return None,
     };
-    Some((typed_identity, context_frames, conversion_history))
+    let details = match field("details") {
+        Some(CtValue::Present(value)) => Some(decode_error_details(value)?),
+        Some(CtValue::Failed(CtReport::Clean(_))) | None => None,
+        _ => return None,
+    };
+    Some((
+        typed_identity,
+        context_frames,
+        conversion_history,
+        details,
+    ))
 }
 
 impl CtValue {
@@ -977,6 +1112,17 @@ impl CtValue {
     pub fn to_jet_err(&self) -> Option<crate::Outcome::JetErr> {
         use crate::Outcome::{jet_err, jet_err_add_context, jet_err_record_conversion, JetAbsent};
 
+        // D-FAIL-ERROR1=A: an anonymous error union is only a carrier view;
+        // unwrap its single member so the report edge sees the same structured
+        // error that entered the union.
+        if let CtValue::Failed(CtReport::Told(error)) = self {
+            return error.to_jet_err();
+        }
+        if let CtValue::Enum { args, .. } = self {
+            return (args.len() == 1)
+                .then(|| args[0].1.to_jet_err())
+                .flatten();
+        }
         let CtValue::Struct { type_name, fields } = self else {
             return None;
         };
@@ -1009,7 +1155,10 @@ impl CtValue {
             Some(value) => Some(decode_error_metadata(value)?),
             None => None,
         };
-        let mut error = match metadata.as_ref().and_then(|(identity, _, _)| identity.clone()) {
+        let mut error = match metadata
+            .as_ref()
+            .and_then(|(identity, _, _, _)| identity.clone())
+        {
             Some(identity) => crate::Outcome::jet_err_with_identity(
                 message.clone(),
                 code,
@@ -1018,12 +1167,15 @@ impl CtValue {
             ),
             None => jet_err(message.clone(), code, cause),
         };
-        if let Some((_, context_frames, conversion_history)) = metadata {
+        if let Some((_, context_frames, conversion_history, details)) = metadata {
             for frame in context_frames {
                 jet_err_add_context(&mut error, frame.text, frame.file, frame.line);
             }
             for conversion in conversion_history {
                 jet_err_record_conversion(&mut error, conversion.source, conversion.target);
+            }
+            if let Some(details) = details {
+                crate::Outcome::jet_err_set_details(&mut error, details);
             }
         }
         Some(error)

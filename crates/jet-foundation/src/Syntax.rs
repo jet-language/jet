@@ -186,9 +186,10 @@
 // 2026-08-21, card #2144) add no token: arm grouping, subject chains, and
 // declaration defaults reuse the existing parentheses, dot, and typed-value
 // forms.
-// D-ERRSUFFIX1=B (ratified 2026-08-21) gives each failure role its own suffix:
-// `[Success?] [ErrorUnion!]`; `?` remains absence and `!` marks the error type.
-// A bare `!` keeps the default-error meaning.
+// D-FAILURE-FOUNDATION1=A: failure contracts use prefix roles:
+// `[?Success] [!Error]` or `[?Success] [!(E1 | E2)]`. A missing contract is
+// the beginner route: the callable is fallible with the implicit default `Err`.
+// Bare `!`, suffix `Error!`, and infix failure spellings are diagnostic-only.
 // D-STRUCT-PLANE1=A and D-STRUCT-LIVE1=A add no spelling: structure facts use
 // the existing fact registry, and liveness uses the existing `_name` ladder
 // (D-NAME-SIGIL1). D-STRUCT-ONCE1=A adds no spelling: it extends the existing
@@ -268,13 +269,13 @@
 // D-HTTP-ROUTE-SYNTAX2=A owns the two route-pattern markers carried inside
 // ordinary String values. They are not lexer tokens; the HTTP router consumes
 // them after String evaluation.
-// D-FLOWTYPE1=A adds no token: after a stable immutable `T?` name is checked
+// D-FLOWTYPE1=A adds no token: after a stable immutable `?T` name is checked
 // with `x != None` (true) or `x == None` (false/else), sema refines that name
 // to `T` for the proven branch and records an S31 Present unwrap for TIR.
-// Mutable locals, fields, indexes, aliases, and calls stay `T?`; bind with
+// Mutable locals, fields, indexes, aliases, and calls stay `?T`; bind with
 // `x == Val(v)` instead. Facts reach the right side of `&&` only, not `||`.
 // D-UNIONTYPE1=A reuses the existing `|` token (TokKind::Pipe / BitOr) in type
-// position as TYPE_UNION_SEP. `T (E1 | E2)!` parses as `T (E1 | E2)!`.
+// position as TYPE_UNION_SEP. `T !(E1 | E2)` parses as `T !(E1 | E2)`.
 // D-REGEX-LIT1=D adds no punctuation. Regex patterns use the universal
 // `Type{ body }` / inferred `{ body }` form from D-LIT-DOT1.
 // D-RANGE-VALUE1=A makes `a..b` and `a..<b` construct one nominal Range

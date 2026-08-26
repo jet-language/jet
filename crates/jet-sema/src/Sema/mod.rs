@@ -1740,6 +1740,10 @@ pub(crate) struct Checker<'a> {
     compiler_api_allowed: bool,
     ret: Option<Type>,
     fn_name: String,
+    /// Compiler-generated bodies already spell their Result inspection or
+    /// propagation explicitly. Do not apply source-level transparent failure
+    /// propagation to those synthetic ASTs.
+    compiler_generated: bool,
     /// Canonical caller-visible parameter order; excludes `self`.
     current_param_names: Vec<String>,
     /// Compiler-private names in inserted defaults resolve to their declaration
@@ -1757,6 +1761,10 @@ pub(crate) struct Checker<'a> {
     /// Card #1440: NoElse-terminated dispatch chains already coverage-checked
     /// (chain span starts) — every level shares one span, the outermost wins.
     noelse_chains_checked: HashSet<usize>,
+    /// D-RESULT-DECON2=B: the parser keeps one receiver in both fixed Result
+    /// pattern tests. Cache its checked type by source span so sema checks the
+    /// receiver, effects, and ownership once, like the lowered carrier.
+    result_handler_subject_types: HashMap<usize, Type>,
     /// Loop bindings that lend one `ViewMut<T>` element from a collection.
     /// These values may edit during the iteration but may not be retained.
     lending_view_loop_vars: HashSet<String>,

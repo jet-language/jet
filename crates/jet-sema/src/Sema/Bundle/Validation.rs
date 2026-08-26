@@ -2046,7 +2046,7 @@ fn check_func_body_bundle_scoped(
         failure_auto_depth: 0,
         fallback_is_shape_miss: false,
         in_comptime: false,
-        compiler_api_allowed: st.allow_compiler_api && f.name == "build",
+        compiler_api_allowed: st.allow_compiler_api && super::is_build_entry(f),
         // Error-conversion bodies are checked as ordinary Rust-shaped helper
         // functions, not as public Jet callables. Every other callable uses
         // the one shared Result carrier, including an omitted return type.
@@ -2056,6 +2056,7 @@ fn check_func_body_bundle_scoped(
             Some(f.effective_return_type())
         },
         fn_name: f.name.clone(),
+        compiler_generated: f.compiler_generated,
         current_param_names: f
             .params
             .iter()
@@ -2068,6 +2069,7 @@ fn check_func_body_bundle_scoped(
         knowledge_gate: None,
         iter_borrowed: HashSet::new(),
         noelse_chains_checked: HashSet::new(),
+        result_handler_subject_types: HashMap::new(),
         lending_view_loop_vars: HashSet::new(),
         return_view_provenance: None,
         views_used_in_stmt: Default::default(),

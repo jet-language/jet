@@ -91,7 +91,7 @@ runtime `main`, mapping cleanly to `jet build`. One per unit. It is the
 stays pure and value-level, so there is exactly one place to audit.
 
 ```jet
-fn build(b: BuildContext) BuildPlan! -[FS]> {
+fn build(b: BuildContext) BuildPlan -[FS]> {
     migrations :: b.find("schema/*.sql")
     b.generate("db_client") {
         module db_client { … }
@@ -371,7 +371,7 @@ ballots ratified the graph shape:
 Build files must feel like Jet programs, not manifest data. Simple generation:
 
 ```jet
-fn build(b: BuildContext) BuildPlan! -[FS]> {
+fn build(b: BuildContext) BuildPlan -[FS]> {
     schema :: b.embed("schema/app.sql")?
     b.generate("db_client") {
         module db_client { … }
@@ -390,7 +390,7 @@ fn build(b: BuildContext) BuildPlan! -[FS]> {
 Asset pipeline plus tests:
 
 ```jet
-fn build(b: BuildContext) BuildPlan! -[FS, Exec]> {
+fn build(b: BuildContext) BuildPlan -[FS, Exec]> {
     atlas :: b.action("pack-sprites",
         inputs: b.find("assets/sprites/*.png")?,
         outputs: ["build/sprites.atlas"],
@@ -417,7 +417,7 @@ fn build(b: BuildContext) BuildPlan! -[FS, Exec]> {
 Org policy as code:
 
 ```jet
-fn build(b: BuildContext) BuildPlan! -> {
+fn build(b: BuildContext) BuildPlan -> {
     require_timeouts(b.program)
     require_archival(b.program)
 
@@ -512,7 +512,7 @@ D-WORKSPACE1/2 + D-MONOREF1 workspace · U10 `package.jet`.
 
 | Ballot | Outcome | Decides |
 |---|---|---|
-| D-BUILDENTRY1 | B | `fn build(b: BuildContext) BuildPlan! ->`, run by `jet build` when root defines one, else default pipeline |
+| D-BUILDENTRY1 | B | `fn build(b: BuildContext) BuildPlan ->`, using the ordinary implicit Error route; run by `jet build` when root defines one, else default pipeline |
 | D-BUILDPOLICY1 | A | tiered authority, `BuildContext`-only; Tier 2 needs `#Impure` + permission; deps denied Tier 2 by default |
 | D-BUILDSCOPE1 | A | entry lives in the unit's own file at every rung; grant chain flag → package.jet `build:` → workspace `policy:` |
 | D-BUILDGEN1 | A | generated modules materialize under `.jet/generated/<package>/`, never committed, additive-only, lock-hashed |
@@ -586,18 +586,19 @@ D-BUILDACTION1=A; implementation lives on #219/#220.
 ### 15.2 D-BUILDENTRY1=B — the build entry
 
 **Ratified semantics.** `jet build` runs a root-defined
-`fn build(b: BuildContext) BuildPlan! ->` when present, otherwise the
+`fn build(b: BuildContext) BuildPlan ->` when present, otherwise the
 batteries default pipeline runs (opt-in, zero-config forever). No marker, no
 name magic beyond the reserved function name; the typed `BuildContext`
 parameter is the visible authority boundary. Only the selected **root** unit's
 entry runs — imported modules never get a hidden build hook; a dependency's
 entry runs only sandboxed when that dependency is itself built (§15.5). The
-entry returns a plan; it never mutates compiler state — the driver compiles
-what the plan names.
+entry returns a plan through the ordinary implicit Error route; an expert may
+name `BuildError` or an error union after the success type. It never mutates
+compiler state — the driver compiles what the plan names.
 
 **API surface (Jet).**
 ```jet
-fn build(b: BuildContext) BuildPlan! -> {   // optional; -[effects]> added by POLICY1
+fn build(b: BuildContext) BuildPlan -> {   // optional; -[effects]> added by POLICY1
     return b.plan(sources: ["src/main.jet"])
 }
 
@@ -628,10 +629,10 @@ D-BUILDTARGET1=A and D-BUILDACTION1=A.
 
 **Diagnostics (new, E35xx block — free).**
 - **E3501** — build entry has the wrong signature.
-  what: "`fn build` must take one `BuildContext` and return `BuildPlan!`"
+  what: "`fn build` must take one `BuildContext` and return `BuildPlan`"
   why: "the build entry is a typed contract: its parameter is the only
   authority it gets, and its result is the plan the compiler builds"
-  fix: "write `fn build(b: BuildContext) BuildPlan! ->`"
+  fix: "write `fn build(b: BuildContext) BuildPlan ->`"
   fixture: `tests/ui/build_entry_bad_sig.{jet,stderr}`
 - **E3520** — two build entries for one unit (file `fn build` **and** a
   `package.jet`/`workspace.jet` entry). (Shared with SCOPE1, §15.5.)
@@ -726,7 +727,7 @@ that dependency. Every granted right is recorded in lock/provenance.
 
 **API surface (Jet).**
 ```jet
-fn build(b: BuildContext) BuildPlan! -[FS]> {        // Tier-1 effect declaration
+fn build(b: BuildContext) BuildPlan -[FS]> {        // Tier-1 effect declaration
     migrations :: b.find("schema/*.sql")                 // Tier 1: locked, ambient-free
     #Impure("probe local openssl for a legacy C dep") {  // Tier 2: gated + permitted
         b.exec(["pkg-config", "--libs", "openssl"])?
@@ -807,7 +808,7 @@ version: "1.2.0"
 packages: .{ atlasgen: library }
 build: .{ allow: #(FS) }                    // standing grant for this package's fn build
 
-fn build(b: BuildContext) BuildPlan! -[FS]> { ... }
+fn build(b: BuildContext) BuildPlan -[FS]> { ... }
 
 // workspace.jet
 module workspace {
@@ -887,7 +888,7 @@ these two from sema results into the snapshot; do not recompute in comptime.
 
 **API surface (Jet).**
 ```jet
-fn build(b: BuildContext) BuildPlan! -> {
+fn build(b: BuildContext) BuildPlan -> {
     for ty in b.program.types() {
         if ty.implements("Entity") and not ty.has_method("archive") {
             b.error(ty.span, code: "ORG01",

@@ -1320,7 +1320,7 @@ impl CanvasCase {
             .expect("write Canvas custom server fixture");
             fs::write(
                 &entry,
-                "use core.term as io\n\nfn run() { io.print(\"cli\") }\nfn serve() { io.print(\"service\") }\nfn web() { io.print(\"web\") }\nfn ui() { io.print(\"ui\") }\nfn game() { io.print(\"game\") }\n\nfn build(b: BuildContext) BuildPlan ! -> {\n    return b.plan()\n}\n",
+                "use core.term as io\n\nfn run() { io.print(\"cli\") }\nfn serve() { io.print(\"service\") }\nfn web() { io.print(\"web\") }\nfn ui() { io.print(\"ui\") }\nfn game() { io.print(\"game\") }\n\nfn build(b: BuildContext) BuildPlan -> {\n    return b.plan()\n}\n",
             )
             .expect("write Canvas session matrix source fixture");
             None

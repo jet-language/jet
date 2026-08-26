@@ -1030,7 +1030,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         ));
         jet_params(&mut out, &class.ctor);
         out.push_str(&format!(
-            ") {} CppError! -[FFI.Cpp]> {{\n    value :: abi.{name}_new(",
+            ") {} !CppError -[FFI.Cpp]> {{\n    value :: abi.{name}_new(",
             class.name
         ));
         jet_args(&mut out, &class.ctor);
@@ -1048,7 +1048,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
                 jet_params(&mut out, &method.params);
             }
             out.push_str(&format!(
-                ") {} CppError! -[FFI.Cpp]> {{\n        result_value :: abi.{name}_{}(self.value",
+                ") {} !CppError -[FFI.Cpp]> {{\n        result_value :: abi.{name}_{}(self.value",
                 method.result.jet(),
                 method.jet_name
             ));
@@ -1067,7 +1067,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         out.push_str(&format!("pub fn {}(", function.jet_name));
         jet_params(&mut out, &function.params);
         out.push_str(&format!(
-            ") {} CppError! -[FFI.Cpp]> {{\n    result_value :: abi.{}(",
+            ") {} !CppError -[FFI.Cpp]> {{\n    result_value :: abi.{}(",
             function.result.jet(),
             function.jet_name
         ));
@@ -1363,7 +1363,7 @@ mod tests {
             .source
             .contains("// jet-ffi-descriptor=jet-ffi-descriptor-v1;"));
         assert!(result.source.contains("fn add(value: Int) Int ="));
-        assert!(result.source.contains("Int CppError! -[FFI.Cpp]>"));
+        assert!(result.source.contains("Int !CppError -[FFI.Cpp]>"));
         assert!(!result.source.contains("=>"));
         assert!(result
             .provenance

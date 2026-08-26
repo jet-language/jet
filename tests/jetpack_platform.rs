@@ -285,11 +285,11 @@ fn platform_tier_gate_exercises_native_lease_diagnostics_and_audit() {
     let staging = Scratch::new("platform-diagnostics-staging");
     let missing_tools = Scratch::new("platform-diagnostics-missing-tools");
     write_native_jetpack_fixture(&fixtures.path, &root.path, &staging.path);
-    let program = format!("jetpack{}", std::env::consts::EXE_SUFFIX);
+    let program = format!("omp{}", std::env::consts::EXE_SUFFIX);
     let run = jetpack()
         .args([
             "use",
-            "native-jetpack@nixpkgs",
+            "omp@releases#1.0.0",
             "--no-color",
             "--offline",
             "--",

@@ -564,6 +564,7 @@ impl<'a> Checker<'a> {
         // Pass 1: collect the subject and the raw arm patterns.
         let mut subject_clone: Option<Expr> = None;
         let mut raw: Vec<Pattern> = Vec::new();
+        let mut same_subject = true;
         let mut last_arm_end: Option<usize> = None;
         {
             let mut cur: &mut Expr = expr;
@@ -581,6 +582,9 @@ impl<'a> Checker<'a> {
                     subject, pattern, ..
                 } = cond.as_mut()
                 {
+                    if let Some(existing) = subject_clone.as_ref() {
+                        same_subject &= existing.span() == subject.span();
+                    }
                     if subject_clone.is_none() {
                         subject_clone = Some((**subject).clone());
                     }
@@ -596,6 +600,17 @@ impl<'a> Checker<'a> {
         let Some(mut subj) = subject_clone else {
             return;
         };
+        // D-RESULT-DECON2=B: the parser's fixed two-arm handler already proves
+        // exhaustive Result coverage. Its receiver is checked by the real
+        // condition walk below; probing this clone would move it a second time
+        // in sema.
+        if same_subject
+            && raw.len() == 2
+            && matches!(raw.first(), Some(Pattern::Ok { .. }))
+            && matches!(raw.get(1), Some(Pattern::Err { .. }))
+        {
+            return;
+        }
         // Result handlers are lowered to this ordinary exhaustive if chain.
         // Keep a direct fallible receiver as the carrier while the coverage
         // probe infers it; ordinary value positions still auto-propagate.

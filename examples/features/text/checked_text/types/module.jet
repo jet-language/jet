@@ -18,7 +18,7 @@ pub Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = TextError
 
-    fn check(text: String) () ! -[]> {
+    fn check(text: String) -[]> {
         if text == "" -> return Err(TextError.Empty)
         return Ok()
     }
@@ -33,7 +33,7 @@ pub Query :: distinct String
 impl Query.CheckedText {
     type Error = TextError
 
-    fn check(text: String) () ! -[]> {
+    fn check(text: String) -[]> {
         if text == "" -> return Err(TextError.Empty)
         if !text.contains("select") -> return Err(TextError.QueryShape)
         return Ok()
@@ -49,7 +49,7 @@ pub Selector :: distinct String
 impl Selector.CheckedText {
     type Error = TextError
 
-    fn check(text: String) () ! -[]> {
+    fn check(text: String) -[]> {
         if text == "" -> return Err(TextError.Empty)
         if !text.contains(".") -> return Err(TextError.SelectorShape)
         return Ok()
@@ -65,7 +65,7 @@ pub Identity :: distinct String
 impl Identity.CheckedText {
     type Error = TextError
 
-    fn check(text: String) () ! -[]> {
+    fn check(text: String) -[]> {
         if text == "" -> return Err(TextError.Empty)
         if !text.contains("@") -> return Err(TextError.IdentityShape)
         return Ok()

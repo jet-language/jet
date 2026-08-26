@@ -25,7 +25,7 @@ pub use Discovery::{discover_module_in, DiscoveryError};
 pub use Edit::{add_authority_hold, add_dep, remove_dep};
 
 use crate::Authority::{AuthorityError, AuthorityResolver, CheckedFile, CheckedPackage};
-use crate::Lexer;
+use crate::{Lexer, Parser, Sema};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fmt::Write as _;
@@ -1229,11 +1229,13 @@ impl PackageFacts {
             } else {
                 source
             };
-            entries.extend(
-                top_level_function_lines(&source, wanted)
-                    .into_iter()
-                    .map(|line| (file.clone(), line)),
-            );
+            let lines = top_level_function_lines(&source, wanted);
+            let lines = if wanted == "build" {
+                real_build_entry_lines(&source, &lines).unwrap_or(lines)
+            } else {
+                lines
+            };
+            entries.extend(lines.into_iter().map(|line| (file.clone(), line)));
         }
         for file in &files {
             resolver.revalidate_file(file)?;
@@ -3615,6 +3617,39 @@ fn top_level_function_lines(source: &str, wanted: &str) -> Vec<usize> {
         }
     }
     matches
+}
+
+/// Refine structural package discovery with the compiler-owned build-entry
+/// shape. A parse failure keeps the structural candidates so the Driver can
+/// report the source diagnostic instead of silently treating the file as
+/// ordinary code.
+fn real_build_entry_lines(source: &str, candidates: &[usize]) -> Option<Vec<usize>> {
+    let (tokens, lex_diags) = Lexer::lex(source);
+    if !lex_diags.is_empty() {
+        return None;
+    }
+    let (program, _) = Parser::parse_for_check(&tokens).ok()?;
+    let real_lines = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            crate::AST::Item::Func(func) if Sema::is_build_entry(func) => {
+                Some(source_line_at(source, func.span.start))
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    Some(
+        candidates
+            .iter()
+            .copied()
+            .filter(|line| real_lines.contains(line))
+            .collect(),
+    )
+}
+
+fn source_line_at(source: &str, offset: usize) -> usize {
+    source[..offset].bytes().filter(|byte| *byte == b'\n').count() + 1
 }
 
 /// Whether a top-level manifest entry is the package's `fn build` decl

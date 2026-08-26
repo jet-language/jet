@@ -73,7 +73,7 @@ enum PatternError { Bad }
 Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = PatternError
-    fn check(text: String) () !PatternError -[]> {
+    fn check(text: String) !PatternError -[]> {
         return
     }
     fn encode_hole<T: Printable>(value: T) String -[]> {

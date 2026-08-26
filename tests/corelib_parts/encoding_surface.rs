@@ -745,7 +745,7 @@ fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn show(result: DataTree XMLError!) String {
+fn show(result: DataTree !XMLError) String {
     if result == {
         .Ok(_) -> { return "accepted" }
         .Err(error) -> {

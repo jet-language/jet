@@ -2001,6 +2001,7 @@ impl TraitRegistry {
             "ArgsSpec",
             "AriaRole",
             crate::Syntax::TYPE_BITS,
+            "BuildError",
             "BrowserError",
             crate::Syntax::TYPE_BYTES,
             "Clock",

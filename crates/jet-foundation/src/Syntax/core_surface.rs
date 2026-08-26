@@ -163,8 +163,9 @@ pub const META_FIELD_MATURITY: &str = "maturity";
 pub const BLOCK_OPEN: &str = "{";
 pub const BLOCK_CLOSE: &str = "}";
 
-/// S7 (ratified M4), D-FAIL-CTX1=A: propagates a fallible result from the
-/// callee; a same-line string immediately after `?` is its lazy hop note.
+/// D-FAILURE-FOUNDATION1=A / D-FAIL-CTX1=A: `?` is the contextual journey
+/// marker only when followed by `(text)`; ordinary fallible calls propagate
+/// implicitly. The note is lazy and source-linked.
 pub const OP_TRY_SUFFIX: &str = "?";
 
 /// S5 (ratified): line comments run from this prefix to end of line.
@@ -326,8 +327,9 @@ pub const KW_ALIAS: &str = "alias";
 /// D-FAILURE-FOUNDATION1=A: optional type prefix — `?Int` is “maybe an Int”.
 pub const TYPE_OPTION_PREFIX: &str = "?";
 
-/// D-FAILURE-FOUNDATION1=A: fallible error contract prefix — `!E`.
-/// The bang is a type-position prefix; expression `!` keeps its value use.
+/// D-FAILURE-FOUNDATION1=A: fallible error contract prefix — `!E` or
+/// `!(E1 | E2)`. The bang is a type-position prefix; expression `!` keeps its
+/// value use.
 pub const TYPE_FALLIBLE_SEP: &str = "!";
 
 /// D-UNIONTYPE1=A: anonymous closed structural sum — `Int | String`.
@@ -338,7 +340,7 @@ pub const TYPE_UNION_SEP: &str = "|";
 /// S32 / D-OPT-SPELL1 / D-SHAPE3b: Optional variants are `Val` / `None`.
 /// Both also support the expected-type forms `.Val` / `.None`.
 ///
-/// D-FLOWTYPE1=A: for a direct immutable local or parameter of type `T?`,
+/// D-FLOWTYPE1=A: for a direct immutable local or parameter of type `?T`,
 /// `x != None` narrows `x` to `T` in the true branch; `x == None` narrows `x`
 /// to `T` in the false branch. The fact reaches the right side of short-circuit
 /// `&&` (not `||`) and ends at the branch boundary. Mutable locals, fields,

@@ -1658,7 +1658,11 @@ impl<'a> Checker<'a> {
                     self.lambda_escapes = matches!(param_conv, AccessConvention::Move);
                 } else if matches!(
                     param_ty,
-                    Type::IntN { .. } | Type::Float | Type::Float32 | Type::InlineRange { .. }
+                    Type::Int
+                        | Type::IntN { .. }
+                        | Type::Float
+                        | Type::Float32
+                        | Type::InlineRange { .. }
                 ) {
                     // D-SG9/D-TYPE2-DEFAULT1: let a numeric literal argument adopt the
                     // parameter's carrier or width and be checked at the literal.

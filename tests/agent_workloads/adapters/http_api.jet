@@ -10,7 +10,7 @@ struct Request {
     role: String
 }
 
-fn handle(req: HTTPRequest) HTTPResponse HTTPError! -> {
+fn handle(req: HTTPRequest) HTTPResponse !HTTPError -> {
     payload :: req.json<Request>()
     if payload == {
         .Ok(request) -> {
@@ -22,7 +22,7 @@ fn handle(req: HTTPRequest) HTTPResponse HTTPError! -> {
     }
 }
 
-fn run() (HTTPError | IOError | NetError | TaskFailure)! {
+fn run() !(HTTPError | IOError | NetError | TaskFailure) {
     args :: process.argv()
     if args.len() != 2 -> panic("usage: http_api INPUT_FILE")
     input :: args.get(1) ?? panic("missing input file")

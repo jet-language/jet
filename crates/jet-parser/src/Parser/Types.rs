@@ -146,7 +146,8 @@ impl<'a> Parser<'a> {
     }
 
     /// D-FAILURE-FOUNDATION1=A: a unit-fallible declaration writes its
-    /// contract as a prefix (`fn save() !IOError`).
+    /// contract as a prefix (`fn save() !IOError`). The default `Err` route is
+    /// implicit, so a written `!` must name its error type.
     pub(in crate::Parser) fn parse_unit_fallible_return(
         &mut self,
     ) -> Result<Option<(Type, Span)>, Diagnostic> {
@@ -155,14 +156,7 @@ impl<'a> Parser<'a> {
         }
         let sigil = self.bump().span;
         let start = sigil.start;
-        let err = if self.type_starts_here()
-            && self.peek().span.start == sigil.end
-            && !self.next_field_starts_here()
-        {
-            self.type_()?.0
-        } else {
-            Type::Named(Syntax::TYPE_ERR.to_string())
-        };
+        let err = self.parse_explicit_failure_type(sigil)?;
         let end = self.toks[self.pos.saturating_sub(1)].span.end;
         Ok(Some((
             Type::Result {
@@ -191,7 +185,7 @@ impl<'a> Parser<'a> {
             "E0003",
             "this unit-fallible signature uses the retired arrow-and-unit form".to_string(),
             "a function that can fail but returns no value has no result payload for an arrow to introduce".to_string(),
-            "write `fn save(path: String) !IOError`, or `fn sync() !` for the default error".to_string(),
+            "write `fn save(path: String) !IOError`, or omit the contract for implicit `Err`".to_string(),
             Some(span),
         )
     }
@@ -200,6 +194,75 @@ impl<'a> Parser<'a> {
         // D-FAILURE-FOUNDATION1=A: return types use the same `?T !E` /
         // `T !(E1 | E2)` rules as every other type position. Parentheses only group.
         self.type_()
+    }
+
+    fn retired_default_failure_contract(span: Span) -> Diagnostic {
+        Diagnostic::from_row("E-ERR-DEFAULT", &[], Some(span))
+    }
+
+    fn retired_infix_failure_contract(span: Span) -> Diagnostic {
+        Diagnostic::from_row("E-ERR-SIGIL", &[], Some(span))
+    }
+
+    fn retired_suffix_failure_contract(span: Span) -> Diagnostic {
+        Diagnostic::from_row("E-ERR-SUFFIX", &[], Some(span))
+    }
+
+    fn with_failure_edit(
+        &self,
+        diagnostic: Diagnostic,
+        span: Span,
+        new_text: String,
+    ) -> Diagnostic {
+        if self
+            .source
+            .as_deref()
+            .is_some_and(|source| source.get(span.start..span.end).is_some())
+        {
+            diagnostic.with_edit(crate::Diagnostics::TextEdit { span, new_text })
+        } else {
+            diagnostic
+        }
+    }
+
+    fn source_fragment(&self, span: Span) -> Option<String> {
+        self.source
+            .as_deref()
+            .and_then(|source| source.get(span.start..span.end))
+            .map(str::to_owned)
+    }
+
+    fn failure_type_boundary_here(&self) -> bool {
+        (matches!(self.peek().kind, TokKind::Ident(_))
+            && matches!(self.peek2().kind, TokKind::Colon))
+            || (matches!(self.peek().kind, TokKind::KwFn)
+                && matches!(self.peek2().kind, TokKind::Ident(_)))
+    }
+
+    fn suffix_failure_follows(&self) -> bool {
+        match self.peek().kind {
+            TokKind::Ident(_) => matches!(self.peek2().kind, TokKind::Bang),
+            TokKind::LParen => {
+                let mut depth = 0usize;
+                for index in self.pos..self.toks.len() {
+                    match &self.toks[index].kind {
+                        TokKind::LParen => depth += 1,
+                        TokKind::RParen => {
+                            depth = depth.saturating_sub(1);
+                            if depth == 0 {
+                                return matches!(
+                                    self.toks.get(index + 1).map(|token| &token.kind),
+                                    Some(TokKind::Bang)
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
     }
 
     /// Skip tokens until the enclosing `Type<…>` or `[T]` argument ends.
@@ -509,18 +572,11 @@ impl<'a> Parser<'a> {
         let start = self.peek().span;
         let base = match self.peek().kind.clone() {
             // D-FAILURE-FOUNDATION1=A: `!Error` is the expert unit-success
-            // failure contract. Bare `!` remains readable during the source
-            // cutover and means the default `Err` domain.
+            // failure contract. Bare `!` is not a source type: the beginner
+            // route omits the contract and uses implicit `Err`.
             TokKind::Bang => {
                 let bang = self.bump().span;
-                let err = if self.type_starts_here()
-                    && self.peek().span.start == bang.end
-                    && !self.next_field_starts_here()
-                {
-                    self.type_inner_with_failure_contract(false)?.0
-                } else {
-                    Type::Named(Syntax::TYPE_ERR.to_string())
-                };
+                let err = self.parse_explicit_failure_type(bang)?;
                 Type::Result {
                     ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
                     err: Box::new(err),
@@ -534,14 +590,7 @@ impl<'a> Parser<'a> {
                 let success = self.type_inner_with_failure_contract(false)?.0;
                 if matches!(self.peek().kind, TokKind::Bang) {
                     let bang = self.bump().span;
-                    let err = if self.type_starts_here()
-                        && self.peek().span.start == bang.end
-                        && !self.next_field_starts_here()
-                    {
-                        self.type_inner_with_failure_contract(false)?.0
-                    } else {
-                        Type::Named(Syntax::TYPE_ERR.to_string())
-                    };
+                    let err = self.parse_explicit_failure_type(bang)?;
                     Type::Result {
                         ok: Box::new(Type::Option(Box::new(success))),
                         err: Box::new(err),
@@ -814,7 +863,7 @@ impl<'a> Parser<'a> {
                             "E0406",
                             "`Result<T, E>` is old Jet error syntax".to_string(),
                             "fallible Jet types use a success type and a prefixed error contract".to_string(),
-                            "write `?T !E`, `T !(E1 | E2)`, or `!` for the default Err type"
+                            "write `?T !E`, `T !(E1 | E2)`, or omit the contract for implicit `Err`"
                                 .to_string(),
                             Some(start),
                         );
@@ -931,6 +980,61 @@ impl<'a> Parser<'a> {
                 Some(qspan),
             ));
         }
+        if allow_failure_contract_tail && matches!(self.peek().kind, TokKind::Question) {
+            let question = self.bump().span;
+            let base_end = self.toks[self.pos.saturating_sub(1)].span.end;
+            if self.type_starts_here() && !self.failure_type_boundary_here() {
+                let (err, err_start) = self.type_inner_with_failure_contract(false)?;
+                let err_span = Span::new(
+                    err_start.start,
+                    self.toks[self.pos.saturating_sub(1)].span.end,
+                );
+                let suffix_bang = matches!(self.peek().kind, TokKind::Bang)
+                    && self.peek().span.start == err_span.end;
+                let (full_span, mut diagnostic, replacement) = if suffix_bang {
+                    let bang = self.bump().span;
+                    let full_span = Span::new(start.start, bang.end);
+                    let replacement = self
+                        .source_fragment(Span::new(start.start, base_end))
+                        .zip(self.source_fragment(err_span))
+                        .map(|(success, error)| format!("?{} !{}", success, error));
+                    (
+                        full_span,
+                        Self::retired_suffix_failure_contract(full_span),
+                        replacement,
+                    )
+                } else {
+                    let full_span = Span::new(question.start, err_span.end);
+                    let replacement = self
+                        .source_fragment(Span::new(start.start, base_end))
+                        .zip(self.source_fragment(err_span))
+                        .map(|(success, error)| format!("?{} !{}", success, error));
+                    (
+                        full_span,
+                        Self::retired_infix_failure_contract(full_span),
+                        replacement,
+                    )
+                };
+                if let Some(replacement) = replacement {
+                    diagnostic = self.with_failure_edit(diagnostic, full_span, replacement);
+                }
+                self.diags.push(diagnostic);
+                return Ok((
+                    Type::Result {
+                        ok: Box::new(Type::Option(Box::new(base))),
+                        err: Box::new(err),
+                    },
+                    start,
+                ));
+            }
+            let full_span = Span::new(start.start, question.end);
+            let mut diagnostic = Self::retired_suffix_failure_contract(full_span);
+            if let Some(success) = self.source_fragment(Span::new(start.start, base_end)) {
+                diagnostic = self.with_failure_edit(diagnostic, full_span, format!("?{success}"));
+            }
+            self.diags.push(diagnostic);
+            return Ok((Type::Option(Box::new(base)), start));
+        }
         if !allow_failure_contract_tail {
             let member = base;
             if matches!(self.peek().kind, TokKind::Pipe) {
@@ -940,18 +1044,56 @@ impl<'a> Parser<'a> {
             }
             return Ok((member, start));
         }
+        if self.suffix_failure_follows() {
+            let (err, err_start) = self.type_inner_with_failure_contract(false)?;
+            let err_span = Span::new(
+                err_start.start,
+                self.toks[self.pos.saturating_sub(1)].span.end,
+            );
+            let bang = self.bump().span;
+            let suffix_span = Span::new(err_span.start, bang.end);
+            let mut diagnostic = Self::retired_suffix_failure_contract(suffix_span);
+            if let Some(error) = self.source_fragment(err_span) {
+                diagnostic = self.with_failure_edit(
+                    diagnostic,
+                    suffix_span,
+                    format!("!{error}"),
+                );
+            }
+            self.diags.push(diagnostic);
+            return Ok((
+                Type::Result {
+                    ok: Box::new(base),
+                    err: Box::new(err),
+                },
+                start,
+            ));
+        }
         // D-FAILURE-FOUNDATION1=A: an error contract owns the `!` prefix.
         // Prefix contracts are the only accepted failure surface.
         let member = if matches!(self.peek().kind, TokKind::Bang) {
             let bang = self.bump().span;
-            let err = if self.type_starts_here()
-                && self.peek().span.start == bang.end
-                && !self.next_field_starts_here()
-            {
-                self.type_inner_with_failure_contract(false)?.0
-            } else {
-                Type::Named(Syntax::TYPE_ERR.to_string())
-            };
+            let base_end = self.toks[self.pos.saturating_sub(2)].span.end;
+            if bang.start == base_end && matches!(&base, Type::Named(_)) {
+                let full_span = Span::new(start.start, bang.end);
+                let mut diagnostic = Self::retired_suffix_failure_contract(full_span);
+                if let Some(error) = self.source_fragment(Span::new(start.start, base_end)) {
+                    diagnostic = self.with_failure_edit(
+                        diagnostic,
+                        full_span,
+                        format!("!{error}"),
+                    );
+                }
+                self.diags.push(diagnostic);
+                return Ok((
+                    Type::Result {
+                        ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+                        err: Box::new(base),
+                    },
+                    start,
+                ));
+            }
+            let err = self.parse_explicit_failure_type(bang)?;
             Type::Result {
                 ok: Box::new(base),
                 err: Box::new(err),
@@ -969,11 +1111,31 @@ impl<'a> Parser<'a> {
         Ok((member, start))
     }
 
-    fn next_field_starts_here(&self) -> bool {
-        (matches!(self.peek().kind, TokKind::Ident(_))
-            && matches!(self.peek2().kind, TokKind::Colon))
-            || (matches!(self.peek().kind, TokKind::KwFn)
-                && matches!(self.peek2().kind, TokKind::Ident(_)))
+    fn parse_explicit_failure_type(&mut self, bang: Span) -> Result<Type, Diagnostic> {
+        if self.type_starts_here() && self.peek().span.start == bang.end {
+            return Ok(self.type_inner_with_failure_contract(false)?.0);
+        }
+        if self.type_starts_here() && !self.failure_type_boundary_here() {
+            let (err, err_start) = self.type_inner_with_failure_contract(false)?;
+            let err_span = Span::new(
+                err_start.start,
+                self.toks[self.pos.saturating_sub(1)].span.end,
+            );
+            let full_span = Span::new(bang.start, err_span.end);
+            let mut diagnostic = Self::retired_infix_failure_contract(full_span);
+            if let Some(error_text) = self.source_fragment(err_span) {
+                diagnostic = self.with_failure_edit(
+                    diagnostic,
+                    full_span,
+                    format!("!{error_text}"),
+                );
+            }
+            self.diags.push(diagnostic);
+            return Ok(err);
+        }
+        self.diags
+            .push(Self::retired_default_failure_contract(bang));
+        Ok(Type::Named(Syntax::TYPE_ERR.to_string()))
     }
 
     /// Parse a function type `fn(T1, …) R -[E]>`, the cursor at `fn`.

@@ -15,7 +15,7 @@ fn codes(src: &str) -> Vec<String> {
 fn origin_facts_clear_only_after_typed_decode() {
     let rejected_before_decode = r#"
 use core.files as files
-fn run() ! {
+fn run() {
     raw :: files.read("config.json") ?? return Err("test")
     SQL.raw(raw)
 }
@@ -37,7 +37,7 @@ struct Config {
     name: String
 }
 
-fn run() ! {
+fn run() {
     raw :: files.read("config.json") ?? return Err("test")
     config :: json.decode<Config>(raw) ?? return Err("test")
     SQL.raw(config.name)
@@ -56,7 +56,7 @@ fn run() ! {
 fn origin_marked_text_rejects_raw_sinks() {
     let src = r#"
 use core.files as files
-fn run() ! {
+fn run() {
     raw :: files.read("payload.txt") ?? return Err("test")
     SQL.raw(raw)
     HTML.raw(raw)
@@ -76,7 +76,7 @@ fn origin_facts_clear_through_scrub_gate() {
     let src = r#"
 use core.files as files
 #Scrub(Input) fn clean(raw: #Input String) String { return ~raw }
-fn run() ! {
+fn run() {
     raw :: files.read("payload.txt") ?? return Err("test")
     safe :: clean(raw)
     SQL.raw(safe)
@@ -96,7 +96,7 @@ fn external_boundaries_seed_origin_facts() {
             "fs",
             r#"
 use core.files as files
-fn run() ! {
+fn run() {
     value :: files.read("payload.txt") ?? return Err("test")
     SQL.raw(value)
 }
@@ -106,7 +106,7 @@ fn run() ! {
             "env",
             r#"
 use core.sys as env
-fn run() ! {
+fn run() {
     value :: env.get("PAYLOAD") ?? return Err("test")
     SQL.raw(value)
 }
@@ -116,7 +116,7 @@ fn run() ! {
             "process",
             r#"
 use core.process as process
-fn run() ! {
+fn run() {
     result :: process.run(["echo", "payload"]) ?? return Err("test")
     SQL.raw(result.output)
 }
@@ -126,7 +126,7 @@ fn run() ! {
             "net",
             r#"
 use core.net as net
-fn run() ! {
+fn run() {
     stream :: net.tcp_connect("example.invalid:80") ?? return Err("test")
     value :: net.tcp_read_text(stream, 1) ?? return Err("test")
     SQL.raw(value)
@@ -161,7 +161,7 @@ fn declared_tag_sources_and_destinations_drive_dataflow() {
 use core.process as process
 tag Untrusted { from: [source], deny: [Exec] }
 fn source() String -> "untrusted"
-fn run() ! {
+fn run() {
     value := source()
     process.run(["echo", value]) ?? return Err("test")
 }
@@ -175,7 +175,7 @@ fn tagged_return_types_drive_dataflow() {
 use core.process as process
 tag PII { deny: [Exec] }
 fn account_name() #PII String -> "Ada"
-fn run() ! {
+fn run() {
     process.run(["echo", account_name()]) ?? return Err("test")
 }
 "#;
@@ -190,7 +190,7 @@ tag PII { deny: [Exec] }
 struct Row {
     secret: #PII String
 }
-fn run() ! {
+fn run() {
     row := Row{ secret: "Ada" }
     process.run(["echo", row.secret]) ?? return Err("test")
 }
@@ -207,7 +207,7 @@ struct Store {
     value: String
     fn read(self) String -> self.value
 }
-fn run() ! {
+fn run() {
     store := Store{ value: "Ada" }
     process.run(["echo", store.read()]) ?? return Err("test")
 }
@@ -222,7 +222,7 @@ use core.process as process
 tag PII { deny: [Exec] }
 #Scrub(PII)
 fn redact(value: #PII String) String -> value
-fn run() ! {
+fn run() {
     value := redact(#PII #Input "secret")
     process.run(["echo", value]) ?? return Err("test")
 }
@@ -239,7 +239,7 @@ fn run() ! {
 fn tainted_to_exec_sink_is_error() {
     let src = r#"
 use core.process as process
-fn run() ! {
+fn run() {
     name :: #Input "world; rm -rf /"
     process.run(["echo", name]) ?? return Err("test")
 }
@@ -257,7 +257,7 @@ fn sanitized_value_reaches_sink_ok() {
     let src = r#"
 use core.process as process
 #Scrub(Input) fn clean(raw: #Input String) String { return raw.split(" ").to_list()[0] }
-fn run() ! {
+fn run() {
     name :: #Input "world; rm -rf /"
     safe := clean(name)
     process.run(["echo", safe]) ?? return Err("test")
@@ -276,7 +276,7 @@ fn run() ! {
 fn taint_propagates_through_binding() {
     let src = r#"
 use core.process as process
-fn run() ! {
+fn run() {
     raw :: #Input "evil"
     cmd := raw
     process.run(["echo", cmd]) ?? return Err("test")
@@ -294,7 +294,7 @@ fn run() ! {
 fn taint_propagates_through_interpolation() {
     let src = r#"
 use core.process as process
-fn run() ! {
+fn run() {
     user :: #Input "bob"
     arg := "hello {user}"
     process.run(["echo", arg]) ?? return Err("test")
@@ -311,7 +311,7 @@ fn run() ! {
 fn reassign_to_clean_clears_taint() {
     let src = r#"
 use core.process as process
-fn run() ! {
+fn run() {
     x := #Input "evil"
     x = "safe-literal"
     process.run(["echo", x]) ?? return Err("test")
@@ -329,7 +329,7 @@ fn run() ! {
 fn clean_value_at_sink_ok() {
     let src = r#"
 use core.process as process
-fn run() ! {
+fn run() {
     process.run(["echo", "hello"]) ?? return Err("test")
 }
 "#;
@@ -576,7 +576,7 @@ fn counted_loop_zero_iterations_keeps_pre_loop_taint() {
     let src = r#"
 use core.process as process
 #Scrub(Input) fn clean(raw: #Input String) String { return raw.split(" ").to_list()[0] }
-fn run(n: Int) ! {
+fn run(n: Int) {
     value := #Input "world; rm -rf /"
     loop i := 0, i < n {
         value = clean(value)

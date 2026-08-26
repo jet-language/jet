@@ -24,7 +24,7 @@ struct EqBox<T: Equatable> { value: T }
 struct Rank<T: Comparable> { value: T }
 #Comparable
 struct NestedRank<T: Comparable> {
-    head: T?
+    head: ?T
     tail: [T]
 }
 struct Adder<T: Add> { value: T }

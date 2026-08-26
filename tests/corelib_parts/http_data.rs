@@ -1006,7 +1006,7 @@ fn must_stay_deferred(ticket: Ticket) Bool {
     return false
 }
 
-fn missing_minutes() Float? -> None
+fn missing_minutes() ?Float -> None
 
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"

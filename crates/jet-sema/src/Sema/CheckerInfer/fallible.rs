@@ -1012,6 +1012,7 @@ impl<'a> Checker<'a> {
         if let Expr::Call(call) = expr {
             self.clear_uninit_mut_args(&call.args);
             return match self.check_call(call, false) {
+                Some(Some(ty)) if ty.is_fallible() => self.auto_propagate_call(expr, Some(ty)),
                 Some(Some(ty)) => Some(ty),
                 Some(None) => Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
                 None => None,

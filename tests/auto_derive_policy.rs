@@ -355,13 +355,13 @@ fn recursive_container_dependencies_derive_without_approving_blocked_nominals() 
         "recursive_containers",
         "",
         r#"
-struct OptionalNode { next: OptionalNode? }
+struct OptionalNode { next: ?OptionalNode }
 struct ListNode { children: [ListNode] }
 struct MapNode { children: [String:MapNode] }
 
 #!Printable
 struct NoPrint { value: Int }
-struct Blocked { child: NoPrint? }
+struct Blocked { child: ?NoPrint }
 
 fn run() {}
 "#,

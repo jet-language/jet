@@ -1,3 +1,5 @@
+use crate::Syntax::TYPE_ERR;
+
 pub use crate::OSTarget::{
     os_target_build_context, os_target_dispatch_arm, os_target_dispatch_exhaustive,
     os_target_mixed_axis, os_target_unmatched_call, OSTarget,
@@ -100,8 +102,8 @@ pub const KW_DISTINCT: &str = "distinct";
 /// `value.raw()` yields the base value. Named-cast family (S42).
 pub const METHOD_DISTINCT_RAW: &str = "raw";
 
-/// D-FAIL-CARRIER1=A (ratified 2026-08-06): the one outcome carrier under `T?`
-/// and `T E!`. Optional and fallible spellings are distinct; these are the
+/// D-FAIL-CARRIER1=A (ratified 2026-08-06): the one outcome carrier under `?T`
+/// and `T !E`. Optional and fallible spellings are distinct; these are the
 /// three reads that reach the carrier's facts.
 ///
 /// `.or_err("why")` lifts a clean absence into a failure — the payload rides
@@ -519,7 +521,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
 ///
 /// Only types a user writes in source. `Result` is the legacy fallible type
 /// (S34) kept for teaching errors; it is intentionally excluded here since
-/// `T E!` is the current spelling.
+/// failure contracts use the prefix spelling `!E` (or `!(E1 | E2)`).
 pub const JET_TYPE_LIST: &[&str] = &[
     TYPE_INT,
     TYPE_FLOAT,
@@ -527,6 +529,7 @@ pub const JET_TYPE_LIST: &[&str] = &[
     TYPE_STRING,
     TYPE_UNIT,
     TYPE_CHAR,
+    TYPE_ERR,
     TYPE_SHARED,
     TYPE_SHARED_GUARD,
     TYPE_SHARED_WEAK,

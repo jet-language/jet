@@ -1,6 +1,6 @@
 //! D-FAIL-CARRIER1=A / D-FAIL-MODEL1=A: one outcome carrier under `T?` and
-//! `T E!`. An outcome has a payload, a verdict and reports. `T?` is the view
-//! whose report is the clean absence; `T E!` is the view whose report matters.
+//! `T !E`. An outcome has a payload, a verdict and reports. `T?` is the view
+//! whose report is the clean absence; `T !E` is the view whose report matters.
 
 mod common;
 
@@ -71,12 +71,12 @@ fn both_views_lower_onto_one_carrier() {
     let rust = compile(
         "views",
         r#"
-fn lookup(id: Int) Int? -> {
+fn lookup(id: Int) ?Int -> {
     if id == 1 { return Val(9) }
     return None
 }
 
-fn parse(raw: String) Int Err! -> {
+fn parse(raw: String) Int !Err -> {
     if raw == "" { return Err("empty") }
     return Ok(7)
 }
@@ -96,7 +96,7 @@ fn run() {
     );
     assert!(
         parse.contains("JetOutcome<i64, JetErr>"),
-        "`T E!` must lower onto the same carrier:\n{parse}"
+        "`T !E` must lower onto the same carrier:\n{parse}"
     );
     assert!(
         !lookup.contains("Option<"),
@@ -123,7 +123,7 @@ fn or_err_lifts_a_clean_absence_into_a_failure() {
     let rust = compile(
         "or_err",
         r#"
-fn birth_year(book: [String:String], name: String) String Err! -> {
+fn birth_year(book: [String:String], name: String) String !Err -> {
     return book.get(name).or_err("nobody in the book is called that")
 }
 
@@ -158,7 +158,7 @@ struct ImportErr {
     notes: [String]
 }
 
-fn import_rows(label: String, rows: [String]) [String] ImportErr! -> {
+fn import_rows(label: String, rows: [String]) [String] !ImportErr -> {
     good :: rows.filter((row) -> row != "")
     broken :: rows.len() - good.len()
     if broken > 0 {
@@ -209,7 +209,7 @@ struct ImportErr {
     notes: [String]
 }
 
-fn import_rows(label: String, rows: [String]) [String] ImportErr! -> {
+fn import_rows(label: String, rows: [String]) [String] !ImportErr -> {
     good :: rows.filter((row) -> row != "")
     broken :: rows.len() - good.len()
     if broken > 0 {
@@ -325,7 +325,7 @@ fn run() {
 #[test]
 fn the_interpreter_edge_renders_default_err_through_the_prelude() {
     let src = r#"
-fn run() Err! {
+fn run() !Err {
     return Err("unhandled", code: "E_RUN", cause: Err("root"))
 }
 "#;
@@ -382,7 +382,7 @@ fn an_unread_verdict_costs_nothing() {
     let rust = compile(
         "erasure",
         r#"
-fn first_even(n: Int) Int? -> {
+fn first_even(n: Int) ?Int -> {
     if n % 2 == 0 {
         return Val(n)
     }

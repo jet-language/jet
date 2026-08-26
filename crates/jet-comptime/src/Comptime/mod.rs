@@ -447,6 +447,9 @@ pub fn run_build_entry_with_policy(
     };
     if let CtValue::Failed(CtReport::Told(error)) = &returned {
         Build::abort_program_build(&context);
+        if let Some(diagnostic) = Build::build_error_diagnostic_from_value(error, build.name_span) {
+            return Err(diagnostic);
+        }
         let detail = error.jet_show();
         let (code, what, why, fix) = if let Some(detail) = detail.strip_prefix("E3511: ") {
             (

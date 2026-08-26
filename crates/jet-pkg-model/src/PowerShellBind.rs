@@ -251,7 +251,7 @@ impl Session.Close {{
 
 pub fn close(session: ^Session) {{}}
 
-pub fn open() Session PowerShellError! -> {{
+pub fn open() Session !PowerShellError -> {{
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(PowerShellError.NotRunning)
     return Ok(Session{{ value: handle }})
@@ -264,7 +264,7 @@ pub fn cancel(session: Session) {{ abi.cancel(session.value) }}
     for function in functions {
         let call = format!("abi.{}", function.jet);
         out.push_str(&format!(
-            r#"pub fn {}(session: Session, input: DataTree, deadline_ms: Int) DataTree PowerShellError! -> {{
+            r#"pub fn {}(session: Session, input: DataTree, deadline_ms: Int) DataTree !PowerShellError -> {{
     raw :: {}(session.value, json.to_string(input), deadline_ms)
     code :: abi.take_error()
     if code == 1 -> return Err(PowerShellError.NotRunning)
@@ -574,7 +574,7 @@ mod tests {
         let worker = super::render_worker(&functions);
         assert!(jet.contains("pub fn get_stateful("));
         assert!(jet.contains("fn open() Int ="));
-        assert!(jet.contains("pub fn open() Session PowerShellError! -> {"));
+        assert!(jet.contains("pub fn open() Session !PowerShellError -> {"));
         assert!(jet.contains("Session{ value: handle }"));
         assert!(!jet.contains("=>"));
         assert!(!jet.contains("Session.{"));

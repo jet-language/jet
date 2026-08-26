@@ -1940,7 +1940,9 @@ pub fn unified_diff(path: &str, old: &str, new: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_source, retired_interpolation_selector_edits, retired_type_edits};
+    use super::{
+        format_program, format_source, retired_interpolation_selector_edits, retired_type_edits,
+    };
 
     #[test]
     fn retired_selector_rewrites_through_the_parser_and_formatter() {
@@ -2082,5 +2084,44 @@ fn run() {
             once,
             format_source(&once).expect("formatted lambda interface should re-format")
         );
+    }
+
+    #[test]
+    fn failure_formatter_keeps_prefix_and_contextual_roles() {
+        let source = r#"fn load() ?Int !IOError -> read()?(
+    "loading"
+)
+"#;
+        let once = format_source(source).expect("failure syntax should format");
+        assert!(once.contains("fn load() ?Int !IOError"), "{once}");
+        assert!(once.contains("read()?(\"loading\")"), "{once}");
+        assert_eq!(once, format_source(&once).expect("failure fmt should be stable"));
+
+        let source = "fn load() Int !IOError -> read()\n";
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(source);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        let mut program = crate::Parser::parse_for_fmt(&tokens).expect("source should parse");
+        let function = program
+            .items
+            .iter_mut()
+            .find_map(|item| match item {
+                crate::AST::Item::Func(function) if function.name == "load" => Some(function),
+                _ => None,
+            })
+            .expect("load function");
+        let crate::AST::Stmt::Expr(expression) = function.body.first_mut().expect("body") else {
+            panic!("expected expression body");
+        };
+        let inner = expression.clone();
+        *expression = crate::AST::Expr::Try(
+            Box::new(inner.clone()),
+            inner.span(),
+            crate::AST::TryConvert::None,
+            None,
+        );
+        let formatted = format_program(&program, source, &[]);
+        assert!(formatted.contains("-> read()"), "{formatted}");
+        assert!(!formatted.contains("read()?"), "{formatted}");
+        assert_eq!(formatted, format_source(&formatted).expect("implicit fmt should be stable"));
     }
 }

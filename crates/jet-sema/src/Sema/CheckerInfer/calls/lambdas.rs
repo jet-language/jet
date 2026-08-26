@@ -127,6 +127,10 @@ impl<'a> Checker<'a> {
             } else {
                 expected_error.cloned()
             };
+            // D-FAILURE-FOUNDATION1: a lambda that names only its success
+            // value follows the same implicit Error route as a named
+            // function. `!Never` remains the explicit no-failure opt-out.
+            let error = error.or_else(|| Some(Type::Named(Syntax::TYPE_ERR.to_string())));
             match error {
                 Some(error) => Some(Type::Result {
                     ok: Box::new(result),

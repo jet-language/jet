@@ -214,6 +214,9 @@ pub enum ReportExtension {
         expected: Option<String>,
         actual: Option<i128>,
     },
+    BuildError {
+        report: String,
+    },
 }
 
 /// The one `jet.report/v1` envelope for diagnostics and command fact streams.
@@ -401,6 +404,10 @@ impl ReportEnvelope {
             if let Some(actual) = actual {
                 out.push_str(&format!(",\"actual\":{actual}"));
             }
+        }
+        if let Some(ReportExtension::BuildError { report }) = &self.extension {
+            out.push_str(",\"build_error\":");
+            out.push_str(report);
         }
         out.push('}');
         out

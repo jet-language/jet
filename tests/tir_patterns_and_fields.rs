@@ -314,7 +314,7 @@ fn boxed_recursive_struct_field_read() {
     let src = "\
 struct Tree {
     value: Int
-    child: Tree?
+    child: ?Tree
 }
 fn sum(t: Tree) Int {
     total := t.value
@@ -532,7 +532,7 @@ fn mixed_switch_non_ident_subject_binds_payload() {
         return;
     }
     let src = "\
-struct Holder { val: Int? }
+struct Holder { val: ?Int }
 fn f(h: Holder) Int {
     if h.val == {
         Val(c) -> { return c }
@@ -894,7 +894,7 @@ fn run() {
 }
 
 /// c97/D-STRPARSE1: `String.lines()` (→ `[String]`) and `Int.parse(text)` (→
-/// `Int ParseError!`). Both are compiler built-ins, so `main` routes
+/// `Int !ParseError`). Both are compiler built-ins, so `main` routes
 /// through the TIR — proven by the emitted `jet_string_lines` helper call and
 /// the Prelude parse-kernel call. `Int.parse` composes with `??`: a good parse
 /// yields the value, a bad one (`"abc"`) takes the fallback.

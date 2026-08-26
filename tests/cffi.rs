@@ -111,7 +111,7 @@ fn cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3() {
     assert!(generated.contains("gross_pay: Decimal\n"));
     assert!(generated.contains("offset=24 width=5 type=Decimal scale=2 encoding=COMP-3"));
     assert!(!generated.contains("gross_pay: Float"));
-    assert!(generated.contains("Int CobolError! -[FFI.Cobol]>"));
+    assert!(generated.contains("Int !CobolError -[FFI.Cobol]>"));
     assert!(!generated.contains("=>"));
     let provenance =
         fs::read_to_string(root.join(".jet/bindings/cobol/payroll.provenance")).unwrap();
@@ -2008,7 +2008,7 @@ use c.store as store
 #Layout(c)
 struct Record { id: U64; flags: U32 }
 #Extern module c.store { fn store_load(id: U64, out: *Record) I32 = "store_load"; }
-fn load(id: U64) Record String! -> {
+fn load(id: U64) Record !String -> {
     slot := Record{id: 0, flags: 0}
     status := I32{ 1 }
     #Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {

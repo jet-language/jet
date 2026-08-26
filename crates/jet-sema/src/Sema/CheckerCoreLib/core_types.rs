@@ -393,7 +393,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Reader" | "Cursor"
         // D-BUILD*: selected-root build-program handles. No runtime values.
         | "BuildContext" | "BuildPlan" | "BuildAction" | "BuildTarget"
-        | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "ProgramInfo" | "MemoStats" | "TypeInfo" | "LayoutInfo" | "LayoutField" | "SourceSpan"
+        | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "BuildError" | "ProgramInfo" | "MemoStats" | "TypeInfo" | "LayoutInfo" | "LayoutField" | "SourceSpan"
         | "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked"
         | "CompilerSemanticIndex" | "CompilerDefinition" | "CompilerSymbolKind"
         | "CompilerParam" | "CompilerField" | "CompilerViewProvenance"

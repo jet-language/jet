@@ -538,7 +538,7 @@ fn run() {
     );
 }
 
-/// `rng.pick(list)` returns the element's optional type (`[String]` → `String?`).
+/// `rng.pick(list)` returns the element's optional type (`[String]` → `?String`).
 #[test]
 fn rng_pick_returns_element_option() {
     let src = r#"

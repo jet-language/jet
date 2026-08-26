@@ -46,6 +46,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_BUILD_TOOLCHAIN,
     Syntax::TYPE_BUILD_PROBE,
     "BuildSigningIdentity",
+    "BuildError",
     Syntax::TYPE_PROGRAM_INFO,
     // D-LOCALCELL1=A: built-in local mutation and guard handles.
     "Cell",
@@ -593,26 +594,24 @@ pub fn builtin_method_return(
 fn build_result(ok: &str) -> Option<Option<Type>> {
     Some(Some(Type::Result {
         ok: Box::new(Type::Named(ok.to_string())),
-        err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+        err: Box::new(Type::Named("BuildError".to_string())),
+    }))
+}
+
+fn build_error_result(ok: Type) -> Option<Option<Type>> {
+    Some(Some(Type::Result {
+        ok: Box::new(ok),
+        err: Box::new(Type::Named("BuildError".to_string())),
     }))
 }
 
 fn build_context_method_return(method: &str, arg_count: usize) -> Option<Option<Type>> {
     match (method, arg_count) {
-        ("generate", 2) => Some(Some(Type::Result {
-            ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
-            err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
-        })),
+        ("generate", 2) => build_error_result(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
         ("find", 1) => Some(Some(Type::List(Box::new(Type::String)))),
         ("embed", 1) => Some(Some(Type::String)),
-        ("fetch", 2) => Some(Some(Type::Result {
-            ok: Box::new(Type::String),
-            err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
-        })),
-        ("plugin", 2) => Some(Some(Type::Result {
-            ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
-            err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
-        })),
+        ("fetch", 2) => build_error_result(Type::String),
+        ("plugin", 2) => build_error_result(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
         ("action", 5 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15) => {
             build_result(Syntax::TYPE_BUILD_ACTION)
         }

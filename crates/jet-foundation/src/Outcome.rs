@@ -73,6 +73,29 @@ pub struct JetErrorConversion {
     pub target: String,
 }
 
+/// Structured identity and source facts carried by a typed error while it is
+/// projected through the default `JetErr` route. `value` is one canonical JSON
+/// value, not rendered prose, so a report edge can inspect fields without
+/// reconstructing them from `Display` output.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct JetErrorField {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct JetErrorSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct JetErrorDetails {
+    pub variant: String,
+    pub fields: Vec<JetErrorField>,
+    pub source_span: Option<JetErrorSpan>,
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct JetErr {
     message: String,
@@ -84,6 +107,8 @@ pub struct JetErr {
     context: Vec<JetErrorContextFrame>,
     /// D-FAIL-REPORT1: every declared conversion crossed on the way out.
     conversions: Vec<JetErrorConversion>,
+    /// Typed source data that survives projection into the default carrier.
+    details: Option<JetErrorDetails>,
 }
 
 /// One source-linked hop in the report's structured journey. This is the
@@ -110,6 +135,7 @@ pub struct JetErrorReport {
     pub context_frames: Vec<JetErrorContextFrame>,
     pub source_journey: Vec<JetErrorJourneyFrame>,
     pub conversion_history: Vec<JetErrorConversion>,
+    pub details: Option<JetErrorDetails>,
 }
 
 pub fn jet_err(
@@ -124,6 +150,7 @@ pub fn jet_err(
         typed_identity: None,
         context: Vec::new(),
         conversions: Vec::new(),
+        details: None,
     }
 }
 
@@ -166,6 +193,14 @@ pub fn jet_err_context(error: &JetErr) -> Vec<JetErrorContextFrame> {
 
 pub fn jet_err_conversions(error: &JetErr) -> Vec<JetErrorConversion> {
     error.conversions.clone()
+}
+
+pub fn jet_err_details(error: &JetErr) -> Option<JetErrorDetails> {
+    error.details.clone()
+}
+
+pub fn jet_err_set_details(error: &mut JetErr, details: JetErrorDetails) {
+    error.details = Some(details);
 }
 
 pub fn jet_err_add_context(error: &mut JetErr, text: String, file: String, line: u32) {
@@ -296,6 +331,49 @@ pub fn jet_journey_take_hops() -> JetJourneyHops {
     JET_JOURNEY_HOPS.with(|hops| JetJourneyHops(std::mem::take(&mut *hops.borrow_mut())))
 }
 
+impl JetErrorDetails {
+    pub fn to_json(&self) -> String {
+        let fields = self
+            .fields
+            .iter()
+            .map(|field| {
+                format!(
+                    "{}:{}",
+                    jet_error_json_quote(&field.name),
+                    field.value
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let source_span = self.source_span.as_ref().map_or_else(
+            || "null".to_string(),
+            |span| format!("{{\"start\":{},\"end\":{}}}", span.start, span.end),
+        );
+        format!(
+            "{{\"variant\":{},\"fields\":{{{fields}}},\"source_span\":{source_span}}}",
+            jet_error_json_quote(&self.variant),
+        )
+    }
+}
+
+fn jet_error_json_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
 impl JetErrorReport {
     fn from_error(error: &JetErr, source_journey: Vec<JetErrorJourneyFrame>) -> Self {
         let causes = match &error.cause {
@@ -313,6 +391,7 @@ impl JetErrorReport {
             context_frames: error.context.clone(),
             source_journey,
             conversion_history: error.conversions.clone(),
+            details: error.details.clone(),
         }
     }
 
@@ -490,7 +569,264 @@ impl JetErrorReport {
                     .join(",")
             ));
         }
+        if let Some(details) = &self.details {
+            fields.push(format!("\"details\":{}", details.to_json()));
+        }
         format!("{{{}}}", fields.join(","))
+    }
+
+    /// Decode the canonical report wire emitted by [`Self::to_json`].
+    ///
+    /// Build cache and remote execution records carry this object without
+    /// reducing it to display text.  Requiring the canonical spelling keeps a
+    /// replayed report byte-for-byte equivalent to the report that crossed
+    /// the original action boundary.
+    pub fn from_json(text: &str) -> Result<Self, String> {
+        let value = crate::EncodingJson::parse_json(text, true)
+            .map_err(|error| format!("invalid error report: {}", error.message))?;
+        let report = jet_error_report_from_json(&value)?;
+        if report.to_json() != text {
+            return Err("error report is not canonical".to_string());
+        }
+        Ok(report)
+    }
+}
+
+fn jet_error_report_from_json(
+    value: &crate::EncodingJson::Value,
+) -> Result<JetErrorReport, String> {
+    let fields = jet_error_json_object(value, "report")?;
+    if jet_error_json_text(jet_error_json_field(fields, "schema")?, "schema")?
+        != "jet.err/v1"
+    {
+        return Err("unsupported error report schema".to_string());
+    }
+    let message = jet_error_json_text(jet_error_json_field(fields, "message")?, "message")?;
+    let code = match jet_error_json_field(fields, "code")? {
+        crate::EncodingJson::Value::Null => None,
+        value => Some(jet_error_json_text(value, "code")?),
+    };
+    let causes = match jet_error_json_field(fields, "cause")? {
+        crate::EncodingJson::Value::Null => Vec::new(),
+        crate::EncodingJson::Value::Object(_) => {
+            vec![jet_error_report_from_json(jet_error_json_field(fields, "cause")?)?]
+        }
+        crate::EncodingJson::Value::Array(values) => values
+            .iter()
+            .map(jet_error_report_from_json)
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err("error report cause is not null, an object, or an array".to_string()),
+    };
+    let typed_identity = jet_error_json_optional_text(fields, "typed_identity")?;
+    let context_frames = jet_error_json_optional_array(fields, "context_frames")?
+        .map(|values| {
+            values
+                .iter()
+                .map(jet_error_context_from_json)
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let source_journey = jet_error_json_optional_array(fields, "source_journey")?
+        .map(|values| {
+            values
+                .iter()
+                .map(jet_error_journey_from_json)
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let conversion_history = jet_error_json_optional_array(fields, "conversion_history")?
+        .map(|values| {
+            values
+                .iter()
+                .map(jet_error_conversion_from_json)
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let details = jet_error_json_field_optional(fields, "details")
+        .map(jet_error_details_from_json)
+        .transpose()?;
+    Ok(JetErrorReport {
+        code,
+        message,
+        typed_identity,
+        causes,
+        context_frames,
+        source_journey,
+        conversion_history,
+        details,
+    })
+}
+
+fn jet_error_json_object<'a>(
+    value: &'a crate::EncodingJson::Value,
+    name: &str,
+) -> Result<&'a [(String, crate::EncodingJson::Value)], String> {
+    match value {
+        crate::EncodingJson::Value::Object(fields) => Ok(fields),
+        _ => Err(format!("error report {name} is not an object")),
+    }
+}
+
+fn jet_error_json_field<'a>(
+    fields: &'a [(String, crate::EncodingJson::Value)],
+    name: &str,
+) -> Result<&'a crate::EncodingJson::Value, String> {
+    jet_error_json_field_optional(fields, name).ok_or_else(|| format!("error report lacks {name}"))
+}
+
+fn jet_error_json_field_optional<'a>(
+    fields: &'a [(String, crate::EncodingJson::Value)],
+    name: &str,
+) -> Option<&'a crate::EncodingJson::Value> {
+    fields
+        .iter()
+        .find_map(|(field, value)| (field == name).then_some(value))
+}
+
+fn jet_error_json_text(
+    value: &crate::EncodingJson::Value,
+    name: &str,
+) -> Result<String, String> {
+    match value {
+        crate::EncodingJson::Value::Text(value) => Ok(value.clone()),
+        _ => Err(format!("error report {name} is not text")),
+    }
+}
+
+fn jet_error_json_optional_text(
+    fields: &[(String, crate::EncodingJson::Value)],
+    name: &str,
+) -> Result<Option<String>, String> {
+    jet_error_json_field_optional(fields, name)
+        .map(|value| jet_error_json_text(value, name).map(Some))
+        .unwrap_or(Ok(None))
+}
+
+fn jet_error_json_optional_array<'a>(
+    fields: &'a [(String, crate::EncodingJson::Value)],
+    name: &str,
+) -> Result<Option<&'a [crate::EncodingJson::Value]>, String> {
+    let Some(value) = jet_error_json_field_optional(fields, name) else {
+        return Ok(None);
+    };
+    match value {
+        crate::EncodingJson::Value::Array(values) => Ok(Some(values)),
+        _ => Err(format!("error report {name} is not an array")),
+    }
+}
+
+fn jet_error_json_u32(
+    value: &crate::EncodingJson::Value,
+    name: &str,
+) -> Result<u32, String> {
+    match value {
+        crate::EncodingJson::Value::Int(value) => u32::try_from(*value)
+            .map_err(|_| format!("error report {name} is not a u32")),
+        _ => Err(format!("error report {name} is not an integer")),
+    }
+}
+
+fn jet_error_context_from_json(
+    value: &crate::EncodingJson::Value,
+) -> Result<JetErrorContextFrame, String> {
+    let fields = jet_error_json_object(value, "context frame")?;
+    Ok(JetErrorContextFrame {
+        text: jet_error_json_text(jet_error_json_field(fields, "text")?, "context text")?,
+        file: jet_error_json_text(jet_error_json_field(fields, "file")?, "context file")?,
+        line: jet_error_json_u32(jet_error_json_field(fields, "line")?, "context line")?,
+    })
+}
+
+fn jet_error_journey_from_json(
+    value: &crate::EncodingJson::Value,
+) -> Result<JetErrorJourneyFrame, String> {
+    let fields = jet_error_json_object(value, "journey frame")?;
+    Ok(JetErrorJourneyFrame {
+        fn_name: jet_error_json_text(jet_error_json_field(fields, "fn_name")?, "journey function")?,
+        file: jet_error_json_text(jet_error_json_field(fields, "file")?, "journey file")?,
+        line: jet_error_json_u32(jet_error_json_field(fields, "line")?, "journey line")?,
+        note: jet_error_json_text(jet_error_json_field(fields, "note")?, "journey note")?,
+        hops: jet_error_json_u32(jet_error_json_field(fields, "hops")?, "journey hops")?,
+    })
+}
+
+fn jet_error_conversion_from_json(
+    value: &crate::EncodingJson::Value,
+) -> Result<JetErrorConversion, String> {
+    let fields = jet_error_json_object(value, "conversion")?;
+    Ok(JetErrorConversion {
+        source: jet_error_json_text(jet_error_json_field(fields, "source")?, "conversion source")?,
+        target: jet_error_json_text(jet_error_json_field(fields, "target")?, "conversion target")?,
+    })
+}
+
+fn jet_error_details_from_json(
+    value: &crate::EncodingJson::Value,
+) -> Result<JetErrorDetails, String> {
+    let fields = jet_error_json_object(value, "details")?;
+    let field_values = jet_error_json_object(jet_error_json_field(fields, "fields")?, "detail fields")?
+        .iter()
+        .map(|(name, value)| {
+            Ok(JetErrorField {
+                name: name.clone(),
+                value: jet_error_json_encode_value(value),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let source_span = match jet_error_json_field(fields, "source_span")? {
+        crate::EncodingJson::Value::Null => None,
+        value => {
+            let span = jet_error_json_object(value, "source span")?;
+            Some(JetErrorSpan {
+                start: jet_error_json_u32(jet_error_json_field(span, "start")?, "span start")?
+                    as usize,
+                end: jet_error_json_u32(jet_error_json_field(span, "end")?, "span end")?
+                    as usize,
+            })
+        }
+    };
+    Ok(JetErrorDetails {
+        variant: jet_error_json_text(jet_error_json_field(fields, "variant")?, "detail variant")?,
+        fields: field_values,
+        source_span,
+    })
+}
+
+fn jet_error_json_encode_value(value: &crate::EncodingJson::Value) -> String {
+    match value {
+        crate::EncodingJson::Value::Null => "null".to_string(),
+        crate::EncodingJson::Value::Bool(value) => value.to_string(),
+        crate::EncodingJson::Value::Int(value) => value.to_string(),
+        crate::EncodingJson::Value::Float(value) => value.to_string(),
+        crate::EncodingJson::Value::Number(value) => value.clone(),
+        crate::EncodingJson::Value::Text(value) => {
+            format!("\"{}\"", crate::JSON::json_escape(value))
+        }
+        crate::EncodingJson::Value::Array(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(jet_error_json_encode_value)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        crate::EncodingJson::Value::Object(fields) => format!(
+            "{{{}}}",
+            fields
+                .iter()
+                .map(|(name, value)| {
+                    format!(
+                        "\"{}\":{}",
+                        crate::JSON::json_escape(name),
+                        jet_error_json_encode_value(value)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
     }
 }
 

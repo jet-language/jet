@@ -2626,7 +2626,7 @@ fn prepare_build_front_end_on_compiler_stack(
             .iter()
             .enumerate()
             .filter_map(|(index, item)| {
-                matches!(item, crate::AST::Item::Func(func) if func.name == "build")
+                matches!(item, crate::AST::Item::Func(func) if crate::Sema::is_build_entry(func))
                     .then_some(index)
             })
             .collect::<Vec<_>>()
@@ -2693,7 +2693,7 @@ fn prepare_build_front_end_on_compiler_stack(
             .iter()
             .enumerate()
             .filter_map(|(index, item)| {
-                matches!(item, crate::AST::Item::Func(func) if func.name == "build")
+                matches!(item, crate::AST::Item::Func(func) if crate::Sema::is_build_entry(func))
                     .then_some(index)
             })
             .collect::<Vec<_>>()
@@ -3821,7 +3821,7 @@ fn validate_selected_action_outputs(
 
 /// D-BUILDENTRY1: `E3501`'s contract, held in one place. Entry identity (the
 /// `build` name plus its `BuildContext` parameter) and the typed
-/// `BuildPlan ?` result facts are graded by the same sema predicates that
+/// `BuildPlan` result facts are graded by the same sema predicates that
 /// `Sema::strip_build_only_entries` uses to keep the entry out of runtime
 /// codegen, so selection, rejection, and removal cannot drift apart (I8).
 fn valid_build_signature(func: &crate::AST::Func) -> bool {
@@ -4091,6 +4091,9 @@ fn package_build_entry_source(
     } else {
         raw_source
     };
+    if source_has_build_entry(&source) == Some(false) {
+        return Ok(None);
+    }
     resolver
         .revalidate_file(&entry)
         .map_err(|error| vec![error.diagnostic()])?;
@@ -4146,19 +4149,27 @@ fn build_entry_resolution_diagnostic(error: &str) -> Diagnostic {
 /// can only select its own `fn build`. A source the parser rejects is not a
 /// routing answer: the pipeline that runs next reports the parse error.
 pub fn selects_build_entry(source: &str, project_root: Option<&std::path::Path>) -> bool {
-    let (tokens, lex_diags) = crate::Lexer::lex(source);
-    if lex_diags.is_empty() {
-        if let Ok((program, _teaching)) = crate::Parser::parse_for_check(&tokens) {
-            if program
-                .items
-                .iter()
-                .any(|item| matches!(item, crate::AST::Item::Func(func) if func.name == "build"))
-            {
-                return true;
-            }
-        }
+    if source_has_build_entry(source) == Some(true) {
+        return true;
     }
     project_root.is_some_and(|root| matches!(package_build_entry_source(root), Ok(Some(_))))
+}
+
+/// Parse one already loaded source to distinguish the programmable-build
+/// shape from an ordinary function that happens to be named `build`. `None`
+/// preserves routing to the build pipeline for parser diagnostics.
+fn source_has_build_entry(source: &str) -> Option<bool> {
+    let (tokens, lex_diags) = crate::Lexer::lex(source);
+    if !lex_diags.is_empty() {
+        return None;
+    }
+    let (program, _) = crate::Parser::parse_for_check(&tokens).ok()?;
+    Some(
+        program
+            .items
+            .iter()
+            .any(|item| matches!(item, crate::AST::Item::Func(func) if crate::Sema::is_build_entry(func))),
+    )
 }
 
 /// Load the selected build entry from its checked source. A `fn build` may be
@@ -4448,9 +4459,9 @@ pub fn program_semantic_facts(
 fn bad_build_signature(span: crate::Diagnostics::Span) -> Diagnostic {
     Diagnostic::error(
         "E3501",
-        "`fn build` must take one `BuildContext` and return `BuildPlan ?`".to_string(),
+        "`fn build` must take one `BuildContext` and return `BuildPlan`".to_string(),
         "the build entry is a typed contract: its parameter is its authority and its result is the graph Jet executes".to_string(),
-        "write `fn build(b: BuildContext) BuildPlan ?`".to_string(),
+        "write `fn build(b: BuildContext) BuildPlan`".to_string(),
         Some(span),
     )
 }
@@ -4923,17 +4934,22 @@ fn build_execution_diagnostic(error: crate::Comptime::Build::BuildExecutionError
             format!("pass `--allow-{}` for this run, or grant it in package/workspace policy", capability.flag()),
             None,
         ),
-        BuildExecutionError::ActionFailed { action, exit_code, stderr } => Diagnostic::error(
-            "E3505",
-            format!("build action `{action}` exited with status {exit_code}"),
-            if stderr.is_empty() {
-                "the declared command failed inside the build sandbox without writing stderr".to_string()
-            } else {
-                format!("the sandboxed command reported: {stderr}")
-            },
-            "fix the action command, declared inputs/outputs, toolchain, or probe, then rerun `jet build`".to_string(),
-            None,
-        ),
+        BuildExecutionError::Reported { report } => {
+            let mut diagnostic = Diagnostic::error(
+                "E3505",
+                report.message.clone(),
+                "the sandboxed command reported a structured failure; its typed identity and source data remain in the report".to_string(),
+                "fix the action command, declared inputs/outputs, toolchain, or probe, then rerun `jet build`".to_string(),
+                None,
+            );
+            diagnostic.detail = Some(
+                report.render_with_style(jet_foundation::Outcome::JetReportStyle::PLAIN),
+            );
+            diagnostic.structured = Some(crate::Diagnostics::StructuredDiagnostic::BuildError {
+                report,
+            });
+            diagnostic
+        }
         BuildExecutionError::ProbeFailed { probe, detail } => Diagnostic::error(
             "E3505",
             format!("build probe `{probe}` failed"),
@@ -5716,7 +5732,9 @@ fn check_file_on_compiler_stack(
             if let Some(crate::AST::Item::Func(build)) = bundle.modules[bundle.entry]
                 .items
                 .iter()
-                .find(|item| matches!(item, crate::AST::Item::Func(func) if func.name == "build"))
+                .find(|item| {
+                    matches!(item, crate::AST::Item::Func(func) if crate::Sema::is_build_entry(func))
+                })
             {
                 if !valid_build_signature(build) {
                     diags.push(bad_build_signature(build.name_span));

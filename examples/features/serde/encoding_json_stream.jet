@@ -4,7 +4,7 @@ use core.encoding.json as json
 use core.files as files
 use core.testing as testing
 
-fn write_catalog(path: Path) Bool (EncodingError | IOError)! {
+fn write_catalog(path: Path) Bool !(EncodingError | IOError) {
     out :: files.create(path)?
     // D-APILABEL1=A: skip the `limits` default and name only the policy that changes.
     writer :: json.writer(^out, canonical: true)?
@@ -19,7 +19,7 @@ fn write_catalog(path: Path) Bool (EncodingError | IOError)! {
     return Ok(true)
 }
 
-fn run() (EncodingError | IOError)! {
+fn run() !(EncodingError | IOError) {
     // `testing.temp_dir` is the shared-Prelude scratch mechanism on every tier.
     path :: Path.from(testing.temp_dir("encoding-json-stream")).join("catalog.json")
     write_catalog(path)?

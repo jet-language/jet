@@ -718,7 +718,7 @@ fn tcl_bind_runs_one_shot_and_persistent_typed_sessions() {
     assert!(dir.join(".jet/bindings/tcl/libjet_tcl_eda.a").is_file());
     assert!(dir.join(".jet/bindings/tcl/eda.provenance").is_file());
     let generated = fs::read_to_string(dir.join(".jet/bindings/tcl/eda.jet")).unwrap();
-    assert!(generated.contains("String TclError! -[FFI.Tcl]>"));
+    assert!(generated.contains("String !TclError -[FFI.Tcl]>"));
     assert!(generated
         .contains("pub fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }"));
     assert!(!generated.contains("=>"));
@@ -811,7 +811,7 @@ end Geodesy;
     assert!(dir.join(".jet/bindings/ada/libjet_ada_geodesy.a").is_file());
     assert!(dir.join(".jet/bindings/ada/geodesy.provenance").is_file());
     let generated = fs::read_to_string(dir.join(".jet/bindings/ada/geodesy.jet")).unwrap();
-    assert!(generated.contains("pub fn double_lat(lat: Float) Float AdaError! -[FFI.Ada]>"));
+    assert!(generated.contains("pub fn double_lat(lat: Float) Float !AdaError -[FFI.Ada]>"));
     assert!(generated.contains("lat < -90.0 || lat > 90.0"));
     assert!(!generated.contains("=>"));
     let provenance = fs::read_to_string(dir.join(".jet/bindings/ada/geodesy.provenance")).unwrap();
@@ -951,7 +951,7 @@ end.
     assert!(cache.join("libjet_pascal_inventory_runtime.so").is_file());
     assert!(cache.join("inventory.provenance").is_file());
     let generated = fs::read_to_string(cache.join("inventory.jet")).unwrap();
-    assert!(generated.contains("pub fn counter_new(") && generated.contains("PascalError! ->"));
+    assert!(generated.contains("pub fn counter_new(") && generated.contains("!PascalError! ->"));
     assert!(!generated.contains("=>"));
     assert!(!generated.contains(".{"));
     let provenance = fs::read_to_string(cache.join("inventory.provenance")).unwrap();
@@ -1150,8 +1150,8 @@ fn dart_bind_runs_jet_compute_and_dart_callback_in_process() {
     assert!(cache.join("callbacks_host.dart").is_file());
     assert!(cache.join("callbacks.provenance").is_file());
     let generated = fs::read_to_string(cache.join("callbacks.jet")).unwrap();
-    assert!(generated.contains("pub fn dart_double(value: Int) Int DartError! -[FFI.Dart]>"));
-    assert!(generated.contains("pub fn dart_half(value: Float) Float DartError! -[FFI.Dart]>"));
+    assert!(generated.contains("pub fn dart_double(value: Int) Int !DartError -[FFI.Dart]>"));
+    assert!(generated.contains("pub fn dart_half(value: Float) Float !DartError -[FFI.Dart]>"));
     assert!(!generated.contains("=>"));
     let host = fs::read_to_string(cache.join("callbacks_host.dart")).unwrap();
     assert!(host.contains("NativeCallable<Int64 Function(Int64)>.isolateLocal"));

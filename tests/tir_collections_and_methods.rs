@@ -478,7 +478,7 @@ fn run() {
 
 // c109 Phase 8: fallible + optional.
 
-/// A fallible `T E!` function with `ok`/`err` constructors and `?` propagation
+/// A fallible `T !E` function with `ok`/`err` constructors and `?` propagation
 /// across a covered scalar-payload error enum, consumed with `??` value fallback.
 /// `parse_age`, `load`, and `main` all route through the TIR.
 #[test]
@@ -491,7 +491,7 @@ enum ParseError {
     Empty
     BadDigit(Int)
 }
-fn parse_age(raw: Int) Int ParseError! -[]> {
+fn parse_age(raw: Int) Int !ParseError -[]> {
     if raw == 0 {
         return Err(ParseError.Empty)
     }
@@ -500,7 +500,7 @@ fn parse_age(raw: Int) Int ParseError! -[]> {
     }
     return Ok((raw * 2))
 }
-fn load(raw: Int) Int ParseError! -[]> {
+fn load(raw: Int) Int !ParseError -[]> {
     n :: parse_age(raw)?
     return Ok((n + 1))
 }
@@ -518,14 +518,14 @@ fn run() {
     assert_eq!(stdout, "43\n99\n");
 }
 
-/// The `??` fallback in its early-`return` form (a `T E!` value), plus `ok`/`err`.
+/// The `??` fallback in its early-`return` form (a `T !E` value), plus `ok`/`err`.
 #[test]
 fn or_fallback_return_form() {
     if !have_rustc() {
         return;
     }
     let src = "\
-fn checked(x: Int) Int Err! -[]> {
+fn checked(x: Int) Int !Err -[]> {
     if x == 0 {
         return Err(\"zero\")
     }
@@ -552,7 +552,7 @@ fn optional_val_none_and_fallback() {
         return;
     }
     let src = "\
-fn first_even(limit: Int) (Int?) -[]> {
+fn first_even(limit: Int) (?Int) -[]> {
     loop i in 1..limit {
         if (i % 2) == 0 {
             return Val(i)
@@ -580,12 +580,12 @@ fn optional_chaining() {
     }
     let src = "\
 struct Profile {
-    handle: (String?)
+    handle: (?String)
 }
 struct Account {
     details: Profile
 }
-fn handle_of(a: (Account?)) (String?) -[]> {
+fn handle_of(a: (?Account)) (?String) -[]> {
     return a?.details?.handle
 }
 fn run() {
@@ -1107,7 +1107,7 @@ fn fallible_when_match() {
 enum ClassifyError {
     Bad(String)
 }
-fn classify(x: Int) Int ClassifyError! -[]> {
+fn classify(x: Int) Int !ClassifyError -[]> {
     if x == 0 {
         return Err(ClassifyError.Bad(\"bad\"))
     }

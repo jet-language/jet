@@ -287,7 +287,7 @@ fn canonical_tokens(src: &str, path: &std::path::Path) -> Vec<Token> {
             continue;
         }
         // D-FAIL-ERROR1=A: the formatter omits an explicit default `Err` in a
-        // fallible function return type (`T Err!` -> `T !`). Keep that
+        // fallible function return type (`T !Err` -> `T !`). Keep that
         // canonical spelling rewrite out of the loss comparison without
         // matching ordinary `Err(...)` constructor expressions.
         if matches!(&tokens[index].kind, TokKind::Ident(name) if name == jet::Syntax::TYPE_ERR)

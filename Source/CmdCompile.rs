@@ -2700,7 +2700,7 @@ pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
         ),
         (
             jet::Syntax::COMMAND_FILE_BUILD,
-            "// Optional `jet build` override. Uncomment one `fn build` to replace the stock default.\n// fn build(b: BuildContext) BuildPlan ! -> { return b.plan() }\n// Inspect the stock behavior with: `jet build --show-default`\n",
+            "// Optional `jet build` override. Uncomment one `fn build` to replace the stock default.\n// fn build(b: BuildContext) BuildPlan -> { return b.plan() }\n// Inspect the stock behavior with: `jet build --show-default`\n",
         ),
         (
             jet::Syntax::COMMAND_FILE_DEV,

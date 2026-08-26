@@ -108,7 +108,7 @@ fn run() {
 }
 
 /// c109 Phase 30: GENERIC functions + TRAIT-OBJECT dispatch (surface (G), 25_traits).
-/// Three covered fns: a generic `largest<T: Comparable>(xs: [T]) -> (T?)` (a `>` on a
+/// Three covered fns: a generic `largest<T: Comparable>(xs: [T]) -> (?T)` (a `>` on a
 /// `Comparable`-bound type var, `[T]` indexing, a `T?` return with `value`/`None`); a
 /// trait-OBJECT param `print_area(s: Shape)` (dynamic dispatch `s.name()`/`s.area()`
 /// through a `Box<dyn __jet_Shape>`); and `main` — a `[Shape]` trait-object list built from
@@ -149,7 +149,7 @@ impl Square.Shape {
         return \"square\"
     }
 }
-fn largest<T: Comparable>(xs: [T]) (T?) -[]> {
+fn largest<T: Comparable>(xs: [T]) (?T) -[]> {
     if xs.len() == 0 {
         return None
     }
@@ -251,7 +251,7 @@ fn run() {
 fn borrowed_parameter_option_fallback_materializes_copy() {
     let src = "\
 struct Config {
-    path: String?
+    path: ?String
 }
 fn selected(config: Config) String -[]> {
     return config.path ?? \"default.toml\"
@@ -367,7 +367,7 @@ fn recursive_struct_construction() {
     let src = "\
 struct Tree {
     value: Int
-    child: Tree?
+    child: ?Tree
 }
 fn run() {
     root :: Tree{

@@ -205,7 +205,7 @@ fn run() {
 }
 "#;
 
-const CANVAS_PATTERN_MULTI_FIXTURE: &str = r#"fn first_or_zero(x: Int?) Int -> {
+const CANVAS_PATTERN_MULTI_FIXTURE: &str = r#"fn first_or_zero(x: ?Int) Int -> {
     if x == Val(n) {
         return n
     } else {
@@ -277,23 +277,23 @@ fn run() {
 }
 "#;
 
-const CANVAS_STRUCTURAL_WRITE_FIXTURE: &str = r#"fn run() ! {
+const CANVAS_STRUCTURAL_WRITE_FIXTURE: &str = r#"fn run() {
     print("start")
 }
 "#;
 
 const CANVAS_RAILS_FIXTURE: &str = r#"use core.mem as mem
 
-fn maybe() Int String! -> {
+fn maybe() Int !String -> {
     return Ok(1)
 }
 
-fn checked() Int String! -> {
+fn checked() Int !String -> {
     n :: maybe()?
     return Ok(n)
 }
 
-fn run() ! {
+fn run() {
     #Unsafe("Canvas proof rail fixture") {
         marker := 1
     }
@@ -2024,7 +2024,7 @@ fn canvas_projects_and_edits_subjectless_guard_arms() {
 fn canvas_classic_pattern_branch_transactions_use_canonical_switch() {
     let path = write_fixture(
         "classic_pattern_transactions",
-        r#"fn choose(x: Int?) Int -> {
+        r#"fn choose(x: ?Int) Int -> {
     if x == Val(_) { return 1 } else { return 0 }
 }
 

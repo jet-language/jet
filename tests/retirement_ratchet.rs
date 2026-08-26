@@ -186,6 +186,489 @@ fn content_files() -> Vec<PathBuf> {
     out
 }
 
+const FAILURE_SURFACE_ROOTS: &[&str] = &[
+    "crates",
+    "examples",
+    "tests",
+    "Source",
+    "corelib",
+    "docs",
+    "editors",
+];
+
+const FAILURE_SURFACE_EXTENSIONS: &[&str] = &[
+    "jet", "md", "rs", "js", "json", "scm", "toml", "yaml", "yml",
+];
+
+/// The failure retirement covers source-shaped documentation and generated
+/// `.jet` trees too. Unlike the older adoption rows, this walk keeps hidden
+/// `.jet` directories and skips only external/build state.
+fn failure_surface_skip_dir(path: &Path) -> bool {
+    path.components().any(|component| {
+        let std::path::Component::Normal(name) = component else {
+            return false;
+        };
+        let name = name.to_string_lossy();
+        name == ".git"
+            || name == ".claude"
+            || name == ".agent-worktrees"
+            || name == ".opencode"
+            || name == "node_modules"
+            || name == "build"
+            || name.starts_with("target")
+    })
+}
+
+fn walk_failure_surface(root: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+        if path.is_dir() {
+            let relative = path
+                .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+                .unwrap_or(&path);
+            if !failure_surface_skip_dir(relative) {
+                walk_failure_surface(&path, out);
+            }
+        } else if path.extension().is_some_and(|extension| {
+            FAILURE_SURFACE_EXTENSIONS
+                .iter()
+                .any(|allowed| extension == *allowed)
+        }) {
+            out.push(path);
+        }
+    }
+}
+
+fn failure_surface_files() -> Vec<PathBuf> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut out = Vec::new();
+    for relative in FAILURE_SURFACE_ROOTS {
+        walk_failure_surface(&root.join(relative), &mut out);
+    }
+    if let Ok(entries) = fs::read_dir(root) {
+        out.extend(entries.flatten().filter_map(|entry| {
+            let path = entry.path();
+            (path.is_file()
+                && path.extension().is_some_and(|extension| extension == "jet"))
+            .then_some(path)
+        }));
+    }
+    out
+}
+
+/// These are the only places where old failure spellings remain useful as
+/// evidence: retirement history, refusal/teaching fixtures, and the catalog
+/// that emits those diagnostics. Live `.jet` source and current documentation
+/// stay outside this list.
+fn failure_surface_allowlisted(path: &str) -> bool {
+    is_authority_history(path)
+        || is_authority_diagnostic_fixture(path)
+        || path == "crates/jet-codegen/src/Prelude/Diagnostics.jet"
+        // These two files contain source snippets whose only purpose is to
+        // exercise retired-form recovery diagnostics and formatter fixes.
+        || path == "crates/jet-parser/src/Parser/mod.rs"
+        || path == "tests/fmt.rs"
+}
+
+struct FailureSourceFragment {
+    first_line: usize,
+    source: String,
+}
+
+fn failure_fence(line: &str) -> Option<(u8, usize, &str)> {
+    let trimmed = line.trim_start();
+    let marker = *trimmed.as_bytes().first()?;
+    if marker != b'`' && marker != b'~' {
+        return None;
+    }
+    let length = trimmed.bytes().take_while(|byte| *byte == marker).count();
+    (length >= 3).then_some((marker, length, &trimmed[length..]))
+}
+
+fn failure_inline_fragments(line: &str) -> Vec<String> {
+    let bytes = line.as_bytes();
+    let mut fragments = Vec::new();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'`' {
+            cursor += 1;
+            continue;
+        }
+        let length = bytes[cursor..]
+            .iter()
+            .take_while(|byte| **byte == b'`')
+            .count();
+        let content_start = cursor + length;
+        let mut close = content_start;
+        while close < bytes.len() {
+            if bytes[close] != b'`' {
+                close += 1;
+                continue;
+            }
+            let close_length = bytes[close..]
+                .iter()
+                .take_while(|byte| **byte == b'`')
+                .count();
+            if close_length == length {
+                fragments.push(line[content_start..close].to_string());
+                cursor = close + close_length;
+                break;
+            }
+            close += close_length;
+        }
+        if close >= bytes.len() {
+            break;
+        }
+    }
+    fragments
+}
+
+fn failure_looks_like_jet(source: &str) -> bool {
+    [
+        "fn ",
+        "alias ",
+        "struct ",
+        "pub fn ",
+        "->",
+        "-[",
+        "fallible",
+        "failure",
+        "optional",
+    ]
+    .iter()
+    .any(|marker| source.contains(marker))
+}
+
+fn failure_embedded_fragments(text: &str) -> Vec<FailureSourceFragment> {
+    let bytes = text.as_bytes();
+    let mut fragments = Vec::new();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'r' {
+            let mut quote = cursor + 1;
+            while quote < bytes.len() && bytes[quote] == b'#' {
+                quote += 1;
+            }
+            if quote < bytes.len() && bytes[quote] == b'"' {
+                let hashes = &text[cursor + 1..quote];
+                let close = format!("\"{hashes}");
+                let content_start = quote + 1;
+                let Some(close_offset) = text[content_start..].find(&close) else {
+                    cursor += 1;
+                    continue;
+                };
+                let content_end = content_start + close_offset;
+                let source = &text[content_start..content_end];
+                if failure_looks_like_jet(source) {
+                    fragments.push(FailureSourceFragment {
+                        first_line: text[..cursor]
+                            .bytes()
+                            .filter(|byte| *byte == b'\n')
+                            .count()
+                            + 1,
+                        source: source.to_string(),
+                    });
+                }
+                cursor = content_end + close.len();
+                continue;
+            }
+        }
+        if bytes[cursor] == b'"' {
+            let content_start = cursor + 1;
+            let mut end = content_start;
+            while end < bytes.len() {
+                if bytes[end] == b'\\' {
+                    end = end.saturating_add(2);
+                } else if bytes[end] == b'"' {
+                    break;
+                } else {
+                    end += 1;
+                }
+            }
+            if end < bytes.len() {
+                let source = &text[content_start..end];
+                if failure_looks_like_jet(source) {
+                    fragments.push(FailureSourceFragment {
+                        first_line: text[..cursor]
+                            .bytes()
+                            .filter(|byte| *byte == b'\n')
+                            .count()
+                            + 1,
+                        source: source.to_string(),
+                    });
+                }
+                cursor = end + 1;
+                continue;
+            }
+        }
+        cursor += 1;
+    }
+    fragments
+}
+
+fn failure_source_fragments(path: &Path, text: &str) -> Vec<FailureSourceFragment> {
+    if path.extension().is_some_and(|extension| extension == "jet") {
+        return vec![FailureSourceFragment {
+            first_line: 1,
+            source: text.to_string(),
+        }];
+    }
+
+    if path.extension().is_some_and(|extension| extension != "md") {
+        return failure_embedded_fragments(text);
+    }
+
+    let mut fragments = Vec::new();
+    let mut fence: Option<(u8, usize, usize, bool, String)> = None;
+    for (index, line) in text.lines().enumerate() {
+        if let Some((open_marker, open_length, _, active, source)) = fence.as_mut() {
+            if failure_fence(line).is_some_and(|(marker, length, rest)| {
+                marker == *open_marker && length >= *open_length && rest.trim().is_empty()
+            }) {
+                let (_, _, first_line, active, source) = fence.take().expect("fence exists");
+                if active {
+                    fragments.push(FailureSourceFragment { first_line, source });
+                }
+            } else if *active {
+                source.push_str(line);
+                source.push('\n');
+            }
+        } else if let Some((marker, length, info)) = failure_fence(line) {
+            let language = info.split_whitespace().next().unwrap_or("");
+            fence = Some((
+                marker,
+                length,
+                index + 2,
+                matches!(language, "jet" | "Jet" | "jetlang"),
+                String::new(),
+            ));
+        } else {
+            for source in failure_inline_fragments(line) {
+                fragments.push(FailureSourceFragment {
+                    first_line: index + 1,
+                    source,
+                });
+            }
+        }
+    }
+    if let Some((_, _, first_line, active, source)) = fence {
+        if active {
+            fragments.push(FailureSourceFragment { first_line, source });
+        }
+    }
+    fragments
+}
+
+fn collect_failure_tokens<'a>(
+    tokens: &'a [jet::Lexer::Token],
+    out: &mut Vec<&'a jet::Lexer::Token>,
+) {
+    for token in tokens {
+        match &token.kind {
+            jet::Lexer::TokKind::LineComment(_) | jet::Lexer::TokKind::BlockComment(_) => {}
+            jet::Lexer::TokKind::Str(parts) => {
+                for part in parts {
+                    if let jet::Lexer::StrTokPart::Interp(inner) = part {
+                        collect_failure_tokens(inner, out);
+                    }
+                }
+            }
+            jet::Lexer::TokKind::Eof => {}
+            _ => out.push(token),
+        }
+    }
+}
+
+fn failure_is_type_atom(token: &jet::Lexer::Token) -> bool {
+    matches!(
+        &token.kind,
+        jet::Lexer::TokKind::Ident(_)
+            | jet::Lexer::TokKind::RParen
+            | jet::Lexer::TokKind::RBracket
+            | jet::Lexer::TokKind::Gt
+            | jet::Lexer::TokKind::Shr
+    )
+}
+
+fn failure_is_contract_position(token: &jet::Lexer::Token) -> bool {
+    failure_is_type_atom(token)
+        || matches!(
+            &token.kind,
+            jet::Lexer::TokKind::Colon | jet::Lexer::TokKind::ColonColon
+        )
+}
+
+fn failure_is_expression_end(token: &jet::Lexer::Token) -> bool {
+    matches!(
+        &token.kind,
+        jet::Lexer::TokKind::Ident(_)
+            | jet::Lexer::TokKind::Int(..)
+            | jet::Lexer::TokKind::Float(..)
+            | jet::Lexer::TokKind::UnitNumber { .. }
+            | jet::Lexer::TokKind::Char(_)
+            | jet::Lexer::TokKind::RParen
+            | jet::Lexer::TokKind::RBracket
+            | jet::Lexer::TokKind::RBrace
+    )
+}
+
+fn failure_is_type_name(token: &jet::Lexer::Token) -> bool {
+    matches!(
+        &token.kind,
+        jet::Lexer::TokKind::Ident(name)
+            if name.chars().next().is_some_and(|character| character.is_ascii_uppercase())
+    )
+}
+
+fn failure_is_adjacent(left: &jet::Lexer::Token, right: &jet::Lexer::Token) -> bool {
+    left.span.end == right.span.start
+}
+
+fn failure_is_result_arm_separator(
+    tokens: &[&jet::Lexer::Token],
+    index: usize,
+) -> bool {
+    let Some(previous) = index.checked_sub(1).and_then(|index| tokens.get(index)) else {
+        return false;
+    };
+    let Some(next) = tokens.get(index + 1) else {
+        return false;
+    };
+    let Some(after_next) = tokens.get(index + 2) else {
+        return false;
+    };
+    matches!(
+        (&previous.kind, &next.kind, &after_next.kind),
+        (
+            jet::Lexer::TokKind::Ident(previous),
+            jet::Lexer::TokKind::Ident(next),
+            jet::Lexer::TokKind::UnifiedArrow,
+        ) if previous.starts_with(|character: char| character.is_ascii_lowercase() || character == '_')
+            && next.starts_with(|character: char| character.is_ascii_lowercase() || character == '_')
+    )
+}
+
+fn failure_is_infix_contract(tokens: &[&jet::Lexer::Token], index: usize) -> bool {
+    let Some(previous) = index.checked_sub(1).and_then(|index| tokens.get(index)) else {
+        return false;
+    };
+    let Some(next) = tokens.get(index + 1) else {
+        return false;
+    };
+    if !failure_is_type_atom(previous)
+        || !(failure_is_type_atom(next)
+            || matches!(&next.kind, jet::Lexer::TokKind::LParen))
+    {
+        return false;
+    }
+    if failure_is_result_arm_separator(tokens, index) {
+        return false;
+    }
+    failure_is_type_name(previous) || failure_is_type_name(next)
+}
+
+fn failure_is_optional_prefix(tokens: &[&jet::Lexer::Token], index: usize) -> bool {
+    let Some(question) = tokens.get(index) else {
+        return false;
+    };
+    let Some(next) = tokens.get(index + 1) else {
+        return false;
+    };
+    let type_head = failure_is_type_name(next)
+        || matches!(
+            &next.kind,
+            jet::Lexer::TokKind::LParen
+                | jet::Lexer::TokKind::LBracket
+                | jet::Lexer::TokKind::Star
+                | jet::Lexer::TokKind::KwFn
+        );
+    type_head && failure_is_adjacent(question, next)
+}
+
+fn failure_syntax_hits(source: &str) -> Vec<(usize, &'static str)> {
+    let (lexed, _) = jet::Lexer::lex(source);
+    let mut tokens = Vec::new();
+    collect_failure_tokens(&lexed, &mut tokens);
+    let line = |offset| source[..offset].bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let mut hits = Vec::new();
+
+    for (index, token) in tokens.iter().enumerate() {
+        match &token.kind {
+            jet::Lexer::TokKind::Bang => {
+                let marker_negation = index >= 2
+                    && matches!(
+                        &tokens[index - 2].kind,
+                        jet::Lexer::TokKind::Hash
+                    );
+                let canonical_prefix = tokens.get(index + 1).is_some_and(|next| {
+                    failure_is_adjacent(token, next)
+                        && matches!(
+                            &next.kind,
+                            jet::Lexer::TokKind::Ident(_)
+                                | jet::Lexer::TokKind::LParen
+                                | jet::Lexer::TokKind::LBracket
+                                | jet::Lexer::TokKind::Star
+                                | jet::Lexer::TokKind::KwFn
+                        )
+                });
+                if marker_negation
+                    || canonical_prefix
+                    || failure_is_result_arm_separator(&tokens, index)
+                {
+                    continue;
+                }
+                if index
+                    .checked_sub(1)
+                    .and_then(|index| tokens.get(index))
+                    .is_some_and(|token| failure_is_contract_position(token))
+                {
+                    hits.push((line(token.span.start), "retired failure contract"));
+                }
+            }
+            jet::Lexer::TokKind::Question => {
+                let contextual = matches!(
+                    tokens.get(index + 1).map(|token| &token.kind),
+                    Some(jet::Lexer::TokKind::LParen)
+                );
+                let result_handler = tokens
+                    .get(index + 1)
+                    .and_then(|next| tokens.get(index + 2).map(|after| (next, after)))
+                    .is_some_and(|(next, after)| {
+                        matches!(
+                            (&next.kind, &after.kind),
+                            (jet::Lexer::TokKind::Ident(name), jet::Lexer::TokKind::UnifiedArrow)
+                                if name.starts_with(|character: char| character.is_ascii_lowercase() || character == '_')
+                        )
+                    });
+                let expression_end = index
+                    .checked_sub(1)
+                    .and_then(|index| tokens.get(index))
+                    .is_some_and(|token| failure_is_expression_end(*token));
+                if contextual
+                    || result_handler
+                    || failure_is_optional_prefix(&tokens, index)
+                {
+                    continue;
+                }
+                if failure_is_infix_contract(&tokens, index) || expression_end {
+                    hits.push((line(token.span.start), "retired failure propagation/type"));
+                }
+            }
+            _ => {}
+        }
+    }
+    hits
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name()
         .unwrap_or_default()
@@ -989,6 +1472,68 @@ fn a_finished_retirement_stays_finished() {
             assert_eq!(retired, 0, "`{}` came back in {retired} files", row.retired);
         }
     }
+}
+
+#[test]
+fn failure_syntax_detector_accepts_current_forms_only() {
+    let current = concat!(
+        "fn maybe() ?Int -> None\n",
+        "fn typed() Int !IOError -> 1\n",
+        "fn union() Int !(DbError | TimeoutError) -> 1\n",
+        "fn unit() !IOError {}\n",
+        "struct Holder { value: !IOError }\n",
+        "fn context() Int !IOError -> read()?(\"loading\")\n",
+        "fn handled() Int !IOError -> value ? ok -> ok ! failure -> 0\n",
+        "if !ready -> print(\"ready\")\n",
+    );
+    assert!(
+        failure_syntax_hits(current).is_empty(),
+        "current failure syntax was misclassified: {:?}",
+        failure_syntax_hits(current)
+    );
+
+    let retired = [
+        concat!("fn suffix() Int Error", "!\n"),
+        concat!("fn infix_bang() Int ", "!", " Error -> 1\n"),
+        concat!("fn infix_question() Int ", "?", " Error -> 1\n"),
+        concat!("fn suffix_option() Int", "? -> None\n"),
+        concat!("fn bare() ", "!", " {}\n"),
+        concat!("alias bare :: ", "!\n"),
+        concat!("fn propagated() Int !Error -> read()", "?\n"),
+    ];
+    for source in retired {
+        assert!(
+            !failure_syntax_hits(source).is_empty(),
+            "retired failure syntax was missed: {source:?}"
+        );
+    }
+}
+
+#[test]
+fn failure_surface_has_no_active_retired_spelling() {
+    let mut offenders = Vec::new();
+    for path in failure_surface_files() {
+        let relative = relative_path(&path);
+        if failure_surface_allowlisted(&relative) {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for fragment in failure_source_fragments(&path, &text) {
+            for (line, spelling) in failure_syntax_hits(&fragment.source) {
+                offenders.push(format!(
+                    "{relative}:{}: {spelling}",
+                    fragment.first_line + line.saturating_sub(1)
+                ));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "retired failure syntax escaped the diagnostic/history allowlist:\n{}",
+        offenders.join("\n")
+    );
 }
 
 #[test]

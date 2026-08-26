@@ -286,7 +286,7 @@ fn expand_origin_projects_the_folded_origin_info_fact() {
     );
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("speed.@origin"), "{text}");
-    assert!(text.contains("OriginInfo?"), "{text}");
+    assert!(text.contains("?OriginInfo"), "{text}");
     assert!(text.contains("tracked: true"), "{text}");
 
     let json = Command::new(jet())
@@ -305,7 +305,7 @@ fn expand_origin_projects_the_folded_origin_info_fact() {
     assert!(parse_json(&json_text).is_ok(), "{json_text}");
     assert!(json_text.contains("\"fact\":\"@origin\""), "{json_text}");
     assert!(
-        json_text.contains("\"type\":\"OriginInfo?\""),
+        json_text.contains("\"type\":\"?OriginInfo\""),
         "{json_text}"
     );
 }

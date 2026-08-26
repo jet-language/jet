@@ -629,7 +629,7 @@ derive T.Describe {
 
 ```jet
 // settled spelling of a shipped mechanism
-fn build(b: BuildContext) =[FS]=> BuildPlan ? {
+fn build(b: BuildContext) BuildPlan -[FS]> {
     schema :: b.embed("schema/app.sql")?
 
     b.generate("db_client") {

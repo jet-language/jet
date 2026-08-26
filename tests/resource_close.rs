@@ -326,7 +326,7 @@ impl Resource.Close {
     }
 }
 
-fn fail() Int String! {
+fn fail() Int !String {
     return Err("stop")
 }
 
@@ -337,7 +337,7 @@ fn returned() {
     return
 }
 
-fn questioned() Int String! {
+fn questioned() Int !String {
     resource := Resource{ name: "question" }
     defer close(^resource)
     value := fail()?
@@ -404,7 +404,7 @@ fn run() {
 fn ordinary_scope_drop_and_reasoned_drop_remain_separate() {
     let src = r#"
 struct Value { number: Int }
-fn maybe() Int String! { return Err("unused") }
+fn maybe() Int !String { return Err("unused") }
 fn run() {
     value := Value{ number: 1 }
     print(value.number)

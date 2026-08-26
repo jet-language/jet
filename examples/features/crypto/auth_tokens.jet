@@ -1,7 +1,7 @@
 // D-AUTH-TOKENPOLICY1=A: strict JWT and PASETO verification.
 use core.auth as auth
 
-fn run() ! {
+fn run() {
     jwt_key :: [U8]{48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102}
     jwt :: #Credential "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB9.3gbnbn_u-GjiQuGusiLrnMUzlo5c9rPeqAO0iWZxhrY"
     jwt_claims :: auth.verify_jwt(jwt, key: jwt_key, audience: "gateway", issuer: "partner") ?? return Err("JWT rejected")

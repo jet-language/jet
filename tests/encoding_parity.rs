@@ -706,7 +706,7 @@ struct Packet {
     bytes: [U8]
     numbers: [Int]
     labels: [String:Int]
-    maybe: Int?
+    maybe: ?Int
     score: Float
     letter: Char
 }

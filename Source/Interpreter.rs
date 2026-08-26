@@ -181,7 +181,9 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
             Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
                 let rendered = error
                     .to_jet_err()
-                    .map(|error| jet_foundation::Outcome::jet_render_err(&error))
+                    .map(|error| {
+                        jet_foundation::Outcome::jet_error_report(&error).render()
+                    })
                     .unwrap_or_else(|| {
                         crate::Comptime::display_core_pure_value(&error)
                             .unwrap_or_else(|| error.jet_show())
@@ -359,7 +361,9 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
             Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
                 let rendered = error
                     .to_jet_err()
-                    .map(|error| jet_foundation::Outcome::jet_render_err(&error))
+                    .map(|error| {
+                        jet_foundation::Outcome::jet_error_report(&error).render()
+                    })
                     .unwrap_or_else(|| {
                         crate::Comptime::display_core_pure_value(&error)
                             .unwrap_or_else(|| error.jet_show())

@@ -368,7 +368,7 @@ mod tests {
         let descriptor = *binder_descriptor(ForeignLanguage::JS).unwrap();
         let source =
             ForeignBridge::render_scalar_jet("jet_js_math", descriptor, &functions).unwrap();
-        assert!(source.contains("Int String! -[FFI]>"));
+        assert!(source.contains("Int !String -[FFI]>"));
         assert!(!source.contains("=>"));
     }
 }

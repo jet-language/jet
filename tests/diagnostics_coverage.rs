@@ -578,6 +578,17 @@ const REPORT_FIXTURE_DIRS: &[(&str, &str)] = &[
 /// extraction prevents prose, comments, and Rust assertions from becoming
 /// coverage.
 fn report_snapshot_paths() -> Vec<PathBuf> {
+    report_fixture_snapshot_paths()
+        .into_iter()
+        .filter(|path| path.is_file())
+        .collect()
+}
+
+/// Expected snapshot paths for every fixture consumed by the UI/lint harnesses
+/// plus direct report fixture directories. Keep this list independent from
+/// code extraction so deleting a snapshot cannot silently remove it from the
+/// coverage scan.
+fn report_fixture_snapshot_paths() -> Vec<PathBuf> {
     let root = root();
     let mut out = Vec::new();
 
@@ -593,9 +604,7 @@ fn report_snapshot_paths() -> Vec<PathBuf> {
                     .is_some_and(|name| name.contains(".fixed."))
             {
                 let snapshot = path.with_extension("stderr");
-                if snapshot.is_file() {
-                    out.push(snapshot);
-                }
+                out.push(snapshot);
                 continue;
             }
             if !path.is_dir() {
@@ -607,9 +616,7 @@ fn report_snapshot_paths() -> Vec<PathBuf> {
                 .find(|candidate| candidate.is_file());
             if entry.is_some() {
                 let snapshot = path.join("stderr");
-                if snapshot.is_file() {
-                    out.push(snapshot);
-                }
+                out.push(snapshot);
             } else {
                 let workspace = path.join(jet::Syntax::WORKSPACE_FILE);
                 if workspace.is_file() {
@@ -621,9 +628,7 @@ fn report_snapshot_paths() -> Vec<PathBuf> {
                         .parent()
                         .expect("workspace fixture parent")
                         .join(format!("{name}.stderr"));
-                    if snapshot.is_file() {
-                        out.push(snapshot);
-                    }
+                    out.push(snapshot);
                 }
             }
         }
@@ -637,9 +642,7 @@ fn report_snapshot_paths() -> Vec<PathBuf> {
                 && path.extension().and_then(|ext| ext.to_str()) == Some(jet::Syntax::FILE_EXT)
             {
                 let snapshot = path.with_extension("warn");
-                if snapshot.is_file() {
-                    out.push(snapshot);
-                }
+                out.push(snapshot);
             }
         }
     }
@@ -687,6 +690,43 @@ fn extract_report_opening_codes(text: &str) -> Vec<String> {
 
 #[test]
 fn diagnostic_snapshots_keep_the_complete_registered_product() {
+    let mut source_rows = 0;
+    for (line_index, raw) in jet_foundation::Registry::DIAGNOSTIC_SOURCE
+        .lines()
+        .enumerate()
+    {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with("//") {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        assert!(
+            matches!(fields.len(), 12 | 13),
+            "Diagnostics.jet:{} lost a registered field: expected 12 or 13, got {}",
+            line_index + 1,
+            fields.len()
+        );
+        for (index, name) in [(1, "code"), (7, "What"), (8, "Why"), (9, "Fix")] {
+            assert!(
+                !fields[index].trim().is_empty(),
+                "Diagnostics.jet:{} lost its registered {name}",
+                line_index + 1
+            );
+        }
+        assert!(
+            jet_foundation::Registry::diagnostic(fields[1]).is_some(),
+            "Diagnostics.jet:{} lost registry identity for {}",
+            line_index + 1,
+            fields[1]
+        );
+        source_rows += 1;
+    }
+    assert_eq!(
+        source_rows,
+        jet_foundation::Registry::diagnostic_rows().len(),
+        "snapshot contract must inspect every registered source row"
+    );
+
     for row in jet_foundation::Registry::diagnostic_rows() {
         assert!(!row.code.is_empty(), "diagnostic row lost its code");
         assert!(!row.what.is_empty(), "{} lost its What", row.code);
@@ -753,6 +793,20 @@ fn diagnostic_snapshots_keep_the_complete_registered_product() {
             );
         }
     }
+}
+
+#[test]
+fn every_report_fixture_has_a_snapshot_file() {
+    let missing: Vec<String> = report_fixture_snapshot_paths()
+        .into_iter()
+        .filter(|path| !path.is_file())
+        .map(|path| path.display().to_string())
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "diagnostic fixture lost its UI snapshot:\n{}",
+        missing.join("\n")
+    );
 }
 
 fn rendered_report_codes() -> BTreeSet<String> {

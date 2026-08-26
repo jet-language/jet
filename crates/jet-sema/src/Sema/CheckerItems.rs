@@ -2876,11 +2876,25 @@ impl<'a> Checker<'a> {
         // fallible call as `T !E` here; ordinary value positions unwrap the
         // same call through the existing automatic propagation rule.
         let preserve_result_carrier = matches!(pattern, Pattern::Ok { .. } | Pattern::Err { .. });
+        let subject_key = subject.span().start;
+        let cached_subject_ty = preserve_result_carrier
+            .then(|| self.result_handler_subject_types.get(&subject_key).cloned())
+            .flatten();
         if preserve_result_carrier {
-            self.failure_auto_depth += 1;
+            if cached_subject_ty.is_none() {
+                self.failure_auto_depth += 1;
+            }
         }
-        let subj_ty = self.infer(subject);
-        if preserve_result_carrier {
+        let subj_ty = cached_subject_ty.clone().or_else(|| {
+            let inferred = self.infer(subject);
+            if preserve_result_carrier {
+                if let Some(ty) = inferred.clone() {
+                    self.result_handler_subject_types.insert(subject_key, ty);
+                }
+            }
+            inferred
+        });
+        if preserve_result_carrier && cached_subject_ty.is_none() {
             self.failure_auto_depth -= 1;
         }
         let Some(st) = subj_ty else {
@@ -2888,7 +2902,7 @@ impl<'a> Checker<'a> {
         };
         super::CheckerCore::normalize_contextual_pattern(pattern, &st);
         let bindings = self.validate_pattern(&st, pattern, span);
-        if !matches!(pattern, Pattern::Struct { .. }) {
+        if cached_subject_ty.is_none() && !matches!(pattern, Pattern::Struct { .. }) {
             self.mark_pattern_subject_moved(subject, &bindings);
         }
         (Some(st), bindings)

@@ -666,6 +666,41 @@ fn read_jet_baseline() -> Vec<(String, String, String)> {
         .collect()
 }
 
+fn pinned_adapter_versions() -> BTreeMap<&'static str, String> {
+    let receipt = fs::read_to_string(corpus_root().join("baselines/receipt.tsv")).unwrap();
+    let mut lines = receipt.lines();
+    assert_eq!(
+        lines.next(),
+        Some(BASELINE_HEADER),
+        "baseline schema drifted while reading tool pins"
+    );
+    let mut versions = BTreeMap::new();
+    for line in lines.filter(|line| !line.is_empty()) {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 23, "bad baseline receipt row: {line}");
+        let adapter = match fields[3] {
+            "bash" => "bash",
+            "python" => "python",
+            "node" => "node",
+            other => panic!("unknown pinned adapter: {other}"),
+        };
+        let version = fields[21];
+        assert!(!version.is_empty() && version != "unknown");
+        if let Some(previous) = versions.insert(adapter, version.to_string()) {
+            assert_eq!(previous, version, "pinned tool version drifted for {adapter}");
+        }
+    }
+    let mut adapters = versions.keys().copied().collect::<Vec<_>>();
+    adapters.sort_unstable();
+    let mut expected = BASELINE_ADAPTERS.to_vec();
+    expected.sort_unstable();
+    assert_eq!(
+        adapters, expected,
+        "baseline must pin every competitor adapter exactly once"
+    );
+    versions
+}
+
 fn run_bounded(mut command: Command, label: &str, deadline: Duration) -> BoundedOutput {
     let capture = Scratch::new("jet_agent_process_output");
     let stdout_path = capture.path.join("stdout");
@@ -2017,6 +2052,13 @@ fn equivalent_adapters_complete_declared_tasks() {
             command_version(Path::new("node"), "--version", "node"),
         ),
     ]);
+    let pinned_versions = pinned_adapter_versions();
+    for adapter in BASELINE_ADAPTERS {
+        assert_eq!(
+            versions[adapter], pinned_versions[adapter],
+            "{adapter} is not the committed pinned shipped tool"
+        );
+    }
     let git_version = command_version(Path::new("git"), "--version", "git");
     let mut baseline = BaselineCapture::from_env();
     let capture_baselines = baseline.is_some();

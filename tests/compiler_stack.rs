@@ -41,11 +41,11 @@ struct Pair {
 }
 
 struct ValueCache {
-    value: Cell<String?>,
+    value: Cell<?String>,
 }
 
 struct LineCache {
-    value: Cell<[Int]?>,
+    value: Cell<?[Int]>,
 }
 
 fn mapped_read(cell: Cell<Pair>) {

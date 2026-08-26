@@ -14,7 +14,7 @@ use super::provenance_toolchains::{
     SigningIdentitySpec, SysrootIdentity, ToolchainSpec,
 };
 use super::targets::TargetSpec;
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Span, StructuredDiagnostic};
 use crate::AST::{ComptimeInput, CtValue};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -26,6 +26,7 @@ struct ProgramBuildSession {
     package: String,
     project_root: PathBuf,
     diagnostics: Vec<Diagnostic>,
+    last_span: Span,
 }
 
 thread_local! {
@@ -69,6 +70,7 @@ pub fn begin_program_build_with_policy_at(
                 package: package.into(),
                 project_root: project_root.to_path_buf(),
                 diagnostics: Vec::new(),
+                last_span: Span::new(0, 0),
             },
         );
     });
@@ -99,6 +101,7 @@ pub fn finish_program_build(
         .and_then(|(_, target)| (target >= 0).then_some(target as usize));
     let session = PROGRAM_BUILD_SESSIONS.with(|sessions| sessions.borrow_mut().remove(&id));
     let session = session.ok_or_else(|| build_diag("build context expired", Span::new(0, 0)))?;
+    let error_span = session.last_span;
     let plan = match default {
         Some(target) => session
             .context
@@ -106,11 +109,11 @@ pub fn finish_program_build(
                 id: TargetId(target),
                 context: id,
             })
-            .map_err(|e| build_error_diag(&e, Span::new(0, 0))),
+            .map_err(|e| build_error_diag(&e, error_span)),
         None => session
             .context
             .plan()
-            .map_err(|e| build_error_diag(&e, Span::new(0, 0))),
+            .map_err(|e| build_error_diag(&e, error_span)),
     }?;
     Ok((plan, session.diagnostics))
 }
@@ -130,6 +133,7 @@ pub fn eval_program_build_method(
         let session = sessions
             .get_mut(&id)
             .ok_or_else(|| build_diag("build context expired", span))?;
+        session.last_span = span;
         eval_session_method(
             id,
             session,
@@ -477,10 +481,8 @@ fn eval_session_method(
                 &session.context.policy().legacy_wrappers,
                 super::actions_policy::PolicySetting::Deny(_)
             ) {
-                return Err(build_error_diag(
-                    &BuildError::PolicyDenied(wrapper.explain(session.context.policy())),
-                    span,
-                ));
+                let error = BuildError::PolicyDenied(wrapper.explain(session.context.policy()));
+                return Ok(CtValue::failed(Box::new(build_error_value(&error, span))));
             }
             if args.len() >= 17 {
                 let project_file = string_arg(&args, 16, span)?;
@@ -494,9 +496,15 @@ fn eval_session_method(
                         span,
                     ));
                 }
-                let imported =
-                    LegacyWrapperSpec::from_project_file(&session.project_root, wrapper.kind)
-                        .map_err(|error| build_error_diag(&error, span))?;
+                let imported = match LegacyWrapperSpec::from_project_file(
+                    &session.project_root,
+                    wrapper.kind,
+                ) {
+                    Ok(imported) => imported,
+                    Err(error) => {
+                        return Ok(CtValue::failed(Box::new(build_error_value(&error, span))))
+                    }
+                };
                 validate_legacy_import_contract(&wrapper, &imported, span)?;
                 for (label, value) in imported.labels {
                     if !matches!(label.as_str(), "legacy.import" | "legacy.project-file") {
@@ -505,9 +513,12 @@ fn eval_session_method(
                 }
                 wrapper = wrapper.with_project_file(project_file);
             }
-            let spec = wrapper
-                .into_action_spec(session.context.policy())
-                .map_err(|error| build_error_diag(&error, span))?;
+            let spec = match wrapper.into_action_spec(session.context.policy()) {
+                Ok(spec) => spec,
+                Err(error) => {
+                    return Ok(CtValue::failed(Box::new(build_error_value(&error, span))))
+                }
+            };
             session
                 .context
                 .action(name, spec)
@@ -764,7 +775,7 @@ fn eval_session_method(
     };
     Ok(match result {
         Ok(value) => CtValue::Present(Box::new(value)),
-        Err(error) => CtValue::failed(Box::new(CtValue::Str(build_error_text(&error)))),
+        Err(error) => CtValue::failed(Box::new(build_error_value(&error, span))),
     })
 }
 
@@ -1042,8 +1053,270 @@ fn safe_name(name: &str) -> String {
         .collect()
 }
 
+fn build_error_jet_error(error: &BuildError, span: Span) -> jet_foundation::Outcome::JetErr {
+    let mut jet_error = jet_foundation::Outcome::jet_err_with_identity(
+        build_error_text(error),
+        Ok("E3502".to_string()),
+        Err(jet_foundation::Outcome::JetAbsent),
+        format!("BuildError::{}", build_error_variant(error)),
+    );
+    jet_foundation::Outcome::jet_err_set_details(
+        &mut jet_error,
+        build_error_details(error, span),
+    );
+    jet_error
+}
+
+fn build_error_value(error: &BuildError, span: Span) -> CtValue {
+    CtValue::from_jet_err(&build_error_jet_error(error, span))
+}
+
+pub fn build_error_diagnostic_from_value(
+    error: &CtValue,
+    fallback_span: Span,
+) -> Option<Diagnostic> {
+    let jet_error = error.to_jet_err()?;
+    jet_foundation::Outcome::jet_err_details(&jet_error)?;
+    let report = jet_foundation::Outcome::jet_error_report(&jet_error);
+    let span = report
+        .details
+        .as_ref()
+        .and_then(|details| details.source_span.as_ref())
+        .map_or(fallback_span, |span| Span::new(span.start, span.end));
+    let mut diagnostic = build_diag(&report.message, span);
+    diagnostic.structured = Some(StructuredDiagnostic::BuildError { report });
+    Some(diagnostic)
+}
+
 fn build_error_diag(error: &BuildError, span: Span) -> Diagnostic {
-    build_diag(&build_error_text(error), span)
+    let report = jet_foundation::Outcome::jet_error_report(&build_error_jet_error(error, span));
+    let mut diagnostic = build_diag(&report.message, span);
+    diagnostic.structured = Some(StructuredDiagnostic::BuildError { report });
+    diagnostic
+}
+
+fn build_error_variant(error: &BuildError) -> &'static str {
+    match error {
+        BuildError::EmptyTargetName => "EmptyTargetName",
+        BuildError::EmptyActionName => "EmptyActionName",
+        BuildError::EmptyToolchainName => "EmptyToolchainName",
+        BuildError::EmptySigningIdentityName => "EmptySigningIdentityName",
+        BuildError::EmptyProbeName => "EmptyProbeName",
+        BuildError::DuplicateTargetName(_) => "DuplicateTargetName",
+        BuildError::DuplicateActionName(_) => "DuplicateActionName",
+        BuildError::CompilerPackageDependencyMissing { .. } => {
+            "CompilerPackageDependencyMissing"
+        }
+        BuildError::DuplicateToolchainName(_) => "DuplicateToolchainName",
+        BuildError::DuplicateSigningIdentityName(_) => "DuplicateSigningIdentityName",
+        BuildError::DuplicateProbeName(_) => "DuplicateProbeName",
+        BuildError::EmptyPath => "EmptyPath",
+        BuildError::InvalidPath(_) => "InvalidPath",
+        BuildError::EmptyToolchainTriple(_) => "EmptyToolchainTriple",
+        BuildError::EmptyIdentityField(_) => "EmptyIdentityField",
+        BuildError::MissingLockedProvenance(_) => "MissingLockedProvenance",
+        BuildError::EmptyProbeField(_) => "EmptyProbeField",
+        BuildError::EmptyActionArgv(_) => "EmptyActionArgv",
+        BuildError::EmptyEnvName(_) => "EmptyEnvName",
+        BuildError::UndeclaredEnvName { .. } => "UndeclaredEnvName",
+        BuildError::CachedActionWithoutOutputs(_) => "CachedActionWithoutOutputs",
+        BuildError::PhonyActionWithoutCaps(_) => "PhonyActionWithoutCaps",
+        BuildError::PhonyActionWithOutputs(_) => "PhonyActionWithOutputs",
+        BuildError::DuplicateActionOutput { .. } => "DuplicateActionOutput",
+        BuildError::DuplicateBuildOutput { .. } => "DuplicateBuildOutput",
+        BuildError::UnknownTarget(_) => "UnknownTarget",
+        BuildError::UnknownAction(_) => "UnknownAction",
+        BuildError::UnknownToolchain(_) => "UnknownToolchain",
+        BuildError::UnknownSigningIdentity(_) => "UnknownSigningIdentity",
+        BuildError::UnknownProbe(_) => "UnknownProbe",
+        BuildError::LegacyWrapperWithoutInputs(_) => "LegacyWrapperWithoutInputs",
+        BuildError::LegacyWrapperWithoutOutputs(_) => "LegacyWrapperWithoutOutputs",
+        BuildError::LegacyWrapperWithoutCaps(_) => "LegacyWrapperWithoutCaps",
+        BuildError::LegacyWrapperCommandMismatch { .. } => "LegacyWrapperCommandMismatch",
+        BuildError::LegacyProjectFileMissing(_) => "LegacyProjectFileMissing",
+        BuildError::LegacyProjectFileInvalid(_) => "LegacyProjectFileInvalid",
+        BuildError::PolicyDenied(_) => "PolicyDenied",
+        BuildError::EmptyPluginField(_) => "EmptyPluginField",
+        BuildError::InvalidPluginDigest(_) => "InvalidPluginDigest",
+        BuildError::PackagedPlugin(_) => "PackagedPlugin",
+        BuildError::PluginVersionMismatch { .. } => "PluginVersionMismatch",
+        BuildError::EmptyGeneratedModuleField(_) => "EmptyGeneratedModuleField",
+        BuildError::InvalidGeneratedModulePath(_) => "InvalidGeneratedModulePath",
+        BuildError::DuplicateGeneratedModuleName(_) => "DuplicateGeneratedModuleName",
+        BuildError::DuplicateGeneratedModulePath(_) => "DuplicateGeneratedModulePath",
+        BuildError::GeneratedModuleCycle { .. } => "GeneratedModuleCycle",
+        BuildError::TargetDependencyCycle(_) => "TargetDependencyCycle",
+        BuildError::ActionDependencyCycle(_) => "ActionDependencyCycle",
+    }
+}
+
+fn build_error_details(
+    error: &BuildError,
+    span: Span,
+) -> jet_foundation::Outcome::JetErrorDetails {
+    let fields = match error {
+        BuildError::EmptyTargetName
+        | BuildError::EmptyActionName
+        | BuildError::EmptyToolchainName
+        | BuildError::EmptySigningIdentityName
+        | BuildError::EmptyProbeName
+        | BuildError::EmptyPath => Vec::new(),
+        BuildError::DuplicateTargetName(value)
+        | BuildError::DuplicateActionName(value)
+        | BuildError::DuplicateToolchainName(value)
+        | BuildError::DuplicateSigningIdentityName(value)
+        | BuildError::DuplicateProbeName(value)
+        | BuildError::InvalidPath(value)
+        | BuildError::EmptyToolchainTriple(value)
+        | BuildError::EmptyIdentityField(value)
+        | BuildError::MissingLockedProvenance(value)
+        | BuildError::EmptyProbeField(value)
+        | BuildError::EmptyActionArgv(value)
+        | BuildError::EmptyEnvName(value)
+        | BuildError::CachedActionWithoutOutputs(value)
+        | BuildError::PhonyActionWithoutCaps(value)
+        | BuildError::PhonyActionWithOutputs(value)
+        | BuildError::LegacyProjectFileInvalid(value)
+        | BuildError::EmptyPluginField(value)
+        | BuildError::InvalidPluginDigest(value)
+        | BuildError::PackagedPlugin(value)
+        | BuildError::EmptyGeneratedModuleField(value)
+        | BuildError::InvalidGeneratedModulePath(value)
+        | BuildError::DuplicateGeneratedModuleName(value)
+        | BuildError::DuplicateGeneratedModulePath(value) => {
+            vec![build_error_text_field("value", value)]
+        }
+        BuildError::CompilerPackageDependencyMissing {
+            package,
+            dependency,
+        } => vec![
+            build_error_text_field("package", package),
+            build_error_text_field("dependency", dependency),
+        ],
+        BuildError::UndeclaredEnvName { action, key } => vec![
+            build_error_text_field("action", action),
+            build_error_text_field("key", key),
+        ],
+        BuildError::DuplicateActionOutput { action, output } => vec![
+            build_error_text_field("action", action),
+            build_error_text_field("output", output),
+        ],
+        BuildError::DuplicateBuildOutput {
+            output,
+            first_action,
+            second_action,
+        } => vec![
+            build_error_text_field("output", output),
+            build_error_text_field("first_action", first_action),
+            build_error_text_field("second_action", second_action),
+        ],
+        BuildError::UnknownTarget(id) => vec![build_error_number_field("id", id.0)],
+        BuildError::UnknownAction(id) => vec![build_error_number_field("id", id.0)],
+        BuildError::UnknownToolchain(id) => vec![build_error_number_field("id", id.0)],
+        BuildError::UnknownSigningIdentity(id) => vec![build_error_number_field("id", id.0)],
+        BuildError::UnknownProbe(id) => vec![build_error_number_field("id", id.0)],
+        BuildError::LegacyWrapperWithoutInputs(kind)
+        | BuildError::LegacyWrapperWithoutOutputs(kind)
+        | BuildError::LegacyWrapperWithoutCaps(kind)
+        | BuildError::LegacyProjectFileMissing(kind) => {
+            vec![build_error_text_field("kind", kind.as_str())]
+        }
+        BuildError::LegacyWrapperCommandMismatch { wrapper, actual } => vec![
+            build_error_text_field("wrapper", wrapper.as_str()),
+            build_error_text_field("actual", actual),
+        ],
+        BuildError::PolicyDenied(explanation) => vec![
+            build_error_text_field("subject", &explanation.subject),
+            build_error_bool_field("allowed", explanation.allowed),
+            build_error_text_field("reason", &explanation.reason),
+            build_error_json_field(
+                "required_caps",
+                format!(
+                    "[{}]",
+                    explanation
+                        .required_caps
+                        .iter()
+                        .map(|cap| build_error_json_string(cap.name()))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
+            ),
+        ],
+        BuildError::PluginVersionMismatch {
+            plugin,
+            expected,
+            actual,
+        } => vec![
+            build_error_text_field("plugin", plugin),
+            build_error_text_field("expected", expected),
+            build_error_text_field("actual", actual),
+        ],
+        BuildError::GeneratedModuleCycle { module, path } => vec![
+            build_error_text_field("module", module),
+            build_error_text_field("path", path),
+        ],
+        BuildError::TargetDependencyCycle(cycle)
+        | BuildError::ActionDependencyCycle(cycle) => vec![build_error_json_field(
+            "nodes",
+            format!(
+                "[{}]",
+                cycle
+                    .nodes()
+                    .iter()
+                    .map(|node| build_error_json_string(node))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        )],
+    };
+    jet_foundation::Outcome::JetErrorDetails {
+        variant: build_error_variant(error).to_string(),
+        fields,
+        source_span: Some(jet_foundation::Outcome::JetErrorSpan {
+            start: span.start,
+            end: span.end,
+        }),
+    }
+}
+
+fn build_error_text_field(name: &str, value: &str) -> jet_foundation::Outcome::JetErrorField {
+    build_error_json_field(name, build_error_json_string(value))
+}
+
+fn build_error_number_field(name: &str, value: usize) -> jet_foundation::Outcome::JetErrorField {
+    build_error_json_field(name, value.to_string())
+}
+
+fn build_error_bool_field(
+    name: &str,
+    value: bool,
+) -> jet_foundation::Outcome::JetErrorField {
+    build_error_json_field(name, value.to_string())
+}
+
+fn build_error_json_field(name: &str, value: String) -> jet_foundation::Outcome::JetErrorField {
+    jet_foundation::Outcome::JetErrorField {
+        name: name.to_string(),
+        value,
+    }
+}
+
+fn build_error_json_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn build_error_text(error: &BuildError) -> String {
@@ -1126,4 +1399,91 @@ fn build_project_error(
     span: Option<Span>,
 ) -> Result<Diagnostic, &'static str> {
     Diagnostic::project_error(code, what, why, fix, span)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::AST::CtReport;
+
+    #[test]
+    fn build_context_failure_keeps_typed_report_facts() {
+        let context = begin_program_build("report-test", CtValue::Unit);
+        let span = Span::new(11, 17);
+        let args = || {
+            vec![
+                CtValue::Str("app".to_string()),
+                CtValue::List(Vec::new()),
+                CtValue::List(Vec::new()),
+            ]
+        };
+
+        let first = eval_program_build_method(
+            &context,
+            "add_executable",
+            args(),
+            None,
+            span,
+            false,
+        )
+        .expect("build context")
+        .expect("first target declaration");
+        assert!(first.is_present());
+
+        let mut failed = eval_program_build_method(
+            &context,
+            "add_executable",
+            args(),
+            None,
+            span,
+            false,
+        )
+        .expect("build context")
+        .expect("duplicate target result");
+        assert!(matches!(failed, CtValue::Failed(CtReport::Told(_))));
+        assert!(failed.add_error_context(
+            "while declaring app".to_string(),
+            "build.jet".to_string(),
+            23,
+        ));
+
+        jet_foundation::Outcome::jet_journey_reset();
+        jet_foundation::Outcome::jet_journey_frame("build.jet", 23, "build", || {
+            "while declaring app".to_string()
+        });
+        let jet_error = failed.to_jet_err().expect("default error carrier");
+        let report = jet_foundation::Outcome::jet_error_report(&jet_error);
+
+        assert_eq!(report.typed_identity.as_deref(), Some("BuildError::DuplicateTargetName"));
+        let details = report.details.as_ref().expect("typed build details");
+        assert_eq!(details.variant, "DuplicateTargetName");
+        assert_eq!(details.fields.len(), 1);
+        assert_eq!(details.fields[0].name, "value");
+        assert_eq!(details.fields[0].value, "\"app\"");
+        assert_eq!(
+            details.source_span.as_ref(),
+            Some(&jet_foundation::Outcome::JetErrorSpan { start: 11, end: 17 })
+        );
+        assert!(report.causes.is_empty());
+        assert_eq!(report.context_frames.len(), 1);
+        assert_eq!(report.context_frames[0].text, "while declaring app");
+        assert_eq!(report.context_frames[0].file, "build.jet");
+        assert_eq!(report.context_frames[0].line, 23);
+        assert_eq!(report.source_journey.len(), 1);
+        assert_eq!(report.source_journey[0].fn_name, "build");
+        assert_eq!(report.source_journey[0].file, "build.jet");
+        assert_eq!(report.source_journey[0].line, 23);
+        assert!(report.to_json().contains(
+            "\"details\":{\"variant\":\"DuplicateTargetName\",\"fields\":{\"value\":\"app\"}"
+        ));
+
+        let diagnostic = build_error_diagnostic_from_value(&failed, Span::new(0, 0))
+            .expect("structured build diagnostic");
+        assert!(matches!(
+            diagnostic.structured,
+            Some(StructuredDiagnostic::BuildError { .. })
+        ));
+
+        abort_program_build(&context);
+    }
 }

@@ -677,7 +677,7 @@ smallest offending source span:
 | E3412 | sema  | `core.net.{method}()` is not available at comptime (only `fetch` is Tier-1) |
 | E3413 | sema  | comptime `fetch` sha256 mismatch — content hash doesn't match the `sha256:` pin (D-CTEFFECT1 / D-NETDEP1=A) |
 | E3414 | sema  | comptime `fetch` failed — bad URL, unsupported scheme, network error, or non-UTF-8 content (D-CTEFFECT1 / D-NETDEP1=A) |
-| E3501 | build | selected root `fn build` has wrong `fn(BuildContext) BuildPlan !` signature (D-BUILDENTRY1) |
+| E3501 | build | selected root `fn build` has wrong `fn(BuildContext) BuildPlan` signature (D-BUILDENTRY1) |
 | E3502 | build | programmable build evaluation, graph validation, or generated-source materialization failed |
 | E3503 | build | root build authority is undeclared, ungated, or denied by effective policy (D-BUILDPOLICY1) |
 | E3504 | build | build action requested authority not granted by CLI/package/workspace policy (D-BUILDPOLICY1) |
@@ -2213,7 +2213,7 @@ failure keeps its What, Why, and Fix lines and ends with
 
 | Code | What | Why | Fix |
 |---|---|---|---|
-| E3501 | `fn build` must take one `BuildContext` and return `BuildPlan !`. | Build authority and graph handoff are one typed contract. A different signature cannot be selected by `jet build` or modeled by the LSP. | Write `fn build(b: BuildContext) BuildPlan !`. |
+| E3501 | `fn build` must take one `BuildContext` and return `BuildPlan`. | Build authority and graph handoff are one typed contract. A different signature cannot be selected by `jet build` or modeled by the LSP. | Write `fn build(b: BuildContext) BuildPlan`. |
 | E3502 | Build plan is invalid, build evaluation returned an error, or generated source could not materialize. | One selected root entry owns one deterministic graph. Handles cannot cross build sessions, outputs need one owner, and generated Jet must become a real file before checking. | Fix the named graph node or generated module; inspect it with `jet inspect graph` and `jet inspect explain-build`. |
 | E3503 | This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy. | Build authority must pass all three independent checks before any probe or action executes. | Declare the effect, gate the ambient operation with `#Impure("reason")`, and grant the effect through CLI/package/workspace policy. |
 | E3504 | Build action `{action}` asks for ungranted `{right}` authority. | Source declaration makes authority auditable but does not grant it. Invocation, package, and workspace policy cap ambient effects independently. | Pass the named `--allow-<effect>` flag for a one-file build, or grant the effect in package/workspace policy. |

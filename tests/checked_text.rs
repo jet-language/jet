@@ -17,7 +17,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = TextError
 
-    fn check(text: String) () !TextError -[]> {
+    fn check(text: String) !TextError -[]> {
         if text == "" { return Err(TextError.Bad) }
         return Ok()
     }
@@ -42,7 +42,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = TextError
 
-    fn check(text: String) () !TextError -[]> {
+    fn check(text: String) !TextError -[]> {
         if text == "hello [1]" || text == "ok" { return Ok() }
         return Err(TextError.Bad)
     }
@@ -79,6 +79,8 @@ fn run() {
 }
 "#;
 
+const TIERS_STDOUT: &str = "hello [1]\nok\nbad rejected\ntrue\nfalse\ntrue\nfalse\n";
+
 const DYNAMIC_ERROR_SOURCE: &str = r#"
 #Error
 enum PatternError { Rejected }
@@ -88,7 +90,7 @@ Pattern :: distinct String
 impl Pattern.CheckedText {
     type Error = PatternError
 
-    fn check(text: String) () !PatternError -[]> {
+    fn check(text: String) !PatternError -[]> {
         if text == "bad" { return Err(PatternError.Rejected) }
         return Ok()
     }
@@ -102,17 +104,17 @@ impl PatternError -> Err {
     return Err("pattern rejected", code: "E_PATTERN", cause: Err("invalid shape"))
 }
 
-fn parse(text: String) Pattern ! -[]> {
+fn parse(text: String) Pattern -[]> {
     pattern :: Pattern.from(text)?
     return Ok(pattern)
 }
 
-fn load(text: String) Pattern ! -[]> {
+fn load(text: String) Pattern -[]> {
     pattern :: parse(text)?("loading pattern")
     return Ok(pattern)
 }
 
-fn run() ! {
+fn run() {
     _ :: load("bad")?
 }
 "#;
@@ -154,7 +156,7 @@ fn malformed_checked_text_impl_reports_the_trait_contract() {
 Pattern :: distinct String
 
 impl Pattern.CheckedText {
-    fn check(text: String) () !Error -[]> { return }
+    fn check(text: String) !Error -[]> { return }
     fn encode_hole<T: Printable>(value: T) String -[]> { return "" }
 }
 
@@ -172,7 +174,7 @@ Pattern :: distinct String
 
 impl Pattern.CheckedText {
     type Error = Error
-    fn check(text: String) () !Error -[]> { return }
+    fn check(text: String) !Error -[]> { return }
     fn encode_hole<T: Printable>(value: T) String -[]> { return "" }
 }
 
@@ -186,12 +188,13 @@ fn run() {
 }
 
 #[test]
-fn checked_text_agrees_across_jit_interpreter_and_aot() {
+fn checked_text_acceptance_matches_comptime_aot_jit_interpreter_and_web() {
     tir_support::assert_tiers_agree(
         "checked_text_tiers",
         TIERS_SOURCE,
-        "hello [1]\nok\nbad rejected\ntrue\nfalse\ntrue\nfalse\n",
+        TIERS_STDOUT,
     );
+    assert_checked_text_web_tier();
 }
 
 #[test]
@@ -236,8 +239,7 @@ fn dynamic_checked_text_from_keeps_the_shared_error_report() {
     }
 }
 
-#[test]
-fn checked_text_web_source_compiles() {
+fn assert_checked_text_web_tier() {
     let output = jet::compile_web_with_path(TIERS_SOURCE, "checked_text_web.jet")
         .expect("ordinary CheckedText source should compile for web");
     let web = output.web.expect("ordinary CheckedText source should produce web artifacts");
@@ -309,6 +311,6 @@ fn checked_text_web_source_compiles() {
     );
     assert_eq!(
         String::from_utf8_lossy(&node.stdout),
-        "hello [1]\nok\nbad rejected\ntrue\nfalse\ntrue\nfalse\n"
+        TIERS_STDOUT
     );
 }

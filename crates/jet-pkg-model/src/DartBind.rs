@@ -558,7 +558,7 @@ fn render_jet(lib: &str, functions: &[Function]) -> String {
         jet_params(&mut out, &f.params);
         out.push(' ');
         out.push_str(f.result.jet());
-        out.push_str(" DartError! -[FFI.Dart]> {\n    result :: abi.");
+        out.push_str(" !DartError -[FFI.Dart]> {\n    result :: abi.");
         out.push_str(&f.jet);
         call_args(&mut out, &f.params);
         out.push_str("\n    code :: abi.take_error()\n    if code == 1 { return Err(DartError.NotInitialized) }\n    if code == 2 { return Err(DartError.CallbackUnavailable) }\n    return Ok(result)\n}\n\n");
@@ -1045,7 +1045,7 @@ mod tests {
         .unwrap();
         let jet = super::render_jet("callbacks", &functions);
         assert!(jet.contains("fn dart_double(value: Int) Int ="));
-        assert!(jet.contains("pub fn dart_double(value: Int) Int DartError! -[FFI.Dart]>"));
+        assert!(jet.contains("pub fn dart_double(value: Int) Int !DartError -[FFI.Dart]>"));
         assert!(jet.contains("fn dart_half(value: Float) Float ="));
         assert!(!jet.contains("=>"));
 

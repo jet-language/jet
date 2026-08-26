@@ -1338,12 +1338,12 @@ fn web_fallible_match_and_option_if_emit_on_js_and_wasm() {
 enum Toggle { On Off }
 
 #Target(JS)
-fn make_result(flag: Bool) Int String! -[]> {
+fn make_result(flag: Bool) Int !String -[]> {
     if flag -> return .Ok(7)
     return .Err("x")
 }
 #Target(JS)
-fn make_opt(flag: Bool) Int? -[]> {
+fn make_opt(flag: Bool) ?Int -[]> {
     if flag -> return .Val(3)
     return .None
 }
@@ -1375,12 +1375,12 @@ fn js_matches_and(flag: Bool) Int -[]> {
     return 0
 }
 #Target(Wasm)
-fn wasm_make_result(flag: Bool) Int String! -[]> {
+fn wasm_make_result(flag: Bool) Int !String -[]> {
     if flag -> return .Ok(7)
     return .Err("x")
 }
 #Target(Wasm)
-fn wasm_make_opt(flag: Bool) Int? -[]> {
+fn wasm_make_opt(flag: Bool) ?Int -[]> {
     if flag -> return .Val(3)
     return .None
 }
@@ -1459,11 +1459,11 @@ impl StoreErr -> Err {
     return Err("store unavailable")
 }
 
-fn read_store() Int StoreErr! -[]> {
+fn read_store() Int !StoreErr -[]> {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() Int ! -[]> {
+fn get_user() Int -[]> {
     value :: read_store()?
     return Ok(value)
 }
@@ -1507,7 +1507,7 @@ enum Packet {
 fn make_packet(n: Int) Packet -> .Data(n)
 
 #Target(JS)
-fn make_opt(n: Int) Int? -> .Val(n)
+fn make_opt(n: Int) ?Int -> .Val(n)
 
 #Target(JS)
 fn bind_opt(n: Int) Int -[]> {
@@ -1569,7 +1569,7 @@ fn web_js_matches_binds_subject_once() {
 enum Toggle { On Off }
 
 #Target(JS)
-fn make_opt(n: Int) Int? -> .Val(n)
+fn make_opt(n: Int) ?Int -> .Val(n)
 
 #Target(JS)
 fn make_toggle() Toggle -> .On
@@ -1735,7 +1735,7 @@ fn web_e3001_context_matches_on_js_and_wasm() {
         (
             "e3001_js_context",
             r#"#Target(JS)
-fn missing() Int? -[]> {
+fn missing() ?Int -[]> {
     return None
 }
 
@@ -1748,7 +1748,7 @@ fn run() {
         (
             "e3001_wasm_context",
             r#"#Target(Wasm)
-fn missing() Int? -[]> {
+fn missing() ?Int -[]> {
     return None
 }
 
@@ -2170,7 +2170,7 @@ try {
     );
 
     let wasm_ok_source = r#"#Target(Web)
-fn run() Int ! -[]> {
+fn run() Int -[]> {
     return Ok(42)
 }
 "#;
@@ -2430,18 +2430,18 @@ fn web_js_try_reaches_typed_edge() {
         return;
     }
     let source = r#"#Target(JS)
-fn load() Int ! -[]> {
+fn load() Int -[]> {
     return Err("try failed", code: "TRYFAIL")
 }
 
 #Target(JS)
-fn read() Int ! -[]> {
+fn read() Int -[]> {
     value :: load()?
     return Ok(value)
 }
 
 #Target(JS)
-fn run() ! {
+fn run() {
     value :: read()?
     print(value)
 }
@@ -2501,18 +2501,18 @@ fn web_wasm_try_returns_typed_journey() {
         return;
     }
     let source = r#"#Target(Wasm)
-fn load() Int ! -[]> {
+fn load() Int -[]> {
     return Err("try failed", code: "TRYFAIL")
 }
 
 #Target(Wasm)
-fn read() Int ! -[]> {
+fn read() Int -[]> {
     value :: load()?
     return Ok(value)
 }
 
 #Target(Wasm)
-fn run() ! {
+fn run() {
     value :: read()?
     print(value)
 }
@@ -2621,16 +2621,16 @@ fn web_two_hop_journey_matches_all_execution_tiers() {
         eprintln!("note: skipping web two-hop journey parity test (need rustc + node)");
         return;
     }
-    let source = r#"fn load() String ! -[]> {
+    let source = r#"fn load() String -[]> {
     return Err("two-hop", code: "TWOHOP")
 }
 
-fn read() String ! -[]> {
+fn read() String -[]> {
     value :: load()? "reading source"
     return Ok(value)
 }
 
-fn run() ! {
+fn run() {
     value :: read()? "running source"
     print(value)
 }

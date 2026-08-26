@@ -1418,9 +1418,9 @@ fn repl_all_complex_binding_shapes_survive_across_turns() {
             "items[0]",
             "counts: [String:Int] :: [\"jet\": 2]",
             "counts[\"jet\"]",
-            "maybe: Int? :: Val(7)",
+            "maybe: ?Int :: Val(7)",
             "maybe ?? 0",
-            "result: Int String! :: Ok(9)",
+            "result: Int !String :: Ok(9)",
             "result ?? 0",
             "state :: State.Ready(11)",
             "state_value(state)",
@@ -1444,7 +1444,7 @@ fn repl_declared_types_survive_empty_and_absent_values() {
     let out = run_transcript(
         &[
             "names: [String] :: []",
-            "missing: String? :: None",
+            "missing: ?String :: None",
             ":type names",
             ":type missing",
             "names.len()",
@@ -1461,7 +1461,7 @@ fn repl_declared_types_survive_empty_and_absent_values() {
         "empty list type collapsed: {out}"
     );
     assert!(
-        out.contains("missing : String?"),
+        out.contains("missing : ?String"),
         "None type collapsed: {out}"
     );
     assert!(
@@ -2301,11 +2301,11 @@ fn shared_semantic_symbols_catalog_numeric_conversions_and_parse() {
     let parse = jet::SemanticSymbols::lookup("Int.parse").expect("Int.parse symbol");
     assert_eq!(
         parse.signature,
-        "Int.parse(text: String) -> Int ParseError!"
+        "Int.parse(text: String) -> Int !ParseError"
     );
     let narrow = jet::SemanticSymbols::lookup("F32.from_float").expect("F32.from_float symbol");
     assert_eq!(narrow.module, "core.numeric");
-    assert!(narrow.signature.ends_with("-> F32 String!"));
+    assert!(narrow.signature.ends_with("-> F32 !String"));
     assert!(jet::SemanticSymbols::lookup("I64.from_f32").is_some());
     assert!(jet::SemanticSymbols::lookup("F64.from_u32").is_some());
 }

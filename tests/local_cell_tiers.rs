@@ -14,11 +14,11 @@ struct Pair {
 }
 
 struct Cache {
-    value: Cell<String?>,
+    value: Cell<?String>,
 }
 
 struct LineCache {
-    value: Cell<[Int]?>,
+    value: Cell<?[Int]>,
 }
 
 fn mapped_read(cell: Cell<Pair>) {
@@ -133,12 +133,12 @@ impl Box {
     }
 }
 
-fn keep_result(value: ^(Int String!)) {
+fn keep_result(value: ^(Int !String)) {
     cell :: Cell.new(value)
     print(cell.read(result -> result ?? 0))
 }
 
-fn ok_result() Int String! {
+fn ok_result() Int !String {
     return Ok(7)
 }
 

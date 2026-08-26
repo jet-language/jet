@@ -53,7 +53,7 @@ fn javascript_sidecar_binds_runs_and_rejects_dynamic_types() {
     );
     let generated = fs::read_to_string(root.join(".jet/bindings/js/ops.jet")).unwrap();
     assert!(generated.contains("jet-ffi-descriptor="));
-    assert!(generated.contains("Int String! -[FFI]>"));
+    assert!(generated.contains("Int !String -[FFI]>"));
     assert!(!generated.contains("=>"));
     assert!(root.join(".jet/bindings/js/libjet_js_ops.a").is_file());
     assert!(root.join(".jet/bindings/js/ops.d.ts").is_file());

@@ -585,7 +585,7 @@ fn render_jet(
         out.push_str("record_id: Int, ");
     }
     out.push_str(&format!(
-        "{}_minor: Int) Int CobolError! -[FFI.Cobol]> {{\n",
+        "{}_minor: Int) Int !CobolError -[FFI.Cobol]> {{\n",
         packed.name
     ));
     if let Some(FieldKind::PackedDecimal { digits, signed, .. }) = Some(&packed.kind) {
@@ -844,7 +844,7 @@ mod tests {
         let l=parse_copybook("       01 X.\n          05 ID PIC 9(6) COMP-5.\n          05 AMOUNT PIC S9(7)V99 COMP-3.\n").unwrap();
         let source = render_jet("payroll", &l, &l.fields[1], Some(&l.fields[0]));
         assert!(source.contains("jet-ffi-descriptor="));
-        assert!(source.contains("Int CobolError! -[FFI.Cobol]>"));
+        assert!(source.contains("Int !CobolError -[FFI.Cobol]>"));
         assert!(source.contains("-> return Err(CobolError.Range)"));
         assert!(!source.contains("=>"));
         assert!(!source.contains(":[FFI.Cobol]"));

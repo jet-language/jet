@@ -7654,28 +7654,50 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                         self.span(),
                                     )
                                 })?;
+                                let default_conversion = matches!(
+                                    func.ret.as_ref(),
+                                    Some(Type::Named(name)) if name == crate::Syntax::TYPE_ERR
+                                )
+                                .then(|| {
+                                    conv_fn
+                                        .strip_prefix("__jet_errconv_")
+                                        .and_then(|stem| stem.split_once("_to_"))
+                                        .map(|(source, target)| {
+                                            (source.to_string(), target.to_string())
+                                        })
+                                })
+                                .flatten();
+                                // A native bridge may already provide a fully
+                                // structured default error. Preserve that report
+                                // across the ordinary conversion function instead
+                                // of flattening its identity and details back to
+                                // display text.
+                                let source_error = default_conversion
+                                    .as_ref()
+                                    .and_then(|_| e.to_jet_err());
                                 let mut child = HashMap::new();
                                 match self.run_func(func, vec![*e], &mut child)? {
-                                    CtValue::Failed(report) => CtValue::Failed(report),
+                                    CtValue::Failed(report) => {
+                                        if let (Some((source, target)), Some(mut error)) =
+                                            (default_conversion, source_error)
+                                        {
+                                            jet_foundation::Outcome::jet_err_apply_conversion(
+                                                &mut error,
+                                                source,
+                                                target,
+                                            );
+                                            CtValue::failed(Box::new(CtValue::from_jet_err(&error)))
+                                        } else {
+                                            CtValue::Failed(report)
+                                        }
+                                    }
                                     other => {
-                                        let default_conversion = matches!(
-                                            func.ret.as_ref(),
-                                            Some(Type::Named(name))
-                                                if name == crate::Syntax::TYPE_ERR
-                                        )
-                                        .then(|| {
-                                            conv_fn
-                                                .strip_prefix("__jet_errconv_")
-                                                .and_then(|stem| stem.split_once("_to_"))
-                                                .map(|(source, target)| {
-                                                    (source.to_string(), target.to_string())
-                                                })
-                                        })
-                                        .flatten();
                                         let other = if let Some((source, target)) =
                                             default_conversion
                                         {
-                                            if let Some(mut error) = other.to_jet_err() {
+                                            if let Some(mut error) =
+                                                source_error.or_else(|| other.to_jet_err())
+                                            {
                                                 jet_foundation::Outcome::jet_err_apply_conversion(
                                                     &mut error,
                                                     source,

@@ -361,7 +361,7 @@ mod tests {
         let descriptor = *binder_descriptor(ForeignLanguage::Py).unwrap();
         let source =
             ForeignBridge::render_scalar_jet("jet_py_math", descriptor, &functions).unwrap();
-        assert!(source.contains("Int String! -[FFI.Py]>"));
+        assert!(source.contains("Int !String -[FFI.Py]>"));
         assert!(!source.contains("=>"));
     }
 }

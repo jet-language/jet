@@ -464,7 +464,7 @@ pub fn clamp(x: Int, lo: Int, hi: Int) => Int {
 pub fn label(prefix: String, n: Int) => String {
     return \"{prefix}:{n}\"
 }
-pub fn checked(value: Int) => Int String! {
+pub fn checked(value: Int) => Int !String {
     if value < 0 {
         return Err(message(value))
     }
@@ -507,7 +507,7 @@ pub fn clamp(x: Int, lo: Int, hi: Int) => Int {
 pub fn label(prefix: String, n: Int) => String {
     return \"{prefix}:{n}\"
 }
-pub fn checked(value: Int) => Int String! {
+pub fn checked(value: Int) => Int !String {
     if value < 0 {
         return Err(message(value))
     }
@@ -721,7 +721,7 @@ fn or_fallback_panic_form() {
         return;
     }
     let src = "\
-fn maybe(n: Int) => (Int?) {
+fn maybe(n: Int) => (?Int) {
     if n > 0 {
         return Val(n)
     }

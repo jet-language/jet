@@ -94,7 +94,7 @@ fn run() {
 #[test]
 fn or_fallback_keeps_sema_rewrites() {
     let src = r#"
-fn maybe() (Int?) {
+fn maybe() (?Int) {
     return None
 }
 
@@ -116,7 +116,7 @@ fn run() {
 #[test]
 fn bare_question_return_uses_default_error() {
     let src = r#"
-fn parse_count(raw: String) Int ! {
+fn parse_count(raw: String) Int {
     if raw == "" {
         return Err("empty")
     }

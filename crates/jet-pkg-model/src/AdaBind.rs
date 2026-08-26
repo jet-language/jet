@@ -392,7 +392,7 @@ fn render_jet(lib: &str, routines: &[Routine]) -> String {
         params_jet(&mut o, &r.params);
         o.push(' ');
         o.push_str(r.result.jet());
-        o.push_str(" AdaError! -[FFI.Ada]> {\n");
+        o.push_str(" !AdaError -[FFI.Ada]> {\n");
         for p in &r.params {
             if let Some(c) = &p.constraint {
                 o.push_str("    if ");
@@ -675,7 +675,7 @@ mod tests {
             }],
         );
         assert!(source.contains("fn double_lat(lat: Float) Float = \"jet_ada_geo_double_lat\""));
-        assert!(source.contains("pub fn double_lat(lat: Float) Float AdaError! -[FFI.Ada]>"));
+        assert!(source.contains("pub fn double_lat(lat: Float) Float !AdaError -[FFI.Ada]>"));
         assert!(source.contains("lat < -90.0 || lat > 90.0"));
         assert!(!source.contains("=>"));
     }

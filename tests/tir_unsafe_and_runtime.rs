@@ -575,7 +575,7 @@ fn run() {
 /// `Expr::MethodCall.resolved_ret` field, read at lowering so the TIR is total
 /// (I3). The emit forms (`(x).abs()`, `(a).min(b)`, `jet_std_random_pick(&(xs))`,
 /// `eprintln!`) reproduce `emit_core_call` byte-for-byte. `random.pick` returns
-/// `Int?` (the element type wrapped in Option), proving the resolved_ret writeback.
+/// `?Int` (the element type wrapped in Option), proving the resolved_ret writeback.
 /// parity: guard tests/tir_unsafe_and_runtime.rs::polymorphic_core_specials
 #[test]
 fn polymorphic_core_specials() {
@@ -1176,7 +1176,7 @@ fn optional_binding_if_condition() {
         return;
     }
     let src = "\
-fn describe(x: Int?) String {
+fn describe(x: ?Int) String {
     if x == Val(n) {
         return \"got {n}\"
     }
@@ -1214,32 +1214,32 @@ fn optional_flow_narrowing_after_none_check() {
         return;
     }
     let src = "\
-fn from_ne(x: Int?) Int {
+fn from_ne(x: ?Int) Int {
     if x != None {
         return x + 1
     }
     return 0
 }
-fn from_else(x: Int?) Int {
+fn from_else(x: ?Int) Int {
     if x == None {
         return 0
     } else {
         return x + 2
     }
 }
-fn and_tail(x: Int?) Int {
+fn and_tail(x: ?Int) Int {
     if x != None && x > 0 {
         return x
     }
     return -1
 }
-fn still_binds(x: Int?) Int {
+fn still_binds(x: ?Int) Int {
     if x == Val(n) {
         return n * 10
     }
     return -2
 }
-fn text_ne(x: String?) String {
+fn text_ne(x: ?String) String {
     if x != None {
         return x
     }
@@ -1285,7 +1285,7 @@ fn run() {
     let field = jet::compile(
         "\
 struct Box {
-    n: Int?
+    n: ?Int
 }
 fn run() {
     b :: Box{ n: Val(1) }
@@ -1302,7 +1302,7 @@ fn run() {
 
     let call = jet::compile(
         "\
-fn get() Int? { return Val(1) }
+fn get() ?Int { return Val(1) }
 fn run() {
     if get() != None {
         print(get() + 1)

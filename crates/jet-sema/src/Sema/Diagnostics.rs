@@ -1501,7 +1501,8 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
 pub(crate) fn is_core_error_family_type(name: &str) -> bool {
     matches!(
         name,
-        "BrowserError"
+        "BuildError"
+            | "BrowserError"
             | "CBORError"
             | "DBError"
             | "DataError"
@@ -1529,6 +1530,7 @@ pub(crate) fn is_core_error_type(name: &str) -> bool {
         name,
         "AllocError"
             | "AuthError"
+            | "BuildError"
             | "BrowserError"
             | "CBORError"
             | "CompilerError"

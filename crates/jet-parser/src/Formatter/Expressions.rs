@@ -1819,8 +1819,6 @@ impl<'a> Fmt<'a> {
                     self.write("?(");
                     self.fmt_expr(note, Prec::Postfix);
                     self.write(")");
-                } else {
-                    self.write("?");
                 }
             }
             Expr::OrFallback {

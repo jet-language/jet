@@ -528,7 +528,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
     params_jet(&mut output, &surface.handle.ctor.params, 0);
     output.push(' ');
     output.push_str(&ty);
-    output.push_str(" PascalError! -> {\n    raw_handle :: abi.");
+    output.push_str(" !PascalError -> {\n    raw_handle :: abi.");
     output.push_str(&surface.handle.ctor.name);
     call_args(&mut output, &surface.handle.ctor.params, 0, None);
     output.push_str(
@@ -550,7 +550,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         }
         output.push_str(") ");
         output.push_str(routine.result.jet());
-        output.push_str(" PascalError! -> {\n    result_value :: abi.");
+        output.push_str(" !PascalError -> {\n    result_value :: abi.");
         output.push_str(&routine.name);
         call_args(&mut output, &routine.params, 1, Some("handle.value"));
         output.push_str(

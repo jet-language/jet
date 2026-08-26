@@ -4,7 +4,7 @@
 // embedded Prelude/CoreLib implementations; sema opens this module once per
 // file and resolves each alias through the ordinary Core call path.
 pub fn print(value: Any)
-pub fn input(prompt: String{""}) String IOError!
+pub fn input(prompt: String{""}) String !IOError
 pub fn panic(message: String)
 pub fn assert(cond: Bool)
 pub fn assert_eq(a: Any, b: Any)
@@ -14,7 +14,7 @@ pub fn assert_eq(a: Any, b: Any)
 // check error, one pure complete-text checker, and one pure generic hole encoder.
 pub trait CheckedText {
     type Error
-    fn check(text: String) () Error! -[]>
+    fn check(text: String) !Error -[]>
     fn encode_hole<T: Printable>(value: T) String -[]>
 }
 

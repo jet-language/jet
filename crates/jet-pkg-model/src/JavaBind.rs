@@ -403,7 +403,7 @@ fn render_jet(lib: &str, s: &Surface) -> String {
     o.push_str(" as abi\n\npub struct Handle { value: Int }\npub enum JavaError { Exception }\n\n");
     o.push_str("pub fn new(");
     params_jet(&mut o, &s.ctor);
-    o.push_str(") Handle JavaError! -[FFI.Java]> {\n    value :: abi.new(");
+    o.push_str(") Handle !JavaError -[FFI.Java]> {\n    value :: abi.new(");
     args(&mut o, s.ctor.len(), 0);
     o.push_str(")\n    if abi.take_error() != 0 { return Err(JavaError.Exception) }\n    return Ok(Handle{ value: value })\n}\n\n");
     o.push_str("pub fn close(^handle: Handle) -[FFI.Java]> {}\n\nimpl Handle.Close {\n    fn close(^self) { abi.close(self.value) }\n}\n\n");
@@ -422,7 +422,7 @@ fn render_jet(lib: &str, s: &Surface) -> String {
         if !matches!(m.result, Scalar::Void) {
             o.push(' ');
             o.push_str(m.result.jet());
-            o.push_str(" JavaError!");
+            o.push_str(" !JavaError");
         }
         o.push_str(" -[FFI.Java]> {\n    ");
         if !matches!(m.result, Scalar::Void) {

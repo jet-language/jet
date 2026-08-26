@@ -71,6 +71,8 @@ const AGENT_RUNNER_MARKERS = [
   "warm.output.stdout, cold.output.stdout",
   "input_hashes(&input), before",
   "scratch_output_violations(",
+  "fn pinned_adapter_versions()",
+  "is not the committed pinned shipped tool",
 ];
 const CORE_API_REVIEW_CHECKS = [
   "workflow-closure",
@@ -78,6 +80,29 @@ const CORE_API_REVIEW_CHECKS = [
   "reasoning-evidence",
   "syntax-coverage",
   "fixture-selection",
+];
+const CORE_API_REVIEW_MARKERS = [
+  "fn core_surface_ledger_matches_its_sources()",
+  "let (ok, stdout, stderr) = run(\"--check\");",
+  "accepted-jet-wins=",
+  "core API fixture execution: deterministic; pinned-tools; cold-warm; exact-stdout; input-unchanged; scratch-closed",
+  "core API fixtures: independent acceptance verified tasks=",
+  "core API fresh review: fresh-context-release-check; checks=workflow-closure,construct-classifications,reasoning-evidence,syntax-coverage,fixture-selection",
+  "fn core_surface_ledger_checker_rejects_hostile_fixtures()",
+  "Core API workflow omits evidence fields",
+  "Core API fixture loses deterministic runner binding",
+  "Core API fixture selection drifts",
+  "fn core_api_syntax_is_taught_by_reference_editor_and_diagnostic_surfaces()",
+];
+const CORE_API_SYNTAX_MARKERS = [
+  "values: ...String",
+  "[...tags",
+  "Stream<Int>",
+  "yield i",
+  "delay: Int",
+  "pub policy audit",
+  "wrap(call)",
+  "#Policy(",
 ];
 const AGENT_RUNNER = "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks";
 const AGENT_SCORING = "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed";
@@ -3152,37 +3177,9 @@ function validateCoreApiFixtureExecution(fixture) {
   }
 }
 
-function validateCoreApiGate(ledger) {
-  const gate = ledger.coreApiGate;
-  if (!gate || gate.schemaVersion !== 1) {
-    throw new Error("missing Core API gate schema");
-  }
-  if (gate.ownerCard !== 1398 || gate.policyDocument !== CORE_API_LAWS_PATH ||
-      gate.policyAnchor !== "## Competitive Core API gate") {
-    throw new Error("Core API gate is not attached to the existing Core API rubric");
-  }
-  if (gate.inventory.source !== "rows" || gate.inventory.manualWorkflowInventory !== false) {
-    throw new Error("Core API gate must consume ledger rows as its only workflow inventory");
-  }
-  const policy = readFileSync(join(ROOT, CORE_API_LAWS_PATH), "utf8");
-  if ((policy.match(/^## Competitive Core API gate\b.*$/gm) || []).length !== 1 ||
-      !policy.includes("Python is the calibration arm") ||
-      !policy.includes("Raw counts are evidence, not a universal ratio") ||
-      !policy.includes("Incidental ceremony fails") ||
-      !policy.includes("coreApiGate.workflowManifest")) {
-    throw new Error("Core API rubric is missing its single Python superiority gate");
-  }
+function validateCoreApiSyntaxCoverage() {
   const syntax = readFileSync(join(ROOT, SYNTAX_REFERENCE_PATH), "utf8");
-  for (const marker of [
-    "values: ...String",
-    "[...tags",
-    "Stream<Int>",
-    "yield i",
-    "delay: Int",
-    "pub policy audit",
-    "wrap(call)",
-    "#Policy(",
-  ]) {
+  for (const marker of CORE_API_SYNTAX_MARKERS) {
     if (!syntax.includes(marker)) {
       throw new Error("syntax reference does not teach Core gate form: " + marker);
     }
@@ -3216,6 +3213,92 @@ function validateCoreApiGate(ledger) {
       }
     }
   }
+}
+
+function validateFreshReview(ledger) {
+  const gate = ledger.coreApiGate;
+  const review = gate.freshReview;
+  const reviewSource = read(CORE_API_REVIEW_TEST_PATH);
+  for (const marker of CORE_API_REVIEW_MARKERS) {
+    if (!reviewSource.includes(marker)) {
+      throw new Error("fresh Core API review lost check marker: " + marker);
+    }
+  }
+
+  const checks = {
+    "workflow-closure": function () {
+      const rowIds = new Set(ledger.rows.map(function (row) { return row.id; }));
+      const workflowIds = new Set();
+      for (const workflow of gate.workflowManifest) {
+        if (!workflow || !nonEmpty(workflow.id) || workflowIds.has(workflow.id) ||
+            !rowIds.has(workflow.id) || workflow.task !== "core-api/" + workflow.id ||
+            !workflow.input || workflow.input.row !== workflow.id) {
+          throw new Error("fresh Core API review found workflow-closure drift");
+        }
+        workflowIds.add(workflow.id);
+      }
+      if (workflowIds.size !== rowIds.size) {
+        throw new Error("fresh Core API review found workflow-closure drift");
+      }
+    },
+    "construct-classifications": function () {
+      for (const workflow of gate.workflowManifest) {
+        if (workflow.evidence.status !== "measured") continue;
+        for (const construct of workflow.evidence.extraConstructs) {
+          if (!construct || !EVIDENCE_CLASSIFICATIONS.has(construct.classification) ||
+              construct.classification === "incidental-ceremony" ||
+              !["claimedClarity", "reasoningBenefit", "localFactBenefit", "guaranteeBenefit",
+                "expertControlBenefit"].some(function (field) { return nonEmpty(construct[field]); })) {
+            throw new Error("fresh Core API review found construct-classification drift: " + workflow.id);
+          }
+        }
+      }
+    },
+    "reasoning-evidence": function () {
+      for (const workflow of gate.workflowManifest) {
+        if (workflow.evidence.status !== "measured") continue;
+        const burden = workflow.evidence.reasoningBurden;
+        if (!burden || !["better", "equal", "worse"].includes(burden.status) ||
+            !nonEmpty(burden.evidence) ||
+            (burden.status === "worse" && workflow.evidence.jetWin.compensates !== true)) {
+          throw new Error("fresh Core API review found reasoning-evidence drift: " + workflow.id);
+        }
+      }
+    },
+    "syntax-coverage": validateCoreApiSyntaxCoverage,
+    "fixture-selection": function () {
+      validateCoreApiFixtureExecution(gate.fixtureContract);
+    },
+  };
+  for (const name of review.checks) {
+    if (typeof checks[name] !== "function") {
+      throw new Error("fresh Core API review names an unknown check: " + name);
+    }
+    checks[name]();
+  }
+}
+
+function validateCoreApiGate(ledger) {
+  const gate = ledger.coreApiGate;
+  if (!gate || gate.schemaVersion !== 1) {
+    throw new Error("missing Core API gate schema");
+  }
+  if (gate.ownerCard !== 1398 || gate.policyDocument !== CORE_API_LAWS_PATH ||
+      gate.policyAnchor !== "## Competitive Core API gate") {
+    throw new Error("Core API gate is not attached to the existing Core API rubric");
+  }
+  if (gate.inventory.source !== "rows" || gate.inventory.manualWorkflowInventory !== false) {
+    throw new Error("Core API gate must consume ledger rows as its only workflow inventory");
+  }
+  const policy = readFileSync(join(ROOT, CORE_API_LAWS_PATH), "utf8");
+  if ((policy.match(/^## Competitive Core API gate\b.*$/gm) || []).length !== 1 ||
+      !policy.includes("Python is the calibration arm") ||
+      !policy.includes("Raw counts are evidence, not a universal ratio") ||
+      !policy.includes("Incidental ceremony fails") ||
+      !policy.includes("coreApiGate.workflowManifest")) {
+    throw new Error("Core API rubric is missing its single Python superiority gate");
+  }
+  validateCoreApiSyntaxCoverage();
   const rowIds = new Set(ledger.rows.map(function (row) { return row.id; }));
   const workflows = gate.workflowManifest;
   if (!Array.isArray(workflows) || workflows.length !== rowIds.size) {
@@ -3370,6 +3453,7 @@ function validateCoreApiGate(ledger) {
     }
   }
   validateCoreApiFixtureExecution(fixture);
+  validateFreshReview(ledger);
 }
 
 function validateSurfaces(ledger, surfaces) {

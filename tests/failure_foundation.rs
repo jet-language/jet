@@ -63,7 +63,7 @@ fn contextual_source() Int -> Err("context", code: "E_CONTEXT", cause: Err("root
 fn contextual() Int -> contextual_source()?("loading")
 
 // Optional success still rides the Result-shaped carrier.
-fn optional_success(value: Int) ?Int ! -> {
+fn optional_success(value: Int) ?Int -> {
     if value == 0 {
         return None
     }
@@ -71,7 +71,7 @@ fn optional_success(value: Int) ?Int ! -> {
 }
 
 // Unit success still propagates a failure through the same carrier.
-fn unit_success(fail: Bool) ! {
+fn unit_success(fail: Bool) {
     if fail {
         return Err("unit")
     }
@@ -83,10 +83,10 @@ fn unit_caller(fail: Bool) Int -> {
 }
 
 // Function values retain their fallible contract.
-fn apply(callback: fn(Int) Int !, value: Int) Int ! -> callback(value)
+fn apply(callback: fn(Int) Int, value: Int) Int -> callback(value)
 
 // Generic call results use the same automatic propagation rule.
-fn generic_forward<T>(value: T) T ! -> value
+fn generic_forward<T>(value: T) T -> value
 
 fn generic_caller(value: Int) Int -> generic_forward<Int>(implicit(value))
 

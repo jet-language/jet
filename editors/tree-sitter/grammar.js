@@ -6,7 +6,8 @@
 // (Zed), not full compilation: it is permissive where the real parser is
 // strict, but every keyword/sigil/marker it names is a *current* one. Retired
 // spellings (`val`/`var`, `mut`/`take`/`view`, `when`/`switch`/`while`/
-// `for`, bare `test`/`pure`/`todo`) are deliberately NOT recognized here.
+// `for`, bare `test`/`pure`/`todo`, and retired failure spellings are
+// deliberately NOT recognized here.
 //
 // Run `tree-sitter generate` in this directory after editing, then rebuild the
 // wasm via editors/zed/install.sh (FORCE=1).
@@ -34,6 +35,8 @@ module.exports = grammar({
     [$._expr, $.list_pattern],
     [$._type, $._expr],
     [$.capability_type, $.union_type],
+    [$.option_type, $.union_type],
+    [$.fallible_type],
     [$.loop_stmt, $._loop_head],
     [$._expr, $.if_expr],
     [$.named_type_field, $.lambda_param],
@@ -277,6 +280,7 @@ module.exports = grammar({
         $.option_type,
         $.list_type,
         $.map_type,
+        $.fallible_type,
       ),
 
     // ── Extern (S50) ───────────────────────────────────────────────────────
@@ -290,17 +294,12 @@ module.exports = grammar({
         "fn",
         field("name", choice($.identifier, $.type_identifier)),
         $.param_list,
-        optional(
-          choice(
-            field("return_type", $._type),
-            prec.right(seq("?", optional(field("error_type", $._type)))),
-          ),
-        ),
+        optional(field("return_type", $._type)),
         optional(seq("=", field("rust_path", $.string_literal))),
       ),
 
     // ── Function definition (S1) ───────────────────────────────────────────
-    // Leading applied rules plus the bare result and effect-row forms.
+    // Leading applied rules plus the implicit result and effect-row forms.
     function_def: ($) =>
       seq(
         repeat(choice($._marker, $._lower_marker)),
@@ -315,7 +314,6 @@ module.exports = grammar({
             optional($.effect_arrow),
           ),
           $.effect_arrow,
-          seq("?", optional(field("error_type", $._type))),
         )),
         choice(seq("->", field("body", choice($.block, $._expr))), $.block),
       ),
@@ -675,7 +673,6 @@ module.exports = grammar({
         "String",
         "Char",
         "()",
-        "Error",
         "Err",
         "I8",
         "I16",
@@ -701,21 +698,35 @@ module.exports = grammar({
         ">",
       ),
 
-    // `T?` optional (S32).
-    option_type: ($) => prec(2, seq($._type, "?")),
-
-    // D-ERRSUFFIX1=B: `[Success?] [ErrorUnion!]`. Tree-sitter does not retain
-    // whitespace, so the compiler owns the tight-vs-separated `!` distinction;
-    // this grammar only needs to preserve the suffix roles and grouping.
-    error_suffix: ($) =>
-      prec(3, seq(choice($.type_identifier, $.generic_type, $.paren_type), "!")),
-    fallible_type: ($) => prec.left(1, choice(
-      seq($._type, "?", $.error_suffix),
-      seq($._type, "?", "!"),
-      seq($._type, $.error_suffix),
-      $.error_suffix,
-      "!",
-    )),
+    // D-FAILURE-FOUNDATION1=A: `?Success` is optional success; an explicit
+    // failure contract is `!Error` or `!(E1 | E2)`. The omitted contract is
+    // implicit `Err` and has no source spelling.
+    option_type: ($) => prec(2, seq("?", $._type)),
+    error_contract: ($) =>
+      prec(
+        3,
+        seq(
+          "!",
+          choice(
+            $.type_identifier,
+            $.generic_type,
+            $.list_type,
+            $.map_type,
+            $.fn_type,
+            $.tuple_type,
+            $.paren_type,
+          ),
+        ),
+      ),
+    fallible_type: ($) =>
+      prec.left(
+        1,
+        choice(
+          seq("?", $._type, $.error_contract),
+          seq($._type, $.error_contract),
+          $.error_contract,
+        ),
+      ),
 
     // D-UNIONTYPE1=A: closed structural sum `A | B | …`.
     union_type: ($) => prec.left(2, seq($._type, "|", $._type)),
@@ -741,7 +752,6 @@ module.exports = grammar({
         optional(choice(
           seq($._type, optional($.effect_arrow)),
           $.effect_arrow,
-          seq("?", optional($._type)),
         )),
       )),
 
@@ -1408,8 +1418,10 @@ module.exports = grammar({
 
     unary_expr: ($) => prec.right(9, seq(choice("-", "!"), $._expr)),
 
-    // Postfix `?` propagation (S7).
-    try_expr: ($) => prec.left(5, seq($._expr, "?")),
+    // D-FAILURE-FOUNDATION1=A / D-FAIL-CTX1=A: only contextual `?(text)` is
+    // a postfix journey form; plain fallible calls propagate implicitly.
+    try_expr: ($) =>
+      prec.left(5, seq($._expr, "?", "(", $._expr, ")")),
 
     // D-RESULT-DECON2=B: one exhaustive Result handler. The contextual
     // `?`/`!` pair is distinct from postfix propagation, optional chaining,

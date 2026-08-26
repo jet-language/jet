@@ -593,7 +593,7 @@ fn absish(n: Int) Int {
     return a + b
 }
 
-fn stamp(path: String) String ! -[FS]> {
+fn stamp(path: String) String -[FS]> {
     return path
 }
 

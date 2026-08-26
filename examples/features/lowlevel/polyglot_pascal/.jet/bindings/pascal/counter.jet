@@ -33,14 +33,14 @@ pub fn add_float(a: Float, b: Float) Float -> {
     return abi.add_float(a, b)
 }
 
-pub fn counter_new(value: Int) Counter PascalError! -> {
+pub fn counter_new(value: Int) Counter !PascalError -> {
     raw_handle :: abi.counter_new(value)
     code :: abi.take_error()
     if code != 0 -> return Err(error(code))
     return Ok(Counter{value: raw_handle})
 }
 
-pub fn counter_add(handle: Counter, delta: Int) Int PascalError! -> {
+pub fn counter_add(handle: Counter, delta: Int) Int !PascalError -> {
     result_value :: abi.counter_add(handle.value, delta)
     code :: abi.take_error()
     if code != 0 -> return Err(error(code))

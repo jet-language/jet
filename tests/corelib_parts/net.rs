@@ -785,11 +785,11 @@ fn core_net_tcp_implements_nominal_io_reader_writer() {
 use core.net as net
 use core.tasks as tasks
 
-fn receive<T: Reader>(&stream: T, limit: Int) [U8] IOError! -[IO]> {
+fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {
     return stream.read(limit)
 }
 
-fn send_four<T: Writer>(&stream: T) Int IOError! -[IO]> {
+fn send_four<T: Writer>(&stream: T) Int !IOError -[IO]> {
     stream.write_all([1, 2, 3, 4])?
     return .Ok(4)
 }
@@ -838,11 +838,11 @@ fn core_net_unix_stream_implements_nominal_io_reader_writer() {
 use core.net as net
 use core.tasks as tasks
 
-fn receive<T: Reader>(&stream: T, limit: Int) [U8] IOError! -[IO]> {{
+fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {{
     return stream.read(limit)
 }}
 
-fn send_four<T: Writer>(&stream: T) Int IOError! -[IO]> {{
+fn send_four<T: Writer>(&stream: T) Int !IOError -[IO]> {{
     first :: stream.write([1, 2])?
     stream.write_all([3, 4])?
     return .Ok(first)
@@ -1022,7 +1022,7 @@ use core.files as fs
 use core.net as net
 use core.process as process
 
-fn receive<T: Reader>(&stream: T, limit: Int) [U8] IOError! -[IO]> {
+fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {
     return stream.read(limit)
 }
 
@@ -1134,7 +1134,7 @@ fn activate_core() String -[IO]> {
     return input() ?? ""
 }
 
-fn fail() Int IOError! -[]> {
+fn fail() Int !IOError -[]> {
     return .Err(IOError.InvalidInput(IOContext{
         operation: .Read,
         resource: None,
@@ -1143,7 +1143,7 @@ fn fail() Int IOError! -[]> {
     }))
 }
 
-fn fail_other() Int IOError! -[]> {
+fn fail_other() Int !IOError -[]> {
     return .Err(IOError.Other(IOContext{
         cause: Val("denied"),
         os_code: Val(13),
@@ -1453,12 +1453,12 @@ fn core_tls_byte_stream_runs_real_local_handshake_and_close_notify() {
 use core.net as net
 use core.net.tls as tls
 
-fn receive<T: Reader>(&stream: T, limit: Int) [U8] IOError! -[IO]> {
+fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {
     return stream.read(limit)
 }
 
 
-fn send<T: Writer>(&stream: T, bytes: [U8]) Int IOError! -[IO]> {
+fn send<T: Writer>(&stream: T, bytes: [U8]) Int !IOError -[IO]> {
     empty_count :: stream.write([])?
     stream.write_all(bytes)?
     return .Ok(empty_count)

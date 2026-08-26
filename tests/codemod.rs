@@ -579,11 +579,11 @@ fn typed_ast_type_nodes_cover_params_returns_fields_distincts_and_alias_targets(
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(
         &source,
-        "struct Box { value: Int }\nCount :: distinct Int;\nalias ResultOf<T> :: Int Int!\nfn convert(value: Int) Int { return value }\nfn run() {}\n",
+        "struct Box { value: Int }\nCount :: distinct Int;\nalias ResultOf<T> :: Int !Int\nfn convert(value: Int) Int { return value }\nfn run() {}\n",
     )
     .unwrap();
     let object = project.join("types.codemod.json");
-    fs::write(&object, "{\"version\":2,\"name\":\"TypeCoverage\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"alias-target\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int Int!\",\"replace\":\"Float Float!\",\"matches\":1},{\"id\":\"simple-types\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int\",\"replace\":\"Float\",\"matches\":4}]}\n").unwrap();
+    fs::write(&object, "{\"version\":2,\"name\":\"TypeCoverage\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"alias-target\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int !Int\",\"replace\":\"Float !Float\",\"matches\":1},{\"id\":\"simple-types\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int\",\"replace\":\"Float\",\"matches\":4}]}\n").unwrap();
     let output = Command::new(jet())
         .args(["inspect", "codemod"])
         .arg(object.to_str().unwrap())

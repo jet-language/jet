@@ -436,12 +436,12 @@ fn lua_bind_runs_embedded_vm_and_recovers_after_hostile_calls() {
     assert!(
         generated.contains("pub struct TableView")
             && generated.contains(
-                "pub fn counters_view(session: Session, deadline_ms: Int) TableView LuaError! ->"
+                "pub fn counters_view(session: Session, deadline_ms: Int) TableView !LuaError ->"
             )
             && generated
-                .contains("pub fn view_get_int(view: TableView, key: String) Int LuaError! ->")
+                .contains("pub fn view_get_int(view: TableView, key: String) Int !LuaError ->")
             && generated.contains(
-                "pub fn view_set_int(view: TableView, key: String, value: Int) Bool LuaError! ->"
+                "pub fn view_set_int(view: TableView, key: String, value: Int) Bool !LuaError ->"
             )
     );
     let run = Command::new(jet())

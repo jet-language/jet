@@ -1282,8 +1282,13 @@ impl<'a> Checker<'a> {
     /// source level, but its Result carrier is transparent in ordinary value
     /// positions. Elaborate that one rule into the existing `Try` node so
     /// lowering, conversion, context frames, and all engines keep one path.
-    fn auto_propagate_call(&mut self, e: &mut Expr, result: Option<Type>) -> Option<Type> {
-        if self.failure_auto_depth != 0
+    pub(crate) fn auto_propagate_call(
+        &mut self,
+        e: &mut Expr,
+        result: Option<Type>,
+    ) -> Option<Type> {
+        if self.compiler_generated
+            || self.failure_auto_depth != 0
             || !matches!(
                 e.without_parens(),
                 Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }

@@ -35,6 +35,8 @@ use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
 mod common;
+#[path = "support/case_law.rs"]
+mod case_law;
 use common::{
     fixture_filter, fixture_matches, jetpack_bin, normalize_fixture_selector, unified_diff,
     unique_tmp,
@@ -1063,6 +1065,10 @@ enum UpdateSelector {
 /// carries `UPDATE_EXPECT_REASON` — the compiler change that justifies the new
 /// output. 6fd88282b had none: zero crate source changed and 122 contracts moved.
 fn update_selector() -> UpdateSelector {
+    // Snapshot writes and ordinary comparisons share this gate. A case-law
+    // violation must fail before any diagnostic contract can be blessed.
+    case_law::assert_user_facing_case_law();
+
     match std::env::var("UPDATE_EXPECT") {
         Err(_) => UpdateSelector::None,
         Ok(value) if value.trim() == "1" => {

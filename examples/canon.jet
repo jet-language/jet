@@ -61,17 +61,17 @@ fn day_kind(day: String) String -> {
     }
 }
 
-// --- errors: `T? E!` / `E!`, ok/err, `?` propagate, `??` fallback -----------
+// --- errors: `?Success`, `!Error`, `!(E1 | E2)`, ok/err, `?` propagate, `??` fallback -----------
 enum ParseError {
     Empty
 }
 
-fn parse_age(raw: String) Int ParseError! -> {
+fn parse_age(raw: String) Int !ParseError -> {
     if raw == "" -> return Err(ParseError.Empty)
     return Ok(7)
 }
 
-fn double_age(raw: String) Int ParseError! -> {
+fn double_age(raw: String) Int !ParseError -> {
     n :: parse_age(raw)?
     return Ok(n * 2)
 }
@@ -122,7 +122,7 @@ struct ServeArgs {
 
 // --- stream parsing: `Reader.over` / `Cursor.over` / `take_pattern` -------
 // D-SHIFT1: the "shift" kernel for linear stream parsing — every read
-// advances position and returns a suffix-zone result such as `U32 String!`, never panics or truncates silently.
+// advances position and returns a result such as `U32 !String`, never panics or truncates silently.
 fn parse_packet() String -> {
     packet :: [U8]{42, 0, 0, 0, 3, 0, 16, 32, 48}
     r :: Reader.over(packet)
@@ -142,7 +142,7 @@ fn parse_incident(line: String) String -> {
 
 // --- decode-time migration: one canonical `decode<T>` result ---------------
 // D-VALIDATE-DECODE1=B: published-schema migrations run silently inside the
-// one `T [FieldError]!` decode contract.
+// one `![FieldError]` decode contract.
 #[PublishedSchema, Codable]
 struct Account {
     id: Int

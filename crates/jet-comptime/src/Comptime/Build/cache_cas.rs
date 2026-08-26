@@ -1375,6 +1375,7 @@ impl RemoteCacheTransport {
         self.require_worker_identity()?;
         self.validate_policy_identity(policy)?;
         self.validate_proof_for_key(policy, &record.key, RemoteActionRequest::CacheWrite)?;
+        validate_action_result_record(record)?;
         validate_action_key(&record.key)?;
         validate_remote_count(record.outputs.len(), "cache outputs")?;
         for output in &record.outputs {
@@ -2674,7 +2675,7 @@ fn validate_unique_remote_paths<'a>(
     Ok(())
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
+pub(super) fn hex_encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
         out.push_str(&format!("{byte:02x}"));
@@ -2682,7 +2683,7 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-fn hex_decode(value: &str) -> Result<Vec<u8>, RemoteCacheError> {
+pub(super) fn hex_decode(value: &str) -> Result<Vec<u8>, RemoteCacheError> {
     if value.len() % 2 != 0 {
         return Err(RemoteCacheError::InvalidRecord(
             "hex field has odd length".to_string(),
@@ -2878,11 +2879,17 @@ fn encode_remote_record(record: &ActionResultRecord) -> String {
         ActionCacheStatus::Hit(reason) => format!("hit:{reason:?}"),
         ActionCacheStatus::Miss(reason) => format!("miss:{reason:?}"),
     };
+    let failure = record
+        .failure_report
+        .as_ref()
+        .map(|report| hex_encode(report.to_json().as_bytes()))
+        .unwrap_or_default();
     let mut encoded = format!(
-        "version=1\nkey={}\noutcome={}\nstatus={}\noutputs={}\n",
+        "version=2\nkey={}\noutcome={}\nstatus={}\nfailure={}\noutputs={}\n",
         hex_encode(record.key.as_str().as_bytes()),
         outcome,
         status,
+        failure,
         record.outputs.len()
     );
     for output in &record.outputs {
@@ -2909,6 +2916,7 @@ fn decode_remote_record(bytes: &[u8]) -> Result<ActionResultRecord, RemoteCacheE
     let mut key = None;
     let mut outcome = None;
     let mut status = None;
+    let mut failure_report = None;
     let mut output_count = None;
     let mut outputs = Vec::new();
     for line in text.lines() {
@@ -2936,6 +2944,25 @@ fn decode_remote_record(bytes: &[u8]) -> Result<ActionResultRecord, RemoteCacheE
                 return Err(duplicate_remote_field("status"));
             }
             status = Some(parse_remote_status(value)?);
+        } else if let Some(value) = line.strip_prefix("failure=") {
+            if !seen.insert("failure") {
+                return Err(duplicate_remote_field("failure"));
+            }
+            if !value.is_empty() {
+                let bytes = hex_decode(value)?;
+                let text = String::from_utf8(bytes).map_err(|_| {
+                    RemoteCacheError::InvalidRecord(
+                        "cache failure report is not UTF-8".to_string(),
+                    )
+                })?;
+                failure_report = Some(
+                    jet_foundation::Outcome::JetErrorReport::from_json(&text).map_err(|error| {
+                        RemoteCacheError::InvalidRecord(format!(
+                            "cache failure report is invalid: {error}"
+                        ))
+                    })?,
+                );
+            }
         } else if let Some(value) = line.strip_prefix("outputs=") {
             if !seen.insert("outputs") {
                 return Err(duplicate_remote_field("outputs"));
@@ -2963,7 +2990,7 @@ fn decode_remote_record(bytes: &[u8]) -> Result<ActionResultRecord, RemoteCacheE
             )));
         }
     }
-    if version != Some(1) || output_count != Some(outputs.len()) {
+    if version != Some(2) || output_count != Some(outputs.len()) {
         return Err(RemoteCacheError::InvalidRecord(
             "cache record version or output count is invalid".to_string(),
         ));
@@ -2971,18 +2998,37 @@ fn decode_remote_record(bytes: &[u8]) -> Result<ActionResultRecord, RemoteCacheE
     let key =
         key.ok_or_else(|| RemoteCacheError::InvalidRecord("missing action key".to_string()))?;
     validate_action_key(&key)?;
-    Ok(ActionResultRecord {
+    let record = ActionResultRecord {
         key,
         outcome: outcome
             .ok_or_else(|| RemoteCacheError::InvalidRecord("missing action outcome".to_string()))?,
         outputs,
+        failure_report,
         provenance: ActionCacheProvenance {
             status: status.ok_or_else(|| {
                 RemoteCacheError::InvalidRecord("missing cache status".to_string())
             })?,
             remote_policy: RemoteCachePolicy::disabled_until_grant_and_sandbox_proof(),
         },
-    })
+    };
+    validate_action_result_record(&record)?;
+    Ok(record)
+}
+
+fn validate_action_result_record(record: &ActionResultRecord) -> Result<(), RemoteCacheError> {
+    match (&record.outcome, &record.failure_report) {
+        (ActionOutcome::Failed { .. }, Some(_)) if record.outputs.is_empty() => Ok(()),
+        (ActionOutcome::Failed { .. }, None) => Err(RemoteCacheError::InvalidRecord(
+            "failed action record has no structured failure report".to_string(),
+        )),
+        (ActionOutcome::Failed { .. }, Some(_)) => Err(RemoteCacheError::InvalidRecord(
+            "failed action record contains outputs".to_string(),
+        )),
+        (_, Some(_)) => Err(RemoteCacheError::InvalidRecord(
+            "successful action record contains a failure report".to_string(),
+        )),
+        _ => Ok(()),
+    }
 }
 
 fn duplicate_remote_field(field: &str) -> RemoteCacheError {
@@ -3066,6 +3112,9 @@ pub struct ActionResultRecord {
     pub key: ActionKey,
     pub outcome: ActionOutcome,
     pub outputs: Vec<ActionOutputRecord>,
+    /// A failed action carries the same structured report that reached the
+    /// build edge. Successful records never carry a failure report.
+    pub failure_report: Option<jet_foundation::Outcome::JetErrorReport>,
     pub provenance: ActionCacheProvenance,
 }
 
@@ -3155,6 +3204,7 @@ impl LocalCas {
             key,
             outcome,
             outputs,
+            failure_report: None,
             provenance,
         })
     }

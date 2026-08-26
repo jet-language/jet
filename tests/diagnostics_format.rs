@@ -8,6 +8,8 @@
 //! Run: `cargo test --test diagnostics_format`
 
 mod common;
+#[path = "support/case_law.rs"]
+mod case_law;
 
 use std::fs;
 use std::path::PathBuf;
@@ -67,10 +69,10 @@ fn every_typed_diagnostic_line_uses_ratified_sentence_case() {
         }
         rows += 1;
         for (name, value) in [("What", fields[7]), ("Why", fields[8]), ("Fix", fields[9])] {
-            if let Some((start, end)) = first_diagnostic_prose_token(value) {
+            if let Some((start, end)) = case_law::first_diagnostic_prose_token(value) {
                 let token = &value[start..end];
                 if token.chars().next().is_some_and(|ch| ch.is_ascii_uppercase())
-                    && !diagnostic_token_keeps_case(token)
+                    && !case_law::diagnostic_token_keeps_case(token)
                 {
                     violations.push(format!(
                         "Diagnostics.jet:{} {} {} starts with uppercase prose `{token}`",
@@ -133,72 +135,109 @@ fn diagnostic_case_validator_preserves_code_fragments_and_flags() {
     }
 }
 
-fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {
-    let mut offset = 0;
-    while offset < input.len() {
-        let rest = &input[offset..];
-        let ch = rest.chars().next()?;
-        if ch.is_whitespace() || matches!(ch, '*' | '~' | '_') {
-            offset += ch.len_utf8();
+#[test]
+fn diagnostic_case_validator_excludes_non_prose_tokens() {
+    for (kind, input) in [
+        ("identifier", "UserId has no matching field"),
+        ("flag", "--offline forbids network access"),
+        ("path", "src/Main.jet is not reachable"),
+        ("path", "Main.jet is not reachable"),
+        ("ref", "package@Source#Version is not available"),
+        ("keyword", "fn is the only declaration form"),
+        ("JSON key", r#"{"SomeKey":"SomeValue"}"#),
+    ] {
+        let Some((start, end)) = case_law::first_diagnostic_prose_token(input) else {
             continue;
-        }
-        if matches!(ch, '`' | '"' | '\'') {
-            let after = &rest[ch.len_utf8()..];
-            if let Some(close) = after.find(ch) {
-                offset += ch.len_utf8() + close + ch.len_utf8();
-                continue;
-            }
-        }
-        if ch == '{' {
-            if let Some(close) = rest.find('}') {
-                offset += close + 1;
-                continue;
-            }
-        }
-        let start = offset;
-        let end = rest
-            .find(|value: char| {
-                value.is_whitespace()
-                    || matches!(value, ',' | '.' | ';' | ':' | '(' | ')' | '[' | ']' | '!')
-            })
-            .map_or(input.len(), |relative| offset + relative);
+        };
         let token = &input[start..end];
-        if token.is_empty() {
-            offset += ch.len_utf8();
-            continue;
-        }
-        offset = end;
-        if diagnostic_token_keeps_case(token) {
-            continue;
-        }
-        return Some((start, end));
+        assert!(
+            !token.chars().next().is_some_and(|ch| ch.is_ascii_uppercase())
+                || case_law::diagnostic_token_keeps_case(token),
+            "{kind} was treated as prose: {input:?} (token {token:?})"
+        );
     }
-    None
+
+    for token in [
+        "UserId",
+        "--offline",
+        "src/Main.jet",
+        "package@Source#Version",
+        "fn",
+        "SomeKey",
+    ] {
+        assert!(
+            case_law::diagnostic_token_keeps_case(token),
+            "excluded {token:?} must keep its own case"
+        );
+    }
+
+    for (input, expected) in [
+        (
+            "UserId has no matching field",
+            "UserId has no matching field",
+        ),
+        ("--offline forbids network access", "--offline forbids network access"),
+        (
+            "src/Main.jet is not reachable",
+            "src/Main.jet is not reachable",
+        ),
+        (
+            "Main.jet is not reachable",
+            "Main.jet is not reachable",
+        ),
+        (
+            "package@Source#Version is not available",
+            "package@Source#Version is not available",
+        ),
+        ("fn is the only declaration form", "fn is the only declaration form"),
+        (r#"{"SomeKey":"SomeValue"}"#, r#"{"SomeKey":"SomeValue"}"#),
+    ] {
+        assert_eq!(
+            jet_foundation::Outcome::jet_sentence_case_line(input),
+            expected,
+            "production diagnostic projection changed exclusion {input:?}"
+        );
+    }
 }
 
-fn diagnostic_token_keeps_case(token: &str) -> bool {
-    if matches!(token.chars().next(), Some('-' | '#' | '@'))
-        || token == "C"
-        || matches!(
-            token,
-            "App" | "Hangar" | "Jet" | "Jetpack" | "Nix" | "Runtime" | "Store"
-        )
-    {
-        return true;
-    }
-    let has_digit = token.chars().any(|ch| ch.is_ascii_digit());
-    let has_structural_case = token
-        .chars()
-        .any(|ch| matches!(ch, '_' | '/' | '\\' | '@' | '#'));
-    let all_code = token
-        .chars()
-        .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'));
-    let camel_case = token
-        .chars()
-        .next()
-        .is_some_and(|ch| ch.is_ascii_uppercase())
-        && token.chars().skip(1).any(|ch| ch.is_ascii_uppercase());
-    has_digit || has_structural_case || all_code || camel_case || token.starts_with("C-")
+/// D-CASE-CHROME1=C / D-CASE-PROSE1=A: collect the strings from the live
+/// producers. Renderers are not alternate homes: the CLI registry feeds both
+/// help surfaces, diagnostic rows feed explain and reports, and the REPL
+/// render helpers feed status, prompt, and interactive chrome.
+#[test]
+fn every_user_facing_case_source_is_checked() {
+    case_law::assert_user_facing_case_law();
+}
+
+#[test]
+fn adding_a_new_title_case_violation_fails_case_check() {
+    let mut sources = case_law::user_facing_case_sources();
+    assert!(
+        case_law::case_law_violations(&sources).is_empty(),
+        "case-law source baseline must pass before mutation"
+    );
+    sources.push(case_law::CaseLawSource {
+        name: "temporary violating label".to_string(),
+        value: "Ready And Safe".to_string(),
+        kind: case_law::CaseLawKind::Title,
+    });
+
+    let violations = case_law::case_law_violations(&sources);
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation.contains("temporary violating label")
+                && violation.contains("And")),
+        "adding a new violating string must fail the case check: {violations:?}"
+    );
+}
+
+#[test]
+fn title_case_minor_words_follow_ratified_per_word_rule() {
+    assert_eq!(case_law::TITLE_CASE_MINOR_WORDS.len(), 16);
+    assert!(case_law::title_case_violation("Read a Book").is_none());
+    assert!(case_law::title_case_violation("Read A Book").is_some());
+    assert!(case_law::title_case_violation("A Book").is_none());
 }
 
 #[test]

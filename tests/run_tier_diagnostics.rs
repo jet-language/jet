@@ -371,7 +371,7 @@ fn programmable_build_check_matches_aot_interpreter_dev_and_web() {
     let source = r#"
 struct Entity { id: Int }
 
-fn build(b: BuildContext) BuildPlan ! -> {
+fn build(b: BuildContext) BuildPlan -> {
     types :: b.program.types()
     b.error(types[0].span, "ORG01", "entity must define archive", "company policy requires archival", "add an archive method")
     return b.plan()

@@ -2,7 +2,7 @@
 //! execution tier must read the same program the same way.
 //!
 //! The fixture below leans on three planes at once — a proven presence test
-//! that refines `String?` to `String` (narrowing), a value given away inside one
+//! that refines `?String` to `String` (narrowing), a value given away inside one
 //! arm (moves), and a branch whose arms must be joined rather than kept
 //! last-walked. One test per tier: parser, sema, TIR, AOT, `jet run` (Cranelift
 //! and the interpreter behind it), comptime, REPL, and web.
@@ -17,7 +17,7 @@ use std::process::Command;
 /// One program, every plane. `label` narrows an optional across a branch;
 /// `total` is written in both arms and read after they meet.
 const SOURCE: &str = r#"
-fn label(text: String?) String {
+fn label(text: ?String) String {
     if text != None {
         return text
     }
@@ -104,7 +104,7 @@ fn comptime_folds_the_same_answer() {
 fn repl_answers_the_same() {
     let transcript = jet::REPL::run_transcript(
         &[
-            "fn label(text: String?) String { if text != None { return text } return \"none\" }",
+            "fn label(text: ?String) String { if text != None { return text } return \"none\" }",
             "print(label(Val(\"keep\")))",
             "print(label(None))",
         ],

@@ -208,9 +208,9 @@ fn run() {}
         "fixed-list join must add the two length measures, got {length_codes:?}"
     );
 
-    // D-RESULT-OPTION-CANON1: the product is fallible, spelled `T E!`.
+    // D-RESULT-OPTION-CANON1: the product is fallible, spelled `T !E`.
     let matrices = r#"
-fn compose(left: Matrix<3, 4>, right: Matrix<4, 2>) Matrix<3, 2> ComputeError! {
+fn compose(left: Matrix<3, 4>, right: Matrix<4, 2>) Matrix<3, 2> !ComputeError {
     return left * right
 }
 
@@ -752,7 +752,7 @@ fn run() {
 
     let negative_digits = r#"
 #UnitFamily(Length, dimension, base: meter) { meter half(scale: 1/2) }
-fn run() ! {
+fn run() {
     digits :: -1
     Meter.from_half_rounded(1half, .NearestEven, digits: digits)?
 }

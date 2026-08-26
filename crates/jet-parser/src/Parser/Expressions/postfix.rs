@@ -202,11 +202,9 @@ impl<'a> Parser<'a> {
                     }
                     let qspan = self.bump().span;
                     if !matches!(self.peek().kind, TokKind::LParen) {
-                        return Err(Diagnostic::error(
-                            "E0003",
-                            "bare `?` propagation is retired".to_string(),
-                            "fallible calls propagate automatically; `?` now adds explicit failure context".to_string(),
-                            "remove `?`, or write `?(\"context\")` to add one context frame".to_string(),
+                        return Err(Diagnostic::from_row(
+                            "E-ERR-PROPAGATE",
+                            &[],
                             Some(qspan),
                         ));
                     }

@@ -328,7 +328,6 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0384"
             | "E0385"
             | "E0386"
-            | "E-ERR-SIGIL"
             | "E0999"
             | "E0412"
             | "E0413"
@@ -952,13 +951,41 @@ mod s61_tests {
 
     #[test]
     fn retired_failure_surface_never_builds_legacy_ast() {
+        for code in [
+            "E-ERR-SIGIL",
+            "E-ERR-DEFAULT",
+            "E-ERR-SUFFIX",
+            "E-ERR-PROPAGATE",
+        ] {
+            assert!(
+                !is_teaching_parse_diag(code),
+                "retired failure diagnostic must not recover an AST: {code}"
+            );
+        }
         for source in [
             "struct Boxed { value: Result<Int, IOError> }\nfn run() {}\n",
+            "alias Old :: Int? ! IOError\n",
+            "fn save() ! {}\n",
+            "fn save() ! IOError {}\n",
+            "fn load() Int IOError! {}\n",
             "fn run() { value :: read()? }\n",
         ] {
             let (tokens, lexer_diagnostics) = lex(source);
             assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
             parse(&tokens).expect_err("retired failure syntax must not produce an AST");
+
+            assert!(
+                parse_for_check(&tokens).is_err(),
+                "retired failure syntax must not enter the check recovery AST: {source}"
+            );
+            assert!(
+                parse_for_fmt(&tokens).is_err(),
+                "retired failure syntax must not enter the formatter recovery AST: {source}"
+            );
+            assert!(
+                crate::Formatter::format_source(source).is_err(),
+                "retired failure syntax must not enter the formatter: {source}"
+            );
         }
     }
 
@@ -1980,7 +2007,7 @@ fn notify(ready: Bool) -[Net]> {
             "prefix `?Int` must be Optional"
         );
 
-        let res = program("fn b() Int ! -> Ok(1)\nfn run() {}\n");
+        let res = program("fn b() Int !Err -> Ok(1)\nfn run() {}\n");
         let b = res.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "b" => Some(f),
             _ => None,
@@ -1990,7 +2017,7 @@ fn notify(ready: Bool) -[Net]> {
                 b.expect("b").return_type,
                 Some(crate::AST::Type::Result { .. })
             ),
-            "`Int !` must be Result"
+            "`Int !Err` must be Result"
         );
 
         let paren = program("fn c() (?Int) -> None\nfn run() {}\n");
@@ -2107,7 +2134,7 @@ fn notify(ready: Bool) -[Net]> {
     fn unit_fallible_signatures_use_the_error_prefix() {
         let parsed = program(
             "fn save(path: String) !IOError {}\n\
-             fn sync() ! {}\n\
+             fn sync() !Err {}\n\
              fn bounded() !IOError -[FS]> {}\n\
              fn load() Config !IOError -> {}\n",
         );
@@ -2144,36 +2171,17 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
-    fn prefix_contract_supports_bare_default_error_in_general_types() {
-        let parsed = program(
-            "struct Holder {\n\
-                 optional: ?Int !,\n\
-                 bare: !\n\
-             }\n\
-             alias DefaultFailure :: !;\n\
-             fn callback(cb: fn(?Int !IOError) Int !(DbError | TimeoutError)) ?Int !IOError -> None\n\
-             fn run() {}\n",
-        );
-        let holder = parsed
-            .items
-            .iter()
-            .find_map(|item| match item {
-                crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
-                _ => None,
-            })
-            .expect("Holder");
-        assert!(matches!(
-            &holder.fields[0].ty,
-            crate::AST::Type::Result { ok, err }
-                if matches!(ok.as_ref(), crate::AST::Type::Option(inner) if matches!(inner.as_ref(), crate::AST::Type::Int))
-                    && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_ERR)
-        ));
-        assert!(matches!(
-            &holder.fields[1].ty,
-            crate::AST::Type::Result { ok, err }
-                if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-                    && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_ERR)
-        ));
+    fn bare_default_error_contract_is_not_accepted() {
+        for source in [
+            "struct Holder { bare: ! }\n",
+            "alias DefaultFailure :: !;\n",
+            "fn sync() ! {}\n",
+            "fn callback(value: Int !) {}\n",
+        ] {
+            let (tokens, lex_diagnostics) = lex(source);
+            assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+            parse(&tokens).expect_err("bare default error contracts must not produce an AST");
+        }
     }
 
     #[test]
@@ -2181,7 +2189,7 @@ fn notify(ready: Bool) -[Net]> {
         let parsed = program(
             "struct Holder {\n\
                  map: [String: !IOError]\n\
-                 tuple: (entry: ?Entry !StoreError, failure: !)\n\
+                 tuple: (entry: ?Entry !StoreError, failure: !Err)\n\
                  callback: fn(?Int !StoreError) !IOError\n\
              }\n\
              alias Callback :: fn(?Int !StoreError) !IOError;\n\
@@ -2233,11 +2241,11 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
-    fn bare_default_error_does_not_consume_the_next_struct_field() {
+    fn explicit_error_contract_does_not_consume_the_next_struct_field() {
         let parsed = program(
             "struct Holder {\n\
-                 first: Int !\n\
-                 callback: fn() !\n\
+                 first: Int !Err\n\
+                 callback: fn() !Err\n\
                  fn value(self) Int -> 1\n\
                  second: String\n\
              }\n\
@@ -2257,14 +2265,14 @@ fn notify(ready: Bool) -[Net]> {
             holder.fields[0].ty,
             crate::AST::Type::Result { ref ok, ref err }
                 if matches!(ok.as_ref(), crate::AST::Type::Int)
-                    && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_ERR)
+                    && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "Err")
         ));
         assert!(matches!(
             holder.fields[1].ty,
             crate::AST::Type::Fn { ref ret, .. }
                 if matches!(ret.as_deref(), Some(crate::AST::Type::Result { ref ok, ref err })
                     if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-                        && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_ERR))
+                        && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "Err"))
         ));
     }
 
@@ -2274,6 +2282,14 @@ fn notify(ready: Bool) -[Net]> {
         let (tokens, lex_diagnostics) = lex(source);
         assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
         parse(&tokens).expect_err("retired infix spelling must not produce an AST");
+    }
+
+    #[test]
+    fn retired_failure_suffix_is_not_accepted() {
+        let source = "alias Old :: String!\n";
+        let (tokens, lex_diagnostics) = lex(source);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        parse(&tokens).expect_err("retired suffix spelling must not produce an AST");
     }
 
     #[test]
@@ -2293,10 +2309,10 @@ fn notify(ready: Bool) -[Net]> {
         use crate::Formatter::format_source;
 
         let source =
-            "fn save(path: String) !IOError {}\nfn sync() ! {}\nfn bounded() !IOError -[FS]> {}\n";
+            "fn save(path: String) !IOError {}\nfn sync() !Err {}\nfn bounded() !IOError -[FS]> {}\n";
         let once = format_source(source).expect("unit-fallible signatures format");
         assert!(once.contains("fn save(path: String) !IOError"), "{once}");
-        assert!(once.contains("fn sync() !"), "{once}");
+        assert!(once.contains("fn sync() !Err"), "{once}");
         assert!(once.contains("fn bounded() !IOError -[FS]>"), "{once}");
         assert_eq!(
             once,

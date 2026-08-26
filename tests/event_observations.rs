@@ -229,7 +229,7 @@ use core.event as event
 use core.tasks as tasks
 use core.time as time
 
-fn fail_async(n: Int) String! {
+fn fail_async(n: Int) !String {
     return Err("ASYNC_FAILURE_SECRET")
 }
 
