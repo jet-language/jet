@@ -75,7 +75,7 @@ pub fn verify_cache_entry(
     )
 }
 
-fn verify_cache_entry_with_graph(
+pub(crate) fn verify_cache_entry_with_graph(
     roots: &Roots,
     entry: &StoreEntry,
     expected_reference: &str,
@@ -228,7 +228,7 @@ fn producer_authority_verified(
         && !is_cache_builder_revoked(&roots.root, &builder).unwrap_or(true)
 }
 
-fn enforce_manifest_provenance_floor(
+pub(crate) fn enforce_manifest_provenance_floor(
     project: Option<&Path>,
     package: &str,
 ) -> Result<(), RealizeError> {
@@ -290,7 +290,7 @@ pub struct CacheLease {
     files: Vec<(PathBuf, fs::File)>,
     executables: Vec<(std::ffi::OsString, fs::File)>,
     out: PathBuf,
-    snapshot_root: PathBuf,
+    pub(crate) snapshot_root: PathBuf,
     bin_relative: Option<PathBuf>,
     expected_digest: String,
     package: String,
@@ -323,11 +323,11 @@ struct NixProjectionBinding {
     handle: fs::File,
 }
 
-struct NixStoreProjection {
-    logical: String,
+pub(crate) struct NixStoreProjection {
+    pub(crate) logical: String,
     digest: String,
     primary: bool,
-    source: PathBuf,
+    pub(crate) source: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -503,7 +503,7 @@ impl CacheLease {
     /// archive reader uses no-follow handles and rejects concurrent mutation.
     pub fn validate(&self) -> std::io::Result<()> {
         self.require_consumable()?;
-        let actual = super::Envelope::try_output_hash_of(&self.snapshot_root.to_string_lossy())
+        let actual = crate::Envelope::try_output_hash_of(&self.snapshot_root.to_string_lossy())
             .map_err(std::io::Error::other)?;
         if actual != self.expected_digest {
             return Err(std::io::Error::other(format!(
@@ -560,7 +560,7 @@ impl CacheLease {
                         binding.logical
                     )));
                 }
-                let actual = super::Envelope::try_output_hash_of_in_hangar(
+                let actual = crate::Envelope::try_output_hash_of_in_hangar(
                     &binding.source.to_string_lossy(),
                     &self.store_root.join("hangar"),
                     false,
@@ -773,7 +773,7 @@ pub fn find_verified_by_reference(
     reference: &str,
     expectation: &CacheExpectation,
 ) -> std::io::Result<Option<VerifiedCacheHit>> {
-    let _global = super::RuntimePolicy::acquire_lock(&roots.root, "hangar")?;
+    let _global = crate::RuntimePolicy::acquire_lock(&roots.root, "hangar")?;
     let graph = Closure::closure_graph_structure_unlocked(roots)?;
     let entry = list_unlocked(roots)?
         .into_iter()
@@ -811,12 +811,12 @@ pub(crate) fn find_verified_user_profile_by_reference(
     };
     Ok(Some(VerifiedRealization {
         entry: hit.entry,
-        source_state: super::Provider::SourceState::Cached,
+        source_state: crate::Provider::SourceState::Cached,
         lease: hit.lease,
     }))
 }
 
-fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLease> {
+pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLease> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     use std::sync::atomic::Ordering;
 
@@ -837,7 +837,7 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         entry.id
     ));
     if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
-        super::Provider::validate_nix_build_facts(&producer)?;
+        crate::Provider::validate_nix_build_facts(&producer)?;
     }
     match fs::symlink_metadata(&snapshot_root) {
         Ok(metadata) => {
@@ -879,7 +879,7 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
     }
     let mut hardlinks = BTreeMap::new();
     copy_snapshot_node(Path::new(&entry.out), &snapshot_root, &mut hardlinks)?;
-    let digest = super::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
+    let digest = crate::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
         .map_err(std::io::Error::other)?;
     if digest != entry.envelope.output_hash {
         remove_snapshot_node(&snapshot_root)?;
@@ -889,7 +889,7 @@ fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLea
         )));
     }
     seal_local_output(&snapshot_root)?;
-    let sealed_digest = super::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
+    let sealed_digest = crate::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
         .map_err(std::io::Error::other)?;
     let mut files = Vec::new();
     open_snapshot_files(&snapshot_root, &snapshot_root, &mut files)?;
@@ -1010,7 +1010,7 @@ fn open_nix_projection_sources(
         let mut options = fs::OpenOptions::new();
         options
             .read(true)
-            .custom_flags(super::Envelope::nofollow_open_flag().map_err(std::io::Error::other)?);
+            .custom_flags(crate::Envelope::nofollow_open_flag().map_err(std::io::Error::other)?);
         let handle = options.open(&projection.source)?;
         let opened_metadata = handle.metadata()?;
         if path_metadata.dev() != opened_metadata.dev()
@@ -1035,7 +1035,7 @@ fn open_nix_projection_sources(
     Ok((stable, bindings))
 }
 
-fn nix_store_projection_for_entry(
+pub(crate) fn nix_store_projection_for_entry(
     roots: &Roots,
     entry: &StoreEntry,
     snapshot_root: &Path,
@@ -1277,7 +1277,7 @@ struct ExecWrappers {
     directory: fs::File,
 }
 
-fn required_child_pipe<T>(pipe: Option<T>, message: &'static str) -> std::io::Result<T> {
+pub(crate) fn required_child_pipe<T>(pipe: Option<T>, message: &'static str) -> std::io::Result<T> {
     pipe.ok_or_else(|| std::io::Error::other(message))
 }
 
@@ -1426,7 +1426,7 @@ fn create_exec_wrappers(
     Ok(None)
 }
 
-fn copy_snapshot_node(
+pub(crate) fn copy_snapshot_node(
     src: &Path,
     dst: &Path,
     hardlinks: &mut BTreeMap<(u64, u64), PathBuf>,
@@ -1490,7 +1490,7 @@ fn snapshot_file_identity(_meta: &fs::Metadata) -> Option<(u64, u64)> {
     None
 }
 
-fn open_snapshot_files(
+pub(crate) fn open_snapshot_files(
     root: &Path,
     path: &Path,
     files: &mut Vec<(PathBuf, fs::File)>,

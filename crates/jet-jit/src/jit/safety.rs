@@ -2954,6 +2954,8 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             op,
             lhs,
             rhs,
+            // Behaviour lives in prefix/op; line and policy are provenance.
+            ..
         } => {
             matches!(prefix.as_str(), "wrapping" | "saturating" | "checked")
                 && matches!(*op, "add" | "sub" | "mul" | "div" | "rem")

@@ -2213,7 +2213,7 @@ fn current_project_root() -> std::io::Result<Option<PathBuf>> {
 }
 
 #[derive(Debug, Default)]
-struct LiveRoots {
+pub(crate) struct LiveRoots {
     ids: BTreeSet<String>,
     output_hashes: BTreeSet<String>,
     name_versions: BTreeSet<(String, String)>,

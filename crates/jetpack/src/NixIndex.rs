@@ -713,7 +713,9 @@ impl<'a> NixIndexClient<'a> {
             ))),
         }
     }
-
+    /// Used by the `jetpack-nix-index` producer binary, which includes this
+    /// module by path; the library itself never calls it.
+    #[allow(dead_code)]
     pub(crate) fn canonical_local_native_recipes(
         bytes: &[u8],
     ) -> Result<Vec<u8>, NixIndexError> {

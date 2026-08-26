@@ -10,11 +10,11 @@ fn with_clean_locks<T>(
 ) -> std::io::Result<T> {
     match current_project_root()? {
         Some(project) => {
-            super::RuntimePolicy::with_project_lock(&project, "hangar-clean-project", || {
-                super::RuntimePolicy::with_lock(&roots.root, "hangar", action)
+            crate::RuntimePolicy::with_project_lock(&project, "hangar-clean-project", || {
+                crate::RuntimePolicy::with_lock(&roots.root, "hangar", action)
             })
         }
-        None => super::RuntimePolicy::with_lock(&roots.root, "hangar", action),
+        None => crate::RuntimePolicy::with_lock(&roots.root, "hangar", action),
     }
 }
 
@@ -25,7 +25,7 @@ struct MalformedObject {
     reason: &'static str,
 }
 
-fn malformed_object_reason(path: &Path) -> std::io::Result<Option<&'static str>> {
+pub(crate) fn malformed_object_reason(path: &Path) -> std::io::Result<Option<&'static str>> {
     let metadata_path = path.join("meta.json");
     match fs::symlink_metadata(&metadata_path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
@@ -193,12 +193,12 @@ fn retained_receipts(
 }
 
 #[derive(Debug, Clone)]
-struct OrphanedCanonicalObject {
-    path: PathBuf,
+pub(crate) struct OrphanedCanonicalObject {
+    pub(crate) path: PathBuf,
     bytes: u64,
 }
 
-fn collect_orphaned_canonical_objects(
+pub(crate) fn collect_orphaned_canonical_objects(
     roots: &Roots,
     live: &LiveRoots,
     retired: &BTreeSet<String>,
@@ -259,7 +259,7 @@ fn collect_orphaned_canonical_objects_with_graph(
     Ok(orphaned)
 }
 
-fn remove_hangar_node(path: &Path) -> std::io::Result<()> {
+pub(crate) fn remove_hangar_node(path: &Path) -> std::io::Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         return Err(std::io::Error::new(
@@ -286,7 +286,7 @@ fn remove_hangar_node(path: &Path) -> std::io::Result<()> {
     }
 }
 
-fn sweep_receipts(
+pub(crate) fn sweep_receipts(
     hangar: &Path,
     retained: &BTreeSet<String>,
     apply: bool,
@@ -524,7 +524,7 @@ fn sweep_build_scratch_plan(hangar: &Path) -> std::io::Result<CleanReport> {
                 ));
             }
             if scratch_name == BUILD_SCRATCH_DIR
-                && super::Provider::active_tmp_marker_is_live(&path)
+                && crate::Provider::active_tmp_marker_is_live(&path)
             {
                 continue;
             }
@@ -535,7 +535,7 @@ fn sweep_build_scratch_plan(hangar: &Path) -> std::io::Result<CleanReport> {
     Ok(report)
 }
 
-fn sweep_build_scratch(hangar: &Path) -> std::io::Result<CleanReport> {
+pub(crate) fn sweep_build_scratch(hangar: &Path) -> std::io::Result<CleanReport> {
     let mut report = CleanReport::default();
     for scratch_name in [BUILD_SCRATCH_DIR, FAILED_SCRATCH_DIR] {
         let root = hangar.join(scratch_name);
@@ -559,7 +559,7 @@ fn sweep_build_scratch(hangar: &Path) -> std::io::Result<CleanReport> {
                 ));
             }
             if scratch_name == BUILD_SCRATCH_DIR
-                && super::Provider::active_tmp_marker_is_live(&path)
+                && crate::Provider::active_tmp_marker_is_live(&path)
             {
                 continue;
             }
@@ -886,14 +886,14 @@ fn same_file_inode(a: &Path, b: &Path) -> bool {
 
 /// Run the cas-pool hardlink optimizer (also invoked from `clean`).
 pub fn optimize_cas_pool(roots: &Roots) -> std::io::Result<CleanReport> {
-    super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+    crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         optimize_objects_cas_pool(&roots.hangar_dir())
     })
 }
 
 /// Re-hash a hangar object with cas-peer hardlink law (hangar-internal OK).
 pub fn verify_hangar_object(roots: &Roots, entry: &StoreEntry) -> Result<(), IngestError> {
-    let _lock = super::RuntimePolicy::acquire_lock(&roots.root, "hangar")
+    let _lock = crate::RuntimePolicy::acquire_lock(&roots.root, "hangar")
         .map_err(|error| IngestError::IO(error.to_string()))?;
     verify_hangar_object_unlocked(roots, entry)
 }
@@ -932,7 +932,7 @@ pub(super) fn verify_hangar_object_unlocked(
                 "closure graph output `{name}` is missing `{expected}`"
             ))
         })?;
-        let digest = super::Envelope::try_output_hash_of_in_hangar(&object.path, &hangar, allow)
+        let digest = crate::Envelope::try_output_hash_of_in_hangar(&object.path, &hangar, allow)
             .map_err(IngestError::Invalid)?;
         if &digest != expected {
             return Err(IngestError::Invalid(format!(
@@ -986,7 +986,7 @@ fn hardlink_replace(first: &Path, file: &Path) -> std::io::Result<()> {
     }
 }
 
-fn object_dirs(hangar: &Path) -> std::io::Result<Vec<fs::DirEntry>> {
+pub(crate) fn object_dirs(hangar: &Path) -> std::io::Result<Vec<fs::DirEntry>> {
     let mut out = Vec::new();
     for ent in fs::read_dir(hangar)? {
         let ent = ent?;
@@ -1043,7 +1043,7 @@ fn files_under(root: &Path) -> Vec<PathBuf> {
     out
 }
 
-fn read_meta(dir: &Path) -> Option<ParsedMeta> {
+pub(crate) fn read_meta(dir: &Path) -> Option<ParsedMeta> {
     let text = fs::read_to_string(dir.join("meta.json")).ok()?;
     parse_meta(&text)
 }

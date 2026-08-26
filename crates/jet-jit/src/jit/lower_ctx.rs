@@ -20407,6 +20407,10 @@ impl LowerCtx<'_, '_> {
                 lhs,
                 rhs,
                 line,
+                // D-WRAP-SCOPE1=A: `policy` is the lexical fact that produced this
+                // node, for diagnostics. `prefix` and `op` carry the behaviour, so the
+                // JIT needs nothing from it and tier parity is unaffected.
+                policy: _,
             } => in_own_frame(|| -> Result<Value, String> {
                 let (signed, bits) = match &lhs.ty {
                     Type::IntN { signed, bits } => (*signed, *bits),
