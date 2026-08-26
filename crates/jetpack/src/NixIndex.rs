@@ -713,15 +713,6 @@ impl<'a> NixIndexClient<'a> {
             ))),
         }
     }
-    /// Used by the `jetpack-nix-index` producer binary, which includes this
-    /// module by path; the library itself never calls it.
-    #[allow(dead_code)]
-    pub(crate) fn canonical_local_native_recipes(
-        bytes: &[u8],
-    ) -> Result<Vec<u8>, NixIndexError> {
-        let recipes = parse_local_native_recipes(bytes)?;
-        Ok(canonical_native_recipes_bytes(&recipes))
-    }
 
     fn resolve_local_catalog(
         &self,
@@ -1076,6 +1067,16 @@ impl<'a> NixIndexClient<'a> {
             .join(&key.system)
             .join(format!("{digest}.json.zst")))
     }
+}
+
+/// Used by the `jetpack-nix-index` producer binary, which includes this
+/// module by path; the library itself never calls it.
+#[allow(dead_code)]
+pub(crate) fn canonical_local_native_recipes(
+    bytes: &[u8],
+) -> Result<Vec<u8>, NixIndexError> {
+    let recipes = parse_local_native_recipes(bytes)?;
+    Ok(canonical_native_recipes_bytes(&recipes))
 }
 
 fn path_exists(path: &Path) -> Result<bool, NixIndexError> {

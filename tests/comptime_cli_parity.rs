@@ -4,7 +4,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-const TIER_PARITY_STEMS: [&str; 7] = [
+// `tooling/declared_text_head` was the seventh stem until its example was
+// removed during the checked-text rework. Card #2185 owns restoring both the
+// example and this parity case; see its log.
+const TIER_PARITY_STEMS: [&str; 6] = [
     "cli/subcommands",
     "concurrency/freeze_capture",
     "comptime/embed",
