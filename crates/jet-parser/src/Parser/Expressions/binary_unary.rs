@@ -7,9 +7,12 @@ fn is_fallback_exit(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Return(..)
         | Stmt::Break(..)
+        | Stmt::BreakValue(..)
         | Stmt::Continue(..)
         | Stmt::BreakLabel(..)
+        | Stmt::BreakLabelValue(..)
         | Stmt::ContinueLabel(..) => true,
+        Stmt::Expr(Expr::Todo { .. }) => true,
         Stmt::Expr(Expr::Call(call)) => call.name == Syntax::BUILTIN_PANIC,
         _ => false,
     }
@@ -181,6 +184,25 @@ impl<'a> Parser<'a> {
                 TokKind::RBrace => {
                     let span = self.peek().span;
                     self.bump();
+                    if let Some(stmt) = body.last() {
+                        if is_fallback_exit(stmt) {
+                            let end = span.end;
+                            return Ok(OrFallback::Block {
+                                body,
+                                value: None,
+                                span: Span::new(start, end),
+                            });
+                        }
+                        return Err(Diagnostic::error(
+                            "E0114",
+                            "this fallback ends with a statement instead of a value".to_string(),
+                            "a value-expected fallback block must end with one unadorned expression; statements yield unit"
+                                .to_string(),
+                            "put one unadorned expression last, or use `return ...` for an early exit"
+                                .to_string(),
+                            Some(stmt.span()),
+                        ));
+                    }
                     return Err(Diagnostic::error(
                             "E0003",
                             "a `??` fallback block needs a final value or exit".to_string(),
@@ -236,12 +258,25 @@ impl<'a> Parser<'a> {
                 if matches!(self.peek().kind, TokKind::Semi)
                     && matches!(self.peek2().kind, TokKind::RBrace)
                 {
+                    let semi = self.peek().span;
+                    if semi.start != semi.end {
+                        return Err(Diagnostic::error(
+                            "E0114",
+                            "this fallback ends with a semicolon-terminated expression"
+                                .to_string(),
+                            "a value-expected fallback block must end with one unadorned expression; a semicolon-terminated expression yields unit"
+                                .to_string(),
+                            "remove the semicolon, or use `return ...` for an early exit"
+                                .to_string(),
+                            Some(value.span()),
+                        ));
+                    }
                     self.bump();
                 }
                 if matches!(self.peek().kind, TokKind::RBrace) {
                     let end = self.bump().span.end;
-                    let is_exit =
-                        matches!(&value, Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC);
+                    let is_exit = matches!(&value, Expr::Todo { .. })
+                        || matches!(&value, Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC);
                     if is_exit {
                         let mut body = body;
                         body.push(Stmt::Expr(value));

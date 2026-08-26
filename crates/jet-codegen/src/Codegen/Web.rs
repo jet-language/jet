@@ -10144,36 +10144,6 @@ const JS_POWER_PRELUDE: &str = concat!(
     "  if (count < 0n) jet_runtime_stop(\"E3010\", file, line, \"invalid shift count\");\n",
     "  return left_shift ? (BigInt(left) << count) : (BigInt(left) >> count);\n",
     "}\n\n",
-    // D-WRAP-SCOPE1=A: the JS adapter keeps fixed-width policy arithmetic in
-    // one helper. The mode and width are settled by sema/TIR; this function
-    // only marshals the operands and applies the embedded Prelude rule.
-    "function jet_fixed_policy_step(raw, bits, signed, mode, file, line) {\n",
-    "  const min = signed ? -(1n << BigInt(bits - 1)) : 0n;\n",
-    "  const max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;\n",
-    "  if (mode === \"wrapping\") return signed ? BigInt.asIntN(bits, raw) : BigInt.asUintN(bits, raw);\n",
-    "  if (mode === \"saturating\") return raw < min ? min : raw > max ? max : raw;\n",
-    "  if (raw < min || raw > max) jet_runtime_stop(\"E3010\", file, line, \"fixed-width arithmetic overflow\");\n",
-    "  return raw;\n",
-    "}\n\n",
-    "function jet_fixed_policy_pow(base, exponent, bits, signed, mode, file, line) {\n",
-    "  if (exponent < 0n) jet_runtime_stop(\"E3010\", file, line, \"a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)\");\n",
-    "  let result = 1n;\n",
-    "  let factor = base;\n",
-    "  let remaining = exponent;\n",
-    "  while (remaining > 0n) {\n",
-    "    if ((remaining & 1n) !== 0n) result = jet_fixed_policy_step(result * factor, bits, signed, mode, file, line);\n",
-    "    remaining >>= 1n;\n",
-    "    if (remaining > 0n) factor = jet_fixed_policy_step(factor * factor, bits, signed, mode, file, line);\n",
-    "  }\n",
-    "  return result;\n",
-    "}\n\n",
-    "function jet_fixed_policy(left, right, op, bits, signed, mode, file, line) {\n",
-    "  const a = BigInt(left);\n",
-    "  const b = BigInt(right);\n",
-    "  if (op === \"pow\") return jet_fixed_policy_pow(a, b, bits, signed, mode, file, line);\n",
-    "  const raw = op === \"add\" ? a + b : op === \"sub\" ? a - b : a * b;\n",
-    "  return jet_fixed_policy_step(raw, bits, signed, mode, file, line);\n",
-    "}\n\n"
 );
 
 /// D-EXPSEM1=A / D-STR-CONCAT1: one call shape for operators whose JS spelling

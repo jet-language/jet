@@ -79,10 +79,14 @@ JP0 stop-line now enforces three truth boundaries:
   outputs are copied into per-realization sealed private snapshots. Executable
   files and executable symlink targets use lease-owned inherited file
   descriptors on Linux. macOS and Windows use the protected service's
-  caller-unwritable executable copy. Linux lease-owned `PATH` wrappers live on
+  caller-unwritable executable copy; if that service is absent or stopped,
+  Jetpack rejects the child before handoff. Linux lease-owned `PATH` wrappers live on
   a read-only private mount pinned by an inherited directory descriptor and
   are revalidated before handoff. Nested shell execution resolves to exact
-  leased executable members, so wrapper chmod/replacement or a same-UID
+  leased executable members. An explicit package path is accepted only when it
+  names that same recorded member, then it resolves to the lease-owned handle.
+  A path from another output or a path that only shares an output prefix is not
+  accepted as a leased executable. Wrapper chmod/replacement or a same-UID
   rename/symlink swap cannot redirect execution. Every realization
   carries a mandatory typed lease: missing outputs are explicitly
   non-consumable and cannot fall back to raw paths. The lease container also
@@ -365,9 +369,11 @@ live acceptance, and documentation. Work order is binding.
 - Atomic root update, the ratified plan-before-apply mutation UX for `jetpack hangar clean`,
   why-live/why-dead, and stale-lease recovery.
 - One kernel-locked executable lease container protocol for running consumers,
-  interrupted setup, cleanup, restart, and rollback. Recovery removes only an
-  idle container; doctor and audit inspect the same ownership state without
-  deleting or publishing anything.
+  interrupted setup, cleanup, restart, replacement, and rollback. Replacement
+  and rollback append a complete authenticated generation; rollback can name
+  only an older complete generation. Recovery removes only an idle container;
+  doctor and audit inspect the same ownership state without deleting or
+  publishing anything.
 - Verify, quarantine, repair from ordered caches, then deterministic rebuild.
 - Hangar receipt substrate: immutable connected package-realization objects,
   lock digest projections, atomic publication, and fail-closed corruption/path

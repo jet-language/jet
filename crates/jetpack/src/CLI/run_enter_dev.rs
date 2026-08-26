@@ -535,12 +535,13 @@ fn task_access_trace_path(cache_key: &str) -> PathBuf {
 
 fn resolve_job_jet_binary(env: &Env) -> Result<String, String> {
     let requested = find_jet_binary();
-    if let Some(stable) = env
-        .cache_leases
-        .iter()
-        .find_map(|lease| lease.executable(&requested))
-    {
-        return Ok(stable.to_string_lossy().into_owned());
+    for lease in &env.cache_leases {
+        if let Some(stable) = lease
+            .executable_for_command(&requested)
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(stable.to_string_lossy().into_owned());
+        }
     }
     Ok(resolve_executable_path(&requested)?
         .to_string_lossy()

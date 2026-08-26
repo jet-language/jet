@@ -96,14 +96,14 @@ pub fn parse_effect_name(name: &str) -> Option<String> {
 }
 
 /// D-PANICROOT1=A: `Panic` is a deny-only row. It remains parseable so a
-/// prohibition can name it, but no positive ceiling, ability, or grant may
+/// prohibition can name it, but no positive ceiling, authority, or grant may
 /// claim it.
 pub fn reject_positive_deny_only_effect(name: &str, span: Span) -> Option<Diagnostic> {
     (effect_root(name) == Effect::Panic.name()).then(|| {
         Diagnostic::error(
             "E0751",
             "`Panic` can't be granted, only denied".to_string(),
-            "`Panic` is a deny-only effect row; no positive effect bound or ability can grant it"
+            "`Panic` is a deny-only effect row; no positive effect bound or authority can grant it"
                 .to_string(),
             "drop `Panic` from the list, or write `-[!Panic]>`".to_string(),
             Some(span),
@@ -550,6 +550,10 @@ pub struct EffectSummary {
     /// D-EFF1: `#FX(…)` restriction regions found in this body (checked against
     /// their transitive inferred set in the post-pass — E0712).
     pub regions: Vec<RegionSummary>,
+    /// D-AUTHORITY-RECEIPT1: every checked Authority handle crossing an
+    /// approved Core boundary. The CLI writes these facts as source-linked
+    /// receipts; execution tiers never rediscover or authorize them.
+    pub authority_delegations: Vec<AuthorityDelegation>,
     /// D-EFF2 (callback param bound): obligations recorded at each call to a
     /// higher-order fn whose function-typed parameter carries an effect bound
     /// (`fn(…) -[]>` / `fn(…) -[E]>`). Checked against the actual callback's
@@ -781,6 +785,17 @@ pub struct RegionSummary {
     pub maximal: bool,
     /// Span of the `#FX(…)` list, for the diagnostic.
     pub caps_span: Span,
+}
+
+/// One source-backed delegation of a scoped Authority value to an approved
+/// boundary consumer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorityDelegation {
+    pub scope_span: Span,
+    pub binding: String,
+    pub resource: String,
+    pub operation: String,
+    pub span: Span,
 }
 
 fn add_seed(seeds: &mut BTreeMap<String, BTreeSet<String>>, node: &str, fact: &str) {
@@ -1569,6 +1584,57 @@ pub fn check_region_caps(
 /// fallback — lets the revoked authority leak past the scope (E0711).
 pub fn grant_handle_escape(body: &[crate::AST::Stmt], handle: &str) -> Option<Span> {
     body.iter().find_map(|s| stmt_handle_escape(s, handle))
+}
+
+/// Collect the source facts for Authority values that cross an approved Core
+/// boundary. `CallArgFlags::authority_boundary` is set only after sema has
+/// checked the argument as an `Authority`, so this remains a fact projection,
+/// not a second authorization path.
+pub fn authority_delegations(
+    body: &[crate::AST::Stmt],
+    binding: &str,
+    scope_span: Span,
+) -> Vec<AuthorityDelegation> {
+    fn operation_parts(name: &str) -> (String, String) {
+        name.rsplit_once('.')
+            .map(|(resource, operation)| (resource.to_string(), operation.to_string()))
+            .unwrap_or_else(|| ("core".to_string(), name.to_string()))
+    }
+
+    let mut delegations = Vec::new();
+    for statement in body {
+        statement.for_each_expr(|expression| match expression {
+            crate::AST::Expr::Call(call) => {
+                let (resource, operation) = operation_parts(&call.name);
+                for argument in &call.args {
+                    if argument.flags.authority_boundary {
+                        delegations.push(AuthorityDelegation {
+                            scope_span,
+                            binding: binding.to_string(),
+                            resource: resource.clone(),
+                            operation: operation.clone(),
+                            span: argument.span,
+                        });
+                    }
+                }
+            }
+            crate::AST::Expr::MethodCall { method, args, .. } => {
+                for argument in args {
+                    if argument.flags.authority_boundary {
+                        delegations.push(AuthorityDelegation {
+                            scope_span,
+                            binding: binding.to_string(),
+                            resource: "method".to_string(),
+                            operation: method.clone(),
+                            span: argument.span,
+                        });
+                    }
+                }
+            }
+            _ => {}
+        });
+    }
+    delegations
 }
 
 fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {

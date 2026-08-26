@@ -20,7 +20,8 @@ const MAX_CANVAS_BROWSERS: usize = 4;
 const BIG_PROJECT_SCENARIO: &str = "big-project-perf";
 const DEVSERVER_REAL_CLIENT_SCENARIO: &str = "devserver-real-client-survival";
 const SESSION_SURFACE_MATRIX_SCENARIO: &str = "session-surface-matrix";
-const EXPLICIT_HOST_TARGET: &str = "x86_64-unknown-linux-gnu";
+const WORKBENCH_E2E_SCENARIO: &str = "canvas-workbench-e2e";
+const EXPLICIT_WEB_TARGET: &str = "web";
 const BIG_FUNCTION_COUNT: usize = 300;
 const BIG_MODULE_COUNT: usize = 12;
 const BIG_FUNCTIONS_PER_MODULE: usize = BIG_FUNCTION_COUNT / BIG_MODULE_COUNT;
@@ -532,11 +533,20 @@ fn resident_session_ide_state_matrix() {
 }
 
 #[test]
+fn canvas_workbench_e2e() {
+    assert!(
+        canvas_tools().is_some(),
+        "Canvas workbench E2E needs dev-shell Chromium and Node; run scripts/agent/jet-env full"
+    );
+    run_canvas_scenario(WORKBENCH_E2E_SCENARIO);
+}
+
+#[test]
 fn session_surface_matrix() {
     run_target_independent_scenario(SESSION_SURFACE_MATRIX_SCENARIO);
     run_target_independent_scenario_for_target(
         SESSION_SURFACE_MATRIX_SCENARIO,
-        EXPLICIT_HOST_TARGET,
+        EXPLICIT_WEB_TARGET,
     );
 }
 
@@ -1109,6 +1119,7 @@ fn run_browser_scenario_with_server(
         .current_dir(&repo)
         .envs(environment.iter().copied())
         .env("TMPDIR", "/home/nate/.cache/jet-test-scratch")
+        .env("JET_BIN", cargo_target_dir(&repo).join("debug/jet"))
         .arg("scripts/canvas-test/run.mjs")
         .arg("--scenario")
         .arg(name)
@@ -1283,7 +1294,7 @@ impl CanvasCase {
             fs::copy(repo.join("examples/features/web/ui_showcase.jet"), &entry)
                 .expect("copy Canvas devserver regression source");
             None
-        } else if name == SESSION_SURFACE_MATRIX_SCENARIO {
+        } else if matches!(name, SESSION_SURFACE_MATRIX_SCENARIO | WORKBENCH_E2E_SCENARIO) {
             fs::write(
                 dir.join("package.jet"),
                 "name: \"canvas_session_matrix\"\nversion: \"0.1.0\"\noutputs: .{\n    cli: .Executable{ name: \"cli\", entry: run }\n    service: .Service{ name: \"service\", entry: serve }\n    web: .Executable{ name: \"web\", entry: web }\n    ui: .Executable{ name: \"ui\", entry: ui }\n    game: .Executable{ name: \"game\", entry: game }\n    library: .Library{ name: \"library\", entry: run }\n    build: .Check{ name: \"build\", entry: build }\n}\ndefaults: .{ run: cli }\n",
@@ -1291,12 +1302,17 @@ impl CanvasCase {
             .expect("write Canvas session matrix package fixture");
             fs::write(
                 dir.join("env.jet"),
-                "module env.dev {\n    prompt: \"canvas-session-matrix\",\n    services: { custom_server: { ports: [43817], run: [\"custom-server\"], ready: \"custom-server-ready\" } },\n}\n",
+                "module env.dev {\n    prompt: \"canvas-session-matrix\",\n    services: { custom_server: { enable: false, ports: [43817], run: [\"node\", \"custom-server.mjs\"], ready: \"custom-server-ready\" } },\n}\n",
             )
             .expect("write Canvas session matrix environment fixture");
             fs::write(
+                dir.join("custom-server.mjs"),
+                "import http from \"node:http\";\nconst server = http.createServer((request, response) => {\n    response.setHeader(\"content-type\", \"text/plain\");\n    response.end(request.url === \"/health\" ? \"custom-server-ready\" : \"custom-server\");\n});\nserver.listen(43817, \"127.0.0.1\", () => console.log(\"custom-server-ready\"));\nprocess.on(\"SIGTERM\", () => server.close(() => process.exit(0)));\n",
+            )
+            .expect("write Canvas custom server fixture");
+            fs::write(
                 &entry,
-                "fn run() {\n    print(\"cli\")\n}\n\nfn serve() {\n    print(\"service\")\n}\n\nfn web() {\n    print(\"web\")\n}\n\nfn ui() {\n    print(\"ui\")\n}\n\nfn game() {\n    print(\"game\")\n}\n\nfn build(b: BuildContext) BuildPlan ! -> {\n    return b.plan()\n}\n",
+                "fn run() { print(\"cli\") }\nfn serve() { print(\"service\") }\nfn web() { print(\"web\") }\nfn ui() { print(\"ui\") }\nfn game() { print(\"game\") }\n\nfn build(b: BuildContext) BuildPlan ! -> {\n    return b.plan()\n}\n",
             )
             .expect("write Canvas session matrix source fixture");
             None

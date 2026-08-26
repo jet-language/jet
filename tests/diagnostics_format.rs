@@ -102,6 +102,14 @@ fn diagnostic_case_validator_preserves_code_fragments_and_flags() {
     assert!(source.contains("C-style"));
     assert!(!source.contains("`--offline` Forbids Network Access"));
     assert!(!source.contains("D-patr: Range"));
+    assert_eq!(
+        jet_foundation::Outcome::jet_sentence_case_line("Int cannot cross the C boundary"),
+        "Int cannot cross the C boundary"
+    );
+    assert_eq!(
+        jet_foundation::Outcome::jet_sentence_case_line("Syntax.rs owns user-typeable syntax"),
+        "Syntax.rs owns user-typeable syntax"
+    );
 }
 
 fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {

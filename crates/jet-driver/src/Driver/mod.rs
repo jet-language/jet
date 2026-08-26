@@ -4411,6 +4411,7 @@ pub fn program_semantic_facts(
     checked: &crate::Sema::SemIndexEffectFacts,
 ) -> crate::Comptime::ProgramSemanticFacts {
     let mut effects = std::collections::HashMap::new();
+    let mut arithmetic = std::collections::HashMap::new();
     let reaches_panic = checked.reachability.nodes_with("panic", "panic");
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         for item in &module.items {
@@ -4429,10 +4430,15 @@ pub fn program_semantic_facts(
                 .map(|set| set.iter().cloned().collect())
                 .unwrap_or_default();
             effects.insert(qualified.clone(), values);
+            arithmetic.insert(
+                qualified,
+                crate::AST::arithmetic_policy_facts(&func.body),
+            );
         }
     }
     crate::Comptime::ProgramSemanticFacts {
         effects,
+        arithmetic,
         reaches_panic,
         fact_registry: checked.fact_registry.clone(),
         name_ledger: checked.name_ledger.clone(),

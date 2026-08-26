@@ -331,6 +331,7 @@ module.exports = grammar({
         "{",
         repeat(
           choice(
+            $.state_section,
             $.struct_cli_binding,
             $.struct_field,
             $.function_def,
@@ -339,6 +340,12 @@ module.exports = grammar({
         ),
         "}",
       ),
+
+    // D-STATE-HOME1=A: typestate facts live in one optional section owned by
+    // the named struct. The compiler keeps the section erased; the grammar
+    // only preserves its source shape for editor tooling.
+    state_section: ($) => seq("state", "{", commaSep1($.state_name), "}"),
+    state_name: ($) => choice($.type_identifier, $.identifier),
 
     // D-CLI-GLOBAL1=E: callable program-struct members use the existing
     // marker/member/`=` surface. The target is an ordinary expression so

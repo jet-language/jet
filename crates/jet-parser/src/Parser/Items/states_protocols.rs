@@ -1142,6 +1142,7 @@ mod state_section_tests {
             ("trait Door { state { Open } }\nfn run() {}\n", "trait"),
             ("alias Door :: state { Open };\nfn run() {}\n", "alias"),
             ("impl Door { state { Open } }\nfn run() {}\n", "impl"),
+            ("module Door { state { Open } }\nfn run() {}\n", "module"),
             ("module Door<T> { state { Open } }\nfn run() {}\n", "module"),
             (
                 "fn run() { value :: { state { Open } } }\n",

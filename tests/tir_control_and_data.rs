@@ -14,7 +14,7 @@ use tir_support::{build_and_run, build_and_run_full, compile, have_rustc, jit_ru
 #[test]
 fn result_handler_reuses_result_split_on_all_tiers() {
     let src = r#"
-fn classify(ok: Bool) Int !String -> if ok -> Ok(7) else -> Err("bad")
+fn classify(ok: Bool) Int! -> if ok -> Ok(7) else -> Err("bad")
 
 fn run() {
     success :: classify(true)
@@ -31,7 +31,7 @@ fn run() {
 #[test]
 fn result_handler_preserves_diverging_arm_on_all_tiers() {
     let src = r#"
-fn choose(ok: Bool) Int !String -> if ok -> Ok(7) else -> Err("bad")
+fn choose(ok: Bool) Int! -> if ok -> Ok(7) else -> Err("bad")
 
 fn run() {
     value :: choose(true)
@@ -40,6 +40,14 @@ fn run() {
 }
 "#;
     tir_support::assert_tiers_agree("result_handler_diverging", src, "8\n");
+}
+
+#[test]
+fn result_handler_example_matches_all_execution_tiers() {
+    tir_support::assert_example_cli_tiers_agree(
+        "errors/result_handler",
+        include_str!("../examples/features/expected/errors/result_handler.out"),
+    );
 }
 
 /// D-TAIL-RETURN1=A / I9: a braced function tail, value arm table, and
@@ -66,11 +74,7 @@ fn run() {
     print(early(false))
 }
 "#;
-    tir_support::assert_tiers_agree(
-        "tail_return_values",
-        src,
-        "one\nother\nearly\nlate\n",
-    );
+    tir_support::assert_tiers_agree("tail_return_values", src, "one\nother\nearly\nlate\n");
 }
 
 #[test]
@@ -112,11 +116,26 @@ fn label(value: Int) String -> {
     let edit = lint.edit.as_ref().expect("L0513 must carry its source fix");
     let fixed = jet::FixEngine::apply_edits(lintable, std::slice::from_ref(edit))
         .expect("the generated L0513 edit must apply");
-    assert!(fixed.contains("else -> { \"other\" }"), "fixed source:\n{fixed}");
-    assert!(fixed.contains("Keep the arm comment"), "fixed source:\n{fixed}");
-    assert!(fixed.contains("keep value comment"), "fixed source:\n{fixed}");
-    assert!(fixed.contains("Keep the fallback comment"), "fixed source:\n{fixed}");
-    assert!(fixed.contains("Keep the tail comment"), "fixed source:\n{fixed}");
+    assert!(
+        fixed.contains("else -> { \"other\" }"),
+        "fixed source:\n{fixed}"
+    );
+    assert!(
+        fixed.contains("Keep the arm comment"),
+        "fixed source:\n{fixed}"
+    );
+    assert!(
+        fixed.contains("keep value comment"),
+        "fixed source:\n{fixed}"
+    );
+    assert!(
+        fixed.contains("Keep the fallback comment"),
+        "fixed source:\n{fixed}"
+    );
+    assert!(
+        fixed.contains("Keep the tail comment"),
+        "fixed source:\n{fixed}"
+    );
     assert!(!fixed.contains("return"), "fixed source:\n{fixed}");
 
     let effectful = r#"
@@ -133,6 +152,63 @@ fn label(value: Int) String -> {
         .lints
         .iter()
         .any(|diagnostic| diagnostic.code == "L0513"));
+}
+
+#[test]
+fn value_blocks_keep_early_exits_and_reject_statement_tails() {
+    let valid = r#"
+fn choose(flag: Bool) Int -> {
+    if flag -> { return 1 } else -> { 2 }
+}
+
+fn fallback(value: Int?) Int -> {
+    value ?? { return 9 }
+}
+
+fn run() {
+    print(choose(true))
+    print(choose(false))
+    print(fallback(None))
+}
+"#;
+    tir_support::assert_tiers_agree("tail_return_nested_exits", valid, "1\n2\n9\n");
+
+    for (name, source) in [
+        (
+            "nested_semicolon",
+            r#"
+fn nested(flag: Bool) Int -> {
+    if flag -> { 1; } else -> { 2 }
+}
+fn run() {}
+"#,
+        ),
+        (
+            "nested_declaration",
+            r#"
+fn nested(flag: Bool) Int -> {
+    if flag -> { value :: 1 } else -> { 2 }
+}
+fn run() {}
+"#,
+        ),
+        (
+            "fallback_semicolon",
+            r#"
+fn fallback(value: Int?) Int -> {
+    value ?? { 1; }
+}
+fn run() {}
+"#,
+        ),
+    ] {
+        let diagnostics = jet::compile_with_path(source, name).expect_err(name);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E0114")
+            .unwrap_or_else(|| panic!("{name} diagnostics: {diagnostics:?}"));
+        assert!(diagnostic.span.is_some(), "{name}: {diagnostics:?}");
+    }
 }
 
 /// D-FAIL-ERROR1=A: the labelled/string shape builds a default `Err` value;

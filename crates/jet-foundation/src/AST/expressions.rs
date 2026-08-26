@@ -40,6 +40,14 @@ pub enum ArithmeticMode {
 }
 
 impl ArithmeticMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Checked => "Checked",
+            Self::Wrapping => "Wrapping",
+            Self::Saturating => "Saturating",
+        }
+    }
+
     pub fn from_expr(expr: &Expr) -> Option<Self> {
         let name = match expr {
             Expr::Ident(name, _) => name.as_str(),
@@ -64,6 +72,27 @@ impl ArithmeticMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArithmeticOperation {
+    Add,
+    Sub,
+    Mul,
+    Neg,
+    Pow,
+}
+
+impl ArithmeticOperation {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Sub => "sub",
+            Self::Mul => "mul",
+            Self::Neg => "neg",
+            Self::Pow => "pow",
+        }
+    }
+}
+
 /// Source provenance for one operation selected by a lexical arithmetic mode.
 /// The operation span and scope span remain together through AST, TIR, and
 /// editor-facing consumers; execution tiers ignore the record.
@@ -72,6 +101,7 @@ pub struct ArithmeticPolicyFact {
     pub mode: ArithmeticMode,
     pub scope_span: Span,
     pub operation_span: Span,
+    pub operation: Option<ArithmeticOperation>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -946,6 +976,15 @@ impl Func {
 }
 
 impl Expr {
+    /// Visit this expression and every expression nested in it without
+    /// changing the checked AST. The mutable walker remains the canonical
+    /// traversal; this read-only facade keeps tooling projections on the same
+    /// compiler-owned expression tree.
+    pub fn for_each_expr(&self, mut f: impl FnMut(&Expr)) {
+        let mut copy = self.clone();
+        copy.for_each_expr_mut(|expr| f(expr));
+    }
+
     /// Visit this expression and every expression nested in it.  Binder
     /// defaults are ordinary expressions, not a special mini-language: calls,
     /// indexes, collections, literals, lambdas, and typed/enum bodies all use
@@ -1300,4 +1339,27 @@ impl Expr {
 
         walk(self, &mut f);
     }
+}
+
+/// Read the compiler-attached arithmetic policy facts from a checked body.
+/// Sema is the only producer; this helper only projects its existing records
+/// for reflection and other tooling consumers.
+pub fn arithmetic_policy_facts(body: &[Stmt]) -> Vec<ArithmeticPolicyFact> {
+    let mut facts = Vec::new();
+    for statement in body {
+        statement.for_each_expr(|expr| {
+            let Expr::Call(call) = expr else {
+                return;
+            };
+            for argument in &call.args {
+                let Some(fact) = argument.flags.arithmetic_policy else {
+                    continue;
+                };
+                if fact.operation.is_some() {
+                    facts.push(fact);
+                }
+            }
+        });
+    }
+    facts
 }

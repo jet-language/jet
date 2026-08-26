@@ -80,6 +80,23 @@ fn run() {
 }
 
 #[test]
+fn fmt_arithmetic_policy_scope_is_canonical_and_idempotent() {
+    let source = r#"
+fn run() {
+    #Arithmetic(.Wrapping) {
+        value :: U8{250} + U8{10}
+        print(value)
+    }
+}
+"#;
+    let once = jet::format_source(source).expect("arithmetic policy block should format");
+    assert!(once.contains("#Arithmetic(.Wrapping)"), "{once}");
+    assert!(!once.contains("wrapping("), "retired expression wrapper leaked:\n{once}");
+    let twice = jet::format_source(&once).expect("formatted arithmetic policy should reformat");
+    assert_eq!(once, twice, "arithmetic policy formatting must be stable");
+}
+
+#[test]
 fn package_formatter_fails_closed_on_comments() {
     let error = jet::Package::format_source(
         "name: \"demo\" // comment ownership is not typed yet\n",
@@ -1170,6 +1187,32 @@ fn fmt_marks_only_value_returning_braced_callables_with_an_arrow() {
 }
 
 #[test]
+fn fmt_value_tail_blocks_keep_values_and_early_returns_distinct() {
+    let source = r#"
+fn label(value: Int) String -> {
+    if value == {
+        1 -> { "one" }
+        else -> { "other" }
+    }
+}
+
+fn early(flag: Bool) String -> {
+    if flag { return "early" }
+    "late"
+}
+"#;
+    let once = jet::format_source(source).expect("value-tail blocks should format");
+    assert!(once.contains("\"one\""), "{once}");
+    assert!(once.contains("\"other\""), "{once}");
+    assert!(once.contains("return \"early\""), "{once}");
+    assert!(once.contains("\"late\""), "{once}");
+    assert_eq!(
+        once,
+        jet::format_source(&once).expect("formatted value-tail blocks should be stable")
+    );
+}
+
+#[test]
 fn parser_rejects_arrowless_value_callable_and_offers_insertion_fix() {
     let source = "fn value() Int { return 1 }\n";
     let (tokens, lex_diagnostics) = jet::Lexer::lex(source);
@@ -1821,7 +1864,8 @@ fn fmt_compact_result_handler_is_one_line_when_it_fits() {
 
 #[test]
 fn fmt_compact_result_handler_expands_long_branches_deterministically() {
-    let long_ok = "ok_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz";
+    let long_ok =
+        "ok_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz";
     let long_err = "error_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz";
     let src = format!(
         "fn pick(value: Int !String) String -> value ? ok -> {long_ok} ! error -> {long_err}\n"
@@ -1843,7 +1887,11 @@ fn fmt_result_handler_expands_blocked_nested_and_commented_branches() {
     let nested = "fn pick(value: Int !String) Int -> value ? ok -> value ? inner -> inner ! inner_error -> inner_error ! error -> 0\n";
     let commented = "fn pick(value: Int !String) String -> value ? ok -> ok /* keep this branch readable */ ! error -> error\n";
 
-    for (source, label) in [(blocked, "blocked"), (nested, "nested"), (commented, "commented")] {
+    for (source, label) in [
+        (blocked, "blocked"),
+        (nested, "nested"),
+        (commented, "commented"),
+    ] {
         let out = jet::format_source(source).expect("Result handler should format");
         assert!(
             out.contains("\n! error ->"),

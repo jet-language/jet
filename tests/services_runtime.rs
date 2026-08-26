@@ -180,6 +180,84 @@ fn service_authority_receipts_match_interpreter() {
     );
 }
 
+const DURABLE_AUDIT_SOURCE: &str = r#"
+use core.service as service
+use core.testing as testing
+use core.time as time
+
+fn worker() {}
+
+fn state_name(delivery: ^Delivery) String -> {
+    state :: delivery.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "pending" }
+        .Accepted -> { return "accepted" }
+        .Delivering -> { return "delivering" }
+        .Delivered -> { return "delivered" }
+        .DeadLettered -> { return "dead" }
+        .Cancelled -> { return "cancelled" }
+    }
+    return "unknown"
+}
+
+fn run() {
+    temp := testing.temp_dir("durable-audit")
+    store :: Path.from(temp).join("authority.log").to_string()
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime(store, retention: retention)
+    tree := service.tree("durable-audit")
+    endpoint :: tree.worker("worker", worker, capacity: 2) ?? panic("worker")
+    tree.start() ?? panic("start")
+
+    accepted :: runtime.send(endpoint, "accepted", key: "accepted") ?? panic("accepted")
+    receipt :: (~accepted).receipt() ?? panic("receipt")
+    events :: (~accepted).events() ?? panic("events")
+    print("audit:{receipt.show().contains(\"DeliveryReceipt\")}:{events.len()}")
+    accepted.status() ?? panic("accepted status")
+
+    cancelled_handle :: runtime.send(endpoint, "cancelled", key: "cancelled") ?? panic("cancelled")
+    cancelled :: cancelled_handle.cancel() ?? panic("cancel")
+    print("cancel:{state_name(^cancelled)}")
+
+    dead_handle :: runtime.send(endpoint, "dead", key: "dead") ?? panic("dead")
+    dead :: runtime.dead_letter(dead_handle) ?? panic("dead letter")
+    print("dead:{state_name(^dead)}")
+
+    short_runtime := service.runtime(store, retention: Duration.milliseconds(1) ?? panic("short retention"))
+    expiring :: short_runtime.send(endpoint, "expiring", key: "expiring") ?? panic("expiring")
+    time.sleep(Duration.milliseconds(5) ?? panic("sleep"))
+    print("expired:{state_name(^expiring)}")
+}
+"#;
+
+const DURABLE_AUDIT_OUTPUT: &str = "audit:true:1\ncancel:cancelled\ndead:dead\nexpired:dead\n";
+
+#[test]
+fn durable_lifecycle_audit_matches_aot_default_and_interpreter() {
+    if !have_rustc() {
+        return;
+    }
+    let (aot_code, aot_stdout) = build_and_run("services_durable_audit", DURABLE_AUDIT_SOURCE);
+    assert_eq!(aot_code, 0);
+    assert_eq!(aot_stdout, DURABLE_AUDIT_OUTPUT);
+
+    let (jit_code, jit_stdout, jit_stderr) = run_default_multi(
+        "services_durable_audit_jit",
+        "main.jet",
+        &[("main.jet", DURABLE_AUDIT_SOURCE)],
+    );
+    assert_eq!(jit_code, 0, "default durable audit failed: {jit_stderr}");
+    assert_eq!(jit_stdout, DURABLE_AUDIT_OUTPUT);
+
+    let (interpreter_code, interpreter_stdout, interpreter_stderr) =
+        interpreter_run("services_durable_audit_interpreter", DURABLE_AUDIT_SOURCE);
+    assert_eq!(
+        interpreter_code, 0,
+        "interpreter durable audit failed: {interpreter_stderr}"
+    );
+    assert_eq!(interpreter_stdout, DURABLE_AUDIT_OUTPUT);
+}
+
 const RESTART_SOURCE: &str = r#"
 use core.sys as env
 use core.service as services
@@ -354,10 +432,10 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
         "restarted:1\naccepted\norder\n"
     );
 
-    // A validly framed but altered receipt field must not become a restart
-    // alias. The receipt id is the existing length-framed SHA-256 identity
-    // for the logical store, route, message, and key; provider authority and
-    // generation are restartable signing facts.
+    // A validly framed but altered immutable acceptance fact must not become a
+    // restart alias. The receipt id is the existing length-framed SHA-256
+    // identity for the logical store, route, message, and key; the acceptance
+    // HMAC also covers the deadline and all persisted route facts.
     let corrupt_store = dir.join("authority-corrupt.log");
     let corrupt_id = run_restart_process(&bin, &corrupt_store, "send", None);
     let mut corrupt = fs::read(&corrupt_store).unwrap();
@@ -367,16 +445,17 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
         .filter_map(|(index, byte)| (*byte == b'|').then_some(index))
         .collect();
     assert!(
-        pipes.len() >= 7,
+        pipes.len() >= 10,
         "receipt record did not contain its framed fields"
     );
-    let message_end = pipes[6];
-    assert!(
-        message_end > pipes[5] + 1,
-        "receipt message field was empty"
-    );
-    let last_message_hex = message_end - 1;
-    corrupt[last_message_hex] = if corrupt[last_message_hex] == b'0' {
+    let expires_start = pipes[8] + 1;
+    let expires_end = pipes[9];
+    let expires_colon = corrupt[expires_start..expires_end]
+        .iter()
+        .position(|byte| *byte == b':')
+        .expect("receipt expiry field was not length framed");
+    let expiry_hex = expires_start + expires_colon + 1;
+    corrupt[expiry_hex] = if corrupt[expiry_hex] == b'0' {
         b'1'
     } else {
         b'0'
@@ -384,7 +463,7 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     fs::write(&corrupt_store, corrupt).unwrap();
     assert!(
         !restart_status(&bin, &corrupt_store, "recover", corrupt_id.trim()).success(),
-        "a receipt with altered authority fields was accepted"
+        "a receipt with altered immutable facts was accepted"
     );
 
     // Removing only the final newline leaves a complete framed record without

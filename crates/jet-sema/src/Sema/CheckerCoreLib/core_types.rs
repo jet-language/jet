@@ -400,7 +400,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "CompilerViewSourcePath" | "CompilerViewSource" | "CompilerViewProjection"
         | "CompilerReference" | "CompilerDefinitionAnchor" | "CompilerCall"
         | "CompilerEffect" | "CompilerEffectProvenance" | "CompilerOutput"
-        | "CompilerOutputEntry" | "CompilerStructuralNode"
+        | "CompilerOutputEntry" | "CompilerStructuralNode" | "CompilerArithmeticOperation"
         | "CompilerSourceMap" | "CompilerToken" | "CompilerNode"
         | "CompilerDiagnostic" | "CompilerGeneratedLine" | "CompilerError"
         | "MarkerInfo" | "MarkerArgInfo" | "StateInfo" | "TransitionInfo" | "FactInfo"
@@ -411,7 +411,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "SendabilityInfo" | "MovednessInfo" | "AttributionInfo" | "OriginInfo"
         | "ViewProvenanceInfo" | "UnitScaleProvenanceInfo" | "UnitScaleProvenanceKind"
         | "MaturityInfo" | "Maturity"
-        | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "MethodInfo" | "FieldInfo" | "TypeParamInfo"
+        | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "ArithmeticOperationInfo" | "MethodInfo" | "FieldInfo" | "TypeParamInfo"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
         || is_io_error_type_name(name)
@@ -682,6 +682,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "effects" => Some(Type::List(Box::new(Type::Named(
                 "CompilerEffect".to_string(),
             )))),
+            "arithmetic" => Some(Type::List(Box::new(Type::Named(
+                "CompilerArithmeticOperation".to_string(),
+            )))),
             "outputs" => Some(Type::List(Box::new(Type::Named(
                 "CompilerOutput".to_string(),
             )))),
@@ -696,6 +699,15 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "view_provenance" => Some(Type::List(Box::new(Type::Named(
                 "CompilerViewProvenance".to_string(),
             )))),
+            _ => None,
+        };
+    }
+    if type_name == "CompilerArithmeticOperation" {
+        return match field {
+            "operation" | "policy" | "module" => Some(Type::String),
+            "operation_span" | "scope_span" => {
+                Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()))
+            }
             _ => None,
         };
     }
@@ -1158,7 +1170,19 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             "effects" => Some(Type::Named("EffectInfo".to_string())),
             "reaches_panic" => Some(Type::Bool),
+            "arithmetic" => Some(Type::List(Box::new(Type::Named(
+                "ArithmeticOperationInfo".to_string(),
+            )))),
             "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
+            _ => None,
+        };
+    }
+    if type_name == "ArithmeticOperationInfo" {
+        return match field {
+            "operation" | "policy" => Some(Type::String),
+            "operation_span" | "scope_span" => {
+                Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string()))
+            }
             _ => None,
         };
     }

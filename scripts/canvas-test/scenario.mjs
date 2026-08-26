@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { join } from "node:path";
 import { createDriver } from "./driver.mjs";
 
@@ -1794,6 +1794,193 @@ export const scenarios = {
     const projectPayload = project.canvas || project;
     if (!Array.isArray(projectPayload.outputs)) throw new Error("project output launcher field missing");
     await ctx.screenshot("resident-session-workbench");
+  },
+
+  "canvas-workbench-e2e": async (ctx) => {
+    await ctx.openCanvas();
+    const payload = (value) => value?.canvas && typeof value.canvas === "object" ? value.canvas : value;
+    const snapshot = await ctx.driver.evaluate(`Promise.all([
+      fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session"))}, { cache: "no-store" }).then((r) => r.json()),
+      fetch(${JSON.stringify(ctx.sessionUrl("/canvas/project"))}, { cache: "no-store" }).then((r) => r.json()),
+      fetch(${JSON.stringify(ctx.sessionUrl("/canvas/graph"))}, { cache: "no-store" }).then((r) => r.json())
+    ]).then(([session, project, graph]) => ({
+      session: session.session || session.canvas?.session || session,
+      project: project.canvas || project,
+      graph: graph.canvas || graph
+    }))`);
+    const session = snapshot.session;
+    const project = snapshot.project;
+    const browserClient = await ctx.driver.evaluate("window.__jetCanvasSessionApi.clientId()");
+    const outputs = project.outputs || [];
+    const expectedOutputs = new Map([
+      ["cli", "executable"], ["service", "service"], ["web", "executable"],
+      ["ui", "executable"], ["game", "executable"], ["library", "library"],
+      ["build", "check"],
+    ]);
+    const outputMap = new Map(outputs.map((output) => [output.target || output.name, output]));
+    const missingOutputs = [...expectedOutputs].filter(([name, kind]) => outputMap.get(name)?.kind !== kind);
+    if (missingOutputs.length) throw new Error(`workbench output launcher is incomplete: ${JSON.stringify({ missingOutputs, outputs })}`);
+
+    await ctx.waitFor(async () => await ctx.driver.evaluate(`(() => {
+      const names = ["project", "output", "graphs", "status", "problems", "details", "proof", "preview"];
+      const views = ["text", "graph", "designer", "preview", "terminal", "debugger", "tests", "custom servers"];
+      return names.every((name) => document.querySelector("[data-canvas-panel=\"" + name + "\"]"))
+        && views.every((name) => document.querySelector("[data-session-view=\"" + name + "\"]"))
+        && document.querySelectorAll("[data-canvas-output]").length >= 7;
+    })()`), "complete workbench chrome");
+    const chrome = await ctx.driver.evaluate(`(() => ({
+      heading: document.querySelector("#workbench-header")?.textContent || "",
+      outputNames: Array.from(document.querySelectorAll("[data-canvas-output]")).map((node) => node.dataset.canvasOutput),
+      views: Array.from(document.querySelectorAll("[data-session-view]")).map((node) => node.dataset.sessionView),
+      previewVisible: !document.getElementById("preview-panel")?.hidden,
+      sessionId: document.getElementById("session-identity")?.dataset.sessionId || "",
+      revision: document.getElementById("session-identity")?.dataset.sourceRevision || ""
+    }))()`);
+    if (!chrome.heading.includes("Canvas Workbench") || !chrome.previewVisible
+      || chrome.sessionId !== session.id || !chrome.revision) {
+      throw new Error(`workbench chrome lost shared session facts: ${JSON.stringify({ chrome, session })}`);
+    }
+
+    const actionsValue = await ctx.query({ schema_version: 1, op: "actions", revision: snapshot.graph.revision });
+    const actions = payload(actionsValue).actions || [];
+    const commandMap = new Map(actions.filter((action) => action.kind === "canvas.command").map((action) => [action.action_id, action]));
+    for (const [id, command] of [
+      ["canvas.command:run", ["jet", "run", "main.jet"]],
+      ["canvas.command:check", ["jet", "check", "main.jet"]],
+      ["canvas.command:test", ["jet", "test", "main.jet"]],
+      ["canvas.command:dev", ["jet", "dev", "main.jet", "--target=web"]],
+      ["canvas.command:service.start", ["jetpack", "services", "up"]],
+    ]) {
+      if (JSON.stringify(commandMap.get(id)?.command) !== JSON.stringify(command)
+        || commandMap.get(id)?.available !== true) {
+        throw new Error(`workbench command surface missing ${id}: ${JSON.stringify(commandMap.get(id))}`);
+      }
+    }
+
+    const postCommand = async (actionId) => {
+      const graph = await ctx.graph();
+      return await ctx.driver.evaluate(`(async () => {
+        const response = await fetch(${JSON.stringify(ctx.sessionUrl("/canvas/command"))}, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ schema_version: 1, revision: ${JSON.stringify(graph.revision)}, action_id: ${JSON.stringify(actionId)}, confirmed: true, client_id: "workbench-primary" })
+        });
+        return { status: response.status, value: await response.json() };
+      })()`);
+    };
+    const checkReceipt = await postCommand("canvas.command:check");
+    const runReceipt = await postCommand("canvas.command:run");
+    const checkPayload = payload(checkReceipt.value);
+    const runPayload = payload(runReceipt.value);
+    if (checkReceipt.status !== 200 || !checkPayload.success || checkPayload.command?.join(" ") !== "jet check main.jet") {
+      throw new Error(`Canvas did not execute the real CLI check: ${JSON.stringify(checkReceipt)}`);
+    }
+    if (runReceipt.status !== 200 || !runPayload.success || !runPayload.stdout.includes("cli")) {
+      throw new Error(`Canvas did not execute the real CLI run: ${JSON.stringify(runReceipt)}`);
+    }
+    await ctx.waitFor(async () => await ctx.driver.evaluate(`document.getElementById("run-hud")?.textContent.includes("passed")`), "CLI receipt in run state", 15000);
+
+    const projectRoot = project.project_root;
+    const jet = process.env.JET_BIN || join(process.cwd(), "target/debug/jet");
+    const runCli = async (args) => {
+      try {
+        const result = await execFileAsync(jet, args, {
+          cwd: projectRoot,
+          env: { ...process.env, TMPDIR: process.env.TMPDIR || "/home/nate/.cache/jet-test-scratch" },
+          maxBuffer: 2 * 1024 * 1024,
+        });
+        return { ok: true, ...result };
+      } catch (error) {
+        return { ok: false, code: error.code, stdout: error.stdout || "", stderr: error.stderr || "" };
+      }
+    };
+    for (const target of ["web", "x86_64-unknown-linux-gnu"]) {
+      const result = await runCli(["check", "main.jet", `--target=${target}`]);
+      if (!result.ok) throw new Error(`real ${target} check failed: ${JSON.stringify(result)}`);
+    }
+    const testResult = await runCli(["test", "main.jet"]);
+    if (!testResult.ok) throw new Error(`real CLI test failed: ${JSON.stringify(testResult)}`);
+
+    const appPort = session.listeners?.application?.port;
+    if (!appPort || appPort === session.listeners?.canvas?.port) {
+      throw new Error(`web app listener did not stay separate from Canvas: ${JSON.stringify(session.listeners)}`);
+    }
+    const appResponse = await fetch(`http://127.0.0.1:${appPort}/`);
+    const appBody = await appResponse.text();
+    if (appResponse.status !== 200 || !appBody.includes("<html")) {
+      throw new Error(`web output did not load from application listener: ${appResponse.status} ${appBody.slice(0, 120)}`);
+    }
+
+    const custom = spawn(process.env.NODE || "node", ["custom-server.mjs"], {
+      cwd: projectRoot,
+      env: { ...process.env, TMPDIR: process.env.TMPDIR || "/home/nate/.cache/jet-test-scratch" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    try {
+      await ctx.waitFor(async () => {
+        try {
+          const response = await fetch("http://127.0.0.1:43817/health");
+          return response.status === 200 && (await response.text()) === "custom-server-ready";
+        } catch (_) {
+          return false;
+        }
+      }, "custom server readiness", 5000);
+    } finally {
+      if (custom.exitCode === null) {
+        custom.kill("SIGTERM");
+        await new Promise((resolve) => custom.once("close", resolve));
+      }
+    }
+    if (session.custom_servers?.owner !== "application" || session.custom_servers?.transport !== "application") {
+      throw new Error(`custom server crossed Canvas transport boundary: ${JSON.stringify(session.custom_servers)}`);
+    }
+
+    const second = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session?client_id=workbench-second"))}, { cache: "no-store" }).then((r) => r.json())`);
+    const secondSession = second.session || second.canvas?.session || second;
+    if (secondSession.id !== session.id || secondSession.source_revision !== session.source_revision || secondSession.clients < 2) {
+      throw new Error(`second workbench client diverged: ${JSON.stringify(second)}`);
+    }
+    const beforeError = await ctx.source();
+    const invalid = await ctx.transaction({ schema_version: 1, op: "replace_source", revision: snapshot.graph.revision, source: "fn broken(" });
+    const invalidPayload = payload(invalid.json);
+    if (invalid.ok || invalidPayload?.kind !== "diagnostic" || await ctx.source() !== beforeError) {
+      throw new Error(`invalid source changed the last-good workbench: ${JSON.stringify(invalid)}`);
+    }
+    const afterError = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session"))}, { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
+    if (afterError.id !== session.id || !afterError.last_good_program
+      || !(afterError.history?.receipts || []).some((receipt) => receipt.status === "refused")) {
+      throw new Error(`last-good/error state was not shared: ${JSON.stringify(afterError)}`);
+    }
+    await ctx.driver.navigate("about:blank");
+    await ctx.openCanvas();
+    const reconnected = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session"))}, { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
+    if (reconnected.id !== session.id || reconnected.source_revision !== session.source_revision || reconnected.history.count !== afterError.history.count) {
+      throw new Error(`reconnect lost workbench history: ${JSON.stringify({ afterError, reconnected })}`);
+    }
+    await ctx.screenshot("workbench");
+
+    const endpoint = `http://127.0.0.1:${ctx.port}`;
+    const disconnect = async (client) => fetch(`${endpoint}${ctx.sessionUrl(`/__jet_dev_disconnect?client=${encodeURIComponent(client)}`)}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ctx.session}`, origin: `http://127.0.0.1:${ctx.port}`, host: `127.0.0.1:${ctx.port}` },
+    });
+    await disconnect("workbench-second");
+    await disconnect(browserClient);
+    await ctx.driver.navigate("about:blank");
+    let shutdown = null;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      await disconnect("workbench-primary");
+      await disconnect(browserClient);
+      await disconnect("workbench-second");
+      const response = await fetch(`${endpoint}${ctx.sessionUrl("/canvas/session")}`, { cache: "no-store" });
+      const value = await response.json();
+      shutdown = value.session || value.canvas?.session || value;
+      if (shutdown.clients === 0) break;
+      await sleep(100);
+    }
+    if (!shutdown || shutdown.id !== session.id || shutdown.clients !== 0) {
+      throw new Error(`workbench shutdown did not release client leases: ${JSON.stringify(shutdown)}`);
+    }
   },
 
   "session-surface-matrix": async (ctx) => {

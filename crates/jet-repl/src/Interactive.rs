@@ -397,7 +397,7 @@ fn cmd_rerun<R: Read>(
         "{}",
         dim(
             &format!(
-                "edit turn {} (Enter to keep as-is, or change it then Enter):",
+                "Edit turn {} (Enter to keep as-is, or change it then Enter):",
                 id
             ),
             color
@@ -430,7 +430,7 @@ fn cmd_rerun<R: Read>(
             continue;
         }
         println!(
-            "replay effect turn {}? [y] replay  [s] skip and mark stale",
+            "Replay effect turn {}? [y] replay  [s] skip and mark stale",
             step.turn_id
         );
         io::stdout().flush().ok();

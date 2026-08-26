@@ -108,6 +108,22 @@ impl FailureContract {
     pub fn is_proven_unreachable(&self) -> bool {
         matches!(self, Self::ProvenUnreachable { .. })
     }
+
+    /// Stable human/tooling projection of where the effective failure route
+    /// came from.  Consumers must use this fact instead of reconstructing
+    /// provenance from the rendered `Result` type.
+    pub fn source(&self) -> String {
+        match self {
+            Self::Default { .. } => "implicit default !Err".to_string(),
+            Self::Explicit { error, .. } => {
+                format!("explicit !{}", error.name())
+            }
+            Self::Converted { source, target, .. } => {
+                format!("converted {} -> {}", source.name(), target.name())
+            }
+            Self::ProvenUnreachable { .. } => "explicit !Never (proven unreachable)".to_string(),
+        }
+    }
 }
 
 /// D-MEMPROVENANCE2=A: one returned-view slot may come from any source path

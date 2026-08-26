@@ -695,6 +695,17 @@ fn authority_vocabulary_has_one_live_name_and_retired_marker_tombstones() {
         "crates/jet-parser/src/Parser/Statements/control.rs",
         "crates/jet-sema/src/Sema/CheckerCore/statements.rs",
         "crates/jet-sema/src/Sema/Effects.rs",
+        "crates/jet-sema/src/Sema/GateLedger.rs",
+        "crates/jet-repl/src/lib.rs",
+        "crates/jet-pkg-model/src/EffectBudget.rs",
+        "crates/jet-devserver/src/Canvas/graph_projection.rs",
+        "Source/CmdCompile.rs",
+        "docs/reference/syntax-surface.jet",
+        "tests/cli/man.txt",
+        "tests/cli/completions_bash.txt",
+        "tests/cli/completions_fish.txt",
+        "tests/cli/completions_powershell.txt",
+        "tests/cli/completions_zsh.txt",
         "crates/jet-codegen/src/Codegen/TIR/lower/statements.rs",
     ];
     let retired_words = [
@@ -730,6 +741,38 @@ fn authority_vocabulary_has_one_live_name_and_retired_marker_tombstones() {
         );
     }
     assert!(jet::Policy::applied_rule("Authority").is_none());
+}
+
+#[test]
+fn retired_authority_types_and_markers_keep_exact_teaching_diagnostics() {
+    for name in ["Ability", "Abilities", "Capability", "Caps"] {
+        let source = format!("fn audit(value: {name}) {{ print(\"x\") }}");
+        let diagnostics = jet::compile(&source).expect_err("retired Authority type must fail");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0119"
+                    && diagnostic.what.contains(&format!("`{name}` is retired"))),
+            "missing exact retirement diagnostic for {name}: {diagnostics:#?}"
+        );
+    }
+
+    for marker in ["Abilities", "Caps"] {
+        let source = format!(
+            "fn run() {{ #{marker}(IO) {{ print(\"x\") }} }}"
+        );
+        let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
+        assert!(lex_diagnostics.is_empty(), "lexer rejected retired marker: {lex_diagnostics:#?}");
+        let diagnostics = jet::Parser::parse(&tokens)
+            .expect_err("retired Authority marker must fail in the parser");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0927"
+                    && diagnostic.what.contains(&format!("`#{marker}` is retired"))),
+            "missing exact retirement diagnostic for #{marker}: {diagnostics:#?}"
+        );
+    }
 }
 
 #[test]

@@ -58,13 +58,32 @@ pub fn jet_try_alloc_value<T>(
 }
 
 // D-FAIL-ERROR1=A (ratified 2026-08-06) — one default error value on every tier.
-// Engines marshal the three source fields. Construction, projection, and report
+// Engines marshal the source fields. Construction, projection, and report
 // rendering stay here so no engine owns error meaning.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct JetErrorContextFrame {
+    pub text: String,
+    pub file: String,
+    pub line: u32,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct JetErrorConversion {
+    pub source: String,
+    pub target: String,
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct JetErr {
     message: String,
     code: JetOutcome<String, JetAbsent>,
     cause: JetOutcome<Box<JetErr>, JetAbsent>,
+    /// D-FAIL-REPORT1: preserve typed identity independently of display text.
+    typed_identity: Option<String>,
+    /// D-FAIL-REPORT1: source-linked local context frames.
+    context: Vec<JetErrorContextFrame>,
+    /// D-FAIL-REPORT1: every declared conversion crossed on the way out.
+    conversions: Vec<JetErrorConversion>,
 }
 
 pub fn jet_err(
@@ -76,7 +95,59 @@ pub fn jet_err(
         message,
         code,
         cause: cause.map(Box::new),
+        typed_identity: None,
+        context: Vec::new(),
+        conversions: Vec::new(),
     }
+}
+
+/// Construct the shared default error while retaining the source type's
+/// identity. The identity is a fact, not a prefix parsed back out of the
+/// rendered message.
+pub fn jet_err_with_identity(
+    message: String,
+    code: JetOutcome<String, JetAbsent>,
+    cause: JetOutcome<JetErr, JetAbsent>,
+    typed_identity: String,
+) -> JetErr {
+    let mut error = jet_err(message, code, cause);
+    error.typed_identity = Some(typed_identity);
+    error
+}
+
+/// Construct the default report at a declared conversion boundary.  Keeping
+/// this operation structured means the report never has to recover either the
+/// source identity or the conversion history from display text.
+pub fn jet_err_from_conversion(
+    message: String,
+    code: JetOutcome<String, JetAbsent>,
+    cause: JetOutcome<JetErr, JetAbsent>,
+    source: String,
+    target: String,
+) -> JetErr {
+    let mut error = jet_err_with_identity(message, code, cause, source.clone());
+    jet_err_record_conversion(&mut error, source, target);
+    error
+}
+
+pub fn jet_err_typed_identity(error: &JetErr) -> Option<String> {
+    error.typed_identity.clone()
+}
+
+pub fn jet_err_context(error: &JetErr) -> Vec<JetErrorContextFrame> {
+    error.context.clone()
+}
+
+pub fn jet_err_conversions(error: &JetErr) -> Vec<JetErrorConversion> {
+    error.conversions.clone()
+}
+
+pub fn jet_err_add_context(error: &mut JetErr, text: String, file: String, line: u32) {
+    error.context.push(JetErrorContextFrame { text, file, line });
+}
+
+pub fn jet_err_record_conversion(error: &mut JetErr, source: String, target: String) {
+    error.conversions.push(JetErrorConversion { source, target });
 }
 
 /// D-FAIL-ERROR1=A: the only String-to-default-error conversion.
@@ -492,6 +563,9 @@ pub fn jet_render_err(error: &JetErr) -> String {
                 Ok(code) => out.push_str(&format!("Error [{code}]: {}", error.message)),
                 Err(JetAbsent) => out.push_str(&format!("Error: {}", error.message)),
             }
+            if let Some(identity) = &error.typed_identity {
+                out.push_str(&format!(" (type: {identity})"));
+            }
         } else {
             out.push_str(&"  ".repeat(depth));
             out.push_str("cause: ");
@@ -500,6 +574,22 @@ pub fn jet_render_err(error: &JetErr) -> String {
         if let Ok(cause) = &error.cause {
             out.push('\n');
             render(cause, out, depth + 1);
+        }
+        for frame in &error.context {
+            out.push('\n');
+            out.push_str(&"  ".repeat(depth + 1));
+            out.push_str(&format!(
+                "context ({}:{}): {}",
+                frame.file, frame.line, frame.text
+            ));
+        }
+        for conversion in &error.conversions {
+            out.push('\n');
+            out.push_str(&"  ".repeat(depth + 1));
+            out.push_str(&format!(
+                "conversion: {} -> {}",
+                conversion.source, conversion.target
+            ));
         }
     }
 
@@ -1044,12 +1134,32 @@ fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {
             }
         }
         let start = offset;
-        let end = rest
-            .find(|value: char| {
-                value.is_whitespace()
-                    || matches!(value, ',' | '.' | ';' | ':' | '(' | ')' | '[' | ']' | '!')
-            })
-            .map_or(input.len(), |relative| offset + relative);
+        let mut end = 0;
+        while end < rest.len() {
+            let value = rest[end..]
+                .chars()
+                .next()
+                .expect("diagnostic token index is on a character boundary");
+            if end > 0
+                && (value.is_whitespace()
+                    || matches!(value, ',' | ';' | ':' | '(' | ')' | '[' | ']' | '!'))
+            {
+                break;
+            }
+            if value == '.' {
+                let next = rest[end + value.len_utf8()..].chars().next();
+                if next.is_none_or(|next| {
+                    next.is_whitespace()
+                        || matches!(next, ',' | ';' | ':' | '(' | ')' | '[' | ']' | '!')
+                }) {
+                    if end > 0 {
+                        break;
+                    }
+                }
+            }
+            end += value.len_utf8();
+        }
+        let end = offset + end;
         let token = &input[start..end];
         if token.is_empty() {
             offset += ch.len_utf8();
@@ -1069,7 +1179,39 @@ fn diagnostic_token_keeps_case(token: &str) -> bool {
         || token == "C"
         || matches!(
             token,
-            "App" | "Hangar" | "Jet" | "Jetpack" | "Nix" | "Runtime" | "Store"
+            "App"
+                | "Canvas"
+                | "Cell"
+                | "Codable"
+                | "Core"
+                | "Dart"
+                | "Debug"
+                | "Decimal"
+                | "Display"
+                | "Float"
+                | "Hangar"
+                | "Int"
+                | "Jet"
+                | "Jetpack"
+                | "Nix"
+                | "Output"
+                | "Package"
+                | "Quantity"
+                | "Rscript"
+                | "Rust"
+                | "Runtime"
+                | "Set"
+                | "Source"
+                | "Store"
+                | "String"
+                | "Syntax"
+                | "Target"
+                | "Tensor"
+                | "Terminal"
+                | "Type"
+                | "Unit"
+                | "Wasm"
+                | "Web"
         )
     {
         return true;
@@ -1077,7 +1219,7 @@ fn diagnostic_token_keeps_case(token: &str) -> bool {
     let has_digit = token.chars().any(|ch| ch.is_ascii_digit());
     let has_structural_case = token
         .chars()
-        .any(|ch| matches!(ch, '_' | '/' | '\\' | '@' | '#'));
+        .any(|ch| matches!(ch, '_' | '/' | '\\' | '@' | '#' | '.'));
     let all_code = token
         .chars()
         .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'));

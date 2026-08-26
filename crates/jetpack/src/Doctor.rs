@@ -27,9 +27,9 @@ impl Health {
     }
     fn mark(self) -> &'static str {
         match self {
-            Self::Healthy => "ok",
-            Self::Degraded => "warn",
-            Self::Broken => "fail",
+            Self::Healthy => "OK",
+            Self::Degraded => "Warn",
+            Self::Broken => "Fail",
         }
     }
 }
@@ -72,10 +72,10 @@ impl Report {
                 c.detail
             ));
             if !c.fix.is_empty() {
-                out.push_str(&format!("         fix: {}\n", c.fix));
+                out.push_str(&format!("         Fix: {}\n", c.fix));
             }
         }
-        out.push_str(&format!("result: {}\n", self.health().word()));
+        out.push_str(&format!("Result: {}\n", self.health().word()));
         out
     }
     pub fn to_json(&self) -> String {
@@ -175,20 +175,11 @@ fn check_hangar(roots: &Store::Roots) -> Check {
         if !path.is_dir() {
             continue;
         }
-        if matches!(
-            ent.file_name().to_str(),
-            Some(
-                "build-scratch"
-                    | "failed-scratch"
-                    | "objects"
-                    | ".stage"
-                    | "cas"
-                    | "referrers"
-                    | "closure-db"
-                    | "lifecycle-db"
-                    | "quarantine"
-            )
-        ) {
+        if ent
+            .file_name()
+            .to_str()
+            .is_some_and(Store::is_hangar_internal_directory)
+        {
             continue;
         }
         objects += 1;

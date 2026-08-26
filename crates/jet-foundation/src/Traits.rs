@@ -1690,7 +1690,59 @@ impl TraitRegistry {
             let _ = prev; // the previous span could be added to the note in a future diagnostic upgrade
             return;
         }
+        if from_ty == to_ty || self.error_conversion_path_exists(to_ty, from_ty) {
+            diags.push(Diagnostic::error(
+                "E2418",
+                format!(
+                    "error conversion cycle: `impl {} -> {}` would make conversion loop",
+                    from_ty, to_ty
+                ),
+                "error conversions must form an acyclic route so a failure has one finite meaning"
+                    .to_string(),
+                "remove this edge or choose a target that is not already reachable back to the source"
+                    .to_string(),
+                Some(span),
+            ));
+            return;
+        }
+        if self.error_conversion_path_exists(from_ty, to_ty) {
+            diags.push(Diagnostic::error(
+                "E2419",
+                format!(
+                    "error conversion is ambiguous: `{}` already reaches `{}`",
+                    from_ty, to_ty
+                ),
+                "a source and target may have one unique declared conversion route"
+                    .to_string(),
+                "remove the direct edge or remove one of the intermediate conversion edges"
+                    .to_string(),
+                Some(span),
+            ));
+            return;
+        }
         self.error_conversions.insert(key, span);
+    }
+
+    fn error_conversion_path_exists(&self, from_ty: &str, to_ty: &str) -> bool {
+        if from_ty == to_ty {
+            return true;
+        }
+        let mut pending = vec![from_ty.to_string()];
+        let mut seen = HashSet::new();
+        while let Some(current) = pending.pop() {
+            if !seen.insert(current.clone()) {
+                continue;
+            }
+            for (source, target) in self.error_conversions.keys() {
+                if source == &current {
+                    if target == to_ty {
+                        return true;
+                    }
+                    pending.push(target.to_string());
+                }
+            }
+        }
+        false
     }
 
     /// D-ARROW-RESPELL1: returns true if a declared `impl from_ty -> to_ty` exists.

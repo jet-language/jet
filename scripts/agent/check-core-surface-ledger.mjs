@@ -52,6 +52,8 @@ const CORE_API_LAWS_PATH = "docs/spec/stdlib-api-laws.md";
 const SYNTAX_REFERENCE_PATH = "docs/reference/syntax-surface.jet";
 const AGENT_MANIFEST_PATH = "tests/agent_workloads/manifest.tsv";
 const AGENT_RECEIPT_PATH = "tests/agent_workloads/baselines/receipt.tsv";
+const AGENT_RUNNER = "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks";
+const AGENT_SCORING = "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed";
 // D-SERVICE1=D: fixed_sigs.rs retains private Prelude contracts under this
 // retired adapter name. It is not a user-facing Core module and must not enter
 // the public workflow inventory. Unknown names remain hard errors below.
@@ -2223,8 +2225,8 @@ function coreApiFixtureContract() {
         ],
       },
       adapters: adapters,
-      scoring: row.evidence,
-      runner: row.evidence,
+      scoring: AGENT_RUNNER,
+      runner: AGENT_RUNNER,
       receipts: taskReceipts.map(function (receipt) {
         return {
           adapter: receipt.adapter,
@@ -2241,8 +2243,8 @@ function coreApiFixtureContract() {
   return {
     manifest: AGENT_MANIFEST_PATH,
     receipt: AGENT_RECEIPT_PATH,
-    runner: "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks",
-    scoring: "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed",
+    runner: AGENT_RUNNER,
+    scoring: AGENT_SCORING,
     sourceBoundary: {
       rule: "Only user-authored adapter source under tests/agent_workloads/adapters is compared.",
       excluded: ["tests/agent_workloads/baselines", "tests/agent_workloads/expected"],
@@ -2466,6 +2468,101 @@ function buildLedger() {
 // ---------------------------------------------------------------------------
 // Validation. Truthfulness is gated; coverage is printed.
 
+const EVIDENCE_COUNT_FIELDS = ["tokens", "statements", "calls", "namedTemporaries"];
+const EVIDENCE_INCLUDES = ["imports", "required-policy", "required-error-handling"];
+const EVIDENCE_CLASSIFICATIONS = new Set([
+  "task-essential",
+  "clarity-bearing",
+  "guarantee-bearing",
+  "expert-control",
+  "incidental-ceremony",
+]);
+
+function nonEmpty(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function nonNegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0;
+}
+
+function validateMeasuredEvidence(workflow) {
+  const evidence = workflow.evidence;
+  if (evidence.status !== "measured") return;
+
+  const counts = evidence.rawSourceCounts;
+  if (!counts || typeof counts !== "object" || counts.unit !== "lexical-token" ||
+      !Array.isArray(counts.includes) ||
+      EVIDENCE_INCLUDES.some(function (item) { return !counts.includes.includes(item); }) ||
+      !counts.arms || typeof counts.arms !== "object" ||
+      Object.keys(counts.arms).length === 0) {
+    throw new Error("measured evidence has incomplete raw source counts: " + workflow.id);
+  }
+  for (const [arm, armCounts] of Object.entries(counts.arms)) {
+    if (!armCounts || typeof armCounts !== "object" ||
+        EVIDENCE_COUNT_FIELDS.some(function (field) {
+          return !nonNegativeInteger(armCounts[field]);
+        })) {
+      throw new Error("measured evidence has incomplete raw source counts for " + workflow.id + " arm " + arm);
+    }
+  }
+
+  for (const field of ["mandatoryConceptIds", "hiddenFacts", "nonlocalLookups", "extraConstructs"]) {
+    if (!Array.isArray(evidence[field]) || evidence[field].some(function (item) {
+      return item === null || item === undefined || item === "";
+    })) {
+      throw new Error("measured evidence has invalid " + field + ": " + workflow.id);
+    }
+  }
+  if (evidence.mandatoryConceptIds.some(function (item) { return !nonEmpty(item); })) {
+    throw new Error("measured evidence has an empty mandatory concept id: " + workflow.id);
+  }
+
+  const burden = evidence.reasoningBurden;
+  if (!burden || !["better", "equal", "worse"].includes(burden.status) || !nonEmpty(burden.evidence)) {
+    throw new Error("measured evidence has no structured reasoning-burden record: " + workflow.id);
+  }
+
+  const review = evidence.independentFixtureReview;
+  const hasPython = workflow.sourceBoundary.competitors.includes(PYTHON_SURFACE_PATH);
+  if (!review || review.status !== "accepted" || !nonEmpty(review.reviewer) ||
+      !nonEmpty(review.fixtureTask) || review.sameTaskInputOutcome !== true ||
+      review.idiomatic !== true || review.minimal !== true ||
+      review.normalLanguageContract !== true ||
+      review.pythonGuarantees !== (hasPython ? "not-emulated" : "not-applicable")) {
+    throw new Error("measured evidence lacks independent fixture acceptance: " + workflow.id);
+  }
+
+  const win = evidence.jetWin;
+  if (!win || win.status !== "accepted" || !nonEmpty(win.property) ||
+      !nonEmpty(win.evidenceRef) || !["machine", "review"].includes(win.kind) ||
+      typeof win.compensates !== "boolean") {
+    throw new Error("measured evidence lacks an evidence-backed Jet win: " + workflow.id);
+  }
+  if (win.kind === "machine" && (!win.measurement ||
+      !nonEmpty(win.measurement.metric) || !nonEmpty(win.measurement.method) ||
+      win.measurement.jet === undefined || win.measurement.competitor === undefined)) {
+    throw new Error("machine Jet win has no measurement: " + workflow.id);
+  }
+  if (win.kind === "review" && (!win.review || !nonEmpty(win.review.reviewer) ||
+      win.review.verdict !== "accepted")) {
+    throw new Error("reviewed Jet win has no independent verdict: " + workflow.id);
+  }
+  for (const construct of evidence.extraConstructs) {
+    if (!construct || !EVIDENCE_CLASSIFICATIONS.has(construct.classification) ||
+        !nonEmpty(construct.span) || !nonEmpty(construct.cost) ||
+        !nonEmpty(construct.rejectedShorterForm) || !nonEmpty(construct.lostValue) ||
+        !nonEmpty(construct.reviewerVerdict) ||
+        !["claimedClarity", "reasoningBenefit", "localFactBenefit", "guaranteeBenefit",
+          "expertControlBenefit"].some(function (field) { return nonEmpty(construct[field]); })) {
+      throw new Error("measured evidence has an incomplete extra-construct record: " + workflow.id);
+    }
+    if (construct.classification === "incidental-ceremony") {
+      throw new Error("incidental ceremony is unexplained: " + workflow.id);
+    }
+  }
+}
+
 function validateCoreApiGate(ledger) {
   const gate = ledger.coreApiGate;
   if (!gate || gate.schemaVersion !== 1) {
@@ -2537,6 +2634,7 @@ function validateCoreApiGate(ledger) {
   }
   const workflowIds = new Set();
   const caseCounts = {};
+  const rowsById = new Map(ledger.rows.map(function (row) { return [row.id, row]; }));
   for (const workflow of workflows) {
     if (workflowIds.has(workflow.id)) throw new Error("duplicate Core API workflow task: " + workflow.id);
     workflowIds.add(workflow.id);
@@ -2554,11 +2652,32 @@ function validateCoreApiGate(ledger) {
       throw new Error("Core API workflow input is not frozen before comparison: " + workflow.id);
     }
     if (!workflow.competingCoreWorkflow || !workflow.sourceBoundary.fixtureManifest ||
-        !workflow.sourceBoundary.userAuthoredRoot) {
+        !workflow.sourceBoundary.userAuthoredRoot || !Array.isArray(workflow.sourceBoundary.jet) ||
+        !Array.isArray(workflow.sourceBoundary.competitors) ||
+        workflow.sourceBoundary.generatedSourceExcluded !== true) {
       throw new Error("Core API workflow lacks a source boundary: " + workflow.id);
+    }
+    const row = rowsById.get(workflow.id);
+    if (workflow.task !== "core-api/" + workflow.id || workflow.input.row !== workflow.id ||
+        workflow.competingCoreWorkflow !== row.workflow ||
+        !workflow.allowedDependency || Object.keys(workflow.allowedDependency).length === 0 ||
+        Object.values(workflow.allowedDependency).some(function (dependency) { return !nonEmpty(dependency); }) ||
+        Object.keys(workflow.toolVersions).length === 0 ||
+        Object.values(workflow.toolVersions).some(function (version) { return !nonEmpty(version); })) {
+      throw new Error("Core API workflow frozen task record drifted: " + workflow.id);
+    }
+    if (!Array.isArray(workflow.cases) || workflow.cases.length === 0 ||
+        workflow.cases.some(function (kind) {
+          return !["beginner", "expert-policy", "failure", "lifecycle"].includes(kind);
+        }) || new Set(workflow.cases).size !== workflow.cases.length) {
+      throw new Error("Core API workflow has invalid case coverage: " + workflow.id);
     }
     if (workflow.scope.excluded && !workflow.scope.decline) {
       throw new Error("Core API workflow is hidden without a ratified scope decision: " + workflow.id);
+    }
+    if (workflow.scope.excluded && (!row || row.verdict !== "declined" ||
+        workflow.scope.decline.decision !== row.declinedBy)) {
+      throw new Error("Core API workflow is hidden without a matching ratified scope decision: " + workflow.id);
     }
     if (!workflow.scope.excluded && workflow.scope.decline && !workflow.scope.decline.scored) {
       throw new Error("Core API design decline is not scored: " + workflow.id);
@@ -2573,6 +2692,7 @@ function validateCoreApiGate(ledger) {
     if (!["pending-fixture", "measured"].includes(workflow.evidence.status)) {
       throw new Error("invalid Core API workflow evidence status: " + workflow.id);
     }
+    validateMeasuredEvidence(workflow);
   }
   if (stable(Array.from(workflowIds).sort()) !== stable(Array.from(rowIds).sort())) {
     throw new Error("Core API workflow manifest row coverage drifted");
@@ -2592,7 +2712,7 @@ function validateCoreApiGate(ledger) {
   }
   const fixture = gate.fixtureContract;
   if (!fixture || fixture.manifest !== AGENT_MANIFEST_PATH || fixture.receipt !== AGENT_RECEIPT_PATH ||
-      fixture.runner !== "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks") {
+      fixture.runner !== AGENT_RUNNER || fixture.scoring !== AGENT_SCORING) {
     throw new Error("Core API gate does not reuse the frozen agent corpus contract");
   }
   if (!Array.isArray(fixture.tasks) || fixture.tasks.length === 0) {
@@ -2611,7 +2731,13 @@ function validateCoreApiGate(ledger) {
     if (!task.sourceBoundary.userAuthored.length || !task.sourceBoundary.generatedAndReferenceExcluded.length) {
       throw new Error("Core API fixture source boundary is incomplete: " + task.task);
     }
-    if (task.scoring !== fixture.runner || task.runner !== fixture.runner) {
+    if (task.scoring !== fixture.runner || task.runner !== fixture.runner ||
+        task.receipts.some(function (receipt) {
+          return !task.adapters.includes(receipt.adapter) || !nonEmpty(receipt.toolVersion) ||
+            !nonNegativeInteger(receipt.sourceTokens) || receipt.exitCode !== 0 ||
+            receipt.outputStable !== true || receipt.scoring !== fixture.scoring ||
+            !nonEmpty(receipt.policyDigest);
+        })) {
       throw new Error("Core API fixture does not name its existing runner: " + task.task);
     }
   }
@@ -3044,25 +3170,24 @@ function check() {
 
 function coreApiReleaseCheck() {
   const stored = loadJson(LEDGER_PATH);
-  validateSurfaces(stored);
-  validateRows(stored);
-  validateOwners(stored);
-  validateCoverage(stored);
-  validateCoreApiGate(stored);
-  compareLedger(stored, buildLedger());
+  try {
+    validateSurfaces(stored);
+    validateRows(stored);
+    validateOwners(stored);
+    validateCoverage(stored);
+    validateCoreApiGate(stored);
+    compareLedger(stored, buildLedger());
+  } catch (error) {
+    throw new Error(error.message + " (owner #1398)");
+  }
 
   const failures = [];
-  const classifications = new Set([
-    "task-essential",
-    "clarity-bearing",
-    "guarantee-bearing",
-    "expert-control",
-    "incidental-ceremony",
-  ]);
   for (const workflow of stored.coreApiGate.workflowManifest) {
     const evidence = workflow.evidence;
     if (workflow.input.fixtureStatus === "stale") {
       failures.push({ task: workflow.task, reason: "fixture is stale", owner: "#1398" });
+    } else if (!["fresh", "accepted"].includes(workflow.input.fixtureStatus)) {
+      failures.push({ task: workflow.task, reason: "fixture is not bound to an accepted frozen source", owner: "#1398" });
     }
     if (evidence.status !== "measured") {
       failures.push({
@@ -3079,7 +3204,7 @@ function coreApiReleaseCheck() {
       failures.push({ task: workflow.task, reason: "measured evidence record is incomplete", owner: "#1398" });
     }
     for (const construct of evidence.extraConstructs || []) {
-      if (!classifications.has(construct.classification)) {
+      if (!EVIDENCE_CLASSIFICATIONS.has(construct.classification)) {
         failures.push({ task: workflow.task, reason: "extra construct has no valid classification", owner: "#1398" });
       }
       for (const field of ["span", "cost", "rejectedShorterForm", "lostValue", "reviewerVerdict"]) {
@@ -3185,6 +3310,27 @@ function hostileFixtures() {
     "Core API workflow evidence is missing rawSourceCounts", function () {
     const broken = clone(ledger);
     delete broken.coreApiGate.workflowManifest[0].evidence.rawSourceCounts;
+    validateCoreApiGate(broken);
+  }));
+
+  results.push(rejects("measured evidence omits raw source dimensions",
+    "measured evidence has incomplete raw source counts", function () {
+    const broken = clone(ledger);
+    const workflow = broken.coreApiGate.workflowManifest[0];
+    workflow.input.fixtureStatus = "accepted";
+    workflow.evidence.status = "measured";
+    workflow.evidence.rawSourceCounts = {
+      unit: "lexical-token",
+      includes: EVIDENCE_INCLUDES,
+      arms: { jet: { tokens: 1 } },
+    };
+    workflow.evidence.mandatoryConceptIds = [];
+    workflow.evidence.hiddenFacts = [];
+    workflow.evidence.nonlocalLookups = [];
+    workflow.evidence.extraConstructs = [];
+    workflow.evidence.reasoningBurden = { status: "equal", evidence: "fixture review" };
+    workflow.evidence.independentFixtureReview = {};
+    workflow.evidence.jetWin = {};
     validateCoreApiGate(broken);
   }));
 

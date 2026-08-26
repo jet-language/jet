@@ -2574,7 +2574,7 @@ fn repl_cooked_rerun_edits_and_applies_downstream_state() {
     let out = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "cooked rerun failed: {out}");
     assert!(
-        out.contains("edit turn 1 [x := 1]"),
+        out.contains("Edit turn 1 [x := 1]"),
         "cooked edit prompt missing: {out}"
     );
     assert!(
@@ -2608,7 +2608,7 @@ fn repl_cooked_rerun_prompts_each_effect_and_skip_stales_downstream() {
         "skipped cooked effect replayed: {out}"
     );
     assert!(
-        out.contains("replay effect turn 2?"),
+        out.contains("Replay effect turn 2?"),
         "per-effect cooked prompt missing: {out}"
     );
     assert!(

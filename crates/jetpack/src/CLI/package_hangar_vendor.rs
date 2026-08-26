@@ -1633,21 +1633,21 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
         leases.active, leases.stale
     ));
     if leases.stale > 0 {
-        theme.detail("  lease-note:  stale executable leases await `jetpack hangar recover`");
+        theme.detail("  Lease Note:  stale executable leases await `jetpack hangar recover`");
     }
     if entries.is_empty() {
-        theme.status("audit: hangar is empty, nothing to read.");
+        theme.status("Audit: hangar is empty, nothing to read.");
         return 0;
     }
     theme.status(&format!(
-        "audit: {} realized object(s) (read-only, no build ran):",
+        "Audit: {} realized object(s) (read-only, no build ran):",
         entries.len()
     ));
     let mut unverified_catalog = Vec::new();
     for e in &entries {
         theme.detail(&format!("{}", theme.bold(&e.id)));
         theme.detail(&format!(
-            "  provenance: {}",
+            "  Provenance: {}",
             if e.envelope.provenance.is_empty() {
                 "<none recorded>"
             } else {
@@ -1655,15 +1655,15 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
             }
         ));
         theme.detail(&format!(
-            "  output-hash: {}",
+            "  Output Hash: {}",
             theme.gray(&e.envelope.output_hash)
         ));
         theme.detail(&format!(
-            "  platform:    {}",
+            "  Platform:    {}",
             theme.gray(&e.envelope.platform)
         ));
         theme.detail(&format!(
-            "  closure:     {}",
+            "  Closure:     {}",
             if e.references.is_empty() {
                 "<none recorded>".to_string()
             } else {
@@ -1688,9 +1688,9 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
                         .get("nix.index.signature-chain")
                         .map(String::as_str)
                         .unwrap_or("unknown");
-                    theme.detail(&format!("  catalog-tier: {tier}"));
-                    theme.detail(&format!("  catalog-trust: {trust}"));
-                    theme.detail(&format!("  signature-chain: {chain}"));
+                    theme.detail(&format!("  Catalog Tier: {tier}"));
+                    theme.detail(&format!("  Catalog Trust: {trust}"));
+                    theme.detail(&format!("  Signature Chain: {chain}"));
                     if chain != "present" {
                         unverified_catalog.push(e.id.clone());
                         let native_catalog = producer.provider == "jetpackage"
@@ -1699,21 +1699,21 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
                                 .get("source.kind")
                                 .is_some_and(|kind| kind == "local-unofficial-catalog");
                         theme.detail(if native_catalog {
-                            "  trust-note: native recipe mapping is unverified; artifact bytes remain SHA-256-verified"
+                            "  Trust Note: native recipe mapping is unverified; artifact bytes remain SHA-256-verified"
                         } else {
-                            "  trust-note: name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified"
+                            "  Trust Note: name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified"
                         });
                     }
                 }
                 for (label, key) in [
-                    ("source", "cache.source"),
-                    ("recipe", "action.recipe"),
-                    ("action", "cache.action"),
-                    ("builder", "cache.builder"),
-                    ("sandbox", "cache.sandbox"),
-                    ("policy", "cache.policy"),
-                    ("reproducibility", "cache.reproducibility"),
-                    ("toolchain", "toolchain_facts"),
+                    ("Source", "cache.source"),
+                    ("Recipe", "action.recipe"),
+                    ("Action", "cache.action"),
+                    ("Builder", "cache.builder"),
+                    ("Sandbox", "cache.sandbox"),
+                    ("Policy", "cache.policy"),
+                    ("Reproducibility", "cache.reproducibility"),
+                    ("Toolchain", "toolchain_facts"),
                 ] {
                     let value = match key {
                         "toolchain_facts" => producer.toolchain_facts.as_str(),
@@ -1727,12 +1727,12 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
                 }
             }
             Err(error) => theme.detail(&format!(
-                "  provenance:   <invalid producer record: {error}>"
+                "  Provenance:   <invalid producer record: {error}>"
             )),
         }
     }
     if !unverified_catalog.is_empty() {
-        theme.status("audit: objects without a Nix index signature chain:");
+        theme.status("Audit: objects without a Nix index signature chain:");
         for id in unverified_catalog {
             theme.detail(&format!("  {id}"));
         }

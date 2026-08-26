@@ -10,7 +10,8 @@
 use super::{lock_state, LockState};
 use crate::TrustRoot::{os_random_bytes, TrustKey};
 use crate::SHA256;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, ErrorKind, Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -25,9 +26,12 @@ const COMPLETE_FILE: &str = "complete";
 const MAX_FRAME_BYTES: usize = 64 * 1024;
 const MAX_FIELD_BYTES: usize = 16 * 1024;
 const MAX_MEMBERS: usize = 4096;
+const MAX_CONTAINER_NAME: usize = 256;
 const OWNER_SCOPE_PREFIX: &str = "executable-lease-owner-";
+const OWNER_LOCK_SCOPE: &str = "owner";
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static PUBLICATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Operation {
@@ -120,8 +124,13 @@ impl ExecutableLeaseProtocol {
     /// Hold this lock for the lifetime of the process handoff.  Kernel lock
     /// ownership, rather than a PID or timestamp, is the stale-lease fact.
     pub(crate) fn acquire_owner(&self, lease_id: &str) -> io::Result<super::FileLock> {
-        let scope = owner_scope(lease_id)?;
-        super::acquire_lease_lock(&self.root, &scope)
+        let record = self.record_dir(lease_id)?;
+        super::acquire_lease_lock(&record, OWNER_LOCK_SCOPE)
+    }
+
+    pub(crate) fn owner_lock_path(&self, lease_id: &str) -> io::Result<PathBuf> {
+        let record = self.existing_record_dir(lease_id)?;
+        Ok(super::lock_path_for_scope(&record, OWNER_LOCK_SCOPE))
     }
 
     pub(crate) fn new_lease_id(&self) -> io::Result<String> {
@@ -160,9 +169,8 @@ impl ExecutableLeaseProtocol {
         Ok((request, owner_lock))
     }
 
-    // Card #963 owns wiring replacement and rollback into the production
-    // handoff path; the request builders below are written and tested but
-    // have no caller until that card lands.
+    // Card #963 owns wiring replacement into the profile/update path; this
+    // authenticated producer is exercised here and consumed by that slice.
     #[allow(dead_code)]
     pub(crate) fn prepare_replacement(
         &self,
@@ -187,7 +195,6 @@ impl ExecutableLeaseProtocol {
         self.encode_request(&request)
     }
 
-    // Card #963 owns wiring rollback into the production handoff path.
     #[allow(dead_code)]
     pub(crate) fn prepare_rollback(
         &self,
@@ -197,18 +204,19 @@ impl ExecutableLeaseProtocol {
         if target_generation == 0 || target_generation >= receipt.generation {
             return Err(invalid("rollback target is not an older lease generation"));
         }
+        let target = self.read_generation(&receipt.lease_id, target_generation)?;
         let request = self.request(
             Operation::Rollback,
             &receipt.lease_id,
-            target_generation,
+            next_generation(receipt.generation)?,
             &receipt.owner_scope,
-            &self.root.join(&receipt.snapshot_rel),
-            &receipt.package,
-            &receipt.version,
-            &receipt.reference,
+            &self.root.join(&target.snapshot_rel),
+            &target.package,
+            &target.version,
+            &target.reference,
+            &target.output_digest,
             &receipt.output_digest,
-            "",
-            &receipt.members,
+            &target.members,
         )?;
         self.encode_request(&request)
     }
@@ -223,7 +231,10 @@ impl ExecutableLeaseProtocol {
         snapshot_root: &Path,
     ) -> io::Result<LeaseReceipt> {
         let request = self.decode_request(frame)?;
-        if !matches!(request.operation, Operation::Acquire | Operation::Replace) {
+        if !matches!(
+            request.operation,
+            Operation::Acquire | Operation::Replace | Operation::Rollback
+        ) {
             return Err(invalid("lease request is not a snapshot publication"));
         }
         self.validate_owner(&request)?;
@@ -255,10 +266,22 @@ impl ExecutableLeaseProtocol {
             Operation::Replace => {
                 let previous = previous
                     .ok_or_else(|| invalid("executable lease replacement has no base generation"))?;
-                if request.generation <= previous.generation
+                if request.generation != next_generation(previous.generation)?
                     || request.previous_output_digest != previous.output_digest
                 {
                     return Err(invalid("executable lease replacement base is stale"));
+                }
+            }
+            Operation::Rollback => {
+                let previous = previous
+                    .ok_or_else(|| invalid("executable lease rollback has no base generation"))?;
+                if request.generation != next_generation(previous.generation)?
+                    || request.previous_output_digest != previous.output_digest
+                {
+                    return Err(invalid("executable lease rollback base is stale"));
+                }
+                if !self.rollback_target_matches(&request, previous.generation)? {
+                    return Err(invalid("executable lease rollback target is not a prior generation"));
                 }
             }
             _ => unreachable!(),
@@ -294,7 +317,7 @@ impl ExecutableLeaseProtocol {
         {
             return Err(invalid("executable lease receipt does not match the handoff"));
         }
-        self.validate_owner_fields(receipt.owner_pid, &receipt.owner_scope)?;
+        self.validate_owner_fields(lease_id, receipt.owner_pid, &receipt.owner_scope)?;
         let actual = crate::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
             .map_err(io::Error::other)?;
         if actual != receipt.output_digest {
@@ -313,75 +336,214 @@ impl ExecutableLeaseProtocol {
         if receipt.owner_scope != owner_scope {
             return Err(invalid("executable lease release owner mismatch"));
         }
-        self.validate_owner_fields(receipt.owner_pid, owner_scope)?;
-        let record = self.record_dir(lease_id)?;
+        self.validate_owner_fields(lease_id, receipt.owner_pid, owner_scope)?;
+        let record = self.existing_record_dir(lease_id)?;
         let generation_dir = record.join("generations").join(generation.to_string());
         remove_owned_tree(&generation_dir)?;
-        if fs::read_dir(record.join("generations"))?.next().is_none() {
-            remove_owned_tree(&record)?;
-        }
         Ok(())
     }
 
-    /// Reclaim only receipts authenticated by this root's key and whose
-    /// owner lock is idle. Unknown lease directories stay untouched.
+    pub(crate) fn reap_empty_record(&self, lease_id: &str) -> io::Result<bool> {
+        let record = match self.existing_record_dir(lease_id) {
+            Ok(record) => record,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        let generations = record.join("generations");
+        let metadata = fs::symlink_metadata(&generations)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(invalid("executable lease generations are not a real directory"));
+        }
+        if fs::read_dir(&generations)?.next().is_some() {
+            return Ok(false);
+        }
+        remove_owned_tree(&record)?;
+        Ok(true)
+    }
+
+    /// Reclaim only leases whose owner and container locks are both idle.
+    /// Unknown or lock-damaged state stays untouched. The container sweep is
+    /// here, beside receipt recovery, so no caller can apply a weaker liveness
+    /// rule to the same executable snapshot.
     pub(crate) fn recover_stale_leases(&self) -> io::Result<usize> {
         let records = self.root.join(SERVICE_DIR).join(RECORDS_DIR);
-        let metadata = match fs::symlink_metadata(&records) {
+        let mut protected_snapshots = BTreeSet::new();
+        if let Ok(metadata) = fs::symlink_metadata(&records) {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(invalid("executable lease records are not a real directory"));
+            }
+            // Collect every live snapshot before deleting any idle record. A
+            // rollback or interrupted upgrade may temporarily have two
+            // receipts naming the same snapshot; an in-order sweep must not
+            // let the first idle receipt delete bytes still held by the other.
+            for entry in fs::read_dir(&records)? {
+                let entry = entry?;
+                let name = entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| invalid("executable lease id is not UTF-8"))?;
+                if !is_hex_id(&name) {
+                    continue;
+                }
+                let record_dir = entry.path();
+                let metadata = fs::symlink_metadata(&record_dir)?;
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    continue;
+                }
+                let generations = record_dir.join("generations");
+                let Ok(entries) = fs::read_dir(&generations) else {
+                    continue;
+                };
+                for generation in entries {
+                    let generation = generation?;
+                    let Some(number) = generation
+                        .file_name()
+                        .to_str()
+                        .and_then(|value| value.parse::<u64>().ok())
+                    else {
+                        continue;
+                    };
+                    let Ok(receipt) = self.read_generation(&name, number) else {
+                        continue;
+                    };
+                    let snapshot = self.snapshot_path(&receipt.snapshot_rel)?;
+                    if !self.receipt_is_idle(&receipt, &snapshot)? {
+                        protected_snapshots.insert(snapshot);
+                    }
+                }
+            }
+            for entry in fs::read_dir(&records)? {
+                let entry = entry?;
+                let name = entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| invalid("executable lease id is not UTF-8"))?;
+                if !is_hex_id(&name) {
+                    continue;
+                }
+                let record_dir = entry.path();
+                let metadata = fs::symlink_metadata(&record_dir)?;
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    continue;
+                }
+                let generations = record_dir.join("generations");
+                let Ok(entries) = fs::read_dir(&generations) else {
+                    continue;
+                };
+                for generation in entries {
+                    let generation = generation?;
+                    let generation_name = generation.file_name();
+                    let generation_path = generation.path();
+                    let Some(number) = generation_name
+                        .to_str()
+                        .and_then(|value| value.parse::<u64>().ok())
+                    else {
+                        if generation_name.to_str().is_some_and(|value| {
+                            value.starts_with('.') && value.ends_with(".partial")
+                        }) {
+                            remove_owned_tree(&generation_path)?;
+                        }
+                        continue;
+                    };
+                    let Ok(receipt) = self.read_generation(&name, number) else {
+                        remove_owned_tree(&generation_path)?;
+                        continue;
+                    };
+                    let snapshot = self.snapshot_path(&receipt.snapshot_rel)?;
+                    if !self.receipt_is_idle(&receipt, &snapshot)? {
+                        protected_snapshots.insert(snapshot);
+                        continue;
+                    }
+                    if protected_snapshots.contains(&snapshot) {
+                        continue;
+                    }
+                    if remove_owned_tree(&snapshot).is_err() {
+                        protected_snapshots.insert(snapshot);
+                        continue;
+                    }
+                    if remove_owned_tree(&generation_path).is_err() {
+                        protected_snapshots.insert(snapshot);
+                    }
+                }
+                if fs::read_dir(&generations)?.next().is_none() {
+                    remove_owned_tree(&record_dir)?;
+                }
+            }
+        } else if let Err(error) = fs::symlink_metadata(&records) {
+            if error.kind() != ErrorKind::NotFound {
+                return Err(error);
+            }
+        }
+
+        let leases = self.root.join("leases");
+        let metadata = match fs::symlink_metadata(&leases) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
             Err(error) => return Err(error),
         };
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            return Err(invalid("executable lease records are not a real directory"));
+            return Err(invalid("executable lease containers are not a real directory"));
         }
         let mut swept = 0;
-        for entry in fs::read_dir(&records)? {
+        for entry in fs::read_dir(&leases)? {
             let entry = entry?;
             let name = entry
                 .file_name()
                 .into_string()
-                .map_err(|_| invalid("executable lease id is not UTF-8"))?;
-            if !is_hex_id(&name) {
-                continue;
+                .map_err(|_| invalid("executable lease container name is not UTF-8"))?;
+            if name.len() > MAX_CONTAINER_NAME || !valid_container_name(&name) {
+                return Err(invalid("executable lease container identity is invalid"));
             }
-            let record_dir = entry.path();
-            let metadata = fs::symlink_metadata(&record_dir)?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path)?;
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(invalid("executable lease container is not a real directory"));
+            }
+            let snapshot = path.join("snapshot");
+            if protected_snapshots.contains(&snapshot) {
                 continue;
             }
-            let generations = record_dir.join("generations");
-            let Ok(entries) = fs::read_dir(&generations) else {
-                continue;
-            };
-            for generation in entries {
-                let generation = generation?;
-                let Some(number) = generation
-                    .file_name()
-                    .to_str()
-                    .and_then(|value| value.parse::<u64>().ok())
-                else {
-                    continue;
-                };
-                let Ok(receipt) = self.read_generation(&name, number) else {
-                    continue;
-                };
-                if self.owner_is_live(receipt.owner_pid, &receipt.owner_scope) {
-                    continue;
+            match lock_state(&path.join(".locks").join("live.lock"))? {
+                LockState::Held => continue,
+                LockState::Idle | LockState::Absent => {
+                    remove_owned_tree(&path)?;
+                    swept += 1;
                 }
-                let snapshot = self.snapshot_path(&receipt.snapshot_rel)?;
-                if remove_owned_tree(&snapshot).is_err() {
-                    continue;
-                }
-                let generation_dir = generations.join(number.to_string());
-                remove_owned_tree(&generation_dir)?;
-                swept += 1;
-            }
-            if fs::read_dir(&generations)?.next().is_none() {
-                remove_owned_tree(&record_dir)?;
             }
         }
         Ok(swept)
+    }
+
+    fn receipt_is_idle(&self, receipt: &LeaseReceipt, snapshot: &Path) -> io::Result<bool> {
+        if !matches!(
+            lock_state(&self.owner_lock_path(&receipt.lease_id)?)?,
+            LockState::Idle
+        ) {
+            return Ok(false);
+        }
+        let container = self.lease_container(snapshot)?;
+        Ok(matches!(
+            lock_state(&container.join(".locks").join("live.lock"))?,
+            LockState::Idle
+        ))
+    }
+
+    fn lease_container(&self, snapshot: &Path) -> io::Result<PathBuf> {
+        let leases = self.root.join("leases");
+        let relative = snapshot
+            .strip_prefix(&leases)
+            .map_err(|_| invalid("executable lease snapshot is outside the lease root"))?;
+        let mut components = relative.components();
+        let Some(Component::Normal(name)) = components.next() else {
+            return Err(invalid("executable lease snapshot has no container"));
+        };
+        let Some(Component::Normal(snapshot_name)) = components.next() else {
+            return Err(invalid("executable lease snapshot is not a container snapshot"));
+        };
+        if snapshot_name != OsStr::new("snapshot") || components.next().is_some() {
+            return Err(invalid("executable lease snapshot is not a container snapshot"));
+        }
+        Ok(leases.join(Path::new(name)))
     }
 
     fn request(
@@ -389,7 +551,7 @@ impl ExecutableLeaseProtocol {
         operation: Operation,
         lease_id: &str,
         generation: u64,
-        owner_scope: &str,
+        owner_scope_text: &str,
         snapshot_root: &Path,
         package: &str,
         version: &str,
@@ -399,7 +561,10 @@ impl ExecutableLeaseProtocol {
         members: &[LeaseMember],
     ) -> io::Result<LeaseRequest> {
         validate_id(lease_id, "lease id")?;
-        validate_scope(owner_scope)?;
+        validate_scope(owner_scope_text)?;
+        if owner_scope(lease_id)? != owner_scope_text {
+            return Err(invalid("executable lease owner scope does not match the lease"));
+        }
         validate_digest(output_digest, "output digest")?;
         if !previous_output_digest.is_empty() {
             validate_digest(previous_output_digest, "previous output digest")?;
@@ -412,7 +577,7 @@ impl ExecutableLeaseProtocol {
             lease_id: lease_id.to_string(),
             generation,
             owner_pid: std::process::id(),
-            owner_scope: owner_scope.to_string(),
+            owner_scope: owner_scope_text.to_string(),
             package: bounded_text(package, "package")?,
             version: bounded_text(version, "version")?,
             reference: bounded_text(reference, "reference")?,
@@ -427,6 +592,12 @@ impl ExecutableLeaseProtocol {
     }
 
     pub(crate) fn encode_request(&self, request: &LeaseRequest) -> io::Result<Vec<u8>> {
+        if request.key_id != self.key.key_id {
+            return Err(invalid("executable lease request key does not match the service"));
+        }
+        if owner_scope(&request.lease_id)? != request.owner_scope {
+            return Err(invalid("executable lease owner scope does not match the lease"));
+        }
         let canonical = request_canonical(request, false)?;
         let mac = self.key.sign(&canonical).sig_hex;
         let mut signed = request.clone();
@@ -505,6 +676,9 @@ impl ExecutableLeaseProtocol {
             mac: get("mac")?.to_string(),
         };
         validate_request(&request)?;
+        if request.key_id != self.key.key_id {
+            return Err(invalid("executable lease request key does not match the service"));
+        }
         let canonical = request_canonical(&request, false)?;
         let expected = self.key.sign(&canonical).sig_hex;
         if !constant_time_equal(expected.as_bytes(), request.mac.as_bytes()) {
@@ -520,24 +694,40 @@ impl ExecutableLeaseProtocol {
         let generations = record.join("generations");
         ensure_real_directory(&generations, "executable lease generations")?;
         let generation_dir = generations.join(receipt.generation.to_string());
-        fs::create_dir(&generation_dir)?;
-        write_new_synced(
-            &generation_dir.join(RECEIPT_FILE),
-            receipt_canonical(&receipt, true)?.as_bytes(),
-        )?;
-        let witness = receipt_witness(&receipt)?;
-        write_new_synced(
-            &generation_dir.join(COMPLETE_FILE),
-            format!("{witness}\n").as_bytes(),
-        )?;
-        sync_directory(&generation_dir)?;
-        sync_directory(&generations)?;
-        sync_directory(&record)?;
+        let partial = generations.join(format!(
+            ".{}-{}.partial",
+            receipt.generation,
+            PUBLICATION_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let result: io::Result<()> = (|| {
+            fs::create_dir(&partial)?;
+            write_new_synced(
+                &partial.join(RECEIPT_FILE),
+                receipt_canonical(&receipt, true)?.as_bytes(),
+            )?;
+            let witness = receipt_witness(&receipt)?;
+            write_new_synced(
+                &partial.join(COMPLETE_FILE),
+                format!("{witness}\n").as_bytes(),
+            )?;
+            sync_directory(&partial)?;
+            // A generation is visible only after both receipt and completion
+            // witness are durable. Rename cannot overwrite an older complete
+            // generation, so a concurrent publisher leaves the last good one.
+            fs::rename(&partial, &generation_dir)?;
+            sync_directory(&generations)?;
+            sync_directory(&record)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = remove_owned_tree(&partial);
+        }
+        result?;
         Ok(receipt)
     }
 
     fn current_receipt(&self, lease_id: &str) -> io::Result<Option<LeaseReceipt>> {
-        let record = self.record_dir(lease_id)?;
+        let record = self.existing_record_dir(lease_id)?;
         let generations = record.join("generations");
         let metadata = match fs::symlink_metadata(&generations) {
             Ok(metadata) => metadata,
@@ -548,6 +738,46 @@ impl ExecutableLeaseProtocol {
             return Err(invalid("executable lease generations are not a real directory"));
         }
         let mut latest = None;
+        for entry in fs::read_dir(&generations)? {
+            let entry = entry?;
+            let Some(generation) = entry
+                .file_name()
+                .to_str()
+                .and_then(|value| value.parse::<u64>().ok())
+            else {
+                continue;
+            };
+            let generation_path = generations.join(generation.to_string());
+            if !complete_generation_artifacts(&generation_path)? {
+                continue;
+            }
+            let receipt = self.read_generation(lease_id, generation)?;
+            if latest
+                .as_ref()
+                .is_none_or(|(current, _)| generation > *current)
+            {
+                latest = Some((generation, receipt));
+            }
+        }
+        Ok(latest.map(|(_, receipt)| receipt))
+    }
+
+    fn rollback_target_matches(
+        &self,
+        request: &LeaseRequest,
+        current_generation: u64,
+    ) -> io::Result<bool> {
+        let generations = self
+            .record_dir(&request.lease_id)?
+            .join("generations");
+        let metadata = match fs::symlink_metadata(&generations) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(invalid("executable lease generations are not a real directory"));
+        }
         for entry in fs::read_dir(generations)? {
             let entry = entry?;
             let Some(generation) = entry
@@ -557,16 +787,24 @@ impl ExecutableLeaseProtocol {
             else {
                 continue;
             };
-            if latest
-                .as_ref()
-                .is_none_or(|(current, _)| generation > *current)
+            if generation >= current_generation {
+                continue;
+            }
+            let Ok(target) = self.read_generation(&request.lease_id, generation) else {
+                continue;
+            };
+            if target.owner_scope == request.owner_scope
+                && target.package == request.package
+                && target.version == request.version
+                && target.reference == request.reference
+                && target.output_digest == request.output_digest
+                && target.snapshot_rel == request.snapshot_rel
+                && target.members == request.members
             {
-                if let Ok(receipt) = self.read_generation(lease_id, generation) {
-                    latest = Some((generation, receipt));
-                }
+                return Ok(true);
             }
         }
-        Ok(latest.map(|(_, receipt)| receipt))
+        Ok(false)
     }
 
     fn read_generation(&self, lease_id: &str, generation: u64) -> io::Result<LeaseReceipt> {
@@ -575,13 +813,20 @@ impl ExecutableLeaseProtocol {
             return Err(invalid("executable lease generation is zero"));
         }
         let path = self
-            .record_dir(lease_id)?
+            .existing_record_dir(lease_id)?
             .join("generations")
             .join(generation.to_string());
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(invalid("executable lease generation is not a real directory"));
+        }
         let receipt_text = read_bounded(&path.join(RECEIPT_FILE))?;
         let receipt = parse_receipt(&receipt_text)?;
         if receipt.lease_id != lease_id || receipt.generation != generation {
             return Err(invalid("executable lease receipt identity mismatch"));
+        }
+        if owner_scope(lease_id)? != receipt.owner_scope {
+            return Err(invalid("executable lease receipt owner scope mismatch"));
         }
         let complete = read_bounded(&path.join(COMPLETE_FILE))?;
         if complete.trim() != receipt_witness(&receipt)? {
@@ -606,9 +851,28 @@ impl ExecutableLeaseProtocol {
             }
             Ok(_) => Ok(record),
             Err(error) if error.kind() == ErrorKind::NotFound => {
-                fs::create_dir(&record)?;
-                Ok(record)
+                match fs::create_dir(&record) {
+                    Ok(()) => Ok(record),
+                    Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                        self.existing_record_dir(lease_id)
+                    }
+                    Err(error) => Err(error),
+                }
             }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn existing_record_dir(&self, lease_id: &str) -> io::Result<PathBuf> {
+        validate_id(lease_id, "lease id")?;
+        let records = self.root.join(SERVICE_DIR).join(RECORDS_DIR);
+        ensure_real_directory(&records, "executable lease records")?;
+        let record = records.join(lease_id);
+        match fs::symlink_metadata(&record) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                Err(invalid("executable lease record is not a real directory"))
+            }
+            Ok(_) => Ok(record),
             Err(error) => Err(error),
         }
     }
@@ -639,20 +903,29 @@ impl ExecutableLeaseProtocol {
     }
 
     fn validate_owner(&self, request: &LeaseRequest) -> io::Result<()> {
-        self.validate_owner_fields(request.owner_pid, &request.owner_scope)
+        self.validate_owner_fields(
+            &request.lease_id,
+            request.owner_pid,
+            &request.owner_scope,
+        )
     }
 
-    fn validate_owner_fields(&self, pid: u32, scope: &str) -> io::Result<()> {
+    fn validate_owner_fields(&self, lease_id: &str, _pid: u32, scope: &str) -> io::Result<()> {
         validate_scope(scope)?;
-        if !self.owner_is_live(pid, scope) {
+        if owner_scope(lease_id)? != scope {
+            return Err(invalid("executable lease owner scope does not match the lease"));
+        }
+        if !self.owner_is_live(lease_id, scope) {
             return Err(invalid("executable lease owner lock is not held"));
         }
         Ok(())
     }
 
-    fn owner_is_live(&self, _pid: u32, scope: &str) -> bool {
-        let path = super::lock_path_for_scope(&self.root, scope);
-        matches!(lock_state(&path), Ok(LockState::Held))
+    fn owner_is_live(&self, lease_id: &str, _scope: &str) -> bool {
+        self.owner_lock_path(lease_id)
+            .ok()
+            .and_then(|path| lock_state(&path).ok())
+            .is_some_and(|state| state == LockState::Held)
     }
 }
 
@@ -877,6 +1150,20 @@ fn owner_scope(lease_id: &str) -> io::Result<String> {
     Ok(format!("{OWNER_SCOPE_PREFIX}{lease_id}"))
 }
 
+fn valid_container_name(name: &str) -> bool {
+    let mut fields = name.splitn(3, '-');
+    let Some(pid) = fields.next().and_then(|value| value.parse::<u32>().ok()) else {
+        return false;
+    };
+    let Some(_sequence) = fields.next().and_then(|value| value.parse::<u64>().ok()) else {
+        return false;
+    };
+    let Some(entry_id) = fields.next() else {
+        return false;
+    };
+    pid != 0 && !entry_id.is_empty()
+}
+
 fn validate_relative_path(value: &str) -> io::Result<()> {
     let path = Path::new(value);
     if value.is_empty()
@@ -985,8 +1272,6 @@ fn random_id(bytes: usize) -> io::Result<String> {
     Ok(value.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-// Card #963: only the replacement and rollback builders bump a generation.
-#[allow(dead_code)]
 fn next_generation(previous: u64) -> io::Result<u64> {
     previous
         .checked_add(1)
@@ -1068,8 +1353,58 @@ fn write_new_synced(path: &Path, bytes: &[u8]) -> io::Result<()> {
     file.sync_all()
 }
 
+fn complete_generation_artifacts(path: &Path) -> io::Result<bool> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(invalid("executable lease generation is not a real directory"));
+    }
+    Ok(regular_artifact_exists(&path.join(RECEIPT_FILE))?
+        && regular_artifact_exists(&path.join(COMPLETE_FILE))?)
+}
+
+fn regular_artifact_exists(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(invalid("executable lease receipt artifact is not a regular file"))
+        }
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 fn read_bounded(path: &Path) -> io::Result<String> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(invalid("executable lease receipt artifact is not a regular file"));
+    }
+    #[cfg(unix)]
+    let file = {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let mut options = fs::OpenOptions::new();
+        options
+            .read(true)
+            .custom_flags(crate::Envelope::nofollow_open_flag().map_err(io::Error::other)?);
+        options.open(path)?
+    };
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        let mut options = fs::OpenOptions::new();
+        options
+            .read(true)
+            .custom_flags(0x0020_0000);
+        options.open(path)?
+    };
+    #[cfg(not(any(unix, windows)))]
     let file = fs::File::open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(invalid("executable lease receipt artifact is not a regular file"));
+    }
     if file.metadata()?.len() > MAX_FIELD_BYTES as u64 * 8 {
         return Err(invalid("executable lease receipt exceeds the bound"));
     }
@@ -1113,13 +1448,17 @@ fn remove_owned_tree(path: &Path) -> io::Result<()> {
     if metadata.file_type().is_symlink() || metadata.is_file() {
         fs::remove_file(path)
     } else if metadata.is_dir() {
-        for entry in fs::read_dir(path)? {
-            remove_owned_tree(&entry?.path())?;
-        }
+        let mut permissions = metadata.permissions();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
-            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+            permissions.set_mode(0o700);
+        }
+        #[cfg(not(unix))]
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions)?;
+        for entry in fs::read_dir(path)? {
+            remove_owned_tree(&entry?.path())?;
         }
         fs::remove_dir(path)
     } else {
@@ -1156,7 +1495,7 @@ mod tests {
     }
 
     fn snapshot(root: &Path, name: &str, bytes: &str) -> (PathBuf, String) {
-        let path = root.join("leases").join(name);
+        let path = root.join("leases").join(name).join("snapshot");
         fs::create_dir_all(&path).unwrap();
         fs::write(path.join("program"), bytes).unwrap();
         let digest = crate::Envelope::try_output_hash_of(&path.to_string_lossy()).unwrap();
@@ -1175,7 +1514,7 @@ mod tests {
         let root = scratch("auth");
         let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
         let lease_id = random_id(16).unwrap();
-        let owner_scope = owner_scope(&lease_id).unwrap();
+        let scope = owner_scope(&lease_id).unwrap();
         let snapshot = root.join("leases").join("auth");
         fs::create_dir_all(&snapshot).unwrap();
         fs::write(snapshot.join("program"), "one").unwrap();
@@ -1183,7 +1522,7 @@ mod tests {
         let (request, owner) = protocol
             .prepare_snapshot(
                 &lease_id,
-                &owner_scope,
+                &scope,
                 &snapshot,
                 "demo",
                 "1",
@@ -1217,12 +1556,52 @@ mod tests {
     }
 
     #[test]
+    fn owner_lock_is_lease_scoped_and_frame_identity_is_bound() {
+        let root = scratch("owner-scope");
+        let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
+        let lease_id = random_id(16).unwrap();
+        let scope = owner_scope(&lease_id).unwrap();
+        let (snapshot, digest) = snapshot(&root, "1-0-owner-scope", "one");
+        let global = crate::RuntimePolicy::acquire_lock(&root, "hangar").unwrap();
+
+        let (request, owner) = protocol
+            .prepare_snapshot(
+                &lease_id,
+                &scope,
+                &snapshot,
+                "demo",
+                "1",
+                "demo@core#1",
+                &digest,
+                &[member("one")],
+            )
+            .unwrap();
+        let mut wrong_scope = request.clone();
+        wrong_scope.owner_scope = owner_scope(&random_id(16).unwrap()).unwrap();
+        assert!(protocol.encode_request(&wrong_scope).is_err());
+
+        let mut wrong_key = request;
+        wrong_key.key_id = "0000000000000000".into();
+        assert!(protocol.encode_request(&wrong_key).is_err());
+
+        drop(owner);
+        drop(global);
+        drop(protocol);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn incomplete_generation_is_not_published_and_stale_owner_is_reclaimed() {
         let root = scratch("recovery");
         let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
         let lease_id = random_id(16).unwrap();
         let owner_scope = owner_scope(&lease_id).unwrap();
-        let (snapshot, digest) = snapshot(&root, "recovery", "one");
+        let (snapshot, digest) = snapshot(&root, "1-0-recovery", "one");
+        let live = crate::RuntimePolicy::acquire_lease_lock(
+            snapshot.parent().unwrap(),
+            "live",
+        )
+        .unwrap();
         let (request, owner) = protocol
             .prepare_snapshot(
                 &lease_id,
@@ -1248,10 +1627,98 @@ mod tests {
         fs::create_dir_all(&incomplete).unwrap();
         fs::write(incomplete.join(RECEIPT_FILE), "partial").unwrap();
         drop(owner);
+        drop(live);
         assert_eq!(protocol.recover_stale_leases().unwrap(), 1);
         assert!(!snapshot.exists());
-        assert!(incomplete.exists());
-        assert!(protocol.read_generation(&receipt.lease_id, receipt.generation).is_err());
+        assert!(!incomplete.exists());
+        assert!(protocol
+            .read_generation(&receipt.lease_id, receipt.generation)
+            .is_err());
+        drop(protocol);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recovery_waits_for_container_lifetime_lock() {
+        let root = scratch("container-lock");
+        let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
+        let lease_id = random_id(16).unwrap();
+        let owner_scope = owner_scope(&lease_id).unwrap();
+        let (snapshot, digest) = snapshot(&root, "1-0-container-lock", "one");
+        let live = crate::RuntimePolicy::acquire_lease_lock(
+            snapshot.parent().unwrap(),
+            "live",
+        )
+        .unwrap();
+        let (request, owner) = protocol
+            .prepare_snapshot(
+                &lease_id,
+                &owner_scope,
+                &snapshot,
+                "demo",
+                "1",
+                "demo@core#1",
+                &digest,
+                &[member("one")],
+            )
+            .unwrap();
+        protocol
+            .accept_snapshot(
+                &protocol.encode_request(&request).unwrap(),
+                &digest,
+                &snapshot,
+            )
+            .unwrap();
+        drop(owner);
+        assert_eq!(protocol.recover_stale_leases().unwrap(), 0);
+        assert!(snapshot.exists());
+        drop(live);
+        assert_eq!(protocol.recover_stale_leases().unwrap(), 1);
+        assert!(!snapshot.exists());
+        drop(protocol);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_lifetime_marker_never_proves_a_live_snapshot_idle() {
+        let root = scratch("marker-interference");
+        let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
+        let lease_id = random_id(16).unwrap();
+        let owner_scope = owner_scope(&lease_id).unwrap();
+        let (snapshot, digest) = snapshot(&root, "1-0-marker-interference", "one");
+        let live_root = snapshot.parent().unwrap();
+        let live = crate::RuntimePolicy::acquire_lease_lock(live_root, "live").unwrap();
+        let (request, owner) = protocol
+            .prepare_snapshot(
+                &lease_id,
+                &owner_scope,
+                &snapshot,
+                "demo",
+                "1",
+                "demo@core#1",
+                &digest,
+                &[member("one")],
+            )
+            .unwrap();
+        protocol
+            .accept_snapshot(
+                &protocol.encode_request(&request).unwrap(),
+                &digest,
+                &snapshot,
+            )
+            .unwrap();
+        drop(owner);
+
+        let marker = live_root.join(".locks/live.lock");
+        fs::remove_file(&marker).unwrap();
+        assert_eq!(protocol.recover_stale_leases().unwrap(), 0);
+        assert!(snapshot.exists());
+
+        drop(live);
+        fs::write(&marker, b"").unwrap();
+        assert_eq!(protocol.recover_stale_leases().unwrap(), 1);
+        assert!(!snapshot.exists());
         drop(protocol);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1262,7 +1729,7 @@ mod tests {
         let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
         let lease_id = random_id(16).unwrap();
         let owner_scope = owner_scope(&lease_id).unwrap();
-        let (first, first_digest) = snapshot(&root, "first", "one");
+        let (first, first_digest) = snapshot(&root, "1-0-first", "one");
         let (request, owner) = protocol
             .prepare_snapshot(
                 &lease_id,
@@ -1282,7 +1749,7 @@ mod tests {
                 &first,
             )
             .unwrap();
-        let (second, second_digest) = snapshot(&root, "second", "two");
+        let (second, second_digest) = snapshot(&root, "1-1-second", "two");
         let frame = protocol
             .prepare_replacement(
                 &first_receipt,
@@ -1302,7 +1769,20 @@ mod tests {
         let rollback = protocol
             .prepare_rollback(&second_receipt, first_receipt.generation)
             .unwrap();
-        assert_eq!(rollback, rollback);
+        let rollback_receipt = protocol
+            .accept_snapshot(&rollback, &first_digest, &first)
+            .unwrap();
+        assert_eq!(rollback_receipt.generation, 3);
+        assert_eq!(rollback_receipt.output_digest, first_receipt.output_digest);
+        assert_eq!(rollback_receipt.snapshot_rel, first_receipt.snapshot_rel);
+        assert_eq!(
+            protocol.current_receipt(&lease_id).unwrap().unwrap(),
+            rollback_receipt
+        );
+        assert_eq!(
+            protocol.read_generation(&lease_id, second_receipt.generation).unwrap(),
+            second_receipt
+        );
         drop(owner);
         fs::remove_dir_all(root).unwrap();
     }

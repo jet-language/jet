@@ -184,3 +184,35 @@ function jet_decimal_to_string(value) {
   const split = digits.length - value.scale;
   return `${value.negative ? "-" : ""}${digits.slice(0, split)}.${digits.slice(split)}`;
 }
+
+// D-WRAP-SCOPE1=A / I9: the web fixed-width arithmetic rule lives in the
+// embedded numeric Prelude. Web.rs only marshals TIR operands to this door.
+function jet_fixed_policy_step(raw, bits, signed, mode, file, line) {
+  const min = signed ? -(1n << BigInt(bits - 1)) : 0n;
+  const max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;
+  if (mode === "wrapping") return signed ? BigInt.asIntN(bits, raw) : BigInt.asUintN(bits, raw);
+  if (mode === "saturating") return raw < min ? min : raw > max ? max : raw;
+  if (raw < min || raw > max) jet_runtime_stop("E3010", file, line, "fixed-width arithmetic overflow");
+  return raw;
+}
+
+function jet_fixed_policy_pow(base, exponent, bits, signed, mode, file, line) {
+  if (exponent < 0n) jet_runtime_stop("E3010", file, line, "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)");
+  let result = 1n;
+  let factor = base;
+  let remaining = exponent;
+  while (remaining > 0n) {
+    if ((remaining & 1n) !== 0n) result = jet_fixed_policy_step(result * factor, bits, signed, mode, file, line);
+    remaining >>= 1n;
+    if (remaining > 0n) factor = jet_fixed_policy_step(factor * factor, bits, signed, mode, file, line);
+  }
+  return result;
+}
+
+function jet_fixed_policy(left, right, op, bits, signed, mode, file, line) {
+  const a = BigInt(left);
+  const b = BigInt(right);
+  if (op === "pow") return jet_fixed_policy_pow(a, b, bits, signed, mode, file, line);
+  const raw = op === "add" ? a + b : op === "sub" ? a - b : a * b;
+  return jet_fixed_policy_step(raw, bits, signed, mode, file, line);
+}

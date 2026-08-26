@@ -1092,7 +1092,7 @@ fn discover_doctests(
         };
         let doc_line = doc_line.trim();
         if !in_fence {
-            if doc_line == "```jet" {
+            if doc_line.starts_with("```") && doctest_fence_is_jet(doc_line) {
                 in_fence = true;
                 fence_line = line_number;
                 setup.clear();
@@ -1118,16 +1118,46 @@ fn discover_doctests(
             in_fence = false;
             continue;
         }
-        if let Some((expression, expected)) = doc_line.split_once("// =>") {
+        if let Some(marker) = find_doctest_expect_marker(doc_line) {
             expectations.push(DocExpectation {
-                expression: expression.trim().to_string(),
-                expected: expected.trim().to_string(),
+                expression: doc_line[..marker].trim().to_string(),
+                expected: doc_line[marker + DOC_EXPECT_MARKER.len()..].trim().to_string(),
             });
         } else if !doc_line.is_empty() {
             setup.push(doc_line.to_string());
         }
     }
     tests
+}
+
+const DOC_EXPECT_MARKER: &str = "// =>";
+
+fn doctest_fence_is_jet(fence: &str) -> bool {
+    let language = fence.trim_start_matches('`').trim();
+    language.is_empty() || language.eq_ignore_ascii_case("jet")
+}
+
+fn find_doctest_expect_marker(line: &str) -> Option<usize> {
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, character) in line.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        if character == '"' {
+            in_string = true;
+        } else if line[index..].starts_with(DOC_EXPECT_MARKER) {
+            return Some(index);
+        }
+    }
+    None
 }
 
 fn source_docs(source: &str, def_start: usize) -> (String, Vec<String>) {

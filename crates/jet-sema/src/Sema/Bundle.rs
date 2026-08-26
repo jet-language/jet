@@ -401,8 +401,17 @@ fn check_fact_tags_and_states(
         state_table.add_items(&module.items);
     }
     if !state_table.is_empty() {
+        // Declaration facts are bundle-wide: an owner and its inherent impls
+        // may be loaded from different source modules. Validate the one
+        // erased `Type.State` row against one item view so graphs and marker
+        // paths do not depend on file placement.
+        let all_items: Vec<Item> = bundle
+            .modules
+            .iter()
+            .flat_map(|module| module.items.iter().cloned())
+            .collect();
+        state_table.validate_declarations(&all_items, diags);
         for module in &bundle.modules {
-            state_table.validate_declarations(&module.items, diags);
             crate::Sema::check_items_state(&module.items, &state_table, diags);
         }
     }
@@ -1455,15 +1464,14 @@ fn record_state_marker_references_for_method(
             if raw == crate::Syntax::STATE_ENTRY {
                 continue;
             }
-            let leaf = raw.rsplit('.').next().unwrap_or(raw.as_str());
-            let candidates = [
-                if raw.contains(".State.") {
-                    raw.clone()
-                } else {
-                    format!("{owner}.State.{raw}")
-                },
-                format!("{owner}.State.{leaf}"),
-            ];
+            let candidates = if raw.contains(".State.") {
+                // A qualified marker names one exact owner. Do not fall back
+                // to the current owner's leaf: that would make a misspelled
+                // `Other.State.Ready` appear to reference `owner.State.Ready`.
+                vec![raw.clone()]
+            } else {
+                vec![format!("{owner}.State.{raw}")]
+            };
             let Some(candidate) = candidates
                 .iter()
                 .find(|candidate| ledger.declaration(module_idx, candidate).is_some())

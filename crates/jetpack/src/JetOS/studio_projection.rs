@@ -474,7 +474,7 @@ proof requirements: check, plan, build, proof
 source transaction: config.jet only</pre>
 <div class=\"actions\">
 <button data-changeset-action=\"apply\">Apply to config.jet</button>
-<button data-run=\"build\">Build only</button>
+<button data-run=\"build\">Build Only</button>
 <button data-pipeline=\"build-switch\">Build and Switch</button>
 <button data-changeset-action=\"discard\">Discard</button>
 </div></article>

@@ -5,7 +5,10 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{assert_tiers_agree, build_and_run, compile, have_rustc, jit_run_with_env};
+use tir_support::{
+    assert_example_cli_tiers_agree, assert_tiers_agree, build_and_run, compile, have_rustc,
+    jit_run_with_env,
+};
 
 /// D-OPDEF1=A: user arithmetic/equality/order reuse ordinary trait methods.
 #[test]
@@ -348,4 +351,76 @@ fn run() {
     assert_eq!(stdout, "44\n");
     assert!(stderr.contains("Stop [E3010]"), "{stderr}");
     assert!(stderr.contains("overflow"), "{stderr}");
+}
+
+/// D-WRAP-SCOPE1=A: wrapping is deliberately narrower than the existing
+/// safety checks. A checked island still traps, and division, shifts,
+/// conversions, and indexing remain checked inside a wrapping block.
+#[test]
+fn non_arithmetic_checks_remain_checked_inside_wrapping_policy() {
+    let src = r#"
+use core.sys as env
+
+fn run() {
+    case :: Int.parse(env.get("JET_ARITHMETIC_CASE") ?? "0") ?? 0
+    raw :: Int.parse(env.get("JET_ARITHMETIC_VALUE") ?? "0") ?? 0
+    value :: U8.from_int(raw) ?? U8{0}
+    #Arithmetic(.Wrapping) {
+        if case == 0 {
+            #Arithmetic(.Checked) {
+                print(value + U8{100})
+            }
+        }
+        if case == 1 { print(U8{1} / value) }
+        if case == 2 { print(U8{1} << value) }
+        if case == 3 { print(U8{raw}) }
+        if case == 4 {
+            values :: [U8]{U8{10}, U8{20}}
+            print(values[raw])
+        }
+    }
+}
+"#;
+
+    for (case, value, label) in [
+        ("0", "200", "nested checked arithmetic"),
+        ("1", "0", "division by zero"),
+        ("2", "8", "invalid shift"),
+        ("3", "256", "conversion overflow"),
+        ("4", "2", "out-of-bounds indexing"),
+    ] {
+        let (code, stdout, stderr) = jit_run_with_env(
+            &format!("tir_wrapping_safety_{case}"),
+            src,
+            &[("JET_ARITHMETIC_CASE", case), ("JET_ARITHMETIC_VALUE", value)],
+        );
+        assert_eq!(code, 70, "{label} must trap: stdout={stdout} stderr={stderr}");
+        assert!(stderr.contains("Stop [E3010]"), "{label}: {stderr}");
+    }
+}
+
+#[test]
+fn murmur3_port_matches_golden_on_default_release_and_interpreter() {
+    assert_example_cli_tiers_agree(
+        "ports/murmur3_x86_32",
+        include_str!("../examples/features/expected/ports/murmur3_x86_32.out"),
+    );
+}
+
+#[test]
+fn fixed_width_rotation_boundary_counts_match_every_tier() {
+    let src = r#"
+fn run() {
+    value :: U32{0x80000001}
+    print(value.rotate_left(0))
+    print(value.rotate_left(31))
+    print(value.rotate_right(0))
+    print(value.rotate_right(31))
+}
+"#;
+    assert_tiers_agree(
+        "tir_fixed_width_rotation_boundaries",
+        src,
+        "2147483649\n3221225472\n2147483649\n3\n",
+    );
 }

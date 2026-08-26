@@ -524,6 +524,7 @@ impl<'a> Checker<'a> {
                     mode,
                     scope_span: marker.span,
                     operation_span: marker.span,
+                    operation: None,
                 });
             }
         }

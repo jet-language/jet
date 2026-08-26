@@ -128,15 +128,36 @@ pub(crate) fn list_read_only_checked(roots: &Roots) -> std::io::Result<Vec<Store
     jet_pkg_model::Store::list_checked(roots)
 }
 
+pub(crate) fn is_hangar_internal_directory(name: &str) -> bool {
+    matches!(
+        name,
+        "build-scratch"
+            | "failed-scratch"
+            | "objects"
+            | ".stage"
+            | "cas"
+            | "referrers"
+            | "closure-db"
+            | "lifecycle-db"
+            | "quarantine"
+            | "receipts"
+            | "stage"
+            | ".archive-stage"
+            | "reproducibility-staging"
+            | "unreproducible"
+    )
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct LeaseInventory {
     pub active: usize,
     pub stale: usize,
 }
 
+/// One lease directory as the inventory sees it. Only staleness is recorded:
+/// the path is what the scan walks, not what a caller reads back.
 #[derive(Debug)]
 struct LeaseNode {
-    path: PathBuf,
     stale: bool,
 }
 
@@ -171,25 +192,10 @@ pub(crate) fn audit_read_only(roots: &Roots) -> std::io::Result<AuditSnapshot> {
                     continue;
                 }
                 let name = entry.file_name();
-                if matches!(
-                    name.to_str(),
-                    Some(
-                        "build-scratch"
-                            | "failed-scratch"
-                            | "objects"
-                            | ".stage"
-                            | "cas"
-                            | "referrers"
-                            | "closure-db"
-                            | "lifecycle-db"
-                            | "quarantine"
-                            | "receipts"
-                            | "stage"
-                            | ".archive-stage"
-                            | "reproducibility-staging"
-                            | "unreproducible"
-                    )
-                ) {
+                if name
+                    .to_str()
+                    .is_some_and(is_hangar_internal_directory)
+                {
                     continue;
                 }
                 let id = name.to_string_lossy().into_owned();
@@ -409,14 +415,12 @@ pub fn recover_hangar(roots: &Roots) -> std::io::Result<usize> {
         let archive = Archive::recover_archive_staging_unlocked(roots)?;
         let repairs = Archive::recover_repair_quarantine_unlocked(roots)?;
         let build_debug = super::BuildDebug::recover_scratch(&roots.hangar_dir())?;
-        // The authenticated protocol owns receipt validation and only removes
-        // a snapshot after its inherited owner lock is idle.  The existing
-        // lease-container sweep then removes the now-empty container.
-        let _authenticated_leases = super::RuntimePolicy::ExecutableLeaseProtocol::open(
-            &roots.root,
-        )?
-        .recover_stale_leases()?;
-        let leases = recover_stale_leases_unlocked(roots)?;
+        // The authenticated protocol owns both receipt validation and the
+        // lease-container sweep. The container lifetime lock is the
+        // process-tree authority; the service-owner lock authenticates the
+        // handoff but shares the managed-root inode with this recovery lock.
+        let leases = super::RuntimePolicy::ExecutableLeaseProtocol::open(&roots.root)?
+            .recover_stale_leases()?;
         let closure = Closure::recover_closure_journal_unlocked(roots)?;
         let migrated = Closure::migrate_closure_graph_unlocked(roots)?.0;
         Ok(staging
@@ -431,31 +435,6 @@ pub fn recover_hangar(roots: &Roots) -> std::io::Result<usize> {
 }
 
 const LEASE_NAME_MAX: usize = 256;
-
-fn recover_stale_leases_unlocked(roots: &Roots) -> std::io::Result<usize> {
-    let nodes = lease_nodes_unlocked(roots)?;
-    let mut swept = 0;
-    for node in nodes.into_iter().filter(|node| node.stale) {
-        let metadata = match fs::symlink_metadata(&node.path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error),
-        };
-        if metadata.is_dir() && !metadata.file_type().is_symlink() {
-            make_tree_writable_for_removal(&node.path)?;
-            fs::remove_dir_all(&node.path)?;
-        } else if metadata.file_type().is_symlink() || metadata.is_file() {
-            fs::remove_file(&node.path)?;
-        } else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Hangar lease `{}` is not removable", node.path.display()),
-            ));
-        }
-        swept += 1;
-    }
-    Ok(swept)
-}
 
 fn lease_nodes_unlocked(roots: &Roots) -> std::io::Result<Vec<LeaseNode>> {
     let leases = roots.root.join("leases");
@@ -509,7 +488,7 @@ fn lease_nodes_unlocked(roots: &Roots) -> std::io::Result<Vec<LeaseNode>> {
         } else {
             true
         };
-        nodes.push(LeaseNode { path, stale });
+        nodes.push(LeaseNode { stale });
     }
     Ok(nodes)
 }
@@ -1923,12 +1902,15 @@ fn realize_adapter_tools(
             )))
         })?;
         for member in receipt.executable_members {
-            let path = lease.executable(&member).ok_or_else(|| {
-                RealizeError::Provider(super::Provider::ProviderError::Adapter(format!(
-                    "build dependency `{}` lost executable `{member}` from its verified lease",
-                    dependency.name
-                )))
-            })?;
+            let path = lease
+                .executable_for_command(&member)
+                .map_err(RealizeError::Store)?
+                .ok_or_else(|| {
+                    RealizeError::Provider(super::Provider::ProviderError::Adapter(format!(
+                        "build dependency `{}` lost executable `{member}` from its verified lease",
+                        dependency.name
+                    )))
+                })?;
             if tools.insert(member.clone(), path).is_some() {
                 return Err(RealizeError::Provider(
                     super::Provider::ProviderError::Adapter(format!(

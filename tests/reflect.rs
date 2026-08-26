@@ -17,6 +17,48 @@ fn span() -> Span {
     Span::new(0, 1)
 }
 
+#[test]
+fn arithmetic_policy_is_visible_in_function_reflection() {
+    let root = std::env::temp_dir().join(format!("jet_reflect_arithmetic_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("main.jet");
+    std::fs::write(
+        &path,
+        "#Arithmetic(.Wrapping)\nfn wrapped(value: U8) U8 { return value + U8{1} }\nfn run() {}\n",
+    )
+    .unwrap();
+    let (diagnostics, bundle, effect_facts) =
+        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let bundle = bundle.expect("checked bundle");
+    let facts = jet::Driver::program_semantic_facts(&bundle, &effect_facts);
+    let program = jet::Comptime::build_program_info(&bundle, &facts);
+    let CtValue::List(functions) = struct_field(&program, "functions") else {
+        panic!("functions");
+    };
+    let wrapped = functions
+        .iter()
+        .find(|value| matches!(struct_field(value, "name"), CtValue::Str(name) if name == "wrapped"))
+        .expect("wrapped reflection");
+    let CtValue::List(arithmetic) = struct_field(wrapped, "arithmetic") else {
+        panic!("arithmetic");
+    };
+    let CtValue::Struct { fields, .. } = arithmetic.first().expect("arithmetic row") else {
+        panic!("arithmetic row");
+    };
+    assert!(fields.iter().any(|(name, value)| {
+        name == "operation" && matches!(value, CtValue::Str(operation) if operation == "add")
+    }));
+    assert!(fields.iter().any(|(name, value)| {
+        name == "policy" && matches!(value, CtValue::Str(policy) if policy == ".Wrapping")
+    }));
+    assert!(fields.iter().any(|(name, value)| {
+        name == "scope_span" && matches!(value, CtValue::Struct { .. })
+    }));
+    std::fs::remove_dir_all(root).ok();
+}
+
 fn field(name: &str, ty: &str, is_pub: bool) -> Field {
     Field {
         is_pub,

@@ -1149,32 +1149,32 @@ fn web_value_and_range_arm_tables_emit_on_js_and_wasm() {
 #Target(JS)
 fn digit(n: Int) String -[]> {
     if n == {
-        0 -> return "0"
-        1 -> return "1"
-        else -> return "x"
+        0 -> { "0" }
+        1 -> { "1" }
+        else -> { "x" }
     }
 }
 #Target(JS)
 fn band(n: Int) String -[]> {
     if n == {
-        0..9 -> return "low"
-        else -> return "high"
+        0..9 -> { "low" }
+        else -> { "high" }
     }
 }
 #WasmExport
 fn wasm_digit(n: Int) String -[]> {
     if n == {
-        0 -> return "0"
-        1 -> return "1"
-        else -> return "x"
+        0 -> { "0" }
+        1 -> { "1" }
+        else -> { "x" }
     }
 }
 #WasmExport
 fn wasm_band(n: Int) String -[]> {
     if n == {
-        0..9 -> return "low"
-        10..19 -> return "mid"
-        else -> return "high"
+        0..9 -> { "low" }
+        10..19 -> { "mid" }
+        else -> { "high" }
     }
 }
 fn run() {}
@@ -2806,18 +2806,18 @@ fn web_if_expr_emits_safe_js_and_wasm_value_blocks() {
     let src = r#"#Target(Web)
 #WasmExport
 fn wasm_pick(flag: Bool) Int -[]> {
-    return if flag -> {
+    if flag -> {
         n :: 6
         n + 1
-    } else -> 3
+    } else -> { 3 }
 }
 
 #Target(JS)
 fn js_pick(flag: Bool) Int -[]> {
-    return if flag -> {
+    if flag -> {
         n :: 6
         n + 2
-    } else -> 4
+    } else -> { 4 }
 }
 
 #Target(JS)

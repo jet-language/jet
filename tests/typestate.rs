@@ -5,6 +5,37 @@
 //! checker and erased in codegen (I3).
 
 mod common;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
+use std::fs;
+use std::process::Command;
+
+const TIER_SOURCE: &str = r#"
+struct Settlement {
+    state { Queued, Approved, Settled }
+}
+
+impl Settlement {
+    #Transition(_, Queued) fn begin() Settlement -[]> { return Settlement{} }
+    #Transition(Queued, Approved) fn approve(self: ^Settlement) Settlement -[]> { return self }
+    #Transition(Approved, Settled) fn settle(self: ^Settlement) Settlement -[]> { return self }
+    #State(Settled) fn report(self) String -[]> { return "settled" }
+}
+
+@state_info :: Settlement.reflect()
+
+fn run() {
+    item := Settlement.begin()
+    item = item.approve()
+    item = item.settle()
+    print(item.report())
+    print(@state_info.states[2].terminal)
+    print(@state_info.states[2].reachable ?? false)
+}
+"#;
+
+const TIER_EXPECTED: &str = "settled\ntrue\ntrue\n";
 
 fn codes(src: &str) -> Vec<String> {
     match jet::compile(src) {
@@ -268,6 +299,97 @@ fn run() {
         !compiled.rust.contains("discriminant"),
         "typestate must not add a tag"
     );
+}
+
+#[test]
+fn typestate_graph_is_folded_before_aot_jit_and_interpreter() {
+    assert!(tir_support::have_rustc(), "AOT proof needs rustc");
+    tir_support::assert_tiers_agree("typestate_graph_tiers", TIER_SOURCE, TIER_EXPECTED);
+    let output = jet::compile(TIER_SOURCE).expect("typestate tier fixture must compile");
+    for label in ["Queued", "Approved", "Settled", "Settlement.State"] {
+        assert!(
+            !output.rust.contains(label),
+            "typestate fact `{label}` reached generated runtime Rust"
+        );
+    }
+}
+
+#[test]
+fn typestate_graph_runs_on_resident_jit_without_runtime_state() {
+    if !jet_jit::cranelift_host_supported() {
+        eprintln!("note: resident Cranelift host unavailable; skipping resident-JIT proof");
+        return;
+    }
+    let scratch = common::Scratch::new("typestate-jit");
+    let path = scratch.join("main.jet");
+    fs::write(&path, TIER_SOURCE).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    let mut bundle = jet::Loader::load_entry(&shown).expect("typestate fixture loads");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.is_empty(),
+        "typestate fixture diagnostics: {diagnostics:#?}"
+    );
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "typestate fixture must be resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::reset_jit_trace_for_test();
+    let outcome = jet::Interpreter::dev_iteration(&shown, false, false);
+    let stdout = match outcome {
+        jet::Interpreter::RunOutcome::Ran { stdout, .. } => stdout,
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("resident JIT rejected typestate fixture: {diags:?}")
+        }
+    };
+    assert_eq!(stdout, TIER_EXPECTED);
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "typestate fixture did not execute on JIT"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "typestate fixture fell back to interpreter"
+    );
+}
+
+#[test]
+fn typestate_graph_reaches_web_without_runtime_state() {
+    let scratch = common::Scratch::new("typestate-web");
+    let shown = scratch.join("main.jet");
+    fs::write(&shown, TIER_SOURCE).unwrap();
+    let shown = shown.to_string_lossy().into_owned();
+    let output = jet::compile_web_with_path(TIER_SOURCE, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "web typestate fixture rejected:\n{}",
+            jet::render_diagnostics(&shown, TIER_SOURCE, &diags)
+        )
+    });
+    let web = output
+        .web
+        .expect("web typestate fixture must produce artifacts");
+    for label in ["Queued", "Approved", "Settled", "Settlement.State"] {
+        assert!(
+            !web.wasm_rust.contains(label),
+            "typestate fact `{label}` reached web runtime Rust"
+        );
+    }
+    fs::write(scratch.join("app.js"), &web.js_app).unwrap();
+    fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+    fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();
+    let node = Command::new("node")
+        .current_dir(&scratch.path)
+        .arg("app.js")
+        .output()
+        .expect("spawn node");
+    assert!(
+        node.status.success(),
+        "web typestate fixture failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&node.stdout), TIER_EXPECTED);
 }
 
 /// D-STATE-TERMINAL1: a state with no outgoing transition is a valid terminal fact.

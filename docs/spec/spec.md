@@ -1057,7 +1057,7 @@ column returns to design review; it does not create a second boundary mechanism.
 
 | Time | Schema named by | Checked by | Evolves by | Fact left |
 | --- | --- | --- | --- | --- |
-| comptime — literal | the typed head from D-UNIFYLIT1 | the head checker and E0152 | source edits | the typed source expression; no runtime origin is needed |
+| comptime — literal | the checked text type from D-TEXTHEAD-TYPE1 | the type checker and E2712 | source edits | the typed source expression; no runtime origin is needed |
 | build — manifest | the closed manifest vocabulary from D-CONF | manifest validation and its registered errors | editions and explicit manifest changes | parsed manifest identity and its provenance |
 | build — dependency | the lockfile entry and content hash | E1204 hash verification and the trust gate | re-resolution, lockfile update, or edition change | locked bytes, hash, and trust decision |
 | link — foreign signature | the binder descriptor from D-FFI-UNIFY1 | the language binder and link checks | explicit rebind or descriptor change | the foreign effect leaf and link provenance |
@@ -1067,7 +1067,7 @@ The ratified rules are instances of this same grid:
 
 | Instance | Grid cell | Existing rule |
 | --- | --- | --- |
-| literal | comptime / typed literal | D-UNIFYLIT1 and E0152 reject unchecked typed-head text |
+| literal | comptime / typed literal | D-TEXTHEAD-TYPE1 and E2712 reject unchecked checked-text bodies |
 | manifest | build / manifest | D-CONF names the accepted fields and manifest diagnostics reject other shapes |
 | dependency | build / dependency | E1204 binds the resolved bytes to the lockfile hash; the trust commands record the grant decision |
 | link | link / foreign signature | D-FFI-UNIFY1 gives a foreign declaration one binder descriptor and one effect leaf |

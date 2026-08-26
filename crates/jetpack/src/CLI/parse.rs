@@ -499,11 +499,12 @@ pub fn main(args: Vec<String>) -> i32 {
         );
         return 2;
     }
-    // Doctor must observe state without repairing or migrating it.
+    // Doctor and audit observe state without repairing or migrating it.
     let read_only_shared_store_status = verb == "hangar"
         && parsed.positional.first().map(String::as_str) == Some("shared")
         && parsed.positional.get(1).map(String::as_str) == Some("status");
-    if verb != "doctor" && !read_only_shared_store_status {
+    let read_only_command = matches!(verb.as_str(), "doctor" | "audit");
+    if !read_only_command && !read_only_shared_store_status {
         let roots = Store::resolve();
         if let Err(error) = Store::migrate_legacy_hangar(&roots) {
             Store::report_integrity(

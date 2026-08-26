@@ -1,6 +1,28 @@
 use super::super::*;
 use crate::Diagnostics::TextEdit;
 
+fn value_block_stmt_diverges(stmt: &Stmt) -> bool {
+    matches!(
+        stmt,
+        Stmt::Return(..)
+            | Stmt::Break(..)
+            | Stmt::BreakValue(..)
+            | Stmt::Continue(..)
+            | Stmt::BreakLabel(..)
+            | Stmt::BreakLabelValue(..)
+            | Stmt::ContinueLabel(..)
+    ) || matches!(stmt, Stmt::Expr(Expr::Todo { .. }))
+        || matches!(
+            stmt,
+            Stmt::Expr(Expr::Call(Call { name, .. })) if name == Syntax::BUILTIN_PANIC
+        )
+}
+
+fn value_expr_diverges(expr: &Expr) -> bool {
+    matches!(expr, Expr::Todo { .. })
+        || matches!(expr, Expr::Call(Call { name, .. }) if name == Syntax::BUILTIN_PANIC)
+}
+
 impl<'a> Parser<'a> {
     /// D-RESULT-DECON2=B: the compact exhaustive Result handler starts only
     /// after a postfix `?`, payload name, and branch arrow. `?.` and `?(…)`
@@ -23,11 +45,8 @@ impl<'a> Parser<'a> {
     ) -> Result<Expr, Diagnostic> {
         let check_duplicate_failure = self.result_handler_depth == 0;
         self.result_handler_depth += 1;
-        let result = self.parse_result_handler_inner(
-            subject,
-            question_span,
-            check_duplicate_failure,
-        );
+        let result =
+            self.parse_result_handler_inner(subject, question_span, check_duplicate_failure);
         self.result_handler_depth -= 1;
         result
     }
@@ -206,7 +225,25 @@ impl<'a> Parser<'a> {
                 if matches!(self.peek().kind, TokKind::Semi)
                     && matches!(self.peek2().kind, TokKind::RBrace)
                 {
-                    self.bump();
+                    let semi = self.peek().span;
+                    if semi.start != semi.end {
+                        if value_expr_diverges(&value) {
+                            self.bump();
+                        } else {
+                            return Err(Diagnostic::error(
+                                "E0114",
+                                "this Result handler branch ends with a semicolon-terminated expression"
+                                    .to_string(),
+                                "a value-expected block must end with one unadorned expression; a semicolon-terminated expression yields unit"
+                                    .to_string(),
+                                "remove the semicolon, or use `return ...` for an early exit"
+                                    .to_string(),
+                                Some(value.span()),
+                            ));
+                        }
+                    } else {
+                        self.bump();
+                    }
                 }
                 if matches!(self.peek().kind, TokKind::RBrace) {
                     self.bump();
@@ -236,7 +273,7 @@ impl<'a> Parser<'a> {
             ) || matches!(
                 &stmt,
                 Stmt::Expr(Expr::Call(Call { name, .. })) if name == Syntax::BUILTIN_PANIC
-            );
+            ) || matches!(&stmt, Stmt::Expr(Expr::Todo { .. }));
             stmts.push(stmt);
             if diverges && matches!(self.peek().kind, TokKind::RBrace) {
                 let close = self.bump().span;
@@ -1568,6 +1605,21 @@ impl<'a> Parser<'a> {
                 TokKind::RBrace => {
                     let span = self.peek().span;
                     self.bump();
+                    if let Some(stmt) = stmts.last() {
+                        if value_block_stmt_diverges(stmt) {
+                            return Ok((stmts, Expr::NoElse(Span::new(span.start, span.start))));
+                        }
+                        return Err(Diagnostic::error(
+                            "E0114",
+                            "this value branch ends with a statement instead of a value"
+                                .to_string(),
+                            "a value-expected block must end with one unadorned expression; statements yield unit"
+                                .to_string(),
+                            "put one unadorned expression last, or use `return ...` for an early exit"
+                                .to_string(),
+                            Some(stmt.span()),
+                        ));
+                    }
                     return Err(Diagnostic::error(
                         "E0003",
                         "this `if` branch is empty but is used as a value".to_string(),
@@ -1593,13 +1645,32 @@ impl<'a> Parser<'a> {
             let save = self.pos;
             let saved_diags = self.diags.len();
             if let Ok(e) = self.expr() {
-                // S6-R: the lexer inserts a synthetic terminator after the tail
-                // value too (it ends a line before `}`); accept `expr }` or
-                // `expr ; }` as the block's value.
+                // S6-R: the lexer inserts a zero-width terminator after a tail
+                // value when the line ends before `}`. An authored `;` is a
+                // statement tail and therefore yields unit under
+                // D-TAIL-RETURN1=A; it must not be admitted as the value.
                 if matches!(self.peek().kind, TokKind::Semi)
                     && matches!(self.peek2().kind, TokKind::RBrace)
                 {
-                    self.bump(); // synthetic `;`
+                    let semi = self.peek().span;
+                    if semi.start != semi.end {
+                        if value_expr_diverges(&e) {
+                            self.bump();
+                        } else {
+                            return Err(Diagnostic::error(
+                                "E0114",
+                                "this value branch ends with a semicolon-terminated expression"
+                                    .to_string(),
+                                "a value-expected block must end with one unadorned expression; a semicolon-terminated expression yields unit"
+                                    .to_string(),
+                                "remove the semicolon, or use `return ...` for an early exit"
+                                    .to_string(),
+                                Some(e.span()),
+                            ));
+                        }
+                    } else {
+                        self.bump();
+                    }
                 }
                 if matches!(self.peek().kind, TokKind::RBrace) {
                     self.bump();

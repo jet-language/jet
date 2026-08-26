@@ -68,9 +68,9 @@ pub use lvalues::{
 #[path = "AST/expressions.rs"]
 mod expressions;
 pub use expressions::{
-    ArithmeticMode, ArithmeticPolicyFact, BinOp, Call, CallArg, CallArgFlags, Expr, IncDecOp,
-    Lambda, LambdaBody, LambdaMeta, LambdaParam, PlaceAccess, StrFormat, StrPart, TypedLitBody,
-    UnOp, UnitFormat,
+    arithmetic_policy_facts, ArithmeticMode, ArithmeticOperation, ArithmeticPolicyFact, BinOp,
+    Call, CallArg, CallArgFlags, Expr, IncDecOp, Lambda, LambdaBody, LambdaMeta, LambdaParam,
+    PlaceAccess, StrFormat, StrPart, TypedLitBody, UnOp, UnitFormat,
 };
 
 #[path = "AST/comptime.rs"]

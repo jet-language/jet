@@ -294,7 +294,23 @@ impl StateTable {
     /// terminal and entry reachability facts without adding a runtime policy.
     pub fn validate_declarations(&mut self, items: &[Item], diags: &mut Vec<Diagnostic>) {
         let graphs = checked_state_graphs(items);
-        for (type_name, decl_states) in &self.declared {
+        // `StateTable` is collected once for the whole bundle, while this
+        // validator is called once per loaded module. Only the struct-owned
+        // rows present in this module may produce declaration diagnostics or
+        // graph facts here; otherwise an empty/duplicate row in one module is
+        // repeated for every sibling module with a synthetic 0..0 span.
+        let local_structs: HashSet<&str> = items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Struct(structure) => Some(structure.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        for (type_name, decl_states) in self
+            .declared
+            .iter()
+            .filter(|(type_name, _)| local_structs.contains(type_name.as_str()))
+        {
             if decl_states.is_empty() {
                 diags.push(e0169(type_name, self.state_span(items, type_name)));
             }

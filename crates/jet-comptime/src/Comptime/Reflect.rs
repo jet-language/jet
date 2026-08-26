@@ -20,6 +20,10 @@ use jet_foundation::Reflection::ReflectionField;
 #[derive(Debug, Clone, Default)]
 pub struct ProgramSemanticFacts {
     pub effects: std::collections::HashMap<String, Vec<String>>,
+    pub arithmetic: std::collections::HashMap<
+        String,
+        Vec<jet_foundation::AST::ArithmeticPolicyFact>,
+    >,
     pub reaches_panic: std::collections::BTreeSet<String>,
     pub fact_registry: jet_foundation::Facts::FactRegistry,
     pub name_ledger: jet_foundation::Names::NameLedger,
@@ -238,6 +242,16 @@ fn ct_struct(type_name: &str, fields: &[(&str, CtValue)]) -> CtValue {
             .map(|(n, v)| (n.to_string(), v.clone()))
             .collect(),
     }
+}
+
+fn source_span_value(span: jet_foundation::Diagnostics::Span) -> CtValue {
+    ct_struct(
+        crate::Syntax::TYPE_SOURCE_SPAN,
+        &[
+            ("start", CtValue::Int(span.start as i64)),
+            ("end", CtValue::Int(span.end as i64)),
+        ],
+    )
 }
 
 fn typed_enum(type_name: &str, variant: &str) -> CtValue {
@@ -1177,10 +1191,12 @@ fn format_method_sig(method: &Func) -> String {
         .map(|p| format_param(&p.name, &p.ty))
         .collect::<Vec<_>>()
         .join(", ");
-    match &method.return_type {
-        Some(ret) => format!("fn {}({}) {}", method.name, params, ret.name()),
-        None => format!("fn {}({})", method.name, params),
-    }
+    format!(
+        "fn {}({}) {}",
+        method.name,
+        params,
+        method.effective_return_type().name()
+    )
 }
 
 /// One reflected struct field (D-METAREFLECT1).
@@ -1238,7 +1254,7 @@ fn method_signature_type(method: &Func) -> Type {
             });
     Type::Fn {
         params: method.params.iter().map(|param| param.ty.clone()).collect(),
-        ret: method.return_type.clone().map(Box::new),
+        ret: Some(Box::new(method.effective_return_type())),
         effect_bound: method.declared_effects.clone(),
         param_contract,
         call_metadata,
@@ -1264,7 +1280,7 @@ fn build_method_info_with_vocabulary(
         .params
         .iter()
         .flat_map(|param| type_dimensions(&param.ty))
-        .chain(method.return_type.iter().flat_map(|ty| type_dimensions(ty)))
+        .chain(type_dimensions(&method.effective_return_type()))
         .collect();
     let mut facts = declared_function_facts(
         &method.name,
@@ -1289,11 +1305,7 @@ fn build_method_info_with_vocabulary(
             (
                 "return_type",
                 ct_str(
-                    method
-                        .return_type
-                        .as_ref()
-                        .map(|t| t.name())
-                        .unwrap_or_else(|| "Unit".to_string()),
+                    method.effective_return_type().name(),
                 ),
             ),
             ("params", ct_list(param_strs)),
@@ -2620,6 +2632,13 @@ fn build_function_info(
 ) -> CtValue {
     let qualified = program_reflection_identity(&facts.name_ledger, module_idx, module, &func.name);
     let effects = facts.effects.get(&qualified).cloned().unwrap_or_default();
+    let arithmetic = facts
+        .arithmetic
+        .get(&qualified)
+        .into_iter()
+        .flatten()
+        .map(arithmetic_operation_info)
+        .collect();
     let declared_facts = declared_function_facts(
         &qualified,
         func.maturity,
@@ -2661,7 +2680,26 @@ fn build_function_info(
                 "reaches_panic",
                 ct_bool(facts.reaches_panic.contains(&qualified)),
             ),
+            ("arithmetic", ct_list(arithmetic)),
             ("facts", ct_list(declared_facts)),
+        ],
+    )
+}
+
+fn arithmetic_operation_info(fact: &jet_foundation::AST::ArithmeticPolicyFact) -> CtValue {
+    ct_struct(
+        "ArithmeticOperationInfo",
+        &[
+            (
+                "operation",
+                ct_str(
+                    fact.operation
+                        .map_or("operation", jet_foundation::AST::ArithmeticOperation::as_str),
+                ),
+            ),
+            ("policy", ct_str(format!(".{}", fact.mode.as_str()))),
+            ("operation_span", source_span_value(fact.operation_span)),
+            ("scope_span", source_span_value(fact.scope_span)),
         ],
     )
 }

@@ -214,6 +214,23 @@ fn origin_fact_uses_the_stable_origin_info_schema() {
 }
 
 #[test]
+fn retired_origin_method_is_rejected_for_every_tracked_value_type() {
+    let diags = diagnostics(
+        "struct Sample { value: Int }\n\nfn run() {\n    #Track count :: 1\n    #Track sample :: Sample{value: 1}\n    print(count.origin())\n    print(sample.origin())\n}\n",
+    );
+    assert_eq!(
+        diags.iter().filter(|diagnostic| diagnostic.code == "E0311").count(),
+        2,
+        "tracked non-Float values must not reach ordinary method lookup: {diags:#?}"
+    );
+    assert!(diags.iter().all(|diagnostic| {
+        diagnostic.code != "E0311"
+            || (diagnostic.what == "`.origin()` is retired for tracked values"
+                && diagnostic.fix == "read `value.@origin` in comptime code")
+    }));
+}
+
+#[test]
 fn parser_preserves_the_typed_fact_fixture() {
     let (tokens, lexer_diagnostics) = jet::Lexer::lex(FIXTURE);
     assert!(lexer_diagnostics.is_empty(), "lex: {lexer_diagnostics:?}");

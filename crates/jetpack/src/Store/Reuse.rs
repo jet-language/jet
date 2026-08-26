@@ -364,7 +364,7 @@ impl CacheLease {
     /// child boundary; the private snapshot path remains an internal source
     /// for validation and fd-backed handoff.
     pub(crate) fn projected_bin_dir(&self) -> Option<PathBuf> {
-        self.require_consumable().ok()?;
+        self.validate().ok()?;
         let bin = self.bin_relative.as_ref()?;
         #[cfg(target_os = "linux")]
         if let Some(wrapper) = &self.wrapper_root {
@@ -456,25 +456,103 @@ impl CacheLease {
 
     pub fn executable(&self, name: &str) -> Option<PathBuf> {
         self.require_consumable().ok()?;
-        if name.contains(std::path::MAIN_SEPARATOR) {
-            return None;
+        let (member, file) = self.executable_file(name)?;
+        Some(self.executable_file_path(member, file))
+    }
+
+    /// Resolve a caller-supplied executable only when it is either an exact
+    /// lease member or the exact raw/projected path for that member. This is
+    /// the confinement boundary: a path that merely shares an output prefix
+    /// never gets converted into a trusted executable handle.
+    pub(crate) fn executable_for(&self, requested: &str) -> Option<PathBuf> {
+        self.require_consumable().ok()?;
+        let (member, file) = self.executable_file(requested)?;
+        Some(self.executable_file_path(member, file))
+    }
+
+    pub(crate) fn executable_for_command(
+        &self,
+        requested: &str,
+    ) -> std::io::Result<Option<PathBuf>> {
+        self.require_consumable()?;
+        if let Some((member, file)) = self.executable_file(requested) {
+            return Ok(Some(self.executable_file_path(member, file)));
         }
-        let (_, file) = self.executables.iter().find(|(member, _)| member == name)?;
+        let requested_path = Path::new(requested);
+        let path_is_lease_owned = [
+            Some(self.out.as_path()),
+            Some(self.lease_root.as_path()),
+            self.bin_output_root.as_deref(),
+            self.projected_bin_root.as_deref(),
+            self.wrapper_root.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|root| requested_path.starts_with(root));
+        if path_is_lease_owned {
+            return Err(std::io::Error::other(
+                "caller requested a path inside an executable lease that is not a recorded member",
+            ));
+        }
+        Ok(None)
+    }
+
+    fn executable_file(&self, requested: &str) -> Option<(&std::ffi::OsString, &fs::File)> {
+        if requested.is_empty() || requested.contains('/') || requested.contains('\\') {
+            let requested_path = Path::new(requested);
+            let member = requested_path.file_name()?;
+            let bin = self.bin_relative.as_ref()?;
+            let matches_root = |root: Option<&Path>| {
+                root.map(|root| root.join(bin).join(member) == requested_path)
+                    .unwrap_or(false)
+            };
+            let matches_wrapper = self
+                .wrapper_root
+                .as_deref()
+                .map(|root| root.join(member) == requested_path)
+                .unwrap_or(false);
+            if !matches_root(self.bin_output_root.as_deref())
+                && !matches_root(self.projected_bin_root.as_deref())
+                && !matches_wrapper
+            {
+                return None;
+            }
+            return self
+                .executables
+                .iter()
+                .find(|(name, _)| name.as_os_str() == member)
+                .map(|(name, file)| (name, file));
+        }
+        self.executables
+            .iter()
+            .find(|(member, _)| member == requested)
+            .map(|(member, file)| (member, file))
+    }
+
+    fn executable_file_path(&self, member: &std::ffi::OsString, file: &fs::File) -> PathBuf {
         #[cfg(unix)]
         {
             use std::os::fd::AsRawFd as _;
+            let _ = member;
             let prefix = if cfg!(target_os = "linux") {
                 "/proc/self/fd"
             } else {
                 "/dev/fd"
             };
-            Some(PathBuf::from(format!("{prefix}/{}", file.as_raw_fd())))
+            PathBuf::from(format!("{prefix}/{}", file.as_raw_fd()))
         }
         #[cfg(not(unix))]
         {
             let _ = file;
-            let bin = self.bin_relative.as_ref()?;
-            Some(self.projected_bin_root.as_ref()?.join(bin).join(name))
+            let bin = self
+                .bin_relative
+                .as_ref()
+                .expect("executable member has a bin-relative path");
+            self.projected_bin_root
+                .as_ref()
+                .expect("executable member has a projected bin root")
+                .join(bin)
+                .join(member)
         }
     }
 
@@ -495,7 +573,7 @@ impl CacheLease {
     }
 
     pub fn stable_path(&self, path: &str) -> std::io::Result<PathBuf> {
-        self.require_consumable()?;
+        self.validate()?;
         let path = Path::new(path);
         let (output_root, lease_root, relative) = self
             .leased_output_roots
@@ -823,13 +901,22 @@ impl Drop for CacheLease {
         // still hold the inherited lease handle, in which case recovery owns
         // cleanup and this process must leave the whole container intact.
         drop(self.live_lock.take());
-        let keep_for_descendant = self.handed_off.get()
-            && match crate::RuntimePolicy::lock_state(&self.lease_lock_path) {
-                Ok(crate::RuntimePolicy::LockState::Held) => true,
-                Ok(crate::RuntimePolicy::LockState::Idle)
-                | Ok(crate::RuntimePolicy::LockState::Absent) => false,
-                Err(_) => true,
+        let lock_held = |path: &Path| match crate::RuntimePolicy::lock_state(path) {
+            Ok(crate::RuntimePolicy::LockState::Held) => true,
+            Ok(crate::RuntimePolicy::LockState::Idle)
+            | Ok(crate::RuntimePolicy::LockState::Absent) => false,
+            Err(_) => true,
         };
+        let protocol_lock_held = (!self.protocol_lease_id.is_empty()).then(|| {
+            match crate::RuntimePolicy::ExecutableLeaseProtocol::open(&self.store_root)
+                .and_then(|protocol| protocol.owner_lock_path(&self.protocol_lease_id))
+            {
+                Ok(path) => lock_held(&path),
+                Err(_) => true,
+            }
+        });
+        let keep_for_descendant = self.handed_off.get()
+            && (lock_held(&self.lease_lock_path) || protocol_lock_held.unwrap_or(false));
         if !keep_for_descendant {
             if remove_snapshot_node(&self.lease_root).is_ok()
                 && !self.protocol_lease_id.is_empty()
@@ -838,11 +925,17 @@ impl Drop for CacheLease {
                 if let Ok(protocol) =
                     crate::RuntimePolicy::ExecutableLeaseProtocol::open(&self.store_root)
                 {
-                    let _ = protocol.release(
+                    let released = protocol
+                        .release(
                         &self.protocol_lease_id,
                         self.protocol_generation,
                         &self.protocol_owner_scope,
-                    );
+                    )
+                        .is_ok();
+                    if released {
+                        drop(self.protocol_owner_lock.take());
+                        let _ = protocol.reap_empty_record(&self.protocol_lease_id);
+                    }
                 }
             }
         }
@@ -1590,12 +1683,17 @@ fn create_exec_wrappers(
     _snapshot_root: &Path,
     executables: &[(std::ffi::OsString, fs::File)],
 ) -> std::io::Result<Option<ExecWrappers>> {
-    // Unix callers use the inherited snapshot directory handle for a stable
-    // PATH projection. Windows keeps the sealed snapshot until its
-    // administrator-installed protected lease service supplies the
-    // caller-unwritable handoff required by D-JPK-EXECLEASE1.
+    if executables.is_empty() {
+        return Ok(None);
+    }
+    // A private snapshot is not a caller-unwritable handoff on these tiers.
+    // Refuse the child before it can receive a raw snapshot path until the
+    // installer-provided protected lease service accepts the same protocol.
     let _ = executables;
-    Ok(None)
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "protected executable lease service is unavailable",
+    ))
 }
 
 pub(crate) fn copy_snapshot_node(

@@ -280,6 +280,7 @@ fn compiler_function_value(node: &SyntaxNode) -> CtValue {
                 ct_struct("EffectInfo", vec![("values", CtValue::List(Vec::new()))]),
             ),
             ("reaches_panic", CtValue::Bool(false)),
+            ("arithmetic", CtValue::List(Vec::new())),
         ],
     )
 }
@@ -325,6 +326,19 @@ fn compiler_semantic_span(span: jet_semindex::SourceSpan) -> CtValue {
         start: span.start,
         end: span.end,
     })
+}
+
+fn compiler_arithmetic_value(value: &jet_semindex::ArithmeticOperationFact) -> CtValue {
+    ct_struct(
+        "CompilerArithmeticOperation",
+        vec![
+            ("operation", CtValue::Str(value.operation.clone())),
+            ("policy", CtValue::Str(value.policy.clone())),
+            ("module", CtValue::Str(value.module_path.clone())),
+            ("operation_span", compiler_semantic_span(value.operation_span)),
+            ("scope_span", compiler_semantic_span(value.scope_span)),
+        ],
+    )
 }
 
 fn compiler_symbol_kind_value(kind: &jet_semindex::SymbolKind) -> CtValue {
@@ -838,6 +852,16 @@ fn compiler_semantic_index_value(index: &jet_semindex::SemIndex, source: &str) -
             (
                 "effects",
                 CtValue::List(index.effects().iter().map(compiler_effect_value).collect()),
+            ),
+            (
+                "arithmetic",
+                CtValue::List(
+                    index
+                        .arithmetic()
+                        .iter()
+                        .map(compiler_arithmetic_value)
+                        .collect(),
+                ),
             ),
             (
                 "outputs",

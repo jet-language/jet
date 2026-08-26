@@ -70,6 +70,9 @@ fn json_and_local_outputs_are_stable_and_complete() {
         "\"kind\":\"trait_impl\"",
         "\"doctests\"",
         "answer()",
+        "\"examples\":[\"`answer()`\"]",
+        "\"expression\":\"1 + 1\",\"expected\":\"2\"",
+        "\"link\":\"run.jet#L35\"",
         "run.jet#L",
     ] {
         assert!(json.contains(needle), "jetdoc JSON lacks {needle}: {json}");
@@ -94,10 +97,15 @@ fn json_and_local_outputs_are_stable_and_complete() {
     let html = fs::read_to_string(scratch.0.join("docs/index.html")).expect("HTML output");
     let markdown = fs::read_to_string(scratch.0.join("docs/index.md")).expect("Markdown output");
     assert!(html.contains("Jet Documentation"));
-    assert!(html.contains("answer()"));
+    assert!(html.contains("<h4>Examples</h4>"));
+    assert!(html.contains("<li><code>`answer()`</code></li>"));
+    assert!(html.contains("1 + 1 // =&gt; 2"));
+    assert!(html.contains("../run.jet#L35"));
     assert!(html.contains("run.jet#L"));
+    assert!(markdown.contains("Examples:\n\n- `answer()`"));
     assert!(markdown.contains("## Doctests"));
     assert!(markdown.contains("1 + 1 // => 2"));
+    assert!(markdown.contains("[Source](../run.jet#L35)"));
     assert!(markdown.contains("run.jet#L"));
 }
 

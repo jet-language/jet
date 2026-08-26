@@ -357,7 +357,7 @@ fn write_authority_receipt(
         .collect::<Vec<_>>();
     writeln!(
         receipt,
-        "{{\"schema\":\"jet.authority.receipt/v1\",\"scope\":{},\"resource\":\"application\",\"operation\":{},\"source\":{},\"authority\":{},\"policy_source\":{},\"required_effects\":{},\"granted_effects\":{},\"denied_effects\":{}}}",
+        "{{\"schema\":\"jet.authority.receipt/v1\",\"kind\":\"approval\",\"scope\":{},\"resource\":\"application\",\"operation\":{},\"source\":{},\"authority\":{},\"policy_source\":{},\"required_effects\":{},\"granted_effects\":{},\"denied_effects\":{}}}",
         json_escape(scope),
         json_escape(operation),
         json_escape(source),
@@ -370,6 +370,66 @@ fn write_authority_receipt(
     .map_err(|error| format!("could not write authority receipt: {error}"))
 }
 
+fn write_authority_delegation_receipts(
+    root: &Path,
+    source: &str,
+    projection: &jet::EffectBudget::EffectProjection,
+    delegations: &[jet::Sema::AuthorityDelegation],
+    policy_source: &str,
+) -> Result<(), String> {
+    if delegations.is_empty() {
+        return Ok(());
+    }
+    let directory = root.join(".jet").join("receipts");
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("could not create authority receipt directory: {error}"))?;
+    let path = directory.join("authority.jsonl");
+    let mut receipt = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|error| format!("could not open authority receipt: {error}"))?;
+    let required = projection
+        .required_effects
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let granted = projection
+        .granted_effects
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let denied = projection
+        .denied_effects
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    for delegation in delegations {
+        let scope = format!(
+            "{}@{}..{}",
+            delegation.binding, delegation.scope_span.start, delegation.scope_span.end
+        );
+        let policy = format!("#FX; {policy_source}");
+        writeln!(
+            receipt,
+            "{{\"schema\":\"jet.authority.receipt/v1\",\"kind\":\"delegation\",\"scope\":{},\"resource\":{},\"operation\":{},\"source\":{},\"source_span\":{{\"start\":{},\"end\":{}}},\"authority\":{},\"policy_source\":{},\"required_effects\":{},\"granted_effects\":{},\"denied_effects\":{}}}",
+            json_escape(&scope),
+            json_escape(&delegation.resource),
+            json_escape(&delegation.operation),
+            json_escape(source),
+            delegation.span.start,
+            delegation.span.end,
+            json_escape(&delegation.binding),
+            json_escape(&policy),
+            json_strings(&required),
+            json_strings(&granted),
+            json_strings(&denied),
+        )
+        .map_err(|error| format!("could not write authority delegation receipt: {error}"))?;
+    }
+    Ok(())
+}
+
 fn resolve_application_authority(
     cmd: &str,
     file: &str,
@@ -377,6 +437,7 @@ fn resolve_application_authority(
     mode: OutputMode,
     projection: &mut jet::EffectBudget::EffectProjection,
     package_manifest: &mut Option<(PathBuf, jet::Package::PackageFacts)>,
+    delegations: &[jet::Sema::AuthorityDelegation],
 ) {
     if !matches!(cmd, "build" | "run") {
         return;
@@ -398,11 +459,6 @@ fn resolve_application_authority(
         report_problems(mode, file, src, &[diagnostic]);
         exit(ExitCodes::USER_ERROR);
     }
-    let undecided = projection.undecided();
-    if undecided.is_empty() {
-        return;
-    }
-
     let root = package_manifest
         .as_ref()
         .map(|(root, _)| root.clone())
@@ -412,6 +468,27 @@ fn resolve_application_authority(
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf()
         });
+    let undecided = projection.undecided();
+    if undecided.is_empty() {
+        if let Err(error) = write_authority_delegation_receipts(
+            &root,
+            file,
+            projection,
+            delegations,
+            "declared policy",
+        ) {
+            let diagnostic = jet::Diagnostics::Diagnostic::error(
+                "E2105",
+                "could not record the Authority delegation receipt".to_string(),
+                "every Authority delegation is source-linked before the effect runs".to_string(),
+                error,
+                None,
+            );
+            report_problems(mode, file, src, &[diagnostic]);
+            exit(ExitCodes::USER_ERROR);
+        }
+        return;
+    }
     if !authority_prompt_is_interactive(mode) {
         let diagnostic = jet::EffectBudget::application_policy_diagnostic(projection, &BTreeSet::new());
         report_problems(mode, file, src, &[diagnostic]);
@@ -518,6 +595,23 @@ fn resolve_application_authority(
             "E2105",
             "could not record the application authority receipt".to_string(),
             "every authority approval is source-linked before the effect runs".to_string(),
+            error,
+            None,
+        );
+        report_problems(mode, file, src, &[diagnostic]);
+        exit(ExitCodes::USER_ERROR);
+    }
+    if let Err(error) = write_authority_delegation_receipts(
+        &root,
+        file,
+        projection,
+        delegations,
+        policy_source,
+    ) {
+        let diagnostic = jet::Diagnostics::Diagnostic::error(
+            "E2105",
+            "could not record the Authority delegation receipt".to_string(),
+            "every Authority delegation is source-linked before the effect runs".to_string(),
             error,
             None,
         );
@@ -1058,7 +1152,7 @@ pub(crate) fn run_compile_cmd(
     let cache_profile_tag = format!("{profile_tag};{}", setting_overrides_tag(setting_overrides));
     // `jet run` needs its key *before* the front end: a hit below replays the
     // cached binary without loading the program at all. `jet build` stays on
-    // the full path (its effect + ability summaries must print), so #2083
+    // the full path (its effect + authority summaries must print), so #2083
     // computes its key further down, from the one front end a build actually
     // runs, instead of from a second independently reloaded copy of the same
     // program.
@@ -1077,7 +1171,7 @@ pub(crate) fn run_compile_cmd(
     // toolchain-version + `package.jet` salts guarantee a compiler or policy change
     // invalidates the entry, so effect-budget enforcement can't be masked.
     // `jet build` deliberately stays on the full path below so its effect +
-    // ability summaries always print; it still skips rustc via `native_key`.
+    // authority summaries always print; it still skips rustc via `native_key`.
     // A selected `fn build` also stays on the full path: replaying a binary
     // would skip staging the build entry, so nothing would execute the action
     // graph or record the computed writers in this project's `.jet/lock`.
@@ -1231,6 +1325,11 @@ pub(crate) fn run_compile_cmd(
                 jet::Codegen::ENTRY_FN,
                 package_manifest.as_ref().map(|(_, manifest)| manifest),
             ),
+            facts
+                .summaries
+                .values()
+                .flat_map(|summary| summary.authority_delegations.iter().cloned())
+                .collect::<Vec<_>>(),
         ))
     });
     // S59: same story for the C link flags — resolve them from the one loaded
@@ -1446,6 +1545,12 @@ pub(crate) fn run_compile_cmd(
                             jet::Codegen::ENTRY_FN,
                             package_manifest.as_ref().map(|(_, manifest)| manifest),
                         ),
+                        checked
+                            .facts
+                            .summaries
+                            .values()
+                            .flat_map(|summary| summary.authority_delegations.iter().cloned())
+                            .collect::<Vec<_>>(),
                     )),
                     Err(_) => None,
                 }
@@ -1457,6 +1562,7 @@ pub(crate) fn run_compile_cmd(
             _effect_summary,
             _effect_json,
             mut projection,
+            delegations,
         )) = effect_view
         {
             // D-PLUGIN1=B (c81): a plugin is deny-by-default — the wasmtime
@@ -1483,6 +1589,7 @@ pub(crate) fn run_compile_cmd(
                 mode,
                 &mut projection,
                 &mut package_manifest,
+                &delegations,
             );
             let effect_summary = jet::EffectBudget::render_effect_projection_line(&projection);
             let effect_json = jet::EffectBudget::render_effect_projection_json(&projection);

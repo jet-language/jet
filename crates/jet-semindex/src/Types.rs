@@ -6,7 +6,7 @@ use jet_pkg_model::Package::PackageFacts;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 15;
+pub const SCHEMA_VERSION: u32 = 17;
 
 /// Canonical JSON values for additive tooling projections. Keeping this small
 /// value model in the semantic-index crate prevents CLI consumers from
@@ -80,8 +80,25 @@ pub struct CallableSignatureFact {
     pub parameters: Vec<CallableParameterFact>,
     pub effects: Vec<String>,
     pub errors: Vec<String>,
+    /// The one effective Result-shaped carrier shown to tooling consumers.
+    pub failure_contract: String,
+    /// The sema fact that explains the carrier: implicit, explicit,
+    /// converted, or proven unreachable.
+    pub failure_source: String,
     pub returned_views: Vec<ViewProvenanceFact>,
     pub policies: Vec<String>,
+}
+
+/// One fixed-width operation selected by a lexical `#Arithmetic` policy.
+/// Both spans are parser-owned byte ranges, so editor and inspect consumers do
+/// not need to infer scope from token windows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArithmeticOperationFact {
+    pub operation: String,
+    pub policy: String,
+    pub module_path: String,
+    pub operation_span: SourceSpan,
+    pub scope_span: SourceSpan,
 }
 
 impl ViewProvenanceFact {
@@ -162,6 +179,15 @@ pub struct SourceSpan {
 impl From<Span> for SourceSpan {
     fn from(s: Span) -> Self {
         SourceSpan {
+            start: s.start,
+            end: s.end,
+        }
+    }
+}
+
+impl From<SourceSpan> for Span {
+    fn from(s: SourceSpan) -> Self {
+        Span {
             start: s.start,
             end: s.end,
         }
@@ -473,6 +499,7 @@ pub struct SemIndex {
     refs: Vec<SymbolRef>,
     calls: Vec<CallEdge>,
     effects: Vec<EffectFact>,
+    arithmetic: Vec<ArithmeticOperationFact>,
     members: Vec<MemberFact>,
     nodes: Vec<StructuralNode>,
     definition_facts: Vec<DefinitionFact>,
@@ -512,6 +539,7 @@ impl SemIndex {
             refs,
             calls,
             effects,
+            arithmetic: Vec::new(),
             members,
             nodes,
             definition_facts,
@@ -603,6 +631,14 @@ impl SemIndex {
 
     pub fn effects(&self) -> &[EffectFact] {
         &self.effects
+    }
+
+    pub(crate) fn set_arithmetic(&mut self, facts: Vec<ArithmeticOperationFact>) {
+        self.arithmetic = facts;
+    }
+
+    pub fn arithmetic(&self) -> &[ArithmeticOperationFact] {
+        &self.arithmetic
     }
 
     pub fn members(&self) -> &[MemberFact] {

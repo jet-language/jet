@@ -2071,6 +2071,9 @@ impl<'a> Checker<'a> {
             return;
         }
         self.check_expr_change(receiver, &format!("be changed by `.{method}()`"), span);
+        if let Some(root) = expr_root_ident(receiver) {
+            self.clear_origin(root);
+        }
         if self.iter_borrowed.contains(&root) {
             self.diags
                 .push(crate::Sema::Diagnostics::collection_changed_in_loop(
@@ -2116,6 +2119,9 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_write_arg_change(&mut self, arg: &crate::AST::CallArg) {
         if arg.convention == AccessConvention::Write {
             self.check_expr_change(&arg.expr, "be passed with write access", arg.span);
+            if let Some(root) = expr_root_ident(&arg.expr) {
+                self.clear_origin(root);
+            }
         }
     }
 

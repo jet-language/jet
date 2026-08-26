@@ -221,6 +221,29 @@ mod generic_module_tests {
     }
 
     #[test]
+    fn result_handler_stays_distinct_from_neighboring_postfix_and_branch_forms() {
+        let source = r#"
+fn optional() ?Success -> None
+fn fallible() !Error -> Err("bad")
+fn result() ?Success !Error -> Ok(1)
+fn run(value: Int!, optional: String) {
+    propagated :: value?
+    noted :: value?("context")
+    chained :: optional?.len
+    negated :: !true
+    if value == {
+        .Ok(ok) -> print(ok)
+        .Err(error) -> print(error)
+    }
+    fallback :: value ?? 0
+}
+"#;
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        Parser::parse(&tokens).expect("neighboring Result syntax should keep its meanings");
+    }
+
+    #[test]
     fn result_handler_reports_fixed_shape_errors_at_the_offending_token() {
         let cases = [
             (

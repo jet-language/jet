@@ -48,6 +48,11 @@
 // accepts ordinary statements followed by either one bare value or one real
 // diverging tail (`return`, `next`, `break`, or `panic(...)`). No new token or
 // binder is added; the old `return value` block-value reading is retired.
+// D-TEXTHEAD-TYPE1=A: a checked text declaration is an ordinary nominal
+// String-backed type with one ordinary `CheckedText` implementation. Its
+// associated error, pure `check(String)`, and pure generic `encode_hole` are
+// resolved by the ordinary trait registry; no marker contract or head registry
+// owns the surface.
 // D-RESULT-DECON2=B (ratified 2026-08-25, card #2173): the existing `?`, `!`,
 // and `->` tokens also delimit one fixed exhaustive Result handler:
 // `result ? ok -> success ! error -> failure`. It is parser sugar for the

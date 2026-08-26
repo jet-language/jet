@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::Symbols::{build_semantic_symbol_index, canonical_symbol_name, SemanticSymbolIndex};
 use crate::Types::{
-    BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact,
+    ArithmeticOperationFact, BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact,
     InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex,
     StateGraphFact, StateNodeFact, StateTransitionFact, StructuralNode, StructuralSlotBoundary,
     StructuralSlotKind, SymbolDef, SymbolKind,
@@ -29,6 +29,10 @@ pub enum SymKind {
         /// the AST type stored in `params` remains the element type.
         param_variadic: Vec<bool>,
         ret: Option<AST::Type>,
+        /// D-FAILURE-FOUNDATION1: the effective Result-shaped contract and
+        /// its source spelling/proof are facts, not inferred from `ret`.
+        failure_contract: String,
+        failure_source: String,
         effects: Option<Vec<(String, Span)>>,
         effect_via: Option<(String, Span)>,
         param_access: Vec<AST::AccessConvention>,
@@ -113,6 +117,9 @@ pub struct SymbolDB {
     pub members: Vec<MemberFact>,
     pub hover: Vec<HoverEntry>,
     pub inlay: Vec<InlayHint>,
+    /// D-WRAP-SCOPE1=A: operation-level arithmetic policy provenance for LSP
+    /// hover and the public inspect projection.
+    pub arithmetic: Vec<ArithmeticOperationFact>,
     pub nodes: Vec<StructuralNode>,
     /// D-LINTPOLICY1=A: every spelled bypass (`#Unsafe`, `.drop(reason)`,
     /// `#[allow(lint)]`) collected during the walk.
@@ -161,6 +168,7 @@ impl SymbolDB {
             members: Vec::new(),
             hover: Vec::new(),
             inlay: Vec::new(),
+            arithmetic: Vec::new(),
             nodes: Vec::new(),
             bypasses: Vec::new(),
             view_provenance: HashMap::new(),
@@ -212,6 +220,14 @@ impl SymbolDB {
             self.nodes.clone(),
             definition_facts,
         );
+        self.arithmetic.sort_by_key(|fact| {
+            (
+                fact.module_path.clone(),
+                fact.operation_span.start,
+                fact.operation_span.end,
+            )
+        });
+        self.index.set_arithmetic(self.arithmetic.clone());
         self.index
             .set_state_graphs(build_state_graphs(bundle, facts));
         self.index.set_bypasses(self.bypasses.clone());
@@ -1287,6 +1303,7 @@ fn apply_inferred_effect_rows(
             param_access,
             param_defaults,
             policies,
+            ..
         } = &mut def.kind
         else {
             continue;
@@ -1656,6 +1673,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     param_contract: method_parameter_contract(f),
                     param_variadic: method_parameter_variadic(f),
                     ret: Some(f.effective_return_type()),
+                    failure_contract: f.failure_contract().effective_type().name(),
+                    failure_source: f.failure_contract().source(),
                     effects: f.declared_effects.clone(),
                     effect_via: f.effect_via.clone(),
                     param_access: method_parameter_access(f),
@@ -1894,6 +1913,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         param_contract: method_parameter_contract(meth),
                         param_variadic: method_parameter_variadic(meth),
                         ret: Some(meth.effective_return_type()),
+                        failure_contract: meth.failure_contract().effective_type().name(),
+                        failure_source: meth.failure_contract().source(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
                         param_access: method_parameter_access(meth),
@@ -1961,6 +1982,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             param_contract: method_parameter_contract(meth),
                             param_variadic: method_parameter_variadic(meth),
                             ret: Some(meth.effective_return_type()),
+                            failure_contract: meth.failure_contract().effective_type().name(),
+                            failure_source: meth.failure_contract().source(),
                             effects: meth.declared_effects.clone(),
                             effect_via: meth.effect_via.clone(),
                             param_access: method_parameter_access(meth),
@@ -2074,6 +2097,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         param_contract: method_parameter_contract(meth),
                         param_variadic: method_parameter_variadic(meth),
                         ret: Some(meth.effective_return_type()),
+                        failure_contract: meth.failure_contract().effective_type().name(),
+                        failure_source: meth.failure_contract().source(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
                         param_access: method_parameter_access(meth),
@@ -2123,6 +2148,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             param_contract: method_parameter_contract(meth),
                             param_variadic: method_parameter_variadic(meth),
                             ret: return_type,
+                            failure_contract: meth.failure_contract().effective_type().name(),
+                            failure_source: meth.failure_contract().source(),
                             effects: meth.declared_effects.clone(),
                             effect_via: meth.effect_via.clone(),
                             param_access: method_parameter_access(meth),
@@ -2179,6 +2206,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         param_contract: parameter_contract(&sig.params),
                         param_variadic: parameter_variadic(&sig.params),
                         ret: Some(sig.effective_return_type()),
+                        failure_contract: sig.failure_contract().effective_type().name(),
+                        failure_source: sig.failure_contract().source(),
                         effects: sig.declared_effects.clone(),
                         effect_via: None,
                         param_access: sig
@@ -2294,6 +2323,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         param_contract: method_parameter_contract(meth),
                         param_variadic: method_parameter_variadic(meth),
                         ret: Some(meth.effective_return_type()),
+                        failure_contract: meth.failure_contract().effective_type().name(),
+                        failure_source: meth.failure_contract().source(),
                         effects: meth.declared_effects.clone(),
                         effect_via: meth.effect_via.clone(),
                         param_access: method_parameter_access(meth),
@@ -2608,13 +2639,16 @@ fn hover_for_fn(f: &AST::Func) -> String {
         .map(|chain| chain.display())
         .filter(|chain| !chain.is_empty())
         .map_or_else(String::new, |chain| format!(" ; policies=[{chain}]"));
+    let failure = f.failure_contract();
     format!(
-        "fn {}({}){}{}{}",
+        "fn {}({}){}{}{}\nfailure: {} ({})",
         f.name,
         params.join(", "),
         ret,
         arrow,
-        policies
+        policies,
+        failure.effective_type().name(),
+        failure.source(),
     )
 }
 
@@ -3017,6 +3051,26 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             ctx.db.refs.push(scoped_ref(name.clone(), *span, mp, ctx));
         }
         AST::Expr::Call(call) => {
+            for arg in &call.args {
+                let Some(fact) = arg.flags.arithmetic_policy else {
+                    continue;
+                };
+                let Some(operation) = fact.operation else {
+                    continue;
+                };
+                ctx.db.arithmetic.push(ArithmeticOperationFact {
+                    operation: operation.as_str().to_string(),
+                    policy: fact.mode.as_str().to_string(),
+                    module_path: mp.to_string(),
+                    operation_span: fact.operation_span.into(),
+                    scope_span: fact.scope_span.into(),
+                });
+                ctx.db.hover.push(HoverEntry {
+                    span: fact.operation_span,
+                    module_path: mp.to_string(),
+                    text: format_arithmetic_hover(&fact, mp),
+                });
+            }
             record_call(ctx, mp, &call.name, call.name_span);
             ctx.db
                 .refs
@@ -3313,6 +3367,18 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
     if structural_id.is_some() {
         ctx.structural_parents.pop();
     }
+}
+
+fn format_arithmetic_hover(fact: &AST::ArithmeticPolicyFact, module_path: &str) -> String {
+    let operation = fact
+        .operation
+        .map_or("operation", AST::ArithmeticOperation::as_str);
+    format!(
+        "fixed-width {operation}: .{}; scope = {module_path}:{}..{}",
+        fact.mode.as_str(),
+        fact.scope_span.start,
+        fact.scope_span.end,
+    )
 }
 
 fn collect_expr_stmt(stmt: &AST::Stmt, mp: &str, ctx: &mut WalkCtx<'_>) {

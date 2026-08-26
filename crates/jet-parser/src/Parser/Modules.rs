@@ -816,6 +816,9 @@ impl<'a> Parser<'a> {
                         self.bump();
                         continue;
                     }
+                    if self.at_state_section() {
+                        return Err(self.reject_state_section("module"));
+                    }
                     if self.at_code_module_import() {
                         match self.code_module_import() {
                             Ok(import) => imports.push(import),

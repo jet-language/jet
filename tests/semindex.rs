@@ -301,7 +301,42 @@ fn semantic_visibility_retains_explicit_qualified_alternatives() {
 #[test]
 fn semindex_schema_version() {
     // D-STATE-TERMINAL1 adds checked typestate graph facts.
-    assert_eq!(SCHEMA_VERSION, 15);
+    assert_eq!(SCHEMA_VERSION, 16);
+}
+
+#[test]
+fn semindex_projects_arithmetic_policy_and_exact_scope() {
+    let path = temp_fixture(
+        "arithmetic_policy.jet",
+        r#"fn run() {
+    #Arithmetic(.Wrapping) {
+        value :: U8{250} + U8{10}
+        print(value)
+    }
+}
+"#,
+    );
+    let index = open(&path).expect("arithmetic policy indexes");
+    let operation = index
+        .arithmetic()
+        .first()
+        .expect("arithmetic operation fact");
+    assert_eq!(operation.operation, "add");
+    assert_eq!(operation.policy, "Wrapping");
+    assert!(operation.scope_span.start < operation.operation_span.start);
+    let json = index.to_json();
+    assert!(json.contains("\"arithmetic\":[{"));
+    assert!(json.contains("\"policy\":\"Wrapping\""));
+
+    let (diagnostics, bundle, facts) =
+        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let db = build_symbol_db(&bundle.expect("checked bundle"), &facts);
+    let hover = db
+        .hover_at(path.to_str().unwrap(), operation.operation_span.start)
+        .expect("arithmetic hover");
+    assert!(hover.contains("fixed-width add: .Wrapping"), "{hover}");
+    assert!(hover.contains("scope = "), "{hover}");
 }
 
 #[test]
@@ -544,6 +579,37 @@ fn semantic_symbols_include_language_builtins() {
         .complete("fil", Some("List"))
         .iter()
         .any(|s| s.name == "filter"));
+}
+
+#[test]
+fn semantic_symbols_index_value_tail_callable() {
+    let path = temp_fixture(
+        "value_tail_callable.jet",
+        r#"
+fn label(value: Int) String -> {
+    if value == {
+        1 -> { "one" }
+        else -> { "other" }
+    }
+}
+
+fn run() {
+    print(label(1))
+}
+"#,
+    );
+    let symbols = open_symbols(&path).expect("value-tail callable should index");
+    let label = symbols
+        .lookup("label")
+        .into_iter()
+        .find(|symbol| symbol.kind == SemanticSymbolKind::Function)
+        .expect("label function fact");
+    assert!(
+        label.signature.contains("value: Int"),
+        "{}",
+        label.signature
+    );
+    assert!(label.signature.contains("String"), "{}", label.signature);
 }
 
 #[test]

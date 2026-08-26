@@ -2439,14 +2439,14 @@ fn doctor_checks_real_state_and_is_read_only() {
         .unwrap();
     assert_eq!(degraded.status.code(), Some(2));
     let degraded_text = String::from_utf8(degraded.stderr).unwrap();
-    assert!(degraded_text.contains("[fail] registry"), "{degraded_text}");
+    assert!(degraded_text.contains("[Fail] registry"), "{degraded_text}");
     assert!(
         degraded_text.contains("embedded registry credentials"),
         "{degraded_text}"
     );
-    assert!(degraded_text.contains("[warn] signing"), "{degraded_text}");
+    assert!(degraded_text.contains("[Warn] signing"), "{degraded_text}");
     assert!(
-        degraded_text.ends_with("result: broken\n"),
+        degraded_text.ends_with("Result: broken\n"),
         "{degraded_text}"
     );
     assert!(
@@ -3539,7 +3539,7 @@ fn parent_env_unchanged_after_run() {
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fx");
     let out_dir = Scratch::new("out");
-    write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
+    let leased_output = write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
     let before = std::env::var("PATH").unwrap_or_default();
 
     let output = jetpack()
@@ -3570,6 +3570,30 @@ fn parent_env_unchanged_after_run() {
         "raw package output escaped the lease handoff, got: {child_path}"
     );
     assert_eq!(std::env::var("PATH").unwrap_or_default(), before);
+
+    let explicit_raw_path = leased_output.join("bin/greet");
+    let output = jetpack()
+        .args([
+            "run",
+            "greet@nixpkgs",
+            "--no-color",
+            "--offline",
+            "--",
+            explicit_raw_path.to_str().unwrap(),
+        ])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "explicit leased executable escaped confinement: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "hello from jetpack"
+    );
 }
 
 #[cfg(unix)]
@@ -8774,23 +8798,23 @@ fn jet_audit_reads_without_exec() {
         "audit is read-only: {report}"
     );
     assert!(
-        report.contains("provenance"),
+        report.contains("Provenance:"),
         "audit reports provenance: {report}"
     );
     assert!(
-        report.contains("source:"),
+        report.contains("Source:"),
         "audit reports source identity: {report}"
     );
     assert!(
-        report.contains("action:"),
+        report.contains("Action:"),
         "audit reports action identity: {report}"
     );
     assert!(
-        report.contains("sandbox:"),
+        report.contains("Sandbox:"),
         "audit reports sandbox policy: {report}"
     );
     assert!(
-        report.contains("closure:"),
+        report.contains("Closure:"),
         "audit reports closure: {report}"
     );
     assert!(

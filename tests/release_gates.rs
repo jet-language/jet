@@ -703,15 +703,12 @@ fn ci_runs_repository_no_nix_dogfood_gate() {
     );
 }
 
-#[test]
-fn ci_change_gate_runs_grammar_and_documentation_build() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
-        .expect("read .github/workflows/ci.yml");
+fn workflow_job(workflow: &str, name: &str) -> String {
+    let marker = format!("  {name}:");
     let mut in_job = false;
     let mut job = String::new();
     for line in workflow.lines() {
-        if line == "  change-gate:" {
+        if line == marker {
             in_job = true;
         } else if in_job && line.starts_with("  ") && !line.starts_with("    ") {
             break;
@@ -721,6 +718,34 @@ fn ci_change_gate_runs_grammar_and_documentation_build() {
             job.push('\n');
         }
     }
+    job
+}
+
+fn job_has_run(job: &str, command: &str) -> bool {
+    let expected = format!("        run: {command}");
+    job.lines().any(|line| line == expected.as_str())
+}
+
+const GRAMMAR_GATE_COMMAND: &str =
+    "nix develop .#full -c cargo test --test grammar --locked -- --nocapture";
+
+fn change_gate_is_accepted(job: &str) -> bool {
+    job.contains("ref: ${{ github.sha }}")
+        && job_has_run(job, GRAMMAR_GATE_COMMAND)
+        && job.contains("RUSTDOCFLAGS: \"-D warnings\"")
+        && job.contains("cargo doc --workspace --no-deps --locked")
+        && !job.contains("if:")
+        && !job.contains("continue-on-error")
+        && !job.contains("|| true")
+        && !job.contains("|| :")
+}
+
+#[test]
+fn ci_change_gate_runs_grammar_and_documentation_build() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
+        .expect("read .github/workflows/ci.yml");
+    let job = workflow_job(&workflow, "change-gate");
     assert!(!job.is_empty(), "CI must define the change-gate job");
 
     assert!(
@@ -728,8 +753,18 @@ fn ci_change_gate_runs_grammar_and_documentation_build() {
         "change-gate must check out the event's exact candidate revision"
     );
     assert!(
-        job.contains("cargo test --test grammar --locked -- --nocapture"),
+        job_has_run(&job, GRAMMAR_GATE_COMMAND),
         "change-gate must invoke tests/grammar.rs directly; the broad test inventory is not enough"
+    );
+    assert!(change_gate_is_accepted(&job));
+    let bypassed = job.replacen(
+        GRAMMAR_GATE_COMMAND,
+        "nix develop .#full -c cargo test --workspace --locked -- --nocapture",
+        1,
+    );
+    assert!(
+        !change_gate_is_accepted(&bypassed),
+        "the change-gate proof must fail when its direct tests/grammar.rs invocation is bypassed"
     );
     assert!(
         job.contains("RUSTDOCFLAGS: \"-D warnings\"")
@@ -743,6 +778,31 @@ fn ci_change_gate_runs_grammar_and_documentation_build() {
             && !job.contains("|| :"),
         "grammar and documentation checks must not have a skip or false-green path"
     );
+}
+
+fn verify_tests_evidence_is_accepted(job: &str) -> bool {
+    [
+        "      - name: Failure propagation canary",
+        "--report-dir \"$JET_CI_EVIDENCE_DIR/canary\"",
+        "-- bash -c 'printf \"expected canary failure\\n\" >&2; exit 23'",
+        "          test \"$status\" -eq 23",
+        r#"          grep -Fxq "status=fail" "$JET_CI_EVIDENCE_DIR/canary/receipt.txt""#,
+        r#"          grep -Fxq "command_exit=23" "$JET_CI_EVIDENCE_DIR/canary/receipt.txt""#,
+        "      - name: Finalize durable gate evidence",
+        "        if: always()",
+        "          JOB_STATUS: ${{ job.status }}",
+        "      - name: Upload durable gate evidence",
+        "          name: ci-gate-evidence-shard-${{ matrix.shard }}-${{ github.sha }}",
+        "          path: ci-evidence/shard-${{ matrix.shard }}/",
+        "          if-no-files-found: error",
+    ]
+    .iter()
+    .all(|needle| job.contains(needle))
+        && job_has_run(
+            job,
+            r#"bash tools/ci/ci-evidence.sh --report-dir "$JET_CI_EVIDENCE_DIR" -- nix develop .#full -c scripts/agent/verify-full.sh"#,
+        )
+        && !job.contains("continue-on-error")
 }
 
 #[test]
@@ -876,15 +936,21 @@ fn ci_workflow_uploads_candidate_bound_evidence_without_false_green_controls() {
         .expect("read .github/workflows/ci.yml");
     let verify = fs::read_to_string(root.join("scripts/agent/verify-full.sh"))
         .expect("read scripts/agent/verify-full.sh");
-    assert!(workflow.contains("tools/ci/ci-evidence.sh"));
-    assert!(workflow.contains("Failure propagation canary"));
-    assert!(workflow.contains("command_exit=23"));
-    assert!(workflow.contains("Finalize durable gate evidence"));
-    assert!(workflow.contains("JOB_STATUS: ${{ job.status }}"));
-    assert!(workflow.contains("if: always()"));
-    assert!(workflow.contains("if-no-files-found: error"));
-    assert!(workflow.contains("ci-gate-evidence-shard-${{ matrix.shard }}-${{ github.sha }}"));
-    assert!(!workflow.contains("continue-on-error"));
+    let verify_tests = workflow_job(&workflow, "verify-tests");
+    assert!(
+        verify_tests_evidence_is_accepted(&verify_tests),
+        "verify-tests must keep failure canary and durable evidence on the required path"
+    );
+    let bypassed = verify_tests.replacen(
+        r#"          grep -Fxq "command_exit=23" "$JET_CI_EVIDENCE_DIR/canary/receipt.txt""#,
+        "          true",
+        1,
+    );
+    assert_ne!(bypassed, verify_tests, "receipt assertion mutation did not apply");
+    assert!(
+        !verify_tests_evidence_is_accepted(&bypassed),
+        "the evidence proof must fail when the failure canary no longer checks its receipt"
+    );
     assert!(verify.contains("tools/ci/test-shards.sh"));
     assert!(verify.contains("cargo test $test_target --no-run"));
     assert!(verify.contains("test_targets_repeat"));

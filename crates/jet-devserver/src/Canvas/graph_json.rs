@@ -172,6 +172,27 @@ pub(super) fn add_region(
     ));
 }
 
+pub(super) fn add_authority_region(
+    g: &mut GraphBuilder,
+    ordinal: usize,
+    title: &str,
+    granted_effects: &[String],
+    binding: Option<&str>,
+    span: Span,
+) {
+    let authority = binding
+        .map(|name| format!("Authority handle `{name}`"))
+        .unwrap_or_else(|| "lexical #FX authority".to_string());
+    g.regions.push(format!(
+        "{{\"region_id\":{},\"kind\":\"authority\",\"title\":{},\"required_effects\":[],\"granted_effects\":{},\"denied_effects\":[],\"authority\":{},\"source_span\":{}}}",
+        json_str(&format!("{}:region:{ordinal}:authority", g.graph_id)),
+        json_str(title),
+        json_strs(granted_effects),
+        json_str(&authority),
+        span_json(span.into())
+    ));
+}
+
 pub(super) fn meta_attr_json(meta: Option<&AST::MetaAttr>) -> Option<String> {
     let meta = meta?;
     let facts = meta.facts();
@@ -817,11 +838,7 @@ fn function_metadata_json(src: &str, f: &AST::Func, visibility: &'static str) ->
         })
         .collect::<Vec<_>>()
         .join(",");
-    let ret = f
-        .return_type
-        .as_ref()
-        .map(AST::Type::name)
-        .unwrap_or_else(|| "Void".to_string());
+    let ret = f.effective_return_type().name();
     let effects = f
         .declared_effects
         .as_ref()
@@ -897,10 +914,8 @@ fn function_signature_text(src: &str, f: &AST::Func, visibility: &'static str) -
             .join(", "),
     );
     out.push(')');
-    if let Some(ret) = &f.return_type {
-        out.push(' ');
-        out.push_str(&ret.name());
-    }
+    out.push(' ');
+    out.push_str(&f.effective_return_type().name());
     if let Some((param, _)) = &f.effect_via {
         out.push_str(" -[via ");
         out.push_str(param);
@@ -984,7 +999,10 @@ fn rails_json(g: &GraphBuilder) -> String {
         .any(|n| n.badges.iter().any(|b| b == "effects"))
         || g.regions
             .iter()
-            .any(|r| r.contains("\"kind\":\"caps\"") || r.contains("\"kind\":\"grant\""))
+            .any(|r| {
+                r.contains("\"kind\":\"authority\"")
+                    || r.contains("\"kind\":\"grant\"")
+            })
     {
         push_rail(&mut kinds, "effect");
     }

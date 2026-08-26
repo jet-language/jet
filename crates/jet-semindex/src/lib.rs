@@ -28,7 +28,7 @@ pub use Symbols::{
     SemanticSymbolKind, SemanticVisibilityAnchor,
 };
 pub use Types::{
-    CallEdge, CallableParameterFact, CallableSignatureFact, DefinitionAnchor, DefinitionFact,
+    ArithmeticOperationFact, CallEdge, CallableParameterFact, CallableSignatureFact, DefinitionAnchor, DefinitionFact,
     EffectFact, EffectProvenance, ExpandLens, ExpandProjection, ExpandValue,
     InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact,
     OutputFact, SemIndex, SourceSpan, StructuralAudit, StructuralNode, StructuralSlotBoundary,
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn schema_version_constant() {
-        assert_eq!(SCHEMA_VERSION, 14);
+        assert_eq!(SCHEMA_VERSION, 16);
     }
 
     #[test]

@@ -2900,7 +2900,8 @@ fn resolve_link_unknown_lib_is_e3201() {
     let expected = "\
 Error [E3201]: C library `nolib` was not found.
  Why: Jet looked for a `nolib: c@…` dep in `package.jet`, then tried `pkg-config nolib` on the system; neither provided include/link paths.
- Fix: Install the system package (e.g. `pacman -S nolib`), or declare it as `nolib: c@system` in `deps:`.
+ Fix: install the system package (e.g. `pacman -S nolib`), or declare it as `nolib: c@system` in `deps:`.
+More: jet-lang.dev/e/E3201
 ";
     assert_eq!(rendered, expected);
     let _ = fs::remove_dir_all(&root);
@@ -2914,9 +2915,10 @@ fn e3209_link_time_missing_lib_snapshot() {
     assert_eq!(d.code, "E3209");
     let rendered = jet::render_diagnostics("main.jet", "", std::slice::from_ref(&d));
     let expected = "\
-Error [E3209]: The linker couldn't find C library `raylib`.
- Why: Your program links against `raylib`, but the linker reported `cannot find -lraylib` — the library isn't on the link search path.
- Fix: Declare it in `deps:` so Jet provisions it: `raylib: c@system` (host pkg-config, else fetched from nixpkgs), or `raylib: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.
+Error [E3209]: the linker couldn't find C library `raylib`.
+ Why: your program links against `raylib`, but the linker reported `cannot find -lraylib` — the library isn't on the link search path.
+ Fix: declare it in `deps:` so Jet provisions it: `raylib: c@system` (host pkg-config, else fetched from nixpkgs), or `raylib: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.
+More: jet-lang.dev/e/E3209
 ";
     assert_eq!(rendered, expected);
 }
@@ -2928,9 +2930,10 @@ fn e3210_nixpkgs_provision_failed_snapshot() {
     assert_eq!(d.code, "E3210");
     let rendered = jet::render_diagnostics("main.jet", "", std::slice::from_ref(&d));
     let expected = "\
-Error [E3210]: Couldn't fetch C library `raylib` from nixpkgs.
+Error [E3210]: couldn't fetch C library `raylib` from nixpkgs.
  Why: `raylib: c@system` asked Jet to provision `nixpkgs#raylib`, but `nix build` failed: error: attribute 'raylib' missing
- Fix: Check the attr exists (`nix build nixpkgs#raylib`), or point at a local build with `raylib: c@\"<path>\"`, or install it and use `system`.
+ Fix: check the attr exists (`nix build nixpkgs#raylib`), or point at a local build with `raylib: c@\"<path>\"`, or install it and use `system`.
+More: jet-lang.dev/e/E3210
 ";
     assert_eq!(rendered, expected);
 }

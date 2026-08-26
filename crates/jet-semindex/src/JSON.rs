@@ -15,7 +15,8 @@ use jet_pkg_model::Package::{
 use crate::Build::{SymDef, SymKind, SymRef};
 use crate::Symbols::canonical_symbol_name;
 use crate::Types::{
-    BypassFact, BypassKind, CallEdge, CallableParameterFact, CallableSignatureFact, DefinitionFact,
+    ArithmeticOperationFact, BypassFact, BypassKind, CallEdge, CallableParameterFact,
+    CallableSignatureFact, DefinitionFact,
     EffectFact, ExpandProjection, ExpandValue, InstanceFact, MemberFact, MemberKind, MemberOrigin,
     OutputFact, SemIndex, SourceSpan, StateGraphFact, SymbolDef, SymbolKind, SymbolRef,
     TypeDossier, ViewProjectionFact, ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
@@ -513,10 +514,12 @@ fn json_callable_signature(signature: &crate::Types::CallableSignatureFact) -> S
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"parameters\":[{}],\"effects\":[{}],\"errors\":[{}],\"returned_views\":[{}],\"policies\":[{}]}}",
+        "{{\"parameters\":[{}],\"effects\":[{}],\"errors\":[{}],\"failure_contract\":{},\"failure_source\":{},\"returned_views\":[{}],\"policies\":[{}]}}",
         parameters,
         list(&signature.effects),
         list(&signature.errors),
+        json_str(&signature.failure_contract),
+        json_str(&signature.failure_source),
         views,
         list(&signature.policies),
     )
@@ -708,6 +711,17 @@ fn json_effect(e: &EffectFact) -> String {
     )
 }
 
+fn json_arithmetic(value: &ArithmeticOperationFact) -> String {
+    format!(
+        "{{\"operation\":{},\"policy\":{},\"module\":{},\"operation_span\":{},\"scope_span\":{}}}",
+        json_str(&value.operation),
+        json_str(&value.policy),
+        json_str(&value.module_path),
+        json_span(value.operation_span),
+        json_span(value.scope_span),
+    )
+}
+
 fn json_member_kind(kind: &MemberKind) -> &'static str {
     match kind {
         MemberKind::Field => "field",
@@ -807,6 +821,7 @@ impl SemIndex {
         let refs: Vec<String> = self.references().iter().map(json_ref).collect();
         let calls: Vec<String> = self.call_edges().iter().map(json_call).collect();
         let effects: Vec<String> = self.effects().iter().map(json_effect).collect();
+        let arithmetic: Vec<String> = self.arithmetic().iter().map(json_arithmetic).collect();
         let members: Vec<String> = self.members().iter().map(json_member).collect();
         let definition_facts: Vec<String> = self
             .definition_facts()
@@ -828,7 +843,7 @@ impl SemIndex {
             .map(|value| format!(",\"expand\":{}", json_expand_projection(value)))
             .unwrap_or_default();
         let payload = format!(
-            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"state_graphs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]{}}}",
+            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"state_graphs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"arithmetic\":[{}],\"members\":[{}]{}}}",
             self.schema_version(),
             defs.join(","),
             definition_facts.join(","),
@@ -840,6 +855,7 @@ impl SemIndex {
             refs.join(","),
             calls.join(","),
             effects.join(","),
+            arithmetic.join(","),
             members.join(","),
             expand,
         );
@@ -1113,6 +1129,8 @@ fn callable_signature(
         param_contract,
         param_variadic,
         ret,
+        failure_contract,
+        failure_source,
         effects,
         effect_via,
         param_access,
@@ -1177,6 +1195,8 @@ fn callable_signature(
         parameters,
         effects,
         errors,
+        failure_contract: failure_contract.clone(),
+        failure_source: failure_source.clone(),
         returned_views: returned_views.to_vec(),
         policies: policies.clone(),
     })

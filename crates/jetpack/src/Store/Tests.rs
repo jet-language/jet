@@ -1649,6 +1649,19 @@ mod tests {
         assert!(projected_bin.starts_with("/proc/self/fd/"));
         assert!(!projected_bin.starts_with(&out));
         let stable_tool = hit.lease.stable_path(&tool.to_string_lossy()).unwrap();
+        let explicit_tool = hit.lease.executable_for(&tool.to_string_lossy()).unwrap();
+        assert_eq!(
+            Command::new(&explicit_tool).output().unwrap().stdout,
+            b"trusted"
+        );
+        assert!(hit
+            .lease
+            .executable_for(&out.join("bin/other-tool").to_string_lossy())
+            .is_none());
+        assert!(hit
+            .lease
+            .executable_for_command(&out.join("bin/other-tool").to_string_lossy())
+            .is_err());
 
         let moved = roots.root.join("fd-view-original");
         let attacker = roots.root.join("fd-view-attacker");
@@ -1659,6 +1672,15 @@ mod tests {
         symlink(&attacker, &out).unwrap();
 
         hit.lease.validate().unwrap();
+        let confined_tool = hit.lease.executable_for(&tool.to_string_lossy()).unwrap();
+        assert_eq!(
+            Command::new(&confined_tool).output().unwrap().stdout,
+            b"trusted"
+        );
+        assert!(hit
+            .lease
+            .executable_for(&attacker.join("bin/tool").to_string_lossy())
+            .is_none());
         let wrapper = hit.lease.wrapper_dir().unwrap();
         assert!(fs::set_permissions(wrapper, fs::Permissions::from_mode(0o755)).is_err());
         assert!(fs::remove_file(wrapper.join("tool")).is_err());

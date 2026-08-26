@@ -11,7 +11,8 @@ use super::graph_helpers::{
     span_through_closing_parens, starts_uppercase, text_matches, wire_ident_refs,
 };
 use super::graph_json::{
-    add_arm_pin, add_execution_overlay, add_inline, add_node, add_pin, add_region,
+    add_arm_pin, add_authority_region, add_execution_overlay, add_inline, add_node, add_pin,
+    add_region,
     add_source_comment_regions, add_wire, add_wire_with_span, graph_to_json, meta_attr_json,
     node_catalog, set_pin_append, set_pin_source_span,
 };
@@ -1992,14 +1993,29 @@ fn project_stmt(
             project_stmt_block(g, index, src, body, ordinal * 100 + 150, x + 230, y + 70);
         }
         Stmt::AuthorityScope {
-            caps, body, span, ..
+            caps,
+            binding,
+            body,
+            span,
+            ..
         } => {
             let title = caps
                 .iter()
                 .map(|(cap, _)| cap.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            add_region(g, ordinal, "caps", &title, *span);
+            let granted = caps
+                .iter()
+                .map(|(cap, _)| cap.clone())
+                .collect::<Vec<_>>();
+            add_authority_region(
+                g,
+                ordinal,
+                &format!("authority: {title}"),
+                &granted,
+                binding.as_deref(),
+                *span,
+            );
             project_stmt_block(g, index, src, body, ordinal * 100 + 160, x + 230, y + 70);
         }
         Stmt::ComptimeIf {

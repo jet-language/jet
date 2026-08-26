@@ -70,6 +70,29 @@ fn tree_sitter_map_type_grammar_keeps_colon_adjacent() {
 }
 
 #[test]
+fn tree_sitter_result_handler_grammar_keeps_the_canonical_shape() {
+    let grammar = fs::read_to_string("editors/tree-sitter/grammar.js").unwrap();
+    let start = grammar
+        .find("result_handler_expr:")
+        .expect("result handler rule");
+    let rule = &grammar[start..grammar[start..].find("paren_expr:").unwrap() + start];
+    assert!(
+        rule.contains("field(\"ok\", $.identifier)")
+            && rule.contains("field(\"error\", $.identifier)")
+            && rule.contains("field(\"success\"")
+            && rule.contains("field(\"failure\"")
+    );
+    assert!(
+        !rule.contains(":>"),
+        "retired arrow leaked into Result handler grammar"
+    );
+    assert!(
+        !rule.contains("=>"),
+        "retired arrow leaked into Result handler grammar"
+    );
+}
+
+#[test]
 fn editor_grammars_match_generated_sections() {
     let cases = [
         (
@@ -603,6 +626,26 @@ fn run() {}
     let (toks, _) = jet::Lexer::lex(src);
     let prog = jet::Parser::parse(&toks).expect("parse");
     assert_eq!(prog.items.len(), 2);
+}
+
+#[test]
+fn parse_value_tail_stays_an_expression_statement() {
+    let src = r#"
+fn label() String -> {
+    "label"
+}
+fn run() {}
+"#;
+    let (tokens, diagnostics) = jet::Lexer::lex(src);
+    assert!(diagnostics.is_empty(), "lex diagnostics: {diagnostics:?}");
+    let program = jet::Parser::parse(&tokens).expect("value tail parses");
+    let jet::AST::Item::Func(function) = &program.items[0] else {
+        panic!("expected label function");
+    };
+    assert!(matches!(
+        function.body.last(),
+        Some(jet::AST::Stmt::Expr(jet::AST::Expr::Str(..)))
+    ));
 }
 
 #[test]

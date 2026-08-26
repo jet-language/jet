@@ -447,6 +447,19 @@ Each matched task reports:
 - independent acceptance that each competing fixture is idiomatic and minimal
   for the same task, input, outcome, and normal language contract.
 
+A measured record is not a bag of placeholders. `rawSourceCounts` has
+`unit: "lexical-token"`, `includes: ["imports", "required-policy",
+"required-error-handling"]`, and one `arms` entry per compared source. Each
+arm reports non-negative `tokens`, `statements`, `calls`, and
+`namedTemporaries`. `mandatoryConceptIds`, `hiddenFacts`, and `nonlocalLookups`
+are arrays, including an explicit empty array when a fact or lookup is absent.
+The fixture review records its reviewer, fixture task, same-task/input/outcome
+check, idiomatic/minimal verdict, normal-language contract, and either
+`pythonGuarantees: "not-emulated"` or `"not-applicable"`. A Jet win records a
+property, evidence reference, kind (`machine` or `review`), and its measurement
+or independent review. A record marked `pending-fixture` cannot pass the
+release check.
+
 Raw counts are evidence, not a universal ratio. An increase passes only when it
 improves clarity, local reasoning, a named guarantee, or expert control.
 Incidental ceremony fails. A worse reasoning burden needs a compensating

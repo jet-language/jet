@@ -1451,10 +1451,12 @@ impl<'a> Checker<'a> {
 
     fn active_arithmetic_policy(
         &self,
+        operation: crate::AST::ArithmeticOperation,
         operation_span: Span,
     ) -> Option<crate::AST::ArithmeticPolicyFact> {
         self.arithmetic_policy_stack.last().copied().map(|mut fact| {
             fact.operation_span = operation_span;
+            fact.operation = Some(operation);
             fact
         })
     }
@@ -3120,7 +3122,10 @@ impl<'a> Checker<'a> {
                         bits,
                     } = &t
                     {
-                        if let Some(fact) = self.active_arithmetic_policy(*span) {
+                        if let Some(fact) = self.active_arithmetic_policy(
+                            crate::AST::ArithmeticOperation::Neg,
+                            *span,
+                        ) {
                             let zero = Expr::Int(
                                 0,
                                 *span,
@@ -3218,7 +3223,15 @@ impl<'a> Checker<'a> {
                 } else if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Pow)
                     && ty.as_ref().is_some_and(|ty| matches!(ty, Type::IntN { .. }))
                 {
-                    if let Some(fact) = self.active_arithmetic_policy(span) {
+                    let operation = match op {
+                        BinOp::Add => Some(crate::AST::ArithmeticOperation::Add),
+                        BinOp::Sub => Some(crate::AST::ArithmeticOperation::Sub),
+                        BinOp::Mul => Some(crate::AST::ArithmeticOperation::Mul),
+                        BinOp::Pow => Some(crate::AST::ArithmeticOperation::Pow),
+                        _ => None,
+                    };
+                    if let Some(operation) = operation {
+                        if let Some(fact) = self.active_arithmetic_policy(operation, span) {
                         let inner = Expr::Binary(
                             op,
                             Box::new(lhs.as_ref().clone()),
@@ -3226,6 +3239,7 @@ impl<'a> Checker<'a> {
                             span,
                         );
                         *e = self.policy_call(fact.mode, inner, fact);
+                        }
                     }
                 }
                 ty
@@ -4076,7 +4090,15 @@ impl<'a> Checker<'a> {
                 operand,
                 postfix,
                 span,
-            } => self.check_incdec(*op, operand, *postfix, *span),
+            } => {
+                let ty = self.check_incdec(*op, operand, *postfix, *span);
+                if ty.is_some() {
+                    if let Some(root) = crate::Sema::Diagnostics::expr_root_ident(operand.as_ref()) {
+                        self.clear_origin(root);
+                    }
+                }
+                ty
+            }
             Expr::TypedLit { .. } => unreachable!("TypedLit elaborated before match"),
         }
     }

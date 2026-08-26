@@ -2213,7 +2213,7 @@ fn os_switch_activates_and_sets_current() {
     );
     let studio_html = fs::read_to_string(generation.join("studio/index.html")).unwrap();
     assert!(
-        studio_html.contains("jetos Studio"),
+        studio_html.contains("Jetos Studio"),
         "studio: {studio_html}"
     );
     assert!(
@@ -2222,8 +2222,8 @@ fn os_switch_activates_and_sets_current() {
     );
     assert!(
         studio_html.contains("data-page-kind=\"dashboard\"")
-            && studio_html.contains("Service configuration")
-            && studio_html.contains("Proof/rollback status"),
+            && studio_html.contains("Service Configuration")
+            && studio_html.contains("Proof/Rollback Status"),
         "studio: {studio_html}"
     );
     assert!(
@@ -2236,8 +2236,8 @@ fn os_switch_activates_and_sets_current() {
             && studio_html.contains("data-apply-gate=\"single-source-transaction\"")
             && studio_html.contains("data-changeset-action=\"apply\"")
             && studio_html.contains("data-changeset-action=\"discard\"")
-            && studio_html.contains("Impact ledger")
-            && studio_html.contains("Build only"),
+            && studio_html.contains("Impact Ledger")
+            && studio_html.contains("Build Only"),
         "studio: {studio_html}"
     );
     assert!(
@@ -2279,7 +2279,7 @@ fn os_switch_activates_and_sets_current() {
     assert!(
         studio_html.contains("data-open-canvas=\"source\"")
             && studio_html.contains("Open Canvas")
-            && studio_html.contains("jetos Studio"),
+            && studio_html.contains("Jetos Studio"),
         "Studio may deep-link to Canvas while remaining a separate app: {studio_html}"
     );
     let secrets = fs::read_to_string(generation.join("secrets.tmpfs.manifest")).unwrap();

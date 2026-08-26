@@ -3073,13 +3073,28 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         .map(|(_, value, _)| emit_tir_expr(value, cx))
                         .unwrap_or_else(|| "Err(JetAbsent)".to_string())
                 };
-                return format!(
-                    "{}jet_err({}, {}, {})",
-                    cx.root_prefix,
-                    value("message"),
-                    value("code"),
-                    value("cause")
-                );
+                let current_fn = cx.current_fn.borrow().clone();
+                let conversion = current_fn
+                    .strip_prefix("__jet_errconv_")
+                    .and_then(|stem| stem.split_once("_to_"));
+                return match conversion {
+                    Some((source, target)) => format!(
+                        "{}jet_err_from_conversion({}, {}, {}, {}, {})",
+                        cx.root_prefix,
+                        value("message"),
+                        value("code"),
+                        value("cause"),
+                        escape_rust_str(source),
+                        escape_rust_str(target),
+                    ),
+                    None => format!(
+                        "{}jet_err({}, {}, {})",
+                        cx.root_prefix,
+                        value("message"),
+                        value("code"),
+                        value("cause")
+                    ),
+                };
             }
             // Value-position generic heads need turbofish (`Foo::<T> {…}`);
             // `cx.rust_type` spells type-position `Foo<T>` and rustc rejects it.

@@ -19310,6 +19310,62 @@ impl LowerCtx<'_, '_> {
                             return Ok(handle);
                         });
                     }
+                    // D-TEXTHEAD-TYPE1=A: `Type.from(text)` is a source-facing
+                    // facade over the ordinary CheckedText implementation. The
+                    // facade is emitted as Rust for AOT, so the resident tier
+                    // calls the same `Type::check` function and reuses its
+                    // Result carrier instead of inventing a second checker.
+                    if method.name == "from"
+                        && args.len() == 1
+                        && matches!(owner, TStaticOwner::User(_))
+                        && matches!(
+                            &expr.ty,
+                            Type::Result { ok, .. }
+                                if matches!(ok.as_ref(), Type::Named(name) if self
+                                    .meta
+                                    .distinct_base(name)
+                                    .is_some_and(|base| *base == Type::String))
+                        )
+                    {
+                        let check_method = TMethodRef::bare("check");
+                        let check_key = Self::static_method_key(
+                            owner,
+                            owner_type.as_ref(),
+                            &check_method,
+                            &[],
+                        )
+                        .ok_or_else(|| "jit CheckedText.check owner".to_string())?;
+                        let check_id = self
+                            .func_ids
+                            .get(&check_key)
+                            .copied()
+                            .ok_or_else(|| format!("jit missing CheckedText checker `{check_key}`"))?;
+                        let text = self.lower_call_arg(&args[0])?;
+                        let check_ref =
+                            self.module.declare_func_in_func(check_id, self.b.func);
+                        let check_call = self.b.ins().call(check_ref, &[text]);
+                        let check_result = self.b.inst_results(check_call)[0];
+                        let is_ok = self.call_host(self.host.result_is_ok, &[check_result]);
+                        let ok_block = self.b.create_block();
+                        let err_block = self.b.create_block();
+                        let merge = self.b.create_block();
+                        self.b.append_block_param(merge, types::I64);
+                        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+                        self.b.switch_to_block(ok_block);
+                        self.b.seal_block(ok_block);
+                        let ok_tag = self.b.ins().iconst(types::I8, 1);
+                        let wrapped = self.call_host(self.host.result_new_i64, &[ok_tag, text]);
+                        self.b.ins().jump(merge, &[wrapped]);
+
+                        self.b.switch_to_block(err_block);
+                        self.b.seal_block(err_block);
+                        self.b.ins().jump(merge, &[check_result]);
+
+                        self.b.switch_to_block(merge);
+                        self.b.seal_block(merge);
+                        return Ok(self.b.block_params(merge)[0]);
+                    }
                     let key =
                         Self::static_method_key(owner, owner_type.as_ref(), method, type_args)
                             .ok_or_else(|| {

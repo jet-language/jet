@@ -2087,7 +2087,7 @@ impl Type {
         }
     }
 
-    fn error_suffix_name(err: &Type) -> String {
+    fn error_contract_name(err: &Type) -> String {
         if let Type::Union(members) = err {
             format!(
                 "({})",
@@ -2106,25 +2106,19 @@ impl Type {
         let default_error = matches!(err, Type::Named(name) if name == crate::Syntax::TYPE_ERR);
         let unit_success =
             matches!(ok, Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE);
-        if unit_success {
-            if default_error {
-                crate::Syntax::TYPE_FALLIBLE_SEP.to_string()
-            } else {
-                format!(
-                    "{}{}",
-                    Self::error_suffix_name(err),
-                    crate::Syntax::TYPE_FALLIBLE_SEP
-                )
-            }
-        } else if default_error {
-            format!("{} {}", ok.name(), crate::Syntax::TYPE_FALLIBLE_SEP)
+        let error = if default_error {
+            crate::Syntax::TYPE_FALLIBLE_SEP.to_string()
         } else {
             format!(
-                "{} {}{}",
-                ok.name(),
-                Self::error_suffix_name(err),
-                crate::Syntax::TYPE_FALLIBLE_SEP
+                "{}{}",
+                crate::Syntax::TYPE_FALLIBLE_SEP,
+                Self::error_contract_name(err)
             )
+        };
+        if unit_success {
+            error
+        } else {
+            format!("{} {error}", ok.name())
         }
     }
 
@@ -2578,7 +2572,7 @@ mod tests {
     }
 
     #[test]
-    fn failure_surface_names_use_postfixes_in_diagnostics() {
+    fn failure_surface_names_use_prefixes_in_diagnostics() {
         let fallible = Type::Result {
             ok: Box::new(Type::Option(Box::new(Type::Int))),
             err: Box::new(Type::Union(vec![
@@ -2586,14 +2580,14 @@ mod tests {
                 Type::Named("TimeoutError".to_string()),
             ])),
         };
-        assert_eq!(fallible.name(), "Int? (DbError | TimeoutError)!");
-        assert_eq!(fallible.show(), "Int? (DbError | TimeoutError)!");
+        assert_eq!(fallible.name(), "Int? !(DbError | TimeoutError)");
+        assert_eq!(fallible.show(), "Int? !(DbError | TimeoutError)");
 
         let unit_fallible = Type::Result {
             ok: Box::new(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
             err: Box::new(Type::Named("IOError".to_string())),
         };
-        assert_eq!(unit_fallible.name(), "IOError!");
+        assert_eq!(unit_fallible.name(), "!IOError");
         assert_eq!(
             Type::Result {
                 ok: Box::new(Type::Int),
@@ -2613,7 +2607,7 @@ mod tests {
         };
         assert_eq!(
             callback.name(),
-            "fn(Int? (DbError | TimeoutError)!) IOError! -[]>"
+            "fn(Int? !(DbError | TimeoutError)) !IOError -[]>"
         );
     }
 

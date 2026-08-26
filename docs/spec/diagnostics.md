@@ -195,6 +195,19 @@ reports, not compiler warnings.
 | `` `var` is a foreign binding keyword; Jet writes `:=` ``. | Jet puts binding mutability on `:=` or `::`, not on a declaration keyword. | Write `name := value`; `let`, `const`, and `val` use `name :: value`. |
 | `a function return type uses :`. | Jet uses `:` for parameter and field types; callable results use `->` after the return type. | Write `fn name(...) Type -> body`. |
 
+### D-RESULT-DECON2 handler diagnostics
+
+The compact exhaustive handler reuses registered diagnostics and marks the
+smallest offending source span:
+
+| Situation | Code | Span |
+|-----------|------|------|
+| missing branch, duplicate role, or bad payload binding | E0003 | the missing separator, duplicate role, or binding |
+| malformed current arrow | E0003 | the token where `->` is required |
+| retired `:>` or `=>` arrow | E0070 | the retired arrow token |
+| non-Result receiver or Result-pattern type mismatch | E0305 | the `.Ok`/`.Err` pattern test |
+| success/failure branch value mismatch | E0124 | the complete handler expression |
+
 ## Error code registry
 
 | Code  | Stage | Meaning                                  |
@@ -299,7 +312,7 @@ reports, not compiler warnings.
 | E0111 | sema  | changing a `::`, const, or read-only parameter |
 | E0112 | sema  | value doesn't fit where it's used (argument/print/interpolation) |
 | E0113 | sema  | `return` value mismatch (wrong/missing/unexpected) |
-| E0114 | sema  | a path reaches the end without `return`   |
+| E0114 | sema  | a value-expected block has no final value |
 | E0115 | sema  | `break`/`next` outside a loop             |
 | E0987 | sema  | `break(name)`/`next(name)` names no enclosing `name :: loop` (D-LOOPLABEL3, D-LOOPSTATE1) |
 | E0988 | parse/sema | retired dot/`@` loop exits in `name := loop`, or runtime use of a loop name (D-LOOPSTATE1) |
@@ -487,7 +500,7 @@ reports, not compiler warnings.
 | E0404 | sema  | `ok`/`err` need a fallible context        |
 | E0405 | sema  | `??` fallback type/`return` mismatch or non-diverging test-bind route |
 | E0406 | parse | old `Result<T, E>` fallible type syntax   |
-| E-ERR-SIGIL | parse | retired infix fallible type spelling; use an error suffix (D-ERRSUFFIX1) |
+| E-ERR-SIGIL | parse | retired infix fallible type spelling; use a prefix failure contract (D-FAILURE-FOUNDATION1) |
 | E0407 | sema  | `.drop()` reason missing or invalid (D-IGNORERET2) |
 | E0408 | sema  | `err` used in an optional fallback (D-CHOOSE-TEST1=A) |
 | E0410 | parse | *retired by D-MARK-DISCARD1=A* (was: `#Suppress` unknown argument) |
@@ -969,6 +982,7 @@ reports, not compiler warnings.
 | E2239 | debug | native debugger invariant failed (D-DBG-DIAG1) |
 | L2001 | jet   | a deprecated item still compiles but should be migrated; suggests `jet fix` (E2-M2, D-REL5) |
 | L2101 | jet   | `jet self doctor` advisory: a rustc / cache / PATH problem with a fix (E2-M3, D-DX2) |
+| L2201 | jet   | public API item has no documentation (D-JETDOC1) |
 | E2701 | runtime | malformed input to a ring library parse function — row/line number and detail (E2-M9) |
 | E2702 | sema  | compiler-known crypto API misuse at the boundary (E2-M9, D-CRYPTO-DIAG1) |
 | L2701 | sema  | advisory: regex pattern may catastrophically backtrack; suggest an anchor (E2-M9) |
@@ -1018,7 +1032,7 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E0071 | This retired effect-only result-arrow teaching is no longer emitted. | Effect-only one-line bodies use `->` for one statement; braces hold multiple statements or a scope. | Follow the current one-line body rule. |
 | E0072 | This collecting loop cannot return a List because it has no finite exhaustion edge. | A collecting loop must finish after a statically finite source or C-style condition. Bare infinite and condition-only loops do not provide that boundary. | Remove `->`, or iterate a finite source. Return one final value from an ordinary loop with `break value`. |
 | E0073 | This collecting loop path produces no item. | Every accepted iteration must contribute one non-unit value unless `next` explicitly omits it. | Return a value on this path, or use `next` to omit the item. Remove `->` if the loop only performs effects. |
-| E0114 | A value-expected block reaches its end without a value. | Its final expression is the block value; a statement or semicolon-terminated expression yields unit. | Put one unadorned expression last, or use `return ...` for an early exit. |
+| E0114 | A value-expected block has no final value. | Its final expression is the block value; a statement or semicolon-terminated expression yields unit. | Put one unadorned expression last, or use `return ...` for an early exit. |
 | E0074 | This collecting loop produces incompatible item types. | One collecting loop builds one `[T]`, so every contributed item must have the same type. | Convert the items to one type, or split the operations into separate loops. |
 | E0075 | This collecting loop cannot use a break payload. | Its result is already the accumulated `[T]`. A second payload would give the same exit two result channels. | Write `break` to return the accumulated list, or return one final value from an ordinary loop. |
 | E0076 | This result loop has a missing or incompatible break payload. | An ordinary loop used as a value has one final result type. Every exit that targets it must provide that type. | Add the missing payload and make every payload the same type, or target an inner effect-only loop. |
@@ -1416,7 +1430,7 @@ all collapse to `OpenFailed`; backend prose and secret material never cross the
 projection. File-envelope cancellation remains internal task control and is not
 a public `FileCryptoError` variant. Handled errors are ordinary values.
 | E2711 | Derive orphan rule: neither `` `derive T.{Trait}` `` nor `` `{Type}` `` is local. | A generated implementation has a clear local owner only when its derive provider or target type lives in the entry module (D-METADERIVE1=A). Two imported sides leave the entry package owning neither contract. | Define `derive T.{Trait}` or `{Type}` in the entry module. |
-| E2712 | this checked text head rejected its body | A library's checked text head evaluated its `check` expression and rejected the complete literal body (D-BOUND-SINK1=A). | Fix the head body so it satisfies the library's declared text grammar. |
+| E2712 | this checked text type rejected its body | A library's `CheckedText.check` function rejected the complete literal body (D-TEXTHEAD-TYPE1=A). | Fix the body so it satisfies the type's declared text grammar. |
 | E2714 | A user derive is written `derive T.{Trait}`. | The type parameter comes first, joined to the trait name with a dot (D-METADERIVE1, amended 2026-07-01); the `derive {Trait} for T` spelling was retired. | Write `derive T.{Trait} { … }`. |
 | L2701 | This regex pattern may catastrophically backtrack on certain inputs. | A regex with unbounded quantifiers nested inside another unbounded quantifier can run in exponential time on adversarial inputs, causing a denial-of-service. Reserved for future `core.regex` patterns. | Anchor the pattern at the start (`^`) or end (`$`), or restructure it to avoid nested quantifiers. |
 
@@ -2026,6 +2040,15 @@ use.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | L2101 | `jet self doctor` found an environment problem with a known fix. | Jet hides a rustc backend, a build cache/store, and a C-FFI bridge; doctor surfaces a broken one before it derails a build. | Apply the fix printed on the advisory line; for a missing cache or store directory, run `jet self doctor --fix`. |
+
+## Documentation diagnostics (D-JETDOC1)
+
+`jet doc --check` reports public API items that cannot appear in the
+generated reference until they have a summary.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| L2201 | Public API item `{name}` has no documentation. | Generated reference documentation needs a summary for every public API item so users can find and understand the supported surface. | Add a `///` summary before `{name}`, or remove `pub` when it is not part of the public API. |
 
 ## Workspace diagnostics (D-WORKSPACE1=B, D-WORKSPACE2=A)
 

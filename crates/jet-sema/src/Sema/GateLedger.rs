@@ -567,7 +567,7 @@ fn visit_statement_gates(source: &str, body: &[Stmt], ledger: &mut GateLedger) {
                 "#FX",
                 None,
                 &format!(
-                    "abilities: {}",
+                    "effects: {}",
                     caps.iter()
                         .map(|(name, _)| name.as_str())
                         .collect::<Vec<_>>()

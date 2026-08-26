@@ -171,6 +171,25 @@ fn web_partition_report_generated_for_web_compile() {
 }
 
 #[test]
+fn web_arithmetic_policy_calls_the_embedded_numeric_prelude() {
+    let source = r#"
+#Target(Web)
+#Arithmetic(.Wrapping)
+fn run() {
+    value :: U8{250} + U8{10}
+    print(value)
+}
+"#;
+    let web = jet::compile_web_with_path(source, "tests/fixtures/web_arithmetic_policy.jet")
+        .expect("arithmetic policy should compile for web")
+        .web
+        .expect("web compilation should produce artifacts");
+    assert!(web.js_app.contains("jet_fixed_policy("));
+    assert!(web.js_app.contains("function jet_fixed_policy_step"));
+    assert!(web.js_app.contains("mode === \"wrapping\""));
+}
+
+#[test]
 fn web_wasm_imaginary_literal_uses_shared_complex_prelude() {
     let source = r#"
 #Target(Web)

@@ -282,6 +282,18 @@ pub(crate) fn compute_definition(
             return Some((def.module_path.clone(), def.def_span));
         }
     }
+    // The sema-owned anchor covers the complete `Type.State.Name` marker
+    // expression. Resolve from that anchor before spelling lookup so a state
+    // with the same leaf name in another type still lands on its owner.
+    if let Some(reference) = db.refs.iter().find(|reference| {
+        reference.module_path == path
+            && reference.span.start <= offset
+            && offset <= reference.span.end
+    }) {
+        if let Some(target) = &reference.target {
+            return Some((target.module_path.clone(), target.def_span.into()));
+        }
+    }
     let name = find_ident_at(tokens, offset)?;
     // Look for a top-level or local def with this name
     // Prefer defs in same module, then other modules
@@ -589,6 +601,63 @@ fn is_valid_ident(name: &str) -> bool {
     chars.all(|c| c.is_alphanumeric() || c == '_')
 }
 
+fn state_anchor_at(
+    db: &SymbolDB,
+    path: &str,
+    offset: usize,
+) -> Option<jet_semindex::DefinitionAnchor> {
+    if let Some(target) = db
+        .refs
+        .iter()
+        .find(|reference| {
+            reference.module_path == path
+                && reference.span.start <= offset
+                && offset <= reference.span.end
+        })
+        .and_then(|reference| reference.target.clone())
+        .filter(|target| target.kind == "state")
+    {
+        return Some(target);
+    }
+    db.defs
+        .iter()
+        .find(|definition| {
+            definition.module_path == path
+                && definition.def_span.start <= offset
+                && offset <= definition.def_span.end
+                && matches!(
+                    &definition.kind,
+                    SymKind::EnumVariant { parent } if parent.ends_with(".State")
+                )
+        })
+        .map(|definition| jet_semindex::DefinitionAnchor {
+            module_path: definition.module_path.clone(),
+            kind: "state".to_string(),
+            def_span: definition.def_span.into(),
+            semantic_identity: Some(definition.identity.clone()),
+        })
+}
+
+fn state_anchor_matches(
+    left: &jet_semindex::DefinitionAnchor,
+    right: &jet_semindex::DefinitionAnchor,
+) -> bool {
+    match (&left.semantic_identity, &right.semantic_identity) {
+        (Some(left), Some(right)) => left == right,
+        _ => left.module_path == right.module_path && left.def_span == right.def_span,
+    }
+}
+
+fn state_leaf_span(reference: &jet_semindex::SymRef) -> Option<Span> {
+    let leaf = reference.name.rsplit('.').next()?;
+    (reference.name.contains('.') && !leaf.is_empty()).then(|| {
+        Span::new(
+            reference.span.end.saturating_sub(leaf.len()),
+            reference.span.end,
+        )
+    })
+}
+
 /// Compute a workspace edit for renaming the symbol at `offset` to `new_name`.
 /// Returns `Err(msg)` if the rename is invalid.
 pub(crate) fn compute_rename(
@@ -714,6 +783,34 @@ pub(crate) fn compute_rename(
         });
         spans.dedup();
         return Ok(spans);
+    }
+    if let Some(target) = state_anchor_at(db, path, offset) {
+        let mut spans = compute_references(db, tokens, path, offset, true);
+        for (reference_path, span) in &mut spans {
+            let Some(reference) = db.refs.iter().find(|reference| {
+                reference.module_path == *reference_path
+                    && reference.span == *span
+                    && reference
+                        .target
+                        .as_ref()
+                        .is_some_and(|candidate| state_anchor_matches(candidate, &target))
+            }) else {
+                continue;
+            };
+            if let Some(leaf_span) = state_leaf_span(reference) {
+                *span = leaf_span;
+            }
+        }
+        spans.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then(left.1.start.cmp(&right.1.start))
+                .then(left.1.end.cmp(&right.1.end))
+        });
+        spans.dedup();
+        if !spans.is_empty() {
+            return Ok(spans);
+        }
     }
     let mut spans: Vec<(String, Span)> = Vec::new();
     // Include definition spans
@@ -1574,6 +1671,9 @@ mod sm {
     pub const WRITE_BORROW: u32 = 1 << 3;
     pub const COPY: u32 = 1 << 4;
     pub const RULE: u32 = 1 << 5;
+    pub const ARITHMETIC_CHECKED: u32 = 1 << 6;
+    pub const ARITHMETIC_WRAPPING: u32 = 1 << 7;
+    pub const ARITHMETIC_SATURATING: u32 = 1 << 8;
 }
 
 fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u32, u32)> {
@@ -1779,22 +1879,33 @@ pub(crate) fn is_live_teaching_semantic_word(name: &str) -> bool {
     )
 }
 
-/// Encode semantic tokens for a token stream into the LSP delta-encoded u32 array.
-pub(crate) fn encode_semantic_tokens(tokens: &[Token], src: &str) -> Vec<u32> {
-    encode_semantic_tokens_where(tokens, src, |_| true)
+pub(crate) fn encode_semantic_tokens_with_arithmetic(
+    tokens: &[Token],
+    src: &str,
+    arithmetic: &[jet_semindex::ArithmeticOperationFact],
+) -> Vec<u32> {
+    encode_semantic_tokens_where(tokens, src, |_| true, arithmetic)
 }
 
-/// Encode only tokens whose start byte lies inside `span`.
-pub(crate) fn encode_semantic_tokens_in_span(tokens: &[Token], src: &str, span: Span) -> Vec<u32> {
-    encode_semantic_tokens_where(tokens, src, |tok| {
-        tok.span.start >= span.start && tok.span.start < span.end
-    })
+pub(crate) fn encode_semantic_tokens_in_span_with_arithmetic(
+    tokens: &[Token],
+    src: &str,
+    span: Span,
+    arithmetic: &[jet_semindex::ArithmeticOperationFact],
+) -> Vec<u32> {
+    encode_semantic_tokens_where(
+        tokens,
+        src,
+        |tok| tok.span.start >= span.start && tok.span.start < span.end,
+        arithmetic,
+    )
 }
 
 fn encode_semantic_tokens_where(
     tokens: &[Token],
     src: &str,
     include: impl Fn(&Token) -> bool,
+    arithmetic: &[jet_semindex::ArithmeticOperationFact],
 ) -> Vec<u32> {
     let mut data: Vec<u32> = Vec::new();
     let mut prev_line = 0u32;
@@ -1811,6 +1922,7 @@ fn encode_semantic_tokens_where(
             Some(t) => t,
             None => continue,
         };
+        let tok_mods = tok_mods | arithmetic_modifier(&tok.span, arithmetic);
         let lsp_start = byte_offset_to_lsp(src, tok.span.start);
         let line = lsp_start.line;
         let start = lsp_start.character;
@@ -1843,6 +1955,25 @@ fn encode_semantic_tokens_where(
         prev_start = start;
     }
     data
+}
+
+fn arithmetic_modifier(
+    token: &Span,
+    arithmetic: &[jet_semindex::ArithmeticOperationFact],
+) -> u32 {
+    arithmetic
+        .iter()
+        .filter(|fact| {
+            token.start < fact.operation_span.end && fact.operation_span.start < token.end
+        })
+        .fold(0, |mods, fact| {
+            mods | match fact.policy.as_str() {
+                "Checked" => sm::ARITHMETIC_CHECKED,
+                "Wrapping" => sm::ARITHMETIC_WRAPPING,
+                "Saturating" => sm::ARITHMETIC_SATURATING,
+                _ => 0,
+            }
+        })
 }
 
 // ── Inlay hints ───────────────────────────────────────────────────────────────

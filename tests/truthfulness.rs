@@ -809,11 +809,47 @@ fn strip_jet_comments_and_strings(source: &str) -> String {
 
 fn marker_used(clean_source: &str, name: &str) -> bool {
     let needle = format!("#{name}");
-    clean_source.match_indices(&needle).any(|(offset, _)| {
+    if clean_source.match_indices(&needle).any(|(offset, _)| {
         let before = clean_source[..offset].chars().next_back();
         let after = clean_source[offset + needle.len()..].chars().next();
         !before.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
             && !after.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    }) {
+        return true;
+    }
+
+    // Type markers use the bracket list form: `#[Codable, RenameAll(camel)]`.
+    // Count positive entries only; `!Equatable` demonstrates opt-out syntax,
+    // not a corpus example of the Equatable capability itself.
+    clean_source.match_indices("#[").any(|(offset, _)| {
+        let list_start = offset + 2;
+        let mut nested = 0;
+        let list_end = clean_source[list_start..]
+            .char_indices()
+            .find_map(|(relative, ch)| match ch {
+                '[' => {
+                    nested += 1;
+                    None
+                }
+                ']' if nested == 0 => Some(list_start + relative),
+                ']' => {
+                    nested -= 1;
+                    None
+                }
+                _ => None,
+            })
+            .unwrap_or(clean_source.len());
+        clean_source[list_start..list_end]
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.starts_with('!'))
+            .map(|entry| {
+                entry
+                    .split(|ch: char| ch == '(' || ch == ':' || ch.is_ascii_whitespace())
+                    .next()
+                    .unwrap_or("")
+            })
+            .any(|entry| entry == name)
     })
 }
 

@@ -301,6 +301,10 @@ fn use_errors(raw: String) Int ParseError! -> {
     return Ok(n * 2)
 }
 
+// Exhaustive Result handling binds both payloads with the existing `?`, `!`,
+// and `->` tokens: `value ? ok -> success ! error -> failure` (D-RESULT-DECON2=B).
+fn handle_result(value: Int ParseError!) String -> value ? ok -> "ok" ! error -> "error"
+
 // Optionals: Val(x) present, bare None absent (S32/D-OPT-SPELL1). `?.` chains, `??` defaults.
 fn optionals(user: User?) String -> {
     city :: user?.address?.city               // optional chaining produces T? (S71)

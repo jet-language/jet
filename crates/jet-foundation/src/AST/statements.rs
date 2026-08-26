@@ -447,6 +447,13 @@ pub enum Stmt {
 
 impl Stmt {
     /// Visit every expression in this statement, including expressions in
+    /// nested statement bodies, without changing the checked AST.
+    pub fn for_each_expr(&self, mut f: impl FnMut(&Expr)) {
+        let mut copy = self.clone();
+        copy.for_each_expr_mut(|expr| f(expr));
+    }
+
+    /// Visit every expression in this statement, including expressions in
     /// nested statement bodies. This is used when a parsed compiler-owned
     /// fragment needs its expression diagnostics reanchored to the user item
     /// that caused the fragment to be generated.

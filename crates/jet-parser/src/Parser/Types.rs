@@ -145,8 +145,8 @@ impl<'a> Parser<'a> {
         Ok((ty, Span::new(start, end)))
     }
 
-    /// D-ERRSUFFIX1=B: a unit-fallible declaration writes its error suffix
-    /// directly after the parameter list (`fn save() IOError!`).
+    /// D-FAILURE-FOUNDATION1=A: a unit-fallible declaration writes its
+    /// contract as a prefix (`fn save() !IOError`).
     pub(in crate::Parser) fn parse_unit_fallible_return(
         &mut self,
     ) -> Result<Option<(Type, Span)>, Diagnostic> {
@@ -188,14 +188,14 @@ impl<'a> Parser<'a> {
             "E0003",
             "this unit-fallible signature uses the retired arrow-and-unit form".to_string(),
             "a function that can fail but returns no value has no result payload for an arrow to introduce".to_string(),
-            "write `fn save(path: String) IOError!`, or `fn sync() !` for the default error".to_string(),
+            "write `fn save(path: String) !IOError`, or `fn sync() !` for the default error".to_string(),
             Some(span),
         )
     }
 
     fn return_type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
-        // D-ERRSUFFIX1: return types use the same `T? E!` / `T (E1 | E2)!`
-        // rules as every other type position. Parentheses only group.
+        // D-FAILURE-FOUNDATION1=A: return types use the same `?T !E` /
+        // `T !(E1 | E2)` rules as every other type position. Parentheses only group.
         self.type_()
     }
 
@@ -810,8 +810,8 @@ impl<'a> Parser<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0406",
                             "`Result<T, E>` is old Jet error syntax".to_string(),
-                            "fallible Jet types use a success type and an error suffix".to_string(),
-                            "write `T? E!`, `T (E1 | E2)!`, or `!` for the default Err type"
+                            "fallible Jet types use a success type and a prefixed error contract".to_string(),
+                            "write `?T !E`, `T !(E1 | E2)`, or `!` for the default Err type"
                                 .to_string(),
                             Some(start),
                         ));

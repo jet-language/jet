@@ -4990,7 +4990,14 @@ impl<'a> Checker<'a> {
                 return self.finish_option_zip(a_inner, args, span, resolved_ret_out);
             }
         }
-        if matches!(&recv_ty, Type::Float | Type::Float32) && method == "origin" {
+        // D-TRACK-ORIGIN1=A: the retired runtime projection is rejected at
+        // the shared method boundary for every directly tracked binding, not
+        // only the historical Float receiver. A copied value has no origin
+        // row of its own, and a normal user-defined `origin` method remains
+        // legal when its receiver is not tracked.
+        let tracked_receiver = matches!(receiver.as_ref().without_parens(), Expr::Ident(name, _)
+            if self.flow.origins.get(name).is_some_and(|origin| origin.is_readable()));
+        if tracked_receiver && method == "origin" {
             self.diags.push(Diagnostic::error(
                 "E0311",
                 "`.origin()` is retired for tracked values".to_string(),

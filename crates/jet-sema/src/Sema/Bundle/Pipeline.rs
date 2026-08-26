@@ -2299,10 +2299,18 @@ fn check_bundle_opts_for_output_inner(
     resolve_inline_module_imports(bundle, &mut states, &mut name_ledger, &mut diags);
 
     // D-STATE-TERMINAL1: freeze the checked graph snapshot before body
-    // reflection and every downstream semantic consumer read it.
+    // reflection and every downstream semantic consumer read it. The graph is
+    // bundle-wide so a separate impl file contributes edges to the same
+    // struct-owned `Type.State` row.
+    let all_items: Vec<Item> = bundle
+        .modules
+        .iter()
+        .flat_map(|module| module.items.iter().cloned())
+        .collect();
+    let all_state_graphs = super::super::checked_state_graphs(&all_items);
     for (state, module) in states.iter_mut().zip(&bundle.modules) {
         state.items = module.items.clone();
-        state.state_graphs = super::super::checked_state_graphs(&module.items);
+        state.state_graphs = all_state_graphs.clone();
     }
 
     complete_bundle_check(

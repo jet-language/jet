@@ -9234,6 +9234,38 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 for a in args {
                     argv.push(self.eval_expr_child(&a.value, scope)?);
                 }
+                // D-TEXTHEAD-TYPE1=A: the generated `Type.from` facade is an
+                // AOT-only Rust method. The interpreter executes its ordinary
+                // CheckedText implementation directly, preserving the same
+                // Result carrier and the typed check failure.
+                if method.name == "from"
+                    && argv.len() == 1
+                    && matches!(
+                        &expr.ty,
+                        Type::Result { ok, .. }
+                            if matches!(ok.as_ref(), Type::Named(name) if self
+                                .distinct_bases
+                                .get(name)
+                                .is_some_and(|base| *base == Type::String))
+                    )
+                {
+                    let type_name = match owner {
+                        crate::Codegen::TIR::TStaticOwner::User(name) => name,
+                        _ => "",
+                    };
+                    let check_name = format!("{type_name}::check");
+                    if let Some(check) = self.funcs.get(&check_name).copied() {
+                        let text = argv.remove(0);
+                        return match self.run_func(check, vec![text.clone()], &mut HashMap::new())? {
+                            CtValue::Present(_) => Ok(CtValue::Present(Box::new(text))),
+                            CtValue::Failed(error) => Ok(CtValue::Failed(error)),
+                            other => Err(unsupported(
+                                &format!("CheckedText.check returned {:?}", other.jet_type()),
+                                self.span(),
+                            )),
+                        };
+                    }
+                }
                 match owner {
                     crate::Codegen::TIR::TStaticOwner::User(type_name) => {
                         if method.name == "diff" && argv.len() == 2 {

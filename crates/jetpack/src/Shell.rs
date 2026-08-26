@@ -249,7 +249,7 @@ fn nix_projection_command(
     if !env
         .cache_leases
         .iter()
-        .any(|lease| lease.projected_executable(program).is_some())
+        .any(|lease| lease.executable_for(program).is_some())
         && !Path::new(program).starts_with("/nix/store")
     {
         return Ok(None);
@@ -629,27 +629,46 @@ fn run_command_in_mode(
     let Some((program, rest)) = cmd_args.split_first() else {
         return 0;
     };
+    let stable_program = match env.cache_leases.iter().try_fold(
+        None,
+        |stable_program, lease| match lease.executable_for_command(program) {
+            Ok(Some(path)) => Ok(stable_program.or(Some(path))),
+            Ok(None) => Ok(stable_program),
+            Err(error) => Err(error),
+        },
+    ) {
+        Ok(path) => path,
+        Err(error) => {
+            Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto).error_coded(
+                "E1340",
+                &format!("could not run `{program}`"),
+                &error.to_string(),
+                "use a recorded executable member or a caller-approved system path",
+            );
+            return 126;
+        }
+    };
     let (mut cmd, _projection_keepers, _projection_scratch) =
-        match nix_projection_command(env, program, rest) {
-            Ok(Some(projection)) => (projection.command, projection.keepers, projection.scratch),
-            Ok(None) => {
-                let stable_program = env
-                    .cache_leases
-                    .iter()
-                    .find_map(|lease| lease.executable(program));
-                let mut command = stable_program
-                    .as_ref()
-                    .map_or_else(|| Command::new(program), Command::new);
-                command.args(rest);
-                (command, Vec::new(), Vec::new())
-            }
-            Err(error) => {
-                report_nix_projection_error(
-                    &Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto),
-                    program,
-                    &error,
-                );
-                return 126;
+        if let Some(stable_program) = stable_program {
+            let mut command = Command::new(stable_program);
+            command.args(rest);
+            (command, Vec::new(), Vec::new())
+        } else {
+            match nix_projection_command(env, program, rest) {
+                Ok(Some(projection)) => (projection.command, projection.keepers, projection.scratch),
+                Ok(None) => {
+                    let mut command = Command::new(program);
+                    command.args(rest);
+                    (command, Vec::new(), Vec::new())
+                }
+                Err(error) => {
+                    report_nix_projection_error(
+                        &Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto),
+                        program,
+                        &error,
+                    );
+                    return 126;
+                }
             }
         };
     if let Some(cwd) = cwd {

@@ -15,8 +15,9 @@ use super::Completion::compute_completions;
 use super::EnvironmentResources::{self, ReadError};
 use super::Features::{
     compute_definition, compute_discovery_hover, compute_generated_definition, compute_hover,
-    compute_refactor_actions, compute_references, compute_rename, encode_semantic_tokens,
-    encode_semantic_tokens_in_span, format_inlay_hints, RefactorAction,
+    compute_refactor_actions, compute_references, compute_rename,
+    encode_semantic_tokens_in_span_with_arithmetic, encode_semantic_tokens_with_arithmetic,
+    format_inlay_hints, RefactorAction,
 };
 use super::Position::{
     apply_lsp_edit, byte_offset_to_lsp, byte_span_to_range, full_document_range, lsp_pos_to_offset,
@@ -556,7 +557,7 @@ fn initialize_response(id: &JSONValue) -> String {
         ],
         "tokenModifiers": [
           "declaration","readonly","move","writeBorrow","copy",
-          "rule"
+          "rule","arithmeticChecked","arithmeticWrapping","arithmeticSaturating"
         ]
       },
       "full": { "delta": true },
@@ -2379,7 +2380,12 @@ fn semantic_tokens_response(
     let doc = server.docs.get(uri)?;
 
     let tokens = server.lex(doc);
-    let data = encode_semantic_tokens(&tokens, &doc.text);
+    let checked = server.check_with_bundle(doc);
+    let db = checked
+        .bundle
+        .map(|bundle| build_symbol_db(&bundle, &checked.facts))
+        .unwrap_or_else(SymbolDB::new);
+    let data = encode_semantic_tokens_with_arithmetic(&tokens, &doc.text, &db.arithmetic);
     Some(response(id, &semantic_tokens_json(&doc.text, &data)))
 }
 
@@ -2399,7 +2405,17 @@ fn semantic_tokens_range_response(
     let start = lsp_pos_to_offset(&doc.text, range.start);
     let end = lsp_pos_to_offset(&doc.text, range.end).max(start);
     let tokens = server.lex(doc);
-    let data = encode_semantic_tokens_in_span(&tokens, &doc.text, Span { start, end });
+    let checked = server.check_with_bundle(doc);
+    let db = checked
+        .bundle
+        .map(|bundle| build_symbol_db(&bundle, &checked.facts))
+        .unwrap_or_else(SymbolDB::new);
+    let data = encode_semantic_tokens_in_span_with_arithmetic(
+        &tokens,
+        &doc.text,
+        Span { start, end },
+        &db.arithmetic,
+    );
     Some(response(id, &semantic_tokens_json(&doc.text, &data)))
 }
 
@@ -2413,7 +2429,12 @@ fn semantic_tokens_delta_response(
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let tokens = server.lex(doc);
-    let data = encode_semantic_tokens(&tokens, &doc.text);
+    let checked = server.check_with_bundle(doc);
+    let db = checked
+        .bundle
+        .map(|bundle| build_symbol_db(&bundle, &checked.facts))
+        .unwrap_or_else(SymbolDB::new);
+    let data = encode_semantic_tokens_with_arithmetic(&tokens, &doc.text, &db.arithmetic);
     // LSP permits a delta request to return a full SemanticTokens result.
     Some(response(id, &semantic_tokens_json(&doc.text, &data)))
 }

@@ -544,9 +544,37 @@ fn run() {}
     fn semantic_tokens_non_empty() {
         let src = "fn run() { x: Int :: 1 }\n";
         let (toks, _) = crate::Lexer::lex(src);
-        let data = encode_semantic_tokens(&toks, src);
+        let data = encode_semantic_tokens_with_arithmetic(&toks, src, &[]);
         // Should emit at least one token (5 u32s per token)
         assert!(data.len() >= 5, "expected at least one semantic token");
+    }
+
+    #[test]
+    fn semantic_tokens_name_arithmetic_policy() {
+        let src = "fn run() { #Arithmetic(.Wrapping) { value :: U8{250} + U8{10} } }\n";
+        let (project, diagnostics, bundle, facts) = check_test_document(src);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "arithmetic semantic-token fixture should check: {diagnostics:#?}"
+        );
+        let db = build_symbol_db(&bundle.expect("checked bundle"), &facts);
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(src);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:#?}");
+        let data = encode_semantic_tokens_with_arithmetic(&tokens, src, &db.arithmetic);
+        const MOD_ARITHMETIC_WRAPPING: u32 = 1 << 7;
+        assert!(
+            data.chunks_exact(5)
+                .any(|token| token[4] & MOD_ARITHMETIC_WRAPPING != 0),
+            "wrapping arithmetic modifier missing: {data:?}"
+        );
+        assert!(
+            db.arithmetic
+                .iter()
+                .all(|fact| fact.module_path == project.entry()),
+            "arithmetic provenance used the wrong source module"
+        );
     }
 
     #[test]

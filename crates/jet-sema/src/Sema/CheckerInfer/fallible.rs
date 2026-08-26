@@ -46,10 +46,10 @@ impl<'a> Checker<'a> {
             "E0404",
             format!("`{}(...)` only fits where a fallible result is expected", Syntax::LIT_OK),
             format!(
-                "`{}` builds the success side of a `T E!` result",
+                "`{}` builds the success side of a `T !E` result",
                 Syntax::LIT_OK
             ),
-            "use it in a `T E!` return type, a `T E!` binding annotation, or a call that expects one"
+            "use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one"
                 .to_string(),
             Some(span),
         ));
@@ -121,10 +121,10 @@ impl<'a> Checker<'a> {
             "E0404",
             format!("`{}(...)` only fits where a fallible result is expected", Syntax::LIT_ERR),
             format!(
-                "`{}` builds the failure side of a `T E!` result",
+                "`{}` builds the failure side of a `T !E` result",
                 Syntax::LIT_ERR
             ),
-            "use it in a `T E!` return type, a `T E!` binding annotation, or a call that expects one"
+            "use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one"
                 .to_string(),
             Some(span),
         ));
@@ -162,6 +162,26 @@ impl<'a> Checker<'a> {
             Type::Result { ok, err } => {
                 let ret = self.resolve_type(self.ret.clone().unwrap_or(Type::Int));
                 match &ret {
+                    // D-FAILURE-FOUNDATION1: `!Never` is a proof that the
+                    // caller has no reachable failure route.  A reachable
+                    // fallible operand therefore cannot be propagated into
+                    // it, even when a conversion happens to be registered.
+                    Type::Result { err: ret_err, .. }
+                        if matches!(ret_err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
+                            && !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER) =>
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E2404",
+                            format!(
+                                "`?` can't propagate `{}` into a `!Never` contract",
+                                err.name()
+                            ),
+                            "`!Never` records that every reachable path is free of structured failure".to_string(),
+                            "remove the fallible path, handle it locally with `??`, or declare its error domain".to_string(),
+                            Some(span),
+                        ));
+                        None
+                    }
                     // E2-M7: error types match — propagate and unwrap the Ok value.
                     // The Ok types (`ret_ok` and `ok`) do NOT need to be equal: `?`
                     // only propagates the error; the unwrapped Ok value may have any
@@ -310,9 +330,9 @@ impl<'a> Checker<'a> {
                         Syntax::OP_TRY_SUFFIX,
                         other.show()
                     ),
-                    "postfix `?` unwraps success or returns early with the failure".to_string(),
+                    "`?` unwraps success or returns early with the failure".to_string(),
                     format!(
-                        "call something that returns `T E!` or an optional value, or remove `{}`",
+                        "call something that returns `T !E` or an optional value, or remove `{}`",
                         Syntax::OP_TRY_SUFFIX
                     ),
                     Some(span),

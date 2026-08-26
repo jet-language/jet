@@ -1608,6 +1608,9 @@ pub(crate) struct Checker<'a> {
     /// D-EFF1: completed `#FX(…)` regions in this body, rolled into the
     /// `EffectSummary` for the post-pass E0712 check.
     fx_regions: Vec<RegionSummary>,
+    /// D-AUTHORITY-RECEIPT1: source facts for Authority handles delegated to
+    /// approved Core boundary consumers.
+    fx_authority_delegations: Vec<Effects::AuthorityDelegation>,
     /// D-EFF2: callback-bound obligations recorded at higher-order call sites
     /// where the function-typed parameter carries a `#Pure`/`#(…)` bound. Rolled
     /// into the `EffectSummary` for the post-pass E0747 check.
@@ -2494,7 +2497,7 @@ pub use Bundle::{
     is_build_entry, specialize_function_types, strip_build_only_entries, IncrementalSemaCache,
     IncrementalSemaStats,
 };
-pub use Effects::{EffectSummary, SemIndexEffectFacts};
+pub use Effects::{AuthorityDelegation, EffectSummary, SemIndexEffectFacts};
 pub use MemoryFacts::{
     check_memory_facts, project_memory_fact, MemoryCall, MemoryEvent, MemoryEventKind, MemoryFact,
     MemoryFactDeclaration, MemoryPolicyRegion, MemoryProjection, MemorySummary, OpenMemoryDispatch,
@@ -2514,7 +2517,8 @@ pub(crate) use CheckerMarkers::{
 };
 pub(crate) use CheckerSchedule::{check_every_marker, check_job_collisions};
 pub use Effects::{
-    builtin_effect, core_effect, effect_covers, effect_root, effect_row_var, effect_set_has_root,
+    authority_delegations, builtin_effect, core_effect, effect_covers, effect_root, effect_row_var,
+    effect_set_has_root,
     memory_allocation_bound, parse_effect_name, reject_positive_deny_only_effect,
     resolve_effect_name, show_set, undeclared_effect, Effect, EffectSet,
 };

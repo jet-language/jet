@@ -7204,17 +7204,28 @@ add members through that body, and member collisions are errors under the normal
 declaration rules.
 
 **D-META-DSL1=A — libraries may declare checked text blocks** *(ratified
-2026-08-06, card #1542)*: A library can declare a checked text block. Jet owns the
-boundary and grammar contract; the library supplies the domain content. This
-amends D-DSLBLOCK1 and retires the marker-only `STDLIB_DSL_BLOCK_MARKERS`
-mechanism.
+2026-08-06, card #1542)*: A library can expose a checked text block through an
+ordinary nominal type and its trait implementation. Jet owns the boundary and
+grammar contract; the library supplies the domain content. This amends
+D-DSLBLOCK1 and retires the marker-only `STDLIB_DSL_BLOCK_MARKERS` mechanism.
 
-**D-BOUND-SINK1=A — libraries declare checked text heads** *(ratified
-2026-08-13, card #1816)*: a library may declare `marker Name on [.Text] {
-check …; hole … }`. The declaration names a checked text type: Jet runs `check`
-on the complete body at comptime and applies `hole` to each interpolation.
-Sinks accept the declared checked type; `.raw()` is the explicit audited
-escape. There is no sink registry or parallel sink mechanism.
+**D-TEXTHEAD-TYPE1=A — checked text is an ordinary type** *(ratified
+2026-08-25, card #2185)*: A checked text declaration is one nominal
+String-backed type plus one ordinary `CheckedText` implementation. The trait
+names one associated check error, one pure `check(String)` function for the
+complete text, and one pure generic `encode_hole(value)` function. Sema resolves
+the implementation through the ordinary trait registry. Known literals run the
+same checker at comptime; `Type.from(text)` runs it at runtime through the
+implicit `Error` route. `Type.raw(text)` is available only inside a reasoned
+`#Unsafe` region and records the escape. This supersedes the marker contract in
+D-BOUND-SINK1=A; `TextHeadContract`, compiler-owned head lists, special wrapper
+calls, and parallel checkers are retired.
+
+**D-BOUND-SINK1=A — retired marker contract** *(superseded by
+D-TEXTHEAD-TYPE1=A, 2026-08-25, card #2185)*: the former `marker Name on
+[.Text] { check …; hole … }` spelling is retained here as decision history
+only. New code uses the ordinary nominal type and `CheckedText` implementation
+defined by D-TEXTHEAD-TYPE1=A.
 
 **D-META-EFFECT1=A — one effect model at both stages** *(ratified 2026-08-06,
 card #1543)*: Compile-time and runtime use the same effect syntax and checker.
@@ -7781,7 +7792,7 @@ D-AUTHORITY-MANIFEST1's trust block, and TAINT1 names its off-switch spelling.
 - **D-BOUND-LAW1=A — one crossing law** *(implementation #1813, `c03jh01p`)*: nothing foreign becomes Jet silently. Every comptime, build, link, and run crossing names its schema and leaves its fact. The five-column grid — time, schema, checker, evolution, fact — is spec law. A new boundary feature names one cell or waits for an owner ruling; the ratified literal, manifest, dependency, link, wire, validation, migration, fact, and trust rules are recorded instances of that grid, not separate mechanisms.
 - **D-BOUND-HEAD1=A — checked URL, Path, and DateTime heads** *(implementation #1814, `c0igyd1l`)*: `URL.{"…"}`, `Path.{"…"}`, and `DateTime.{"…"}` are checked typed values, not fallible runtime constructors; an invalid head is E0155. A URL hole is percent-encoded, a Path hole is one encoded component, and a DateTime head takes no hole. Runtime strings keep their existing `parse`/`from` constructors. No amendment: the forms ride D-UNIFYLIT1, D-DOTCTOR3, and D-CORE-PATH1.
 - **D-BOUND-RAW1=A — typed head bodies own their escapes** *(implementation #1815, `c0wji8qh`)*: inside any `Type.{"…"}` body a backslash is literal text owned by that head's grammar, so a checked pattern reads as written. **Amendment**: this narrows D-UNIFYLIT1's head-body lexing, and backslash handling only — quote, brace, multiline-closing, and hole rules do not move, and D-REGEX-LIT1 stays untouched, so Regex still refuses interpolation. Plain strings keep the four-entry escape table.
-- **D-BOUND-SINK1=A — libraries declare their own checked text heads** *(implementation #1816, `c0am2fst`)*: `marker Name on [.Text] { check … hole … }` declares a checked text type on the ratified D-META-DSL1 marker rail; `check` runs at comptime over the complete body and `hole` encodes every interpolation. A function that takes the declared type is the sink, so the planned sink registry is deleted rather than built; a rejected body is E2712 and `.raw()` remains the audited escape. **Disclosure**: the 2026-07-28 type-unification audit's F9 note recorded types, not markers, for user heads. Both shapes were balloted; the marker rail won because D-META-DSL1 had since ratified it for the sibling job.
+- **D-BOUND-SINK1=A — retired marker contract** *(implementation #1816; superseded by D-TEXTHEAD-TYPE1=A, card #2185)*: the former `marker Name on [.Text] { check … hole … }` route is decision history only. The ordinary nominal type and `CheckedText` implementation now own the checked-text sink; the planned sink registry remains deleted.
 - **D-BOUND-TAINT1=A — origin facts clear on typed decode** *(implementation #1817, `c0oolhyo`)*: `net.*`, `fs.read*`, `env.*`, process output, and FFI marshalling seed a `$origin.*` fact in the one ratified flow store. The fact spreads with no ceremony and clears on a successful typed decode or typed construction, because a value that just proved a schema is not raw attacker text. `SQL.raw`, `HTML.raw`, and `Sh.raw` refuse origin-marked text with E0721; `#Scrub` stays the word for a hand-written sanitizer, and `jet inspect gates` lists every gate. The fact is sema-only and is erased before every execution tier. **Off-switch**: one typed settings row on the D-CONF rail refuses seeding project-wide; the proposed spelling is `settings: { origin_facts: off }`, the final key is the owner's, and the row stays unbuilt until that spelling is ratified (I7).
 - **D-BOUND-EVOLVE1=A — published schemas keep unknown wire fields** *(implementation #1818, `c02qrwab`)*: a `#PublishedSchema` codec keeps the fields it does not recognize and re-emits them in their original relative order, so an old binary cannot eat a new field during a rolling deploy. Plain `#Codable` keeps today's drop and `#DenyUnknownFields` keeps its refusal with E2412 — refuse, drop, preserve, one word each. This extends the D-MIGRATE1/D-MIGRATE4 bookkeeping and changes no known-field decoding, marker behaviour, or FieldError shape.
 - **D-BOUND-BIND1=A — the binder verb reads data schemas** *(implementation #1819, `c0gp49xp`)*: `jet inspect bind json|csv|sql|xml|proto <file>` writes visible ordinary Jet source under a provenance header that records the command, the input, its `sha256`, the format, and each inference rule applied. Regeneration is explicit and nothing imports the result for you, so D-NAME-FILES1=C holds; the same verb still binds language headers.
@@ -7789,18 +7800,17 @@ D-AUTHORITY-MANIFEST1's trust block, and TAINT1 names its off-switch spelling.
 - **D-BOUND-PROV1=A — dependency provenance has one read surface and a chosen posture** *(implementation #1821, `c090fxus`)*: `jet inspect provenance` prints one lock-backed record per dependency — locked hash, transparency entry, publisher identity, build attestation — each marked enforced, verified, or recorded, with the same record behind the human and JSON output. Integrity stays enforced by E1204. **Amendment**: the `require: none | logged | attested` row is new vocabulary inside D-AUTHORITY-MANIFEST1's ratified trust block; `none` is the default, so an unattested dependency still resolves until a project raises its floor.
 
 These nine cards share one I9 requirement: the Prelude owns the crossing
-behaviour — the typed-head interpolation kernel, the ordered wire merge, the
+behaviour — the checked-text interpolation kernel, the ordered wire merge, the
 taint erasure, the rollback hook, and the provenance record — and AOT emit, the
 Cranelift JIT hosts, and the interpreter ambient all call the same `jet_*`
 symbol instead of re-encoding the rule. A missing tier proof is an open
 criterion, never a `tests/jit_gaps.txt` entry.
 
 Syntax chores: the only user-typeable syntax in this slate is HEAD1's three
-heads, RAW1's head-body lexing, SINK1's `marker … on [.Text]` form, and UNDO1's
-`#Undo` marker row. Each owning card carries its own `Syntax.rs` row, grammar
-regeneration, formatter round-trip, and snapshot blessing — #1814 for the three
-heads, #1815 for head-body escapes, #1816 for declared text heads, #1820 for
-`#Undo`. This slate adds no spelling of its own.
+typed values, RAW1's body lexing, and UNDO1's `#Undo` marker row. SINK1's former
+marker form is retired by D-TEXTHEAD-TYPE1=A. Each owning card carries its own
+`Syntax.rs` row, grammar regeneration, formatter round-trip, and snapshot
+blessing. This slate adds no spelling of its own.
 
 **2026-08-14 — D-FMT-PRETTY1=A** *(card #1966; ratified 2026-08-14)*: `:Pretty`
 rides the existing interpolation selector rail beside `:Debug`, expands canonical

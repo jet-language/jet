@@ -1861,6 +1861,25 @@ fn lower_method_call_impl(
                 });
             }
         }
+        if let Some(type_name) = static_call_type_name_lower(receiver, env) {
+            if cx.is_checked_text_type_name(&type_name) {
+                return in_own_frame(|| TExpr {
+                    ty: resolved_ret
+                        .cloned()
+                        .unwrap_or_else(|| Type::Named(type_name.clone())),
+                    kind: TExprKind::StaticCall {
+                        owner: TStaticOwner::User(type_name.clone()),
+                        owner_type: Some(Type::Named(type_name)),
+                        method: TMethodRef::bare("raw"),
+                        type_args: Vec::new(),
+                        args: args
+                            .iter()
+                            .map(|argument| lower_one_call_arg(argument, None, env, cx))
+                            .collect(),
+                    },
+                });
+            }
+        }
     }
     // D-TYPEDTEXT1=D: `.template()`/`.params()` split a checked `SQL` value;
     // `.text()` reads the escaped `HTML` string.
@@ -5640,6 +5659,36 @@ fn lower_method_call_impl(
     // (Expression.rs ~L1644): `__jet_<Type>::__jet_<method>(args)`.
     if let Some(type_name) = static_call_type_name_lower(receiver, env) {
         return in_own_frame(|| {
+            // D-TEXTHEAD-TYPE1=A: the source-facing constructors are ordinary
+            // inherent facades over the ordinary CheckedText implementation.
+            // Their Rust names stay bare; only actual Jet methods use the
+            // `__jet_` mangle.
+            if cx.is_checked_text_type_name(&type_name)
+                && matches!(method, "from" | "encode_hole")
+            {
+                return TExpr {
+                    ty: resolved_ret.cloned().unwrap_or_else(|| {
+                        if method == "from" {
+                            Type::Result {
+                                ok: Box::new(Type::Named(type_name.clone())),
+                                err: Box::new(Type::String),
+                            }
+                        } else {
+                            Type::String
+                        }
+                    }),
+                    kind: TExprKind::StaticCall {
+                        owner: TStaticOwner::User(type_name.clone()),
+                        owner_type: Some(Type::Named(type_name)),
+                        method: TMethodRef::bare(method),
+                        type_args: type_args.to_vec(),
+                        args: args
+                            .iter()
+                            .map(|argument| lower_one_call_arg(argument, None, env, cx))
+                            .collect(),
+                    },
+                };
+            }
             // D-AUTHORITY-NAME1=A: keep construction as a Prelude static call
             // so every engine receives the same named rights carrier.
             if type_name == Syntax::TYPE_AUTHORITY && method == "workspace" && args.is_empty() {

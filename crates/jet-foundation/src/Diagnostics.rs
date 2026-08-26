@@ -1347,6 +1347,18 @@ mod renderer_tests {
             crate::Outcome::jet_sentence_case_line("`--offline` Forbids network access"),
             "`--offline` forbids network access"
         );
+        assert_eq!(
+            crate::Outcome::jet_sentence_case_line("Int cannot cross the C boundary"),
+            "Int cannot cross the C boundary"
+        );
+        assert_eq!(
+            crate::Outcome::jet_sentence_case_line("Syntax.rs owns user-typeable syntax"),
+            "Syntax.rs owns user-typeable syntax"
+        );
+        assert_eq!(
+            crate::Outcome::jet_sentence_case_line("pkg@source#version is a package ref"),
+            "pkg@source#version is a package ref"
+        );
         let diagnostic = Diagnostic::error(
             "E0001",
             "The dynamic what".into(),

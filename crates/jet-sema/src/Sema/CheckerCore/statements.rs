@@ -963,6 +963,12 @@ impl<'a> Checker<'a> {
                     self.expected_type = saved_expected;
                     return;
                 }
+                let origin_write_root = match &*target {
+                    LValue::Local { name, .. } => Some(name.clone()),
+                    LValue::Field { base, .. } | LValue::Index { base, .. } => {
+                        expr_root_ident(base).map(str::to_string)
+                    }
+                };
                 if let LValue::Local { name, .. } = &*target {
                     self.mark_local_write(name);
                 }
@@ -1123,10 +1129,6 @@ impl<'a> Checker<'a> {
                             self.diags.push(diagnostic);
                         }
                         self.clear_moved_binding(name);
-                        // D-TRACK-ORIGIN1=A: a mutable replacement ends the
-                        // old value's provenance. Do not let a later fact read
-                        // report metadata from the value that was replaced.
-                        self.clear_origin(name);
                         // D-CONC-FREEZE1=A: rebinding a local replaces its
                         // frozen proof only after the write check above.
                         // A rejected write through a frozen target keeps
@@ -1703,6 +1705,13 @@ impl<'a> Checker<'a> {
                             self.clear_moved_expr(&target);
                         }
                     }
+                }
+                // D-TRACK-ORIGIN1=A: any successful write into a tracked
+                // binding, including a field or index place, ends the old
+                // value's provenance. Reads on the RHS above still observe
+                // the pre-write fact.
+                if let Some(root) = origin_write_root.as_deref() {
+                    self.clear_origin(root);
                 }
             }
             Stmt::Expr(_) => {
@@ -2627,6 +2636,7 @@ impl<'a> Checker<'a> {
                 let fx_maximal_span = self.fx_maximal_span;
                 let region_stack = self.region_stack.clone();
                 let fx_regions = self.fx_regions.clone();
+                let fx_authority_delegations = self.fx_authority_delegations.clone();
                 let fx_callback_obligations = self.fx_callback_obligations.clone();
                 let fx_memory_events = self.fx_memory_events.clone();
                 let fx_memory_open = self.fx_memory_open.clone();
@@ -2651,6 +2661,7 @@ impl<'a> Checker<'a> {
                 self.fx_maximal_span = fx_maximal_span;
                 self.region_stack = region_stack;
                 self.fx_regions = fx_regions;
+                self.fx_authority_delegations = fx_authority_delegations;
                 self.fx_callback_obligations = fx_callback_obligations;
                 self.fx_memory_events = fx_memory_events;
                 self.fx_memory_open = fx_memory_open;
@@ -2705,6 +2716,7 @@ impl<'a> Checker<'a> {
                         mode,
                         scope_span: *span,
                         operation_span: *span,
+                        operation: None,
                     });
                 self.check_block(body, true);
                 self.arithmetic_policy_stack.pop();
@@ -2901,6 +2913,7 @@ impl<'a> Checker<'a> {
                 binding,
                 binding_span,
                 body,
+                span,
                 ..
             } => {
                 let mut cap_set = crate::Sema::EffectSet::new();
@@ -2970,6 +2983,15 @@ impl<'a> Checker<'a> {
                 self.check_block(body, true);
                 let acc = self.region_stack.pop().expect("pushed above");
                 if let Some(binding) = binding {
+                    for delegation in crate::Sema::authority_delegations(body, binding, *span) {
+                        if !self.fx_authority_delegations.iter().any(|existing| {
+                            existing.span == delegation.span
+                                && existing.resource == delegation.resource
+                                && existing.operation == delegation.operation
+                        }) {
+                            self.fx_authority_delegations.push(delegation);
+                        }
+                    }
                     if let Some(escape_span) = grant_handle_escape(body, binding) {
                         self.diags.push(crate::Sema::e0711(
                             binding,
