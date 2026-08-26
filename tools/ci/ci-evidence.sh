@@ -21,7 +21,6 @@ stderr_file="$report_dir/command.stderr"
 receipt="$report_dir/receipt.txt"
 toolchain="$report_dir/toolchain.txt"
 candidate_manifest="$report_dir/candidate.txt"
-: >"$stdout_file" || exit 1
 
 hash_file() {
   local path="$1"
@@ -45,25 +44,7 @@ fi
 
 runner_os="${RUNNER_OS:-${GITHUB_RUNNER_OS:-}}"
 runner_arch="${RUNNER_ARCH:-${GITHUB_RUNNER_ARCH:-}}"
-[ -n "$runner_os" ] || runner_os="$(uname -s 2>/dev/null || printf 'unknown')"
-[ -n "$runner_arch" ] || runner_arch="$(uname -m 2>/dev/null || printf 'unknown')"
 
-{
-  echo '=== rustc ==='
-  if command -v rustc >/dev/null 2>&1; then rustc -vV; else echo '(unavailable)'; fi
-  echo
-  echo '=== cargo ==='
-  if command -v cargo >/dev/null 2>&1; then cargo -vV; else echo '(unavailable)'; fi
-  echo
-  echo '=== nix ==='
-  if command -v nix >/dev/null 2>&1; then nix --version; else echo '(unavailable)'; fi
-} >"$toolchain"
-
-source_manifest="$ROOT/Cargo.lock"
-workflow="$ROOT/.github/workflows/ci.yml"
-source_hash="$(hash_file "$source_manifest")"
-workflow_hash="$(hash_file "$workflow")"
-toolchain_hash="$(hash_file "$toolchain")"
 artifact_name="${JET_CI_ARTIFACT_NAME:-not-published}"
 signature_candidate="${JET_CI_SIGNATURE_CANDIDATE:-$candidate}"
 release_candidate="${JET_CI_RELEASE_CANDIDATE:-$candidate}"
@@ -77,6 +58,58 @@ identity_failure=""
 fail_identity() {
   [ -n "$identity_failure" ] || identity_failure="$1"
 }
+
+# A reused report directory can otherwise leave a previous pass beside a new
+# failed command. Refuse stale or non-regular evidence paths before running the
+# gate; a failure receipt can still replace a stale regular file below.
+for evidence_path in "$stdout_file" "$stderr_file" "$receipt" "$toolchain" "$candidate_manifest"; do
+  if [ -L "$evidence_path" ] || { [ -e "$evidence_path" ] && [ ! -f "$evidence_path" ]; }; then
+    fail_identity "evidence path is not a regular file: $evidence_path"
+  elif [ -f "$evidence_path" ]; then
+    fail_identity "evidence report contains stale file: $evidence_path"
+  fi
+done
+
+case "${GITHUB_ACTIONS:-}" in
+  true|1)
+    [ -n "$runner_os" ] || fail_identity "GitHub runner OS identity is missing"
+    [ -n "$runner_arch" ] || fail_identity "GitHub runner architecture identity is missing"
+    ;;
+esac
+if [ -z "$runner_os" ]; then
+  case "${GITHUB_ACTIONS:-}" in
+    true|1) runner_os="unknown" ;;
+    *) runner_os="$(uname -s 2>/dev/null || printf 'unknown')" ;;
+  esac
+fi
+if [ -z "$runner_arch" ]; then
+  case "${GITHUB_ACTIONS:-}" in
+    true|1) runner_arch="unknown" ;;
+    *) runner_arch="$(uname -m 2>/dev/null || printf 'unknown')" ;;
+  esac
+fi
+
+: >"$stdout_file" || {
+  fail_identity "cannot initialize evidence stdout: $stdout_file"
+}
+
+source_manifest="$ROOT/Cargo.lock"
+workflow="$ROOT/.github/workflows/ci.yml"
+if ! {
+  echo '=== rustc ==='
+  if command -v rustc >/dev/null 2>&1; then rustc -vV; else echo '(unavailable)'; fi
+  echo
+  echo '=== cargo ==='
+  if command -v cargo >/dev/null 2>&1; then cargo -vV; else echo '(unavailable)'; fi
+  echo
+  echo '=== nix ==='
+  if command -v nix >/dev/null 2>&1; then nix --version; else echo '(unavailable)'; fi
+} >"$toolchain"; then
+  fail_identity "cannot write toolchain evidence: $toolchain"
+fi
+source_hash="$(hash_file "$source_manifest")"
+workflow_hash="$(hash_file "$workflow")"
+toolchain_hash="$(hash_file "$toolchain")"
 
 case "$candidate" in
   ''|*[!0-9a-fA-F]*) fail_identity "missing or invalid candidate commit identity" ;;
@@ -104,7 +137,7 @@ done
 
 write_candidate_manifest() {
   local tmp="$candidate_manifest.tmp.$$"
-  {
+  if ! {
     echo 'schema=jet.ci-candidate.v1'
     echo "candidate_commit=$candidate"
     echo "source_candidate_commit=$candidate"
@@ -124,14 +157,26 @@ write_candidate_manifest() {
     echo "support_matrix=${JET_CI_SUPPORT_MATRIX:-$runner_os/$runner_arch}"
     echo "provenance=github-actions:${GITHUB_RUN_ID:-local}/${GITHUB_RUN_ATTEMPT:-1}"
     echo "release_ref=${GITHUB_REF:-local}"
-  } >"$tmp" && mv -f -- "$tmp" "$candidate_manifest"
+  } >"$tmp"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  if [ -L "$candidate_manifest" ] || { [ -e "$candidate_manifest" ] && [ ! -f "$candidate_manifest" ]; }; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  if ! mv -f -- "$tmp" "$candidate_manifest"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  [ -f "$candidate_manifest" ] && [ ! -L "$candidate_manifest" ]
 }
 
 write_receipt() {
   local result="$1"
   local tmp="$receipt.tmp.$$"
   write_candidate_manifest || return 1
-  {
+  if ! {
     echo 'schema=jet.ci-evidence.v1'
     echo "status=$result"
     echo "candidate_commit=${candidate:-unknown}"
@@ -170,7 +215,29 @@ write_receipt() {
     echo "stderr=$stderr_file"
     echo "signature=not-required-for-ci-test-gate"
     echo "publication=github-actions-artifact"
-  } >"$tmp" && mv -f -- "$tmp" "$receipt"
+  } >"$tmp"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  if [ -L "$receipt" ] || { [ -e "$receipt" ] && [ ! -f "$receipt" ]; }; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  if ! mv -f -- "$tmp" "$receipt"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  [ -f "$receipt" ] && [ ! -L "$receipt" ]
+}
+
+report_complete() {
+  local evidence_path
+  for evidence_path in "$stdout_file" "$stderr_file" "$receipt" "$toolchain" "$candidate_manifest"; do
+    if [ ! -f "$evidence_path" ] || [ -L "$evidence_path" ]; then
+      echo "evidence report incomplete: missing regular file $evidence_path" >&2
+      return 1
+    fi
+  done
 }
 
 finish() {
@@ -178,7 +245,10 @@ finish() {
   if [ "$status" = "started" ]; then
     command_exit="$rc"
     status="fail"
-    write_receipt "$status" "${command_args[@]}"
+    if ! write_receipt "$status" "${command_args[@]}" || ! report_complete; then
+      echo "evidence finalization failed; refusing a green gate" >&2
+      rc=78
+    fi
   fi
   exit "$rc"
 }
@@ -192,7 +262,9 @@ if [ -n "$identity_failure" ]; then
   cat -- "$stderr_file" >&2
   command_exit=78
   status="fail"
-  write_receipt "$status" "${command_args[@]}"
+  if ! write_receipt "$status" "${command_args[@]}" || ! report_complete; then
+    echo "evidence finalization failed; refusing a green gate" >&2
+  fi
   trap - EXIT HUP INT TERM
   exit "$command_exit"
 fi
@@ -209,6 +281,10 @@ else
     command_exit=78
   fi
 fi
-write_receipt "$status" "${command_args[@]}"
+if ! write_receipt "$status" "${command_args[@]}" || ! report_complete; then
+  echo "evidence finalization failed; refusing a green gate" >&2
+  trap - EXIT HUP INT TERM
+  exit 78
+fi
 trap - EXIT HUP INT TERM
 exit "$command_exit"

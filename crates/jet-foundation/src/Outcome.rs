@@ -1466,7 +1466,8 @@ fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {
 }
 
 fn diagnostic_token_keeps_case(token: &str) -> bool {
-    if matches!(token.chars().next(), Some('-' | '#' | '@'))
+    if DIAGNOSTIC_TYPE_NAMES.contains(&token)
+        || matches!(token.chars().next(), Some('-' | '#' | '@'))
         || token == "C"
         || matches!(
             token,
@@ -1521,6 +1522,46 @@ fn diagnostic_token_keeps_case(token: &str) -> bool {
         && token.chars().skip(1).any(|ch| ch.is_ascii_uppercase());
     has_digit || has_structural_case || all_code || camel_case || token.starts_with("C-")
 }
+
+// Keep this list dependency-free: Outcome.rs is embedded into standalone AOT
+// and Web Preludes, where the host Syntax module does not exist.
+const DIAGNOSTIC_TYPE_NAMES: &[&str] = &[
+    "Bool",
+    "Char",
+    "Float",
+    "Int",
+    "String",
+    "Unit",
+    "Shared",
+    "SharedGuard",
+    "Shared.Weak",
+    "Condition",
+    "Task",
+    "Receiver",
+    "Sender",
+    "TaskFailure",
+    "HashMap",
+    "BTreeMap",
+    "Map",
+    "Queue",
+    "Set",
+    "Rank",
+    "PriorityQueue",
+    "Cache",
+    "Tally",
+    "Bits",
+    "Bytes",
+    "I8",
+    "I16",
+    "I32",
+    "I64",
+    "U8",
+    "U16",
+    "U32",
+    "U64",
+    "F32",
+    "F64",
+];
 
 /// Shared wording for a checked list position. Collection adapters marshal
 /// the length and index here; they do not own the user-facing text.

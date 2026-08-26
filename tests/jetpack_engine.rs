@@ -56,6 +56,20 @@ fn make_directories_writable(path: &Path) {
     }
 }
 
+fn write_native_lease_fixture(fixtures: &Path) {
+    fs::create_dir_all(fixtures).unwrap();
+    let artifact = fixtures.join("omp-1.0.0");
+    fs::write(&artifact, "#!/bin/sh\necho hello from jetpack\n").unwrap();
+    let digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
+    fs::write(
+        fixtures.join("jetpackage-omp.json"),
+        format!(
+            "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{digest}\",\"artifact\":\"omp-1.0.0\"}}"
+        ),
+    )
+    .unwrap();
+}
+
 mod common;
 
 #[path = "support/jetpack_fixtures.rs"]
@@ -3525,7 +3539,7 @@ fn run_dash_dash_propagates_failure_status() {
 }
 
 #[test]
-fn parent_env_unchanged_after_run() {
+fn parent_env_unchanged_after_use() {
     // The composed PATH only reaches the child. Ask the child to echo PATH and
     // confirm our bin dirs lead; the test process's own PATH is unaffected
     // because we never mutate it.
@@ -3538,16 +3552,20 @@ fn parent_env_unchanged_after_run() {
     // path exposed to the child.
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fx");
-    let out_dir = Scratch::new("out");
-    let leased_output = write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
+    write_native_lease_fixture(&fixtures.path);
     let before = std::env::var("PATH").unwrap_or_default();
 
     let output = jetpack()
         .args([
-            "run",
-            "greet@nixpkgs",
+            "use",
+            "omp@releases#1.0.0",
+            "-y",
             "--no-color",
             "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .args([
             "--",
             "sh",
             "-c",
@@ -3557,6 +3575,11 @@ fn parent_env_unchanged_after_run() {
         .env("JETPACK_FIXTURES", &fixtures.path)
         .output()
         .unwrap();
+    assert!(
+        output.status.success(),
+        "lease handoff command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let child_path = String::from_utf8_lossy(&output.stdout);
     let mut entries = child_path.split(':');
     let wrapper = entries.next().unwrap_or_default();
@@ -3571,13 +3594,23 @@ fn parent_env_unchanged_after_run() {
     );
     assert_eq!(std::env::var("PATH").unwrap_or_default(), before);
 
-    let explicit_raw_path = leased_output.join("bin/greet");
+    let entry = jetpack::Store::find_by_reference(
+        &jetpack::Store::Roots::at(root.path.clone()),
+        "omp@releases#1.0.0",
+    )
+    .unwrap();
+    let explicit_raw_path = Path::new(&entry.out).join("bin/omp");
     let output = jetpack()
         .args([
-            "run",
-            "greet@nixpkgs",
+            "use",
+            "omp@releases#1.0.0",
+            "-y",
             "--no-color",
             "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .args([
             "--",
             explicit_raw_path.to_str().unwrap(),
         ])
@@ -3596,27 +3629,150 @@ fn parent_env_unchanged_after_run() {
     );
 }
 
-#[cfg(unix)]
 #[test]
-fn run_keeps_lease_for_background_descendant_until_hangar_recovery() {
-    let root = Scratch::new("lease-process-tree-root");
-    let fixtures = Scratch::new("lease-process-tree-fixtures");
-    let out_dir = Scratch::new("lease-process-tree-output");
-    write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
+fn use_rejects_unrecorded_path_inside_lease() {
+    let root = Scratch::new("lease-caller-confinement-root");
+    let fixtures = Scratch::new("lease-caller-confinement-fixtures");
+    write_native_lease_fixture(&fixtures.path);
 
-    let run = jetpack()
+    let prime = jetpack()
         .args([
-            "run",
-            "greet@nixpkgs",
+            "use",
+            "omp@releases#1.0.0",
+            "-y",
             "--no-color",
             "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .args([
             "--",
-            "/bin/sh",
+            "sh",
             "-c",
-            "/bin/sleep 2 >/dev/null 2>&1 &",
+            "true",
         ])
         .env("JETPACK_ROOT", &root.path)
         .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert!(
+        prime.status.success(),
+        "lease setup failed: {}",
+        String::from_utf8_lossy(&prime.stderr)
+    );
+
+    let entry = jetpack::Store::find_by_reference(
+        &jetpack::Store::Roots::at(root.path.clone()),
+        "omp@releases#1.0.0",
+    )
+    .unwrap();
+    // Keep the path valid after OS normalization. A bypassed Store lease
+    // would execute the recorded `omp` member through this unrecorded form.
+    let unrecorded = Path::new(&entry.out).join("bin/../bin/omp");
+
+    let output = jetpack()
+        .args([
+            "use",
+            "omp@releases#1.0.0",
+            "-y",
+            "--no-color",
+            "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .args([
+            "--",
+            unrecorded.to_str().unwrap(),
+        ])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(126),
+        "unrecorded lease path must fail before child launch: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E1340]:"), "stderr: {stderr}");
+    assert!(stderr.contains("not a recorded member"), "stderr: {stderr}");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("hello from jetpack"));
+}
+
+#[test]
+fn use_fails_closed_when_executable_lease_service_key_is_invalid() {
+    let root = Scratch::new("invalid-executable-lease-key-root");
+    let fixtures = Scratch::new("invalid-executable-lease-key-fixtures");
+    write_native_lease_fixture(&fixtures.path);
+    let service = root.path.join("lease-service");
+    fs::create_dir_all(&service).unwrap();
+    fs::write(service.join("auth.key"), [0u8; 31]).unwrap();
+
+    let output = jetpack()
+        .args([
+            "use",
+            "omp@releases#1.0.0",
+            "-y",
+            "--no-color",
+            "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .args([
+            "--",
+            "omp",
+        ])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E1315]:"), "stderr: {stderr}");
+    assert!(stderr.contains("32-byte file"), "stderr: {stderr}");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("hello from jetpack"));
+    let diagnostic = stderr
+        .find("Error [E1315]:")
+        .map(|offset| &stderr[offset..])
+        .expect("lease failure diagnostic");
+    assert_jetos_stderr_snapshot_trimmed(
+        "executable_lease_service_key_invalid",
+        diagnostic,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn executable_lease_process_tree_recovery_uses_store_production_path() {
+    let root = Scratch::new("lease-process-tree-root");
+    let fixtures = Scratch::new("lease-process-tree-fixtures");
+    let out_dir = Scratch::new("lease-process-tree-output");
+    let ready = root.path.join("descendant-ready");
+    let release = root.path.join("descendant-release");
+    write_native_jetpack_fixture(&fixtures.path, &root.path, &out_dir.path);
+
+    let run = jetpack()
+        .args([
+            "use",
+            "omp@releases#1.0.0",
+            "-y",
+            "--no-color",
+            "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .args([
+            "--",
+            "/bin/sh",
+            "-c",
+            "printf ready > \"$LEASE_READY\"; while [ ! -f \"$LEASE_RELEASE\" ]; do /bin/sleep 0.01; done >/dev/null 2>&1 </dev/null &",
+        ])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .env("LEASE_READY", &ready)
+        .env("LEASE_RELEASE", &release)
         .output()
         .unwrap();
     assert!(
@@ -3624,6 +3780,7 @@ fn run_keeps_lease_for_background_descendant_until_hangar_recovery() {
         "stderr: {}",
         String::from_utf8_lossy(&run.stderr)
     );
+    assert!(ready.exists(), "descendant did not start before parent exit");
 
     let leases = root.path.join("leases");
     let lease = fs::read_dir(&leases)
@@ -3644,18 +3801,25 @@ fn run_keeps_lease_for_background_descendant_until_hangar_recovery() {
     );
     assert!(lease.exists(), "live descendant lease was reclaimed early");
 
-    std::thread::sleep(Duration::from_secs(2));
-    let recover_after_child_exit = jetpack()
-        .args(["hangar", "recover", "--no-color"])
-        .env("JETPACK_ROOT", &root.path)
-        .output()
-        .unwrap();
-    assert!(
-        recover_after_child_exit.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&recover_after_child_exit.stderr)
-    );
-    assert!(!lease.exists(), "idle descendant lease was not reclaimed");
+    fs::write(&release, "release").unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while lease.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "idle descendant lease was not reclaimed"
+        );
+        let recover_after_child_exit = jetpack()
+            .args(["hangar", "recover", "--no-color"])
+            .env("JETPACK_ROOT", &root.path)
+            .output()
+            .unwrap();
+        assert!(
+            recover_after_child_exit.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&recover_after_child_exit.stderr)
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]

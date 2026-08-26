@@ -319,7 +319,8 @@ pub fn write_runnable_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) 
         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
         out_dir.to_string_lossy()
     );
-    fs::write(fixtures.join("nixpkgs-greet.json"), json).unwrap();
+    fs::write(fixtures.join("nixpkgs-greet.json"), &json).unwrap();
+    fs::write(fixtures.join("jetpack-greet.json"), &json).unwrap();
     out_dir
 }
 
@@ -339,6 +340,9 @@ pub fn write_native_jetpack_fixture(fixtures: &Path, root: &Path, staging_dir: &
     fs::write(
         &source,
         r#"fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--hold") {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
     if std::env::args().nth(1).as_deref() == Some("--help") {
         println!("jetpack platform fixture");
     }
@@ -359,12 +363,23 @@ pub fn write_native_jetpack_fixture(fixtures: &Path, root: &Path, staging_dir: &
         "native platform fixture compilation failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let artifact_name = format!("omp-native-jetpack-fixture{}", std::env::consts::EXE_SUFFIX);
+    let artifact = fixtures.join(&artifact_name);
+    fs::copy(&executable, &artifact).unwrap();
+    let artifact_digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
     let out_dir = seed_hangar_object(root, staging_dir);
     let json = format!(
         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
         out_dir.to_string_lossy()
     );
-    fs::write(fixtures.join("nixpkgs-native-jetpack.json"), json).unwrap();
+    fs::write(fixtures.join("nixpkgs-native-jetpack.json"), &json).unwrap();
+    fs::write(
+        fixtures.join("jetpackage-omp.json"),
+        format!(
+            "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":{artifact_name:?}}}"
+        ),
+    )
+    .unwrap();
     out_dir
 }
 

@@ -333,6 +333,38 @@ retrying. Jetpack rejects a Hangar destination that is a symlink or
 non-directory, so migration cannot redirect writes outside the resolved user
 path.
 
+## Executable lease lifetime and recovery
+
+Every executable consumed from a realized package is handed off through one
+authenticated executable lease container. The container owns the private
+snapshot and its complete generations. It also owns an authenticated service
+owner lock and an inheritable `live.lock`. The child and every descendant keep
+the live lock, so process-tree lifetime does not depend on a PID, timestamp, or
+an untrusted marker file.
+
+The same lease protocol covers initial publication, replacement, restart,
+cleanup, and rollback. It writes the authenticated receipt only after a
+complete generation is ready. A replacement or rollback adds a complete
+generation and retains the previous complete generation; an interrupted setup
+or failed replacement cannot publish a partial executable or remove the last
+good one.
+
+`jetpack hangar recover` is the recovery boundary. It reclaims an executable
+lease only when both its owner lock and its container lifetime lock are idle.
+It removes abandoned partial generations and stale unreferenced snapshots,
+while preserving a snapshot protected by a running descendant. Kernel lock
+release after a process exit or reboot makes the next recovery safe to run;
+stale PIDs and PID reuse are not liveness evidence. A symlinked or non-real
+lease root stops recovery with the live path untouched.
+
+`jetpack audit` and `jetpack doctor` inspect this same ownership state without
+publishing or deleting anything. A stale audit reports the recovery command:
+
+```text
+           ▸   Leases:      0 active, 1 stale
+           ▸   Lease Note:  stale executable leases await `jetpack hangar recover`
+```
+
 ## Hangar capacity and eviction
 
 Every Hangar admission is bounded by a 128 GiB logical-byte ceiling by

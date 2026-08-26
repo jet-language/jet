@@ -1149,7 +1149,7 @@ mod tests {
             version: "1".into(),
             reference: "projection@nixpkgs".into(),
             out: snapshot.to_string_lossy().into_owned(),
-            bin: Path::new(&dev_object)
+            bin: snapshot
                 .join("bin")
                 .to_string_lossy()
                 .into_owned(),
@@ -1176,7 +1176,7 @@ mod tests {
         assert_eq!(projection.get("/nix/store/projection-out"), Some(&snapshot));
         assert_eq!(
             projection.get("/nix/store/projection-dev"),
-            Some(&PathBuf::from(dev_object))
+            Some(&PathBuf::from(&dev_object))
         );
         assert!(
             projection
@@ -1193,9 +1193,16 @@ mod tests {
                     .unwrap()
             )
             .unwrap(),
-            "dev"
+            "out"
         );
         assert!(lease.projected_executable("tool").is_some());
+        assert!(lease
+            .executable_for_command(
+                &Path::new(&dev_object)
+                    .join("unrecorded")
+                    .to_string_lossy()
+            )
+            .is_err());
         lease.validate().unwrap();
 
         #[cfg(target_os = "linux")]
@@ -1494,6 +1501,7 @@ mod tests {
         let hit = find_verified_by_reference(&roots, "leased@mine", &test_expectation(&out))
             .unwrap()
             .unwrap();
+        let lease_root = hit.lease.snapshot_root.parent().unwrap().to_path_buf();
         fs::write(out.join("payload"), "mutated outside cooperative lock").unwrap();
         hit.lease.validate().unwrap();
         let stable = hit
@@ -1501,6 +1509,8 @@ mod tests {
             .stable_path(&out.join("payload").to_string_lossy())
             .unwrap();
         assert_eq!(fs::read_to_string(stable).unwrap(), "trusted");
+        drop(hit);
+        assert!(!lease_root.exists(), "idle lease was not reclaimed on drop");
     }
 
     #[cfg(unix)]

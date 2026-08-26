@@ -8,6 +8,10 @@ each example's golden output. Run any example directly:
 jet run examples/features/basics/hello.jet
 ```
 
+The [executable lease recovery example](jetpack/executable-lease-recovery.md)
+shows the read-only audit and explicit Hangar recovery boundary for a stale
+process-tree lease.
+
 For a new project, the default is shorter: `jet new hello && cd hello && jet
 run`. That command selects the generated `run.jet`; the explicit path above
 is the standalone-example form.

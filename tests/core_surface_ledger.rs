@@ -117,6 +117,26 @@ fn core_surface_ledger_matches_its_sources() {
         stdout.contains("11 recorded competitor surfaces"),
         "the ledger must compare against all eleven languages the owner named:\n{stdout}"
     );
+    assert!(
+        stdout.contains("accepted-jet-wins=9389"),
+        "every Core workflow must carry an accepted machine Jet win:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "core API fixture execution: deterministic; pinned-tools; cold-warm; exact-stdout; input-unchanged; scratch-closed"
+        ),
+        "Core API fixtures must report deterministic pinned execution:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("core API fixtures: independent acceptance verified tasks=29"),
+        "every frozen Core API fixture must have an accepted independent review:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "core API fresh review: fresh-context-release-check; checks=workflow-closure,construct-classifications,reasoning-evidence,syntax-coverage,fixture-selection"
+        ),
+        "Core API release check must name every fresh-review check:\n{stdout}"
+    );
     assert_layering_contract_is_taught();
 }
 
@@ -136,6 +156,12 @@ fn core_surface_ledger_checker_rejects_hostile_fixtures() {
         "a language is dropped from the comparison",
         "stale owner: cluster claims a closed card",
         "unratified scope exclusion",
+        "Core API workflow omits its Jet win",
+        "Core API fixture review is not accepted",
+        "Core API fixture execution contract drifted",
+        "Core API fixture receipt projection drifted",
+        "Core API fixture selection contract drifted",
+        "Core API gate is missing its fresh-review contract",
         "hidden uncompared Core domain",
         "source-surface drift",
         "a competitor member is dropped from the ledger",

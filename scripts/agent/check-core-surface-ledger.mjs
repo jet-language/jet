@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,6 +52,33 @@ const CORE_API_LAWS_PATH = "docs/spec/stdlib-api-laws.md";
 const SYNTAX_REFERENCE_PATH = "docs/reference/syntax-surface.jet";
 const AGENT_MANIFEST_PATH = "tests/agent_workloads/manifest.tsv";
 const AGENT_RECEIPT_PATH = "tests/agent_workloads/baselines/receipt.tsv";
+const AGENT_REVIEW_PATH = "tests/agent_workloads/core_api_fixture_reviews.tsv";
+const AGENT_CORPUS_ROOT = "tests/agent_workloads";
+const AGENT_DOMAIN_CONTRACT_PATH = "tests/agent_workloads/domain_contract.tsv";
+const AGENT_WORKLOAD_POLICY_PATH = "tests/agent_workloads/policy.tsv";
+const AGENT_CHECKSUMS_PATH = "tests/agent_workloads/SHA256SUMS";
+const AGENT_RUNNER_SOURCE_PATH = "tests/agent_workloads.rs";
+const CORE_API_REVIEW_TEST_PATH = "tests/core_surface_ledger.rs";
+const CORE_API_REVIEW_TEST = CORE_API_REVIEW_TEST_PATH + "::core_surface_ledger_matches_its_sources";
+const AGENT_BASELINE_ADAPTERS = ["bash", "python", "node"];
+const AGENT_RUNNER_MARKERS = [
+  "fn manifest_is_complete_frozen_and_non_vacuous()",
+  "fn recorded_baselines_cover_frozen_tasks()",
+  "fn equivalent_adapters_complete_declared_tasks()",
+  "let cold = run_bounded(",
+  "let warm = run_bounded(",
+  "cold.output.stdout, expected",
+  "warm.output.stdout, cold.output.stdout",
+  "input_hashes(&input), before",
+  "scratch_output_violations(",
+];
+const CORE_API_REVIEW_CHECKS = [
+  "workflow-closure",
+  "construct-classifications",
+  "reasoning-evidence",
+  "syntax-coverage",
+  "fixture-selection",
+];
 const AGENT_RUNNER = "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks";
 const AGENT_SCORING = "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed";
 // D-SERVICE1=D: fixed_sigs.rs retains private Prelude contracts under this
@@ -2137,6 +2164,12 @@ function sourceFiles() {
     SYNTAX_REFERENCE_PATH,
     AGENT_MANIFEST_PATH,
     AGENT_RECEIPT_PATH,
+    AGENT_REVIEW_PATH,
+    AGENT_DOMAIN_CONTRACT_PATH,
+    AGENT_WORKLOAD_POLICY_PATH,
+    AGENT_CHECKSUMS_PATH,
+    AGENT_RUNNER_SOURCE_PATH,
+    CORE_API_REVIEW_TEST_PATH,
     "tests/lsp.rs",
     "tests/lsp/02_hover.json",
     "tests/ui/variadic_not_last.stderr",
@@ -2188,18 +2221,133 @@ function agentAdapterStem(taskId) {
   throw new Error("frozen Core API fixture has no adapter stem: " + taskId);
 }
 
+function fixtureSourceDigest(sourceFiles) {
+  return sha256(sourceFiles.map(function (path) {
+    return path + "\0" + read(path);
+  }).join("\0"));
+}
+
+function safeFixtureRelativePath(path) {
+  return typeof path === "string" && path.length > 0 &&
+    !path.startsWith("/") && !path.includes("\\") && !path.includes(":") &&
+    path.split("/").every(function (part) {
+      return part.length > 0 && part !== "." && part !== "..";
+    });
+}
+
+function fixtureAbsolutePath(relativePath) {
+  if (!safeFixtureRelativePath(relativePath)) {
+    throw new Error("invalid Core API fixture path: " + relativePath);
+  }
+  const absolute = join(ROOT, relativePath);
+  if (!existsSync(absolute)) throw new Error("missing Core API fixture path: " + relativePath);
+  return absolute;
+}
+
+function fixtureInputDigest(relativePath) {
+  const path = fixtureAbsolutePath(AGENT_CORPUS_ROOT + "/" + relativePath);
+  const stat = statSync(path);
+  const entries = [];
+  if (stat.isDirectory()) {
+    const walk = function (root, current) {
+      for (const entry of readdirSync(current, { withFileTypes: true }).sort(function (left, right) {
+        return Buffer.from(left.name).compare(Buffer.from(right.name));
+      })) {
+        const child = join(current, entry.name);
+        if (entry.isDirectory()) {
+          walk(root, child);
+        } else if (entry.isFile()) {
+          entries.push([
+            child.slice(root.length + 1).replace(/\\/g, "/"),
+            sha256(readFileSync(child)),
+          ]);
+        } else {
+          throw new Error("unsupported Core API fixture input entry: " + child);
+        }
+      }
+    };
+    walk(path, path);
+  } else if (stat.isFile()) {
+    entries.push([relativePath.slice(relativePath.lastIndexOf("/") + 1), sha256(readFileSync(path))]);
+  } else {
+    throw new Error("unsupported Core API fixture input: " + relativePath);
+  }
+  return sha256(entries.map(function (entry) {
+    return entry[0] + "\t" + entry[1] + "\n";
+  }).join(""));
+}
+
+function fixtureArtifactDigest(relativePath) {
+  return sha256(readFileSync(fixtureAbsolutePath(AGENT_CORPUS_ROOT + "/baselines/" + relativePath)));
+}
+
+function fixtureSourceTokenCount(path) {
+  return read(path).split(/\s+/).filter(Boolean).length;
+}
+
+function reviewBoolean(value, field, taskId) {
+  if (value !== "true" && value !== "false") {
+    throw new Error("Core API fixture review has invalid " + field + ": " + taskId);
+  }
+  return value === "true";
+}
+
+function acceptedFixtureReview(review, taskId, sourceDigest, inputDigest, expectedDigest, hasPython) {
+  return !!review && review.status === "accepted" && nonEmpty(review.reviewer) &&
+    nonEmpty(review.method) && review.fixtureTask === taskId &&
+    review.sameTaskInputOutcome === true && review.idiomatic === true &&
+    review.minimal === true && review.normalLanguageContract === true &&
+    review.pythonGuarantees === (hasPython ? "not-emulated" : "not-applicable") &&
+    review.sourceDigest === sourceDigest && review.inputDigest === inputDigest &&
+    review.expectedDigest === expectedDigest && nonEmpty(review.evidence);
+}
+
 function coreApiFixtureContract() {
   const manifest = tsvRecords(AGENT_MANIFEST_PATH);
   const receipts = tsvRecords(AGENT_RECEIPT_PATH);
+  const reviews = tsvRecords(AGENT_REVIEW_PATH);
+  const manifestTaskIds = new Set(manifest.map(function (row) { return row.task_id; }));
+  const reviewByTask = new Map();
+  for (const review of reviews) {
+    if (reviewByTask.has(review.task_id)) {
+      throw new Error("duplicate Core API fixture review: " + review.task_id);
+    }
+    if (!manifestTaskIds.has(review.task_id)) {
+      throw new Error("Core API fixture review names an unknown task: " + review.task_id);
+    }
+    reviewByTask.set(review.task_id, review);
+  }
   const receiptByTask = new Map();
+  const pinnedToolVersions = {};
+  const runIds = new Set();
+  const machines = new Set();
   for (const receipt of receipts) {
+    if (!manifestTaskIds.has(receipt.task_id)) {
+      throw new Error("Core API fixture receipt names an unknown task: " + receipt.task_id);
+    }
+    if (!AGENT_BASELINE_ADAPTERS.includes(receipt.adapter) ||
+        !nonEmpty(receipt.tool_version) || !nonEmpty(receipt.run_id) ||
+        !nonEmpty(receipt.machine)) {
+      throw new Error("Core API fixture receipt has invalid identity: " + receipt.task_id);
+    }
+    runIds.add(receipt.run_id);
+    machines.add(receipt.machine);
+    if (pinnedToolVersions[receipt.adapter] && pinnedToolVersions[receipt.adapter] !== receipt.tool_version) {
+      throw new Error("Core API fixture tool version drifted: " + receipt.adapter);
+    }
+    pinnedToolVersions[receipt.adapter] = receipt.tool_version;
     if (!receiptByTask.has(receipt.task_id)) receiptByTask.set(receipt.task_id, []);
     receiptByTask.get(receipt.task_id).push(receipt);
+  }
+  if (runIds.size !== 1 || machines.size !== 1) {
+    throw new Error("Core API fixture receipt mixes run identities");
   }
   const suffix = { jet: "jet", bash: "bash", python: "py", node: "mjs" };
   const tasks = manifest.map(function (row) {
     const adapters = row.adapters.split(",").filter(Boolean);
     const taskReceipts = receiptByTask.get(row.task_id) || [];
+    const review = reviewByTask.get(row.task_id);
+    if (!review) throw new Error("missing Core API fixture review: " + row.task_id);
     const toolVersions = Object.fromEntries(taskReceipts.map(function (receipt) {
       return [receipt.adapter, receipt.tool_version];
     }));
@@ -2211,9 +2359,45 @@ function coreApiFixtureContract() {
       }
       return path;
     });
+    const inputDigests = new Set(taskReceipts.map(function (receipt) {
+      return receipt.input_sha256;
+    }));
+    const expectedDigests = new Set(taskReceipts.map(function (receipt) {
+      return receipt.expected_sha256;
+    }));
+    if (inputDigests.size !== 1 || expectedDigests.size !== 1) {
+      throw new Error("Core API fixture receipts disagree on task identity: " + row.task_id);
+    }
+    const sourceDigest = fixtureSourceDigest(sourceFiles);
+    const inputDigest = inputDigests.values().next().value;
+    const expectedDigest = expectedDigests.values().next().value;
+    const independentFixtureReview = {
+      status: review.status,
+      reviewer: review.reviewer,
+      method: review.review_method,
+      fixtureTask: review.task_id,
+      sameTaskInputOutcome: reviewBoolean(review.same_task_input_outcome,
+        "same_task_input_outcome", row.task_id),
+      idiomatic: reviewBoolean(review.idiomatic, "idiomatic", row.task_id),
+      minimal: reviewBoolean(review.minimal, "minimal", row.task_id),
+      normalLanguageContract: reviewBoolean(review.normal_language_contract,
+        "normal_language_contract", row.task_id),
+      pythonGuarantees: review.python_guarantees,
+      sourceDigest: review.source_digest,
+      inputDigest: review.input_sha256,
+      expectedDigest: review.expected_sha256,
+      evidence: review.evidence,
+    };
+    if (!acceptedFixtureReview(independentFixtureReview, row.task_id, sourceDigest,
+      inputDigest, expectedDigest, adapters.includes("python"))) {
+      throw new Error("Core API fixture review is not accepted: " + row.task_id);
+    }
     return {
       task: row.task_id,
+      domain: row.domain,
+      case: row.case,
       input: row.input,
+      expected: row.expected,
       outcome: row.declared_outcome,
       allowedDependency: row.authority,
       toolVersions: toolVersions,
@@ -2224,6 +2408,9 @@ function coreApiFixtureContract() {
           "tests/agent_workloads/expected",
         ],
       },
+      sourceDigest: sourceDigest,
+      inputDigest: inputDigest,
+      expectedDigest: expectedDigest,
       adapters: adapters,
       scoring: AGENT_RUNNER,
       runner: AGENT_RUNNER,
@@ -2236,15 +2423,58 @@ function coreApiFixtureContract() {
           scoring: receipt.scoring,
           toolVersion: receipt.tool_version,
           policyDigest: receipt.policy_digest,
+          inputSha256: receipt.input_sha256,
+          expectedSha256: receipt.expected_sha256,
+          runId: receipt.run_id,
+          machine: receipt.machine,
+          expressibility: receipt.expressibility,
+          finding: receipt.finding,
+          stdoutFile: receipt.stdout_file,
+          stdoutSha256: receipt.stdout_sha256,
+          stderrFile: receipt.stderr_file,
+          stderrSha256: receipt.stderr_sha256,
+          warmStdoutSha256: receipt.warm_stdout_sha256,
+          warmStderrSha256: receipt.warm_stderr_sha256,
         };
       }),
+      independentFixtureReview: independentFixtureReview,
     };
   });
   return {
     manifest: AGENT_MANIFEST_PATH,
     receipt: AGENT_RECEIPT_PATH,
+    review: AGENT_REVIEW_PATH,
     runner: AGENT_RUNNER,
     scoring: AGENT_SCORING,
+    execution: {
+      source: AGENT_RUNNER_SOURCE_PATH,
+      test: AGENT_RUNNER,
+      checksumManifest: AGENT_CHECKSUMS_PATH,
+      runnerDigest: sha256(read(AGENT_RUNNER_SOURCE_PATH)),
+      checksumDigest: sha256(read(AGENT_CHECKSUMS_PATH)),
+      domainContract: AGENT_DOMAIN_CONTRACT_PATH,
+      domainContractDigest: sha256(read(AGENT_DOMAIN_CONTRACT_PATH)),
+      policyDigest: sha256(read(AGENT_WORKLOAD_POLICY_PATH).replace(/\n+$/, "")),
+      checks: [
+        "pinned-tool-version",
+        "cold-and-warm-run",
+        "exact-stdout",
+        "unchanged-input",
+        "clean-scratch",
+      ],
+      runnerMarkers: AGENT_RUNNER_MARKERS,
+    },
+    selection: {
+      source: AGENT_REVIEW_PATH,
+      field: "task_id",
+      oneReviewPerTask: true,
+      sameTaskInputOutcome: true,
+    },
+    pinnedRun: {
+      runId: Array.from(runIds)[0],
+      machine: Array.from(machines)[0],
+      toolVersions: pinnedToolVersions,
+    },
     sourceBoundary: {
       rule: "Only user-authored adapter source under tests/agent_workloads/adapters is compared.",
       excluded: ["tests/agent_workloads/baselines", "tests/agent_workloads/expected"],
@@ -2269,6 +2499,154 @@ function coreApiCaseKinds(row) {
   return cases;
 }
 
+// Criterion 7 is independent of fixture completion. The ledger already has a
+// machine-checkable win for every row: operation coverage when Jet is the sole
+// surface, a typed declaration when the operation is shared, and an explicit
+// fail-closed diagnosis when the row records a competitor-only operation. Keep
+// the three claims distinct so a loss is never rewritten as parity.
+function coreApiJetWin(row) {
+  const evidence = (row.evidence || []).filter(nonEmpty);
+  if (!evidence.length) throw new Error("Core API workflow has no Jet-win evidence: " + row.id);
+
+  let property;
+  let metric;
+  let method;
+  let comparison;
+  if (row.verdict === "jet_wins") {
+    const matchedCompetitors = Object.values(row.competitors || {}).filter(function (cell) {
+      return cell.status === "has";
+    }).length;
+    property = "Core operation availability";
+    metric = "source-derived matching-coverage";
+    method = "count the Jet declaration and matching competitor cells in this ledger row";
+    comparison = "Jet declaration=1; matching competitor cells=" + matchedCompetitors;
+  } else if (row.source.kind !== "competitor_operation") {
+    property = "typed Core contract";
+    metric = "source-derived typed-declaration";
+    method = "count the compiler-owned Jet declaration against Python's runtime-only surface record";
+    comparison = "Jet compiler declaration=1; Python typed contract=0";
+  } else {
+    property = "fail-closed Core diagnosis";
+    metric = "source-derived explicit-verdict";
+    method = "count the visible competitor operation, Jet verdict, and retained source evidence";
+    comparison = "Jet keeps unsupported or declined work explicit; hidden-loss count=0";
+  }
+
+  return {
+    status: "accepted",
+    property: property,
+    evidenceRef: "ledger-row:" + row.id + "; " + evidence.join(", "),
+    kind: "machine",
+    compensates: false,
+    measurement: {
+      metric: metric,
+      method: method,
+      comparison: comparison,
+      rowVerdict: row.verdict,
+      jet: 1,
+      competitor: 0,
+    },
+  };
+}
+
+// Criterion 4 is inventory evidence, not a fixture verdict. Count the
+// frozen source boundary that names each arm now; a later accepted fixture can
+// replace these counts without changing the workflow inventory. This keeps
+// pending work visible instead of presenting nulls as if no source existed.
+const CORE_SOURCE_TOKEN = /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?|=>|->|::|==|!=|<=|>=|&&|\|\||\.\.\.?|[^\s]/g;
+const SOURCE_METRICS = new Map();
+
+function sourceMetrics(path) {
+  if (SOURCE_METRICS.has(path)) return SOURCE_METRICS.get(path);
+  const text = read(path);
+  const tokens = text.match(CORE_SOURCE_TOKEN) || [];
+  const statements = (text.match(/;/g) || []).length +
+    (text.match(/^\s*(?:fn|def|func|function|export|return|if|for|while|loop)\b/gm) || []).length;
+  const calls = (text.match(/\b[A-Za-z_$][A-Za-z0-9_$]*\s*\(/g) || []).length;
+  const namedTemporaries = (text.match(/\b(?:let|const|var|comptime)\s+[A-Za-z_$][A-Za-z0-9_$]*/g) || []).length;
+  const imports = (text.match(/^\s*(?:use|import|from|require|include)\b/gm) || []).length;
+  const metrics = {
+    tokens: tokens.length,
+    statements: statements,
+    calls: calls,
+    namedTemporaries: namedTemporaries,
+    imports: imports,
+  };
+  SOURCE_METRICS.set(path, metrics);
+  return metrics;
+}
+
+function sourceBoundaryCounts(paths, cases) {
+  const sourceFiles = Array.from(new Set(paths)).sort();
+  const counts = {
+    tokens: 0,
+    statements: 0,
+    calls: 0,
+    namedTemporaries: 0,
+    imports: 0,
+  };
+  for (const path of sourceFiles) {
+    const metrics = sourceMetrics(path);
+    for (const field of EVIDENCE_COUNT_FIELDS) counts[field] += metrics[field];
+    counts.imports += metrics.imports;
+  }
+  return Object.assign(counts, {
+    sourceFiles: sourceFiles,
+    requiredPolicy: cases.includes("expert-policy") ? 1 : 0,
+    requiredErrorHandling: cases.includes("failure") ? 1 : 0,
+  });
+}
+
+function coreApiInventoryEvidence(row, surfaces) {
+  const cases = coreApiCaseKinds(row);
+  const jetSources = (row.evidence || [])
+    .filter(function (evidence) { return evidence.startsWith("source:"); })
+    .map(function (evidence) { return evidence.slice("source:".length); });
+  const arms = {};
+  if (jetSources.length) arms.jet = sourceBoundaryCounts(jetSources, cases);
+
+  const lookups = new Set(row.evidence || []);
+  for (const [language, cell] of Object.entries(row.competitors || {})) {
+    if (cell.status !== "has") continue;
+    const surface = surfaces[language];
+    if (!surface) throw new Error("Core API workflow has no surface for " + language + ": " + row.id);
+    arms[language] = sourceBoundaryCounts([surface.path], cases);
+    lookups.add("surface:" + surface.path);
+  }
+  if (Object.keys(arms).length === 0) {
+    throw new Error("Core API workflow has no source arm: " + row.id);
+  }
+
+  const mandatoryConceptIds = [
+    "workflow:" + row.id,
+    "container:" + row.container,
+  ];
+  if (row.source.member) mandatoryConceptIds.push("operation:" + normalize(row.source.member));
+  if (row.source.module) mandatoryConceptIds.push("module:" + row.source.module);
+  if (row.source.type) mandatoryConceptIds.push("type:" + row.source.type);
+
+  const hiddenFacts = ["verdict:" + row.verdict];
+  if (!row.jetSpelling) hiddenFacts.push("jet-spelling:absent");
+  if (row.source.sourceLine === null || row.source.sourceLine === undefined) {
+    hiddenFacts.push("source-line:unrecorded");
+  }
+  for (const [language, cell] of Object.entries(row.competitors || {})) {
+    if (cell.status !== "has") hiddenFacts.push("competitor:" + language + ":" + cell.status);
+  }
+
+  return {
+    rawSourceCounts: {
+      unit: "lexical-token",
+      includes: EVIDENCE_INCLUDES,
+      basis: "frozen source boundary; fixture status remains pending-fixture",
+      arms: arms,
+    },
+    mandatoryConceptIds: Array.from(new Set(mandatoryConceptIds)).sort(),
+    hiddenFacts: hiddenFacts.sort(),
+    nonlocalLookups: Array.from(lookups).sort(),
+  };
+}
+
 function coreApiWorkflowManifest(rows, surfaces) {
   const languageVersions = Object.fromEntries(Object.entries(surfaces).map(function ([language, entry]) {
     return [language, entry.surface.runtime];
@@ -2282,6 +2660,7 @@ function coreApiWorkflowManifest(rows, surfaces) {
       .filter(function (evidence) { return evidence.startsWith("source:"); })
       .map(function (evidence) { return evidence.slice("source:".length); })
       .sort();
+    const inventoryEvidence = coreApiInventoryEvidence(row, surfaces);
     const declined = row.declinedBy ? {
       decision: row.declinedBy,
       scored: true,
@@ -2321,14 +2700,14 @@ function coreApiWorkflowManifest(rows, surfaces) {
       },
       evidence: {
         status: "pending-fixture",
-        rawSourceCounts: null,
-        mandatoryConceptIds: null,
-        hiddenFacts: null,
-        nonlocalLookups: null,
+        rawSourceCounts: inventoryEvidence.rawSourceCounts,
+        mandatoryConceptIds: inventoryEvidence.mandatoryConceptIds,
+        hiddenFacts: inventoryEvidence.hiddenFacts,
+        nonlocalLookups: inventoryEvidence.nonlocalLookups,
         extraConstructs: null,
         reasoningBurden: null,
         independentFixtureReview: null,
-        jetWin: null,
+        jetWin: coreApiJetWin(row),
       },
     };
   });
@@ -2343,6 +2722,9 @@ function coreApiGate(rows, surfaces) {
   }
   const pendingEvidenceCount = workflows.filter(function (workflow) {
     return workflow.evidence.status !== "measured";
+  }).length;
+  const acceptedJetWinCount = workflows.filter(function (workflow) {
+    return workflow.evidence.jetWin && workflow.evidence.jetWin.status === "accepted";
   }).length;
   return {
     schemaVersion: 1,
@@ -2360,12 +2742,20 @@ function coreApiGate(rows, surfaces) {
       rule: "Every ledger row has one manifest entry; no workflow may be hidden by a fixture filter.",
     },
     fixtureContract: fixtureContract,
+    freshReview: {
+      method: "fresh-context-release-check",
+      command: "node scripts/agent/check-core-surface-ledger.mjs --check",
+      source: CORE_API_REVIEW_TEST,
+      sourceDigest: sha256(read(CORE_API_REVIEW_TEST_PATH)),
+      checks: CORE_API_REVIEW_CHECKS,
+    },
     workflowManifest: workflows,
     summary: {
       workflowCount: workflows.length,
       caseCounts: caseCounts,
       pendingEvidenceCount: pendingEvidenceCount,
       measuredEvidenceCount: workflows.length - pendingEvidenceCount,
+      acceptedJetWinCount: acceptedJetWinCount,
       releaseStatus: pendingEvidenceCount === 0 ? "ready" : "blocked-until-evidence-complete",
       releaseOwner: "#1398",
     },
@@ -2469,6 +2859,11 @@ function buildLedger() {
 // Validation. Truthfulness is gated; coverage is printed.
 
 const EVIDENCE_COUNT_FIELDS = ["tokens", "statements", "calls", "namedTemporaries"];
+const EVIDENCE_REQUIRED_COUNT_FIELDS = EVIDENCE_COUNT_FIELDS.concat([
+  "imports",
+  "requiredPolicy",
+  "requiredErrorHandling",
+]);
 const EVIDENCE_INCLUDES = ["imports", "required-policy", "required-error-handling"];
 const EVIDENCE_CLASSIFICATIONS = new Set([
   "task-essential",
@@ -2486,6 +2881,52 @@ function nonNegativeInteger(value) {
   return Number.isInteger(value) && value >= 0;
 }
 
+function validateInventoryEvidence(workflow) {
+  const evidence = workflow.evidence;
+  const counts = evidence.rawSourceCounts;
+  if (!counts || typeof counts !== "object" || counts.unit !== "lexical-token" ||
+      !Array.isArray(counts.includes) ||
+      EVIDENCE_INCLUDES.some(function (item) { return !counts.includes.includes(item); }) ||
+      !nonEmpty(counts.basis) || !counts.arms || typeof counts.arms !== "object" ||
+      Object.keys(counts.arms).length === 0) {
+    throw new Error("Core API workflow evidence is missing rawSourceCounts: " + workflow.id);
+  }
+  for (const [arm, armCounts] of Object.entries(counts.arms)) {
+    if (!armCounts || typeof armCounts !== "object" ||
+        EVIDENCE_REQUIRED_COUNT_FIELDS.some(function (field) {
+          return !nonNegativeInteger(armCounts[field]);
+        }) || !Array.isArray(armCounts.sourceFiles) || armCounts.sourceFiles.length === 0) {
+      throw new Error("Core API workflow has incomplete raw source counts: " + workflow.id + " arm " + arm);
+    }
+  }
+  for (const field of ["mandatoryConceptIds", "hiddenFacts", "nonlocalLookups"]) {
+    if (!Array.isArray(evidence[field]) || evidence[field].some(function (item) {
+      return item === null || item === undefined || item === "";
+    })) {
+      throw new Error("Core API workflow evidence has invalid " + field + ": " + workflow.id);
+    }
+  }
+  if (evidence.mandatoryConceptIds.some(function (item) { return !nonEmpty(item); })) {
+    throw new Error("Core API workflow evidence has an empty mandatory concept id: " + workflow.id);
+  }
+}
+
+function validateJetWin(workflow) {
+  const win = workflow.evidence.jetWin;
+  if (!win || win.status !== "accepted" || !nonEmpty(win.property) ||
+      !nonEmpty(win.evidenceRef) || win.kind !== "machine" ||
+      typeof win.compensates !== "boolean") {
+    throw new Error("Core API workflow lacks an accepted Jet win: " + workflow.id);
+  }
+  const measurement = win.measurement;
+  if (!measurement || !nonEmpty(measurement.metric) ||
+      !nonEmpty(measurement.method) || !nonEmpty(measurement.comparison) ||
+      measurement.rowVerdict !== workflow.outcome.ledgerVerdict ||
+      measurement.jet !== 1 || measurement.competitor !== 0) {
+    throw new Error("Core API workflow has incomplete Jet-win measurement: " + workflow.id);
+  }
+}
+
 function validateMeasuredEvidence(workflow) {
   const evidence = workflow.evidence;
   if (evidence.status !== "measured") return;
@@ -2500,7 +2941,7 @@ function validateMeasuredEvidence(workflow) {
   }
   for (const [arm, armCounts] of Object.entries(counts.arms)) {
     if (!armCounts || typeof armCounts !== "object" ||
-        EVIDENCE_COUNT_FIELDS.some(function (field) {
+        EVIDENCE_REQUIRED_COUNT_FIELDS.some(function (field) {
           return !nonNegativeInteger(armCounts[field]);
         })) {
       throw new Error("measured evidence has incomplete raw source counts for " + workflow.id + " arm " + arm);
@@ -2533,21 +2974,7 @@ function validateMeasuredEvidence(workflow) {
     throw new Error("measured evidence lacks independent fixture acceptance: " + workflow.id);
   }
 
-  const win = evidence.jetWin;
-  if (!win || win.status !== "accepted" || !nonEmpty(win.property) ||
-      !nonEmpty(win.evidenceRef) || !["machine", "review"].includes(win.kind) ||
-      typeof win.compensates !== "boolean") {
-    throw new Error("measured evidence lacks an evidence-backed Jet win: " + workflow.id);
-  }
-  if (win.kind === "machine" && (!win.measurement ||
-      !nonEmpty(win.measurement.metric) || !nonEmpty(win.measurement.method) ||
-      win.measurement.jet === undefined || win.measurement.competitor === undefined)) {
-    throw new Error("machine Jet win has no measurement: " + workflow.id);
-  }
-  if (win.kind === "review" && (!win.review || !nonEmpty(win.review.reviewer) ||
-      win.review.verdict !== "accepted")) {
-    throw new Error("reviewed Jet win has no independent verdict: " + workflow.id);
-  }
+  validateJetWin(workflow);
   for (const construct of evidence.extraConstructs) {
     if (!construct || !EVIDENCE_CLASSIFICATIONS.has(construct.classification) ||
         !nonEmpty(construct.span) || !nonEmpty(construct.cost) ||
@@ -2559,6 +2986,168 @@ function validateMeasuredEvidence(workflow) {
     }
     if (construct.classification === "incidental-ceremony") {
       throw new Error("incidental ceremony is unexplained: " + workflow.id);
+    }
+  }
+}
+
+function validateCoreApiFixtureExecution(fixture) {
+  const execution = fixture.execution;
+  if (!execution || execution.source !== AGENT_RUNNER_SOURCE_PATH ||
+      execution.test !== AGENT_RUNNER || execution.checksumManifest !== AGENT_CHECKSUMS_PATH ||
+      execution.runnerDigest !== sha256(read(AGENT_RUNNER_SOURCE_PATH)) ||
+      execution.checksumDigest !== sha256(read(AGENT_CHECKSUMS_PATH)) ||
+      execution.domainContract !== AGENT_DOMAIN_CONTRACT_PATH ||
+      execution.domainContractDigest !== sha256(read(AGENT_DOMAIN_CONTRACT_PATH)) ||
+      execution.policyDigest !== sha256(read(AGENT_WORKLOAD_POLICY_PATH).replace(/\n+$/, "")) ||
+      stable(execution.checks) !== stable([
+        "pinned-tool-version",
+        "cold-and-warm-run",
+        "exact-stdout",
+        "unchanged-input",
+        "clean-scratch",
+      ]) || stable(execution.runnerMarkers) !== stable(AGENT_RUNNER_MARKERS)) {
+    throw new Error("Core API fixture execution contract drifted");
+  }
+  const runner = read(AGENT_RUNNER_SOURCE_PATH);
+  for (const marker of AGENT_RUNNER_MARKERS) {
+    if (!runner.includes(marker)) {
+      throw new Error("Core API fixture runner lost deterministic check: " + marker);
+    }
+  }
+
+  const selection = fixture.selection;
+  if (!selection || selection.source !== AGENT_REVIEW_PATH || selection.field !== "task_id" ||
+      selection.oneReviewPerTask !== true || selection.sameTaskInputOutcome !== true) {
+    throw new Error("Core API fixture selection contract drifted");
+  }
+
+  const manifest = tsvRecords(AGENT_MANIFEST_PATH);
+  const manifestByTask = new Map(manifest.map(function (row) { return [row.task_id, row]; }));
+  const fixtureByTask = new Map();
+  for (const task of fixture.tasks || []) {
+    if (fixtureByTask.has(task.task)) throw new Error("duplicate Core API fixture task: " + task.task);
+    fixtureByTask.set(task.task, task);
+  }
+  if (fixtureByTask.size !== manifestByTask.size ||
+      stable(Array.from(fixtureByTask.keys()).sort()) !== stable(Array.from(manifestByTask.keys()).sort())) {
+    throw new Error("Core API fixture selection does not cover the frozen manifest");
+  }
+
+  const pinnedRun = fixture.pinnedRun;
+  if (!pinnedRun || !nonEmpty(pinnedRun.runId) || !nonEmpty(pinnedRun.machine) ||
+      stable(Object.keys(pinnedRun.toolVersions || {}).sort()) !== stable(AGENT_BASELINE_ADAPTERS.slice().sort())) {
+    throw new Error("Core API fixture tool pin is incomplete");
+  }
+  const receipts = tsvRecords(AGENT_RECEIPT_PATH);
+  const seenReceipts = new Set();
+  const projectedReceipts = new Set();
+  const currentToolVersions = {};
+  for (const receipt of receipts) {
+    const row = manifestByTask.get(receipt.task_id);
+    if (!row) throw new Error("Core API fixture receipt names an unknown task: " + receipt.task_id);
+    if (!AGENT_BASELINE_ADAPTERS.includes(receipt.adapter)) {
+      throw new Error("Core API fixture receipt names an unpinned adapter: " + receipt.adapter);
+    }
+    const key = receipt.adapter + "\0" + receipt.task_id;
+    if (seenReceipts.has(key)) throw new Error("duplicate Core API fixture receipt: " + key);
+    seenReceipts.add(key);
+    const storedTask = fixtureByTask.get(receipt.task_id);
+    const storedReceipt = storedTask && (storedTask.receipts || []).find(function (candidate) {
+      return candidate.adapter === receipt.adapter;
+    });
+    const projectedReceipt = storedReceipt && {
+      adapter: receipt.adapter,
+      sourceTokens: Number(receipt.source_tokens),
+      exitCode: Number(receipt.exit_code),
+      outputStable: receipt.output_stable === "true",
+      scoring: receipt.scoring,
+      toolVersion: receipt.tool_version,
+      policyDigest: receipt.policy_digest,
+      inputSha256: receipt.input_sha256,
+      expectedSha256: receipt.expected_sha256,
+      runId: receipt.run_id,
+      machine: receipt.machine,
+      expressibility: receipt.expressibility,
+      finding: receipt.finding,
+      stdoutFile: receipt.stdout_file,
+      stdoutSha256: receipt.stdout_sha256,
+      stderrFile: receipt.stderr_file,
+      stderrSha256: receipt.stderr_sha256,
+      warmStdoutSha256: receipt.warm_stdout_sha256,
+      warmStderrSha256: receipt.warm_stderr_sha256,
+    };
+    if (!storedReceipt || stable(storedReceipt) !== stable(projectedReceipt)) {
+      throw new Error("Core API fixture receipt projection drifted: " + key);
+    }
+    projectedReceipts.add(key);
+    if (receipt.run_id !== pinnedRun.runId || receipt.machine !== pinnedRun.machine) {
+      throw new Error("Core API fixture receipt run identity drifted: " + key);
+    }
+    if (!nonEmpty(receipt.tool_version)) {
+      throw new Error("Core API fixture receipt has no tool version: " + key);
+    }
+    if (currentToolVersions[receipt.adapter] && currentToolVersions[receipt.adapter] !== receipt.tool_version) {
+      throw new Error("Core API fixture tool version is not pinned: " + receipt.adapter);
+    }
+    currentToolVersions[receipt.adapter] = receipt.tool_version;
+    if (receipt.tool_version !== pinnedRun.toolVersions[receipt.adapter]) {
+      throw new Error("Core API fixture receipt disagrees with pinned tool: " + key);
+    }
+    if (receipt.policy_digest !== execution.policyDigest || receipt.scoring !== AGENT_SCORING ||
+        receipt.exit_code !== "0" || receipt.expressibility !== "supported" || receipt.finding !== "none" ||
+        receipt.output_stable !== "true") {
+      throw new Error("Core API fixture receipt is not a deterministic pass: " + key);
+    }
+
+    const source = "tests/agent_workloads/adapters/" + agentAdapterStem(row.task_id) + "." +
+      ({ bash: "bash", python: "py", node: "mjs" })[receipt.adapter];
+    if (Number(receipt.source_tokens) !== fixtureSourceTokenCount(source)) {
+      throw new Error("Core API fixture source count drifted: " + key);
+    }
+    const inputDigest = fixtureInputDigest(row.input);
+    const expectedPath = AGENT_CORPUS_ROOT + "/" + row.expected;
+    const expectedDigest = sha256(readFileSync(fixtureAbsolutePath(expectedPath)));
+    if (receipt.input_sha256 !== inputDigest || receipt.expected_sha256 !== expectedDigest) {
+      throw new Error("Core API fixture input or outcome digest drifted: " + key);
+    }
+    for (const field of ["stdout_sha256", "stderr_sha256", "warm_stdout_sha256", "warm_stderr_sha256"]) {
+      if (!/^[0-9a-f]{64}$/.test(receipt[field])) {
+        throw new Error("Core API fixture receipt has invalid " + field + ": " + key);
+      }
+    }
+    if (!safeFixtureRelativePath(receipt.stdout_file) || !safeFixtureRelativePath(receipt.stderr_file)) {
+      throw new Error("Core API fixture receipt artifact path escaped its root: " + key);
+    }
+    const stdout = readFileSync(fixtureAbsolutePath(AGENT_CORPUS_ROOT + "/baselines/" + receipt.stdout_file));
+    const expected = readFileSync(fixtureAbsolutePath(expectedPath));
+    if (sha256(stdout) !== receipt.stdout_sha256 ||
+        receipt.warm_stdout_sha256 !== receipt.stdout_sha256 ||
+        sha256(stdout) !== receipt.expected_sha256 ||
+        Buffer.compare(stdout, expected) !== 0 ||
+        fixtureArtifactDigest(receipt.stderr_file) !== receipt.stderr_sha256) {
+      throw new Error("Core API fixture output artifact drifted: " + key);
+    }
+  }
+  if (seenReceipts.size !== manifest.length * AGENT_BASELINE_ADAPTERS.length ||
+      stable(Object.keys(currentToolVersions).sort()) !== stable(AGENT_BASELINE_ADAPTERS.slice().sort()) ||
+      stable(Array.from(projectedReceipts).sort()) !== stable(Array.from(seenReceipts).sort())) {
+    throw new Error("Core API fixture receipt coverage drifted");
+  }
+
+  for (const row of manifest) {
+    const task = fixtureByTask.get(row.task_id);
+    const expectedSources = row.adapters.split(",").filter(Boolean).map(function (adapter) {
+      return "tests/agent_workloads/adapters/" + agentAdapterStem(row.task_id) + "." +
+        ({ jet: "jet", bash: "bash", python: "py", node: "mjs" })[adapter];
+    });
+    const inputDigest = fixtureInputDigest(row.input);
+    const expectedDigest = sha256(readFileSync(fixtureAbsolutePath(AGENT_CORPUS_ROOT + "/" + row.expected)));
+    if (!task || task.domain !== row.domain || task.case !== row.case || task.input !== row.input ||
+        task.expected !== row.expected || task.outcome !== row.declared_outcome ||
+        task.inputDigest !== inputDigest || task.expectedDigest !== expectedDigest ||
+        stable(task.sourceBoundary.userAuthored) !== stable(expectedSources) ||
+        task.sourceDigest !== fixtureSourceDigest(expectedSources)) {
+      throw new Error("Core API fixture selection is stale: " + row.task_id);
     }
   }
 }
@@ -2692,6 +3281,8 @@ function validateCoreApiGate(ledger) {
     if (!["pending-fixture", "measured"].includes(workflow.evidence.status)) {
       throw new Error("invalid Core API workflow evidence status: " + workflow.id);
     }
+    validateInventoryEvidence(workflow);
+    validateJetWin(workflow);
     validateMeasuredEvidence(workflow);
   }
   if (stable(Array.from(workflowIds).sort()) !== stable(Array.from(rowIds).sort())) {
@@ -2710,8 +3301,24 @@ function validateCoreApiGate(ledger) {
       gate.summary.measuredEvidenceCount !== workflows.length - expectedPending) {
     throw new Error("Core API workflow evidence summary drifted");
   }
+  const expectedJetWins = workflows.filter(function (workflow) {
+    return workflow.evidence.jetWin.status === "accepted";
+  }).length;
+  if (gate.summary.acceptedJetWinCount !== expectedJetWins ||
+      expectedJetWins !== workflows.length) {
+    throw new Error("Core API workflow evidence is missing an accepted Jet win");
+  }
   const fixture = gate.fixtureContract;
+  const freshReview = gate.freshReview;
+  if (!freshReview || freshReview.method !== "fresh-context-release-check" ||
+      freshReview.command !== "node scripts/agent/check-core-surface-ledger.mjs --check" ||
+      freshReview.source !== CORE_API_REVIEW_TEST ||
+      freshReview.sourceDigest !== sha256(read(CORE_API_REVIEW_TEST_PATH)) ||
+      stable(freshReview.checks) !== stable(CORE_API_REVIEW_CHECKS)) {
+    throw new Error("Core API gate is missing its fresh-review contract");
+  }
   if (!fixture || fixture.manifest !== AGENT_MANIFEST_PATH || fixture.receipt !== AGENT_RECEIPT_PATH ||
+      fixture.review !== AGENT_REVIEW_PATH ||
       fixture.runner !== AGENT_RUNNER || fixture.scoring !== AGENT_SCORING) {
     throw new Error("Core API gate does not reuse the frozen agent corpus contract");
   }
@@ -2723,7 +3330,8 @@ function validateCoreApiGate(ledger) {
     if (taskIds.has(task.task)) throw new Error("duplicate Core API fixture task: " + task.task);
     taskIds.add(task.task);
     for (const field of ["input", "outcome", "allowedDependency", "toolVersions", "sourceBoundary",
-      "adapters", "scoring", "runner", "receipts"]) {
+      "sourceDigest", "inputDigest", "expectedDigest", "adapters", "scoring", "runner", "receipts",
+      "independentFixtureReview"]) {
       if (task[field] === undefined || task[field] === null) {
         throw new Error("Core API fixture is missing " + field + ": " + task.task);
       }
@@ -2731,16 +3339,34 @@ function validateCoreApiGate(ledger) {
     if (!task.sourceBoundary.userAuthored.length || !task.sourceBoundary.generatedAndReferenceExcluded.length) {
       throw new Error("Core API fixture source boundary is incomplete: " + task.task);
     }
+    const competitorAdapters = task.adapters.filter(function (adapter) { return adapter !== "jet"; });
+    const receiptAdapters = task.receipts.map(function (receipt) { return receipt.adapter; }).sort();
+    const review = task.independentFixtureReview;
     if (task.scoring !== fixture.runner || task.runner !== fixture.runner ||
+        stable(receiptAdapters) !== stable(competitorAdapters.slice().sort()) ||
+        task.sourceDigest !== fixtureSourceDigest(task.sourceBoundary.userAuthored) ||
+        !nonEmpty(task.inputDigest) || !nonEmpty(task.expectedDigest) ||
         task.receipts.some(function (receipt) {
           return !task.adapters.includes(receipt.adapter) || !nonEmpty(receipt.toolVersion) ||
             !nonNegativeInteger(receipt.sourceTokens) || receipt.exitCode !== 0 ||
             receipt.outputStable !== true || receipt.scoring !== fixture.scoring ||
-            !nonEmpty(receipt.policyDigest);
-        })) {
+            !nonEmpty(receipt.policyDigest) || receipt.inputSha256 !== task.inputDigest ||
+            receipt.expectedSha256 !== task.expectedDigest;
+        }) ||
+        !acceptedFixtureReview(review, task.task, task.sourceDigest, task.inputDigest,
+          task.expectedDigest, task.adapters.includes("python"))) {
+      if (review && review.status !== "accepted") {
+        throw new Error("Core API fixture review is not accepted: " + task.task);
+      }
+      throw new Error("Core API fixture lacks accepted independent review: " + task.task);
+    }
+    if (task.receipts.some(function (receipt) {
+      return !task.adapters.includes(receipt.adapter) || receipt.adapter === "jet";
+    })) {
       throw new Error("Core API fixture does not name its existing runner: " + task.task);
     }
   }
+  validateCoreApiFixtureExecution(fixture);
 }
 
 function validateSurfaces(ledger, surfaces) {
@@ -3086,6 +3712,7 @@ function markdown(ledger) {
     "| Lifecycle cases | " + gate.summary.caseCounts.lifecycle + " |",
     "| Pending evidence records | " + gate.summary.pendingEvidenceCount + " |",
     "| Measured evidence records | " + gate.summary.measuredEvidenceCount + " |",
+    "| Accepted Jet wins | " + gate.summary.acceptedJetWinCount + " |",
     "| Release status | `" + gate.summary.releaseStatus + "` |",
     "",
     "Every ledger row has one frozen task record with the same input and outcome",
@@ -3097,7 +3724,14 @@ function markdown(ledger) {
     "scoring contract. Raw source counts are evidence, not a universal ratio.",
     "Incidental ceremony fails; accepted extra constructs need a clarity, local",
     "reasoning, named guarantee, or expert-control benefit and an independent",
-    "fixture review.",
+    "fixture review. Every workflow also has one source-derived machine Jet win:",
+    "operation coverage, a typed contract, or an explicit fail-closed diagnosis.",
+    "Fixture selection is one accepted review row per frozen task, bound to the",
+    "adapter-source, input, and expected-output digests. The existing runner's",
+    "pinned tools, cold and warm runs, exact stdout, unchanged-input, and clean",
+    "scratch checks are revalidated from the receipt and artifact files.",
+    "A fresh-context release check reviews workflow closure, construct",
+    "classifications, reasoning evidence, syntax coverage, and fixture selection.",
     "",
     "Run the structural check and the fail-closed release check:",
     "",
@@ -3165,7 +3799,14 @@ function check() {
     " clusters-needing-a-card=" + stored.summary.clustersNeedingCard + "\n");
   process.stdout.write("core API gate: " + stored.coreApiGate.summary.releaseStatus +
     " workflows=" + stored.coreApiGate.summary.workflowCount +
-    " pending-evidence=" + stored.coreApiGate.summary.pendingEvidenceCount + "\n");
+    " pending-evidence=" + stored.coreApiGate.summary.pendingEvidenceCount +
+    " accepted-jet-wins=" + stored.coreApiGate.summary.acceptedJetWinCount + "\n");
+  process.stdout.write("core API fixtures: independent acceptance verified tasks=" +
+    stored.coreApiGate.fixtureContract.tasks.length + "\n");
+  process.stdout.write("core API fixture execution: deterministic; pinned-tools; cold-warm; " +
+    "exact-stdout; input-unchanged; scratch-closed\n");
+  process.stdout.write("core API fresh review: " + stored.coreApiGate.freshReview.method +
+    "; checks=" + stored.coreApiGate.freshReview.checks.join(",") + "\n");
 }
 
 function coreApiReleaseCheck() {
@@ -3313,6 +3954,13 @@ function hostileFixtures() {
     validateCoreApiGate(broken);
   }));
 
+  results.push(rejects("Core API workflow omits its Jet win",
+    "Core API workflow lacks an accepted Jet win", function () {
+    const broken = clone(ledger);
+    broken.coreApiGate.workflowManifest[0].evidence.jetWin = null;
+    validateCoreApiGate(broken);
+  }));
+
   results.push(rejects("measured evidence omits raw source dimensions",
     "measured evidence has incomplete raw source counts", function () {
     const broken = clone(ledger);
@@ -3331,6 +3979,41 @@ function hostileFixtures() {
     workflow.evidence.reasoningBurden = { status: "equal", evidence: "fixture review" };
     workflow.evidence.independentFixtureReview = {};
     workflow.evidence.jetWin = {};
+    validateCoreApiGate(broken);
+  }));
+
+  results.push(rejects("Core API fixture loses independent acceptance",
+    "Core API fixture review is not accepted", function () {
+    const broken = clone(ledger);
+    broken.coreApiGate.fixtureContract.tasks[0].independentFixtureReview.minimal = false;
+    validateCoreApiGate(broken);
+  }));
+
+  results.push(rejects("Core API fixture loses deterministic runner binding",
+    "Core API fixture execution contract drifted", function () {
+    const broken = clone(ledger);
+    broken.coreApiGate.fixtureContract.execution.runnerDigest = "0".repeat(64);
+    validateCoreApiGate(broken);
+  }));
+
+  results.push(rejects("Core API fixture output artifact drifts",
+    "Core API fixture receipt projection drifted", function () {
+    const broken = clone(ledger);
+    broken.coreApiGate.fixtureContract.tasks[0].receipts[0].stdoutSha256 = "0".repeat(64);
+    validateCoreApiGate(broken);
+  }));
+
+  results.push(rejects("Core API fixture selection drifts",
+    "Core API fixture selection contract drifted", function () {
+    const broken = clone(ledger);
+    broken.coreApiGate.fixtureContract.selection.field = "domain";
+    validateCoreApiGate(broken);
+  }));
+
+  results.push(rejects("Core API fresh review loses a check",
+    "Core API gate is missing its fresh-review contract", function () {
+    const broken = clone(ledger);
+    broken.coreApiGate.freshReview.checks.pop();
     validateCoreApiGate(broken);
   }));
 

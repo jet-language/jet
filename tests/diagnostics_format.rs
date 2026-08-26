@@ -110,6 +110,27 @@ fn diagnostic_case_validator_preserves_code_fragments_and_flags() {
         jet_foundation::Outcome::jet_sentence_case_line("Syntax.rs owns user-typeable syntax"),
         "Syntax.rs owns user-typeable syntax"
     );
+    for (input, expected) in [
+        ("Bool cannot cross the boundary", "Bool cannot cross the boundary"),
+        ("U8 has the wrong width", "U8 has the wrong width"),
+        ("src/Main.jet is not reachable", "src/Main.jet is not reachable"),
+        (
+            "package@Source#Version is not available",
+            "package@Source#Version is not available",
+        ),
+        ("UserId has no matching field", "UserId has no matching field"),
+        ("fn is the only declaration form", "fn is the only declaration form"),
+        (
+            "`TypeName` cannot be constructed here",
+            "`TypeName` cannot be constructed here",
+        ),
+    ] {
+        assert_eq!(
+            jet_foundation::Outcome::jet_sentence_case_line(input),
+            expected,
+            "diagnostic case law changed `{input}`"
+        );
+    }
 }
 
 fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {

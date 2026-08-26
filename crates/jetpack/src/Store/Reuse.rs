@@ -486,9 +486,10 @@ impl CacheLease {
             self.projected_bin_root.as_deref(),
             self.wrapper_root.as_deref(),
         ]
-        .into_iter()
-        .flatten()
-        .any(|root| requested_path.starts_with(root));
+            .into_iter()
+            .flatten()
+            .chain(self.leased_output_roots.iter().map(|(root, _)| root.as_path()))
+            .any(|root| requested_path.starts_with(root));
         if path_is_lease_owned {
             return Err(std::io::Error::other(
                 "caller requested a path inside an executable lease that is not a recorded member",
@@ -907,16 +908,11 @@ impl Drop for CacheLease {
             | Ok(crate::RuntimePolicy::LockState::Absent) => false,
             Err(_) => true,
         };
-        let protocol_lock_held = (!self.protocol_lease_id.is_empty()).then(|| {
-            match crate::RuntimePolicy::ExecutableLeaseProtocol::open(&self.store_root)
-                .and_then(|protocol| protocol.owner_lock_path(&self.protocol_lease_id))
-            {
-                Ok(path) => lock_held(&path),
-                Err(_) => true,
-            }
-        });
-        let keep_for_descendant = self.handed_off.get()
-            && (lock_held(&self.lease_lock_path) || protocol_lock_held.unwrap_or(false));
+        // The owner lock is still held by this CacheLease while Drop runs. It
+        // authenticates publication, but cannot prove a descendant exists;
+        // only the inherited container lock is the process-tree lifetime fact.
+        let keep_for_descendant =
+            self.handed_off.get() && lock_held(&self.lease_lock_path);
         if !keep_for_descendant {
             if remove_snapshot_node(&self.lease_root).is_ok()
                 && !self.protocol_lease_id.is_empty()
@@ -947,21 +943,22 @@ pub fn find_verified_by_reference(
     reference: &str,
     expectation: &CacheExpectation,
 ) -> std::io::Result<Option<VerifiedCacheHit>> {
-    let _global = crate::RuntimePolicy::acquire_lock(&roots.root, "hangar")?;
-    let graph = Closure::closure_graph_structure_unlocked(roots)?;
-    let entry = list_unlocked(roots)?
-        .into_iter()
-        .filter(|entry| entry.reference == reference)
-        .filter(|entry| {
-            verify_cache_entry_with_graph(roots, entry, reference, expectation, Some(&graph))
-                .trusted()
-        })
-        .max_by_key(|entry| entry.last_used_at);
-    let Some(entry) = entry else {
-        return Ok(None);
-    };
-    let lease = snapshot_lease(roots, &entry)?;
-    Ok(Some(VerifiedCacheHit { entry, lease }))
+    crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let graph = Closure::closure_graph_structure_unlocked(roots)?;
+        let entry = list_unlocked(roots)?
+            .into_iter()
+            .filter(|entry| entry.reference == reference)
+            .filter(|entry| {
+                verify_cache_entry_with_graph(roots, entry, reference, expectation, Some(&graph))
+                    .trusted()
+            })
+            .max_by_key(|entry| entry.last_used_at);
+        let Some(entry) = entry else {
+            return Ok(None);
+        };
+        let lease = snapshot_lease_unlocked(roots, &entry)?;
+        Ok(Some(VerifiedCacheHit { entry, lease }))
+    })
 }
 
 /// Reuse the exact user-profile realization for a package ref. User-profile
@@ -991,6 +988,15 @@ pub(crate) fn find_verified_user_profile_by_reference(
 }
 
 pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLease> {
+    crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        snapshot_lease_unlocked(roots, entry)
+    })
+}
+
+fn snapshot_lease_unlocked(
+    roots: &Roots,
+    entry: &StoreEntry,
+) -> std::io::Result<CacheLease> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     use std::sync::atomic::Ordering;
 
@@ -1078,6 +1084,10 @@ pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Resu
         )));
     }
     seal_local_output(&snapshot_root)?;
+    // Publish the authenticated receipt only after every snapshot byte,
+    // directory entry, and sealed mode is durable. A reboot can then expose
+    // either a complete lease or a recoverable pre-publication container.
+    fsync_tree(&lease_root)?;
     let sealed_digest = crate::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
         .map_err(std::io::Error::other)?;
     let snapshot_dir_handle = fs::File::open(&snapshot_root).and_then(|file| {
@@ -1156,6 +1166,7 @@ pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Resu
         projected_bin_root.as_deref().unwrap_or(&snapshot_root),
         bin_relative.as_deref(),
     )?;
+    let wrappers = create_exec_wrappers(&snapshot_root, &executables)?;
     let protocol = crate::RuntimePolicy::ExecutableLeaseProtocol::open(&roots.root)?;
     let protocol_lease_id = protocol.new_lease_id()?;
     let protocol_owner_scope =
@@ -1171,13 +1182,15 @@ pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Resu
         &sealed_digest,
         &protocol_members,
     )?;
+    // Publish the authenticated generation only after every executable
+    // handoff artifact exists.  A failed/interrupted wrapper setup must not
+    // leave a complete receipt for a lease that can never launch.
     let protocol_frame = protocol.encode_request(&protocol_request)?;
     let protocol_receipt = protocol.accept_snapshot(
         &protocol_frame,
         &sealed_digest,
         &snapshot_root,
     )?;
-    let wrappers = create_exec_wrappers(&snapshot_root, &executables)?;
         Ok(CacheLease {
         files,
         executables,

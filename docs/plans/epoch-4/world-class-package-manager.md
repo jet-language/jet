@@ -57,6 +57,21 @@ reports active and stale lease containers without repairing them, and audit
 uses the strict read-only Store projection, closure proof, output digest, and
 lease inventory before it prints provenance.
 
+The executable lease slice uses one shared authenticated protocol. Its bounded
+`JET-EXECUTABLE-LEASE/1` frame binds the owner, locked output digest, snapshot,
+and executable member digests. The protocol publishes a receipt only after the
+receipt and completion witness are synced and renamed as one complete
+generation. Replacement and rollback append generations; recovery removes only
+an idle owner/container pair. `jetpack audit` reads the lease inventory without
+repair: it prints `Leases:      <active> active, <stale> stale` and adds a
+`Lease Note:` only when stale state exists. The protocol is internal, so this
+slice adds no user-facing Jet-language syntax. The production checks
+`platform_tier_gate_exercises_native_lease_diagnostics_and_audit`,
+`platform_tier_gate_recovers_hostile_partial_lease_without_losing_good_output`,
+and `jet_audit_reads_without_exec` cover child lifetime, recovery, and the
+read-only audit projection; the stale lease output is pinned by
+`audit_reports_stale_executable_lease_golden`.
+
 JP0 stop-line now enforces three truth boundaries:
 
 - cache reuse verifies output existence, current canonical digest, platform,
@@ -374,6 +389,18 @@ live acceptance, and documentation. Work order is binding.
   only an older complete generation. Recovery removes only an idle container;
   doctor and audit inspect the same ownership state without deleting or
   publishing anything.
+- Executable lease evidence runs through the production path:
+  `parent_env_unchanged_after_run` proves that a child receives the sealed lease
+  projection instead of the raw output;
+  `use_fails_closed_when_executable_lease_service_key_is_invalid` pins the
+  E1315 failure and proves that no child output appears; and
+  `executable_lease_process_tree_recovery_uses_store_production_path` proves
+  the process-tree lifetime.
+  `platform_tier_gate_recovers_hostile_partial_lease_without_losing_good_output`
+  proves interrupted recovery, while `jet_audit_reads_without_exec` proves the
+  read-only `Leases:` audit row. The protocol unit checks cover authenticated
+  frames, complete-generation recovery, live-container locking, replacement,
+  and rollback.
 - Verify, quarantine, repair from ordered caches, then deterministic rebuild.
 - Hangar receipt substrate: immutable connected package-realization objects,
   lock digest projections, atomic publication, and fail-closed corruption/path

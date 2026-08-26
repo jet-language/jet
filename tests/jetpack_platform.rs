@@ -6,6 +6,7 @@
 //! native macOS and Windows executions.
 
 use std::fs;
+use std::time::{Duration, Instant};
 
 mod common;
 
@@ -77,7 +78,7 @@ fn platform_tier_gate_runs_native_package_offline_and_cleans_store() {
 
     let run = jetpack()
         .args([
-            "run",
+            "use",
             "native-jetpack@nixpkgs",
             "--no-color",
             "--offline",
@@ -127,6 +128,115 @@ fn platform_tier_gate_runs_native_package_offline_and_cleans_store() {
 }
 
 #[test]
+fn platform_gate_reaches_store_authenticated_lease_service() {
+    let root = Scratch::new("platform-authenticated-lease-root");
+    let fixtures = Scratch::new("platform-authenticated-lease-fixtures");
+    let staging = Scratch::new("platform-authenticated-lease-staging");
+    let missing_tools = Scratch::new("platform-authenticated-lease-missing-tools");
+    write_native_jetpack_fixture(&fixtures.path, &root.path, &staging.path);
+    let program = format!("omp{}", std::env::consts::EXE_SUFFIX);
+
+    let mut run = jetpack()
+        .args([
+            "use",
+            "omp@releases#1.0.0",
+            "-y",
+            "--no-color",
+            "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .args(["--", &program, "--hold"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .env("PATH", &missing_tools.path)
+        .spawn()
+        .unwrap();
+
+    let records = root.path.join("lease-service/leases");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let found = loop {
+        let found = fs::read_dir(&records).ok().and_then(|entries| {
+            entries.flatten().find_map(|entry| {
+                let generation = entry.path().join("generations/1");
+                let receipt = generation.join("receipt");
+                let complete = generation.join("complete");
+                if receipt.is_file() && complete.is_file() {
+                    fs::read_to_string(&receipt)
+                        .ok()
+                        .map(|contents| (entry.path(), contents))
+                } else {
+                    None
+                }
+            })
+        });
+        if found.is_some() || Instant::now() >= deadline {
+            break found;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let Some((record, receipt)) = found else {
+        let _ = run.kill();
+        let output = run.wait_with_output().unwrap();
+        panic!(
+            "production run did not publish a complete authenticated lease receipt: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    assert!(receipt.starts_with("JET-EXECUTABLE-LEASE/1 receipt\n"));
+    assert!(receipt.contains("\ngeneration=1\n"), "receipt: {receipt}");
+    let mac = receipt
+        .lines()
+        .find_map(|line| line.strip_prefix("mac="))
+        .expect("authenticated lease receipt tag");
+    assert_eq!(mac.len(), 64);
+    assert!(mac.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    let witness = fs::read_to_string(record.join("generations/1/complete")).unwrap();
+    assert_eq!(witness.trim().len(), 71);
+    assert!(witness.trim().starts_with("sha256-"));
+
+    let recover = jetpack()
+        .args(["hangar", "recover", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &missing_tools.path)
+        .output()
+        .unwrap();
+    assert!(
+        recover.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
+    assert!(
+        record.join("generations/1/receipt").is_file(),
+        "recovery removed a live authenticated lease"
+    );
+
+    let run_output = run.wait_with_output().unwrap();
+    assert!(
+        run_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+    let recover_after_exit = jetpack()
+        .args(["hangar", "recover", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &missing_tools.path)
+        .output()
+        .unwrap();
+    assert!(
+        recover_after_exit.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&recover_after_exit.stderr)
+    );
+    assert!(
+        fs::read_dir(&records)
+            .map(|entries| entries.flatten().next().is_none())
+            .unwrap_or(true),
+        "idle authenticated lease record survived recovery"
+    );
+}
+
+#[test]
 fn platform_tier_gate_recovers_hostile_partial_lease_without_losing_good_output() {
     let root = Scratch::new("platform-hostile-lease-root");
     let fixtures = Scratch::new("platform-hostile-lease-fixtures");
@@ -166,6 +276,159 @@ fn platform_tier_gate_recovers_hostile_partial_lease_without_losing_good_output(
         good_object.join("meta.json").is_file(),
         "recovery removed the last good Hangar object"
     );
+}
+
+#[test]
+fn platform_tier_gate_exercises_native_lease_diagnostics_and_audit() {
+    let root = Scratch::new("platform-diagnostics-root");
+    let fixtures = Scratch::new("platform-diagnostics-fixtures");
+    let staging = Scratch::new("platform-diagnostics-staging");
+    let missing_tools = Scratch::new("platform-diagnostics-missing-tools");
+    write_native_jetpack_fixture(&fixtures.path, &root.path, &staging.path);
+    let program = format!("jetpack{}", std::env::consts::EXE_SUFFIX);
+    let run = jetpack()
+        .args([
+            "use",
+            "native-jetpack@nixpkgs",
+            "--no-color",
+            "--offline",
+            "--",
+            &program,
+            "--help",
+        ])
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .env("PATH", &missing_tools.path)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "native lease handoff failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&run.stdout).contains("jetpack"),
+        "native lease child did not run: {}",
+        String::from_utf8_lossy(&run.stdout)
+    );
+    assert!(
+        fs::read_dir(root.join("leases"))
+            .unwrap()
+            .next()
+            .is_none(),
+        "production child exit left an executable lease behind"
+    );
+
+    let (good_object, _) = write_hangar_meta(
+        &root.path,
+        "platform-diagnostics-good",
+        "platform-diagnostics-good",
+        "1.0",
+        None,
+    );
+    let stale = root
+        .join("leases")
+        .join("4294967294-1-platform-diagnostics-good");
+    fs::create_dir_all(stale.join("snapshot")).unwrap();
+    fs::write(stale.join("snapshot/partial"), "interrupted").unwrap();
+
+    let doctor = jetpack()
+        .args(["doctor", "--json", "--offline"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    let doctor_json = String::from_utf8_lossy(&doctor.stdout);
+    assert!(
+        doctor_json.contains("stale executable lease(s) found"),
+        "doctor missed stale lease: {doctor_json}"
+    );
+    assert!(stale.is_dir(), "doctor changed lease state");
+
+    let audit = jetpack()
+        .args(["audit", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        audit.status.success(),
+        "audit stderr: {}",
+        String::from_utf8_lossy(&audit.stderr)
+    );
+    let audit_text = String::from_utf8_lossy(&audit.stderr);
+    assert!(audit_text.contains("Leases:"), "audit omitted lease state");
+    assert!(
+        audit_text.contains("0 active, 1 stale"),
+        "audit missed stale lease: {audit_text}"
+    );
+
+    let journal = root.path.join("hangar/closure-db/journal");
+    fs::create_dir_all(&journal).unwrap();
+    let partial = journal.join("00000000000000000099-corrupt.txn.partial");
+    fs::write(&partial, "interrupted").unwrap();
+    let broken = jetpack()
+        .args(["audit", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(broken.status.code(), Some(2));
+    let broken_text = String::from_utf8_lossy(&broken.stderr);
+    assert!(broken_text.contains("Error [E1340]:"), "{broken_text}");
+    assert!(broken_text.contains("Why:"), "{broken_text}");
+    assert!(broken_text.contains("Fix:"), "{broken_text}");
+    assert!(
+        broken_text.contains("More: jet-lang.dev/e/E1340"),
+        "{broken_text}"
+    );
+    assert!(partial.is_file(), "audit repaired partial journal");
+    assert!(good_object.join("meta.json").is_file());
+
+    fs::remove_file(&partial).unwrap();
+    let recover = jetpack()
+        .args(["hangar", "recover", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", &missing_tools.path)
+        .output()
+        .unwrap();
+    assert!(
+        recover.status.success(),
+        "lease recovery stderr: {}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
+    assert!(!stale.exists(), "production recovery left stale lease");
+    assert!(
+        good_object.join("meta.json").is_file(),
+        "production recovery removed the last good Hangar object"
+    );
+}
+
+#[test]
+fn audit_reports_stale_executable_lease_golden() {
+    let root = Scratch::new("audit-stale-lease-golden");
+    let stale = root.join("leases").join("4294967294-1-audit-stale");
+    fs::create_dir_all(stale.join("snapshot")).unwrap();
+    fs::write(stale.join("snapshot/partial"), "interrupted").unwrap();
+
+    let audit = jetpack()
+        .args(["audit", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        audit.status.success(),
+        "audit stderr: {}",
+        String::from_utf8_lossy(&audit.stderr)
+    );
+    let audit_text = String::from_utf8_lossy(&audit.stderr);
+    let lease_lines = audit_text
+        .lines()
+        .filter(|line| line.contains("Leases:") || line.contains("Lease Note:"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        format!("{lease_lines}\n"),
+        include_str!("cli/jetpack_audit_stale_lease.txt")
+    );
+    assert!(stale.is_dir(), "audit repaired stale lease state");
 }
 
 #[test]

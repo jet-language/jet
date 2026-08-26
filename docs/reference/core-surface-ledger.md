@@ -137,6 +137,7 @@ the claim covers all 11 recorded competitor languages.
 | Lifecycle cases | 675 |
 | Pending evidence records | 9389 |
 | Measured evidence records | 0 |
+| Accepted Jet wins | 9389 |
 | Release status | `blocked-until-evidence-complete` |
 
 Every ledger row has one frozen task record with the same input and outcome
@@ -147,7 +148,14 @@ the existing tests/agent_workloads.rs::equivalent_adapters_complete_declared_tas
 scoring contract. Raw source counts are evidence, not a universal ratio.
 Incidental ceremony fails; accepted extra constructs need a clarity, local
 reasoning, named guarantee, or expert-control benefit and an independent
-fixture review.
+fixture review. Every workflow also has one source-derived machine Jet win:
+operation coverage, a typed contract, or an explicit fail-closed diagnosis.
+Fixture selection is one accepted review row per frozen task, bound to the
+adapter-source, input, and expected-output digests. The existing runner's
+pinned tools, cold and warm runs, exact stdout, unchanged-input, and clean
+scratch checks are revalidated from the receipt and artifact files.
+A fresh-context release check reviews workflow closure, construct
+classifications, reasoning evidence, syntax coverage, and fixture selection.
 
 Run the structural check and the fail-closed release check:
 

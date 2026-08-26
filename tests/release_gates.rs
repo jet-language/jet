@@ -740,8 +740,19 @@ fn change_gate_is_accepted(job: &str) -> bool {
         && !job.contains("|| :")
 }
 
+fn nightly_slice_is_accepted(workflow: &str) -> bool {
+    let change_gate = workflow_job(workflow, "change-gate");
+    !change_gate.is_empty()
+        && change_gate_is_accepted(&change_gate)
+        && workflow.contains("nightly-fuzz:")
+        && workflow.contains("FUZZ_VARIANTS: \"1000\"")
+        && workflow.contains("tools/perf/ci-perf-check.sh")
+}
+
+/// #806 criterion 6: the nightly slice owns a targeted proof that the real
+/// workflow cannot bypass the direct `tests/grammar.rs` gate.
 #[test]
-fn ci_change_gate_runs_grammar_and_documentation_build() {
+fn ci_nightly_slice_rejects_grammar_gate_bypass() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
         .expect("read .github/workflows/ci.yml");
@@ -756,14 +767,18 @@ fn ci_change_gate_runs_grammar_and_documentation_build() {
         job_has_run(&job, GRAMMAR_GATE_COMMAND),
         "change-gate must invoke tests/grammar.rs directly; the broad test inventory is not enough"
     );
-    assert!(change_gate_is_accepted(&job));
+    assert!(nightly_slice_is_accepted(&workflow));
     let bypassed = job.replacen(
         GRAMMAR_GATE_COMMAND,
         "nix develop .#full -c cargo test --workspace --locked -- --nocapture",
         1,
     );
     assert!(
-        !change_gate_is_accepted(&bypassed),
+        !nightly_slice_is_accepted(&workflow.replacen(
+            &job,
+            &bypassed,
+            1,
+        )),
         "the change-gate proof must fail when its direct tests/grammar.rs invocation is bypassed"
     );
     assert!(
@@ -783,8 +798,9 @@ fn ci_change_gate_runs_grammar_and_documentation_build() {
 fn verify_tests_evidence_is_accepted(job: &str) -> bool {
     [
         "      - name: Failure propagation canary",
-        "--report-dir \"$JET_CI_EVIDENCE_DIR/canary\"",
-        "-- bash -c 'printf \"expected canary failure\\n\" >&2; exit 23'",
+        r#"          bash tools/ci/ci-evidence.sh \
+            --report-dir "$JET_CI_EVIDENCE_DIR/canary" \
+            -- bash -c 'printf "expected canary failure\\n" >&2; exit 23'"#,
         "          test \"$status\" -eq 23",
         r#"          grep -Fxq "status=fail" "$JET_CI_EVIDENCE_DIR/canary/receipt.txt""#,
         r#"          grep -Fxq "command_exit=23" "$JET_CI_EVIDENCE_DIR/canary/receipt.txt""#,
@@ -803,6 +819,62 @@ fn verify_tests_evidence_is_accepted(job: &str) -> bool {
             r#"bash tools/ci/ci-evidence.sh --report-dir "$JET_CI_EVIDENCE_DIR" -- nix develop .#full -c scripts/agent/verify-full.sh"#,
         )
         && !job.contains("continue-on-error")
+}
+
+fn nightly_gate_is_accepted(job: &str) -> bool {
+    job.contains("if: github.event_name == 'schedule'")
+        && job.contains("runs-on: ubuntu-latest")
+        && job.contains("JET_REQUIRE_RUSTC: \"1\"")
+        && job.contains("FUZZ_VARIANTS: \"1000\"")
+        && job.contains(
+            "FUZZ_SEED=\"$seed\" nix develop -c cargo test --release --test fuzz_sema -- --nocapture",
+        )
+        && job.contains("CARGO_BUILD_JOBS: \"6\"")
+        && job.contains("nix develop .#full -c cargo build")
+        && job.contains("nix develop -c sh tools/perf/ci-perf-check.sh")
+        && job.contains("nix develop .#full -c bash tools/perf/web-bundle-check.sh")
+        && !job.contains("continue-on-error")
+        && !job.contains("|| true")
+        && !job.contains("|| :")
+}
+
+#[test]
+fn ci_nightly_gate_runs_production_fuzz_and_perf_checks() {
+    let workflow = fs::read_to_string(root().join(".github/workflows/ci.yml"))
+        .expect("read .github/workflows/ci.yml");
+    let job = workflow_job(&workflow, "nightly-fuzz");
+    assert!(!job.is_empty(), "CI must define the nightly-fuzz job");
+    assert!(nightly_gate_is_accepted(&job));
+
+    for (name, command, replacement) in [
+        (
+            "fuzz",
+            "FUZZ_SEED=\"$seed\" nix develop -c cargo test --release --test fuzz_sema -- --nocapture",
+            "true",
+        ),
+        (
+            "Jet build",
+            "nix develop .#full -c cargo build",
+            "true",
+        ),
+        (
+            "compiler-speed perf",
+            "nix develop -c sh tools/perf/ci-perf-check.sh",
+            "true",
+        ),
+        (
+            "web bundle perf",
+            "nix develop .#full -c bash tools/perf/web-bundle-check.sh",
+            "true",
+        ),
+    ] {
+        let bypassed = job.replacen(command, replacement, 1);
+        assert_ne!(bypassed, job, "{name} command mutation did not apply");
+        assert!(
+            !nightly_gate_is_accepted(&bypassed),
+            "nightly gate proof must fail when the {name} production command is bypassed"
+        );
+    }
 }
 
 #[test]
@@ -871,6 +943,7 @@ fn ci_gate_evidence_preserves_success_and_failure_receipts() {
         .arg(&script)
         .args(["--report-dir", success_dir.to_str().unwrap(), "--", "bash", "-c"])
         .arg("printf 'gate-ok\\n'")
+        .env_remove("GITHUB_ACTIONS")
         .env("RUNNER_OS", "Linux")
         .env("RUNNER_ARCH", "X64")
         .current_dir(&root)
@@ -965,6 +1038,67 @@ fn ci_gate_evidence_preserves_success_and_failure_receipts() {
         "failed gates must retain toolchain evidence"
     );
 
+    let missing_runner_dir = scratch.join("missing-runner");
+    let missing_runner = Command::new("bash")
+        .arg(&script)
+        .args([
+            "--report-dir",
+            missing_runner_dir.to_str().unwrap(),
+            "--",
+            "bash",
+            "-c",
+        ])
+        .arg("printf 'must-not-run\\n'")
+        .env("GITHUB_ACTIONS", "true")
+        .env("GITHUB_SHA", &candidate)
+        .env_remove("RUNNER_OS")
+        .env_remove("RUNNER_ARCH")
+        .env_remove("GITHUB_RUNNER_OS")
+        .env_remove("GITHUB_RUNNER_ARCH")
+        .current_dir(&root)
+        .output()
+        .expect("run CI evidence missing-runner path");
+    assert_eq!(missing_runner.status.code(), Some(78));
+    assert_eq!(
+        fs::read_to_string(missing_runner_dir.join("command.stdout")).unwrap(),
+        ""
+    );
+    let missing_runner_receipt =
+        fs::read_to_string(missing_runner_dir.join("receipt.txt")).unwrap();
+    assert!(missing_runner_receipt.contains("status=fail"));
+    assert!(
+        fs::read_to_string(missing_runner_dir.join("command.stderr"))
+            .unwrap()
+            .contains("runner OS identity is missing")
+    );
+
+    let stale_dir = scratch.join("stale");
+    fs::create_dir_all(&stale_dir).unwrap();
+    fs::write(stale_dir.join("receipt.txt"), "status=pass\\n").unwrap();
+    let stale = Command::new("bash")
+        .arg(&script)
+        .args(["--report-dir", stale_dir.to_str().unwrap(), "--", "bash", "-c"])
+        .arg("printf 'must-not-run\\n'")
+        .env_remove("GITHUB_ACTIONS")
+        .env("GITHUB_SHA", &candidate)
+        .env("RUNNER_OS", "Linux")
+        .env("RUNNER_ARCH", "X64")
+        .current_dir(&root)
+        .output()
+        .expect("run CI evidence stale-report path");
+    assert_eq!(stale.status.code(), Some(78));
+    assert_eq!(
+        fs::read_to_string(stale_dir.join("command.stdout")).unwrap(),
+        ""
+    );
+    let stale_receipt = fs::read_to_string(stale_dir.join("receipt.txt")).unwrap();
+    assert!(stale_receipt.contains("status=fail"));
+    assert!(
+        fs::read_to_string(stale_dir.join("command.stderr"))
+            .unwrap()
+            .contains("stale file")
+    );
+
     let artifact_mismatch_dir = scratch.join("artifact-mismatch");
     let artifact_mismatch = Command::new("bash")
         .arg(&script)
@@ -976,6 +1110,7 @@ fn ci_gate_evidence_preserves_success_and_failure_receipts() {
             "-c",
         ])
         .arg("printf 'must-not-run\\n'")
+        .env_remove("GITHUB_ACTIONS")
         .env("GITHUB_SHA", &candidate)
         .env("JET_CI_ARTIFACT_NAME", "ci-gate-evidence-shard-0-stale")
         .current_dir(&root)

@@ -473,7 +473,16 @@ Every failure names card `#1398` as the release-gate owner.
 
 The gate reuses the existing agent corpus manifest, receipt, runner, and
 `#769` scoring contract. It adds no benchmark runner and no second scoring
-model:
+model. Independent fixture acceptance is recorded in
+`tests/agent_workloads/core_api_fixture_reviews.tsv`, with one row for each
+frozen task. The checker binds each row to the adapter-source, input, and
+expected-output digests. A Python row must say `not-emulated` for Jet-only
+guarantees. The release check reuses the runner's pinned tool versions,
+cold/warm executions, exact stdout, unchanged-input, and clean-scratch checks;
+it also verifies the stored stdout/stderr artifacts and checksum closure. A
+fresh-context review records closure, construct classifications, reasoning
+evidence, syntax coverage, and fixture selection. A drift in any of these
+bindings fails the gate under card `#1398`.
 
 ~~~sh
 node scripts/agent/check-core-surface-ledger.mjs --check

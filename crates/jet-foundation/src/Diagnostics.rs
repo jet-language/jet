@@ -465,9 +465,9 @@ impl Diagnostic {
             moment: row.moment,
             severity: row.severity,
             code,
-            what,
-            why,
-            fix,
+            what: crate::Outcome::jet_sentence_case_line(&what),
+            why: crate::Outcome::jet_sentence_case_line(&why),
+            fix: crate::Outcome::jet_sentence_case_line(&fix),
             span,
             cause: Vec::new(),
             applicability: row_applicability(row, edit.as_ref()),
@@ -1369,6 +1369,17 @@ mod renderer_tests {
         let rendered = diagnostic.render("", "");
         assert!(rendered.contains("Error [E0001]: the dynamic what"));
         assert!(rendered.ends_with("More: jet-lang.dev/e/E0001\n"));
+
+        let lint = Diagnostic::lint(
+            "L2001",
+            "The dynamic warning".into(),
+            "The dynamic why".into(),
+            "The dynamic fix".into(),
+            None,
+        );
+        assert_eq!(lint.what, "the dynamic warning");
+        assert_eq!(lint.why, "the dynamic why");
+        assert_eq!(lint.fix, "the dynamic fix");
     }
 
     #[test]

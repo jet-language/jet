@@ -4767,6 +4767,23 @@ same-user redirect protection. This is the ratified narrow amendment to the
 otherwise no-root/no-daemon product law; ordinary run/env remains offline and
 ceremony-free after installation.
 
+**D-JPK-EXECLEASE1 implementation contract (no new syntax):** the shared
+service frame is `JET-EXECUTABLE-LEASE/1`. A bounded canonical request carries
+the operation, key id, request and lease identities, owner scope, package
+reference, locked output digest, snapshot path, executable member digests,
+nonce, and an HMAC-SHA256 tag. The service key is the 32-byte
+`<JETPACK_ROOT>/lease-service/auth.key`; the client and service reject a
+different key, owner lock, snapshot, digest, or member set before publication.
+Each lease record stores immutable generations under
+`lease-service/leases/<lease-id>/generations/<generation>/` with an
+authenticated `receipt` and a `complete` witness. Publication writes and syncs
+both files, then renames the generation without replacing an existing
+generation. Replace and rollback append a generation; rollback must name an
+older complete generation. Recovery removes only records whose owner lock and
+process-tree `live.lock` are idle, and leaves malformed or lock-damaged state
+untouched. The audit view reads lease-container ownership state without repair
+or publication.
+
 **D-FE-PROMPT1 (=D) + D-FE-PROMPT-STRIP1 (=B, ratified 2026-07-08, #359)**:
 `jet env` uses one hybrid prompt engine. Default prompt shows the env label and
 compact path; `Ctrl-G` pulls the same status words the optional always-on strip

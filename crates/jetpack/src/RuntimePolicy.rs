@@ -130,6 +130,17 @@ pub fn acquire_lock(root: &Path, scope: &str) -> io::Result<FileLock> {
     acquire_lock_with_timing(root, scope, LOCK_WAIT, LOCK_POLL)
 }
 
+/// Claim a lock for recovery without waiting behind a live owner. Recovery
+/// must hold the claim while inspecting and removing state; a probe followed
+/// by deletion lets a contender acquire the same inode in the gap.
+pub(crate) fn try_acquire_lock(root: &Path, scope: &str) -> io::Result<Option<FileLock>> {
+    match acquire_lock_with_timing(root, scope, Duration::ZERO, LOCK_POLL) {
+        Ok(lock) => Ok(Some(lock)),
+        Err(error) if error.kind() == ErrorKind::TimedOut => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 pub(crate) fn lock_path_for_scope(root: &Path, scope: &str) -> PathBuf {
     root.join(LOCK_DIR)
         .join(format!("{}.lock", sanitize_scope(scope)))

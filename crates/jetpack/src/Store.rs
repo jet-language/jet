@@ -459,6 +459,12 @@ fn lease_nodes_unlocked(roots: &Roots) -> std::io::Result<Vec<LeaseNode>> {
                 "Hangar lease name is not valid UTF-8",
             )
         })?;
+        if text.starts_with(".reclaiming-") {
+            // Executable-lease recovery quarantines are outside the live
+            // lease namespace and may remain while antivirus finishes a
+            // delete. Audit must not classify the private retry name.
+            continue;
+        }
         if text.len() > LEASE_NAME_MAX {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -1919,6 +1925,11 @@ fn realize_adapter_tools(
                 ));
             }
         }
+        // Recipe::run_logged launches the adapter's child process directly from
+        // these leased executable paths. Mark the handoff before the lease
+        // leaves this function so Drop can retain the snapshot only while an
+        // inherited descendant lock proves it is still in use.
+        lease.mark_process_handoff();
         dependency_leases.push(lease);
     }
 

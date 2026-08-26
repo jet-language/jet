@@ -23,6 +23,7 @@ const AUTH_KEY_FILE: &str = "auth.key";
 const RECORDS_DIR: &str = "leases";
 const RECEIPT_FILE: &str = "receipt";
 const COMPLETE_FILE: &str = "complete";
+const LEASE_STATE_SCOPE: &str = "lease-state";
 const MAX_FRAME_BYTES: usize = 64 * 1024;
 const MAX_FIELD_BYTES: usize = 16 * 1024;
 const MAX_MEMBERS: usize = 4096;
@@ -32,6 +33,7 @@ const OWNER_LOCK_SCOPE: &str = "owner";
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static PUBLICATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static RECLAIM_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Operation {
@@ -121,11 +123,24 @@ impl ExecutableLeaseProtocol {
         })
     }
 
+    /// Serialize the short lease-state transitions independently of the
+    /// store's broader hangar lock. The service lock is the common boundary
+    /// for owner acquisition, publication, release, and recovery, including
+    /// callers that already hold a hangar lock themselves.
+    fn with_lease_state_lock<T>(
+        &self,
+        operation: impl FnOnce() -> io::Result<T>,
+    ) -> io::Result<T> {
+        super::with_lock(&self.root.join(SERVICE_DIR), LEASE_STATE_SCOPE, operation)
+    }
+
     /// Hold this lock for the lifetime of the process handoff.  Kernel lock
     /// ownership, rather than a PID or timestamp, is the stale-lease fact.
     pub(crate) fn acquire_owner(&self, lease_id: &str) -> io::Result<super::FileLock> {
-        let record = self.record_dir(lease_id)?;
-        super::acquire_lease_lock(&record, OWNER_LOCK_SCOPE)
+        self.with_lease_state_lock(|| {
+            let record = self.record_dir(lease_id)?;
+            super::acquire_lease_lock(&record, OWNER_LOCK_SCOPE)
+        })
     }
 
     pub(crate) fn owner_lock_path(&self, lease_id: &str) -> io::Result<PathBuf> {
@@ -225,6 +240,17 @@ impl ExecutableLeaseProtocol {
     /// the owner lock, the locked digest, and the snapshot before publishing
     /// an immutable complete receipt.
     pub(crate) fn accept_snapshot(
+        &self,
+        frame: &[u8],
+        locked_output_digest: &str,
+        snapshot_root: &Path,
+    ) -> io::Result<LeaseReceipt> {
+        self.with_lease_state_lock(|| {
+            self.accept_snapshot_unlocked(frame, locked_output_digest, snapshot_root)
+        })
+    }
+
+    fn accept_snapshot_unlocked(
         &self,
         frame: &[u8],
         locked_output_digest: &str,
@@ -332,11 +358,31 @@ impl ExecutableLeaseProtocol {
         generation: u64,
         owner_scope: &str,
     ) -> io::Result<()> {
+        self.with_lease_state_lock(|| {
+            self.release_unlocked(lease_id, generation, owner_scope)
+        })
+    }
+
+    fn release_unlocked(
+        &self,
+        lease_id: &str,
+        generation: u64,
+        owner_scope: &str,
+    ) -> io::Result<()> {
         let receipt = self.read_generation(lease_id, generation)?;
         if receipt.owner_scope != owner_scope {
             return Err(invalid("executable lease release owner mismatch"));
         }
         self.validate_owner_fields(lease_id, receipt.owner_pid, owner_scope)?;
+        // A replaced lease keeps every complete older generation as rollback
+        // authority. Releasing an old consumer must not erase that history;
+        // only the current generation is eligible for removal.
+        if self
+            .current_receipt(lease_id)?
+            .is_some_and(|current| current.generation != generation)
+        {
+            return Ok(());
+        }
         let record = self.existing_record_dir(lease_id)?;
         let generation_dir = record.join("generations").join(generation.to_string());
         remove_owned_tree(&generation_dir)?;
@@ -344,6 +390,12 @@ impl ExecutableLeaseProtocol {
     }
 
     pub(crate) fn reap_empty_record(&self, lease_id: &str) -> io::Result<bool> {
+        self.with_lease_state_lock(|| {
+            self.reap_empty_record_unlocked(lease_id)
+        })
+    }
+
+    fn reap_empty_record_unlocked(&self, lease_id: &str) -> io::Result<bool> {
         let record = match self.existing_record_dir(lease_id) {
             Ok(record) => record,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
@@ -366,8 +418,13 @@ impl ExecutableLeaseProtocol {
     /// here, beside receipt recovery, so no caller can apply a weaker liveness
     /// rule to the same executable snapshot.
     pub(crate) fn recover_stale_leases(&self) -> io::Result<usize> {
+        self.with_lease_state_lock(|| self.recover_stale_leases_unlocked())
+    }
+
+    fn recover_stale_leases_unlocked(&self) -> io::Result<usize> {
         let records = self.root.join(SERVICE_DIR).join(RECORDS_DIR);
         let mut protected_snapshots = BTreeSet::new();
+        let mut preserve_containers = false;
         if let Ok(metadata) = fs::symlink_metadata(&records) {
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
                 return Err(invalid("executable lease records are not a real directory"));
@@ -390,26 +447,54 @@ impl ExecutableLeaseProtocol {
                 if metadata.file_type().is_symlink() || !metadata.is_dir() {
                     continue;
                 }
+                let owner_state = lock_state(&record_dir.join(".locks").join("owner.lock"))?;
+                if owner_state == LockState::Held {
+                    // A held owner lock means the record may still be in the
+                    // middle of publication. Without a complete receipt there
+                    // is no safe way to name the snapshot, so leave every
+                    // container untouched for this recovery pass.
+                    preserve_containers = true;
+                }
                 let generations = record_dir.join("generations");
-                let Ok(entries) = fs::read_dir(&generations) else {
-                    continue;
+                let entries = match fs::read_dir(&generations) {
+                    Ok(entries) => entries,
+                    Err(error) if error.kind() == ErrorKind::NotFound => continue,
+                    Err(_) => {
+                        preserve_containers = true;
+                        continue;
+                    }
                 };
+                let mut unknown_state = false;
                 for generation in entries {
                     let generation = generation?;
-                    let Some(number) = generation
-                        .file_name()
+                    let generation_name = generation.file_name();
+                    let Some(number) = generation_name
                         .to_str()
                         .and_then(|value| value.parse::<u64>().ok())
                     else {
+                        if !generation_name.to_str().is_some_and(|value| {
+                            value.starts_with('.') && value.ends_with(".partial")
+                        }) {
+                            unknown_state = true;
+                        }
                         continue;
                     };
                     let Ok(receipt) = self.read_generation(&name, number) else {
+                        let complete = complete_generation_artifacts(&generation.path());
+                        if !matches!(complete, Ok(false))
+                            || self.unverified_snapshot_path(&generation.path()).is_some()
+                        {
+                            unknown_state = true;
+                        }
                         continue;
                     };
                     let snapshot = self.snapshot_path(&receipt.snapshot_rel)?;
-                    if !self.receipt_is_idle(&receipt, &snapshot)? {
+                    if owner_state == LockState::Held || !self.receipt_is_idle(&receipt, &snapshot)? {
                         protected_snapshots.insert(snapshot);
                     }
+                }
+                if unknown_state {
+                    preserve_containers = true;
                 }
             }
             for entry in fs::read_dir(&records)? {
@@ -426,10 +511,27 @@ impl ExecutableLeaseProtocol {
                 if metadata.file_type().is_symlink() || !metadata.is_dir() {
                     continue;
                 }
-                let generations = record_dir.join("generations");
-                let Ok(entries) = fs::read_dir(&generations) else {
+                let Some(owner_lock) = super::try_acquire_lock(&record_dir, OWNER_LOCK_SCOPE)?
+                else {
+                    // The recovery claim lost a race with the owner. A probe
+                    // is not enough: never delete state after it reports idle.
+                    preserve_containers = true;
                     continue;
                 };
+                let generations = record_dir.join("generations");
+                let entries = match fs::read_dir(&generations) {
+                    Ok(entries) => entries,
+                    Err(error) if error.kind() == ErrorKind::NotFound => {
+                        drop(owner_lock);
+                        continue;
+                    }
+                    Err(_) => {
+                        preserve_containers = true;
+                        drop(owner_lock);
+                        continue;
+                    }
+                };
+                let mut record_reclaimable = true;
                 for generation in entries {
                     let generation = generation?;
                     let generation_name = generation.file_name();
@@ -441,32 +543,62 @@ impl ExecutableLeaseProtocol {
                         if generation_name.to_str().is_some_and(|value| {
                             value.starts_with('.') && value.ends_with(".partial")
                         }) {
-                            remove_owned_tree(&generation_path)?;
+                            if remove_owned_tree(&generation_path).is_err() {
+                                record_reclaimable = false;
+                                preserve_containers = true;
+                            }
+                        } else {
+                            record_reclaimable = false;
+                            preserve_containers = true;
                         }
                         continue;
                     };
                     let Ok(receipt) = self.read_generation(&name, number) else {
-                        remove_owned_tree(&generation_path)?;
+                        // Numeric generations are published by rename only
+                        // after both artifacts are durable. A malformed
+                        // complete-looking generation is unknown state: keep
+                        // it and all containers. A plainly partial directory
+                        // with no receipt is safe to discard after the owner
+                        // claim. A parseable receipt may name the last good
+                        // snapshot even when antivirus has hidden one artifact.
+                        let complete = complete_generation_artifacts(&generation_path);
+                        let claimed_snapshot = self.unverified_snapshot_path(&generation_path);
+                        if matches!(complete, Ok(false)) && claimed_snapshot.is_none() {
+                            if remove_owned_tree(&generation_path).is_err() {
+                                record_reclaimable = false;
+                            }
+                        } else {
+                            record_reclaimable = false;
+                            preserve_containers = true;
+                            if let Some(snapshot) = claimed_snapshot {
+                                protected_snapshots.insert(snapshot);
+                            }
+                        }
                         continue;
                     };
                     let snapshot = self.snapshot_path(&receipt.snapshot_rel)?;
-                    if !self.receipt_is_idle(&receipt, &snapshot)? {
-                        protected_snapshots.insert(snapshot);
-                        continue;
-                    }
                     if protected_snapshots.contains(&snapshot) {
+                        record_reclaimable = false;
                         continue;
                     }
-                    if remove_owned_tree(&snapshot).is_err() {
+                    let container = self.lease_container(&snapshot)?;
+                    let Some(live_lock) = super::try_acquire_lock(&container, "live")? else {
                         protected_snapshots.insert(snapshot);
+                        record_reclaimable = false;
                         continue;
-                    }
+                    };
+                    // Remove the receipt first. If antivirus or permissions
+                    // interrupt the removal, keep the executable snapshot
+                    // referenced by the last good receipt.
                     if remove_owned_tree(&generation_path).is_err() {
                         protected_snapshots.insert(snapshot);
+                        record_reclaimable = false;
                     }
+                    drop(live_lock);
                 }
-                if fs::read_dir(&generations)?.next().is_none() {
-                    remove_owned_tree(&record_dir)?;
+                drop(owner_lock);
+                if record_reclaimable && fs::read_dir(&generations)?.next().is_none() {
+                    let _ = remove_owned_tree(&record_dir);
                 }
             }
         } else if let Err(error) = fs::symlink_metadata(&records) {
@@ -491,24 +623,42 @@ impl ExecutableLeaseProtocol {
                 .file_name()
                 .into_string()
                 .map_err(|_| invalid("executable lease container name is not UTF-8"))?;
+            let path = entry.path();
+            if name.starts_with(".reclaiming-") {
+                // Quarantines are already outside the live namespace. A
+                // prior cleanup may have been interrupted by antivirus or a
+                // crash; retry deletion without treating the private name as
+                // a caller-visible lease identity.
+                let _ = remove_owned_tree(&path);
+                continue;
+            }
             if name.len() > MAX_CONTAINER_NAME || !valid_container_name(&name) {
                 return Err(invalid("executable lease container identity is invalid"));
             }
-            let path = entry.path();
             let metadata = fs::symlink_metadata(&path)?;
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
                 return Err(invalid("executable lease container is not a real directory"));
             }
             let snapshot = path.join("snapshot");
-            if protected_snapshots.contains(&snapshot) {
+            if preserve_containers || protected_snapshots.contains(&snapshot) {
                 continue;
             }
-            match lock_state(&path.join(".locks").join("live.lock"))? {
-                LockState::Held => continue,
-                LockState::Idle | LockState::Absent => {
-                    remove_owned_tree(&path)?;
-                    swept += 1;
+            let live_lock = match fs::symlink_metadata(path.join(".locks")) {
+                Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                    return Err(invalid("executable lease lock directory is not real"));
                 }
+                Err(error) if error.kind() != ErrorKind::NotFound => return Err(error),
+                // A missing lock directory is not proof of idleness: an
+                // antivirus can remove the marker while the process still
+                // holds the canonical container inode. The claim helper
+                // recreates only the marker and still tests that inode.
+                Ok(_) | Err(_) => match super::try_acquire_lock(&path, "live")? {
+                    Some(lock) => Some(lock),
+                    None => continue,
+                },
+            };
+            if reclaim_container(&path, &leases, live_lock) {
+                swept += 1;
             }
         }
         Ok(swept)
@@ -526,6 +676,12 @@ impl ExecutableLeaseProtocol {
             lock_state(&container.join(".locks").join("live.lock"))?,
             LockState::Idle
         ))
+    }
+
+    fn unverified_snapshot_path(&self, generation: &Path) -> Option<PathBuf> {
+        let receipt_text = read_bounded(&generation.join(RECEIPT_FILE)).ok()?;
+        let receipt = parse_receipt(&receipt_text).ok()?;
+        self.snapshot_path(&receipt.snapshot_rel).ok()
     }
 
     fn lease_container(&self, snapshot: &Path) -> io::Result<PathBuf> {
@@ -669,7 +825,10 @@ impl ExecutableLeaseProtocol {
             version: decode_text(get("version")?, "version")?,
             reference: decode_text(get("reference")?, "reference")?,
             output_digest: decode_text(get("output")?, "output digest")?,
-            previous_output_digest: decode_text(get("previous")?, "previous output digest")?,
+            previous_output_digest: decode_optional_text(
+                get("previous")?,
+                "previous output digest",
+            )?,
             snapshot_rel: decode_text(get("snapshot")?, "snapshot path")?,
             members: decode_members(get("members")?)?,
             nonce: get("nonce")?.to_string(),
@@ -814,8 +973,12 @@ impl ExecutableLeaseProtocol {
         }
         let path = self
             .existing_record_dir(lease_id)?
-            .join("generations")
-            .join(generation.to_string());
+            .join("generations");
+        let generations_metadata = fs::symlink_metadata(&path)?;
+        if generations_metadata.file_type().is_symlink() || !generations_metadata.is_dir() {
+            return Err(invalid("executable lease generations are not a real directory"));
+        }
+        let path = path.join(generation.to_string());
         let metadata = fs::symlink_metadata(&path)?;
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(invalid("executable lease generation is not a real directory"));
@@ -852,7 +1015,10 @@ impl ExecutableLeaseProtocol {
             Ok(_) => Ok(record),
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 match fs::create_dir(&record) {
-                    Ok(()) => Ok(record),
+                    Ok(()) => {
+                        sync_directory(&records)?;
+                        Ok(record)
+                    }
                     Err(error) if error.kind() == ErrorKind::AlreadyExists => {
                         self.existing_record_dir(lease_id)
                     }
@@ -1194,6 +1360,11 @@ fn decode_text(value: &str, field: &str) -> io::Result<String> {
     bounded_text(&text, field)
 }
 
+fn decode_optional_text(value: &str, field: &str) -> io::Result<String> {
+    let bytes = decode_hex(value, field)?;
+    String::from_utf8(bytes).map_err(|_| invalid(field))
+}
+
 fn encode_members(members: &[LeaseMember]) -> io::Result<String> {
     validate_members(members)?;
     let mut sorted = members.to_vec();
@@ -1312,8 +1483,15 @@ fn load_or_create_key(service: &Path) -> io::Result<Vec<u8>> {
     }
     file.write_all(&secret)?;
     file.sync_all()?;
-    match fs::rename(&partial, &path) {
-        Ok(()) => sync_directory(service)?,
+    // `rename` replaces an existing destination on Unix.  That would let two
+    // first openers race and silently rotate the shared authentication key,
+    // invalidating every receipt signed by the winner.  A hard link gives us
+    // create-new publication on both supported native platforms.
+    match fs::hard_link(&partial, &path) {
+        Ok(()) => {
+            let _ = fs::remove_file(&partial);
+            sync_directory(service)?;
+        }
         Err(error) if error.kind() == ErrorKind::AlreadyExists => {
             let _ = fs::remove_file(&partial);
         }
@@ -1439,6 +1617,42 @@ fn sync_directory(path: &Path) -> io::Result<()> {
     }
 }
 
+fn reclaim_container(
+    path: &Path,
+    leases: &Path,
+    live_lock: Option<super::FileLock>,
+) -> bool {
+    let sequence = RECLAIM_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let quarantine = leases.join(format!(
+        ".reclaiming-{}-{sequence}",
+        std::process::id()
+    ));
+    // Windows denies directory replacement while the lock marker is open.
+    // The outer Hangar lock prevents a production producer from entering this
+    // gap; Unix keeps the kernel claim through the namespace move.
+    #[cfg(windows)]
+    let live_lock = {
+        drop(live_lock);
+        None::<super::FileLock>
+    };
+    #[cfg(not(windows))]
+    let live_lock = live_lock;
+    if fs::rename(path, &quarantine).is_err() {
+        return false;
+    }
+    // Publish the quarantine name before deleting anything. An interrupted
+    // delete leaves the complete old tree recoverable and outside the live
+    // lease namespace.
+    if sync_directory(leases).is_err() {
+        drop(live_lock);
+        return true;
+    }
+    drop(live_lock);
+    let _ = remove_owned_tree(&quarantine);
+    let _ = sync_directory(leases);
+    true
+}
+
 fn remove_owned_tree(path: &Path) -> io::Result<()> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -1484,6 +1698,9 @@ fn invalid(message: &str) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+    #[cfg(unix)]
+    use std::process::Command;
 
     fn scratch(tag: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
@@ -1626,6 +1843,8 @@ mod tests {
             .join("99");
         fs::create_dir_all(&incomplete).unwrap();
         fs::write(incomplete.join(RECEIPT_FILE), "partial").unwrap();
+        assert_eq!(protocol.recover_stale_leases().unwrap(), 0);
+        assert!(incomplete.exists());
         drop(owner);
         drop(live);
         assert_eq!(protocol.recover_stale_leases().unwrap(), 1);
@@ -1634,6 +1853,133 @@ mod tests {
         assert!(protocol
             .read_generation(&receipt.lease_id, receipt.generation)
             .is_err());
+        drop(protocol);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recovery_does_not_remove_a_partial_generation_while_owner_is_held() {
+        let root = scratch("active-partial");
+        let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
+        let lease_id = random_id(16).unwrap();
+        let owner = protocol.acquire_owner(&lease_id).unwrap();
+        let partial = root
+            .join(SERVICE_DIR)
+            .join(RECORDS_DIR)
+            .join(&lease_id)
+            .join("generations")
+            .join(".1-0.partial");
+        fs::create_dir_all(&partial).unwrap();
+        fs::write(partial.join(RECEIPT_FILE), "in flight").unwrap();
+
+        assert_eq!(protocol.recover_stale_leases().unwrap(), 0);
+        assert!(partial.exists());
+
+        drop(owner);
+        protocol.recover_stale_leases().unwrap();
+        assert!(!partial.exists());
+        drop(protocol);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recovery_preserves_a_complete_generation_when_its_witness_is_interfered_with() {
+        let root = scratch("witness-interference");
+        let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
+        let lease_id = random_id(16).unwrap();
+        let owner_scope = owner_scope(&lease_id).unwrap();
+        let (snapshot, digest) = snapshot(&root, "1-0-witness-interference", "one");
+        let (request, owner) = protocol
+            .prepare_snapshot(
+                &lease_id,
+                &owner_scope,
+                &snapshot,
+                "demo",
+                "1",
+                "demo@core#1",
+                &digest,
+                &[member("one")],
+            )
+            .unwrap();
+        let receipt = protocol
+            .accept_snapshot(
+                &protocol.encode_request(&request).unwrap(),
+                &digest,
+                &snapshot,
+            )
+            .unwrap();
+        drop(owner);
+
+        let generation = root
+            .join(SERVICE_DIR)
+            .join(RECORDS_DIR)
+            .join(&lease_id)
+            .join("generations")
+            .join(receipt.generation.to_string());
+        fs::write(
+            generation.join(COMPLETE_FILE),
+            "antivirus-interference",
+        )
+        .unwrap();
+
+        assert_eq!(protocol.recover_stale_leases().unwrap(), 0);
+        assert!(generation.exists());
+        assert!(snapshot.exists());
+        drop(protocol);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn interrupted_pre_handoff_container_is_quarantined_and_removed() {
+        let root = scratch("pre-handoff");
+        let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
+        let (snapshot, _) = snapshot(&root, "4294967294-1-pre-handoff", "partial");
+
+        assert_eq!(protocol.recover_stale_leases().unwrap(), 1);
+        assert!(!snapshot.parent().unwrap().exists());
+        assert!(fs::read_dir(root.join("leases")).unwrap().next().is_none());
+
+        drop(protocol);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_lifetime_marker_without_receipt_is_not_live_proof() {
+        let root = scratch("marker-without-receipt");
+        let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
+        let (snapshot, _) = snapshot(&root, "1-0-marker-without-receipt", "one");
+        let live_root = snapshot.parent().unwrap();
+        let live = crate::RuntimePolicy::acquire_lease_lock(live_root, "live").unwrap();
+        fs::remove_file(live_root.join(".locks/live.lock")).unwrap();
+
+        assert_eq!(protocol.recover_stale_leases().unwrap(), 0);
+        assert!(snapshot.exists());
+
+        drop(live);
+        fs::write(live_root.join(".locks/live.lock"), b"").unwrap();
+        assert_eq!(protocol.recover_stale_leases().unwrap(), 1);
+        assert!(!snapshot.exists());
+        drop(protocol);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_lifetime_lock_directory_never_proves_a_live_snapshot_idle() {
+        let root = scratch("lock-directory-interference");
+        let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
+        let (snapshot, _) = snapshot(&root, "1-0-lock-directory-interference", "one");
+        let live_root = snapshot.parent().unwrap();
+        let live = crate::RuntimePolicy::acquire_lease_lock(live_root, "live").unwrap();
+        fs::remove_dir_all(live_root.join(".locks")).unwrap();
+
+        assert_eq!(protocol.recover_stale_leases().unwrap(), 0);
+        assert!(snapshot.exists());
+
+        drop(live);
+        assert_eq!(protocol.recover_stale_leases().unwrap(), 1);
+        assert!(!snapshot.exists());
         drop(protocol);
         fs::remove_dir_all(root).unwrap();
     }
@@ -1749,6 +2095,10 @@ mod tests {
                 &first,
             )
             .unwrap();
+        drop(owner);
+        drop(protocol);
+        let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
+        let owner = protocol.acquire_owner(&lease_id).unwrap();
         let (second, second_digest) = snapshot(&root, "1-1-second", "two");
         let frame = protocol
             .prepare_replacement(
@@ -1762,6 +2112,13 @@ mod tests {
             .accept_snapshot(&frame, &second_digest, &second)
             .unwrap();
         assert_eq!(second_receipt.generation, 2);
+        assert_eq!(
+            protocol.read_generation(&lease_id, first_receipt.generation).unwrap(),
+            first_receipt
+        );
+        protocol
+            .release(&lease_id, first_receipt.generation, &owner_scope)
+            .unwrap();
         assert_eq!(
             protocol.read_generation(&lease_id, first_receipt.generation).unwrap(),
             first_receipt
@@ -1784,6 +2141,162 @@ mod tests {
             second_receipt
         );
         drop(owner);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_worker() {
+        let Some(root) = std::env::var_os("JET_EXEC_LEASE_WORKER_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let lease_id = std::env::var("JET_EXEC_LEASE_WORKER_LEASE").unwrap();
+        let snapshot = PathBuf::from(std::env::var_os("JET_EXEC_LEASE_WORKER_SNAPSHOT").unwrap());
+        let digest = std::env::var("JET_EXEC_LEASE_WORKER_DIGEST").unwrap();
+        let ready = PathBuf::from(std::env::var_os("JET_EXEC_LEASE_WORKER_READY").unwrap());
+        let go = PathBuf::from(std::env::var_os("JET_EXEC_LEASE_WORKER_GO").unwrap());
+        let prepared =
+            PathBuf::from(std::env::var_os("JET_EXEC_LEASE_WORKER_PREPARED").unwrap());
+        let publish = PathBuf::from(std::env::var_os("JET_EXEC_LEASE_WORKER_PUBLISH").unwrap());
+        let result = PathBuf::from(std::env::var_os("JET_EXEC_LEASE_WORKER_RESULT").unwrap());
+        let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
+        fs::write(&ready, b"ready").unwrap();
+        while !go.exists() {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let current = protocol.current_receipt(&lease_id).unwrap().unwrap();
+        let member_bytes = fs::read_to_string(snapshot.join("program")).unwrap();
+        let frame = protocol
+            .prepare_replacement(&current, &snapshot, &digest, &[member(&member_bytes)])
+            .unwrap();
+        fs::write(&prepared, b"prepared").unwrap();
+        while !publish.exists() {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        match protocol.accept_snapshot(&frame, &digest, &snapshot) {
+            Ok(receipt) => fs::write(&result, format!("ok\n{}\n", receipt.generation)).unwrap(),
+            Err(error) => fs::write(&result, format!("err\n{error}\n")).unwrap(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_replacements_publish_one_serial_generation() {
+        let root = scratch("concurrent-replace");
+        let protocol = ExecutableLeaseProtocol::open(&root).unwrap();
+        let lease_id = random_id(16).unwrap();
+        let scope = owner_scope(&lease_id).unwrap();
+        let (first, first_digest) = snapshot(&root, "1-0-concurrent-first", "one");
+        let (request, owner) = protocol
+            .prepare_snapshot(
+                &lease_id,
+                &scope,
+                &first,
+                "demo",
+                "1",
+                "demo@core#1",
+                &first_digest,
+                &[member("one")],
+            )
+            .unwrap();
+        protocol
+            .accept_snapshot(
+                &protocol.encode_request(&request).unwrap(),
+                &first_digest,
+                &first,
+            )
+            .unwrap();
+        let (left, left_digest) = snapshot(&root, "1-1-concurrent-left", "left");
+        let (right, right_digest) = snapshot(&root, "1-2-concurrent-right", "right");
+        let binary = std::env::current_exe().unwrap();
+        let go = root.join("workers.go");
+        let publish = root.join("workers.publish");
+        let spawn = |tag: &str, snapshot: &Path, digest: &str| {
+            Command::new(&binary)
+                .arg("replacement_worker")
+                .env("JET_EXEC_LEASE_WORKER_ROOT", &root)
+                .env("JET_EXEC_LEASE_WORKER_LEASE", &lease_id)
+                .env("JET_EXEC_LEASE_WORKER_SNAPSHOT", snapshot)
+                .env("JET_EXEC_LEASE_WORKER_DIGEST", digest)
+                .env("JET_EXEC_LEASE_WORKER_READY", root.join(format!("{tag}.ready")))
+                .env(
+                    "JET_EXEC_LEASE_WORKER_PREPARED",
+                    root.join(format!("{tag}.prepared")),
+                )
+                .env("JET_EXEC_LEASE_WORKER_GO", &go)
+                .env("JET_EXEC_LEASE_WORKER_PUBLISH", &publish)
+                .env("JET_EXEC_LEASE_WORKER_RESULT", root.join(format!("{tag}.result")))
+                .spawn()
+                .unwrap()
+        };
+        let mut workers = vec![
+            spawn("left", &left, &left_digest),
+            spawn("right", &right, &right_digest),
+        ];
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while (!root.join("left.ready").exists() || !root.join("right.ready").exists())
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        if !(root.join("left.ready").is_file() && root.join("right.ready").is_file()) {
+            for worker in &mut workers {
+                let _ = worker.kill();
+                let _ = worker.wait();
+            }
+            panic!("replacement workers did not reach the barrier");
+        }
+        fs::write(&go, b"go").unwrap();
+        let prepared_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while (!root.join("left.prepared").exists() || !root.join("right.prepared").exists())
+            && std::time::Instant::now() < prepared_deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        if !(root.join("left.prepared").is_file() && root.join("right.prepared").is_file()) {
+            for worker in &mut workers {
+                let _ = worker.kill();
+                let _ = worker.wait();
+            }
+            panic!("replacement workers did not prepare the same base generation");
+        }
+        fs::write(&publish, b"publish").unwrap();
+        for worker in &mut workers {
+            assert!(worker.wait().unwrap().success());
+        }
+        let results = ["left", "right"]
+            .map(|tag| fs::read_to_string(root.join(format!("{tag}.result"))).unwrap());
+        assert_eq!(
+            results.iter().filter(|result| result.starts_with("ok\n")).count(),
+            1,
+            "replacement results: {results:?}"
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| result.contains("executable lease replacement base is stale"))
+                .count(),
+            1,
+            "replacement results: {results:?}"
+        );
+        let current = protocol.current_receipt(&lease_id).unwrap().unwrap();
+        assert_eq!(current.generation, 2);
+        assert_eq!(
+            protocol.read_generation(&lease_id, 1).unwrap().output_digest,
+            first_digest
+        );
+        let generations = root
+            .join(SERVICE_DIR)
+            .join(RECORDS_DIR)
+            .join(&lease_id)
+            .join("generations");
+        assert!(fs::read_dir(generations)
+            .unwrap()
+            .flatten()
+            .all(|entry| !entry.file_name().to_string_lossy().ends_with(".partial")));
+        drop(owner);
+        protocol.recover_stale_leases().unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 }

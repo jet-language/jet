@@ -26,6 +26,24 @@ production workspace-driver and focused build-entry proof.
 | Package / Config | E4 card `#560`; workspace-driver and split-file package graph tests |
 | Inspect / LSP / Canvas | existing focused suites; Canvas remains E8 for unfinished UI |
 
+## CI nightly projections
+
+D-CI1 adds CI work. It adds no user-typeable Jet form. It therefore adds no
+`Syntax.rs` entry, example, diagnostic code, UI snapshot, or language golden.
+The existing projections remain the source of truth:
+
+| Surface | Source and proof |
+|---|---|
+| Examples and goldens | `examples/features/**` and `tests/golden.rs`; coverage uses `tests/fixtures/coverage.jet` with `coverage.text.golden` and `coverage.json.golden`. |
+| Diagnostics | `docs/spec/diagnostics.md`, `tests/ui/*.stderr`, and `tests/diagnostics_coverage.rs`; the CI gate has no user diagnostic. |
+| Grammar | `tests/grammar.rs`; the change gate calls the target directly. |
+| Fuzzing | `tests/fuzz_sema.rs`; `FUZZ_SEED` reproduces a run and `FUZZ_VARIANTS` sets its bounded size. |
+| Performance | `tools/perf/corpus.tsv`, `tools/perf/baseline.json`, `tools/perf/dashboard.sh`, and `tools/perf/ci-perf-check.sh`. |
+| Audit evidence | `tools/ci/ci-evidence.sh` writes `jet.ci-evidence.v1` `candidate.txt`, `receipt.txt`, `toolchain.txt`, `command.stdout`, and `command.stderr`. `scripts/agent/verify-full.sh` keeps the Tower hygiene report beside that evidence. |
+
+The CI evidence is a report, not a second test or language surface. A failed
+command keeps its receipt and captured output. A missing report is not a pass.
+
 ## 2026-07-15 rulings
 
 Recorded in `syntax-decisions.md`. Superseded spellings must not remain as a
