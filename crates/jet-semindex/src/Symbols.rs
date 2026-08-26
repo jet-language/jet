@@ -10,7 +10,7 @@ use jet_foundation::AST::ProgramBundle;
 use jet_foundation::{Collections, AST};
 
 use crate::Build::{function_parameter_parts, SymKind, SymbolDB};
-use crate::Types::{CompilerFact, MemberOrigin, SourceSpan, TraitContractFact};
+use crate::Types::{CompilerFact, MemberFact, MemberOrigin, SourceSpan, SymbolDef, TraitContractFact};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemanticSymbolKind {
@@ -424,6 +424,23 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
         .iter()
         .map(|member| (member.identity.as_str(), member.owner.as_str()))
         .collect();
+    let member_facts: HashMap<&str, &MemberFact> = db
+        .members
+        .iter()
+        .fold(HashMap::new(), |mut facts, member| {
+            facts.entry(member.identity.as_str()).or_insert(member);
+            facts
+        });
+    let definitions: HashMap<&str, &SymbolDef> = db
+        .index
+        .definitions()
+        .iter()
+        .fold(HashMap::new(), |mut definitions, definition| {
+            definitions
+                .entry(definition.identity.as_str())
+                .or_insert(definition);
+            definitions
+        });
     let sources: HashMap<&str, &str> = bundle
         .modules
         .iter()
@@ -475,12 +492,7 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
         if let Some(marker_signature) = marker_declaration_signature(bundle, def) {
             signature = marker_signature;
         }
-        if let Some(metadata) = db
-            .index
-            .definitions()
-            .iter()
-            .find(|definition| definition.identity == def.identity)
-        {
+        if let Some(metadata) = definitions.get(def.identity.as_str()) {
             if let Some(base) = &metadata.nominal_base {
                 signature = format!("type {display_name} :: distinct {}", display_type(base));
             }
@@ -493,7 +505,7 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
                 ));
             }
         }
-        if let Some(member) = db.members.iter().find(|member| member.identity == def.identity) {
+        if let Some(member) = member_facts.get(def.identity.as_str()) {
             let trait_name = match &member.origin {
                 MemberOrigin::TraitImpl { trait_name }
                 | MemberOrigin::TraitRequirement { trait_name } => Some(trait_name),
@@ -1376,13 +1388,13 @@ fn language_symbols() -> Vec<SemanticSymbol> {
             "Int",
             "Int.parse(text: String) -> Int !ParseError",
             "Parses text as an Int.",
-            "Int.parse(text)?",
+            "Int.parse(text)",
         ),
         (
             "Float",
             "Float.parse(text: String) -> Float !ParseError",
             "Parses text as a Float.",
-            "Float.parse(text)?",
+            "Float.parse(text)",
         ),
     ] {
         let qualified_name = format!("{owner}.parse");
@@ -1473,7 +1485,7 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
         "Duration.in",
         "Duration.in(unit: DurationUnit) -> Int !RangeError",
         "Reads a checked whole duration unit.",
-        Some("duration.in(.Milliseconds)?"),
+        Some("duration.in(.Milliseconds)"),
     ),
     (
         "List.len",

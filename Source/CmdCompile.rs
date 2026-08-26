@@ -1412,6 +1412,35 @@ pub(crate) fn run_compile_cmd(
         .and_then(|prepared| prepared.emitted_program())
         .map(|program| jet::resolve_c_links_for_bundle(program, cross_target));
 
+    // Restore a validated native artifact before code generation. A workspace
+    // index and any foreign-linked/bridge-backed program stay on the ordinary
+    // path because their final artifact has inputs outside this key.
+    let native_cache_hit = if cmd == "build"
+        && !emit_rust
+        && !emit_generated
+        && !is_library
+        && output_name.is_none()
+        && !is_web
+        && !is_plugin
+        && cross_target.is_none()
+        && Path::new(file).file_name().and_then(|name| name.to_str())
+            != Some(jet::Syntax::WORKSPACE_FILE)
+        && native_key.is_some()
+        && reused_clinks
+            .as_ref()
+            .is_some_and(|result| matches!(result, Ok(args) if args.is_empty()))
+        && build_front_end
+            .as_ref()
+            .and_then(|prepared| prepared.runtime_program())
+            .is_some_and(jet::FFI::native_cacheable)
+    {
+        native_key.as_ref().is_some_and(|key| {
+            jet::BuildCache::try_copy_cached(key, &bin_path(file))
+        })
+    } else {
+        false
+    };
+
     // D-LINTPOLICY1=A (the override law): visible lints from this compile,
     // captured here (out of the `match` arm's scope) so the `policy.lints`
     // deny-path enforcement below can see them alongside the already-loaded
@@ -1440,6 +1469,23 @@ pub(crate) fn run_compile_cmd(
         )
     } else if cmd == "build" && emit_generated {
         jet::compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped(
+            file,
+            build_grants,
+            freestanding,
+            gates,
+            locked,
+            is_web,
+            is_plugin,
+            cross_target,
+            remote_builder,
+            profile.budget_name(),
+            setting_overrides,
+            build_front_end.take(),
+            package_scope,
+            build_override,
+        )
+    } else if native_cache_hit {
+        jet::compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_without_codegen(
             file,
             build_grants,
             freestanding,
@@ -1801,6 +1847,7 @@ pub(crate) fn run_compile_cmd(
                 web_out.as_ref(),
                 plugin_out.as_ref(),
                 mode,
+                native_cache_hit,
                 native_key.clone(),
             );
             print_release_job_summary(&src, release_profile, mode);
@@ -1876,6 +1923,7 @@ pub(crate) fn run_compile_cmd(
                 web_out.as_ref(),
                 plugin_out.as_ref(),
                 mode,
+                false,
                 native_key.clone(),
             );
             print_release_job_summary(&src, release_profile, mode);
@@ -1977,6 +2025,7 @@ pub(crate) fn run_dev_entry(
         None,
         None,
         mode,
+        false,
         // `jet dev` is an interactive live-reload loop (entry-swapped codegen);
         // not worth a content-cache entry. Still race-safe via `build`'s
         // per-process temp path.
@@ -3059,6 +3108,7 @@ fn run_test_target(
         None,
         None,
         mode,
+        false,
         // `jet test` caches on the same canonical-AST key, but in its own mode
         // space (the test-harness binary must never be served for a `jet run`);
         // profile and `--coverage` instrumentation are distinct binaries again.
@@ -3224,6 +3274,7 @@ fn run_doctests(
             None,
             None,
             mode,
+            false,
             // Doctest binaries are one-shot synthetic programs; not cached.
             None,
         );
@@ -4929,6 +4980,7 @@ pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, m
         None,
         None,
         mode,
+        false,
         // Fuzz harness build; not content-cached — target selection (an
         // implicit "the file's only property test") can change without the
         // file's bytes changing (e.g. a sibling test gains params), and a
@@ -5006,10 +5058,32 @@ fn native_cache_salt(
     target: &str,
     instance_fingerprints: &[String],
 ) -> String {
+    native_cache_salt_with_schema(
+        NATIVE_CACHE_SALT_SCHEMA,
+        toolchain,
+        dependency_fingerprint,
+        runtime_fingerprint,
+        corelib_fingerprint,
+        mode,
+        target,
+        instance_fingerprints,
+    )
+}
+
+fn native_cache_salt_with_schema(
+    schema: &[u8],
+    toolchain: &str,
+    dependency_fingerprint: &str,
+    runtime_fingerprint: &str,
+    corelib_fingerprint: &str,
+    mode: &str,
+    target: &str,
+    instance_fingerprints: &[String],
+) -> String {
     let mut instances = instance_fingerprints.to_vec();
     instances.sort();
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"jet-native-cache-salt-v5");
+    bytes.extend_from_slice(schema);
     for value in [
         toolchain,
         dependency_fingerprint,
@@ -5027,6 +5101,7 @@ fn native_cache_salt(
     jet::SHA256::sha256_hex(&bytes)
 }
 
+const NATIVE_CACHE_SALT_SCHEMA: &[u8] = b"jet-native-cache-salt-v5";
 const NATIVE_CACHE_COMPILER_ABI: &str = "jet.native-cache-abi.v5";
 
 fn command_identity(program: &str, args: &[&str]) -> String {
@@ -6145,6 +6220,7 @@ pub(crate) fn build(
     web: Option<&jet::Codegen::WebArtifacts>,
     plugin: Option<&jet::Codegen::PluginArtifacts>,
     mode: OutputMode,
+    restored_cache: bool,
     // D-BUILDNORM1=A (Tower #85): the content-addressed cache key, computed by
     // the caller from the *pre-sema* canonical AST bytes (+ profile + toolchain
     // salt). `None` when this build must not be cached (e.g. an `embed_file`
@@ -6165,14 +6241,27 @@ pub(crate) fn build(
         crate::cli_error!("E2105", "couldn't create the build/ folder: {}", e);
         exit(ExitCodes::USER_ERROR);
     });
+    let mut compile_timer = jet::PhaseTiming::enabled().then(jet::PhaseTiming::PhaseTimer::new);
+    if restored_cache {
+        step("cache hit -> reused cached binary".to_string());
+        if jet::PhaseTiming::enabled() {
+            if let Ok(meta) = std::fs::metadata(&bin) {
+                eprintln!("jet-timing binary_bytes={}", meta.len());
+            }
+        }
+        if let Some(timer) = compile_timer.as_mut() {
+            timer.record_us("backend", 0);
+            timer.record_us("link", 0);
+            write_backend_timing(timer);
+        }
+        return;
+    }
     let rs_path = PathBuf::from("build").join(format!("{}.rs", stem(file)));
     step(format!("emit Rust  -> {}", rs_path.display()));
     fs::write(&rs_path, rust_code).unwrap_or_else(|e| {
         crate::cli_error!("E2105", "couldn't write {}: {}", rs_path.display(), e);
         exit(ExitCodes::USER_ERROR);
     });
-    let mut compile_timer = jet::PhaseTiming::enabled().then(jet::PhaseTiming::PhaseTimer::new);
-
     // D-WEBKIND1=A (c123 M2): `web` is a Jet backend target — emit WASM + JS.
     if cross_target == Some(jet::Syntax::BUILD_TARGET_WEB) {
         let web = web.unwrap_or_else(|| {
@@ -6586,6 +6675,7 @@ pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: Ou
         None,
         None,
         mode,
+        false,
         // `jet debug` builds carry a line-map and launch interactively; not cached.
         None,
     );
@@ -6707,7 +6797,8 @@ mod profile_tests {
 mod missing_c_lib_tests {
     use super::{
         child_exit_code, missing_c_lib, missing_linker, native_cache_key,
-        native_cache_key_with_toolchain, native_cache_salt, render_internal_fault,
+        native_cache_key_with_toolchain, native_cache_salt, native_cache_salt_with_schema,
+        render_internal_fault,
     };
 
     struct ScratchProject(std::path::PathBuf);
@@ -6924,6 +7015,20 @@ mod missing_c_lib_tests {
             )
         };
         let base_salt = salt("dependency-a", "generated-runtime-a", "core-a", "linux-x86_64");
+        assert_ne!(
+            base_salt,
+            native_cache_salt_with_schema(
+                b"jet-native-cache-salt-v4",
+                &base_identity,
+                "dependency-a",
+                "generated-runtime-a",
+                "core-a",
+                "run",
+                "linux-x86_64",
+                &instances,
+            ),
+            "cache-schema change must miss final work"
+        );
         for (input, changed) in [
             ("dependency", salt("dependency-b", "generated-runtime-a", "core-a", "linux-x86_64")),
             ("generated code", salt("dependency-a", "generated-runtime-b", "core-a", "linux-x86_64")),

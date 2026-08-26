@@ -116,6 +116,8 @@
       identity.title = session.id;
       identity.dataset.sessionId = session.id;
       identity.dataset.sourceRevision = currentRevision;
+      const sessionCard = identity.closest(".workbench-session");
+      if (sessionCard) sessionCard.dataset.sessionState = session.state || "starting";
     }
     if (footerSession) {
       footerSession.textContent = `Session ${shortId}`;

@@ -218,7 +218,9 @@ pub(crate) fn annotate_scoped_gc_promotions(bundle: &mut ProgramBundle) -> Vec<D
             }
             for stmt in &function.body {
                 let Stmt::Val(binding) = stmt else { continue };
-                if matches!(&binding.init, Expr::Call(call) if promoted.contains(&call.name)) {
+                if called_function_name(&binding.init)
+                    .is_some_and(|name| promoted.contains(name))
+                {
                     diagnostics.push(Diagnostic::error(
                         "E2111",
                         format!("`{}` cannot leave its scoped GC policy here", binding.name),
@@ -441,7 +443,8 @@ fn propagate_gc_transfers(function: &mut Func, promoted: &HashSet<String>) -> bo
     for stmt in &mut function.body {
         if let Stmt::Val(binding) = stmt {
             if function.gc_scope
-                && matches!(&binding.init, Expr::Call(call) if promoted.contains(&call.name))
+                && called_function_name(&binding.init)
+                    .is_some_and(|name| promoted.contains(name))
                 && !binding.gc_transferred
             {
                 binding.gc_transferred = true;
@@ -463,8 +466,10 @@ fn returned_names(stmts: &[Stmt]) -> HashSet<String> {
     let mut names = HashSet::new();
     for stmt in stmts {
         match stmt {
-            Stmt::Return(Some(Expr::Ident(name, _)), _) => {
-                names.insert(name.clone());
+            Stmt::Return(Some(expr), _) => {
+                if let Some(name) = returned_name(expr) {
+                    names.insert(name.to_owned());
+                }
             }
             Stmt::Policy { body, .. } => names.extend(returned_names(body)),
             Stmt::While { body, .. }
@@ -485,6 +490,26 @@ fn returned_names(stmts: &[Stmt]) -> HashSet<String> {
         }
     }
     names
+}
+
+fn called_function_name(expr: &Expr) -> Option<&str> {
+    match expr.without_parens() {
+        Expr::Call(call) => Some(call.name.as_str()),
+        // Fallible calls are wrapped in the propagation node before memory
+        // facts run, but they retain the same callee identity.
+        Expr::Try(inner, _, _, _) => called_function_name(inner),
+        _ => None,
+    }
+}
+
+fn returned_name(expr: &Expr) -> Option<&str> {
+    match expr.without_parens() {
+        Expr::Ident(name, _) => Some(name),
+        // Fallible functions carry direct success returns in the compiler's
+        // Result envelope before memory facts are computed.
+        Expr::Ok(inner, _) => returned_name(inner),
+        _ => None,
+    }
 }
 
 fn collect_expr_idents(expr: &Expr, out: &mut HashSet<String>) {

@@ -478,7 +478,7 @@ fn run() {
 
 // c109 Phase 8: fallible + optional.
 
-/// A fallible `T !E` function with `ok`/`err` constructors and `?` propagation
+/// A fallible `T !E` function with `ok`/`err` constructors and automatic propagation
 /// across a covered scalar-payload error enum, consumed with `??` value fallback.
 /// `parse_age`, `load`, and `main` all route through the TIR.
 #[test]
@@ -501,7 +501,7 @@ fn parse_age(raw: Int) Int !ParseError -[]> {
     return Ok((raw * 2))
 }
 fn load(raw: Int) Int !ParseError -[]> {
-    n :: parse_age(raw)?
+    n :: parse_age(raw)
     return Ok((n + 1))
 }
 fn run() {
@@ -514,7 +514,7 @@ fn run() {
     let (code, stdout) = build_and_run("tir_fallible", src);
     assert_eq!(code, 0);
     // load(21): parse_age→Ok(42), n=42, Ok(43); ?? → 43.
-    // load(0):  parse_age→Err(Empty), ? propagates Err; ?? → 99.
+    // load(0):  parse_age→Err(Empty), automatic propagation passes Err; ?? → 99.
     assert_eq!(stdout, "43\n99\n");
 }
 

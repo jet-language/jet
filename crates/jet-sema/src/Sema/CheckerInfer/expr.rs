@@ -4701,6 +4701,15 @@ impl<'a> Checker<'a> {
                     value,
                 } = expected
                 {
+                    if !self.map_key_type_eligible(&key) {
+                        self.diags.push(Diagnostic::error(
+                            "E0502",
+                            format!("`{}` can't be a map key type (D-MAP-KEY1)", key.name()),
+                            "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields recursively follow D-MAP-KEY1; Float, views, Shared, functions, lists, maps, sets, and payload-carrying enums are not key-eligible".to_string(),
+                            "use an eligible scalar, enum, tuple, or struct key; remove non-key fields or store the value separately".to_string(),
+                            Some(key_span.unwrap_or(span)),
+                        ));
+                    }
                     return Some(Type::Map {
                         key,
                         key_span,

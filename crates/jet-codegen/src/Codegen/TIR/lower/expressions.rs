@@ -2135,6 +2135,115 @@ pub(crate) fn lower_debug_text(value: TExpr) -> TExpr {
     }
 }
 
+/// D-FAIL-ERROR1=A: top-level comptime values are lowered before sema has
+/// rewritten raw `Err(...)` calls to `Expr::Err` plus the default `Err` struct.
+/// Normalize that one early shape here so the comptime evaluator consumes the
+/// same TIR carrier as the post-sema AOT/JIT paths.
+fn lower_raw_err_value(call: &Call, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    let message = call
+        .args
+        .first()
+        .filter(|arg| arg.label.is_none())
+        .map(|arg| lower_expr(&arg.expr, cx, env))
+        .unwrap_or_else(|| TExpr {
+            ty: Type::String,
+            kind: TExprKind::StrLit(vec![TStrPart::Lit(String::new())]),
+        });
+    let optional = |value: Option<TExpr>, fallback: Type| match value {
+        Some(value) => TExpr {
+            ty: Type::Option(Box::new(value.ty.clone())),
+            kind: TExprKind::Present(Box::new(value)),
+        },
+        None => TExpr {
+            ty: Type::Option(Box::new(fallback)),
+            kind: TExprKind::Absent,
+        },
+    };
+    let code = call
+        .args
+        .iter()
+        .find(|arg| arg.label.as_ref().is_some_and(|(name, _)| name == "code"))
+        .map(|arg| lower_expr(&arg.expr, cx, env));
+    let cause = call
+        .args
+        .iter()
+        .find(|arg| arg.label.as_ref().is_some_and(|(name, _)| name == "cause"))
+        .map(|arg| match strip_expr_parens(&arg.expr) {
+            Expr::Call(nested) if nested.name == Syntax::LIT_ERR => {
+                lower_raw_err_value(nested, cx, env)
+            }
+            _ => lower_expr(&arg.expr, cx, env),
+        });
+    TExpr {
+        ty: Type::Named(Syntax::TYPE_ERR.to_string()),
+        kind: TExprKind::StructLit {
+            fields: vec![
+                ("message".to_string(), message, false),
+                ("code".to_string(), optional(code, Type::String), false),
+                (
+                    "cause".to_string(),
+                    optional(cause, Type::Named(Syntax::TYPE_ERR.to_string())),
+                    false,
+                ),
+            ],
+            extra: None,
+            as_trait: None,
+        },
+    }
+}
+
+fn lower_raw_err_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
+    if call.name != Syntax::LIT_ERR
+        || cx.sigs.contains_key(&call.name)
+        || env.locals.contains_key(&call.name)
+    {
+        return None;
+    }
+    let target_error = match env.ret_ty.as_ref() {
+        Some(Type::Result { err, .. }) => Some((**err).clone()),
+        _ => None,
+    };
+    let default_error = target_error.as_ref().is_none_or(|error| {
+        matches!(error, Type::Named(name) if name == Syntax::TYPE_ERR)
+    });
+    if default_error {
+        let value = lower_raw_err_value(call, cx, env);
+        return Some(match target_error {
+            Some(_) => TExpr {
+                ty: Type::Result {
+                    ok: Box::new(Type::Int),
+                    err: Box::new(value.ty.clone()),
+                },
+                kind: TExprKind::Err(Box::new(value)),
+            },
+            None => value,
+        });
+    }
+    let payload = call
+        .args
+        .first()
+        .map(|arg| lower_expr(&arg.expr, cx, env))
+        .unwrap_or_else(|| TExpr {
+            ty: Type::Named(Syntax::TYPE_ERR.to_string()),
+            kind: TExprKind::StructLit {
+                fields: Vec::new(),
+                extra: None,
+                as_trait: None,
+            },
+        });
+    let payload = match target_error.as_ref() {
+        Some(error) => crate::Codegen::TIR::maybe_widen_expr_to_union(payload, error),
+        None => payload,
+    };
+    Some(TExpr {
+        ty: Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(payload.ty.clone()),
+        },
+        kind: TExprKind::Err(Box::new(payload)),
+    })
+}
+
 fn lower_positive_integer_literal(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
     match expr {
         Expr::Paren(inner, _) => lower_positive_integer_literal(inner, cx, env),
@@ -3151,6 +3260,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }),
         Expr::Call(call) => {
             in_own_frame(|| {
+                if let Some(lowered) = lower_raw_err_call(call, cx, env) {
+                    return lowered;
+                }
                 // D-CONC-CHAN1=A: `channel<T>()` is a readable builtin. Keep
                 // the source surface direct, then normalize to the one existing
                 // Core/Prelude channel route consumed by AOT, JIT, and TIR.

@@ -68,6 +68,20 @@ PARITY_CASE_COUNT=0
 }
 mkdir -p "$TMP_ROOT"
 
+# Pin the compiler process for the whole receipt. A concurrent cargo build can
+# replace target/debug/jet while this script is between a warmup and a sample;
+# the JIT run-cache correctly treats that as a compiler-identity change, which
+# would turn a valid no-change measurement into a false cache miss. The copy is
+# the exact binary identified below and is used by every measured and parity
+# invocation, so a receipt never mixes compiler builds.
+run_dir=$(mktemp -d "$TMP_ROOT/compiler-speed.XXXXXX")
+rows_file="$run_dir/rows.tsv"
+outputs_dir="$run_dir/outputs"
+trap 'rm -rf "$run_dir"' EXIT HUP INT TERM
+cp "$JET_BIN" "$run_dir/jet"
+JET_BIN="$run_dir/jet"
+mkdir -p "$outputs_dir"
+
 sha256() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" | awk '{print $1}'
@@ -150,7 +164,7 @@ machine_llvm=$(printf '%s\n' "$machine_rustc_vv" | sed -n 's/^LLVM version: //p'
 machine_rustc_vv_sha=$(printf '%s\n' "$machine_rustc_vv" | sha256_text)
 machine_memory=$(awk '/^MemTotal:/ { print $2 * 1024; exit }' /proc/meminfo 2>/dev/null || true)
 machine_governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown)
-compiler_sha256=$(sha256 "$ROOT/target/debug/jet")
+compiler_sha256=$(sha256 "$JET_BIN")
 machine_rustc_path=$(resolve_tool_path rustc || true)
 machine_rustc_sha256=
 if [ -n "$machine_rustc_path" ]; then
@@ -263,11 +277,6 @@ for identity_pair in \
 done
 machine="$machine_os/$machine_arch/cpus=$machine_cpus/host=$machine_host"
 corpus_sha=$(sha256 "$CORPUS")
-run_dir=$(mktemp -d "$TMP_ROOT/compiler-speed.XXXXXX")
-rows_file="$run_dir/rows.tsv"
-outputs_dir="$run_dir/outputs"
-mkdir -p "$outputs_dir"
-trap 'rm -rf "$run_dir"' EXIT HUP INT TERM
 
 check_corpus() {
     corpus_count=0
@@ -541,7 +550,7 @@ run_aot_trial() {
             JET_TIMING=1 \
             JET_TIMING_DIR="$trial_work/timing" \
             NO_COLOR=1 \
-            "$JET_ENV" bash -c "cd '$trial_work' && exec jet build --profile=release --verbose run.jet"; then
+            "$JET_ENV" bash -c "cd '$trial_work' && exec '$JET_BIN' build --profile=release --verbose run.jet"; then
             trial_status=0
         else
             trial_status=$?
@@ -765,7 +774,7 @@ parity_run_case() {
         "$JET_BIN" dev run.jet --watch=off --quiet
     parity_run_process "$parity_root/aot-build.status" "$parity_root/aot-build.stdout" "$parity_root/aot-build.stderr" "$parity_root" \
         env JET_CACHE_DIR="$parity_root/aot-build-cache" NO_COLOR=1 \
-        "$JET_ENV" bash -c "cd '$parity_root' && exec jet build --profile=release run.jet"
+        "$JET_ENV" bash -c "cd '$parity_root' && exec '$JET_BIN' build --profile=release run.jet"
     parity_require_status "$(sed -n '1p' "$parity_root/jit.status")" "$parity_id/jit"
     parity_require_status "$(sed -n '1p' "$parity_root/dev.status")" "$parity_id/dev"
     parity_require_status "$(sed -n '1p' "$parity_root/aot-build.status")" "$parity_id/aot-build"
@@ -857,7 +866,7 @@ parity_check_diagnostic() {
         "$JET_BIN" dev "$parity_source" --watch=off --quiet
     parity_run_process "$parity_root/aot.status" "$parity_root/aot.stdout" "$parity_root/aot.stderr" "$ROOT" \
         env JET_CACHE_DIR="$parity_root/aot-build-cache" NO_COLOR=1 \
-        "$JET_ENV" bash -c "cd '$ROOT' && exec jet build --profile=release '$parity_source'"
+        "$JET_ENV" bash -c "cd '$ROOT' && exec '$JET_BIN' build --profile=release '$parity_source'"
     for parity_tier in jit dev aot; do
         parity_status=$(sed -n '1p' "$parity_root/$parity_tier.status")
         [ "$parity_status" -ne 0 ] || { echo "diagnostic unexpectedly passed: $parity_tier" >&2; exit 1; }

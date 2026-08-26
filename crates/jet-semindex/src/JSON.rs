@@ -1,6 +1,6 @@
 //! Stable JSON encoding for `SemIndex` (no external crates — I6 path deps only).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use jet_foundation::Report::render_status_json;
 use jet_foundation::AST::{Item, ProgramBundle};
@@ -1248,10 +1248,23 @@ pub(crate) fn convert_defs(
     members: &[MemberFact],
     bundle: &ProgramBundle,
 ) -> Vec<SymbolDef> {
+    let member_owners: HashMap<&str, &str> = members
+        .iter()
+        .fold(HashMap::new(), |mut owners, member| {
+            owners
+                .entry(member.identity.as_str())
+                .or_insert(member.owner.as_str());
+            owners
+        });
     defs.iter()
         .map(|d| {
-            let (nominal_base, trait_contracts) =
-                contract_metadata(d, bundle, members);
+            let (nominal_base, trait_contracts) = match &d.kind {
+                SymKind::Struct { .. }
+                | SymKind::Enum { .. }
+                | SymKind::Trait
+                | SymKind::Type { .. } => contract_metadata(d, bundle, members),
+                _ => (None, Vec::new()),
+            };
             let view_provenance = view_provenance
                 .get(&d.identity)
                 .map(|map| {
@@ -1264,10 +1277,7 @@ pub(crate) fn convert_defs(
                 SymKind::EnumVariant { parent } | SymKind::Field { parent, .. } => {
                     Some(parent.as_str())
                 }
-                SymKind::Function { .. } => members
-                    .iter()
-                    .find(|member| member.identity == d.identity)
-                    .map(|member| member.owner.as_str()),
+                SymKind::Function { .. } => member_owners.get(d.identity.as_str()).copied(),
                 _ => None,
             };
             SymbolDef {

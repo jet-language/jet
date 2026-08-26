@@ -678,8 +678,8 @@ impl Token.Encode {
 }
 
 impl Token.Decode {
-    fn decode(tree: DataTree) Token [FieldError]! -[]> {
-        value :: tree.text()?
+    fn decode(tree: DataTree) Token ![FieldError] -[]> {
+        value :: tree.text()
         if value != "wire" {
             return Err([FieldError{ path: "$xml_event", reason: "bad token" }])
         }

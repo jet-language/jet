@@ -2960,8 +2960,8 @@ fn run() {
     recovered :: speed * elapsed
     ratio :: recovered / distance
     print(ratio)
-    exact :: Meter.from_millimeter(3000millimeter)?
-    rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven, digits: 0)?
+    exact :: Meter.from_millimeter(3000millimeter)
+    rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven, digits: 0)
     print("{(exact.raw())} {(rounded.raw())}")
 }
 "#, "physical_quantity");
@@ -2983,16 +2983,16 @@ fn run() {
     thirdish(scale: 2/3)
 }
 fn run() {
-    Meter.from_thirdish(1thirdish)?
+    Meter.from_thirdish(1thirdish)
 }
 "#, "physical_quantity_inexact");
-    // D-FAIL-CTX1=A (ratified 2026-08-06, card #1532): "Each `?` hop joins the
-    // failure journey on every tier, whether it has a note or not." The `?` on
-    // line 7 is that hop, printed as one trail line under the root failure the
+    // D-FAIL-CTX1=A (ratified 2026-08-06, card #1532): "Each automatic
+    // propagation crossing joins the failure journey on every tier, whether it
+    // has a note or not." The conversion call on line 7 is that hop, printed as one trail line under the root failure the
     // way E3002 now registers it: `  {n}. {fn} ({file}:{line})`, origin first,
     // under the root failure line. D-FAIL-ERROR1=A
-    // (card #1528) + D-FAIL-EXIT1=A (card #1533): bare `fn run() ?` means
-    // `run() !Err`, so the conversion's plain `String` error arrives as the
+    // (card #1528) + D-FAIL-EXIT1=A (card #1533): `fn run()` uses the implicit
+    // default error, so the conversion's plain `String` error arrives as the
     // default error and `jet_render_err` prints `Error: {message}` -- no code,
     // because this error carries none -- at the process edge, then exits 1.
     let inexact_shown = fixture_shown("physical_quantity_inexact");
@@ -3015,11 +3015,11 @@ fn run() {
     almost(scale: 9007199254740993/9007199254740992)
 }
 fn run() {
-    Meter.from_almost(1almost)?
+    Meter.from_almost(1almost)
 }
 "#, "physical_quantity_exact_rational_edge");
     // Same ratified envelope as above (D-FAIL-CTX1=A / D-FAIL-ERROR1=A): the
-    // exact conversion's `?` is again on line 7 of the fixture.
+    // exact conversion call is again on line 7 of the fixture.
     let rational_edge_shown = fixture_shown("physical_quantity_exact_rational_edge");
     assert_eq!(
         beyond_f64,
@@ -3049,16 +3049,16 @@ fn run() {
     below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
 }
 fn run() {
-    tie :: Meter.from_half_rounded(1half, .NearestEven, digits: 0)?
-    above :: Meter.from_above_half_rounded(1above_half, .NearestEven, digits: 0)?
+    tie :: Meter.from_half_rounded(1half, .NearestEven, digits: 0)
+    above :: Meter.from_above_half_rounded(1above_half, .NearestEven, digits: 0)
     negative_source :: ThreeHalves.from_float(-Float{1.0})
-    negative :: Meter.from_three_halves_rounded(negative_source, .NearestEven, digits: 0)?
+    negative :: Meter.from_three_halves_rounded(negative_source, .NearestEven, digits: 0)
     tie_point :: TieOffsetPoint.from_float(Float{0.0})
     above_point :: AboveOffsetPoint.from_float(Float{0.0})
     below_point :: BelowOffsetPoint.from_float(Float{0.0})
-    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(tie_point, .NearestEven, digits: 0)?
-    affine_above :: KelvinPoint.from_above_offset_point_rounded(above_point, .NearestEven, digits: 0)?
-    affine_below :: KelvinPoint.from_below_offset_point_rounded(below_point, .NearestEven, digits: 0)?
+    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(tie_point, .NearestEven, digits: 0)
+    affine_above :: KelvinPoint.from_above_offset_point_rounded(above_point, .NearestEven, digits: 0)
+    affine_below :: KelvinPoint.from_below_offset_point_rounded(below_point, .NearestEven, digits: 0)
     print("{(tie.raw())} {(above.raw())} {(negative.raw())} {(affine_tie.raw())} {(affine_above.raw())} {(affine_below.raw())}")
 }
 "#, "physical_quantity_rational_edges");
@@ -3071,11 +3071,11 @@ fn run() {
 #UnitFamily(Length, base: meter) { meter double(scale: 2) }
 fn run() {
     source :: Double.from_float(Float{1.7976931348623157e308})
-    Meter.from_double_rounded(source, .NearestEven, digits: 0)?
+    Meter.from_double_rounded(source, .NearestEven, digits: 0)
 }
 "#;
     // Same ratified envelope (D-FAIL-CTX1=A / D-FAIL-ERROR1=A); this fixture's
-    // `?` is on line 5, so its single trail hop names that line.
+    // The conversion call is on line 5, so its single trail hop names that line.
     let overflow_shown = fixture_shown("physical_quantity_rounded_overflow");
     assert_eq!(
         run_cranelift_without_fallback(overflow, "physical_quantity_rounded_overflow"),
@@ -3110,13 +3110,13 @@ fn rounded_physical_quantities_match_resident_default_dev_and_aot() {
 fn run() {
     positive :: Half.from_float(Float{5.0})
     negative :: Half.from_float(-Float{5.0})
-    toward_zero :: Meter.from_half_rounded(positive, .TowardZero, digits: 0)?
-    floor :: Meter.from_half_rounded(negative, .Floor, digits: 0)?
-    ceiling :: Meter.from_half_rounded(positive, .Ceiling, digits: 0)?
-    nearest_even :: Meter.from_near_quarter_rounded(1near_quarter, .NearestEven, digits: 2)?
-    nearest_odd :: Meter.from_near_three_quarters_rounded(1near_three_quarters, .NearestEven, digits: 2)?
-    point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(Float{0.0}), .Ceiling, digits: 2)?
-    delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(Float{0.0}), .Ceiling, digits: 2)?
+    toward_zero :: Meter.from_half_rounded(positive, .TowardZero, digits: 0)
+    floor :: Meter.from_half_rounded(negative, .Floor, digits: 0)
+    ceiling :: Meter.from_half_rounded(positive, .Ceiling, digits: 0)
+    nearest_even :: Meter.from_near_quarter_rounded(1near_quarter, .NearestEven, digits: 2)
+    nearest_odd :: Meter.from_near_three_quarters_rounded(1near_three_quarters, .NearestEven, digits: 2)
+    point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(Float{0.0}), .Ceiling, digits: 2)
+    delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(Float{0.0}), .Ceiling, digits: 2)
     print("{(toward_zero.raw())} {(floor.raw())} {(ceiling.raw())} {(nearest_even.raw())} {(nearest_odd.raw())} {(point.raw())} {(delta.raw())}")
 }
 "#;
@@ -3528,18 +3528,18 @@ fn choose_err() Float !String {
 }
 
 fn forward() Float !String {
-    value :: choose_ok()?
+    value :: choose_ok()
     return Ok(value + 0.25)
 }
 
 fn run() {
-    print(forward()?)
+    print(forward())
 }
 "#;
     let success_jit = run_cranelift_outcome(success, "result_success");
     assert_eq!(success_jit, ProgramOutput::ran("0.5\n".into(), "".into(), 0));
 
-    let failure = success.replace("choose_ok()?", "choose_err()?");
+    let failure = success.replace("choose_ok()", "choose_err()");
     let failure_jit = run_cranelift_outcome(&failure, "result_failure");
     // `run_cranelift_outcome` writes the fixture at this exact path, and every
     // journey frame names it, so the expectation must be built from it.
@@ -3547,13 +3547,14 @@ fn run() {
         .join("jet_jit_result_result_failure.jet")
         .to_string_lossy()
         .into_owned();
-    // D-FAIL-CTX1=A (ratified 2026-08-06, card #1532): "Each `?` hop joins the
-    // failure journey on every tier, whether it has a note or not." That
-    // authorises the two E3002 hops — `forward`'s `?` on line 11 and `run`'s on
+    // D-FAIL-CTX1=A (ratified 2026-08-06, card #1532): "Each automatic
+    // propagation crossing joins the failure journey on every tier, whether it
+    // has a note or not." That authorises the two E3002 hops — `forward`'s
+    // call on line 11 and `run`'s on
     // line 16 — origin first under the root failure, spelled the way E3002 now
     // registers it: `  {n}. {fn} ({file}:{line})`.
-    // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): bare `fn run() ?`
-    // means `run() !Err`, so the `String` error arrives as the default error and
+    // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): `fn run()` uses
+    // the implicit default error, so the `String` error arrives as that error and
     // the process edge prints one full report and exits 1. `jet_render_err`
     // renders `Error: {message}` with no code and `Error [{code}]: {message}`
     // with one. Same shape as the ratified AOT golden
@@ -3605,7 +3606,7 @@ fn direct_ok() Int {
 }
 
 fn run() {
-    print(direct_ok()?)
+    print(direct_ok())
     stop :: false
     if stop {
         return Err("one-arm stopped")
@@ -3619,7 +3620,7 @@ fn direct_ok() Int {
 }
 
 fn run() {
-    print(direct_ok()?)
+    print(direct_ok())
     outer :: true
     inner :: false
     if outer {
@@ -3636,7 +3637,7 @@ fn direct_ok() Int {
 }
 
 fn run() {
-    print(direct_ok()?)
+    print(direct_ok())
     if true {
         print("left continues")
     } else {
@@ -3651,7 +3652,7 @@ fn direct_ok() Int {
 }
 
 fn run() {
-    print(direct_ok()?)
+    print(direct_ok())
     if true {
         return Err("left branch")
     } else {
@@ -3683,14 +3684,14 @@ fn run() {
         (
             "both_arms_terminate",
             both_arms_terminate,
-            // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): bare
-            // `fn run() ?` means `run() !Err`, so `return Err("left branch")`
+            // D-FAIL-ERROR1=A (card #1528) + D-FAIL-EXIT1=A (card #1533): `fn run()`
+            // uses the implicit default error, so `return Err("left branch")`
             // reaches the process edge as one full default-error report and exits
             // 1. `jet_render_err` renders `Error: {message}` when the error
             // carries no code — see the ratified golden
             // `examples/features/expected/errors/default_err_edge.err.out`, which
             // shows the `Error [CODE]: …` form of the same renderer. No journey
-            // frame here: D-FAIL-CTX1=A appends a frame per `?` hop, and this
+            // frame here: D-FAIL-CTX1=A appends a frame per propagation crossing, and this
             // `Err` is returned directly rather than re-raised.
             ProgramOutput::ran("7\n".into(), "Error: left branch\n".into(), 1),
         ),
@@ -3721,7 +3722,7 @@ use core.perf as perf
 fn run() {
     perf.reset_fidelity()
     print(perf.default_fidelity())
-    perf.override_fidelity(0.25)?
+    perf.override_fidelity(0.25)
     print(perf.fidelity())
     perf.reset_fidelity()
     print(perf.fidelity())
@@ -3755,8 +3756,8 @@ fn run() {
             r#"use core.perf as perf
 fn run() {{
     perf.reset_fidelity()
-    perf.override_fidelity(0.375)?
-    perf.override_fidelity({value})?
+    perf.override_fidelity(0.375)
+    perf.override_fidelity({value})
 }}"#
         );
         let got = run_cranelift_outcome(&src, tag);
@@ -5545,7 +5546,7 @@ fn run_tier_parity_guard() {
 ///   never re-observed. `f7aab7bf8` re-derived the ledger from an observed run
 ///   (374 -> 496 rows, 122 stems previously in no section at all) and recorded
 ///   what the tiers actually do: `serde/encoding_breadth` is `frontend_rejected:`
-///   on the E2402 `?`-conversion family, and `serde/serde_generic` is a bare
+///   on the E2402 error-conversion family, and `serde/serde_generic` is an
 ///   `deopt_interp:` row.
 /// * Nothing ran this test in between. `dev` belonged to no named target set
 ///   until `tests/suites.txt` landed, so the pin went stale silently — the same
@@ -5600,13 +5601,13 @@ fn serde_jit_parity_manifest_pins() {
         // `impl <CoreError> => Err` on the D-FAIL-CONV2=A rail — so this branch
         // retires exactly as its previous note said it would. It used to ALLOW a
         // `frontend_rejected:` row for this stem as long as the reason was the
-        // known E2402 `?`-conversion gap. There is no longer a known reason to
+        // known E2402 error-conversion gap. There is no longer a known reason to
         // allow, so the allowance becomes the flat law: a shipped example that
         // the front end rejects is a defect, and naming it here is stronger than
         // the conditional it replaces.
         assert!(
             record.class != CorpusGateClass::FrontendRejected,
-            "{stem} is frontend-rejected: {}. The E2402 `?`-conversion gap that \
+            "{stem} is frontend-rejected: {}. The E2402 error-conversion gap that \
              once excused this row is fixed (D-FAIL-CONV2=A), so a rejection here \
              is a live defect, not the known one",
             record.detail
@@ -6488,7 +6489,7 @@ impl Email.Encode {
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) Email [FieldError]! {
+    fn decode(tree: DataTree) Email ![FieldError] {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return Ok(Email{addr: s})

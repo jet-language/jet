@@ -1367,7 +1367,7 @@ pub fn apply_core_call_with_type(
         )),
         // D-TEXTWIDTH1=B: 1-arg call uses the portable default policy and
         // returns a bare `Int`; the 2-arg (`policy:`) call can reject a
-        // control character under `.Reject`, so it returns `Int TextError!`.
+        // control character under `.Reject`, so it returns `Int !TextError`.
         // `TextWidth`'s two enum fields evaluate generically (`CtValue::Struct`/
         // `CtValue::Enum`, no per-type interpreter code needed) — this arm
         // just reads them back out.

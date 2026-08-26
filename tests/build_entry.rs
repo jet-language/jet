@@ -108,7 +108,7 @@ use dep_a
 use dep_b
 
 fn build(b: BuildContext) BuildPlan -> {
-    app :: b.add_executable("app", ["main.jet"], [])?
+    app :: b.add_executable("app", ["main.jet"], [])
     return b.plan(app)
 }
 
@@ -141,8 +141,8 @@ fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
         [".jet/generated/app/stamp.txt"],
         ["sh", "-c", "printf stamped > .jet/generated/app/stamp.txt"],
         ["Exec", "FS"]
-    )?
-    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/generated_message.jet"], [stamp])?
+    )
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/generated_message.jet"], [stamp])
     return b.plan(app)
     }
     return b.plan()
@@ -230,8 +230,8 @@ version: "0.1.0"
 fn build(b: BuildContext) BuildPlan -> {
     b.generate("package_message") {
         fn package_message() String -> "package";
-    }?
-    app :: b.add_executable("app", ["main.jet", ".jet/generated/package-entry/package_message.jet"], [])?
+    }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/package-entry/package_message.jet"], [])
     return b.plan(app)
 }
 
@@ -450,7 +450,7 @@ fn package_build_entry_is_discovered_from_one_unimported_source_file() {
     fs::create_dir_all(root.join("tools")).unwrap();
     write(
         &root.join("tools/build.jet"),
-        "fn build(b: BuildContext) BuildPlan -> { target :: b.add_library(\"discovered\", [\"run.jet\"], [])?; return b.plan(target) }\n",
+        "fn build(b: BuildContext) BuildPlan -> { target :: b.add_library(\"discovered\", [\"run.jet\"], []); return b.plan(target) }\n",
     );
 
     let output = compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts())
@@ -518,7 +518,7 @@ fn package_build_discovery_stops_at_nested_package_boundary() {
     fs::create_dir_all(root.join("tools")).unwrap();
     write(
         &root.join("tools/build.jet"),
-        "fn build(b: BuildContext) BuildPlan -> { target :: b.add_library(\"root\", [\"run.jet\"], [])?; return b.plan(target) }\n",
+        "fn build(b: BuildContext) BuildPlan -> { target :: b.add_library(\"root\", [\"run.jet\"], []); return b.plan(target) }\n",
     );
     fs::create_dir_all(root.join("packages/nested/tools")).unwrap();
     write(
@@ -528,7 +528,7 @@ fn package_build_discovery_stops_at_nested_package_boundary() {
     write(&root.join("packages/nested/run.jet"), "fn run() {}\n");
     write(
         &root.join("packages/nested/tools/build.jet"),
-        "fn build(b: BuildContext) BuildPlan -> { target :: b.add_library(\"nested\", [\"run.jet\"], [])?; return b.plan(target) }\n",
+        "fn build(b: BuildContext) BuildPlan -> { target :: b.add_library(\"nested\", [\"run.jet\"], []); return b.plan(target) }\n",
     );
 
     let output = compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts())
@@ -582,8 +582,8 @@ fn workspace_build_uses_batteries_for_missing_member_and_root_entries() {
         r#"fn build(b: BuildContext) BuildPlan -> {
     b.generate("a_generated") {
         fn a_generated() String -> "a";
-    }?
-    target :: b.add_library("a", ["run.jet", ".jet/generated/a/a_generated.jet"], [])?
+        }
+    target :: b.add_library("a", ["run.jet", ".jet/generated/a/a_generated.jet"], [])
     return b.plan(target)
 }
 "#,
@@ -624,8 +624,8 @@ fn production_build_bridge_imports_only_the_canonical_legacy_project_file() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     #Impure("invoke one explicitly imported legacy project file") {
-        tc :: b.toolchain("native", "x86_64-linux")?
-        identity :: b.signing("builder", "ci")?
+        tc :: b.toolchain("native", "x86_64-linux")
+        identity :: b.signing("builder", "ci")
         imported :: b.legacy(
             "cargo",
             "cargo",
@@ -644,8 +644,8 @@ fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
             [],
             "cached",
             "Cargo.toml"
-        )?
-        app :: b.add_executable("app", ["main.jet"], [imported])?
+        )
+        app :: b.add_executable("app", ["main.jet"], [imported])
         return b.plan(app)
     }
     return b.plan()
@@ -676,8 +676,8 @@ fn production_legacy_import_uses_project_contents_for_the_typed_action() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     #Impure("inspect the canonical Cargo import") {
-        tc :: b.toolchain("native", "x86_64-linux")?
-        identity :: b.signing("builder", "ci")?
+        tc :: b.toolchain("native", "x86_64-linux")
+        identity :: b.signing("builder", "ci")
         imported :: b.legacy(
             "cargo",
             "cargo-import",
@@ -696,8 +696,8 @@ fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
             [],
             "cached",
             "Cargo.toml"
-        )?
-        app :: b.add_executable("app", ["main.jet"], [imported])?
+        )
+        app :: b.add_executable("app", ["main.jet"], [imported])
         return b.plan(app)
     }
     return b.plan()
@@ -753,8 +753,8 @@ fn production_legacy_import_rejects_unsupported_project_constructs() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     #Impure("reject unsupported CMake import") {
-        tc :: b.toolchain("native", "x86_64-linux")?
-        identity :: b.signing("builder", "ci")?
+        tc :: b.toolchain("native", "x86_64-linux")
+        identity :: b.signing("builder", "ci")
         imported :: b.legacy(
             "cmake",
             "cmake-import",
@@ -773,8 +773,8 @@ fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
             [],
             "cached",
             "CMakeLists.txt"
-        )?
-        app :: b.add_executable("app", ["main.jet"], [imported])?
+        )
+        app :: b.add_executable("app", ["main.jet"], [imported])
         return b.plan(app)
     }
     return b.plan()
@@ -807,7 +807,7 @@ module workspace {
 }
 
 fn build(b: BuildContext) BuildPlan -> {
-    app :: b.add_executable("workspace", ["workspace.jet"], [])?
+    app :: b.add_executable("workspace", ["workspace.jet"], [])
     return b.plan(app)
 }
 "#,
@@ -820,8 +820,8 @@ version: "0.1.0"
     fn build(b: BuildContext) BuildPlan -> {
     b.generate("a_generated") {
         fn a_generated() String -> "a";
-    }?
-    target :: b.add_library("a", [".jet/generated/a/a_generated.jet"], [])?
+        }
+    target :: b.add_library("a", [".jet/generated/a/a_generated.jet"], [])
     return b.plan(target)
 }
 "#,
@@ -832,7 +832,7 @@ version: "0.1.0"
     );
     write(
         &packages.join("b").join("run.jet"),
-        "fn build(b: BuildContext) BuildPlan -> {\n    b.generate(\"b_generated\") {\n        fn b_generated() String -> \"b\";\n    }?\n    target :: b.add_library(\"b\", [\"run.jet\", \".jet/generated/b/b_generated.jet\"], [])?\n    return b.plan(target)\n}\nfn run() {}\n",
+        "fn build(b: BuildContext) BuildPlan -> {\n    b.generate(\"b_generated\") {\n        fn b_generated() String -> \"b\";\n    }\n    target :: b.add_library(\"b\", [\"run.jet\", \".jet/generated/b/b_generated.jet\"], [])\n    return b.plan(target)\n}\nfn run() {}\n",
     );
 
     let output = jet::compile_programmable_build_opts(
@@ -873,8 +873,8 @@ fn workspace_cli_grant_does_not_authorize_member_builds() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec]> {
     #Impure("member must use its own grant") {
-        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
-        app :: b.add_executable("app", ["run.jet"], [action])?
+        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])
+        app :: b.add_executable("app", ["run.jet"], [action])
         return b.plan(app)
     }
     return b.plan()
@@ -910,8 +910,8 @@ fn failed_action_replaces_stale_rebuild_provenance() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec]> {
     #Impure("run declared failing action") {
-        fail :: b.action("fail", [], ["never"], ["sh", "-c", "exit 23"], ["Exec"])?
-        app :: b.add_executable("app", ["main.jet"], [fail])?
+        fail :: b.action("fail", [], ["never"], ["sh", "-c", "exit 23"], ["Exec"])
+        app :: b.add_executable("app", ["main.jet"], [fail])
         return b.plan(app)
     }
     return b.plan()
@@ -959,8 +959,8 @@ fn cache_restore_provenance_distinguishes_missing_and_invalid_blobs() {
             r#"
 fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     #Impure("write declared cached output") {
-        emit :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf fresh > artifact"], ["Exec", "FS"])?
-        app :: b.add_executable("app", ["main.jet"], [emit])?
+        emit :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf fresh > artifact"], ["Exec", "FS"])
+        app :: b.add_executable("app", ["main.jet"], [emit])
         return b.plan(app)
     }
     return b.plan()
@@ -1007,7 +1007,7 @@ fn build(b: BuildContext) BuildPlan -> {
     b.generate("broken") {
         fn nope(
     }?
-    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/broken.jet"], [])?
+        app :: b.add_executable("app", ["main.jet", ".jet/generated/main/broken.jet"], [])
     return b.plan(app)
 }
 fn run() {}
@@ -1071,8 +1071,8 @@ fn ungranted_action_fails_before_process_spawn() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     #Impure("exercise denied authority") {
-    action :: b.action("escape", [], ["out"], ["sh", "-c", "printf bad > out"], ["Exec"])?
-    app :: b.add_executable("app", ["main.jet"], [action])?
+    action :: b.action("escape", [], ["out"], ["sh", "-c", "printf bad > out"], ["Exec"])
+    app :: b.add_executable("app", ["main.jet"], [action])
     return b.plan(app)
     }
     return b.plan()
@@ -1101,8 +1101,8 @@ fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
         [".jet/generated/main/bad.jet"],
         ["sh", "-c", "printf 'fn nope(' > .jet/generated/main/bad.jet"],
         ["Exec", "FS"]
-    )?
-    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/bad.jet"], [action])?
+        )
+        app :: b.add_executable("app", ["main.jet", ".jet/generated/main/bad.jet"], [action])
     return b.plan(app)
     }
     return b.plan()
@@ -1132,8 +1132,8 @@ fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
         ["stamp.txt"],
         ["sh", "-c", "printf cli-built > stamp.txt"],
         ["Exec", "FS"]
-    )?
-    app :: b.add_executable("app", ["main.jet"], [action])?
+        )
+        app :: b.add_executable("app", ["main.jet"], [action])
     return b.plan(app)
     }
     return b.plan()
@@ -1181,8 +1181,8 @@ fn jet_build_positional_name_resolves_one_workspace_member() {
         r#"fn build(b: BuildContext) BuildPlan -> {
     b.generate("member_generated") {
         fn member_generated() String -> "one";
-    }?
-    app :: b.add_executable("one", ["run.jet", ".jet/generated/one/member_generated.jet"], [])?
+        }
+    app :: b.add_executable("one", ["run.jet", ".jet/generated/one/member_generated.jet"], [])
     return b.plan(app)
 }
 "#,
@@ -1212,8 +1212,8 @@ fn graph_query_is_static_json_and_lsp_check_sees_bad_signature() {
         &entry,
         r#"
 fn build(b: BuildContext) BuildPlan -> {
-    action :: b.action("never-run", [], ["out"], ["sh", "-c", "exit 99"], [])?
-    app :: b.add_executable("app", ["main.jet"], [action])?
+    action :: b.action("never-run", [], ["out"], ["sh", "-c", "exit 99"], [])
+    app :: b.add_executable("app", ["main.jet"], [action])
     return b.plan(app)
 }
 fn run() {}
@@ -1260,8 +1260,8 @@ fn graph_query_inspects_declared_effects_without_execution_grants() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     #Impure("declare an inspectable action") {
-        action :: b.action("never-run", [], ["out"], ["sh", "-c", "exit 91"], ["Exec", "FS"])?
-        app :: b.add_executable("app", ["main.jet"], [action])?
+        action :: b.action("never-run", [], ["out"], ["sh", "-c", "exit 91"], ["Exec", "FS"])
+        app :: b.add_executable("app", ["main.jet"], [action])
         return b.plan(app)
     }
     return b.plan()
@@ -1370,8 +1370,8 @@ fn graph_query_denies_each_ambient_authority_class() {
 fn graph_overlay_uses_unsaved_text_and_canonical_cli_facts() {
     let root = project("query-overlay");
     let entry = root.join("main.jet");
-    write(&entry, "fn build(b: BuildContext) BuildPlan -> { app :: b.add_executable(\"disk\", [\"main.jet\"], [])?\n return b.plan(app) }\nfn run() {}\n");
-    let unsaved = "fn build(b: BuildContext) BuildPlan -> { app :: b.add_executable(\"unsaved\", [\"main.jet\"], [])?\n return b.plan(app) }\nfn run() {}\n";
+    write(&entry, "fn build(b: BuildContext) BuildPlan -> { app :: b.add_executable(\"disk\", [\"main.jet\"], [])\n return b.plan(app) }\nfn run() {}\n");
+    let unsaved = "fn build(b: BuildContext) BuildPlan -> { app :: b.add_executable(\"unsaved\", [\"main.jet\"], [])\n return b.plan(app) }\nfn run() {}\n";
     let disk = jet::Driver::query_build_plan(entry.to_str().unwrap())
         .unwrap()
         .unwrap();
@@ -1413,9 +1413,9 @@ fn unselected_action_output_never_runs_checks_or_leaks() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     #Impure("declare selected closure") {
-    bad :: b.action("unselected", [], ["missing-generated.jet"], ["sh", "-c", "exit 77"], ["Exec", "FS"])?
-    ignored :: b.add_executable("ignored", ["missing-generated.jet"], [bad])?
-    app :: b.add_executable("app", ["main.jet"], [])?
+    bad :: b.action("unselected", [], ["missing-generated.jet"], ["sh", "-c", "exit 77"], ["Exec", "FS"])
+    ignored :: b.add_executable("ignored", ["missing-generated.jet"], [bad])
+    app :: b.add_executable("app", ["main.jet"], [])
     return b.plan(app)
     }
     return b.plan()
@@ -1438,8 +1438,8 @@ fn malformed_generate_is_rejected_before_selection() {
 fn build(b: BuildContext) BuildPlan -> {
     b.generate("ignored") {
         fn broken(
-    }?
-    app :: b.add_executable("app", ["main.jet"], [])?
+        }
+    app :: b.add_executable("app", ["main.jet"], [])
     return b.plan(app)
 }
 fn run() {}
@@ -1460,8 +1460,8 @@ fn runtime_reload_error_rolls_back_action_outputs_and_lock() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     #Impure("rollback after runtime reload") {
-    stamp :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf changed > stamp"], ["Exec", "FS"])?
-    app :: b.add_executable("app", ["main.jet", "missing.jet"], [stamp])?
+    stamp :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf changed > stamp"], ["Exec", "FS"])
+    app :: b.add_executable("app", ["main.jet", "missing.jet"], [stamp])
     return b.plan(app)
     }
     return b.plan()
@@ -1608,8 +1608,8 @@ fn run_programmable_build_executes_destination_owned_distinct_conversion() {
 #Numeric BuildCode :: distinct U8
 
 fn build(b: BuildContext) BuildPlan -> {
-    code :: BuildCode.from_int(7)?
-    expected :: U8.from_int(7)?
+    code :: BuildCode.from_int(7)
+    expected :: U8.from_int(7)
     if code.raw() == expected {
         b.error(b.program.functions()[0].span, "DISTINCT", "converted", "executed", "ok")
     }
@@ -1639,8 +1639,8 @@ fn typed_toolchain_and_probe_flow_into_executed_action() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     #Impure("probe selected toolchain") {
-    tc :: b.toolchain("native", "x86_64-linux")?
-    shell :: b.probe("shell", "find_program", "sh")?
+    tc :: b.toolchain("native", "x86_64-linux")
+    shell :: b.probe("shell", "find_program", "sh")
     action :: b.action(
         "stamp",
         [],
@@ -1649,8 +1649,8 @@ fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
         ["Exec", "FS"],
         tc,
         [shell]
-    )?
-    app :: b.add_executable("app", ["main.jet"], [action])?
+    )
+    app :: b.add_executable("app", ["main.jet"], [action])
     return b.plan(app)
     }
     return b.plan()
@@ -1687,8 +1687,8 @@ fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
         ["redirect/pwn"],
         ["sh", "-c", "mkdir -p redirect; printf escaped > redirect/pwn"],
         ["Exec", "FS"]
-    )?
-    app :: b.add_executable("app", ["main.jet"], [action])?
+    )
+    app :: b.add_executable("app", ["main.jet"], [action])
     return b.plan(app)
     }
     return b.plan()
@@ -1745,8 +1745,8 @@ fn locked_generated_drift_fails_before_materialization() {
 fn build(b: BuildContext) BuildPlan -> {{
     b.generate("value") {{
         fn generated_value() String -> "{value}";
-    }}?
-    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/value.jet"], [])?
+        }}
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/value.jet"], [])
     return b.plan(app)
 }}
 fn run() {{ print(generated_value()) }}
@@ -1778,8 +1778,8 @@ fn build(b: BuildContext) BuildPlan -> {
     }?
     b.generate("provider") {
         pub fn message() String -> "round two";
-    }?
-    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/consumer.jet", ".jet/generated/main/provider.jet"], [])?
+        }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/consumer.jet", ".jet/generated/main/provider.jet"], [])
     return b.plan(app)
 }
 fn run() { print(generated_value()) }
@@ -1806,8 +1806,8 @@ fn build(b: BuildContext) BuildPlan -> {
     }?
     b.generate("alpha") {
         pub fn beta() {}
-    }?
-    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/alpha.jet", ".jet/generated/main/beta.jet"], [])?
+        }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/alpha.jet", ".jet/generated/main/beta.jet"], [])
     return b.plan(app)
 }
 fn run() {}
@@ -1835,8 +1835,8 @@ fn emit_generated_exports_the_exact_materialized_source() {
 fn build(b: BuildContext) BuildPlan -> {{
     b.generate("exported") {{
         fn exported_generated() String -> "exported";
-    }}?
-    app :: b.add_executable("app", ["main.jet"], [])?
+        }}
+    app :: b.add_executable("app", ["main.jet"], [])
     return b.plan(app)
 }}
 fn run() {{ print(exported_generated()) }}
@@ -1875,8 +1875,8 @@ fn package_grant_and_workspace_ceiling_resolve_before_execution() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec]> {
     #Impure("policy chain test") {
-    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf ok > stamp"], ["Exec"])?
-    app :: b.add_executable("app", ["main.jet"], [action])?
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf ok > stamp"], ["Exec"])
+    app :: b.add_executable("app", ["main.jet"], [action])
     return b.plan(app)
     }
     return b.plan()
@@ -1934,8 +1934,8 @@ fn workspace_subject_grant_authorizes_a_package_without_cli_flags() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec]> {
     #Impure("workspace grant test") {
-        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf workspace > stamp"], ["Exec"])?
-        app :: b.add_executable("app", ["run.jet"], [action])?
+        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf workspace > stamp"], ["Exec"])
+        app :: b.add_executable("app", ["run.jet"], [action])
         return b.plan(app)
     }
     return b.plan()
@@ -1966,8 +1966,8 @@ fn malformed_package_and_workspace_build_policy_fail_closed() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec]> {
     #Impure("must never run under malformed policy") {
-    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
-    app :: b.add_executable("app", ["run.jet"], [action])?
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])
+    app :: b.add_executable("app", ["run.jet"], [action])
     return b.plan(app)
     }
     return b.plan()
@@ -2057,8 +2057,8 @@ fn unsupported_workspace_policy_allow_is_e3503() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec]> {
     #Impure("unsupported workspace policy must block build") {
-        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
-        app :: b.add_executable("app", ["run.jet"], [action])?
+        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])
+        app :: b.add_executable("app", ["run.jet"], [action])
         return b.plan(app)
     }
     return b.plan()
@@ -2172,8 +2172,8 @@ fn outer_package_grant_cannot_override_inner_workspace_deny() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec]> {
     #Impure("workspace ceiling wins last") {
-    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
-    app :: b.add_executable("app", ["run.jet"], [action])?
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])
+    app :: b.add_executable("app", ["run.jet"], [action])
     return b.plan(app)
     }
     return b.plan()
@@ -2218,8 +2218,8 @@ fn outer_workspace_grant_does_not_cross_inner_workspace_boundary() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec]> {
     #Impure("outer workspace grant must not apply") {
-    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
-    app :: b.add_executable("app", ["run.jet"], [action])?
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])
+    app :: b.add_executable("app", ["run.jet"], [action])
     return b.plan(app)
     }
     return b.plan()
@@ -2269,8 +2269,8 @@ fn inner_workspace_grant_overrides_outer_workspace_deny_from_canonical_run() {
         r#"
 fn build(b: BuildContext) BuildPlan -[Exec]> {
     #Impure("inner workspace grant must apply") {
-        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf inner > stamp"], ["Exec"])?
-        app :: b.add_executable("app", ["run.jet"], [action])?
+        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf inner > stamp"], ["Exec"])
+        app :: b.add_executable("app", ["run.jet"], [action])
         return b.plan(app)
     }
     return b.plan()
@@ -2301,7 +2301,7 @@ fn programmable_staging_preserves_web_cross_freestanding_and_plugin_modes() {
         &entry,
         r#"
 fn build(b: BuildContext) BuildPlan -> {
-    app :: b.add_executable("app", ["main.jet"], [])?
+    app :: b.add_executable("app", ["main.jet"], [])
     return b.plan(app)
 }
 fn run() {}
@@ -2336,7 +2336,7 @@ fn run() {}
         &entry,
         r#"
 fn build(b: BuildContext) BuildPlan -> {
-    plugin :: b.add_library("plugin", ["main.jet"], [])?
+    plugin :: b.add_library("plugin", ["main.jet"], [])
     return b.plan(plugin)
 }
 pub fn transform(value: Int) Int -> { return value + 1 }
@@ -2360,8 +2360,8 @@ fn locked_action_output_drift_rolls_back_filesystem() {
             r#"
 fn build(b: BuildContext) BuildPlan -[Exec]> {{
     #Impure("locked action output") {{
-    action :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf {value} > artifact"], ["Exec"])?
-    app :: b.add_executable("app", ["main.jet"], [action])?
+    action :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf {value} > artifact"], ["Exec"])
+    app :: b.add_executable("app", ["main.jet"], [action])
     return b.plan(app)
     }}
     return b.plan()
@@ -2395,8 +2395,8 @@ fn build(b: BuildContext) BuildPlan -[FS]> {
     message :: b.embed(files[0])
     b.generate("asset") {
         fn generated_asset() String -> "hello";
-    }?
-    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/asset.jet"], [])?
+        }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/asset.jet"], [])
     return b.plan(app)
 }
 fn run() { print(generated_asset()) }
@@ -2424,9 +2424,9 @@ fn build_context_fetch_uses_the_locked_tier_one_host_surface() {
         &format!(
             r#"
 fn build(b: BuildContext) BuildPlan -> {{
-    content :: b.fetch("file://{}", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")?
+    content :: b.fetch("file://{}", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
     if content != "hello" {{ panic("unexpected fetch content") }}
-    app :: b.add_executable("app", ["main.jet"], [])?
+    app :: b.add_executable("app", ["main.jet"], [])
     return b.plan(app)
 }}
 fn run() {{}}
@@ -2612,8 +2612,8 @@ fn duplicate_target_build_source(return_type: &str, declarations: &str) -> Strin
         r#"
 {declarations}
 fn build(b: BuildContext) {return_type} -> {{
-    first :: b.add_library("app", ["main.jet"], [])
-    duplicate :: b.add_library("app", ["main.jet"], [])
+ first :: b.add_library("app", ["main.jet"], [])
+ duplicate :: b.add_library("app", ["main.jet"], [])
     return b.plan()
 }}
 
@@ -2752,7 +2752,9 @@ fn criterion9_programmable_build_cli_human_and_json_reports_match() {
     assert!(!human.status.success(), "human build failure unexpectedly passed");
     let human_stderr = String::from_utf8_lossy(&human.stderr);
     assert!(
-        human_stderr.contains("Error [E3502]: target name `app` is registered twice"),
+        human_stderr.contains(
+            "Error [E3502]: build plan is invalid: target name `app` is registered twice",
+        ),
         "human report did not preserve the BuildError message:\n{human_stderr}"
     );
     assert!(

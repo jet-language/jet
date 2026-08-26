@@ -4371,7 +4371,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     use jet::Publish::{diff_public_api, ApiItem};
 
     let dir = tmp_dir("physical_unit_api_freeze");
-    let current = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\npub fn distance() Millimeter -> { return Millimeter.from_float(1.0)? }\n";
+    let current = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\npub fn distance() Millimeter -> { return Millimeter.from_float(1.0) }\n";
     let current_path = dir.join("current.jet");
     fs::write(&current_path, current).unwrap();
     let current_api = jet::Publish::extract_public_api_for_package(
@@ -4406,7 +4406,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         .collect();
     assert!(diff_public_api(&frozen_api, &current_api).is_empty());
 
-    let changed = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\npub fn distance() Millimeter -> { return Millimeter.from_float(1.0)? }\n";
+    let changed = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\npub fn distance() Millimeter -> { return Millimeter.from_float(1.0) }\n";
     let changed_path = dir.join("changed.jet");
     fs::write(&changed_path, changed).unwrap();
     let changed_api = jet::Publish::extract_public_api_for_package(

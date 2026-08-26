@@ -110,7 +110,7 @@ use core.sys as env
 use core.process as process
 
 fn remove(name: String) Bool !env.EnvError -> {
-    return Ok(env.unset(name)?)
+    return Ok(env.unset(name))
 }
 
 fn run() {

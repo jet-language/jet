@@ -790,7 +790,7 @@ fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {
 }
 
 fn send_four<T: Writer>(&stream: T) Int !IOError -[IO]> {
-    stream.write_all([1, 2, 3, 4])?
+    stream.write_all([1, 2, 3, 4])
     return .Ok(4)
 }
 
@@ -843,8 +843,8 @@ fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {{
 }}
 
 fn send_four<T: Writer>(&stream: T) Int !IOError -[IO]> {{
-    first :: stream.write([1, 2])?
-    stream.write_all([3, 4])?
+    first :: stream.write([1, 2])
+    stream.write_all([3, 4])
     return .Ok(first)
 }}
 
@@ -1459,8 +1459,8 @@ fn receive<T: Reader>(&stream: T, limit: Int) [U8] !IOError -[IO]> {
 
 
 fn send<T: Writer>(&stream: T, bytes: [U8]) Int !IOError -[IO]> {
-    empty_count :: stream.write([])?
-    stream.write_all(bytes)?
+    empty_count :: stream.write([])
+    stream.write_all(bytes)
     return .Ok(empty_count)
 }
 

@@ -12,6 +12,9 @@ use crate::AST::{ComptimeInput, Expr, Func, ProgramBundle, Stmt, StructDef, Type
 pub struct ExprEvalRequest<'a> {
     pub expr: &'a Expr,
     pub funcs: &'a HashMap<String, &'a Func>,
+    /// Checked `impl Source -> Target` bodies available to fragment lowering.
+    /// The evaluator lowers these through the same TIR conversion path as AOT.
+    pub error_conversions: &'a [crate::AST::ErrorConvDef],
     /// Instance/associated methods are kept in their semantic owner/name table
     /// by comptime. The TIR fragment host needs the same table to lower
     /// computed-field getters and to call user methods.
@@ -46,6 +49,8 @@ pub struct ExprEvalRequest<'a> {
 pub struct BlockEvalRequest<'a, 'debug> {
     pub stmts: &'a [Stmt],
     pub funcs: &'a HashMap<String, &'a Func>,
+    /// Checked `impl Source -> Target` bodies available to fragment lowering.
+    pub error_conversions: &'a [crate::AST::ErrorConvDef],
     pub methods: &'a HashMap<(String, String), &'a Func>,
     pub extern_names: &'a HashSet<String>,
     pub base_dir: &'a Path,

@@ -22,7 +22,7 @@ guaranteeing accuracy.
 | `x :: expr` / `x := expr` binding | `TStmt::Bind` |
 | `if cond { … } else { … }` | `TExprKind::If` |
 | `if subject == { arm -> … }` dispatch | `TExprKind::Match` |
-| `expr?` / `expr?? fallback` | `TExprKind::Propagate` / `TExprKind::WithDefault` |
+| fallible `expr` (implicit) / `expr?? fallback` | `TExprKind::Propagate` / `TExprKind::WithDefault` |
 | `loop x in iter { … }` | `TExprKind::ForIn` → iterator protocol |
 | `loop { … }` | `TExprKind::Loop` |
 | `#MustUse` / `#SingleUse` markers | `TMarker::MustUse` / `TMarker::SingleUse` |

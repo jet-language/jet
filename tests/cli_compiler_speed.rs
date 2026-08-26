@@ -9,6 +9,8 @@ mod production_path {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
+    const COMPILER_SPEED_PLAN: &str = include_str!("../docs/plans/compiler-speed.md");
+
     fn jet() -> PathBuf {
         PathBuf::from(env!("CARGO_BIN_EXE_jet"))
     }
@@ -72,7 +74,20 @@ mod production_path {
     }
 
     #[test]
-    fn production_build_uses_clean_rustc_flags_and_explicit_linker() {
+    fn production_build_follows_compiler_speed_plan_flags_and_linker() {
+        for requirement in [
+            "Fast linker (mold → lld → system), tuned rustc flags.",
+            "Native rustc builds honor explicit `RUSTC_LINKER`/`CC`",
+            "Fast builds pass explicit `opt-level=0`, `codegen-units=256`, and",
+            "`lto=off`",
+            "optimized AOT passes explicit `opt-level=2`, thin LTO, and strip.",
+        ] {
+            assert!(
+                COMPILER_SPEED_PLAN.contains(requirement),
+                "compiler-speed production proof is no longer backed by docs/plans/compiler-speed.md: missing {requirement:?}"
+            );
+        }
+
         let scratch = Scratch::new("compiler-speed-production");
         fs::write(
             scratch.join("main.jet"),

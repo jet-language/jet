@@ -5,7 +5,7 @@ fn perf_static_api_lowers_to_core_helpers() {
         r#"
 fn run() {
     print(Perf.default_fidelity())
-    Perf.override_fidelity(0.25)?
+    Perf.override_fidelity(0.25)
     print(Perf.fidelity())
     Perf.reset_fidelity()
 }
@@ -23,7 +23,7 @@ fn perf_set_fidelity_alias_is_not_exported() {
 use core.perf as perf
 
 fn run() {
-    perf.set_fidelity(0.25)?
+    perf.set_fidelity(0.25)
 }
 "#;
     let dir = std::env::temp_dir().join(format!("jet_corelib_perf_alias_{}", std::process::id()));
@@ -63,11 +63,11 @@ use core.perf as perf
 
 fn run() {
     print(perf.default_fidelity())
-    perf.override_fidelity(0.25)?
+    perf.override_fidelity(0.25)
     print(perf.fidelity())
     perf.reset_fidelity()
     print(perf.fidelity())
-    perf.override_fidelity(1.25)?
+    perf.override_fidelity(1.25)
 }
 "#,
         &[],

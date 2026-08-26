@@ -131,6 +131,7 @@ pub struct SymbolDB {
     pub view_provenance: HashMap<String, AST::ViewProvenanceMap>,
     pub slot_boundaries: Vec<StructuralSlotBoundary>,
     pub symbols: SemanticSymbolIndex,
+    structural_ordinals: HashMap<(Option<usize>, String), usize>,
 }
 
 struct CallerFrame {
@@ -177,6 +178,7 @@ impl SymbolDB {
             view_provenance: HashMap::new(),
             slot_boundaries: Vec::new(),
             symbols: SemanticSymbolIndex::language(),
+            structural_ordinals: HashMap::new(),
         }
     }
 
@@ -477,14 +479,55 @@ fn definition_matches_target(definition: &SymDef, target: &DefinitionAnchor) -> 
 }
 
 fn project_generated_presentation(db: &mut SymbolDB, bundle: &ProgramBundle) {
+    let projections: HashMap<usize, Vec<(String, String)>> = bundle
+        .modules
+        .iter()
+        .enumerate()
+        .map(|(module_idx, _)| {
+            let mut replacements: Vec<(String, String)> = bundle
+                .name_ledger
+                .canonical_paths(module_idx)
+                .into_iter()
+                .filter_map(|(name, _)| {
+                    if name.contains('.') {
+                        return None;
+                    }
+                    let display = bundle
+                        .name_ledger
+                        .display_path(module_idx, &name, Some(module_idx))?;
+                    let display_leaf = display
+                        .rsplit_once('.')
+                        .map_or(display.as_str(), |(_, leaf)| leaf);
+                    (display != name && display_leaf != name).then_some((name, display))
+                })
+                .collect();
+            replacements.sort_by(|left, right| right.0.len().cmp(&left.0.len()));
+            (module_idx, replacements)
+        })
+        .collect();
     for hover in &mut db.hover {
-        project_text(bundle, &hover.module_path, &mut hover.text);
+        let Some(module_idx) = module_index(bundle, &hover.module_path) else {
+            continue;
+        };
+        if let Some(replacements) = projections.get(&module_idx) {
+            project_text(replacements, &mut hover.text);
+        }
     }
     for inlay in &mut db.inlay {
-        project_text(bundle, &inlay.module_path, &mut inlay.label);
+        let Some(module_idx) = module_index(bundle, &inlay.module_path) else {
+            continue;
+        };
+        if let Some(replacements) = projections.get(&module_idx) {
+            project_text(replacements, &mut inlay.label);
+        }
     }
     for member in &mut db.members {
-        project_text(bundle, &member.module_path, &mut member.signature);
+        let Some(module_idx) = module_index(bundle, &member.module_path) else {
+            continue;
+        };
+        if let Some(replacements) = projections.get(&module_idx) {
+            project_text(replacements, &mut member.signature);
+        }
     }
 }
 
@@ -495,30 +538,9 @@ fn module_index(bundle: &ProgramBundle, module_path: &str) -> Option<usize> {
         .position(|module| module.display == module_path || module.alias == module_path)
 }
 
-fn project_text(bundle: &ProgramBundle, module_path: &str, text: &mut String) {
-    let Some(module_idx) = module_index(bundle, module_path) else {
-        return;
-    };
-    let mut replacements: Vec<(String, String)> = bundle
-        .name_ledger
-        .canonical_paths(module_idx)
-        .into_iter()
-        .filter_map(|(name, _)| {
-            if name.contains('.') {
-                return None;
-            }
-            let display = bundle
-                .name_ledger
-                .display_path(module_idx, &name, Some(module_idx))?;
-            let display_leaf = display
-                .rsplit_once('.')
-                .map_or(display.as_str(), |(_, leaf)| leaf);
-            (display != name && display_leaf != name).then_some((name, display))
-        })
-        .collect();
-    replacements.sort_by(|left, right| right.0.len().cmp(&left.0.len()));
+fn project_text(replacements: &[(String, String)], text: &mut String) {
     for (internal, display) in replacements {
-        *text = text.replace(&internal, &display);
+        *text = text.replace(internal, display);
     }
 }
 
@@ -1015,16 +1037,21 @@ fn record_node(
             parent.is_none() || ctx.structural_slot != "root",
             "compiler structural child missing explicit slot: {class}/{shape}"
         );
-        let ordinal = ctx
-            .db
-            .nodes
-            .iter()
-            .filter(|node| node.parent == parent && node.slot == ctx.structural_slot)
-            .count();
+        let slot = ctx.structural_slot.clone();
+        let ordinal = {
+            let next = ctx
+                .db
+                .structural_ordinals
+                .entry((parent, slot.clone()))
+                .or_default();
+            let ordinal = *next;
+            *next += 1;
+            ordinal
+        };
         ctx.db.nodes.push(StructuralNode {
             id,
             parent,
-            slot: ctx.structural_slot.clone(),
+            slot,
             slot_kind: ctx.structural_slot_kind,
             ordinal,
             class: class.to_string(),
@@ -1049,8 +1076,11 @@ fn structural_slot<T>(
             let parent_start = ctx.db.nodes[parent].span.start;
             let parent_end = ctx.db.nodes[parent].span.end;
             let exact_parent_end = ctx.db.nodes[parent].class == "arm";
-            if let Some(span) = ctx
+            let first = ctx
                 .block_spans
+                .partition_point(|span| span.start < parent_start);
+            if let Some(span) = ctx
+                .block_spans[first..]
                 .iter()
                 .filter(|span| {
                     parent_start <= span.start
@@ -1217,6 +1247,8 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
     let mut db = SymbolDB::new();
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         let mp = module.display.clone();
+        let mut block_spans = module.block_spans.clone();
+        block_spans.sort_by_key(|span| span.start);
         let module_alias = facts
             .name_ledger
             .module_alias(module_idx)
@@ -1231,7 +1263,7 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
             structural_parents: Vec::new(),
             structural_slot: "root".to_string(),
             structural_slot_kind: StructuralSlotKind::List,
-            block_spans: &module.block_spans,
+            block_spans: &block_spans,
             claimed_block_spans: std::collections::HashSet::new(),
         };
         for item in &module.items {
@@ -1492,6 +1524,17 @@ fn build_definition_facts(
     nodes: &[StructuralNode],
     bundle: &ProgramBundle,
 ) -> Vec<DefinitionFact> {
+    let mut defs_by_module: HashMap<&str, Vec<&SymbolDef>> = HashMap::new();
+    for def in defs {
+        defs_by_module
+            .entry(def.module_path.as_str())
+            .or_default()
+            .push(def);
+    }
+    for module_defs in defs_by_module.values_mut() {
+        module_defs.sort_by_key(|def| def.def_span.start);
+    }
+    let mut cursors: HashMap<&str, usize> = HashMap::new();
     let mut out = Vec::new();
     for node in nodes
         .iter()
@@ -1504,12 +1547,20 @@ fn build_definition_facts(
         else {
             continue;
         };
-        let Some(def) = defs
+        let Some(module_defs) = defs_by_module.get(node.module_path.as_str()) else {
+            continue;
+        };
+        let cursor = cursors.entry(node.module_path.as_str()).or_default();
+        while *cursor < module_defs.len()
+            && module_defs[*cursor].def_span.start < node.span.start
+        {
+            *cursor += 1;
+        }
+        let Some(def) = module_defs[*cursor..]
             .iter()
-            .filter(|def| {
-                def.module_path == node.module_path
-                    && node.span.start <= def.def_span.start
-                    && def.def_span.end <= node.span.end
+            .take_while(|def| def.def_span.start <= node.span.end)
+            .find(|def| {
+                def.def_span.end <= node.span.end
                     && !matches!(
                         def.kind,
                         SymbolKind::Local { .. }
@@ -1518,7 +1569,7 @@ fn build_definition_facts(
                             | SymbolKind::EnumVariant { .. }
                     )
             })
-            .min_by_key(|def| def.def_span.start)
+            .copied()
         else {
             continue;
         };
@@ -1666,6 +1717,8 @@ fn normalize_definition(source: &str) -> String {
 /// parsing and candidate matching cannot invent a parallel syntax tree.
 pub fn structural_nodes_from_parsed(module: &LoadedModule) -> Vec<StructuralNode> {
     let mp = module.display.clone();
+    let mut block_spans = module.block_spans.clone();
+    block_spans.sort_by_key(|span| span.start);
     let mut db = SymbolDB::new();
     let name_ledger = jet_foundation::Names::NameLedger::default();
     let mut ctx = WalkCtx {
@@ -1678,7 +1731,7 @@ pub fn structural_nodes_from_parsed(module: &LoadedModule) -> Vec<StructuralNode
         structural_parents: Vec::new(),
         structural_slot: "root".to_string(),
         structural_slot_kind: StructuralSlotKind::List,
-        block_spans: &module.block_spans,
+        block_spans: &block_spans,
         claimed_block_spans: std::collections::HashSet::new(),
     };
     for item in &module.items {

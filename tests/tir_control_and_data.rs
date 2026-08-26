@@ -17,7 +17,7 @@ const RESULT_HANDLER_PACKAGE: &str =
 #[test]
 fn result_handler_reuses_result_split_on_all_tiers() {
     let src = r#"
-fn classify(ok: Bool) Int !Err -> {
+fn classify(ok: Bool) Int -> {
     if ok { return 7 }
     return Err("bad")
 }
@@ -67,7 +67,7 @@ fn run() -[IO]> {
 #[test]
 fn result_handler_preserves_diverging_arm_on_all_tiers() {
     let src = r#"
-fn choose(ok: Bool) Int !Err -> {
+fn choose(ok: Bool) Int -> {
     if ok { return 7 }
     return Err("bad")
 }
@@ -95,12 +95,12 @@ fn run() {
 #[test]
 fn result_handler_preserves_ownership_generic_and_nested_values_on_all_tiers() {
     let src = r#"
-fn choose<T>(value: ^T, ok: Bool) T !Err -> {
+fn choose<T>(value: ^T, ok: Bool) T -> {
     if ok { return value }
     return Err("bad")
 }
 
-fn choose_text(value: ^String, ok: Bool) String !Err -> {
+fn choose_text(value: ^String, ok: Bool) String -> {
     if ok { return value }
     return Err("bad")
 }
@@ -109,7 +109,7 @@ fn owned(ok: Bool) String -> {
     return choose_text("owned", ok) ? success -> success ! _failure -> "bad"
 }
 
-fn generic<T>(value: ^T, ok: Bool) T !Err -> {
+fn generic<T>(value: ^T, ok: Bool) T -> {
     return choose<T>(^value, ok) ? success -> success ! _failure -> return Err("bad")
 }
 
@@ -437,11 +437,11 @@ fn make() Err {
     return Err("bad input", code: "E_BAD", cause: Err("root cause"))
 }
 
-fn typed(value: Err) !Err {
+fn typed(value: Err) {
     return Err(value)
 }
 
-fn run() !Err {
+fn run() {
     return typed(make())
 }
 "#;
@@ -461,7 +461,7 @@ fn run() !Err {
 #[test]
 fn default_err_value_runs_on_the_default_jit_edge() {
     let src = r#"
-fn run() !Err {
+fn run() {
     return Err("unhandled", code: "E_RUN", cause: Err("root"))
 }
 "#;

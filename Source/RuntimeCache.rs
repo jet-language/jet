@@ -1270,7 +1270,7 @@ mod tests {
             None,
             rustc,
             rustc_version,
-            flags,
+            &runtime_compile_flags(flags),
             environment,
         )
     }
@@ -1465,6 +1465,36 @@ mod tests {
         for (input, key) in cases {
             assert_ne!(base, key, "{input} must invalidate runtime artifact");
         }
+        let core = "fn core() {}";
+        let core_exported = export_runtime_source(core);
+        let core_base = cache_key_with_schema(
+            CACHE_SCHEMA,
+            CORE_CRATE_NAME,
+            core,
+            &core_exported,
+            CORE_CRATE_PREFIX,
+            Some("runtime-key-a"),
+            OsStr::new("rustc"),
+            "rustc 1",
+            &[],
+            &[],
+        );
+        assert_ne!(
+            core_base,
+            cache_key_with_schema(
+                CACHE_SCHEMA,
+                CORE_CRATE_NAME,
+                core,
+                &core_exported,
+                CORE_CRATE_PREFIX,
+                Some("runtime-key-b"),
+                OsStr::new("rustc"),
+                "rustc 1",
+                &[],
+                &[],
+            ),
+            "runtime dependency change must invalidate dependent Core artifact"
+        );
         let linker_flags = [
             OsString::from("-C"),
             OsString::from("linker=ld-hostile"),
@@ -1748,18 +1778,20 @@ use std::fmt::Debug;
         ));
         fs::create_dir_all(&root).unwrap();
         let rustc = root.join("rustc-fake");
+        let rustc_alt = root.join("rustc-fake-alt");
         let count = root.join("count");
-        fs::write(
-            &rustc,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"-vV\" ]; then echo 'rustc 1.99.0 fake'; exit 0; fi\nout=''\nwhile [ \"$#\" -gt 0 ]; do if [ \"$1\" = \"-o\" ]; then shift; out=\"$1\"; fi; shift; done\nprintf artifact > \"$out\"\nprintf x >> '{}'\n",
-                count.display()
-            ),
-        )
-        .unwrap();
+        let script = format!(
+            "#!/bin/sh\nif [ \"$1\" = \"-vV\" ]; then echo 'rustc 1.99.0 fake'; exit 0; fi\nout=''\nwhile [ \"$#\" -gt 0 ]; do if [ \"$1\" = \"-o\" ]; then shift; out=\"$1\"; fi; shift; done\nprintf artifact > \"$out\"\nprintf x >> '{}'\n",
+            count.display()
+        );
+        fs::write(&rustc, &script).unwrap();
+        fs::write(&rustc_alt, &script).unwrap();
         let mut permissions = fs::metadata(&rustc).unwrap().permissions();
         permissions.set_mode(0o755);
-        fs::set_permissions(&rustc, permissions).unwrap();
+        fs::set_permissions(&rustc, permissions.clone()).unwrap();
+        fs::set_permissions(&rustc_alt, permissions).unwrap();
+
+        let build_count = || fs::read(&count).map_or(0, |bytes| bytes.len());
 
         let generated = format!(
             "{BEGIN}fn runtime() {{}}\n{END}{CORE_BEGIN}fn core() {{}}\n{CORE_END}fn main() {{}}\n"
@@ -1775,10 +1807,68 @@ use std::fmt::Debug;
         assert!(!first.cache_hit());
         drop(first);
         assert_eq!(
-            fs::read(&count).unwrap().len(),
+            build_count(),
             2,
             "runtime and Core need separate cold builds"
         );
+
+        let compiler_changed = prepare_at(
+            &root.join("cache"),
+            rustc_alt.as_os_str(),
+            &generated,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(!compiler_changed.cache_hit(), "compiler identity must miss both artifacts");
+        drop(compiler_changed);
+        assert_eq!(build_count(), 4, "compiler change must rebuild both closures");
+
+        let compile_cases = vec![
+            (
+                "target",
+                vec![OsString::from("--target"), OsString::from("wasm32")],
+                vec![],
+            ),
+            (
+                "profile",
+                vec![OsString::from("-C"), OsString::from("opt-level=3")],
+                vec![],
+            ),
+            (
+                "backend",
+                vec![OsString::from("-C"), OsString::from("target-cpu=native")],
+                vec![],
+            ),
+            (
+                "flags",
+                vec![OsString::from("-C"), OsString::from("panic=abort")],
+                vec![],
+            ),
+            (
+                "environment flags",
+                vec![],
+                vec![(OsString::from("RUSTFLAGS"), OsString::from("-Ctarget-cpu=native"))],
+            ),
+        ];
+        for (input, flags, environment) in compile_cases {
+            let before = build_count();
+            let changed = prepare_at(
+                &root.join("cache"),
+                rustc.as_os_str(),
+                &generated,
+                &flags,
+                &environment,
+            )
+            .unwrap();
+            assert!(!changed.cache_hit(), "{input} change must miss both artifacts");
+            drop(changed);
+            assert_eq!(
+                build_count(),
+                before + 2,
+                "{input} change must rebuild runtime and dependent Core"
+            );
+        }
 
         let linker_changed = prepare_at(
             &root.join("cache"),
@@ -1799,8 +1889,8 @@ use std::fmt::Debug;
         );
         drop(linker_changed);
         assert_eq!(
-            fs::read(&count).unwrap().len(),
-            2,
+            build_count(),
+            14,
             "linker-only change must affect final link work only"
         );
 
@@ -1818,7 +1908,7 @@ use std::fmt::Debug;
             "program/generated-code changes must reuse the runtime/Core closure"
         );
         drop(program_hit);
-        assert_eq!(fs::read(&count).unwrap().len(), 2);
+        assert_eq!(build_count(), 14);
 
         let core_changed = generated.replace("fn core() {}", "fn core_changed() {}");
         let core_miss = prepare_at(
@@ -1832,8 +1922,8 @@ use std::fmt::Debug;
         assert!(!core_miss.cache_hit());
         drop(core_miss);
         assert_eq!(
-            fs::read(&count).unwrap().len(),
-            3,
+            build_count(),
+            15,
             "Core-only change must rebuild only the Core closure"
         );
 
@@ -1849,25 +1939,9 @@ use std::fmt::Debug;
         assert!(!runtime_miss.cache_hit());
         drop(runtime_miss);
         assert_eq!(
-            fs::read(&count).unwrap().len(),
-            5,
+            build_count(),
+            17,
             "runtime change must rebuild runtime and its dependent Core closure"
-        );
-
-        let compile_changed = prepare_at(
-            &root.join("cache"),
-            rustc.as_os_str(),
-            &generated,
-            &[OsString::from("-C"), OsString::from("opt-level=3")],
-            &[],
-        )
-        .unwrap();
-        assert!(!compile_changed.cache_hit());
-        drop(compile_changed);
-        assert_eq!(
-            fs::read(&count).unwrap().len(),
-            7,
-            "compile flag change must rebuild both closures"
         );
         let _ = fs::remove_dir_all(root);
     }

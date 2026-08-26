@@ -3838,11 +3838,19 @@ impl<'a> Checker<'a> {
 
     /// D-MUSTUSE1 (c18iwxqx): emit E0419 when a must-use result is dropped as a
     /// bare expression statement.
-    pub(crate) fn check_ignored_must_use(&mut self, expr: &Expr, ty: &Type, span: Span) {
+    pub(crate) fn check_ignored_must_use(
+        &mut self,
+        expr: &Expr,
+        ty: &Type,
+        span: Span,
+        call_target: Option<String>,
+    ) {
         if self.suppress_must_use || is_task_type(ty) {
             return;
         }
-        let target = if let Some(name) = self.ignored_must_use_call_target(expr) {
+        let target = if let Some(name) =
+            call_target.or_else(|| self.ignored_must_use_call_target(expr))
+        {
             name
         } else if matches!(ty, Type::Named(n) if n == "Unit") {
             return;

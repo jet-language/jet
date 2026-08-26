@@ -466,7 +466,7 @@ fn error_return_trace_frames() {
         return;
     }
 
-    // parse_age originates an Err; `?` in load and again in double each append
+    // parse_age originates an Err; automatic propagation in load and again in double each append
     // one E3002 frame to the journey. The journey reaches stderr at the one
     // report edge, so `run` lets the failure escape — a recovered failure
     // reports nothing, which is why catching it here proved nothing about the
@@ -483,15 +483,15 @@ fn parse_age(raw: String) Int !ParseError -[]> {
     return Ok(42)
 }
 fn load(raw: String) Int !ParseError -[]> {
-    n :: parse_age(raw)? "loading age"
+    n :: parse_age(raw)?("loading age")
     return Ok((n * 2))
 }
 fn double(raw: String) Int !ParseError -[]> {
-    n :: load(raw)? "doubling age"
+    n :: load(raw)?("doubling age")
     return Ok((n * 2))
 }
 fn run() !ParseError {
-    n :: double("")?
+    n :: double("")
     print(n)
 }
 "#;
@@ -501,7 +501,7 @@ fn run() !ParseError {
         stdout.is_empty(),
         "nothing printed before the failure: {stdout}"
     );
-    // Root failure first, then the trail: one numbered hop per `?` site,
+    // Root failure first, then the trail: one numbered hop per propagation site,
     // origin first, each carrying its own note.
     let (root, trail) = stderr
         .split_once(" Trail [E3002] (")
@@ -512,10 +512,10 @@ fn run() !ParseError {
     );
     assert!(
         trail.starts_with("3 hops via ?, origin first):\n"),
-        "three `?` sites, none repeated: {stderr}"
+        "three propagation sites, none repeated: {stderr}"
     );
     let hops: Vec<&str> = trail.lines().skip(1).collect();
-    assert_eq!(hops.len(), 3, "one hop per `?` site: {stderr}");
+    assert_eq!(hops.len(), 3, "one hop per propagation site: {stderr}");
     assert!(
         hops[0].starts_with("  1. load (") && hops[0].ends_with(") — loading age"),
         "innermost hop must be load with its note: {stderr}"
@@ -544,7 +544,7 @@ fn note_value() String -[IO]> {
     return "unexpected"
 }
 fn wrapped() String -[IO]> {
-    value :: present()? "never {note_value()}"
+    value :: present()?("never {note_value()}")
     return Ok(value)
 }
 fn run() {
@@ -577,7 +577,7 @@ fn pass_through() -[]> {
 fn run() {
     recovered :: fail() ?? "fallback"
     print(recovered)
-    _ :: pass_through()?
+    _ :: pass_through()
 }
 "#;
     let (code, stdout, stderr) = build_and_run_debug("fallback_context_cause", src);
@@ -684,17 +684,17 @@ fn read_store() String !IOError -> {
     }))
 }
 
-fn load_store() String !Err -> {
+fn load_store() String -> {
     value :: read_store()?("loading store")
     return value
 }
 
-fn open_store() String !Err -> {
+fn open_store() String -> {
     value :: load_store()?("opening store")
     return value
 }
 
-fn run() !Err {
+fn run() {
     _ :: open_store()?("running store")
 }
 "#;
@@ -733,20 +733,20 @@ fn uncaught_err_prints_propagation_chain() {
         return;
     }
 
-    // D-FAIL-CTX1=A: uncaught Err at `fn run() ?` prints the `?` journey
+    // D-FAIL-CTX1=A: uncaught Err at `fn run()` prints the journey
     // (file:line per frame, with notes) then the error text, exit 1.
     let src = r#"
 fn read_raw() String -> Err("file not found")
 fn parse_config() String -[]> {
-    raw :: read_raw()? "reading raw config"
+    raw :: read_raw()?("reading raw config")
     return Ok(raw)
 }
 fn load_config() String -[]> {
-    cfg :: parse_config()? "loading config"
+    cfg :: parse_config()?("loading config")
     return Ok(cfg)
 }
 fn run() {
-    _ :: load_config()?
+    _ :: load_config()
 }
 "#;
     let (code, _stdout, stderr) = build_and_run_debug("error_trace_uncaught", src);
@@ -780,7 +780,7 @@ fn propagation_trace_collapses_repeated_frames() {
         return;
     }
 
-    // Same `?` site hit repeatedly via recursion → one frame, not N copies.
+    // Same propagation site hit repeatedly via recursion → one frame, not N copies.
     // The journey only reaches stderr when the failure escapes the entry, so
     // `run` propagates instead of recovering.
     let src = r#"
@@ -788,11 +788,11 @@ fn dive(n: Int) Int -[]> {
     if n <= 0 {
         return Err("bottom")
     }
-    v :: dive((n - 1))?
+    v :: dive((n - 1))
     return Ok(v)
 }
 fn run() {
-    v :: dive(4)?
+    v :: dive(4)
     print(v)
 }
 "#;

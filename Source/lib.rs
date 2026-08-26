@@ -521,6 +521,45 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
         prepared,
         package_scope,
         build_override,
+        false,
+    )
+}
+
+/// Compile a native cache hit after its checked front end has completed. The
+/// returned output keeps diagnostics and facts but omits generated Rust.
+pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped_without_codegen(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    gates: Policy::GateSet,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    remote_builder: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    prepared: Option<Driver::PreparedBuildFrontEnd>,
+    package_scope: bool,
+    build_override: bool,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_opts_inner(
+        file,
+        grants,
+        freestanding,
+        gates,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        false,
+        remote_builder,
+        profile,
+        setting_overrides,
+        prepared,
+        package_scope,
+        build_override,
+        true,
     )
 }
 
@@ -668,6 +707,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
         prepared,
         package_scope,
         build_override,
+        false,
     )
 }
 
@@ -817,6 +857,7 @@ fn compile_programmable_build_opts_inner(
     prepared: Option<Driver::PreparedBuildFrontEnd>,
     package_scope: bool,
     build_override: bool,
+    without_codegen: bool,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         let remote = remote_builder
@@ -874,28 +915,31 @@ fn compile_programmable_build_opts_inner(
             .iter()
             .filter_map(|grant| Comptime::Build::BuildCapability::parse(grant))
             .collect();
-        let output = Driver::compile_bundle_path_build_with_front_end(
-            file,
-            Driver::BuildRunOptions {
-                grants,
-                policy: production_build_policy(),
-                execute: true,
-                gates,
-                inspect_only: false,
-                emit_generated,
-                locked,
-                freestanding,
-                web_target,
-                plugin_target,
-                cross_target: cross_target.map(str::to_string),
-                profile: profile.to_string(),
-                setting_overrides: setting_overrides.clone(),
-                remote,
-                package_scope,
-                build_override,
-            },
-            prepared,
-        )?;
+        let options = Driver::BuildRunOptions {
+            grants,
+            policy: production_build_policy(),
+            execute: true,
+            gates,
+            inspect_only: false,
+            emit_generated,
+            locked,
+            freestanding,
+            web_target,
+            plugin_target,
+            cross_target: cross_target.map(str::to_string),
+            profile: profile.to_string(),
+            setting_overrides: setting_overrides.clone(),
+            remote,
+            package_scope,
+            build_override,
+        };
+        let output = if without_codegen {
+            Driver::compile_bundle_path_build_with_front_end_without_codegen(
+                file, options, prepared,
+            )?
+        } else {
+            Driver::compile_bundle_path_build_with_front_end(file, options, prepared)?
+        };
         if emit_generated {
             export_generated_sources(file, &output)?;
         }

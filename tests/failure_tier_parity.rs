@@ -97,7 +97,7 @@ fn read() Int !StoreFailure -> Err(StoreFailure.Missing)
 
 fn run() {
     value :: read()
-    return Ok(())
+    return Ok()
 }
 "#;
 

@@ -3327,8 +3327,8 @@ fn lsp_definition_uses_build_graph_generated_source() {
     let source = r#"fn build(b: BuildContext) BuildPlan {
     b.generate("made") {
         fn generated_value() String -> "hi";
-    }?
-    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/made.jet"], [])?
+    }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/made.jet"], [])
     return b.plan(app)
 }
 fn run() { print(generated_value()) }

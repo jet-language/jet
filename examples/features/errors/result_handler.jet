@@ -1,15 +1,15 @@
 // D-RESULT-DECON2=B: one fixed exhaustive Result handler handles both payloads.
-fn classify(ok: Bool) Int !Err -> if ok -> Ok(7) else -> Err("bad")
+fn classify(ok: Bool) Int -> if ok -> Ok(7) else -> Err("bad")
 
-fn choose<T>(value: ^T, ok: Bool) T !Err -> if ok -> Ok(value) else -> Err("bad")
+fn choose<T>(value: ^T, ok: Bool) T -> if ok -> Ok(value) else -> Err("bad")
 
-fn choose_text(value: ^String, ok: Bool) String !Err -> if ok -> Ok(value) else -> Err("bad")
+fn choose_text(value: ^String, ok: Bool) String -> if ok -> Ok(value) else -> Err("bad")
 
 fn owned(ok: Bool) String -> {
     return choose_text("owned", ok) ? success -> success ! _failure -> "bad"
 }
 
-fn generic<T>(value: ^T, ok: Bool) T !Err -> {
+fn generic<T>(value: ^T, ok: Bool) T -> {
     return choose<T>(^value, ok) ? success -> success ! _failure -> return Err("bad")
 }
 

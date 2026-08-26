@@ -1853,6 +1853,7 @@ impl<'a> Checker<'a> {
                 // value-if may leave its Result carrier in `expected_type`,
                 // but that expectation belongs only to the branch value, not
                 // to this statement.
+                let must_use_call_target = self.ignored_must_use_call_target(expr);
                 let saved_expected = self.expected_type.take();
                 let inferred = self.infer_fallible_stmt(expr);
                 self.expected_type = saved_expected;
@@ -1872,7 +1873,12 @@ impl<'a> Checker<'a> {
                                 Some(expr.span()),
                             ));
                     } else if !self.suppress_must_use {
-                        self.check_ignored_must_use(expr, &ty, expr.span());
+                        self.check_ignored_must_use(
+                            expr,
+                            &ty,
+                            expr.span(),
+                            must_use_call_target,
+                        );
                     }
                     if self.arrow_loop_body && !self.is_unit_type(&ty) {
                         self.diags.push(Diagnostic::lint(

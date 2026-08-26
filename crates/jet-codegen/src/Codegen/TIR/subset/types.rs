@@ -664,7 +664,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
             return true;
         }
         // D-TYPE2-MEASURE1=A: `ComputeError` is the err side of every fallible
-        // compute operation, including the composed `Matrix<M, P> ComputeError!`
+        // compute operation, including the composed `Matrix<M, P> !ComputeError`
         // a matrix product produces. Same argument as `CryptoError` above: it
         // renders through `cx.rust_type` to the Prelude-owned
         // `jet_std::JetComputeError` (`core_rust_type_name`), so the payload is

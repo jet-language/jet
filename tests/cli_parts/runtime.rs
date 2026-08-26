@@ -2,7 +2,7 @@ use super::*;
 use jet_foundation::JSON::JSONValue;
 
 /// `jet fix --edition=2027` rewrites `json.canonical(x)` per D-JSONCANON1:
-/// `json.canonical(x)?` when the enclosing function is fallible, otherwise
+/// `json.canonical(x)` when the enclosing function is fallible, otherwise
 /// `json.canonical(x) ?? panic("value is not canonical JSON")`. A re-run
 /// must be a no-op (idempotent), including when the existing fallback
 /// already has a space before `??` (the bug that made `jet fix` double-
@@ -21,8 +21,8 @@ fn show() {
     print(r)
 }
 
-fn sign() -> String ! {
-    data := json.parse("{\"a\":1}")?
+fn sign() String -> {
+    data := json.parse("{\"a\":1}")
     r := json.canonical(data)
     return r
 }
@@ -56,8 +56,8 @@ fn already_migrated() {
         "infallible fn `show` must get the panic fallback:\n{after_first}"
     );
     assert!(
-        after_first.contains("json.canonical(data)?\n    return r"),
-        "fallible fn `sign` must get bare `?` propagation, not a panic fallback:\n{after_first}"
+        after_first.contains("json.canonical(data)\n    return r"),
+        "fallible fn `sign` must use automatic propagation, not a panic fallback:\n{after_first}"
     );
     assert!(
         !after_first.contains("value is not canonical JSON\") ?? panic"),

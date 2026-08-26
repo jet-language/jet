@@ -1,14 +1,14 @@
 // D-FAIL-CONV2=A (ratified 2026-08-17, card #2018): the standard library declares
-// the conversion for its own error family. A program can write `fn run() !` and
-// pass a Core failure up with `?` without declaring anything, because these
-// declarations already sit on the existing D-ERR-CONV rail. One source; every
-// tier lowers the same `impl <CoreError> -> Err` block, the same way
+// the conversion for its own error family. A program can write `fn run()` and
+// pass a Core failure up automatically without declaring anything, because
+// these declarations already sit on the existing D-ERR-CONV rail. One source;
+// every tier lowers the same `impl <CoreError> -> Err` block, the same way
 // `Prelude/Units.jet` ships one dimension catalog.
 //
-// Sema injects only the conversions a module actually exercises — the `?`
-// operators whose error type is a family member converting into the default
-// `Err`. Unused members are not copied into the module, so a defect in one
-// conversion cannot break a program that never produces that error.
+// Sema injects only the conversions a module actually exercises — fallible
+// calls whose error type is a family member converting into the default `Err`.
+// Unused members are not copied into the module, so a defect in one conversion
+// cannot break a program that never produces that error.
 //
 // An author who wants the failure named still writes the named form
 // (`fn run() !JSONError`), and that stays correct: this file only makes the

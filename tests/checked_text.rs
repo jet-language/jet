@@ -105,7 +105,7 @@ impl PatternError -> Err {
 }
 
 fn parse(text: String) Pattern -[]> {
-    pattern :: Pattern.from(text)?
+    pattern :: Pattern.from(text)
     return Ok(pattern)
 }
 
@@ -115,7 +115,7 @@ fn load(text: String) Pattern -[]> {
 }
 
 fn run() {
-    _ :: load("bad")?
+    _ :: load("bad")
 }
 "#;
 

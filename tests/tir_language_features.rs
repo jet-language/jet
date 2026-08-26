@@ -458,7 +458,7 @@ fn run() {
 }
 
 /// D-RANGETYPE1/D-SHAPE-CONVERT1: range-constrained distinct conversions are
-/// fallible for runtime values (`Severity.from_int(raw)?`), and arithmetic
+/// fallible for runtime values (`Severity.from_int(raw)`), and arithmetic
 /// loosens to the base `Int` only at the written `wrapping` gate.
 #[test]
 fn range_type_runtime_try_and_spelled_arithmetic_gate() {
@@ -469,7 +469,7 @@ fn range_type_runtime_try_and_spelled_arithmetic_gate() {
 #Numeric Severity :: distinct Int(0..10);
 
 fn checked(raw: Int) Severity !String {
-    return Ok(Severity.from_int(raw)?)
+    return Ok(Severity.from_int(raw))
 }
 
 fn pass_checked(value: Severity !String) Severity !String { return ~value }

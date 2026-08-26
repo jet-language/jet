@@ -75,3 +75,13 @@ fn run() {
     rejects(include_str!("ui/typestate_wrong_state.jet"), "E0150");
     rejects(include_str!("ui/taint_sink_unsanitized.jet"), "E0721");
 }
+
+#[test]
+fn inline_range_runtime_conversion_requires_try() {
+    let diagnostics = jet::compile(include_str!("ui/inline_range_runtime_needs_try.jet"))
+        .expect_err("runtime inline range conversion must be rejected");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0136"),
+        "expected E0136, got {diagnostics:#?}"
+    );
+}

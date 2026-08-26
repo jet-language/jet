@@ -5535,6 +5535,7 @@ pub(crate) fn collect_measure_evidence(
         None,
         None,
         mode,
+        false,
         None,
     );
     let mut command = Command::new(&bin);
@@ -5862,6 +5863,7 @@ pub(crate) fn collect_scene_evidence(
         None,
         None,
         mode,
+        false,
         None,
     );
 

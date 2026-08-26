@@ -392,7 +392,7 @@ buffering law](../spec/spec.md#bounded-buffering-law):
 use core.files as files
 
 fn count_lines(path: String) Int !IOError -> {
-    handle :: files.open(~path)?
+    handle :: files.open(~path)
     n := 0
     loop line in handle.lines() {
         n = (n + 1)
@@ -829,9 +829,9 @@ use core.crypto as crypto
 use core.crypto.vault as vault
 
 fn provision() !vault.VaultError -[Secret]> {
-    plan :: vault.prepare_generate<crypto.SigningKey>("release")?
-    write :: vault.authorize_write(&plan, reason: "create release signer")?
-    key_ref :: vault.commit_generate<crypto.SigningKey>(take(write), take(plan))?
+    plan :: vault.prepare_generate<crypto.SigningKey>("release")
+    write :: vault.authorize_write(&plan, reason: "create release signer")
+    key_ref :: vault.commit_generate<crypto.SigningKey>(take(write), take(plan))
     print(key_ref) // repo:release@v1
 }
 ```
@@ -1420,7 +1420,7 @@ fn run() {
         .env("RUST_BACKTRACE", "1")
         .stdout(.Stream)
         .stderr(.Inherit)
-        .timeout(Duration.seconds(30)?)
+        .timeout(Duration.seconds(30))
 
     child :: spec.spawn() ?? return
     loop line in child.stdout.lines() {
@@ -1554,7 +1554,7 @@ drain live via `child.stdout.lines()`), `.Inherit` (pass through to the
 parent's stream), or `.Capture` (pipe it — collect into `ProcessReceipt` at
 `run()`/`wait()`). `stdin` defaults to closed (no `.stdin(...)` call — the
 child gets no stdin at all, never the parent's terminal by accident).
-`timeout` takes a `Duration` (e.g. `Duration.seconds(30)?`). A spec can
+`timeout` takes a `Duration` (e.g. `Duration.seconds(30)`). A spec can
 `run()` to collect a `ProcessReceipt`, `run_checked()` to reject a failed exit,
 or `spawn()` to return a `ProcessChild`.
 
@@ -1579,7 +1579,7 @@ same `ProcessSpec`, so cwd, environment, streams, timeout, and the child
 lifecycle keep one model:
 
 ```jet
-child :: process.cmd(["lldb", app]).terminal().spawn()?
+child :: process.cmd(["lldb", app]).terminal().spawn()
 
 policy :: TerminalPolicy{
     size: TerminalSize{ cols: 120, rows: 40 },
@@ -1587,9 +1587,9 @@ policy :: TerminalPolicy{
 }
 plan :: process.cmd(["python", "-i"]).terminal(policy)
 if plan.abilities().has(TerminalFact.resize) {
-    child :: plan.spawn()?
+    child :: plan.spawn()
     session :: child.terminal ?? return
-    session.resize(TerminalSize{ cols: 160, rows: 50 })?
+    session.resize(TerminalSize{ cols: 160, rows: 50 })
 }
 ```
 
@@ -2017,7 +2017,7 @@ fn run() {
     if perf.fidelity() < 0.5 {
         print("low quality mode")
     }
-    perf.override_fidelity(0.25)?   // tests or explicit app policy
+    perf.override_fidelity(0.25)   // tests or explicit app policy
     perf.reset_fidelity()
 }
 ```
@@ -2190,7 +2190,7 @@ fn run() {
 `DateTime` is an unambiguous UTC instant. `LocalDate` and `LocalTime` are civil
 values without a zone. `ZonedDateTime` combines an instant with a `Zone` so
 formatting and calendar arithmetic use the right offset. `Duration` is elapsed
-time; `Period` is calendar time. Across DST, `z.add_duration(Duration.hours(24)?)`
+time; `Period` is calendar time. Across DST, `z.add_duration(Duration.hours(24))`
 adds 24 real hours, while `z.add_period(time.period_days(1))` keeps the same
 local clock time on the next calendar day.
 
@@ -2253,9 +2253,9 @@ clock starts at the same value; a copied system clock keeps advancing from the
 same observed instant. Backward mutation never rewinds a system clock.
 
 A runtime `Duration` is an i64 nanosecond count (D-TIMERES1=A), built with
-checked type-owned unit methods such as `Duration.seconds(n)?` or
-`Duration.nanoseconds(n)?`. Read a whole unit with `d.in(.Nanoseconds)?` /
-`d.in(.Milliseconds)?`; the result truncates toward zero and reports
+checked type-owned unit methods such as `Duration.seconds(n)` or
+`Duration.nanoseconds(n)`. Read a whole unit with `d.in(.Nanoseconds)` /
+`d.in(.Milliseconds)`; the result truncates toward zero and reports
 `RangeError` on overflow. Time literals `ns`, `us`, `ms`, `s`, `min`, `h`, and
 `d` are members of the canonical `core.units::Time` family and produce a
 `Duration` with an i64 nanosecond carrier. `Instant` is the matching point:
@@ -2346,7 +2346,7 @@ struct Invoice {
     units: Int
 }
 
-invoice :: json.decode<Invoice>(raw)?
+invoice :: json.decode<Invoice>(raw)
 ```
 
 Use a fixed-width target when a wire contract has a fixed range. An out-of-range
@@ -2699,12 +2699,12 @@ one mechanism.
 ```jet
 impl Email.Decode {
     fn decode(tree: DataTree) Email ![FieldError] -> {
-        address := FieldError.under("address", tree.text())?
+        address := FieldError.under("address", tree.text())
         return Ok(Email{ address })
     }
 }
 
-items := tree.field("items")?.decode<[LineItem]>()?
+items := tree.field("items")?.decode<[LineItem]>()
 ```
 
 **Decode migration (D-MIGRATE3=A, retired by D-VALIDATE-DECODE1=B):** every
@@ -3694,9 +3694,9 @@ Beginner calls accept strings; expert calls accept typed
 | `tcp_listen_addr(addr)` / `tcp_connect_addr(addr)` | `TcpListener !NetError` / `TcpStream !NetError` | Typed entrypoints |
 | `tcp_connect_timeout(addr, ms)` | `TcpStream !NetError` | Typed dial with timeout |
 | `tcp_connect_happy(host, port, ms)` | `TcpStream !NetError` | Dual-stack dial with staggered IPv6/IPv4 racing under one cancellation/deadline budget |
-| `listener.accept(deadline: Duration)?` | `TcpStream !NetError` | Accept with an optional per-call deadline |
-| `stream.read(limit, deadline: Duration)?` / `stream.write(bytes, deadline: Duration)?` / `stream.write_all(bytes, deadline: Duration)?` | `[U8] !NetError` / `Int !NetError` / `!NetError` | Canonical byte operations with optional per-call deadlines |
-| `stream.read_text(limit, deadline: Duration)?` / `stream.write_text(text, deadline: Duration)?` | `String !NetError` / `!NetError` | Checked UTF-8 projections with optional per-call deadlines |
+| `listener.accept(deadline: Duration)` | `TcpStream !NetError` | Accept with an optional per-call deadline |
+| `stream.read(limit, deadline: Duration)` / `stream.write(bytes, deadline: Duration)` / `stream.write_all(bytes, deadline: Duration)` | `[U8] !NetError` / `Int !NetError` / `!NetError` | Canonical byte operations with optional per-call deadlines |
+| `stream.read_text(limit, deadline: Duration)` / `stream.write_text(text, deadline: Duration)` | `String !NetError` / `!NetError` | Checked UTF-8 projections with optional per-call deadlines |
 | `stream.shutdown(.Read/.Write/.Both)` / `stream.close()` | `!NetError` | Explicit half-close; close is idempotent and later I/O is `.Closed` |
 | `stream.ready(.Read/.Write/.ReadWrite, deadline: Duration)` | `NetReady !NetError` | Same-handle readiness; earliest ambient or explicit deadline wins |
 | `tcp_local_socket_addr(stream)` / `tcp_peer_socket_addr(stream)` | `SocketAddr !NetError` | Typed stream addresses |

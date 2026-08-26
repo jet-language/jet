@@ -60,10 +60,10 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
   Source-owned `to_*`, casts, and a neutral `convert` helper are absent.
 - Runtime durations (D-SHAPE-DURATION1=A, D-SHAPE-DURATIONCONVERT1=A,
   D-TIMERES1=A) use
-  `Duration.nanoseconds|microseconds|milliseconds|seconds|minutes|hours(number)?`;
+  `Duration.nanoseconds|microseconds|milliseconds|seconds|minutes|hours(number)`;
   non-finite and
   out-of-range values fail with `RangeError`. A Duration stores a whole-nanosecond
-  count. `duration.in(.Unit)?` reads a whole `Int` unit, truncating toward zero.
+  count. `duration.in(.Unit)` reads a whole `Int` unit, truncating toward zero.
   `is_zero()`, `total_seconds()`, and `difference(other)` are Duration facts.
   Time literals (`ns`, `us`, `ms`, `s`, `min`, `h`, `d`) resolve through the
   in-scope canonical Time family and produce the checked Duration delta.
@@ -3376,7 +3376,7 @@ failure, and E4203 when the host image has no usable certificate roots.
 Advanced client TLS configuration belongs in `core.net.tls` (custom roots,
 pinning, client certificates). D-TLSSERVE1=A adds HTTPS serving as a named
 option on the same server entry point: `Server.serve(addr, mux, tls:
-Server.tls(cert, key))?`. The third argument must be labeled `tls:`; unlabeled
+Server.tls(cert, key))`. The third argument must be labeled `tls:`; unlabeled
 TLS config is rejected so the transport switch is visible at the call site.
 
 ### Graphics and games (D-RAYLIB1, D-GAME1-3)
@@ -3416,7 +3416,7 @@ fn_effects = "fn" ident "(" params ")" [ type ]
 
 ```jet
 fn load(path: String) String -[FS]> {
-    core.files.read(path)?     // OK: FS ⊆ {FS}
+    core.files.read(path)      // OK: FS ⊆ {FS}
 }
 ```
 
@@ -4428,8 +4428,8 @@ supports `find_program`, `pkg_config`, and `header` probe kinds.
 ```jet
 fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     #Impure("run declared toolchain probe and action") {
-    shell :: b.probe("shell", "find_program", "sh")?
-    native :: b.toolchain("native", "x86_64-linux")?
+    shell :: b.probe("shell", "find_program", "sh")
+    native :: b.toolchain("native", "x86_64-linux")
     stamp :: b.action(
         "stamp",
         ["assets/version.txt"],
@@ -4438,8 +4438,8 @@ fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
         ["Exec", "FS"],
         native,
         [shell]
-    )?
-    app :: b.add_executable("app", ["main.jet"], [stamp])?
+    )
+    app :: b.add_executable("app", ["main.jet"], [stamp])
     return b.plan(app)
     }
     return b.plan()

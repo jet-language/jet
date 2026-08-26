@@ -289,7 +289,7 @@ fn maybe() Int !String -> {
 }
 
 fn checked() Int !String -> {
-    n :: maybe()?
+    n :: maybe()
     return Ok(n)
 }
 
@@ -297,7 +297,7 @@ fn run() {
     #Unsafe("Canvas proof rail fixture") {
         marker := 1
     }
-    print(checked()?)
+    print(checked())
 }
 "#;
 

@@ -1534,7 +1534,7 @@ impl LowerCtx<'_, '_> {
                     Some(Type::Int)
                 }
                 // D-TEXTWIDTH1=B: the policy overload can reject a control
-                // character, so its return type is `Int TextError!`. The
+                // character, so its return type is `Int !TextError`. The
                 // DECLARING table is sema's `is_polymorphic_core_special` +
                 // `infer_core_call`, which now stamps that type onto the node,
                 // so `??`/`?` read it off `value.ty` and never reach here. This

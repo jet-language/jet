@@ -208,6 +208,47 @@ pub fn prepare(bundle: &ProgramBundle) -> Result<Option<FfiLink>, Vec<Diagnostic
     prepare_for_target(bundle, &target)
 }
 
+/// Whether the native whole-program cache can skip Rust code generation for
+/// this bundle. FFI and C-linked programs stay on the ordinary path because
+/// their final artifacts depend on bridge/link inputs outside the AST key.
+pub fn native_cacheable(bundle: &ProgramBundle) -> bool {
+    if bundle.cffi.links_c() || !collect_externs(bundle).is_empty() {
+        return false;
+    }
+    !bundle.used_core.iter().any(|u| {
+        u == "core.archive"
+            || u.starts_with("core.archive::")
+            || u == "core.db"
+            || u.starts_with("core.db::")
+            || u == "core.archive.gzip"
+            || u.starts_with("core.archive.gzip::")
+            || u == "core.archive.zstd"
+            || u.starts_with("core.archive.zstd::")
+            || u == "core.http.client"
+            || u.starts_with("core.http.client::")
+            || matches!(
+                u.as_str(),
+                "core.http::get" | "core.http::post" | "core.http::request"
+            )
+            || u == "core.http.server::tls"
+            || u == "core.net::tls_connect"
+            || u == "core.net.tls"
+            || u.starts_with("core.net.tls::")
+            || u == "core.email"
+            || u.starts_with("core.email::")
+            || u == "core.crypto"
+            || u.starts_with("core.crypto::")
+            || u == "core.crypto.expert"
+            || u.starts_with("core.crypto.expert::")
+            || u == "core.auth"
+            || u.starts_with("core.auth::")
+            || u == "core.crypto.vault"
+            || u.starts_with("core.crypto.vault::")
+            || u == "core.plugin"
+            || u.starts_with("core.plugin::")
+    })
+}
+
 /// Prepare the bridge for the target selected by the driver. Native source,
 /// inline asm, cache identity, cargo, and the eventual rustc link must agree on
 /// this exact triple.

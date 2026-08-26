@@ -14,8 +14,8 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 const LEGACY_TEMPLATE: &str = r#"
 fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
     #Impure("exercise the typed legacy bridge") {
-        tc :: b.toolchain("native", "x86_64-linux")?
-        identity :: b.signing("builder", "ci")?
+        tc :: b.toolchain("native", "x86_64-linux")
+        identity :: b.signing("builder", "ci")
         imported :: b.legacy(
             "cargo",
             "legacy",
@@ -34,8 +34,8 @@ fn build(b: BuildContext) BuildPlan -[Exec, FS]> {
             [],
             "cached",
             "Cargo.toml"
-        )?
-        app :: b.add_executable("app", ["main.jet"], [imported])?
+        )
+        app :: b.add_executable("app", ["main.jet"], [imported])
         return b.plan(app)
     }
     return b.plan()
@@ -182,8 +182,8 @@ fn build(b: BuildContext) BuildPlan -[Exec]> {
             ["workspace-stamp"],
             ["sh", "-c", "printf workspace > workspace-stamp"],
             ["Exec"]
-        )?
-        app :: b.add_executable("workspace", ["workspace.jet"], [action])?
+        )
+        app :: b.add_executable("workspace", ["workspace.jet"], [action])
         return b.plan(app)
     }
     return b.plan()
@@ -217,8 +217,8 @@ fn build(b: BuildContext) BuildPlan -[Exec]> {
             ["a/a.jet"],
             ["sh", "-c", "printf 'fn a_ready() Int -> 1' > a/a.jet"],
             ["Exec"]
-        )?
-        target :: b.add_library("a", ["run.jet"], [action])?
+        )
+        target :: b.add_library("a", ["run.jet"], [action])
         return b.plan(target)
     }
     return b.plan()
@@ -241,8 +241,8 @@ fn build(b: BuildContext) BuildPlan -[Exec]> {
             ["b/b.jet"],
             ["sh", "-c", "printf 'fn b_ready() Int -> 1' > b/b.jet"],
             ["Exec"]
-        )?
-        target :: b.add_library("b", ["run.jet"], [action])?
+        )
+        target :: b.add_library("b", ["run.jet"], [action])
         return b.plan(target)
     }
     return b.plan()

@@ -1473,6 +1473,21 @@ impl<'a> Checker<'a> {
                 *resolved_ret_out = Some(target.clone());
                 return Some(target);
             }
+            // D-FAILURE-FOUNDATION1: ordinary calls auto-propagate their
+            // Result carrier, which would hide the binding-level range rule
+            // below by rewriting this method call to `Try`. Keep the source
+            // diagnostic at the conversion seam while the binding is active;
+            // an explicit `Try` has nonzero `failure_auto_depth` and remains
+            // legal.
+            if self.failure_auto_depth == 0 && self.current_binding_name.is_some() {
+                self.diags
+                    .push(crate::Sema::Diagnostics::inline_range_runtime_conversion(
+                        lo,
+                        hi,
+                        method,
+                        args[0].expr.span(),
+                    ));
+            }
             let ret = Type::Result {
                 ok: Box::new(target),
                 err: Box::new(Type::String),
@@ -3345,7 +3360,7 @@ impl<'a> Checker<'a> {
                 return ret;
             }
         }
-        // D-DATAFLOW1=A: DataStream<T>.next() → T? DataError!
+        // D-DATAFLOW1=A: DataStream<T>.next() → ?T !DataError
         if let Type::Apply {
             name,
             args: type_args,
@@ -4137,7 +4152,7 @@ impl<'a> Checker<'a> {
                 *recv_type_out = Some(handle_ty_s.clone());
                 // For allocator value methods, infer the payload once. The
                 // fallible spelling keeps the same payload inside one
-                // `T AllocError!` carrier.
+                // `T !AllocError` carrier.
                 if matches!(method, "alloc" | "try_alloc") {
                     if let Some(arg) = args.get_mut(0) {
                         let inferred = self.infer(&mut arg.expr);

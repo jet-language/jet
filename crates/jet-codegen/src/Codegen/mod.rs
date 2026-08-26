@@ -449,6 +449,23 @@ fn push_cached_runtime_body(out: &mut String, link: Option<&FfiLink>) {
         push_ffi_reporter(out, None);
     }
     push_cached_runtime_traits(out);
+    // `Outcome::from_json` is fixed-runtime code. Keep its parser and error
+    // vocabulary in the same cached rlib instead of the optional Core closure;
+    // the latter is a separate crate when native runtime reuse is active.
+    out.push_str("\nmod jet_encoding_errors {\n");
+    out.push_str(include_str!(
+        "../../../jet-foundation/src/EncodingErrors.rs"
+    ));
+    out.push_str("\n}\n");
+    out.push_str("\nmod jet_json_number {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/JSONNumber.rs"));
+    out.push_str("\n}\n");
+    out.push_str("\nmod jet_encoding_json {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/EncodingJson.rs"));
+    out.push_str("\n}\n");
+    out.push_str(
+        "\n#[allow(non_snake_case)]\nmod EncodingJson { pub use crate::jet_encoding_json::*; }\n",
+    );
     push_prelude(out);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(out);
@@ -1213,20 +1230,6 @@ fn push_corelib_prelude_body(
     out.push_str("\nmod jet_regex_syntax {\n");
     out.push_str(include_str!("../../../jet-foundation/src/RegexSyntax.rs"));
     out.push_str("\n}\n");
-    out.push_str("\nmod jet_encoding_errors {\n");
-    out.push_str(include_str!(
-        "../../../jet-foundation/src/EncodingErrors.rs"
-    ));
-    out.push_str("\n}\n");
-    out.push_str("\nmod jet_json_number {\n");
-    out.push_str(include_str!("../../../jet-foundation/src/JSONNumber.rs"));
-    out.push_str("\n}\n");
-    out.push_str("\nmod jet_encoding_json {\n");
-    out.push_str(include_str!("../../../jet-foundation/src/EncodingJson.rs"));
-    out.push_str("\n}\n");
-    out.push_str(
-        "\n#[allow(non_snake_case)]\nmod EncodingJson { pub use crate::jet_encoding_json::*; }\n",
-    );
     let needs_xml = core_usage_matches(used_core, &["core.encoding.xml", "core.encoding"]);
     let needs_base = core_usage_matches(
         used_core,
@@ -3851,6 +3854,17 @@ mod tests {
             );
         }
         assert!(body.contains("fn jet_runtime_diagnostic_row"));
+        for module in [
+            "mod jet_encoding_errors",
+            "mod jet_json_number",
+            "mod jet_encoding_json",
+            "mod EncodingJson",
+        ] {
+            assert!(
+                body.contains(module),
+                "fixed runtime must own JSON report decoding module `{module}`"
+            );
+        }
         for part in [
             ENV_INIT_PRELUDE,
             UNINIT_PRELUDE,

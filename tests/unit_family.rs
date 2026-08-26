@@ -441,7 +441,7 @@ fn scaled_family_metadata_is_public_api_identity() {
     meter
     millimeter(scale: 2/2000)
 }
-pub fn length() Millimeter { return Millimeter.from_float(1.0)? }
+pub fn length() Millimeter { return Millimeter.from_float(1.0) }
 "#;
     let (tokens, diagnostics) = jet::Lexer::lex(src);
     assert!(diagnostics.is_empty());
@@ -754,7 +754,7 @@ fn run() {
 #UnitFamily(Length, dimension, base: meter) { meter half(scale: 1/2) }
 fn run() {
     digits :: -1
-    Meter.from_half_rounded(1half, .NearestEven, digits: digits)?
+    Meter.from_half_rounded(1half, .NearestEven, digits: digits)
 }
 "#;
     let (code, stdout, stderr) = tir_support::build_and_run_full(

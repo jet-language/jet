@@ -340,7 +340,7 @@ fn returned() {
 fn questioned() Int !String {
     resource := Resource{ name: "question" }
     defer close(^resource)
-    value := fail()?
+    value := fail()
     return Ok(value)
 }
 

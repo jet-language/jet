@@ -93,12 +93,19 @@ body:not(.is-debug-active) .debug-controls > :not(#debug-start) { display: none;
 .workbench-context code { min-width: 0; overflow: hidden; color: #d7e4f7; text-overflow: ellipsis; white-space: nowrap; font: inherit; }
 .workbench-context > span { color: #46617d; }
 .workbench-map { min-width: 0; display: flex; align-items: center; gap: 6px; overflow: auto hidden; scrollbar-width: thin; }
-.workbench-map > span, .workbench-session { display: flex; align-items: baseline; gap: 6px; min-width: max-content; padding: 5px 8px; border: 1px solid #29415d; border-radius: 4px; background: rgba(7,14,23,.72); }
+.workbench-map > span, .workbench-session { display: flex; align-items: baseline; gap: 6px; min-width: 0; padding: 5px 8px; border: 1px solid #29415d; border-radius: 4px; background: rgba(7,14,23,.72); }
 .workbench-map b, .workbench-session > b { color: #8fb2dc; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; }
 .workbench-map span span { color: #d7e4f7; font-size: 11px; letter-spacing: 0; text-transform: none; }
-.workbench-session { justify-content: end; gap: 8px; border-color: #365a7f; }
+.workbench-session { align-items: center; justify-content: end; gap: 10px; border-color: #365a7f; }
+.workbench-state-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #f6d365; box-shadow: 0 0 14px rgba(246,211,101,.72); }
+.workbench-session[data-session-state="ready"] .workbench-state-dot { background: #5eead4; box-shadow: 0 0 14px rgba(94,234,212,.72); }
+.workbench-session[data-session-state="error"] .workbench-state-dot { background: #fb7185; box-shadow: 0 0 14px rgba(251,113,133,.72); }
+.workbench-session-copy, .workbench-run-state { min-width: 0; display: grid; gap: 2px; }
+.workbench-run-state { min-width: 116px; padding-left: 10px; border-left: 1px solid #29415d; }
+.workbench-session-copy > b, .workbench-run-state > b { color: #8fb2dc; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; }
+.workbench-session-copy #session-identity { display: block; }
 #workbench-header #session-identity { max-width: 220px; overflow: hidden; color: #cfe9ff; text-overflow: ellipsis; white-space: nowrap; }
-#workbench-header #run-hud { position: static; top: auto; right: auto; z-index: auto; display: block; min-width: 132px; margin: 0; padding: 0; border: 0; background: transparent; color: #9fb9d8; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; white-space: nowrap; }
+#workbench-header #run-hud { position: static; top: auto; right: auto; z-index: auto; display: block; min-width: 0; margin: 0; padding: 0; border: 0; background: transparent; color: #9fb9d8; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #workbench-header #run-hud.is-running { display: block; color: #fef3c7; }
 .side { min-width: 0; overflow: hidden auto; background: #0b1017; border-right: 1px solid #23344a; box-shadow: inset -1px 0 0 rgba(255,255,255,.03); }
 .right { border-right: 0; border-left: 1px solid #23344a; box-shadow: inset 1px 0 0 rgba(255,255,255,.03); display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; overflow: hidden; }
@@ -510,12 +517,12 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
         <span><b>Editor</b><span>Code · Graph</span></span>
         <span><b>Runtime</b><span><span id="workbench-preview-label" data-capability="preview" hidden inert>Preview · </span>Problems</span></span>
       </div>
-      <div class="workbench-session"><b>Session</b><span id="session-identity" class="tag" data-session-id="">Starting session</span><div id="run-hud" aria-live="polite" data-capability="runtime_output" hidden inert>Run idle</div></div>
+      <div class="workbench-session" data-session-state="starting"><span class="workbench-state-dot" aria-hidden="true"></span><div class="workbench-session-copy"><b>Session</b><span id="session-identity" class="tag" data-session-id="">Starting session</span></div><div class="workbench-run-state"><b>Run</b><div id="run-hud" aria-live="polite" data-capability="runtime_output" hidden inert>Run idle</div></div></div>
     </header>
     <aside id="left-drawer" class="side">
       <section id="canvas-panel" class="panel">
         <div id="canvas-component-tree" data-canvas-component-tree role="tree" aria-label="My Canvas">
-          <div class="component-tree-head"><h2>My Canvas</h2><span class="tag">source tree</span></div>
+          <div class="component-tree-head"><h2>My Canvas</h2><span class="tag">Source Tree</span></div>
           <section id="project-panel" class="component-tree-section" data-canvas-panel="project">
             <details open>
               <summary><span>Files</span><span id="project-mode" class="count">file</span></summary>
@@ -578,7 +585,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <section id="problems-panel" class="panel" data-canvas-panel="problems" data-capability="diagnostics" hidden inert><details open><summary><span>Problems</span><span id="problems-count" class="count">0</span></summary><div id="problems-list" class="problem-list"></div></details></section>
       <section id="details" class="panel" data-canvas-panel="details"></section>
       <section id="proof-panel" class="panel" data-canvas-panel="proof"><details open><summary><span>Proof</span><span id="proof-state" class="count">unknown</span></summary><div id="proof-rail" class="proof-rail"></div></details></section>
-      <section id="preview-panel" class="panel" data-canvas-panel="preview" data-capability="preview" hidden inert><details open><summary><span>App Preview</span><span class="count">last good</span></summary><div id="preview-status" class="tag">waiting for session</div><a id="preview-link" href="/" target="_blank" rel="noreferrer">Preview is starting</a></details></section>
+      <section id="preview-panel" class="panel" data-canvas-panel="preview" data-capability="preview" hidden inert><details open><summary><span>App Preview</span><span class="count">Last Good</span></summary><div id="preview-status" class="tag">waiting for session</div><a id="preview-link" href="/" target="_blank" rel="noreferrer">Preview is starting</a></details></section>
     </aside>
   </main>
   <footer id="statusbar"><span id="source-id">source</span><span id="revision">revision</span><span id="session-id">session</span><span id="schema">canvas v1</span><span id="scm-state">git</span><span id="toast"></span></footer>

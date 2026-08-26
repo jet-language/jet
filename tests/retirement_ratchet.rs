@@ -198,8 +198,13 @@ const FAILURE_SURFACE_ROOTS: &[&str] = &[
 ];
 
 const FAILURE_SURFACE_EXTENSIONS: &[&str] = &[
-    "jet", "md", "rs", "js", "json", "scm", "toml", "yaml", "yml",
+    "jet", "md", "rs", "js", "json", "scm", "toml", "txt", "yaml", "yml",
 ];
+
+/// D-FAILURE-FOUNDATION1=A: retired failure syntax has no active-source
+/// allowance. Diagnostic fixtures and decision history are skipped by the
+/// explicit allowlist below; every other detected spelling must be zero.
+const FAILURE_RETIREMENT_CEILING: usize = 0;
 
 /// The failure retirement covers source-shaped documentation and generated
 /// `.jet` trees too. Unlike the older adoption rows, this walk keeps hidden
@@ -263,6 +268,10 @@ fn failure_surface_files() -> Vec<PathBuf> {
                     || file_name(&path) == "llms.text"))
             .then_some(path)
         }));
+    }
+    let readme = root.join("README.md");
+    if readme.is_file() {
+        out.push(readme);
     }
     out
 }
@@ -425,6 +434,14 @@ fn failure_source_fragments(path: &Path, text: &str) -> Vec<FailureSourceFragmen
         }];
     }
 
+    if relative_path(path).starts_with("editors/tree-sitter/test/corpus/") {
+        let source = text.split_once("\n---").map_or(text, |(source, _)| source);
+        return vec![FailureSourceFragment {
+            first_line: 1,
+            source: source.to_string(),
+        }];
+    }
+
     let markdown = path.extension().is_some_and(|extension| extension == "md")
         || file_name(path) == "llms.text";
     if !markdown {
@@ -480,6 +497,7 @@ fn collect_failure_tokens<'a>(
         match &token.kind {
             jet::Lexer::TokKind::LineComment(_) | jet::Lexer::TokKind::BlockComment(_) => {}
             jet::Lexer::TokKind::Str(parts) => {
+                out.push(token);
                 for part in parts {
                     if let jet::Lexer::StrTokPart::Interp(inner) = part {
                         collect_failure_tokens(inner, out);
@@ -517,13 +535,21 @@ fn failure_is_expression_end(token: &jet::Lexer::Token) -> bool {
     matches!(
         &token.kind,
         jet::Lexer::TokKind::Ident(_)
+            | jet::Lexer::TokKind::Str(_)
             | jet::Lexer::TokKind::Int(..)
             | jet::Lexer::TokKind::Float(..)
             | jet::Lexer::TokKind::UnitNumber { .. }
             | jet::Lexer::TokKind::Char(_)
+            | jet::Lexer::TokKind::KwTrue
+            | jet::Lexer::TokKind::KwFalse
+            | jet::Lexer::TokKind::KwNull
+            | jet::Lexer::TokKind::KwIt
+            | jet::Lexer::TokKind::KwSelf
             | jet::Lexer::TokKind::RParen
             | jet::Lexer::TokKind::RBracket
             | jet::Lexer::TokKind::RBrace
+            | jet::Lexer::TokKind::PlusPlus
+            | jet::Lexer::TokKind::MinusMinus
     )
 }
 
@@ -604,6 +630,7 @@ fn failure_syntax_hits(source: &str) -> Vec<(usize, &'static str)> {
     let (lexed, _) = jet::Lexer::lex(source);
     let mut tokens = Vec::new();
     collect_failure_tokens(&lexed, &mut tokens);
+    tokens.sort_by_key(|token| token.span.start);
     let line = |offset| source[..offset].bytes().filter(|byte| *byte == b'\n').count() + 1;
     let mut hits = Vec::new();
 
@@ -1506,6 +1533,9 @@ fn failure_syntax_detector_accepts_current_forms_only() {
         concat!("fn bare() ", "!", " {}\n"),
         concat!("alias bare :: ", "!\n"),
         concat!("fn propagated() Int !Error -> read()", "?\n"),
+        concat!("fn literal_propagation() Bool -> ", "true", "?\n"),
+        concat!("fn string_propagation() String -> ", "\"value\"", "?\n"),
+        concat!("fn null_propagation() Null -> ", "null", "?\n"),
     ];
     for source in retired {
         assert!(
@@ -1535,8 +1565,9 @@ fn failure_surface_has_no_active_retired_spelling() {
             }
         }
     }
-    assert!(
-        offenders.is_empty(),
+    assert_eq!(
+        offenders.len(),
+        FAILURE_RETIREMENT_CEILING,
         "retired failure syntax escaped the diagnostic/history allowlist:\n{}",
         offenders.join("\n")
     );

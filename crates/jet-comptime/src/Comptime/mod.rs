@@ -386,6 +386,7 @@ pub fn run_build_entry(
     run_build_entry_with_policy(
         build,
         funcs,
+        &[],
         base_dir,
         program,
         program_value,
@@ -401,6 +402,7 @@ pub fn run_build_entry(
 pub fn run_build_entry_with_policy(
     build: &Func,
     funcs: &HashMap<String, &Func>,
+    error_conversions: &[crate::AST::ErrorConvDef],
     base_dir: &Path,
     program: &ProgramInfo,
     program_value: CtValue,
@@ -412,6 +414,7 @@ pub fn run_build_entry_with_policy(
         Build::begin_program_build_with_policy_at(package, program_value, policy, base_dir);
     let mut interp = Interp {
         funcs,
+        error_conversions,
         base_dir,
         fuel: DEV_FUEL_BUDGET,
         sink: None,
@@ -932,6 +935,7 @@ pub fn evaluate_with_imports_opts(
     TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
         expr: init,
         funcs,
+        error_conversions: &[],
         methods: empty_methods(),
         extern_names,
         base_dir,
@@ -1037,6 +1041,7 @@ fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
     let val = TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
         expr: init,
         funcs,
+        error_conversions: &[],
         methods,
         extern_names,
         base_dir,
@@ -1120,6 +1125,7 @@ pub fn run_main(
     // #777: AST tree-walker entry retired — same TirBridge path as REPL/debug.
     let mut interp = Interp {
         funcs,
+        error_conversions: &[],
         base_dir,
         fuel: DEV_FUEL_BUDGET,
         sink: Some(sink),
@@ -1167,6 +1173,7 @@ pub fn run_main_debug(
 ) -> Result<(), Diagnostic> {
     let mut interp = Interp {
         funcs,
+        error_conversions: &[],
         base_dir,
         fuel: DEV_FUEL_BUDGET,
         sink: Some(sink),
@@ -1218,6 +1225,7 @@ pub fn run_main_value(
 ) -> Result<CtValue, Diagnostic> {
     let mut interp = Interp {
         funcs,
+        error_conversions: &[],
         base_dir,
         fuel: DEV_FUEL_BUDGET,
         sink: Some(sink),
@@ -1262,6 +1270,7 @@ pub fn run_main_with_fuel(
 ) -> Result<(), Diagnostic> {
     let mut interp = Interp {
         funcs,
+        error_conversions: &[],
         base_dir,
         fuel,
         sink: Some(sink),
@@ -1306,6 +1315,7 @@ pub fn run_repl_main_with_fuel<'a>(
 ) -> Result<(), Diagnostic> {
     let mut interp = Interp {
         funcs,
+        error_conversions: &[],
         base_dir,
         fuel,
         sink: Some(sink),
@@ -1443,6 +1453,7 @@ fn run_repl_step_inner(
 ) -> Result<Option<CtValue>, ReplStepError> {
     let mut interp = Interp {
         funcs,
+        error_conversions: &[],
         base_dir,
         fuel,
         sink: Some(sink),
@@ -1534,6 +1545,7 @@ pub fn run_block_with_imports(
     match TirBridge::eval_block(&mut TirBridge::BlockEvalRequest {
         stmts,
         funcs: &refs,
+        error_conversions: &[],
         methods: empty_methods(),
         extern_names,
         base_dir,
@@ -1700,6 +1712,7 @@ pub fn expand_template_body(
 ) -> Result<Vec<crate::AST::Item>, Diagnostic> {
     let mut interp = Interpreter::Interp {
         funcs,
+        error_conversions: &[],
         base_dir,
         fuel: FUEL_BUDGET,
         sink: None,

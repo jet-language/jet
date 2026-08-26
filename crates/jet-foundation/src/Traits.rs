@@ -2724,7 +2724,7 @@ impl TraitRegistry {
     /// codegen bridges it to `jet_encode`/`jet_decode`.
     ///
     ///   `Encode`:  `fn encode(self) Data`             (one `self` param, returns `Data`)
-    ///   `Decode`:  `fn decode(tree: Data) T [FieldError]!`
+    ///   `Decode`:  `fn decode(tree: Data) T ![FieldError]`
     ///              (static — no `self`; one `Data` param; returns the owning type or
     ///               `[FieldError]`)
     fn check_serde_impl_methods(
@@ -2760,7 +2760,7 @@ impl TraitRegistry {
                 // `encode(self) Data`: exactly `self`, no other params, returns a Data.
                 has_self && non_self.is_empty() && m.return_type.as_ref().is_some_and(is_data)
             } else {
-                // `decode(tree: Data) T [FieldError]!`: static, one `Data` param,
+                // `decode(tree: Data) T ![FieldError]`: static, one `Data` param,
                 // returns the owning type (or `Self`) or the canonical error list.
                 let ret_ok = matches!(
                     &m.return_type,

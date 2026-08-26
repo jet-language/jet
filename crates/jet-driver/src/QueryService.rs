@@ -795,6 +795,74 @@ mod tests {
     }
 
     #[test]
+    fn hostile_world_edit_rechecks_only_changed_module() {
+        // #1498 hostile proof, owned by #1023/#666: a body edit in one module
+        // must not turn a large dependency world into a recheck.
+        let root =
+            std::env::temp_dir().join(format!("jet-query-hostile-world-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        let lock_dir = root.join(".jet");
+        let module_count = 32;
+        let names = std::iter::once("changed".to_owned())
+            .chain((0..module_count - 1).map(|index| format!("stable{index}")))
+            .collect::<Vec<_>>();
+        let declarations = names
+            .iter()
+            .map(|name| format!("module {name};\n"))
+            .collect::<String>();
+        let calls = names
+            .iter()
+            .map(|name| format!("{name}.value()"))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        let main_source = format!("{declarations}fn run() Int -> {{ return {calls} }}\n");
+        std::fs::write(&main, &main_source).unwrap();
+        for (index, name) in names.iter().enumerate() {
+            std::fs::write(
+                root.join(format!("{name}.jet")),
+                format!("pub fn value() Int -> {{ return {} }}\n", index + 1),
+            )
+            .unwrap();
+        }
+        std::fs::create_dir_all(&lock_dir).unwrap();
+        std::fs::write(
+            lock_dir.join("lock"),
+            "version = 1\n\n[build.stamp]\ndirty = false\ntoolchain = \"test\"\nat = \"test\"\n",
+        )
+        .unwrap();
+
+        let mut service = CompilerQueries::new();
+        let first = service.check_disk(&main.to_string_lossy(), false);
+        assert!(first.diagnostics.is_empty(), "{:#?}", first.diagnostics);
+        let discovered = service.check_disk(&main.to_string_lossy(), false);
+        assert!(
+            discovered.diagnostics.is_empty(),
+            "{:#?}",
+            discovered.diagnostics
+        );
+
+        std::fs::write(
+            root.join("changed.jet"),
+            "pub fn value() Int -> { return 99 }\n",
+        )
+        .unwrap();
+        let (checked, receipt) =
+            service.check_text_with_receipt(&main.to_string_lossy(), &main_source, false);
+        assert!(checked.diagnostics.is_empty(), "{:#?}", checked.diagnostics);
+        assert_eq!(receipt.program_items, module_count + 1);
+        assert_eq!(receipt.item_recomputes, 1);
+        assert_eq!(receipt.blast_radius(), 1);
+        assert!(
+            receipt.item_hits >= module_count as u64,
+            "unchanged modules must remain warm: {receipt:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn local_body_edit_rechecks_only_changed_item() {
         let mut service = CompilerQueries::new();
         let before = "fn alpha() Int -> { return 1 }\nfn beta() Int -> { return 2 }\n";
@@ -1190,6 +1258,71 @@ fn run() {{}}
             .collect::<String>();
         source.push_str("fn target() Int -> { return 1 }\nfn run() Int -> { return target() }\n");
         source
+    }
+
+    #[test]
+    fn hostile_no_change_corpus_reuses_every_item() {
+        // #1498 hostile proof, owned by #1023/#666: no-change work must not
+        // become slower by doing another semantic pass over the whole corpus.
+        let source = cone_source(256);
+        let mut service = CompilerQueries::new();
+        let (cold, cold_receipt) =
+            service.check_text_with_receipt("hostile-no-change.jet", &source, false);
+        assert!(cold.diagnostics.is_empty(), "{:#?}", cold.diagnostics);
+        assert_eq!(cold_receipt.program_items, 258);
+        assert_eq!(cold_receipt.item_recomputes, 258);
+
+        let (warm, warm_receipt) =
+            service.check_text_with_receipt("hostile-no-change.jet", &source, false);
+        assert!(warm.diagnostics.is_empty(), "{:#?}", warm.diagnostics);
+        assert_eq!(warm_receipt.edit_bytes, 0);
+        assert_eq!(warm_receipt.query_recomputes, 0);
+        assert_eq!(warm_receipt.item_recomputes, 0);
+        assert_eq!(warm_receipt.blast_radius(), 0);
+        assert_eq!(warm_receipt.program_items, cold_receipt.program_items);
+        assert!(service.stats().hits > 0, "the unchanged query must be a hit");
+    }
+
+    fn nested_typecheck_source(depth: usize, leaf: &str) -> String {
+        let mut expression = leaf.to_owned();
+        for _ in 0..depth {
+            expression = format!("id({expression})");
+        }
+        format!(
+            "fn id(value: Int) Int -> {{ return value }}\nfn run() {{\n    value :: {expression}\n}}\n"
+        )
+    }
+
+    #[test]
+    fn hostile_typecheck_cliff_keeps_pinpoint_fresh_diagnostic() {
+        // #1498 hostile proof, owned by #1023/#666: a deep expression must
+        // still produce a bounded, actionable diagnostic instead of guessing.
+        let before = nested_typecheck_source(96, "1");
+        let after = nested_typecheck_source(96, "\"bad\"");
+        let mut incremental = CompilerQueries::new();
+        let valid = incremental.check_text("hostile-typecheck.jet", &before, false);
+        assert!(valid.diagnostics.is_empty(), "{:#?}", valid.diagnostics);
+
+        let changed = incremental.check_text("hostile-typecheck.jet", &after, false);
+        let fresh = CompilerQueries::new().check_text("hostile-typecheck.jet", &after, false);
+        assert_eq!(
+            diagnostic_summary(&changed.diagnostics),
+            diagnostic_summary(&fresh.diagnostics),
+            "the hostile diagnostic must match a fresh batch check"
+        );
+        let diagnostic = changed
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E0112")
+            .expect("the deep wrong-type call must retain E0112");
+        let span = diagnostic.span.expect("the wrong argument needs a span");
+        assert_eq!(&after[span.start..span.end], "\"bad\"");
+        assert!(diagnostic.what.contains("Int"));
+        assert!(diagnostic.what.contains("String"));
+        assert!(!diagnostic.why.is_empty());
+        assert!(!diagnostic.fix.is_empty());
+        assert!(!diagnostic.what.to_ascii_lowercase().contains("guess"));
+        assert!(!diagnostic.what.to_ascii_lowercase().contains("reasonable time"));
     }
 
     #[test]

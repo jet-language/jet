@@ -4769,6 +4769,7 @@ fn eval_expr_hook(
     req: &mut Comptime::TirBridge::ExprEvalRequest<'_>,
 ) -> Result<CtValue, Diagnostic> {
     let fragment_funcs = merge_fragment_funcs(req.funcs, req.methods);
+    let error_conversions = req.error_conversions;
     let expr = req.expr;
     let methods = req.methods;
     let structs = req.structs;
@@ -4801,7 +4802,7 @@ fn eval_expr_hook(
             cx.type_names.extend(structs.keys().cloned());
             cx.core_imports = core_imports.clone();
             cx.jit_spawn_site_base = spawn_lambdas.len();
-            let lowered: Vec<TFunc> = fragment_funcs
+            let mut lowered: Vec<TFunc> = fragment_funcs
                 .iter()
                 .filter_map(|(name, f)| {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -4828,6 +4829,17 @@ fn eval_expr_hook(
                     .ok()
                 })
                 .collect();
+            for conversion in error_conversions {
+                if let Ok(lowered_conversion) =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        crate::Codegen::TIR::with_eval_fragment(|| {
+                            TIR::lower_error_conv(conversion, &cx)
+                        })
+                    }))
+                {
+                    lowered.push(lowered_conversion);
+                }
+            }
             spawn_lambdas.extend(std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()));
             Ok((tir, spawn_lambdas, lowered))
         })?;
@@ -4927,6 +4939,7 @@ fn eval_block_hook(
     req: &mut Comptime::TirBridge::BlockEvalRequest<'_, '_>,
 ) -> Result<Comptime::TirBridge::StmtOutcome, Diagnostic> {
     let fragment_funcs = merge_fragment_funcs(req.funcs, req.methods);
+    let error_conversions = req.error_conversions;
     let (tir, mut spawn_lambdas) = lower_stmts_for_eval(
         req.stmts,
         &fragment_funcs,
@@ -4946,7 +4959,7 @@ fn eval_block_hook(
     seed_fragment_funcs(&mut cx, &fragment_funcs);
     cx.core_imports = req.core_imports.clone();
     cx.jit_spawn_site_base = spawn_lambdas.len();
-    let lowered: Vec<TFunc> = fragment_funcs
+    let mut lowered: Vec<TFunc> = fragment_funcs
         .iter()
         .filter_map(|(name, f)| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -4968,6 +4981,15 @@ fn eval_block_hook(
             .ok()
         })
         .collect();
+    for conversion in error_conversions {
+        if let Ok(lowered_conversion) =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::Codegen::TIR::with_eval_fragment(|| TIR::lower_error_conv(conversion, &cx))
+            }))
+        {
+            lowered.push(lowered_conversion);
+        }
+    }
     spawn_lambdas.extend(std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()));
     let funcs: HashMap<String, &TFunc> = lowered.iter().map(|f| (f.name.clone(), f)).collect();
     let base_dir = req.base_dir.to_path_buf();

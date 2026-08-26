@@ -30,6 +30,10 @@ fn normalize_path(path: &Path) -> PathBuf {
     out
 }
 
+fn name_leaf(name: &str) -> &str {
+    name.rsplit_once('.').map_or(name, |(_, leaf)| leaf)
+}
+
 /// Visibility recorded for a declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NameVisibility {
@@ -152,11 +156,13 @@ pub struct NameLedger {
     imports: HashMap<(usize, Span), usize>,
     modules: HashMap<usize, NameModule>,
     declarations: HashMap<(usize, String), NameDeclaration>,
+    declaration_names: HashMap<String, Vec<(usize, String)>>,
     /// Source-facing paths for compiler-owned declarations. Generated
     /// generic-instance names remain semantic keys, but diagnostics and
     /// tooling project them back to the instance member path.
     display_paths: HashMap<(usize, String), String>,
     aliases: HashMap<(usize, String), NameAlias>,
+    alias_names: HashMap<String, Vec<(usize, String)>>,
     /// Import uses keyed by the defining alias span. Source spellings and
     /// target module text must not decide liveness.
     alias_uses: HashSet<(usize, Span)>,
@@ -223,17 +229,25 @@ impl NameLedger {
         span: Span,
         visibility: NameVisibility,
     ) {
+        let key = (module, name.clone());
+        let fresh = !self.declarations.contains_key(&key);
         self.declarations.insert(
-            (module, name.clone()),
+            key,
             NameDeclaration {
                 module,
-                name,
+                name: name.clone(),
                 path,
                 kind,
                 span,
                 visibility,
             },
         );
+        if fresh {
+            self.declaration_names
+                .entry(name_leaf(&name).to_string())
+                .or_default()
+                .push((module, name));
+        }
     }
 
     pub fn declaration(&self, module: usize, name: &str) -> Option<&NameDeclaration> {
@@ -372,31 +386,36 @@ impl NameLedger {
     ) -> Option<String> {
         let leaf = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
         let mut paths = BTreeSet::new();
-        for declaration in self.declarations.values() {
-            if declaration.name == leaf && self.visible(from_module, declaration.module, leaf) {
-                if let Some(path) =
-                    self.display_declaration_path(declaration.module, &declaration.name)
-                {
-                    paths.insert(path);
+        if let Some(declarations) = self.declaration_names.get(leaf) {
+            for (module, name) in declarations {
+                if self.visible(from_module, *module, leaf) {
+                    if let Some(path) = self.display_declaration_path(*module, name) {
+                        paths.insert(path);
+                    }
                 }
             }
         }
-        for alias in self.aliases.values() {
-            if alias.name != leaf || !self.visible(from_module, alias.module, leaf) {
-                continue;
-            }
-            let path = alias
-                .target_module
-                .and_then(|module| {
-                    let target_leaf = alias
-                        .target
-                        .rsplit_once('.')
-                        .map_or(alias.target.as_str(), |(_, leaf)| leaf);
-                    self.display_declaration_path(module, target_leaf)
-                })
-                .or_else(|| alias.target.contains('.').then(|| alias.target.clone()));
-            if let Some(path) = path {
-                paths.insert(path);
+        if let Some(aliases) = self.alias_names.get(leaf) {
+            for (module, name) in aliases {
+                let Some(alias) = self.aliases.get(&(*module, name.clone())) else {
+                    continue;
+                };
+                if !self.visible(from_module, *module, leaf) {
+                    continue;
+                }
+                let path = alias
+                    .target_module
+                    .and_then(|module| {
+                        let target_leaf = alias
+                            .target
+                            .rsplit_once('.')
+                            .map_or(alias.target.as_str(), |(_, leaf)| leaf);
+                        self.display_declaration_path(module, target_leaf)
+                    })
+                    .or_else(|| alias.target.contains('.').then(|| alias.target.clone()));
+                if let Some(path) = path {
+                    paths.insert(path);
+                }
             }
         }
 
@@ -405,13 +424,18 @@ impl NameLedger {
             .or_else(|| self.display_declaration_path(from_module, leaf))
             .or_else(|| self.canonical_path(from_module, name));
         let resolved_path = resolved_path.or_else(|| paths.iter().next().cloned())?;
-        let has_display_projection = self.declarations.values().any(|declaration| {
-            declaration.name == leaf
-                && self.visible(from_module, declaration.module, leaf)
-                && self
-                    .display_paths
-                    .contains_key(&(declaration.module, declaration.path.clone()))
-        });
+        let has_display_projection = self
+            .declaration_names
+            .get(leaf)
+            .into_iter()
+            .flatten()
+            .any(|(module, name)| {
+                self.visible(from_module, *module, leaf)
+                    && self.declaration(*module, name).is_some_and(|declaration| {
+                        self.display_paths
+                            .contains_key(&(*module, declaration.path.clone()))
+                    })
+            });
         if paths.len() <= 1
             && !name.contains('.')
             && !name.starts_with(crate::Syntax::GENERATED_NAME_PREFIX)
@@ -529,17 +553,24 @@ impl NameLedger {
         visibility: NameVisibility,
     ) {
         let key = (module, name.clone());
+        let fresh = !self.aliases.contains_key(&key);
         self.aliases.insert(
             key,
             NameAlias {
                 module,
-                name,
+                name: name.clone(),
                 target,
                 target_module,
                 span,
                 visibility,
             },
         );
+        if fresh {
+            self.alias_names
+                .entry(name_leaf(&name).to_string())
+                .or_default()
+                .push((module, name));
+        }
     }
 
     pub fn record_alias_use(&mut self, module: usize, span: Span) {
@@ -673,8 +704,10 @@ impl NameLedger {
     pub fn clear_sema_facts(&mut self) {
         self.modules.clear();
         self.declarations.clear();
+        self.declaration_names.clear();
         self.display_paths.clear();
         self.aliases.clear();
+        self.alias_names.clear();
         self.alias_uses.clear();
         self.references.clear();
         // The loader owns import-edge observations and sema must not erase

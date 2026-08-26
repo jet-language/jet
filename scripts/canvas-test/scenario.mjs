@@ -3638,7 +3638,7 @@ fn use_callback(callback: fn(Int) Int -[]>) {
     print("callback")
 }
 
-fn parse(raw: String) Int ParseError! -> {
+fn parse(raw: String) Int !ParseError -> {
     if raw == "" -> return Err(ParseError.Empty)
     return Ok(7)
 }

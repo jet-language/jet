@@ -1464,7 +1464,7 @@ fn read_store() Int !StoreErr -[]> {
 }
 
 fn get_user() Int -[]> {
-    value :: read_store()?
+    value :: read_store()
     return Ok(value)
 }
 
@@ -2436,13 +2436,13 @@ fn load() Int -[]> {
 
 #Target(JS)
 fn read() Int -[]> {
-    value :: load()?
+    value :: load()
     return Ok(value)
 }
 
 #Target(JS)
 fn run() {
-    value :: read()?
+    value :: read()
     print(value)
 }
 "#;
@@ -2507,13 +2507,13 @@ fn load() Int -[]> {
 
 #Target(Wasm)
 fn read() Int -[]> {
-    value :: load()?
+    value :: load()
     return Ok(value)
 }
 
 #Target(Wasm)
 fn run() {
-    value :: read()?
+    value :: read()
     print(value)
 }
 "#;
@@ -2626,12 +2626,12 @@ fn web_two_hop_journey_matches_all_execution_tiers() {
 }
 
 fn read() String -[]> {
-    value :: load()? "reading source"
+    value :: load()?("reading source")
     return Ok(value)
 }
 
 fn run() {
-    value :: read()? "running source"
+    value :: read()?("running source")
     print(value)
 }
 "#;

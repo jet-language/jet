@@ -159,6 +159,9 @@ pub(super) fn reborrow_repl_authorizer<'short, 'long: 'short>(
 
 pub(super) struct Interp<'a> {
     pub(super) funcs: &'a HashMap<String, &'a Func>,
+    /// Checked error-conversion bodies for the current bundle. Empty outside
+    /// programmable-build evaluation; TIR owns their execution semantics.
+    pub(super) error_conversions: &'a [crate::AST::ErrorConvDef],
     pub(super) base_dir: &'a Path,
     pub(super) fuel: u64,
     /// `Some` in whole-program dev mode (E2-M4): `print`/`eprint` write here
@@ -375,6 +378,7 @@ impl<'a> Interp<'a> {
         let repl_mode = self.repl_mode;
         let base_dir = self.base_dir;
         let funcs = self.funcs;
+        let error_conversions = self.error_conversions;
         let core_imports = self.core_imports;
         let structs = self.structs;
         let sink = self.sink.as_deref_mut();
@@ -384,6 +388,7 @@ impl<'a> Interp<'a> {
         let mut req = super::TirBridge::BlockEvalRequest {
             stmts,
             funcs,
+            error_conversions,
             methods: self.methods,
             extern_names: &extern_names,
             base_dir,
@@ -581,6 +586,7 @@ impl<'a> Interp<'a> {
         let repl_mode = self.repl_mode;
         let base_dir = self.base_dir;
         let funcs = self.funcs;
+        let error_conversions = self.error_conversions;
         let core_imports = self.core_imports;
         let structs = self.structs;
         let sink = self.sink.as_deref_mut();
@@ -591,6 +597,7 @@ impl<'a> Interp<'a> {
         let mut req = super::TirBridge::ExprEvalRequest {
             expr: e,
             funcs,
+            error_conversions,
             methods: self.methods,
             extern_names: &extern_names,
             base_dir,

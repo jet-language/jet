@@ -105,9 +105,9 @@ fn core_db_implements_driver_trait() {
 use core.db as db
 
 fn count_people<T: Driver>(&conn: T) Int !DBError {
-    row :: conn.query_one("SELECT COUNT(*) AS n FROM person", [])?
+    row :: conn.query_one("SELECT COUNT(*) AS n FROM person", [])
     found :: row ?? panic("missing")
-    missing :: conn.query_one("SELECT id, name FROM person WHERE id = ?", [DBValue.Int(99)])?
+    missing :: conn.query_one("SELECT id, name FROM person WHERE id = ?", [DBValue.Int(99)])
     if missing == .None { print("absent") } else { panic("unexpected row") }
     return .Ok(db.row_int(found, "n") ?? 0)
 }

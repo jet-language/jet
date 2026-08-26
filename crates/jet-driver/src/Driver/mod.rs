@@ -2255,6 +2255,7 @@ pub fn query_build_plan_with_overlay(
         Some((std::path::Path::new(file), source)),
         None,
         None,
+        false,
     )
     .map(|output| output.build.map(|build| build.plan))
 }
@@ -2430,7 +2431,7 @@ pub fn compile_bundle_path_build(
     file: &str,
     options: BuildRunOptions,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_build_inner(file, options, None, None, None)
+    compile_bundle_path_build_inner(file, options, None, None, None, false)
 }
 
 /// #2083: `compile_bundle_path_build` resuming a front end the caller already
@@ -2442,7 +2443,18 @@ pub fn compile_bundle_path_build_with_front_end(
     options: BuildRunOptions,
     prepared: Option<PreparedBuildFrontEnd>,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_build_inner(file, options, None, None, prepared)
+    compile_bundle_path_build_inner(file, options, None, None, prepared, false)
+}
+
+/// Resume a checked build front end after the native binary cache already
+/// restored the artifact. This preserves diagnostics and build facts while
+/// avoiding the full generated-Rust emission pass.
+pub fn compile_bundle_path_build_with_front_end_without_codegen(
+    file: &str,
+    options: BuildRunOptions,
+    prepared: Option<PreparedBuildFrontEnd>,
+) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
+    compile_bundle_path_build_inner(file, options, None, None, prepared, true)
 }
 
 /// Compile a build entry from the checked source snapshot selected by an
@@ -2454,7 +2466,14 @@ pub fn compile_bundle_path_build_with_overlay(
     source: &str,
     options: BuildRunOptions,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_build_inner(file, options, Some((source_path, source)), None, None)
+    compile_bundle_path_build_inner(
+        file,
+        options,
+        Some((source_path, source)),
+        None,
+        None,
+        false,
+    )
 }
 
 /// Compile one workspace member as a dependency authority boundary. Its
@@ -2465,7 +2484,7 @@ pub fn compile_bundle_path_build_as_dependency(
     file: &str,
     options: BuildRunOptions,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_build_inner(file, options, None, Some(file), None)
+    compile_bundle_path_build_inner(file, options, None, Some(file), None, false)
 }
 
 /// Dependency variant of `compile_bundle_path_build_with_overlay`.
@@ -2475,7 +2494,14 @@ pub fn compile_bundle_path_build_as_dependency_with_overlay(
     source: &str,
     options: BuildRunOptions,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_build_inner(file, options, Some((source_path, source)), Some(file), None)
+    compile_bundle_path_build_inner(
+        file,
+        options,
+        Some((source_path, source)),
+        Some(file),
+        None,
+        false,
+    )
 }
 
 /// The one build-graph seam. Every `compile_bundle_path_build*` facade and
@@ -2488,6 +2514,7 @@ fn compile_bundle_path_build_inner(
     overlay: Option<(&std::path::Path, &str)>,
     dependency_boundary: Option<&str>,
     prepared: Option<PreparedBuildFrontEnd>,
+    without_codegen: bool,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
     crate::run_compiler_work(|| {
         compile_bundle_path_build_on_compiler_stack(
@@ -2496,6 +2523,7 @@ fn compile_bundle_path_build_inner(
             overlay,
             dependency_boundary,
             prepared,
+            without_codegen,
         )
     })
 }
@@ -2506,6 +2534,7 @@ fn compile_bundle_path_build_on_compiler_stack(
     overlay: Option<(&std::path::Path, &str)>,
     dependency_boundary: Option<&str>,
     prepared: Option<PreparedBuildFrontEnd>,
+    without_codegen: bool,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
     let inputs = FrontEndInputs::for_build(file, &options);
     // #2083: resume the caller's front end only when it checked this program,
@@ -2515,7 +2544,14 @@ fn compile_bundle_path_build_on_compiler_stack(
         Some(prepared) if overlay.is_none() && prepared.inputs == inputs => prepared,
         _ => prepare_build_front_end_on_compiler_stack(inputs, overlay)?,
     };
-    compile_build_from_front_end(file, options, overlay, dependency_boundary, prepared)
+    compile_build_from_front_end(
+        file,
+        options,
+        overlay,
+        dependency_boundary,
+        prepared,
+        without_codegen,
+    )
 }
 
 /// Stage one of the build pipeline, run exactly once per invocation.
@@ -2770,6 +2806,7 @@ fn compile_build_from_front_end(
     overlay: Option<(&std::path::Path, &str)>,
     dependency_boundary: Option<&str>,
     prepared: PreparedBuildFrontEnd,
+    without_codegen: bool,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
     let PreparedBuildFrontEnd {
         inputs: _,
@@ -2810,6 +2847,15 @@ fn compile_build_from_front_end(
         let has_impure_gate = contains_impure_gate(&build.body);
         let build_name_span = build.name_span;
         let mut funcs = std::collections::HashMap::new();
+        let error_conversions = bundle
+            .modules
+            .iter()
+            .flat_map(|module| module.items.iter())
+            .filter_map(|item| match item {
+                crate::AST::Item::ErrorConv(conversion) => Some(conversion.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         let mut methods = std::collections::HashMap::new();
         let mut structs = std::collections::HashMap::new();
         let mut enums = std::collections::HashMap::new();
@@ -2977,6 +3023,7 @@ fn compile_build_from_front_end(
                 crate::Comptime::run_build_entry_with_policy(
                     build,
                     &funcs,
+                    &error_conversions,
                     base_dir,
                     &info,
                     program_value,
@@ -3419,6 +3466,43 @@ fn compile_build_from_front_end(
     .map_err(|diags| diags)?;
     if timing {
         timer.lap("ffi");
+    }
+    let without_codegen = without_codegen
+        && build_run.is_none()
+        && ffi.is_none()
+        && bundle.cffi.libs.is_empty()
+        && !options.web_target
+        && !options.plugin_target
+        && options.cross_target.is_none();
+    if without_codegen {
+        if timing {
+            timer.metric("rust_bytes", 0);
+            timer.write_to(&bundle.project_root);
+        }
+        let build_facts = bundle.build_facts.clone();
+        let compile = crate::CompileOutput {
+            rust: String::new(),
+            lints,
+            ffi,
+            clinks: Vec::new(),
+            comptime_inputs: std::mem::take(&mut bundle.comptime_inputs),
+            web: None,
+            web_partition_report: None,
+            plugin: None,
+            library: None,
+            library_config: None,
+            inferred_layer: bundle.inferred_layer,
+            layer_ceiling: bundle.layer_ceiling,
+        };
+        if let Some(transaction) = filesystem_transaction.as_mut() {
+            transaction.commit();
+        }
+        return Ok(BuildCompileOutput {
+            compile,
+            build: build_run,
+            runtime: Some(bundle),
+            build_facts,
+        });
     }
     if options.web_target {
         let misses = crate::Codegen::validate_web_tir_support(&bundle, ffi.as_ref());

@@ -192,7 +192,7 @@ impl Email.Encode {
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) Email [FieldError]! {
+    fn decode(tree: DataTree) Email ![FieldError] {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return .Ok(Email{addr: s})
@@ -243,7 +243,7 @@ impl HandEmail.Encode {
     fn encode(self) DataTree -> DataTree.Object(["address": DataTree.Text(~self.address)])
 }
 impl HandEmail.Decode {
-    fn decode(tree: DataTree) HandEmail [FieldError]! {
+    fn decode(tree: DataTree) HandEmail ![FieldError] {
         field :: tree.field("address") ?? DataTree.Text("")
         address :: field.text() ?? ""
         return Ok(HandEmail{ address: address })
@@ -295,7 +295,7 @@ use core.encoding.json as json
 struct Boxed<T> { value: T }
 
 fn generic_encode<T: Encode>(value: T) String -> json.to_string(value)
-fn generic_decode<T: Decode>(wire: String) T [FieldError]! -> json.decode<T>(wire)
+fn generic_decode<T: Decode>(wire: String) T ![FieldError] -> json.decode<T>(wire)
 
 fn run() {
     value :: Boxed<Int>{ value: 7 }
@@ -333,7 +333,7 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
-    fn decode(tree: DataTree) Email [FieldError]! {
+    fn decode(tree: DataTree) Email ![FieldError] {
         value := tree.field("address") ?? DataTree.Text("")
         return .Ok(Email{ addr: value.text() ?? "" })
     }
@@ -1226,11 +1226,11 @@ migration Config {
 }
 
 fn run() ![FieldError] {
-    old :: json.decode<Config>("{{\"port\":2}}")?
+    old :: json.decode<Config>("{{\"port\":2}}")
     print("json {old.port} {old.host}")
-    toml_old :: toml.decode<Config>("port = 3\n")?
+    toml_old :: toml.decode<Config>("port = 3\n")
     print("toml {toml_old.port} {toml_old.host}")
-    rows :: csv.decode<Config>("port\n4\n5\n")?
+    rows :: csv.decode<Config>("port\n4\n5\n")
     print("csv {rows.len()} {rows[1].port} {rows[1].host}")
     if json.decode<Config>("{{\"port\":\"nope\",\"host\":\"h\"}}") == {
         .Ok(value) -> print("unexpected {value.port}")

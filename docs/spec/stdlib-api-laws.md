@@ -107,7 +107,7 @@ or source-qualified spelling for the same conversion.
 - Before adding a new API, search for an existing one that covers the same semantic
   job. If one exists, extend or document it; do not add a second spelling.
 - Convenience shorthand methods are acceptable if they compose existing primitives
-  without adding new behavior (e.g. `slice.first()` over `slice[0]?`).
+  without adding new behavior (e.g. `slice.first()` over an optional `slice[0]` result).
 
 ## Signature-honesty review rows
 

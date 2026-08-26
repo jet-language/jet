@@ -6,7 +6,7 @@ use crate::Syntax;
 use crate::AST::Type;
 
 /// D-ARGS1: type-check a method call on `ArgsSpec` (the builder).
-/// Builder methods return `ArgsSpec` for chaining; `parse` returns `ParsedArgs String!`.
+    /// Builder methods return `ArgsSpec` for chaining; `parse` returns `ParsedArgs !String`.
 /// Returns `Some(Some(ty))` for valid calls, `Some(None)` for void (none here),
 /// `None` for unknown method (caller emits E0102).
 pub(crate) fn args_spec_method_return(
@@ -35,7 +35,7 @@ pub(crate) fn args_spec_method_return(
         ("completion", 1) => Some(Some(Type::String)),
         // .help() → String  (render --help text)
         ("help", 0) => Some(Some(Type::String)),
-        // .parse([String]) → ParsedArgs String!
+        // .parse([String]) → ParsedArgs !String
         ("parse", 1) => Some(Some(result_ty(
             Type::Named("ParsedArgs".to_string()),
             Type::String,

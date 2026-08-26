@@ -125,7 +125,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.term", "print")
             | ("core.term", "progress")
             // D-TEXTWIDTH1=B: `text.display_width(s)` returns `Int`, while
-            // `text.display_width(s, policy: p)` returns `Int TextError!` —
+            // `text.display_width(s, policy: p)` returns `Int !TextError` —
             // the `.Reject` control policy can fail. One call, two return
             // types chosen by arity, so no `core_fixed_sig` row can state it:
             // that table holds exactly one param list and one return, and
