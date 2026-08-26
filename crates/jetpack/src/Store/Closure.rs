@@ -1443,16 +1443,51 @@ pub(crate) fn register_entries_unlocked(
     roots: &Roots,
     entries: &[StoreEntry],
 ) -> std::io::Result<bool> {
+    register_entries_unlocked_mode(roots, entries, true)
+}
+
+pub(crate) fn register_admitted_nix_entries_unlocked(
+    roots: &Roots,
+    entries: &[StoreEntry],
+) -> std::io::Result<bool> {
+    register_entries_unlocked_mode(roots, entries, false)
+}
+
+fn register_entries_unlocked_mode(
+    roots: &Roots,
+    entries: &[StoreEntry],
+    verify_outputs: bool,
+) -> std::io::Result<bool> {
     if entries.is_empty() {
         return Ok(false);
     }
     for entry in entries {
-        Ingest::share_tree_files(
-            roots,
-            Path::new(&entry.out),
-            !entry.platform_artifact_kind.is_empty(),
-        )?;
-        verify_registration_output(roots, entry)?;
+        if verify_outputs {
+            Ingest::share_tree_files(
+                roots,
+                Path::new(&entry.out),
+                !entry.platform_artifact_kind.is_empty(),
+            )?;
+            verify_registration_output(roots, entry)?;
+        } else {
+            let producer =
+                ProducerRecord::decode(&entry.producer_record).map_err(std::io::Error::other)?;
+            let expected = roots
+                .hangar_dir()
+                .join(OBJECTS_DIR)
+                .join(&entry.envelope.output_hash);
+            let metadata = fs::symlink_metadata(&expected)?;
+            if producer.provider != "nix"
+                || Path::new(&entry.out) != expected
+                || entry.envelope.output_hash.is_empty()
+                || metadata.file_type().is_symlink()
+                || !metadata.is_dir()
+            {
+                return Err(std::io::Error::other(
+                    "admitted Nix entry is not its verified canonical CAS object",
+                ));
+            }
+        }
     }
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
     for entry in entries {

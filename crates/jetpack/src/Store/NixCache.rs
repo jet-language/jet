@@ -885,7 +885,7 @@ impl<'a> AdmissionTransaction<'a> {
                 last_used_at: now,
             });
         }
-        Closure::register_entries_unlocked(self.roots, &entries)
+        Closure::register_admitted_nix_entries_unlocked(self.roots, &entries)
             .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
         Ok(closure_receipt.0)
     }
