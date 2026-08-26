@@ -1,17 +1,17 @@
-Error [E0066]: this function uses the retired effect-arrow spelling
-  --> tests/ui/build_action_ungranted.jet:2:27
+Error [E-ERR-PROPAGATE]: bare `?` propagation is retired.
+  --> tests/ui/build_action_ungranted.jet:4:96
     |
-  2 | fn build(b: BuildContext) =[Exec]=> BuildPlan ! {
-    |                           ^
- Why: callable results use `->`, and an explicit effect ceiling uses the same arrow
- Fix: write `-[Effects]>`; use `-[]>` for an explicit purity bound
-More: jet-lang.dev/e/E0066
+  4 |         action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf ok > stamp"], ["Exec"])?
+    |                                                                                                ^
+ Why: fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE
 
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/build_action_ungranted.jet:2:27
+Error [E-ERR-PROPAGATE]: bare `?` propagation is retired.
+  --> tests/ui/build_action_ungranted.jet:5:81
     |
-  2 | fn build(b: BuildContext) =[Exec]=> BuildPlan ! {
-    |                           ^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
+  5 |         app :: b.add_executable("app", ["build_action_ungranted.jet"], [action])?
+    |                                                                                 ^
+ Why: fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE

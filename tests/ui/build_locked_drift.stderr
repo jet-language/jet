@@ -1,4 +1,17 @@
-Error [E3512]: the build provenance stamp is unavailable
- Why: locked build has no `[build.stamp]` in `tests/ui/.jet/lock`
- Fix: run an unlocked build to create the lock stamp, then rerun with `--locked`
-More: jet-lang.dev/e/E3512
+Error [E-ERR-PROPAGATE]: bare `?` propagation is retired.
+  --> tests/ui/build_locked_drift.jet:6:6
+    |
+  6 |     }?
+    |      ^
+ Why: fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE
+
+Error [E-ERR-PROPAGATE]: bare `?` propagation is retired.
+  --> tests/ui/build_locked_drift.jet:7:115
+    |
+  7 |     app :: b.add_executable("app", ["build_locked_drift.jet", ".jet/generated/build_locked_drift/locked.jet"], [])?
+    |                                                                                                                   ^
+ Why: fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE

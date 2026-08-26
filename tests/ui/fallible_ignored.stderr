@@ -1,8 +1,17 @@
-Error [E0402]: this call can fail and nothing checks it
-  --> tests/ui/fallible_ignored.jet:8:8
+Error [E2417]: explicit failure domain ``E`` is not an Error type
+  --> tests/ui/fallible_ignored.jet:5:8
     |
-  8 |     xs.try_push(2)
+  5 | fn f() Int !E -> Ok(1)
+    |        ^^^^^^
+ Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
+ Fix: use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+More: jet-lang.dev/e/E2417
+
+Error [E2402]: `?` can't convert `AllocError` into `Err` — no declared conversion exists
+  --> tests/ui/fallible_ignored.jet:9:8
+    |
+  9 |     xs.try_push(2)
     |        ^^^^^^^^
- Why: a fallible result can't be ignored — handle it or say failure is impossible
- Fix: use `?`, `??`, `panic ...`, or `.drop("reason")` to intentionally discard
-More: jet-lang.dev/e/E0402
+ Why: `?` uses the declared conversion rail; `AllocError` can reach `Err` only through `impl AllocError -> Err`
+ Fix: add `impl AllocError -> Err { … }` before this function, or change the return type
+More: jet-lang.dev/e/E2402

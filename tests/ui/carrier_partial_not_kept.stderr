@@ -1,17 +1,26 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
+Error [E2417]: explicit failure domain ``ImportErr`` is not an Error type
   --> tests/ui/carrier_partial_not_kept.jet:7:32
     |
-  7 | fn import_rows(rows: [String]) => [String] ImportErr! {
-    |                                ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
+  7 | fn import_rows(rows: [String]) [String] !ImportErr -> {
+    |                                ^^^^^^^^^^^^^^^^^^^
+ Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
+ Fix: use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+More: jet-lang.dev/e/E2417
 
-Error [E0302]: `ImportErr` has no field `partial`
-  --> tests/ui/carrier_partial_not_kept.jet:14:19
+Error [E0501]: an empty list needs a type
+  --> tests/ui/carrier_partial_not_kept.jet:13:27
     |
- 14 |     print((spotty.partial() ?? []).len())
-    |                   ^^^^^^^
- Why: an error type keeps part of its work by carrying it as a field named `partial`
- Fix: add a `partial` field to `ImportErr`
-More: jet-lang.dev/e/E0302
+ 13 |     spotty :: import_rows([String]{})
+    |                           ^^^^^^^^^^
+ Why: write `[]` only where the list type is already known from around it
+ Fix: name the element type on the literal: `[Int].{}`
+More: jet-lang.dev/e/E0501
+
+Error [E2402]: `?` can't convert `ImportErr` into `Err` — no declared conversion exists
+  --> tests/ui/carrier_partial_not_kept.jet:13:15
+    |
+ 13 |     spotty :: import_rows([String]{})
+    |               ^^^^^^^^^^^
+ Why: `?` uses the declared conversion rail; `ImportErr` can reach `Err` only through `impl ImportErr -> Err`
+ Fix: add `impl ImportErr -> Err { … }` before this function, or change the return type
+More: jet-lang.dev/e/E2402

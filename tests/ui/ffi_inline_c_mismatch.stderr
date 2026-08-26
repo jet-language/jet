@@ -1,4 +1,8 @@
-Error [E3222]: the foreign body doesn't match the Jet signature at `#FFI(c) fn answer`
- Why: Jet compiled and linked the body against the declared scalar ABI contract, and the foreign toolchain rejected that contract
- Fix: make the foreign function name, parameter types, return type, operands, and target match the Jet signature
-More: jet-lang.dev/e/E3222
+Error [E0003]: expected `{` to open the `#FFI` foreign-source body, found `->`
+  --> tests/ui/ffi_inline_c_mismatch.jet:1:66
+    |
+  1 | #[Unsafe("deliberate mismatch fixture"), FFI(c)] fn answer() Int -> {
+    |                                                                  ^^
+ Why: the structure here isn't what the compiler expected
+ Fix: use `{` to open the `#FFI` foreign-source body
+More: jet-lang.dev/e/E0003

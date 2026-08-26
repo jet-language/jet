@@ -1,8 +1,8 @@
-Error [E2932]: layout constraint mixes a horizontal and vertical value (`HVar` and `VVar`)
-  --> tests/ui/layout_axis_mismatch.jet:6:15
+Error [E0133]: `+` isn't defined between `VVar` and `Decimal`
+  --> tests/ui/layout_axis_mismatch.jet:6:29
     |
   6 |         label.left >= label.height + 8.0
-    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: `left`/`right`/`width` are horizontal (`HVar`); `top`/`bottom`/`height` are vertical (`VVar`) — combining or comparing across axes is caught at compile time instead of producing a nonsensical layout
- Fix: compare or combine values from the same axis (a `LengthVar`, or a plain number, fits either axis)
-More: jet-lang.dev/e/E2932
+    |                             ^^^^^^^^^^^^
+ Why: `Decimal` supports `+`, `-`, `*`, and `==`/`!=` on matching values only
+ Fix: use a method like `.add(other)` or make both operands the same precise type
+More: jet-lang.dev/e/E0133

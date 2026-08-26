@@ -1,8 +1,8 @@
-Error [E2702]: crypto API misuse
-  --> tests/ui/crypto_safe_raw_algorithm.jet:5:34
+Error [E2402]: `?` can't convert `CryptoError` into `Err` — no declared conversion exists
+  --> tests/ui/crypto_safe_raw_algorithm.jet:5:17
     |
   5 |     _ :: crypto.seal([], [], [], algorithm: "xchacha20poly1305")
-    |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: `seal` would select a caller-supplied algorithm, which violates the safe envelope requirement that Jet selects the algorithm internally
- Fix: remove the `algorithm:` argument, or use a raw expert primitive inside `#Unsafe` for protocol interop
-More: jet-lang.dev/e/E2702
+    |                 ^^^^
+ Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
+ Fix: add `impl CryptoError -> Err { … }` before this function, or change the return type
+More: jet-lang.dev/e/E2402

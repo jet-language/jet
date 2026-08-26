@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2209,
-    "rev": 45627,
+    "nextNum": 2210,
+    "rev": 45628,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -152426,6 +152426,34 @@
       "created": "2026-08-26T09:36:02.083Z",
       "updated": "2026-08-26T10:32:51.772Z",
       "updatedBy": "orchestrator"
+    },
+    {
+      "id": "c0vl0eqe",
+      "num": 2209,
+      "title": "Five checks stopped firing: the compiler accepts rejected programs in silence",
+      "body": "Five checks stopped firing. Each fixture source is INTACT - the construct its snapshot quotes is still present - so this is not migration debt: the compiler now accepts programs it must reject, in silence.\n\n| fixture | code | now accepted |\n|---|---|---|\n| tests/ui/decimal_float_mix.jet | E0131 | mixing Decimal and Float in one expression is accepted |\n| tests/ui/gc_escape_ownership.jet | E2111 | a value escaping into automatic memory management is accepted |\n| tests/ui/inline_range_runtime_needs_try.jet | E0136 | a runtime range that needs the fallible form is accepted |\n| tests/ui/map_key_composite_rejected.jet | E0502 | a composite map key that must be rejected is accepted |\n| tests/ui/must_use_fn_ignored.jet | E0419 | a #MustUse result dropped as a bare statement is accepted |\n\nReproduce any of them with:\n\n    JET_UI_FILTER=tests/ui/<name>.jet cargo test --test diagnostic_snapshots ui_snapshots\n\nEach reports (no errors) where its snapshot expects the code above.\n\nFound the same way as #2208: the snapshot shrink guard refused to bless a fixture whose diagnostic count fell to zero. These five were separated from 6 genuinely over-migrated fixtures by checking whether the source still contains the construct its own snapshot quotes. Their snapshots are deliberately left unblessed and red.\n\nE2111 is an ownership check, so treat it with the same weight as the E0631 hole on #2208.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "regression",
+        "diagnostics"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-26T12:45:25.994Z",
+      "updated": "2026-08-26T12:45:25.996Z",
+      "updatedBy": "orchestrator"
     }
   ],
   "decisions": [
@@ -211466,6 +211494,13 @@
   ],
   "events": [
     {
+      "at": "2026-08-26T12:45:25.996Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0vl0eqe",
+      "note": "Five checks stopped firing: the compiler accepts rejected programs in silence"
+    },
+    {
       "at": "2026-08-26T10:32:51.772Z",
       "by": "orchestrator",
       "action": "card.criteria-reopen",
@@ -214957,13 +214992,6 @@
       "action": "card.criteria-meet",
       "ref": "c087yjjx",
       "note": "#4"
-    },
-    {
-      "at": "2026-08-26T00:22:48.946Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c087yjjx",
-      "note": "#3"
     }
   ],
   "nextNum": 368,

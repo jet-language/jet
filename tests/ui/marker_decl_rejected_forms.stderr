@@ -1,17 +1,26 @@
 Error [E0381]: a trailing `on` clause isn't how a marker states a fact
-  --> tests/ui/marker_decl_rejected_forms.jet:7:29
+  --> tests/ui/marker_decl_rejected_forms.jet:6:29
     |
-  7 | marker Inline(mode: String) on [.Function]
+  6 | marker Inline(mode: String) on [.Function]
     |                             ^^
  Why: D-MARKER-SITES1=B: every marker declaration uses one named parameter list; ordinary arguments are typed parameters and `@` names are fixed metadata values — not a clause after the list
  Fix: move the sites into the parameter list as `@sites: [.Function, …]`
 More: jet-lang.dev/e/E0381
 
 Error [E0381]: a second parameter list isn't how a marker states a fact
-  --> tests/ui/marker_decl_rejected_forms.jet:9:30
+  --> tests/ui/marker_decl_rejected_forms.jet:8:30
     |
-  9 | marker Pre(condition: String)(sites: [.Function])
+  8 | marker Pre(condition: String)(sites: [.Function])
     |                              ^
  Why: D-MARKER-SITES1=B: the rule's own typed arguments and fixed metadata share one named-parameter list, told apart by the compile-time `@` sigil — not two parameter lists
  Fix: fold the second list's facts into the first as `@sites: […]`, `@repeatable: true`
+More: jet-lang.dev/e/E0381
+
+Error [E0381]: the checked-text marker declaration is retired
+  --> tests/ui/marker_decl_rejected_forms.jet:10:17
+    |
+ 10 | marker Selector on [.Text] {
+    |                 ^^
+ Why: D-MARKER-SITES1=B: every marker declaration uses one named parameter list; `@sites` records legal sites, and checked-text contracts are not a separate marker form
+ Fix: write `marker Selector(@sites: [.Text])` for a plain rule, or use a built-in typed text head
 More: jet-lang.dev/e/E0381

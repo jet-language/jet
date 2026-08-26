@@ -6,3 +6,12 @@ Error [E0702]: an FFI boundary rejects call `bad` uses capability `&` outside `#
  Why: a foreign capability can write to or transfer ownership of Jet storage, so a raw call needs an audited boundary
  Fix: call `bad` inside `#Unsafe("…") { … }`, or expose it through a generated typed binding
 More: jet-lang.dev/e/E0702
+
+Error [E0702]: an FFI boundary rejects call `bad` uses capability `&` outside `#Unsafe`
+  --> tests/ui/ffi_bad_type.jet:8:11
+    |
+  8 |     print(bad(&value))
+    |           ^^^
+ Why: a foreign capability can write to or transfer ownership of Jet storage, so a raw call needs an audited boundary
+ Fix: call `bad` inside `#Unsafe("…") { … }`, or expose it through a generated typed binding
+More: jet-lang.dev/e/E0702

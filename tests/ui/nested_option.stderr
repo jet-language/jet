@@ -1,8 +1,17 @@
-Error [E0309]: `??` isn't allowed on a type
-  --> tests/ui/nested_option.jet:1:14
+Error [E0107]: nothing named `Int` exists here
+  --> tests/ui/nested_option.jet:1:11
     |
-  1 | fn f() => Int?? {
-    |              ^^
- Why: an optional value is written `T?` once — there's no optional optional
- Fix: use a single `?`, like `Int?`
-More: jet-lang.dev/e/E0309
+  1 | fn f() -> Int ?? {
+    |           ^^^
+ Why: a name must be declared before it's used
+ Fix: declare it first: `Int :: ...`
+More: jet-lang.dev/e/E0107
+
+Error [E0112]: `print` doesn't know how to show `Unit`
+  --> tests/ui/nested_option.jet:5:18
+    |
+  5 | fn run() { print(f()) }
+    |                  ^
+ Why: print shows values that have a display
+ Fix: print one of its parts instead
+More: jet-lang.dev/e/E0112

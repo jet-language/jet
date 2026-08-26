@@ -10,7 +10,7 @@ More: jet-lang.dev/e/E0106
 Error [E0119]: there's no type called `Tally`
   --> tests/ui/incomparable_eq.jet:5:12
     |
-  5 | fn same(a: Tally, b: Tally) => Bool :: (a == b)
+  5 | fn same(a: Tally, b: Tally) Bool -> (a == b)
     |            ^^^^^
  Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
  Fix: check the spelling, or define the struct or enum first
@@ -19,20 +19,29 @@ More: jet-lang.dev/e/E0119
 Error [E0119]: there's no type called `Tally`
   --> tests/ui/incomparable_eq.jet:5:22
     |
-  5 | fn same(a: Tally, b: Tally) => Bool :: (a == b)
+  5 | fn same(a: Tally, b: Tally) Bool -> (a == b)
     |                      ^^^^^
  Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
  Fix: check the spelling, or define the struct or enum first
 More: jet-lang.dev/e/E0119
 
 Error [E0312]: `Tally` can't be compared with `Tally` because field `?` doesn't support `==`
-  --> tests/ui/incomparable_eq.jet:5:41
+  --> tests/ui/incomparable_eq.jet:5:38
     |
-  5 | fn same(a: Tally, b: Tally) => Bool :: (a == b)
-    |                                         ^^^^^^
+  5 | fn same(a: Tally, b: Tally) Bool -> (a == b)
+    |                                      ^^^^^^
  Why: value equality needs every field to support the comparison
  Fix: compare individual fields instead
 More: jet-lang.dev/e/E0312
+
+Error [E0302]: `.data` only works on struct and tuple values
+  --> tests/ui/incomparable_eq.jet:1:8
+    |
+  1 | struct Tally {
+    |        ^^^^^
+ Why: enums and other values use methods or pattern tests instead
+ Fix: use a struct or tuple value before `.data`
+More: jet-lang.dev/e/E0302
 
 Error [E0302]: `.data` only works on struct and tuple values
   --> tests/ui/incomparable_eq.jet:1:8

@@ -1,8 +1,26 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/build_generated_cycle/run.jet:3:27
+Error [E-ERR-PROPAGATE]: bare `?` propagation is retired.
+  --> tests/ui/build_generated_cycle/run.jet:5:6
     |
-  3 | fn build(b: BuildContext) => BuildPlan ! {
-    |                           ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
+  5 |     }?
+    |      ^
+ Why: fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE
+
+Error [E-ERR-PROPAGATE]: bare `?` propagation is retired.
+  --> tests/ui/build_generated_cycle/run.jet:8:6
+    |
+  8 |     }?
+    |      ^
+ Why: fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE
+
+Error [E-ERR-PROPAGATE]: bare `?` propagation is retired.
+  --> tests/ui/build_generated_cycle/run.jet:9:118
+    |
+  9 |     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/alpha.jet", ".jet/generated/main/beta.jet"], [])?
+    |                                                                                                                      ^
+ Why: fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE

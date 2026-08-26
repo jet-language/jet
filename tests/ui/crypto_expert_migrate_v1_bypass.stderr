@@ -3,7 +3,7 @@ Error [E0405]: `?? return` here needs a value
     |
   7 |     recipient :: crypto.X25519SecretKey.new_random() ?? return
     |                                                         ^^^^^^
- Why: a bare `return` needs a value here because the function returns !
+ Why: a bare `return` needs a value here because the function returns !Err
  Fix: give a fallback value: `?? return <value>`
 More: jet-lang.dev/e/E0405
 
@@ -15,3 +15,21 @@ Error [E0510]: `core.crypto.expert.migrate_v1` requires an audited `#Unsafe` reg
  Why: raw crypto primitives may only run inside an explicit expert-tier gate (I1)
  Fix: wrap the call in `#Unsafe("crypto expert: …") { … }` or use `crypto.seal`/`open` instead
 More: jet-lang.dev/e/E0510
+
+Error [E0510]: `core.crypto.expert.migrate_v1` requires an audited `#Unsafe` region
+  --> tests/ui/crypto_expert_migrate_v1_bypass.jet:8:17
+    |
+  8 |     _ :: expert.migrate_v1(key, Path.from("old.jetc"), [recipient.public_key()], Path.from("new.jetc"))
+    |                 ^^^^^^^^^^
+ Why: raw crypto primitives may only run inside an explicit expert-tier gate (I1)
+ Fix: wrap the call in `#Unsafe("crypto expert: …") { … }` or use `crypto.seal`/`open` instead
+More: jet-lang.dev/e/E0510
+
+Error [E2402]: `?` can't convert `FileCryptoError` into `Err` — no declared conversion exists
+  --> tests/ui/crypto_expert_migrate_v1_bypass.jet:8:17
+    |
+  8 |     _ :: expert.migrate_v1(key, Path.from("old.jetc"), [recipient.public_key()], Path.from("new.jetc"))
+    |                 ^^^^^^^^^^
+ Why: `?` uses the declared conversion rail; `FileCryptoError` can reach `Err` only through `impl FileCryptoError -> Err`
+ Fix: add `impl FileCryptoError -> Err { … }` before this function, or change the return type
+More: jet-lang.dev/e/E2402

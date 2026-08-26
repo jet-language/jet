@@ -1,8 +1,35 @@
 Error [E0769]: `force` is a label-only parameter of `action`
-  --> tests/ui/fn_type_zone_call.jet:3:19
+  --> tests/ui/fn_type_zone_call.jet:3:65
     |
-  3 |     return action(true)
-    |                   ^^^^
+  3 | fn apply(action: fn(*, force: Bool) Int) Int -> { return action(true) }
+    |                                                                 ^^^^
  Why: the `*` in the declaration requires the label, so the call says what the value means
  Fix: write `force: …` for this argument
 More: jet-lang.dev/e/E0769
+
+Error [E0769]: `force` is a label-only parameter of `action`
+  --> tests/ui/fn_type_zone_call.jet:3:65
+    |
+  3 | fn apply(action: fn(*, force: Bool) Int) Int -> { return action(true) }
+    |                                                                 ^^^^
+ Why: the `*` in the declaration requires the label, so the call says what the value means
+ Fix: write `force: …` for this argument
+More: jet-lang.dev/e/E0769
+
+Error [E0112]: `apply` wants fn(*, force: Bool) Int for argument 1, but this is fn(force: Bool) Int
+  --> tests/ui/fn_type_zone_call.jet:5:23
+    |
+  5 | fn run() { _ :: apply(save) }
+    |                       ^^^^
+ Why: every argument must match its parameter's type
+ Fix: use fn(*, force: Bool) Int here
+More: jet-lang.dev/e/E0112
+
+Error [E0112]: `apply` wants fn(*, force: Bool) Int for argument 1, but this is fn(force: Bool) Int
+  --> tests/ui/fn_type_zone_call.jet:5:23
+    |
+  5 | fn run() { _ :: apply(save) }
+    |                       ^^^^
+ Why: every argument must match its parameter's type
+ Fix: use fn(*, force: Bool) Int here
+More: jet-lang.dev/e/E0112

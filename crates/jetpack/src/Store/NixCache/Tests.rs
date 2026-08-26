@@ -231,6 +231,19 @@ fn native_nix_cache_recurses_and_admits_closure_atomically() {
         .values()
         .all(|object| object.hangar_path.is_dir()));
     assert_eq!(crate::Store::list(&roots).len(), 2);
+    let mut entry = crate::Store::list_checked(&roots)
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.name == "root")
+        .expect("root cache entry");
+    let mut producer = crate::Store::ProducerRecord::decode(&entry.producer_record).unwrap();
+    producer
+        .facts
+        .extend(crate::Provider::nix_build_facts_record());
+    entry.producer_record = producer.encode();
+    let lease = crate::Store::snapshot_lease(&roots, &entry).unwrap();
+    assert_eq!(lease.snapshot_root, PathBuf::from(&entry.out));
+    lease.validate().unwrap();
     let offline = admit_nix_closure(
         &roots,
         &[NixOutputRequest {

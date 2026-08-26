@@ -43,11 +43,47 @@ Error [E0367]: pattern `String` needs a leading `.`
  Fix: write `.String(…)`
 More: jet-lang.dev/e/E0367
 
+Error [E2417]: explicit failure domain `String (text)` is not an Error type
+  --> tests/ui/enum_pattern_needs_dot_payload.jet:6:31
+    |
+  6 | fn show(light: Light, result: Int !String, value: Int | String) {
+    |                               ^^^^^^^^^^^
+ Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
+ Fix: use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+More: jet-lang.dev/e/E2417
+
+Error [E0116]: `print` doesn't hand back a value
+  --> tests/ui/enum_pattern_needs_dot_payload.jet:15:21
+    |
+ 15 |         Int(n) -> { print(n) }
+    |                     ^^^^^
+ Why: a call is a value only when its function declares a result after the parameter list
+ Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -> …`
+More: jet-lang.dev/e/E0116
+
+Error [E0116]: `print` doesn't hand back a value
+  --> tests/ui/enum_pattern_needs_dot_payload.jet:16:24
+    |
+ 16 |         String(s) -> { print(s) }
+    |                        ^^^^^
+ Why: a call is a value only when its function declares a result after the parameter list
+ Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -> …`
+More: jet-lang.dev/e/E0116
+
 Error [E0404]: `Ok(...)` only fits where a fallible result is expected
   --> tests/ui/enum_pattern_needs_dot_payload.jet:21:25
     |
  21 |     show(Light.Fade(1), Ok(1), 2)
     |                         ^^^^
- Why: `Ok` builds the success side of a `T E!` result
- Fix: use it in a `T E!` return type, a `T E!` binding annotation, or a call that expects one
+ Why: `Ok` builds the success side of a `T !E` result
+ Fix: use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one
+More: jet-lang.dev/e/E0404
+
+Error [E0404]: `Ok(...)` only fits where a fallible result is expected
+  --> tests/ui/enum_pattern_needs_dot_payload.jet:21:25
+    |
+ 21 |     show(Light.Fade(1), Ok(1), 2)
+    |                         ^^^^
+ Why: `Ok` builds the success side of a `T !E` result
+ Fix: use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one
 More: jet-lang.dev/e/E0404

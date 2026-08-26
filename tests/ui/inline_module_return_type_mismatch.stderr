@@ -1,8 +1,17 @@
-Error [E0113]: `bad` promises to return `bank.Account`, but this returns `vis2.bank.Account`
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/inline_module_return_type_mismatch.jet:15:23
+    |
+ 15 | fn bad() bank.Account {
+    |                       ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
+
+Error [E0113]: `bad` promises to return bank.Account, but this returns `vis2.bank.Account`
   --> tests/ui/inline_module_return_type_mismatch.jet:16:12
     |
  16 |     return vis2.bank.Account{balance: 1}
     |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: the value handed back must match the type after `=>`
- Fix: these names may refer to one declaration; make both sides use one spelling for `Account`
+ Why: the value handed back must match the declared return type
+ Fix: use bank.Account here
 More: jet-lang.dev/e/E0113

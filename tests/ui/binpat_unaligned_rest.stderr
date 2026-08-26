@@ -6,3 +6,21 @@ Error [E1011]: this part of the binary pattern doesn't start on a byte boundary
  Why: fixed bytes and a `{rest:...}` capture are read whole-byte, so every bit-field before them must add up to a multiple of 8 bits
  Fix: pad the preceding holes to a byte boundary (e.g. add a reserved `{_:U4}`)
 More: jet-lang.dev/e/E1011
+
+Error [E0116]: `print` doesn't hand back a value
+  --> tests/ui/binpat_unaligned_rest.jet:4:39
+    |
+  4 |         [U8]{"{a:U4}{rest:...}"} -> { print("x") }
+    |                                       ^^^^^
+ Why: a call is a value only when its function declares a result after the parameter list
+ Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -> …`
+More: jet-lang.dev/e/E0116
+
+Error [E0116]: `print` doesn't hand back a value
+  --> tests/ui/binpat_unaligned_rest.jet:6:13
+    |
+  6 |             print("no")
+    |             ^^^^^
+ Why: a call is a value only when its function declares a result after the parameter list
+ Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -> …`
+More: jet-lang.dev/e/E0116

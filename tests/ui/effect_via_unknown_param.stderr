@@ -1,17 +1,26 @@
-Error [E0771]: this needs fn(Int) =[IO]=>, but the function value is fn(n: Int)
-  --> tests/ui/effect_via_unknown_param.jet:12:15
+Error [E0112]: `invoke` wants fn(Int) -[IO]> for argument 2, but this is fn(n: Int) !Err
+  --> tests/ui/effect_via_unknown_param.jet:7:22
     |
- 12 |     invoke(5, show)
-    |               ^^^^
- Why: public labels and parameter zones are part of a function's callable type
- Fix: use `fn(Int) =[IO]=>` here
-More: jet-lang.dev/e/E0771
+  7 | fn run() { invoke(5, show) }
+    |                      ^^^^
+ Why: every argument must match its parameter's type
+ Fix: use fn(Int) -[IO]> here
+More: jet-lang.dev/e/E0112
 
-Error [E0748]: `=[via missing]=>` on `invoke` names no such parameter
-  --> tests/ui/effect_via_unknown_param.jet:3:47
+Error [E0112]: `invoke` wants fn(Int) -[IO]> for argument 2, but this is fn(n: Int) !Err
+  --> tests/ui/effect_via_unknown_param.jet:7:22
     |
-  3 | fn invoke(n: Int, act: fn(Int) =[IO]=>) =[via missing]=> {
-    |                                               ^^^^^^^
- Why: `=[via f]=>` publishes the effects of a callback parameter `f`; `invoke` has no parameter called `missing`
+  7 | fn run() { invoke(5, show) }
+    |                      ^^^^
+ Why: every argument must match its parameter's type
+ Fix: use fn(Int) -[IO]> here
+More: jet-lang.dev/e/E0112
+
+Error [E0748]: `-[via missing]>` on `invoke` names no such parameter
+  --> tests/ui/effect_via_unknown_param.jet:3:46
+    |
+  3 | fn invoke(n: Int, act: fn(Int) -[IO]>) -[via missing]> { act(n) }
+    |                                              ^^^^^^^
+ Why: `-[via f]>` publishes the effects of a callback parameter `f`; `invoke` has no parameter called `missing`
  Fix: name one of `invoke`'s callback parameters after `via`
 More: jet-lang.dev/e/E0748

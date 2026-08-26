@@ -1,6 +1,6 @@
-// E0994 (D-IF3): the `==` on the `if` already matches each arm head against the
-// subject, so repeating `subject ==` on an arm is redundant. Drop the prefix and
-// write just the value or pattern.
+// E0994 (D-IF3): the `==` on the `if` already matches each arm head against
+// the subject, so repeating `subject ==` on an arm is redundant. The redundant
+// prefix is this fixtures subject and must stay.
 enum Conn {
     Active(Int)
     Closed
@@ -8,7 +8,7 @@ enum Conn {
 
 fn describe(c: Conn) String -> {
     if c == {
-        .Active(id) -> { return "live:{id}" }
+        c == .Active(id) -> { return "live:{id}" }
         .Closed -> { return "closed" }
     }
     return "unknown"

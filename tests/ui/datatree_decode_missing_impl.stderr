@@ -6,3 +6,21 @@ Error [E0905]: `SecretHandle` does not implement `Decode`
  Why: `DataTree.decode<SecretHandle>()` can only call the type's Decode contract
  Fix: derive `Decode` on `SecretHandle`, or write `impl SecretHandle.Decode`
 More: jet-lang.dev/e/E0905
+
+Error [E0905]: `SecretHandle` does not implement `Decode`
+  --> tests/ui/datatree_decode_missing_impl.jet:10:15
+    |
+ 10 |     _ :: tree.decode<SecretHandle>()
+    |               ^^^^^^
+ Why: `DataTree.decode<SecretHandle>()` can only call the type's Decode contract
+ Fix: derive `Decode` on `SecretHandle`, or write `impl SecretHandle.Decode`
+More: jet-lang.dev/e/E0905
+
+Error [E2402]: `?` can't convert `[FieldError]` into `Err` — no declared conversion exists
+  --> tests/ui/datatree_decode_missing_impl.jet:10:15
+    |
+ 10 |     _ :: tree.decode<SecretHandle>()
+    |               ^^^^^^
+ Why: `?` uses the declared conversion rail; `[FieldError]` can reach `Err` only through `impl [FieldError] -> Err`
+ Fix: add `impl [FieldError] -> Err { … }` before this function, or change the return type
+More: jet-lang.dev/e/E2402

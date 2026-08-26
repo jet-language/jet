@@ -6,3 +6,21 @@ Error [E0112]: `xchacha20poly1305_seal` wants [U8] for argument 3, but this is B
  Why: every argument must match its parameter's type
  Fix: use [U8] here
 More: jet-lang.dev/e/E0112
+
+Error [E0112]: `xchacha20poly1305_seal` wants [U8] for argument 3, but this is Bool (true or false)
+  --> tests/ui/crypto_expert_nonce_type_precedence.jet:6:147
+    |
+  6 |         _ :: expert.xchacha20poly1305_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0], true, [])
+    |                                                                                                                                                   ^^^^
+ Why: every argument must match its parameter's type
+ Fix: use [U8] here
+More: jet-lang.dev/e/E0112
+
+Error [E2402]: `?` can't convert `CryptoError` into `Err` — no declared conversion exists
+  --> tests/ui/crypto_expert_nonce_type_precedence.jet:6:21
+    |
+  6 |         _ :: expert.xchacha20poly1305_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0], true, [])
+    |                     ^^^^^^^^^^^^^^^^^^^^^^
+ Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
+ Fix: add `impl CryptoError -> Err { … }` before this function, or change the return type
+More: jet-lang.dev/e/E2402

@@ -6,3 +6,12 @@ Error [E0209]: implicit clone of `msg`
  Why: `consume` expects to take ownership of this value
  Fix: `msg` is used again after this call, so the move marker `^` (`^msg`) would break that later use — write the copy marker `~` (`~msg`) to pass a copy, or reorder so this call is `msg`'s last use and write the move marker `^` (`^msg`)
 More: jet-lang.dev/e/E0209
+
+Error [E0209]: implicit clone of `msg`
+  --> tests/ui/implicit_clone_live_after.jet:7:13
+    |
+  7 |     consume(msg)
+    |             ^^^
+ Why: `consume` expects to take ownership of this value
+ Fix: `msg` is used again after this call, so the move marker `^` (`^msg`) would break that later use — write the copy marker `~` (`~msg`) to pass a copy, or reorder so this call is `msg`'s last use and write the move marker `^` (`^msg`)
+More: jet-lang.dev/e/E0209

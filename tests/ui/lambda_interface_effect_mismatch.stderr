@@ -1,8 +1,17 @@
-Error [E0108]: this needs fn(Int) =[]=> Int, but the callable obligations are not satisfied
+Error [E0112]: `apply` wants fn(Int) Int -[]> for argument 1, but this is fn(Int) Int -[IO]>
   --> tests/ui/lambda_interface_effect_mismatch.jet:4:17
     |
   4 |     print(apply((n: Int) Int -[IO]> n))
     |                 ^^^^^^^^^^^^^^^^^^^^^
- Why: the callable value does not provide the obligations required here
- Fix: pass a callable with matching effects, labels, and view provenance
-More: jet-lang.dev/e/E0108
+ Why: every argument must match its parameter's type
+ Fix: use fn(Int) Int -[]> here
+More: jet-lang.dev/e/E0112
+
+Error [E0112]: `apply` wants fn(Int) Int -[]> for argument 1, but this is fn(Int) Int -[IO]>
+  --> tests/ui/lambda_interface_effect_mismatch.jet:4:17
+    |
+  4 |     print(apply((n: Int) Int -[IO]> n))
+    |                 ^^^^^^^^^^^^^^^^^^^^^
+ Why: every argument must match its parameter's type
+ Fix: use fn(Int) Int -[]> here
+More: jet-lang.dev/e/E0112

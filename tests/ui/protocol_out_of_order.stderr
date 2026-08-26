@@ -1,8 +1,98 @@
-Error [E0150]: `Charge` needs `Payment.Client` in state `S2`, but `h1` is in state `S1`
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/protocol_out_of_order.jet:9:21
+    |
+  9 |     server: Ack(session: Int)
+    |                     ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
+
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/protocol_out_of_order.jet:16:26
+    |
+ 16 |     h1 :: h.Hello(1) ?? panic("hello failed")
+    |                          ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
+
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/protocol_out_of_order.jet:18:16
+    |
+ 18 |     h1.Charge(500) ?? panic("charge failed")
+    |                ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
+
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/protocol_out_of_order.jet:20:1
+    |
+ 20 | 
+    | ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
+
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/protocol_out_of_order.jet:20:1
+    |
+ 20 | 
+    | ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
+
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/protocol_out_of_order.jet:20:1
+    |
+ 20 | 
+    | ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
+
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/protocol_out_of_order.jet:20:1
+    |
+ 20 | 
+    | ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
+
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/protocol_out_of_order.jet:20:1
+    |
+ 20 | 
+    | ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
+
+Error [E0153]: protocol `Payment` failed to expand into handle types
+  --> tests/ui/protocol_out_of_order.jet:7:10
+    |
+  7 | protocol Payment {
+    |          ^^^^^^^
+ Why: the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the protocol block — a fragment did not parse
+ Fix: check the protocol declaration for typos; if this persists, file a bug
+More: jet-lang.dev/e/E0153
+
+Error [E0107]: nothing named `Payment` exists here
+  --> tests/ui/protocol_out_of_order.jet:15:10
+    |
+ 15 |     h :: Payment.Client.client()
+    |          ^^^^^^^
+ Why: a name must be declared before it's used
+ Fix: declare it first: `Payment :: ...`
+More: jet-lang.dev/e/E0107
+
+Error [E0311]: `Charge` isn't a method on this value
   --> tests/ui/protocol_out_of_order.jet:18:8
     |
  18 |     h1.Charge(500) ?? panic("charge failed")
     |        ^^^^^^
- Why: typestate (D-STATE1): `Charge` is only valid in state `S2`; calling it in `S1` is the out-of-order-events bug it prevents
- Fix: transition it first: call `recv_Ack` to reach `S2`
-More: jet-lang.dev/e/E0150
+ Why: this `Int` value has no instance method named `Charge`
+ Fix: check the spelling of `Charge`
+More: jet-lang.dev/e/E0311

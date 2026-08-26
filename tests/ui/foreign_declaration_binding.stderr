@@ -1,7 +1,7 @@
 Error [E0003]: `fun` is a function declaration keyword; Jet writes `fn`
   --> tests/ui/foreign_declaration_binding.jet:3:1
     |
-  3 | fun add(left: Int, right: Int) => Int {
+  3 | fun add(left: Int, right: Int) -> Int {
     | ^^^
  Why: Jet uses one function declaration spelling so every declaration has one shape
  Fix: replace `fun` with `fn`
@@ -10,16 +10,25 @@ More: jet-lang.dev/e/E0003
 Error [E0068]: this callable uses the retired result-arrow shape.
   --> tests/ui/foreign_declaration_binding.jet:3:32
     |
-  3 | fun add(left: Int, right: Int) => Int {
+  3 | fun add(left: Int, right: Int) -> Int {
     |                                ^^
  Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
  Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 More: jet-lang.dev/e/E0068
 
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/foreign_declaration_binding.jet:3:39
+    |
+  3 | fun add(left: Int, right: Int) -> Int {
+    |                                       ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
+
 Error [E0003]: `func` is a function declaration keyword; Jet writes `fn`
   --> tests/ui/foreign_declaration_binding.jet:7:1
     |
-  7 | func subtract(left: Int, right: Int) => Int {
+  7 | func subtract(left: Int, right: Int) -> Int {
     | ^^^^
  Why: Jet uses one function declaration spelling so every declaration has one shape
  Fix: replace `func` with `fn`
@@ -28,11 +37,20 @@ More: jet-lang.dev/e/E0003
 Error [E0068]: this callable uses the retired result-arrow shape.
   --> tests/ui/foreign_declaration_binding.jet:7:38
     |
-  7 | func subtract(left: Int, right: Int) => Int {
+  7 | func subtract(left: Int, right: Int) -> Int {
     |                                      ^^
  Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
  Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 More: jet-lang.dev/e/E0068
+
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/foreign_declaration_binding.jet:7:45
+    |
+  7 | func subtract(left: Int, right: Int) -> Int {
+    |                                             ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
 
 Error [E0003]: `def` is a function declaration keyword; Jet writes `fn`
   --> tests/ui/foreign_declaration_binding.jet:11:1
@@ -52,10 +70,19 @@ Error [E0003]: a function return type uses `:`
  Fix: replace `:` with `->` before the return type
 More: jet-lang.dev/e/E0003
 
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/foreign_declaration_binding.jet:11:42
+    |
+ 11 | def multiply(left: Int, right: Int): Int {
+    |                                          ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
+
 Error [E0003]: `function` is a function declaration keyword; Jet writes `fn`
   --> tests/ui/foreign_declaration_binding.jet:15:1
     |
- 15 | function divide(left: Int, right: Int) => Int {
+ 15 | function divide(left: Int, right: Int) -> Int {
     | ^^^^^^^^
  Why: Jet uses one function declaration spelling so every declaration has one shape
  Fix: replace `function` with `fn`
@@ -64,11 +91,20 @@ More: jet-lang.dev/e/E0003
 Error [E0068]: this callable uses the retired result-arrow shape.
   --> tests/ui/foreign_declaration_binding.jet:15:40
     |
- 15 | function divide(left: Int, right: Int) => Int {
+ 15 | function divide(left: Int, right: Int) -> Int {
     |                                        ^^
  Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
  Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
 More: jet-lang.dev/e/E0068
+
+Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
+  --> tests/ui/foreign_declaration_binding.jet:15:47
+    |
+ 15 | function divide(left: Int, right: Int) -> Int {
+    |                                               ^
+ Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
+ Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) ! { ... }` bare.
+More: jet-lang.dev/e/E0080
 
 Error [E0003]: `var` is a foreign binding keyword; Jet writes `:=`
   --> tests/ui/foreign_declaration_binding.jet:20:5

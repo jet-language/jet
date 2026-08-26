@@ -1,8 +1,8 @@
-Error [E2404]: `?` can't turn a `FileErr` into a `AppErr` here
-  --> tests/ui/e2404_no_error_conv.jet:13:5
+Error [E-ERR-PROPAGATE]: bare `?` propagation is retired.
+  --> tests/ui/e2404_no_error_conv.jet:14:12
     |
- 13 |     inner()?
-    |     ^^^^^^^^
- Why: `?` only changes an error's type when you've declared how; there's no declared way to turn `FileErr` into `AppErr`
- Fix: add `impl FileErr => AppErr { … }` before this function
-More: jet-lang.dev/e/E2404
+ 14 |     inner()?
+    |            ^
+ Why: fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE

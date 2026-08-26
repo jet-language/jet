@@ -1,8 +1,8 @@
-Error [E2402]: `?` can't convert `MyError` into `Err` — no declared conversion exists
-  --> tests/ui/e2402_fallible_missing.jet:7:10
+Error [E-ERR-PROPAGATE]: bare `?` propagation is retired.
+  --> tests/ui/e2402_fallible_missing.jet:8:17
     |
-  7 |     x :: inner()?
-    |          ^^^^^^^^
- Why: `?` uses the declared conversion rail; `MyError` can reach `Err` only through `impl MyError => Err`
- Fix: add `impl MyError => Err { … }` before this function, or change the return type
-More: jet-lang.dev/e/E2402
+  8 |     x :: inner()?
+    |                 ^
+ Why: fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE

@@ -2,7 +2,16 @@ Error [E0307]: this `if` doesn't cover every case — missing: Green
   --> tests/ui/dispatch_not_exhaustive.jet:8:5
     |
   8 |     if x == {
-    |     ^^
+    |     ^^^^^^^^^
  Why: every arm here is a pattern test, so each variant must appear once
  Fix: add an arm for: Green
 More: jet-lang.dev/e/E0307
+
+Error [E0116]: `print` doesn't hand back a value
+  --> tests/ui/dispatch_not_exhaustive.jet:10:13
+    |
+ 10 |             print("r")
+    |             ^^^^^
+ Why: a call is a value only when its function declares a result after the parameter list
+ Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -> …`
+More: jet-lang.dev/e/E0116

@@ -1,17 +1,17 @@
 Error [E0119]: there's no type called `Iter`
-  --> tests/ui/memo_lazy_iter_e0940.jet:2:30
+  --> tests/ui/memo_lazy_iter_e0940.jet:2:24
     |
-  2 | #Memo fn lazy_result() =[]=> Iter<Int> :: [1, 2].lazy()
-    |                              ^^^^^^^^^
+  2 | #Memo fn lazy_result() Iter<Int> -[]> [1, 2].lazy()
+    |                        ^^^^^^^^^
  Why: generic types must name a struct or enum you defined
  Fix: check the spelling, or define the type first
 More: jet-lang.dev/e/E0119
 
 Error [E0119]: `Iter` isn't generic
-  --> tests/ui/memo_lazy_iter_e0940.jet:2:30
+  --> tests/ui/memo_lazy_iter_e0940.jet:2:24
     |
-  2 | #Memo fn lazy_result() =[]=> Iter<Int> :: [1, 2].lazy()
-    |                              ^^^^^^^^^
+  2 | #Memo fn lazy_result() Iter<Int> -[]> [1, 2].lazy()
+    |                        ^^^^^^^^^
  Why: only types declared with type parameters accept `<…>`
  Fix: use `Iter` without type arguments
 More: jet-lang.dev/e/E0119
@@ -19,7 +19,7 @@ More: jet-lang.dev/e/E0119
 Error [E0940]: `#Memo` cannot cache a lazy `Iter` result
   --> tests/ui/memo_lazy_iter_e0940.jet:2:1
     |
-  2 | #Memo fn lazy_result() =[]=> Iter<Int> :: [1, 2].lazy()
+  2 | #Memo fn lazy_result() Iter<Int> -[]> [1, 2].lazy()
     | ^^^^^
  Why: a lazy iterator carries live computation state instead of one completed result
  Fix: materialize the iterator before returning from the memoized function

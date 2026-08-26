@@ -1,10 +1,16 @@
 // E0366 (D-IFDIST1): structural pattern arms need `==`. Other distributed
-// comparison markers only wrap bare values — a pattern head is a teaching error.
+// comparison markers only wrap bare values, so a pattern head under `<` is a
+// teaching error. The `<` table is this fixtures subject and must stay.
 enum Shape {
     Circle
     Square
 }
 
-fn name(s: Shape) String -> { return if false -> "circle" else -> "other" }
+fn name(s: Shape) String -> {
+    if s < {
+        .Circle -> "circle"
+        else -> "other"
+    }
+}
 
 fn run() { print(name(.Circle)) }

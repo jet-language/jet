@@ -1,7 +1,25 @@
+Error [E0068]: this callable uses the retired result-arrow shape.
+  --> tests/ui/external_method_unknown_type.jet:1:20
+    |
+  1 | fn Missing.build() -> Missing :: Missing.build()
+    |                    ^^
+ Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
+ Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
+More: jet-lang.dev/e/E0068
+
+Error [E0065]: this function uses the retired `::` body marker.
+  --> tests/ui/external_method_unknown_type.jet:1:31
+    |
+  1 | fn Missing.build() -> Missing :: Missing.build()
+    |                               ^^
+ Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
+ Fix: replace `::` with `->`; `jet fmt` applies this fix.
+More: jet-lang.dev/e/E0065
+
 Error [E0301]: `impl Missing` names a type that doesn't exist
   --> tests/ui/external_method_unknown_type.jet:1:4
     |
-  1 | fn Missing.build() => Missing :: Missing.build()
+  1 | fn Missing.build() -> Missing :: Missing.build()
     |    ^^^^^^^
  Why: `Missing` hasn't been defined as a struct or enum
  Fix: define `struct Missing` or `enum Missing` first
@@ -10,7 +28,7 @@ More: jet-lang.dev/e/E0301
 Error [E0119]: there's no type called `Missing`
   --> tests/ui/external_method_unknown_type.jet:1:23
     |
-  1 | fn Missing.build() => Missing :: Missing.build()
+  1 | fn Missing.build() -> Missing :: Missing.build()
     |                       ^^^^^^^
  Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
  Fix: check the spelling, or define the struct or enum first
@@ -19,7 +37,7 @@ More: jet-lang.dev/e/E0119
 Error [E0107]: nothing named `Missing` exists here
   --> tests/ui/external_method_unknown_type.jet:1:34
     |
-  1 | fn Missing.build() => Missing :: Missing.build()
+  1 | fn Missing.build() -> Missing :: Missing.build()
     |                                  ^^^^^^^
  Why: a name must be declared before it's used
  Fix: declare it first: `Missing :: ...`

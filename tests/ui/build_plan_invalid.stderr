@@ -1,8 +1,17 @@
-Error [E3501]: `fn build` must take one `BuildContext` and return `BuildPlan`.
-  --> tests/ui/build_plan_invalid.jet:2:4
+Error [E-ERR-PROPAGATE]: bare `?` propagation is retired.
+  --> tests/ui/build_plan_invalid.jet:3:60
     |
-  2 | fn build(b: BuildContext) BuildPlan! -> {
-    |    ^^^^^
- Why: the build entry is a typed contract: its parameter is its authority and its result is the graph Jet executes
- Fix: write `fn build(b: BuildContext) BuildPlan`
-More: jet-lang.dev/e/E3501
+  3 |     b.action("same", [], ["one"], ["sh", "-c", "true"], [])?
+    |                                                            ^
+ Why: fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE
+
+Error [E-ERR-PROPAGATE]: bare `?` propagation is retired.
+  --> tests/ui/build_plan_invalid.jet:4:60
+    |
+  4 |     b.action("same", [], ["two"], ["sh", "-c", "true"], [])?
+    |                                                            ^
+ Why: fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
+ Fix: remove the trailing `?`, or write `?(text)` to add one context frame.
+More: jet-lang.dev/e/E-ERR-PROPAGATE
