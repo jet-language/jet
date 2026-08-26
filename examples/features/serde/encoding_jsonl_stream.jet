@@ -4,22 +4,22 @@ use core.encoding.jsonl as jsonl
 use core.files as files
 
 fn write_catalog(path: Path) Bool !(EncodingError | IOError) {
-    output :: files.create(path)?
-    writer :: jsonl.writer(^output, encoding.EncodingLimits.safe())?
-    writer.write(DataTree.Object(["ok": DataTree.Bool(true)]))?
-    writer.flush()?
-    writer.finish()?
+    output :: files.create(path)
+    writer :: jsonl.writer(^output, encoding.EncodingLimits.safe())
+    writer.write(DataTree.Object(["ok": DataTree.Bool(true)]))
+    writer.flush()
+    writer.finish()
     return Ok(true)
 }
 
 fn run() !(EncodingError | IOError) {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
-    scratch :: files.temp_dir("jet-encoding-jsonl")?
+    scratch :: files.temp_dir("jet-encoding-jsonl")
     path :: Path.from(scratch.path).join("catalog.jsonl")
-    write_catalog(path)?
-    input :: files.open(path)?
-    reader :: jsonl.reader(^input)?
+    write_catalog(path)
+    input :: files.open(path)
+    reader :: jsonl.reader(^input)
     loop record in reader -> print("record")
     print("eof")
 }

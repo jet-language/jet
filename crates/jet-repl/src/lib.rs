@@ -1045,7 +1045,7 @@ fn render_turns(session: &Session, color: bool) {
         return;
     }
     if session.turns.is_empty() {
-        println!("no turns yet");
+        println!("No turns yet");
         return;
     }
     for turn in &session.turns {
@@ -1066,7 +1066,7 @@ fn render_turns(session: &Session, color: bool) {
 
 fn render_turns_text(session: &Session) -> String {
     if session.turns.is_empty() {
-        return "no turns yet\n".to_string();
+        return "No turns yet\n".to_string();
     }
     let mut out = String::new();
     for turn in &session.turns {

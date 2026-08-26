@@ -801,17 +801,17 @@ fn covers_fixed_list_param_and_field() {
 
 #[test]
 fn covers_option_param() {
-    // c109 Phase 8: an optional-typed param (`Int?`) is now inside the subset
+    // c109 Phase 8: an optional-typed param (`?Int`) is now inside the subset
     // (was excluded through Phase 7). The payload is a covered value type.
-    assert!(covers("fn f(p: Int?) => Int {\n return 0\n}\n", "f"));
+    assert!(covers("fn f(p: ?Int) => Int {\n return 0\n}\n", "f"));
 }
 
 #[test]
 fn rejects_list_of_option_param_still() {
-    // A list whose element is itself optional (`[Int?]`) is still excluded — the
+    // A list whose element is itself optional (`[?Int]`) is still excluded — the
     // collection element-coverage does not admit optionals (clone/coercion for an
-    // option-element collection is deferred), even though a bare `Int?` is covered.
-    assert!(!covers("fn f(xs: [Int?]) => Int {\n return 0\n}\n", "f"));
+    // option-element collection is deferred), even though a bare `?Int` is covered.
+    assert!(!covers("fn f(xs: [?Int]) => Int {\n return 0\n}\n", "f"));
 }
 
 #[test]
@@ -947,7 +947,7 @@ fn covers_mixed_switch_non_ident_subject() {
     let variant = "enum Light { Red Green Yellow }\nfn pick() => Light { return Light.Red }\nfn classify() => Int {\n if pick() == {\n .Red -> { return 1 }\n .Green -> { return 2 }\n else -> { return 0 }\n }\n}\n";
     assert!(covers(variant, "classify"));
     // A field-access subject with a payload-binding (optional) arm:
-    let payload = "struct Holder { val: Int? }\nfn f(h: Holder) => Int {\n if h.val == {\n .Val(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
+    let payload = "struct Holder { val: ?Int }\nfn f(h: Holder) => Int {\n if h.val == {\n .Val(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
     assert!(covers(payload, "f"));
 }
 
@@ -1081,10 +1081,10 @@ fn covers_method_call_collection_iteration() {
 #[test]
 fn covers_optional_binding_if_condition() {
     // c109 Phase 22: `if x == .Val(b) { … b … }` lowers to `if let Some(b) = …`.
-    let src = "fn f(x: Int?) {\n if x == .Val(n) {\n print(\"{n}\")\n }\n}\n";
+    let src = "fn f(x: ?Int) {\n if x == .Val(n) {\n print(\"{n}\")\n }\n}\n";
     assert!(covers(src, "f"));
     // `x == .None` lowers to `.is_none()`.
-    let isnone = "fn f(x: Int?) {\n if x == .None {\n print(\"none\")\n }\n}\n";
+    let isnone = "fn f(x: ?Int) {\n if x == .None {\n print(\"none\")\n }\n}\n";
     assert!(covers(isnone, "f"));
 }
 
@@ -1098,9 +1098,9 @@ fn covers_user_enum_variant_if_let_condition() {
 
 #[test]
 fn rejects_list_of_option_param() {
-    // A list whose element is an option (`[Int?]`) is not a covered value type
+    // A list whose element is an option (`[?Int]`) is not a covered value type
     // (optionals are Phase 8); the owning collection is excluded.
-    let src = "fn f(xs: [Int?]) => Int {\n return 0\n}\n";
+    let src = "fn f(xs: [?Int]) => Int {\n return 0\n}\n";
     assert!(!covers(src, "f"));
 }
 
@@ -1297,7 +1297,7 @@ fn rejects_intercepted_static_name() {
 
 #[test]
 fn covers_fallible_return_and_try() {
-    // A `T Err!` return (default-error fallible) with `ok`/`err` over scalar
+    // A `T !Err` return (default-error fallible) with `ok`/`err` over scalar
     // values and `?` propagation of a covered fallible call — all in-subset
     // (Phase 8). `Err` lowers to the Prelude value; the constructors here take
     // a message. Full sema owns the resolved fallible types and
@@ -1306,14 +1306,14 @@ fn covers_fallible_return_and_try() {
     // MethodCall and is only rewritten to an `EnumLit` by full sema; that path is
     // proven end-to-end by
     // `tests/tir_collections_and_methods.rs::fallible_try_and_or_fallback`.)
-    let src = "fn f(x: Int) Int Err! -> {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) Int Err! -> {\n n :: f(x)?\n return Ok((n + 1))\n}\nfn run() {}\n";
+    let src = "fn f(x: Int) Int !Err -> {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) Int !Err -> {\n n :: f(x)?\n return Ok((n + 1))\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
     assert!(covers_after_sema(src, "g"));
 }
 
 #[test]
 fn covers_optional_return_and_chaining() {
-    // A `T?` return with `Val`/`None`, plus `?.` chaining over a covered struct.
+    // A `?T` return with `Val`/`None`, plus `?.` chaining over a covered struct.
     // (Multi-letter struct name; a single uppercase letter reads as a type var.)
     //
     // `opt` asserts through `covers_after_sema` for the same reason as
@@ -1325,7 +1325,7 @@ fn covers_optional_return_and_chaining() {
     // right to reject the unresolved node; the covered shape is the resolved
     // one. `ch` needs no sema fact — `Expr::OptField` is in-subset iff its base
     // is — so it stays on the structural helper.
-    let src = "struct Addr {\n city: String\n}\nfn opt(x: Int) => (Int?) {\n if x > 0 {\n return Val(x)\n }\n return None\n}\nfn ch(a: (Addr?)) => (String?) {\n return a?.city\n}\n";
+    let src = "struct Addr {\n city: String\n}\nfn opt(x: Int) => ?Int {\n if x > 0 {\n return Val(x)\n }\n return None\n}\nfn ch(a: ?Addr) => ?String {\n return a?.city\n}\n";
     assert!(covers_after_sema(src, "opt"));
     assert!(covers(src, "ch"));
 }
@@ -1333,7 +1333,7 @@ fn covers_optional_return_and_chaining() {
 #[test]
 fn covers_or_fallback_value_and_return() {
     // `??` with a value fallback and with an early-`return` fallback.
-    let src = "fn v(x: (Int?)) => Int {\n return x ?? 0\n}\nfn r(x: (Int?)) => Int {\n return x ?? return -1\n}\n";
+    let src = "fn v(x: ?Int) => Int {\n return x ?? 0\n}\nfn r(x: ?Int) => Int {\n return x ?? return -1\n}\n";
     assert!(covers(src, "v"));
     assert!(covers(src, "r"));
 }
@@ -1342,7 +1342,7 @@ fn covers_or_fallback_value_and_return() {
 fn covers_or_fallback_panic_form() {
     // c109 Phase 15: the `panic(…)` fallback form is now covered — the
     // `safe_locals_expr` snapshot is rendered from the lexical lowering env.
-    let src = "fn p(x: (Int?)) => Int {\n return x ?? panic(\"missing\")\n}\n";
+    let src = "fn p(x: ?Int) => Int {\n return x ?? panic(\"missing\")\n}\n";
     assert!(covers(src, "p"));
 }
 
@@ -1445,11 +1445,11 @@ fn source_owned_numeric_aliases_are_not_builtins() {
 
 #[test]
 fn covers_string_payload_error_enum() {
-    // c109 Phase 16: a `T E!` whose error enum has a String payload is now
+    // c109 Phase 16: a `T !E` whose error enum has a String payload is now
     // covered — the error enum is a covered (String-payload) enum, and its
     // construction (`Err(Oops.Msg("bad"))`) reproduces `emit_boxed_enum_arg`
     // (a String literal arg, no borrowed clone) byte-for-byte.
-    let src = "enum Oops {\n Msg(String)\n}\nfn f(x: Int) => Int Oops! {\n if x == 0 {\n return Err(Oops.Msg(\"bad\"))\n }\n return Ok(x)\n}\nfn run() {}\n";
+    let src = "enum Oops {\n Msg(String)\n}\nfn f(x: Int) => Int !Oops {\n if x == 0 {\n return Err(Oops.Msg(\"bad\"))\n }\n return Ok(x)\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
 }
 
@@ -2154,12 +2154,12 @@ fn run() {
 
 #[test]
 fn covers_optional_struct_field() {
-    // c109 Phase 24: a struct with an OPTIONAL field (`note: String?`) is now covered
+    // c109 Phase 24: a struct with an OPTIONAL field (`note: ?String`) is now covered
     // (`field_ty_covered` admits a covered-payload Option). A fn building it routes.
     let src = "\
 struct PR {
     file_path: String
-    note: String?
+    note: ?String
 }
 fn mk(p: String) => PR {
     return PR.{file_path: ~p, note: None}
@@ -2226,10 +2226,10 @@ fn nope(x: U8) {
 
 #[test]
 fn covers_generic_optional_return() {
-    // c109 Phase 30: a generic fn with a `T?` return whose payload is a type
+    // c109 Phase 30: a generic fn with a `?T` return whose payload is a type
     // var. `fallible_payload_covered` routes the payload through
     // `is_type_var_param_ty` (subset/types.rs), so the signature is covered;
-    // before Phase 30 the `T?` payload admitted no type var.
+    // before Phase 30 the `?T` payload admitted no type var.
     //
     // The body needs the full front end, so this asserts through
     // `covers_after_sema`. A bare `Val(x)` parses to an `Expr::EnumLit` with
@@ -2242,7 +2242,7 @@ fn covers_generic_optional_return() {
     // sema-resolved one — the same `return Val(best)` that
     // `examples/features/types/traits.jet::largest<T: Comparable>` compiles.
     let src = "\
-fn opt_id<T>(x: ^T) => (T?) {
+fn opt_id<T>(x: ^T) => ?T {
     return Val(x)
 }
 fn run() {
@@ -2253,13 +2253,13 @@ fn run() {
 
 #[test]
 fn rejects_optional_return_uncovered_payload() {
-    // A `T?` return whose payload is an UNcovered type (a trait object is not a
+    // A `?T` return whose payload is an UNcovered type (a trait object is not a
     // fallible payload) stays excluded — the type-var admission is narrow.
     let src = "\
 trait Shape {
     fn area(self) => Float
 }
-fn maybe_shape(s: Shape) => (Shape?) {
+fn maybe_shape(s: Shape) => ?Shape {
     return Val(s)
 }
 ";
@@ -2327,7 +2327,7 @@ fn covers_recursive_struct_construction() {
     let src = "\
 struct Tree {
     value: Int
-    child: Tree?
+    child: ?Tree
 }
 fn build() {
     root :: Tree.{ value: 1, child: Val(Tree.{ value: 2, child: None }) }
@@ -2346,7 +2346,7 @@ fn covers_recursive_struct_boxed_field_read() {
     let src = "\
 struct Tree {
     value: Int
-    child: Tree?
+    child: ?Tree
 }
 fn first_child(t: Tree) => Int {
     kid :: t.child

@@ -227,9 +227,9 @@ pub fn render_categorized(
     out.push_str(&top(width, "jet ? — Command Palette", color));
     out.push('\n');
     let hint = if color {
-        theme.dim("type to search · ↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1")
+        theme.dim("Type to search · ↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1")
     } else {
-        "type to search · ↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1".to_string()
+        "Type to search · ↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1".to_string()
     };
     out.push_str(&selected_row(width, &hint, false, color));
     out.push('\n');
@@ -634,7 +634,7 @@ pub fn render_reference(
             .lines()
             .map(str::to_string)
             .collect(),
-        None => vec![theme.dim("select a command on the left")],
+        None => vec![theme.dim("Select a command on the left")],
     };
 
     let body_rows = height.saturating_sub(2);

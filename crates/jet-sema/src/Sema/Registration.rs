@@ -530,8 +530,16 @@ impl<'a> Checker<'a> {
         }
         let is_generator =
             matches!(&f.return_type, Some(Type::Apply { name, .. }) if name == "Stream");
-        let value_return = f
-            .return_type
+        // D-FAILURE-FOUNDATION1: body checking uses the same effective carrier
+        // that call sites publish. Otherwise an omitted/default error contract
+        // reaches calls but `return Err(...)` is still checked as a plain value.
+        // Generated conversion helpers retain their Rust-shaped raw return.
+        let body_return = if f.name.starts_with("__errconv_") {
+            f.return_type.clone()
+        } else {
+            Some(f.effective_return_type())
+        };
+        let value_return = body_return
             .as_ref()
             .filter(|ty| !is_void_like_return(ty) && !is_generator)
             .cloned();
@@ -558,17 +566,16 @@ impl<'a> Checker<'a> {
         self.check_single_use_consumed_in_current_scope();
         // D-STREAMYIELD1: a generator (`Stream<T> ->`) falling off the end is
         // exactly a bare `return;` — it just ends the stream. Never E0114.
-        let is_fallible_void = f
-            .return_type
+        let is_fallible_void = body_return
             .as_ref()
             .is_some_and(|ty| is_fallible_void_return(ty));
         if !is_generator
             && !is_fallible_void
-            && f.return_type.is_some()
+            && body_return.is_some()
             && value_return.is_none()
             && !block_definitely_returns(&f.body)
         {
-            let rt = f.return_type.clone().unwrap();
+            let rt = body_return.clone().unwrap();
             self.diags.push(Diagnostic::error(
                 "E0114",
                 format!(

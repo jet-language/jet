@@ -101,7 +101,7 @@ pub(crate) fn compute_hover(
                 format!(
                     "Compiler fact {}: optional {} provenance derived from sema flow.",
                     Syntax::COMPILER_FACT_ORIGIN,
-                    type_name.trim_end_matches('?')
+                    type_name.trim_start_matches('?')
                 )
             }
             _ => {

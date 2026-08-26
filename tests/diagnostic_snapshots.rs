@@ -1122,8 +1122,7 @@ fn write_blessed_snapshot(expect_path: &Path, shown_path: &str, actual: &str) {
     if after < before {
         let named = std::env::var("UPDATE_EXPECT_SHRINK")
             .ok()
-            .map(|value| value.trim().to_string())
-            .is_some_and(|value| !value.is_empty() && shown_path.contains(&value));
+            .is_some_and(|value| value.trim() == shown_path);
         let reason = bless_reason();
         assert!(
             named && reason.is_some(),

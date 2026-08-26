@@ -22,14 +22,14 @@ migration UserRecord {
 
 fn run() ![FieldError] {
     p_raw :: "{{\"x\": 3, \"y\": 4}}"
-    p :: json.decode<Point>(p_raw)?
+    p :: json.decode<Point>(p_raw)
     print("point: ({p.x}, {p.y})")
 
     fresh_raw :: "{{\"id\": 7, \"display_name\": \"Betty\", \"verified\": true}}"
-    fresh :: json.decode<UserRecord>(fresh_raw)?
+    fresh :: json.decode<UserRecord>(fresh_raw)
     print("record {fresh.id} arrived fresh")
 
     old_raw :: "{{\"id\": 3, \"name\": \"Ada\"}}"
-    user :: json.decode<UserRecord>(old_raw)?
+    user :: json.decode<UserRecord>(old_raw)
     print("name: {user.display_name}, verified: {user.verified}")
 }

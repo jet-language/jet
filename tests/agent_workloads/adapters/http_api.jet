@@ -26,17 +26,17 @@ fn run() !(HTTPError | IOError | NetError | TaskFailure) {
     args :: process.argv()
     if args.len() != 2 -> panic("usage: http_api INPUT_FILE")
     input :: args.get(1) ?? panic("missing input file")
-    body :: fs.read(input)?
-    listener :: net.tcp_listen("127.0.0.1:0")?
-    address :: listener.local_addr()?
+    body :: fs.read(input)
+    listener :: net.tcp_listen("127.0.0.1:0")
+    address :: listener.local_addr()
     mux :: http_server.mux()
     mux.post("/agent", (req: HTTPRequest) -> handle(req))
-    t :: task { http_server.serve_once_listener(listener, mux)? }
+    t :: task { http_server.serve_once_listener(listener, mux) }
     request :: http_client.request("POST", "http://{address}/agent")
         .header("content-type", "application/json")
         .body(body)
-    response :: request.send()?
-    answer :: response.body().text(1024 * 1024)?
+    response :: request.send()
+    answer :: response.body().text(1024 * 1024)
     print("{response.status()}|{answer}")
-    t.join()?
+    t.join()
 }

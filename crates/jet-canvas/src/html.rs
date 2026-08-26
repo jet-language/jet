@@ -84,9 +84,14 @@ body:not(.is-debug-active) .debug-controls > :not(#debug-start) { display: none;
 .debug-controls button { min-width: 30px; padding: 0 7px; }
 #workbench { min-height: 0; min-width: 0; position: relative; display: grid; grid-template-columns: minmax(156px, 15vw) minmax(0, 1fr) minmax(238px, 20vw); grid-template-rows: auto minmax(0, 1fr); background: #05070b; }
 #workbench-header { grid-column: 1 / -1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 7px 12px; border-bottom: 1px solid #23344a; background: linear-gradient(180deg, #101a27, #0b121c); box-shadow: inset 0 1px 0 rgba(255,255,255,.03); }
-.workbench-heading { display: grid; gap: 1px; min-width: 142px; }
-.workbench-heading strong { color: #f8fbff; font-size: 13px; letter-spacing: .04em; }
-.workbench-heading span { color: #7895b8; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; }
+.workbench-heading { display: grid; gap: 1px; min-width: 184px; }
+.workbench-heading > strong { color: #f8fbff; font-size: 13px; letter-spacing: .04em; }
+.workbench-heading > span { color: #7895b8; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; }
+.workbench-context { min-width: 0; display: flex; align-items: baseline; gap: 5px; overflow: hidden; color: #9db4d2; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.workbench-context > div { min-width: 0; display: flex; align-items: baseline; gap: 4px; padding: 2px 5px; border: 1px solid #243b56; border-radius: 3px; background: rgba(7,14,23,.72); }
+.workbench-context b { color: #7895b8; font-size: 8px; letter-spacing: .07em; text-transform: uppercase; }
+.workbench-context code { min-width: 0; overflow: hidden; color: #d7e4f7; text-overflow: ellipsis; white-space: nowrap; font: inherit; }
+.workbench-context > span { color: #46617d; }
 .workbench-map { min-width: 0; display: flex; align-items: center; gap: 6px; overflow: auto hidden; scrollbar-width: thin; }
 .workbench-map > span, .workbench-session { display: flex; align-items: baseline; gap: 6px; min-width: max-content; padding: 5px 8px; border: 1px solid #29415d; border-radius: 4px; background: rgba(7,14,23,.72); }
 .workbench-map b, .workbench-session > b { color: #8fb2dc; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; }
@@ -499,7 +504,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
   </header>
   <main id="workbench">
     <header id="workbench-header" aria-label="Jet Project Workbench">
-      <div class="workbench-heading"><span>Project IDE</span><strong>Canvas Workbench</strong></div>
+      <div class="workbench-heading"><span>Project IDE</span><strong>Canvas Workbench</strong><div class="workbench-context" aria-label="Active Project Context"><div><b>Project</b><code id="workbench-project">loading</code></div><span aria-hidden="true">·</span><div><b>Output</b><code id="workbench-output">default</code></div><span aria-hidden="true">·</span><div><b>Revision</b><code id="workbench-revision">pending</code></div></div></div>
       <div class="workbench-map" aria-label="Workbench Regions">
         <span><b>Project</b><span>Files · Outputs</span></span>
         <span><b>Editor</b><span>Code · Graph</span></span>

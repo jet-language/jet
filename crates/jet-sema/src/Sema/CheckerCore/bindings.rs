@@ -691,6 +691,10 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // Capture allocator provenance before inference can elaborate the
+        // method call. The view fact must be registered from the source
+        // binding, not from the post-inference expression shape.
+        let arena_alloc_source = self.arena_alloc_source(&b.init);
         let diagnostics_before_init = self.diags.len();
         // An immutable `::` binding is a read window. Let the existing
         // field-read clone rule inspect the selected type without treating
@@ -1117,15 +1121,14 @@ impl<'a> Checker<'a> {
             None
         };
         // D-ALLOC2: `x :: arena.alloc(v)` makes `x` a scope-bound view into
-        // `arena`. Record it so E0631 (escape) / E0632 (use-after-reset) can
-        // fire, and flag the binding for codegen (it lowers to a `&mut T`, read
-        // through a deref). E0631: a binding whose *initializer is itself a view
-        // name* (`y :: x`) would move the view to a new — possibly
-        // longer-lived — binding; reject it (views are non-reassignable
-        // non-escaping locals, I8).
-        if let Some(arena) = self.arena_alloc_source(&b.init) {
+        // `arena`. Flag the binding for codegen (it lowers to a `&mut T`, read
+        // through a deref); register the fact after declaration so its binding
+        // identity is available to E0631 / E0632. E0631: a binding whose
+        // *initializer is itself a view name* (`y :: x`) would move the view to
+        // a new — possibly longer-lived — binding; reject it (views are
+        // non-reassignable non-escaping locals, I8).
+        if arena_alloc_source.is_some() {
             b.arena_view = true;
-            self.record_arena_view(&b.name, arena, b.name_span);
         } else if let Expr::Ident(src, src_span) = &b.init {
             if self.is_arena_view(src) || self.is_fixed_backing_view(src) {
                 self.report_view_escape(src, "be stored in another binding", *src_span);
@@ -1216,6 +1219,9 @@ impl<'a> Checker<'a> {
             },
             binding_sendable,
         );
+        if let Some(arena) = arena_alloc_source {
+            self.record_arena_view(&b.name, arena, b.name_span);
+        }
         if b.track() && !b.name.is_empty() {
             let depth = self
                 .flow

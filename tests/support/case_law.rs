@@ -110,9 +110,15 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
             CaseLawKind::Sentence,
         );
     }
-    for line in jet::CLI::usage_page("1.0.0").lines() {
+    for (line_index, line) in jet::CLI::usage_page("1.0.0").lines().enumerate() {
         let line = line.trim();
-        if line == "Usage:" || line == "Flags:" {
+        if line_index == 0 {
+            add(
+                "CLI usage greeting".to_string(),
+                line,
+                CaseLawKind::Sentence,
+            );
+        } else if line == "Usage:" || line == "Flags:" {
             add(
                 format!("CLI usage header {line}"),
                 line.trim_end_matches(':'),
@@ -150,7 +156,6 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
             );
         }
     }
-
     // REPL help/status/prompt/interactive text comes from its public render
     // seam. Split dynamic identifiers and key names before checking prose.
     let repl_help = jet::REPL::run_transcript(&[":help"], None);
@@ -193,18 +198,27 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
         ("cooked", jet::REPL::Render::render_discovery_hint(false, false)),
     ] {
         for part in hint.strip_prefix("Try: ").unwrap_or(&hint).split(" · ") {
+            if part
+                .to_ascii_lowercase()
+                .starts_with("interactive keys")
+            {
+                add(
+                    format!("REPL {mode} discovery status {part}"),
+                    part,
+                    CaseLawKind::Title,
+                );
+                continue;
+            }
             let text = part
                 .split_once(' ')
                 .map_or(part, |(_, description)| description);
-            if !text.starts_with("interactive keys") {
-                add(
-                    format!("REPL {mode} discovery hint {text}"),
-                    text,
-                    // D-CASE-CHROME1=C: a one- or two-word hint in the key bar
-                    // is a label, not a description, so it takes Title Case.
-                    CaseLawKind::Title,
-                );
-            }
+            add(
+                format!("REPL {mode} discovery hint {text}"),
+                text,
+                // D-CASE-CHROME1=C: a one- or two-word hint in the key bar
+                // is a label, not a description, so it takes Title Case.
+                CaseLawKind::Title,
+            );
         }
     }
     let prompt = jet::REPL::Render::render_prompt(1, false);
@@ -262,7 +276,10 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
     // the case law leaves it alone rather than break every consumer.
     for line in jet::REPL::run_transcript(&["1 + 2", ":turns"], None).lines() {
         if line.starts_with('#') {
-            if let Some(status) = line.split_whitespace().nth(1) {
+            if let Some(status) = line
+                .split_once(' ')
+                .and_then(|(_, rest)| rest.split_once("  ").map(|(status, _)| status))
+            {
                 add(
                     format!("REPL status {status}"),
                     status,
@@ -271,8 +288,286 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
             }
         }
     }
+    let empty_turns = jet::REPL::run_transcript(&[":turns"], None);
+    if let Some(status) = empty_turns.lines().find(|line| !line.trim().is_empty()) {
+        add(
+            "REPL empty-turn status".to_string(),
+            status.trim(),
+            CaseLawKind::Sentence,
+        );
+    }
+    collect_help_render_sources(&mut sources);
 
     sources
+}
+
+/// Check the labels owned by the hybrid help renderer from its emitted frames.
+/// The command index above checks the dynamic summaries and flags. These
+/// calls cover the renderer's own chrome without copying its literals into a
+/// second test-only table, so a changed label remains tied to its producer.
+fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
+    let index = jet::Help::build_index();
+
+    let categorized = jet::Help::Render::render_categorized(
+        &index, 0, true, Some("run"), 72, false, None,
+    );
+    let categorized_lines: Vec<&str> = categorized.lines().collect();
+    let title = frame_title(categorized_lines.first().copied().unwrap_or_default())
+        .and_then(|title| title.strip_prefix("jet ? — ").or(Some(title)))
+        .expect("categorized help must have a frame title");
+    push_source(sources, "help categorized frame title", title, CaseLawKind::Title);
+    let hint = panel_line(
+        categorized_lines
+            .get(1)
+            .copied()
+            .expect("categorized help must have a search hint"),
+    )
+    .expect("categorized help search hint must be a panel row");
+    push_source(sources, "help categorized search hint", hint, CaseLawKind::Sentence);
+    for line in &categorized_lines {
+        let Some(line) = panel_line(line) else {
+            continue;
+        };
+        if let Some(category) = line
+            .strip_prefix("▾ ")
+            .or_else(|| line.strip_prefix("▸ "))
+        {
+            push_source(
+                sources,
+                format!("help categorized category {category}"),
+                category,
+                CaseLawKind::Title,
+            );
+        }
+    }
+
+    // The error-code category has a static explanatory row that is not
+    // present in the initial expanded category.
+    let error_category = jet::Help::CATEGORIES
+        .iter()
+        .position(|category| *category == "Error Codes")
+        .expect("hybrid help must retain its error-code category");
+    let error_view = jet::Help::Render::render_categorized(
+        &index,
+        error_category,
+        true,
+        None,
+        72,
+        false,
+        None,
+    );
+    let error_tip = error_view
+        .lines()
+        .filter_map(panel_line)
+        .find(|line| !line.starts_with("▾ ") && !line.starts_with("▸ "))
+        .expect("expanded error-code help must have its explanatory row");
+    push_source(sources, "help error-code tip", error_tip, CaseLawKind::Sentence);
+
+    let hits = jet::Help::search(&index, "run");
+    let results = jet::Help::Render::render_result_list(&hits, "run", 72, false, None, None);
+    let result_lines: Vec<&str> = results.lines().collect();
+    let title = frame_title(result_lines.first().copied().unwrap_or_default())
+        .expect("help results must have a frame title");
+    push_source(sources, "help result frame title", title, CaseLawKind::Title);
+    let footer = result_lines
+        .iter()
+        .rev()
+        .copied()
+        .filter_map(|line| panel_line(line))
+        .next()
+        .expect("help results must have a footer");
+    push_source(sources, "help result footer", footer, CaseLawKind::Sentence);
+    if let Some(example) = hits.first().and_then(|hit| match hit {
+        jet::Help::Hit::Command { entry, .. } => entry.symbol.examples.first(),
+        jet::Help::Hit::Code(_) => None,
+    }) {
+        let example_line = result_lines
+            .iter()
+            .filter_map(|line| panel_line(line))
+            .find(|line| line.ends_with(example.as_str()))
+            .expect("help result with an example must render its example row");
+        let label = example_line
+            .strip_suffix(example.as_str())
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .expect("help example row must have a label");
+        push_source(sources, "help result example label", label, CaseLawKind::Title);
+    }
+
+    let detail_entry = index
+        .iter()
+        .find(|entry| entry.symbol.name == "run")
+        .expect("hybrid help must contain the run command");
+    let detail = jet::Help::Render::render_detail(detail_entry, 72, false);
+    let detail_lines: Vec<&str> = detail.lines().collect();
+    let title = frame_title(detail_lines.first().copied().unwrap_or_default())
+        .expect("help detail must have a frame title");
+    let collapse = title
+        .rsplit_once("⇥ ")
+        .map(|(_, label)| label)
+        .expect("help detail frame title must have a collapse label");
+    push_source(sources, "help detail collapse label", collapse, CaseLawKind::Title);
+    if let Some(line) = detail_lines.get(1).and_then(|line| panel_line(line)) {
+        let label = line
+            .split_once("   ")
+            .map(|(label, _)| label.trim())
+            .filter(|label| !label.is_empty())
+            .expect("help detail usage row must have a label");
+        push_source(sources, "help detail usage label", label, CaseLawKind::Title);
+    }
+    for line in &detail_lines {
+        let Some(line) = panel_line(line) else {
+            continue;
+        };
+        if let Some((label, rest)) = line.split_once("   ") {
+            let label = label.trim();
+            let is_flag_row = line.contains("(none)")
+                || detail_entry
+                    .flags
+                    .iter()
+                    .any(|(flag, _)| rest.trim_start().starts_with(flag));
+            if is_flag_row && !label.is_empty() {
+                push_source(
+                    sources,
+                    "help detail flags label",
+                    label,
+                    CaseLawKind::Title,
+                );
+            }
+        }
+        if let Some(example) = detail_entry.symbol.examples.first() {
+            if line.ends_with(example.as_str()) {
+                let label = line
+                    .strip_suffix(example.as_str())
+                    .map(str::trim)
+                    .filter(|label| !label.is_empty())
+                    .expect("help detail example row must have a label");
+                push_source(sources, "help detail example label", label, CaseLawKind::Title);
+            }
+        }
+        let see_also = detail_entry.see_also.join(" · ");
+        if !see_also.is_empty() && line.ends_with(&see_also) {
+            let label = line
+                .strip_suffix(&see_also)
+                .map(str::trim)
+                .filter(|label| !label.is_empty())
+                .expect("help detail see-also row must have a label");
+            push_source(sources, "help detail see-also label", label, CaseLawKind::Title);
+        }
+    }
+    let footer = detail_lines
+        .iter()
+        .rev()
+        .copied()
+        .filter_map(|line| panel_line(line))
+        .next()
+        .expect("help detail must have a footer");
+    push_source(sources, "help detail footer", footer, CaseLawKind::Sentence);
+
+    let reference = jet::Help::Render::render_reference(
+        &index,
+        0,
+        Some(detail_entry),
+        80,
+        12,
+        false,
+        "run",
+    );
+    let reference_lines: Vec<&str> = reference.lines().collect();
+    let header = reference_lines
+        .first()
+        .copied()
+        .unwrap_or_default()
+        .trim();
+    let reference_label = header
+        .strip_prefix("jet ? ")
+        .and_then(|header| header.split_once(" · Search:").map(|(label, _)| label))
+        .expect("help reference must have a reference title");
+    push_source(
+        sources,
+        "help reference title",
+        reference_label,
+        CaseLawKind::Title,
+    );
+    let search_label = header
+        .split_once(" · ")
+        .and_then(|(_, search)| search.split_once(':').map(|(label, _)| label))
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .expect("help reference must have a search label");
+    push_source(sources, "help reference search label", search_label, CaseLawKind::Title);
+    let footer = reference_lines
+        .last()
+        .copied()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .expect("help reference must have a footer");
+    push_source(sources, "help reference footer", footer, CaseLawKind::Sentence);
+
+    let empty_reference = jet::Help::Render::render_reference(
+        &index, 0, None, 80, 12, false, "",
+    );
+    let empty_body = empty_reference
+        .lines()
+        .nth(1)
+        .expect("empty help reference must have a body row");
+    let empty_message = empty_body
+        .split('│')
+        .nth(2)
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .expect("empty help reference must have its empty-state message");
+    push_source(
+        sources,
+        "help reference empty state",
+        empty_message,
+        CaseLawKind::Sentence,
+    );
+
+    // `jet ? <query>` has one non-interactive message outside the framed
+    // renderer. It is still a help source and must not escape the check.
+    let no_match = jet::Help::run_query("zzzznonsense", false);
+    let no_match = no_match
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .expect("help no-match query must have a message");
+    push_source(sources, "help no-match message", no_match, CaseLawKind::Sentence);
+
+    // The symbol lookup branch is the other non-interactive help path. Its
+    // signature, summary, example, and provenance are data already checked
+    // above; the labels are renderer-owned chrome.
+    let symbol_help = jet::Help::run_query("List.len", false);
+    for line in symbol_help.lines().skip(2) {
+        if let Some((label, _)) = line.split_once(": ") {
+            push_source(sources, "help symbol lookup label", label, CaseLawKind::Title);
+        }
+    }
+}
+
+fn push_source(
+    sources: &mut Vec<CaseLawSource>,
+    name: impl Into<String>,
+    value: &str,
+    kind: CaseLawKind,
+) {
+    sources.push(CaseLawSource {
+        name: name.into(),
+        value: value.to_string(),
+        kind,
+    });
+}
+
+fn panel_line(line: &str) -> Option<&str> {
+    line.strip_prefix('│')
+        .and_then(|line| line.strip_suffix('│'))
+        .map(str::trim)
+}
+
+fn frame_title(line: &str) -> Option<&str> {
+    line.strip_prefix("┌─ ")
+        .and_then(|line| line.rsplit_once(" ─").map(|(title, _)| title))
 }
 
 /// D-CASE-PROSE1=A governs the FIRST thing on the line and nothing after it.

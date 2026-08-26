@@ -505,14 +505,35 @@ impl<'a> Checker<'a> {
                     *e = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
                 }
                 let saved_expected = self.expected_type.clone();
-                self.expected_type = Some(rt.clone());
+                // D-FAILURE-FOUNDATION1=A: a direct fallible call in a return
+                // position uses the ordinary transparent-carrier route. Give
+                // the call its success expectation so `infer` elaborates the
+                // existing `Try` node and applies the declared error
+                // conversion, then the return checker lifts that success
+                // value back into the caller's carrier.
+                let contextual_result_constructor = matches!(
+                    e.without_parens(),
+                    Expr::Call(call)
+                        if !self.funcs.contains_key(&call.name)
+                            && matches!(call.name.as_str(), Syntax::LIT_OK | Syntax::LIT_ERR)
+                );
+                let call_success_type = (!contextual_result_constructor
+                    && matches!(
+                        e.without_parens(),
+                        Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
+                    ))
+                .then(|| match &rt {
+                    Type::Result { ok, .. } => ok.as_ref().clone(),
+                    _ => rt.clone(),
+                });
+                self.expected_type = Some(call_success_type.unwrap_or_else(|| rt.clone()));
                 // Spawned task returns are checked separately by E1102.
                 self.borrow_ctx = self.is_task_spawn;
                 let saved_string_view_read = self.allow_string_view_read;
                 if string_view_return {
                     self.allow_string_view_read = true;
                 }
-                        let mut et = self.infer(e);
+                let mut et = self.infer(e);
                         // D-FAILURE-FOUNDATION1=A: the public return contract
                         // is the shared Result carrier, but source authors
                         // return its success payload directly. Preserve an
@@ -527,6 +548,7 @@ impl<'a> Checker<'a> {
                                 let value_span = e.span();
                                 let value = std::mem::replace(e, Expr::Absent(value_span));
                                 *e = Expr::Ok(Box::new(value), value_span);
+                                self.expected_type = Some(rt.clone());
                                 et = self.infer(e);
                             }
                         }

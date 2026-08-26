@@ -2890,10 +2890,10 @@ fn emit_representation_bridges(
         ));
     }
     // I2: Jet equality on a nominal value is the `Equatable` hook, but the SAME
-    // value nested in a container (`T?`, `[T]`, `[K:T]`, a tuple, another
+    // value nested in a container (`?T`, `[T]`, `[K:T]`, a tuple, another
     // record) is compared by Rust's own structural `==` on that container,
     // which requires `PartialEq` on the element. Without this bridge the
-    // derived `equal` of `struct Tree { child: Tree? }` emits
+    // derived `equal` of `struct Tree { child: ?Tree }` emits
     // `(*(self).__jet_child) == (*(rhs).__jet_child)` on a
     // `JetOutcome<__jet_Tree, JetAbsent>` and rustc answers E0369. Forwarding
     // to the hook keeps ONE definition of equality — the derived or

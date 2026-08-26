@@ -951,7 +951,7 @@ end.
     assert!(cache.join("libjet_pascal_inventory_runtime.so").is_file());
     assert!(cache.join("inventory.provenance").is_file());
     let generated = fs::read_to_string(cache.join("inventory.jet")).unwrap();
-    assert!(generated.contains("pub fn counter_new(") && generated.contains("!PascalError! ->"));
+    assert!(generated.contains("pub fn counter_new(") && generated.contains("!PascalError ->"));
     assert!(!generated.contains("=>"));
     assert!(!generated.contains(".{"));
     let provenance = fs::read_to_string(cache.join("inventory.provenance")).unwrap();

@@ -2538,12 +2538,12 @@ fn run() {
 
 /// D-FAILURE-FOUNDATION1=A: a beginner build entry writes only its success
 /// value. The callable checker supplies the ordinary implicit `!Err` route,
-/// which lets a BuildContext failure propagate through `?`.
+/// which lets a BuildContext failure propagate without a marker.
 #[test]
 fn bare_build_plan_entry_uses_implicit_default_error_route() {
     let source = r#"
 fn build(b: BuildContext) BuildPlan -> {
-    app :: b.add_library("app", ["main.jet"], [])?
+    app :: b.add_library("app", ["main.jet"], [])
     return b.plan(app)
 }
 
@@ -2600,7 +2600,11 @@ fn run() {}
 
     let output = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
         .expect("a valid programmable build plan must compile");
-    assert!(output.build.is_some(), "programmable build result is missing");
+    let plan = output
+        .build
+        .expect("programmable build result is missing")
+        .plan;
+    assert!(plan.targets().is_empty(), "the empty valid plan has no targets");
 }
 
 fn duplicate_target_build_source(return_type: &str, declarations: &str) -> String {
@@ -2747,8 +2751,14 @@ fn criterion9_programmable_build_cli_human_and_json_reports_match() {
     let human = run(false);
     assert!(!human.status.success(), "human build failure unexpectedly passed");
     let human_stderr = String::from_utf8_lossy(&human.stderr);
-    assert!(human_stderr.contains("Error [E3502]: target name `app` is registered twice"));
-    assert!(human_stderr.contains("More: jet-lang.dev/e/E3502"));
+    assert!(
+        human_stderr.contains("Error [E3502]: target name `app` is registered twice"),
+        "human report did not preserve the BuildError message:\n{human_stderr}"
+    );
+    assert!(
+        human_stderr.contains("More: jet-lang.dev/e/E3502"),
+        "human report did not preserve the diagnostic URL:\n{human_stderr}"
+    );
 
     let json = run(true);
     assert!(!json.status.success(), "JSON build failure unexpectedly passed");
@@ -2779,6 +2789,12 @@ fn criterion9_programmable_build_cli_human_and_json_reports_match() {
         details.get("variant").and_then(json_str),
         Some("DuplicateTargetName")
     );
+    let fields = details
+        .get("fields")
+        .expect("structured fields stay in the JSON report")
+        .as_object()
+        .expect("structured fields are an object");
+    assert_eq!(fields.get("value").and_then(json_str), Some("app"));
 }
 
 /// Tower card 2008 / I2 / I3: a build entry must never reach runtime codegen,

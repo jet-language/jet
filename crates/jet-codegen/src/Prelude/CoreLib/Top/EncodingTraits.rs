@@ -117,7 +117,7 @@ impl<T: __jet_Encode, const N: usize> __jet_Encode for [T; N] {
         jet_std::DataTree::Array(self.iter().map(|value| value.jet_encode()).collect())
     }
 }
-// D-FAIL-CARRIER1=A: `T?` is the carrier, so the carrier is what codes.
+// D-FAIL-CARRIER1=A: `?T` is the carrier, so the carrier is what codes.
 impl<T: __jet_Encode> __jet_Encode for JetOutcome<T, JetAbsent> {
     fn jet_encode(&self) -> jet_std::DataTree {
         match self {

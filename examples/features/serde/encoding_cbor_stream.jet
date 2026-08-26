@@ -4,25 +4,25 @@ use core.encoding.cbor as cbor
 use core.files as files
 
 fn write_catalog(path: Path) Bool !(EncodingError | IOError) {
-    output :: files.create(path)?
-    writer :: cbor.writer(^output, encoding.EncodingLimits.safe())?
-    writer.write(encoding.DataEvent.ObjectStart)?
-    writer.write(encoding.DataEvent.Key("ok"))?
-    writer.write(encoding.DataEvent.Bool(true))?
-    writer.write(encoding.DataEvent.ObjectEnd)?
-    writer.flush()?
-    writer.finish()?
+    output :: files.create(path)
+    writer :: cbor.writer(^output, encoding.EncodingLimits.safe())
+    writer.write(encoding.DataEvent.ObjectStart)
+    writer.write(encoding.DataEvent.Key("ok"))
+    writer.write(encoding.DataEvent.Bool(true))
+    writer.write(encoding.DataEvent.ObjectEnd)
+    writer.flush()
+    writer.finish()
     return Ok(true)
 }
 
 fn run() !(EncodingError | IOError) {
     // Scratch output belongs in a fresh temp directory, never the working
     // directory the example happens to run from.
-    scratch :: files.temp_dir("jet-encoding-cbor")?
+    scratch :: files.temp_dir("jet-encoding-cbor")
     path :: Path.from(scratch.path).join("catalog.cbor")
-    write_catalog(path)?
-    input :: files.open(path)?
-    reader :: cbor.reader(^input)?
+    write_catalog(path)
+    input :: files.open(path)
+    reader :: cbor.reader(^input)
     loop event in reader -> print("event")
     print("eof")
 }

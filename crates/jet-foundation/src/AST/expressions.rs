@@ -395,7 +395,7 @@ pub struct LambdaMeta {
     /// D-CONC-SPAWN1: the body contains a `?` that sema typed against the
     /// enclosing function's fallible return. A spawned closure with this flag
     /// early-returns that error, so every engine must give the closure a
-    /// `Result` carrier (`Task<T E!>`), or the rendered Rust `?` sits inside
+    /// `Result` carrier (`Task<T !E>`), or the rendered Rust `?` sits inside
     /// a `()` closure and rustc rejects the generated code (I2).
     pub fallible_propagation: bool,
 }
@@ -737,9 +737,9 @@ pub enum Expr {
         pattern: Pattern,
         span: Span,
     },
-    /// S34: `Ok(expr)` — success value for `T E!`.
+    /// S34: `Ok(expr)` — success value for `T !E`.
     Ok(Box<Expr>, Span),
-    /// S34: `Err(expr)` — failure value for `T E!`.
+    /// S34: `Err(expr)` — failure value for `T !E`.
     Err(Box<Expr>, Span),
     /// S7/D-FAIL-CTX1: sema's internal propagation node. Source-level
     /// propagation is implicit; `?(text)` carries one lazy context note.
@@ -749,7 +749,7 @@ pub enum Expr {
     OrFallback {
         value: Box<Expr>,
         fallback: OrFallback,
-        /// Set during typechecking: `true` when the left side is `T?`.
+        /// Set during typechecking: `true` when the left side is `?T`.
         is_option: bool,
         span: Span,
     },

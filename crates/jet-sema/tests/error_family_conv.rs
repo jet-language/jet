@@ -68,8 +68,8 @@ fn core_json_error_converts_into_default_err() {
     let found = diags(
         r#"
 use core.encoding.json as json
-fn run() ! {
-    data :: json.decode("{}")?
+fn run() {
+    data :: json.decode("{}")
     print(data)
 }
 "#,

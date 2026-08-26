@@ -37,7 +37,7 @@ never an AST fallback or a miscompile. The legacy AST codegen path (`emit_expr`/
 `emit_stmts`/`emit_lambda`) was deleted (c109) once a whole-test-suite byte-parity check proved
 every reachable body routes through the TIR; no legacy emit machinery remains. Constructs the
 gate excludes are provably sema-unreachable (generic-struct methods E0311, bare `?? return`
-in a value fn E0405, nested `T??`, a bare `Variant(n) ->` arm) — they never reach codegen.
+in a value fn E0405, nested `??T`, a bare `Variant(n) ->` arm) — they never reach codegen.
 (Type *definitions* — `emit_struct`/`emit_enum`/`emit_trait_def` — are structural, not bodies,
 and emit directly; only executable bodies go through the TIR.)
 

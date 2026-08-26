@@ -297,7 +297,7 @@ fn parse_age(raw: String) Int !ParseError -> {
 }
 
 fn use_errors(raw: String) Int !ParseError -> {
-    n :: parse_age(raw)?                       // `?` propagates (S7)
+    n :: parse_age(raw)                       // ordinary fallible calls propagate (S7)
     fallback :: parse_age("0") ?? 0            // `??` fallback (S35/S71)
     return Ok(n * 2)
 }
@@ -313,7 +313,7 @@ fn optionals(user: ?User) String -> {
     return city ?? "unknown"
 }
 
-// Error conversion: declare one `Source -> Target` rail; `?` applies it
+// Error conversion: declare one `Source -> Target` rail; ordinary calls apply it
 // (D-FAIL-CONV1).
 impl FileErr -> Err {
     return Err("file error")
@@ -395,7 +395,7 @@ fn collections() {
 
      fruits := [String:Float]{ "limes": 4.2 } // map shorthand (S64)
     fruits["pears"] = 9.9                        // insert (S39)
-    got :: fruits.get("limes")                  // safe access produces V? (S39)
+    got :: fruits.get("limes")                  // safe access produces ?V (S39)
 
     // map entry iteration yields a named entry value (S66)
     loop e in fruits {

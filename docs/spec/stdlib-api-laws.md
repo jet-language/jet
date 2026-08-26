@@ -53,7 +53,7 @@ or source-qualified spelling for the same conversion.
 
 ## Law 2 — Fallibility
 
-- A function that can legitimately fail returns `T E!`; never panics on expected failure.
+- A function that can legitimately fail returns `T !E`; never panics on expected failure.
 - Panics are reserved for programmer error (index out of bounds on a known-size slice).
 - The error type must carry enough context to write a helpful error message without
   inspecting source code (no opaque integer codes).
@@ -89,7 +89,7 @@ or source-qualified spelling for the same conversion.
 
 ## Law 6 — Diagnostics and fix hints
 
-- Every fallible function that returns a suffix-zone type (`T? E!`, `E!`, or bare `!`) has at least one corresponding UI snapshot
+- Every fallible function uses a prefix contract (`?T !E`, `!E`, or the omitted implicit `Err` contract) and has at least one corresponding UI snapshot
   showing the error message a user sees when misusing it (I4).
 - Error messages follow the voice and format in `docs/spec/diagnostics.md`:
   what happened, why it happened, how to fix it.
@@ -170,8 +170,8 @@ Required evidence: <example, diagnostic snapshot, and focused proof>
 - [ ] `D2` Every magic default has one row here and an explicit override.
 - [ ] `D3` Defaulted labeled options replace option-only overloads.
 - [ ] `D4` Every policy option is a dedicated enum; no Boolean or bare-string flag remains.
-- [ ] `F1` Expected failure is `T E!`, and propagation is one `?`.
-- [ ] `F2` Every lookup returns `T?`; no sentinel, empty-status, or follow-up status check remains.
+- [ ] `F1` Expected failure is `T !E`, and propagation is contextual `?(text)`.
+- [ ] `F2` Every lookup returns `?T`; no sentinel, empty-status, or follow-up status check remains.
 - [ ] `F3` Every failure says what happened, why, and how to fix it.
 - [ ] `T1` Domain values use domain types while obvious beginner literals work at the boundary.
 - [ ] `T2` Core values are immutable; mutation belongs to containers.
@@ -284,8 +284,8 @@ and examples.
 | D2 | Every magic default appears in the defaults table and has an explicit override. |
 | D3 | Defaulted options replace overload families. |
 | D4 | Options use dedicated enums; Core does not use boolean or bare-string policy flags. |
-| F1 | Expected failure is `T E!`; propagation costs `?`. |
-| F2 | A lookup returns `T?`; sentinel values are not an API contract. |
+| F1 | Expected failure is `T !E`; contextual propagation uses `?(text)`. |
+| F2 | A lookup returns `?T`; sentinel values are not an API contract. |
 | F3 | Every failure message states what happened, why, and how to fix it. |
 | T1 | Domain values use domain types while beginner literals remain accepted at the boundary. |
 | T2 | Core values are immutable; mutation belongs to containers. |
@@ -349,7 +349,7 @@ find_or_minus_one(items, needle) // returns Int; -1 means absent
 The lookup result carries absence in its type instead:
 
 ```jet
-items.find(needle) // illustrative result: Item?
+items.find(needle) // illustrative result: ?Item
 ```
 
 The caller handles `None` as absence or propagates it with the ordinary

@@ -36,14 +36,14 @@ struct BoundedNumbers {
 
 fn run() ![FieldError] {
     raw :: "{{\"fullName\":\"Ada\",\"homeAddress\":{{\"city\":\"Reno\",\"zip\":\"89501\"}},\"nicknames\":[\"Addy\"],\"age\":36}}"
-    p :: json.decode<Person>(raw)?
+    p :: json.decode<Person>(raw)
     print(p.full_name)
     print(p.home_address.city)
     print(p.nicknames.len())
     print(json.to_string(p))
     // Beginner default: Decimal preserves scale; Int preserves whole values.
     exact_raw :: "{{\"amount\":12.340,\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":9007199254740992,\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890,\"large_exp\":1e30}}"
-    exact :: json.decode<ExactNumbers>(exact_raw)?
+    exact :: json.decode<ExactNumbers>(exact_raw)
     print(exact.amount.to_string())
     print(exact.exponent.to_string())
     print(exact.whole.to_string())

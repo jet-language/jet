@@ -1,6 +1,28 @@
 // Resident session identity, output launcher, preview link, and shared view rail.
   let canvasSession = null;
 
+  function syncWorkbenchContext(project = latestProject, session = canvasSession) {
+    const packageName = project && (project.packages || []).find((pkg) => pkg && pkg.name)?.name;
+    const projectName = packageName || (project && project.entry) || (project && project.mode) || "Project";
+    const selectedOutput = session && session.run && session.run.output;
+    const rows = outputRows(project);
+    const firstOutput = rows[0] && (rows[0].name || rows[0].target || rows[0].output || rows[0].kind);
+    const outputName = selectedOutput || firstOutput || "default";
+    const acceptedRevision = session && (session.accepted_revision || session.source_revision);
+    const revisionName = acceptedRevision || (latestDoc && latestDoc.revision) || "pending";
+    const values = {
+      "workbench-project": projectName,
+      "workbench-output": outputName,
+      "workbench-revision": String(revisionName).slice(0, 12)
+    };
+    for (const [id, value] of Object.entries(values)) {
+      const element = document.getElementById(id);
+      if (!element) continue;
+      element.textContent = value;
+      element.title = String(value);
+    }
+  }
+
   function canvasCapability(name) {
     const capabilities = window.__jetCanvasCapabilities || {};
     return capabilities[name] === true;
@@ -135,6 +157,7 @@
       history: session.history || { count: 0, receipts: [] },
       listeners: session.listeners || {}
     };
+    syncWorkbenchContext(latestProject, session);
     syncCanvasCapabilities(latestProject);
     syncCanvasOutputs(latestProject);
   }
@@ -179,6 +202,7 @@
     const count = document.getElementById("output-count");
     if (!list) return;
     const rows = outputRows(project);
+    syncWorkbenchContext(project, canvasSession);
     const outputPanel = document.getElementById("output-panel");
     if (outputPanel) {
       if (!rows.length && outputPanel.contains(document.activeElement) && canvas) canvas.focus();

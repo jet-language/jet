@@ -48,25 +48,25 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "List",
         "pop",
-        "List.pop() -> T?",
+        "List.pop() -> ?T",
         "Removes and returns the last item, if any."
     ),
     member!(
         "List",
         "get",
-        "List.get(i: Int) -> T?",
+        "List.get(i: Int) -> ?T",
         "The item at index i, if in bounds."
     ),
     member!(
         "List",
         "first",
-        "List.first() -> T?",
+        "List.first() -> ?T",
         "The first item, if any."
     ),
     member!(
         "List",
         "last",
-        "List.last() -> T?",
+        "List.last() -> ?T",
         "The last item, if any."
     ),
     member!(
@@ -78,7 +78,7 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "List",
         "index_of",
-        "List.index_of(item: T) -> Int?",
+        "List.index_of(item: T) -> ?Int",
         "Index of the first matching item, if any."
     ),
     member!(
@@ -97,13 +97,13 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "List",
         "min",
-        "List.min() -> T?",
+        "List.min() -> ?T",
         "The smallest item, if any."
     ),
     member!(
         "List",
         "max",
-        "List.max() -> T?",
+        "List.max() -> ?T",
         "The largest item, if any."
     ),
     member!(
@@ -121,7 +121,7 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "List",
         "filter_map",
-        "List.filter_map(f: fn(T) V?) -> [V]",
+        "List.filter_map(f: fn(T) ?V) -> [V]",
         "Maps then drops failures — keeps only successes."
     ),
     member!(
@@ -133,7 +133,7 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "List",
         "find",
-        "List.find(f: fn(T) Bool) -> T?",
+        "List.find(f: fn(T) Bool) -> ?T",
         "The first item where f(item) is true, if any."
     ),
     member!(
@@ -183,7 +183,7 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "List",
         "remove",
-        "List.remove(value: T, by: RemoveBy = .Val) -> T?",
+        "List.remove(value: T, by: RemoveBy = .Val) -> ?T",
         "Removes the first equal value; `.Slot` selects positional removal."
     ),
     member!(
@@ -232,13 +232,13 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "Map",
         "get",
-        "Map.get(key: K) -> V?",
+        "Map.get(key: K) -> ?V",
         "Value for key, if present."
     ),
     member!(
         "Map",
         "add",
-        "Map.add(key: K, value: V) -> V?",
+        "Map.add(key: K, value: V) -> ?V",
         "Upserts and returns the displaced value."
     ),
     member!(
@@ -250,7 +250,7 @@ pub const SYMBOLS: &[Symbol] = &[
     member!(
         "Map",
         "remove",
-        "Map.remove(key: K) -> V?",
+        "Map.remove(key: K) -> ?V",
         "Removes and returns the value for key, if present."
     ),
     member!(

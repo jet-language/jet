@@ -20,7 +20,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const DEFAULT_ENDPOINT: &str = "https://cache.nixos.org";
 const DEFAULT_PUBLIC_KEY: &str = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=";
 const MAX_METADATA_BYTES: u64 = 1024 * 1024;
-const MAX_PARALLEL_FETCHES: usize = 4;
+const MAX_PARALLEL_FETCHES: usize = 8;
+const MAX_PARALLEL_METADATA_FETCHES: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NixCacheErrorKind {
@@ -170,6 +171,7 @@ pub(crate) fn plan_nix_downloads(
     roots: &Roots,
     store_paths: &[String],
     offline: bool,
+    progress: Option<ProgressHandle>,
 ) -> Result<NixDownloadPlan, StoreError> {
     let endpoint = CacheEndpoint::from_roots(roots)?;
     let cache_info = if offline {
@@ -187,17 +189,41 @@ pub(crate) fn plan_nix_downloads(
         queue.insert(store_path.clone());
     }
     let mut scheduled = queue.clone();
+    let mut checked = 0usize;
     let mut packages = 0usize;
     let mut bytes = 0u64;
+    if let Some(progress) = progress.as_ref() {
+        progress.phase("Planning");
+        progress.object_progress(0, scheduled.len());
+    }
 
-    while let Some(store_path) = queue.iter().next().cloned() {
-        queue.remove(&store_path);
-        if let Some(existing) = existing_object(roots, &store_path, store_dir)? {
-            for reference in existing.references {
-                if scheduled.insert(reference.clone()) {
-                    queue.insert(reference);
+    while !queue.is_empty() {
+        let wave = queue
+            .iter()
+            .take(MAX_PARALLEL_METADATA_FETCHES)
+            .cloned()
+            .collect::<Vec<_>>();
+        for store_path in &wave {
+            queue.remove(store_path);
+        }
+
+        let mut pending = Vec::new();
+        for store_path in wave {
+            if let Some(existing) = existing_object(roots, &store_path, store_dir)? {
+                for reference in existing.references {
+                    if scheduled.insert(reference.clone()) {
+                        queue.insert(reference);
+                    }
                 }
+                checked = checked.saturating_add(1);
+                if let Some(progress) = progress.as_ref() {
+                    progress.object_progress(checked, scheduled.len());
+                }
+            } else {
+                pending.push(store_path);
             }
+        }
+        if pending.is_empty() {
             continue;
         }
         if offline {
@@ -206,35 +232,73 @@ pub(crate) fn plan_nix_downloads(
                 "offline admission found no complete verified Hangar object",
             ));
         }
-        let info = endpoint.narinfo(&store_path, store_dir)?.ok_or_else(|| {
-            NixCacheError::new(
-                NixCacheErrorKind::MissingReference,
-                "a requested Nix reference returned no narinfo",
-            )
-        })?;
-        let file_size = info.info.file_size.ok_or_else(|| {
-            NixCacheError::new(
-                NixCacheErrorKind::Metadata,
-                "Nix narinfo has no signed FileSize for download planning",
-            )
-        })?;
-        bytes = bytes.checked_add(file_size).ok_or_else(|| {
-            NixCacheError::new(
-                NixCacheErrorKind::Metadata,
-                "Nix closure download size overflowed",
-            )
-        })?;
-        packages = packages.checked_add(1).ok_or_else(|| {
-            NixCacheError::new(
-                NixCacheErrorKind::Metadata,
-                "Nix closure package count overflowed",
-            )
-        })?;
-        for reference in info.info.references {
-            let reference = format!("{store_dir}/{reference}");
-            validate_store_path(&reference, store_dir)?;
-            if scheduled.insert(reference.clone()) {
-                queue.insert(reference);
+
+        let results = std::thread::scope(|scope| {
+            let handles = pending
+                .iter()
+                .map(|store_path| {
+                    scope.spawn(|| {
+                        endpoint
+                            .narinfo(store_path, store_dir)?
+                            .ok_or_else(|| {
+                                NixCacheError::new(
+                                    NixCacheErrorKind::MissingReference,
+                                    "a requested Nix reference returned no narinfo",
+                                )
+                            })
+                            .map(|info| (store_path.clone(), info))
+                    })
+                })
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle.join().unwrap_or_else(|_| {
+                        Err(NixCacheError::new(
+                            NixCacheErrorKind::Metadata,
+                            "Nix cache worker panicked during closure planning",
+                        ))
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
+        let mut results = results;
+        results.sort_by(|left, right| match (left, right) {
+            (Ok((left, _)), Ok((right, _))) => left.cmp(right),
+            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+            (Err(_), Err(_)) => std::cmp::Ordering::Equal,
+        });
+        for result in results {
+            let (_, info) = result?;
+            let file_size = info.info.file_size.ok_or_else(|| {
+                NixCacheError::new(
+                    NixCacheErrorKind::Metadata,
+                    "Nix narinfo has no signed FileSize for download planning",
+                )
+            })?;
+            bytes = bytes.checked_add(file_size).ok_or_else(|| {
+                NixCacheError::new(
+                    NixCacheErrorKind::Metadata,
+                    "Nix closure download size overflowed",
+                )
+            })?;
+            packages = packages.checked_add(1).ok_or_else(|| {
+                NixCacheError::new(
+                    NixCacheErrorKind::Metadata,
+                    "Nix closure package count overflowed",
+                )
+            })?;
+            for reference in info.info.references {
+                let reference = format!("{store_dir}/{reference}");
+                validate_store_path(&reference, store_dir)?;
+                if scheduled.insert(reference.clone()) {
+                    queue.insert(reference);
+                }
+            }
+            checked = checked.saturating_add(1);
+            if let Some(progress) = progress.as_ref() {
+                progress.object_progress(checked, scheduled.len());
             }
         }
     }

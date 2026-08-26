@@ -8,28 +8,34 @@ mod tir_support;
 use jet::Interpreter::{dev_iteration, RunOutcome};
 use tir_support::{build_and_run, build_and_run_full, compile, have_rustc, jit_run};
 
+const RESULT_HANDLER_PACKAGE: &str =
+    "name: \"result_handler_tiers\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO] } }\n";
+
 /// D-RESULT-DECON2=B / I9: the compact handler is only parser sugar for the
 /// existing Result pattern split, so every execution tier must agree without a
 /// handler-specific runtime path.
 #[test]
 fn result_handler_reuses_result_split_on_all_tiers() {
     let src = r#"
-#Error
-enum ClassifyError { Bad }
-
-fn classify(ok: Bool) Int !ClassifyError -> {
+fn classify(ok: Bool) Int !Err -> {
     if ok { return 7 }
-    return Err(ClassifyError.Bad)
+    return Err("bad")
 }
 
 fn run() -[IO]> {
-    #FX(IO) {
+    #FX(authority: IO) {
+        authority.with("IO")
         classify(true) ? ok -> { print("ok"); print(ok); 0 } ! _error -> { print("error"); 0 }
         classify(false) ? ok -> { print("ok"); print(ok); 0 } ! _error -> { print("error"); 0 }
     }
 }
 "#;
-    tir_support::assert_tiers_agree("result_handler_tiers", src, "ok\n7\nerror\n");
+    tir_support::assert_tiers_agree_with_application_policy(
+        "result_handler_tiers",
+        src,
+        "ok\n7\nerror\n",
+        RESULT_HANDLER_PACKAGE,
+    );
 }
 
 #[test]
@@ -42,12 +48,18 @@ fn classify(ok: Bool) Int -[IO]> {
 }
 
 fn run() -[IO]> {
-    #FX(IO) {
+    #FX(authority: IO) {
+        authority.with("IO")
         classify(false) ? _ok -> print("ok") ! _error -> print("error")
     }
 }
 "#;
-    tir_support::assert_tiers_agree("result_handler_effectful_receiver", src, "source\nerror\n");
+    tir_support::assert_tiers_agree_with_application_policy(
+        "result_handler_effectful_receiver",
+        src,
+        "source\nerror\n",
+        RESULT_HANDLER_PACKAGE,
+    );
 }
 
 /// D-RESULT-DECON2=B: a diverging arm keeps the ordinary exhaustive-chain
@@ -55,19 +67,25 @@ fn run() -[IO]> {
 #[test]
 fn result_handler_preserves_diverging_arm_on_all_tiers() {
     let src = r#"
-fn choose(ok: Bool) Int -> {
+fn choose(ok: Bool) Int !Err -> {
     if ok { return 7 }
     return Err("bad")
 }
 
 fn run() {
-    #FX(IO) {
+    #FX(authority: IO) {
+        authority.with("IO")
         result :: choose(true) ? ok -> ok + 1 ! _error -> return
         print(result)
     }
 }
 "#;
-    tir_support::assert_tiers_agree("result_handler_diverging", src, "8\n");
+    tir_support::assert_tiers_agree_with_application_policy(
+        "result_handler_diverging",
+        src,
+        "8\n",
+        RESULT_HANDLER_PACKAGE,
+    );
 }
 
 /// D-RESULT-DECON2=B / I9: handler branches keep ordinary ownership, generic,
@@ -77,16 +95,21 @@ fn run() {
 #[test]
 fn result_handler_preserves_ownership_generic_and_nested_values_on_all_tiers() {
     let src = r#"
-fn choose<T>(value: ^T, ok: Bool) T -> {
+fn choose<T>(value: ^T, ok: Bool) T !Err -> {
+    if ok { return value }
+    return Err("bad")
+}
+
+fn choose_text(value: ^String, ok: Bool) String !Err -> {
     if ok { return value }
     return Err("bad")
 }
 
 fn owned(ok: Bool) String -> {
-    return choose("owned", ok) ? success -> success ! _failure -> "bad"
+    return choose_text("owned", ok) ? success -> success ! _failure -> "bad"
 }
 
-fn generic<T>(value: ^T, ok: Bool) T -> {
+fn generic<T>(value: ^T, ok: Bool) T !Err -> {
     return choose<T>(^value, ok) ? success -> success ! _failure -> return Err("bad")
 }
 
@@ -97,19 +120,21 @@ fn nested(value: Int, ok: Bool) Int -> {
 }
 
 fn run() {
-    #FX(IO) {
+    #FX(authority: IO) {
+        authority.with("IO")
         print(owned(true))
         print(owned(false))
-        print(generic(4, true))
+        print(generic(4, true) ? generic_value -> generic_value ! _generic_failure -> 0)
         print(nested(4, true))
         print(nested(4, false))
     }
 }
 "#;
-    tir_support::assert_tiers_agree(
+    tir_support::assert_tiers_agree_with_application_policy(
         "result_handler_ownership_generic_nested",
         src,
         "owned\nbad\n4\n5\n0\n",
+        RESULT_HANDLER_PACKAGE,
     );
 }
 

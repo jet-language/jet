@@ -1,23 +1,24 @@
 // D-FAIL-CONV2=A: the standard library declares the conversion for its own error
-// family. This program is a plain fallible `fn run() !` and declares nothing, yet
-// `?` carries a `JSONError` and an `EnvError` straight out to the default `Err`.
+// family. This program is a plain fallible `fn run()` and declares nothing, yet
+// ordinary calls carry a `JSONError` and an `EnvError` straight out to the default `Err`.
 //
 // Compare `default_error_conversion.jet`: a program's OWN error type still needs
 // its own `impl MyError -> Err { … }`. Only the library's family is shipped.
-// Compare `serde/json_coerce.jet`: naming the failure (`fn run() JSONError!`) is
+// Compare `serde/json_coerce.jet`: naming the failure (`fn run() !JSONError`) is
 // still correct, and stays the right choice when one failure is the point.
 use core.encoding.json as json
 use core.sys as env
 
 fn run() {
     // `json.decode` fails with `JSONError` — one family member.
-    data :: json.decode("{{\"name\":\"api\"}}")?
+    data :: json.decode("{{\"name\":\"api\"}}")
     if data == .Object(entries) {
         name :: entries["name"]
         if name == .Text(text) -> print(text)
     }
-    // `env.vars` fails with `EnvError` — a second family member, same plain `?`,
+    // `env.vars` fails with `EnvError` — a second family member with the same
+    // implicit propagation,
     // still no declaration in this program.
-    names :: env.vars()?
+    names :: env.vars()
     print(names.len() > 0)
 }

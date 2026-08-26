@@ -573,7 +573,7 @@ pub fn builtin_method_return(
         Type::Apply { name, args } if name == Syntax::TYPE_ITER => {
             iter_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
-        // D-HOLE1: `.map` on `T?` (no general "hole"/absent-propagating value type —
+        // D-HOLE1: `.map` on `?T` (no general "hole"/absent-propagating value type —
         // Option composition gets library combinators instead). `.zip` is handled
         // directly in the checker dispatch (its second operand's type is independent
         // of the receiver's, which doesn't fit this table's one-fixed-placeholder-type
@@ -935,7 +935,7 @@ fn int_kind(ty: &Type) -> Option<(bool, u8)> {
 
 /// D-NUMOPS1: an integer width conversion is *widening* (infallible) when the
 /// target range fully contains the source range; otherwise *narrowing*
-/// (fallible — returns `T String!`, with no silent truncation).
+/// (fallible — returns `T !String`, with no silent truncation).
 fn int_conv_widening(src: (bool, u8), dst: (bool, u8)) -> bool {
     let (slo, shi) = crate::AST::int_range(src.0, src.1);
     let (dlo, dhi) = crate::AST::int_range(dst.0, dst.1);
@@ -1031,7 +1031,7 @@ pub fn numeric_conversion_return(
     }
     // D-SHAPE-CONVERT1=A: a float source can carry NaN, an infinity, or a
     // magnitude no integer names, so *every* float→integer conversion is
-    // checked narrowing and answers `T String!`. `int_kind` reports no width
+    // checked narrowing and answers `T !String`. `int_kind` reports no width
     // for exact `Int` (D-INTBIG1), so the width table below cannot see this
     // crossing; naming it here is what keeps the checking layer agreeing with
     // the AOT emitter, the JIT host, the comptime tier, and the web tier, all
@@ -1369,7 +1369,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         // D-CORE-EAGER2=A: flat_map on a concrete List returns [U]; sema
         // refines U from the callback. Iter receivers stay on the table below.
         ("flat_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),
-        // D-FAILCOMP1: filter_map(f: T -> V?E) → Iter<V>; keeps ok, drops err; sema refines V.
+        // D-FAILCOMP1: filter_map(f: fn(T) ?V !E) → Iter<V>; keeps ok, drops err; sema refines V.
         ("filter_map", 1) => Some(Some(iter_ty(Type::Int))),
         // D-FAILCOMP1: try_collect on [Result<T,E>] → Result<[T],E>.
         ("try_collect", 0) => {
@@ -1383,9 +1383,9 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         }
         // D-ITERTOOLS1=A: scan(seed, f: (acc,T)->acc) → Iter<acc>; placeholder; sema refines.
         ("scan", 2) => Some(Some(iter_ty(Type::Int))),
-        // D-ITER1: position(f) → Int?
+        // D-ITER1: position(f) → ?Int
         ("position", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
-        // D-ITER1: min_by/max_by(f: T->K) → T?
+        // D-ITER1: min_by/max_by(f: T->K) → ?T
         ("min_by" | "max_by", 1) => Some(Some(Type::Option(Box::new(inner.clone())))),
         // D-ITER1: fold(init, f: (acc,T)->acc) → acc; placeholder; sema refines from init.
         ("fold", 2) => Some(Some(Type::Int)),
@@ -1561,7 +1561,7 @@ fn option_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Opti
 }
 
 /// D-FAIL-CARRIER1=A: the middle states of the carrier, read from the fallible
-/// view. `.partial` answers `T?` — sema first proves the error type carries the
+/// view. `.partial` answers `?T` — sema first proves the error type carries the
 /// surviving payload under that name and at that type, so the answer is
 /// derivable from the receiver alone.
 fn result_method_return(ok: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
@@ -1674,11 +1674,11 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
         ("chars", 0) => Some(Some(Type::List(Box::new(Type::Char)))),
         ("repeat", 1) => Some(Some(Type::String)),
-        // c97/D-STRPARSE1: fallible integer parse. Same `Int ParseError!` result
+        // c97/D-STRPARSE1: fallible integer parse. Same `Int !ParseError` result
         // `Int.parse(s)` returns, so one error type covers text→int.
         // D-STR-DECLINE1=C: `to_int`/`to_float` are direct String spellings of
         // the one parse mechanism `Int.parse`/`Float.parse` already run —
-        // same `Int ParseError!` result, reached one call shorter from text.
+        // same `Int !ParseError` result, reached one call shorter from text.
         ("to_int", 0) => Some(Some(Type::Result {
             ok: Box::new(Type::Int),
             err: Box::new(Type::Named("ParseError".to_string())),
@@ -1688,7 +1688,7 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
             err: Box::new(Type::Named("ParseError".to_string())),
         })),
         // D-STR-DECLINE1=C: `matches`/`match` route through the one core.regex
-        // engine (`core.regex.compile` + `is_match`/`find`) — same `String!`
+        // engine (`core.regex.compile` + `is_match`/`find`) — same `!String`
         // bad-pattern error shape `core.regex.compile` already returns.
         ("matches", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Bool),
@@ -2769,7 +2769,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 param_contract: None,
                 call_metadata: None,
             }]),
-            // D-FAILCOMP1: filter_map(f: T -> V?E) → [V]; keeps ok, drops err.
+        // D-FAILCOMP1: filter_map(f: fn(T) ?V !E) → [V]; keeps ok, drops err.
             // ret: None so any Result return is accepted; sema refines V via calls.rs.
             "filter_map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],

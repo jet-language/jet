@@ -771,7 +771,7 @@ pub(crate) fn method_call_in_subset(
     // `recv_type == Some("Match")` + `group`/1 — disjoint from every user instance method
     // (whose `recv_type` is a covered struct/enum, never `Match`) and from the numeric
     // shape (a numeric `recv_type`). The receiver is a `Match` value (`if m == value(mat)`
-    // binding). Lowered to `BuiltinMethod`/`TBuiltinOp::MatchGroup`. The result is `String?`.
+    // binding). Lowered to `BuiltinMethod`/`TBuiltinOp::MatchGroup`. The result is `?String`.
     if recv_type.as_deref() == Some("Match") && method == "group" && args.len() == 1 {
         return expr_in_subset(receiver, cx, locals)
             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));

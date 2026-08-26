@@ -232,7 +232,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // (`!cx.sigs`); the sole argument is one integer `Expr::Binary` (`+`/`-`/`*`/`/`),
             // lowered to `(ls).{name}_{add|sub|mul|div}(rs)` with PLAIN operands (no trap).
             // Sema validated the shape. The operands must be in-subset; `checked` yields
-            // `T?`, the others `T`. Handled by a bespoke `TExprKind::OverflowOpt` — return
+            // `?T`, the others `T`. Handled by a bespoke `TExprKind::OverflowOpt` — return
             // early here so the generic-call arg machinery below doesn't also claim it.
             if matches!(
                 c.name.as_str(),

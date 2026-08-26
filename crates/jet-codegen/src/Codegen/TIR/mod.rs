@@ -4224,9 +4224,9 @@ pub enum TExprKind {
     Present(Box<TExpr>),
     /// c109 Phase 8: bare `null` — an absent optional (`None`).
     Absent,
-    /// c109 Phase 8: `Ok(x)` — a success value of `T E!` (`Ok(x)`).
+    /// c109 Phase 8: `Ok(x)` — a success value of `T !E` (`Ok(x)`).
     Ok(Box<TExpr>),
-    /// c109 Phase 8: `Err(e)` — a failure value of `T E!` (`Err(e)`).
+    /// c109 Phase 8: `Err(e)` — a failure value of `T !E` (`Err(e)`).
     Err(Box<TExpr>),
     /// c109 Phase 8: the `?` propagation operator (`Expr::Try`). The error
     /// conversion (`convert`) is the TOTAL sema fact (`TryConvert`): a `None` is a
@@ -4248,7 +4248,7 @@ pub enum TExprKind {
     },
     /// c109 Phase 8: the `??` fallback operator (`Expr::OrFallback`).
     /// D-FAIL-CARRIER1=A: one carrier, so one lowering —
-    /// `match … { Ok(v) => v, Err(_) => fb }` reads `T?` and `T E!` alike.
+    /// `match … { Ok(v) => v, Err(_) => fb }` reads `?T` and `T !E` alike.
     /// The fallback is a value or an early `return` (the panic form is deferred —
     /// its `safe_locals_expr` reproduction is out of subset).
     OrFallback {
@@ -4724,7 +4724,7 @@ pub enum TClosureOp {
     },
     ParaFold,
     // D-HOLE1: Option combinators.
-    /// `map` on `T?` — `(recv).as_ref().map(f)` (Rust's native `Option::map`, no
+    /// `map` on `?T` — `(recv).as_ref().map(f)` (Rust's native `Option::map`, no
     /// prelude helper needed; `.as_ref()` supplies plain callback read access).
     OptionMap,
     // D-DYNARRAY1: `View<T>` read-only closure methods. `recv` is already a
@@ -5152,7 +5152,7 @@ pub enum TBuiltinOp {
         field_types: Vec<Type>,
     },
     // D-HOLE1: Option combinators.
-    /// `zip(U?)` on `T?` → `(recv).clone().zip((a0).clone()).map(|(x,y)| Struct{…})`
+    /// `zip(?U)` on `?T` → `(recv).clone().zip((a0).clone()).map(|(x,y)| Struct{…})`
     /// (Rust's native `Option::zip`, wrapped into the named-tuple struct). `elem_ty`
     /// (`(a: T, b: U)`) is the resolved pair type — carried so the call's own `TExpr`
     /// type is total (not the generic table's placeholder), even though it's rarely
@@ -5336,7 +5336,7 @@ pub enum THandleOp {
     JSONLWriterFlush,
     JSONLWriterFinish,
     CSVReaderNext,
-    /// D-DATAFLOW1=A: typed pull `DataStream<T>.next()` → `T? DataError!`.
+    /// D-DATAFLOW1=A: typed pull `DataStream<T>.next()` → `?T !DataError`.
     DataStreamNext,
     XMLReaderNext,
     XMLWriterWrite,
@@ -5392,7 +5392,7 @@ pub enum THandleOp {
     RngBytes,
     /// D-RANDOMDIST1 Rng: `split()` → `{root}jet_rng_split(&mut (recv))`.
     RngSplit,
-    /// D-DET-CAPAPI Rng: `pick(list)` → `{root}jet_rng_pick(&mut (recv), &(a0))` (uniform `T?`).
+    /// D-DET-CAPAPI Rng: `pick(list)` → `{root}jet_rng_pick(&mut (recv), &(a0))` (uniform `?T`).
     RngPick,
     /// D-RANDOMDIST1 Rng: `weighted_pick(list, weights)` → `{root}jet_rng_weighted_pick(&mut (recv), &(a0), &(a1))`.
     RngWeightedPick,
@@ -5492,7 +5492,7 @@ pub enum THandleOp {
     /// c109 Phase 19: Arena/Bump/Pool/Fixed `alloc(v)` → `(recv).alloc(a0)` (hands back a
     /// `&mut T` view into the allocator's storage). The arg is emitted plainly.
     AllocAlloc,
-    /// D-ALLOCFAIL1=A: allocator `try_alloc(v)` returns `T AllocError!`.
+    /// D-ALLOCFAIL1=A: allocator `try_alloc(v)` returns `T !AllocError`.
     AllocTryAlloc,
     /// c109 Phase 19: Arena/Bump/Pool/Fixed `reset()` → `(recv).reset()`.
     AllocReset,
@@ -5567,7 +5567,7 @@ pub enum THandleOp {
     ReflectFieldName,
     ReflectFieldValue,
     /// D-CONC-FAIL1=A: Task `join()` → `(recv).join()`; sema types it as
-    /// `T TaskFailure!`.
+    /// `T !TaskFailure`.
     TaskJoin,
     /// c109 Phase 21: Task `detach()` → `{ let _detach = (recv); }` (D-DETACH1 —
     /// fire-and-forget; drops the JoinHandle). Returns unit.

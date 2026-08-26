@@ -1,13 +1,15 @@
 // D-RESULT-DECON2=B: one fixed exhaustive Result handler handles both payloads.
-fn classify(ok: Bool) Int -> if ok -> Ok(7) else -> Err("bad")
+fn classify(ok: Bool) Int !Err -> if ok -> Ok(7) else -> Err("bad")
 
-fn choose<T>(value: ^T, ok: Bool) T -> if ok -> Ok(value) else -> Err("bad")
+fn choose<T>(value: ^T, ok: Bool) T !Err -> if ok -> Ok(value) else -> Err("bad")
+
+fn choose_text(value: ^String, ok: Bool) String !Err -> if ok -> Ok(value) else -> Err("bad")
 
 fn owned(ok: Bool) String -> {
-    return choose("owned", ok) ? success -> success ! _failure -> "bad"
+    return choose_text("owned", ok) ? success -> success ! _failure -> "bad"
 }
 
-fn generic<T>(value: ^T, ok: Bool) T -> {
+fn generic<T>(value: ^T, ok: Bool) T !Err -> {
     return choose<T>(^value, ok) ? success -> success ! _failure -> return Err("bad")
 }
 
@@ -18,7 +20,8 @@ fn nested(value: Int, ok: Bool) Int -> {
 }
 
 fn run() {
-    #FX(IO) {
+    #FX(authority: IO) {
+        authority.with("IO")
         classify(true) ? ok -> { print("ok"); print(ok) } ! _error -> print("error")
         classify(false) ? ok -> { print("ok"); print(ok) } ! _error -> print("error")
         value :: classify(true) ? ok -> ok + 1 ! _error -> 0
@@ -26,7 +29,7 @@ fn run() {
         print(value)
         print(owned(true))
         print(owned(false))
-        print(generic(4, true))
+        print(generic(4, true) ? generic_value -> generic_value ! _generic_failure -> 0)
         print(nested(4, true))
         print(nested(4, false))
     }

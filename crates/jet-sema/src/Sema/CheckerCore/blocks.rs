@@ -108,6 +108,9 @@ impl<'a> Checker<'a> {
                 let span = expr.span();
                 let mut value = Some(std::mem::replace(expr, Expr::Absent(span)));
                 self.check_return_expr(&mut value, &span, Some(expected.clone()));
+                if let Some(value) = value.as_mut() {
+                    self.lift_value_tail_into_return_carrier(value, expected);
+                }
                 if let Some(value) = value {
                     *expr = value;
                 }
@@ -148,6 +151,26 @@ impl<'a> Checker<'a> {
             "move the expression to the final line without `;`, or add an explicit `return ...` for an early exit".to_string(),
             Some(span),
         ));
+    }
+
+    /// D-FAILURE-FOUNDATION1=A: named callable bodies are checked against
+    /// their source success type, while the callable itself carries the
+    /// shared `Result` rail. Lift that checked tail through the same `Ok`
+    /// constructor used by an explicit `return` before lowering.
+    fn lift_value_tail_into_return_carrier(&mut self, value: &mut Expr, expected: &Type) {
+        if matches!(expected, Type::Result { .. })
+            || !matches!(self.ret.as_ref(), Some(Type::Result { .. }))
+            || matches!(value.without_parens(), Expr::Ok(..) | Expr::Err(..))
+        {
+            return;
+        }
+        let span = value.span();
+        let inner = std::mem::replace(value, Expr::Absent(span));
+        *value = Expr::Ok(Box::new(inner), span);
+        let saved_expected = self.expected_type.clone();
+        self.expected_type = self.ret.clone();
+        self.infer(value);
+        self.expected_type = saved_expected;
     }
 
     fn tail_has_authored_semicolon(&self, span: Span) -> bool {

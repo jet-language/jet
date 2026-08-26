@@ -112,7 +112,7 @@ mod jet_std {
         pub errors: String,
         pub success: bool,
         // D-FAIL-CARRIER1=A: sema declares `ProcessResult.signal` an
-        // `Option<Int>`, and the one Rust spelling of a Jet `T?` is
+        // `Option<Int>`, and the one Rust spelling of a Jet `?T` is
         // `JetOutcome<T, JetAbsent>` (Codegen/Context.rs `rust_type`). A raw
         // `Option<i64>` here was a SECOND optional representation, so a
         // `.Val`/`.None` pattern on the field emitted the carrier's `Ok`/`Err`

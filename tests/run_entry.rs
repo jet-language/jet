@@ -156,11 +156,11 @@ fn step() Int {
 }
 
 fn run() {
-    value :: step()?
+    value :: step()
     print(value)
 }
 "#;
-    let out = jet::compile(source).expect("an unannotated run may use ?");
+    let out = jet::compile(source).expect("an unannotated run may propagate a fallible call");
     assert!(
         out.rust
             .contains("pub fn __jet_run() -> JetOutcome<(), JetErr>"),
@@ -433,7 +433,7 @@ use core.crypto as crypto
 
 fn run() !CryptoError {
     length :: 0
-    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)?
+    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)
 }
 "#;
     let out = jet::compile(src).expect("CryptoError entrypoint should compile");
@@ -470,7 +470,7 @@ fn dynamic_length(value: Int) Int {
 
 fn run() !CryptoError {
     length :: dynamic_length(8161)
-    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)?
+    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)
 }
 "#;
     let dir = std::env::temp_dir().join(format!("jet_crypto_entry_error_{}", std::process::id()));
@@ -576,7 +576,7 @@ fn internal_crypto_error_uses_the_reported_entry_exit() {
 use core.crypto as crypto
 
 fn run() !CryptoError {
-    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 0)?
+    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 0)
 }
 "#;
     let out = jet::compile(src).expect("CryptoError entrypoint should compile");
@@ -650,7 +650,7 @@ fn step() Int {
 }
 
 fn run() {
-    n :: step()?
+    n :: step()
     print(n)
 }
 "#;

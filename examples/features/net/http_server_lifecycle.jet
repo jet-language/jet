@@ -6,13 +6,13 @@ use core.time as time
 fn run() !(HTTPError | RangeError | TaskFailure) {
     mux :: http_server.mux()
     mux.get("/", (req: HTTPRequest) -> Ok(http_server.response(200, "ok")))
-    server :: http_server.bind("127.0.0.1:0", mux)?
-    addr :: server.local_addr()?
+    server :: http_server.bind("127.0.0.1:0", mux)
+    addr :: server.local_addr()
     print(addr.starts_with("127.0.0.1:"))
-    serving :: task { server.serve()? }
+    serving :: task { server.serve() }
     time.sleep(20ms)
-    grace :: Duration.milliseconds(100)?
-    report :: server.shutdown(grace)?
+    grace :: Duration.milliseconds(100)
+    report :: server.shutdown(grace)
     print(report.cancelled)
-    serving.join()?
+    serving.join()
 }

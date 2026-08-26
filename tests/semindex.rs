@@ -361,8 +361,8 @@ fn semantic_visibility_retains_explicit_qualified_alternatives() {
 
 #[test]
 fn semindex_schema_version() {
-    // D-STATE-TERMINAL1 adds checked typestate graph facts.
-    assert_eq!(SCHEMA_VERSION, 16);
+    // D-TEXTHEAD-TYPE1 adds nominal type and ordinary trait-contract facts.
+    assert_eq!(SCHEMA_VERSION, 17);
 }
 
 #[test]
@@ -543,7 +543,7 @@ fn semindex_reconstructs_checked_output_callable() {
     assert_eq!(output.name, "checked-output");
     assert_eq!(output.entry.name, "launch");
     assert!(output.entry.identity.ends_with("::launch"));
-    assert_eq!(output.entry.failure_contract, "!");
+    assert_eq!(output.entry.failure_contract, "!Err");
     assert_eq!(output.entry.failure_source, "implicit default !Err");
     assert_eq!(output.entry.authority, "safe-jet");
     assert_ne!(output.entry.definition_span, output.entry.reference_span);
@@ -551,7 +551,7 @@ fn semindex_reconstructs_checked_output_callable() {
     for field in [
         "\"outputs\":[{",
         "\"entry\":{\"identity\"",
-        "\"failure_contract\":\"!\"",
+        "\"failure_contract\":\"!Err\"",
         "\"failure_source\":\"implicit default !Err\"",
         "\"authority\":\"safe-jet\"",
         "\"effects\":[\"IO\"]",
@@ -611,7 +611,7 @@ fn run() {
         .expect("score identity");
     assert_eq!(
         score.signature,
-        "fn score(name: String) Int !\nfailure: Int ! (implicit default !Err)"
+        "fn score(name: String) Int\nfailure: Int (implicit default !Err)"
     );
     assert_eq!(score.summary, "Scores one name.");
     assert_eq!(score.examples, vec!["score(\"Ada\")"]);

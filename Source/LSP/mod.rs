@@ -407,7 +407,7 @@ mod tests {
         assert!(
             completions.iter().any(|item| {
                 item.label == "@origin"
-                    && item.detail.as_deref() == Some("compiler fact: OriginInfo?")
+                    && item.detail.as_deref() == Some("compiler fact: ?OriginInfo")
             }),
             "origin fact completion missing: {}",
             completions
@@ -732,8 +732,8 @@ fn run() {
         assert!(hover.contains(&symbol.summary));
         assert!(symbol
             .signature
-            .contains("failure: Int ! (implicit default !Err)"));
-        assert!(hover.contains("failure: Int ! (implicit default !Err)"));
+            .contains("failure: Int (implicit default !Err)"));
+        assert!(hover.contains("failure: Int (implicit default !Err)"));
         assert_eq!(
             completion.detail.as_deref(),
             Some(symbol.signature.as_str())
@@ -854,7 +854,7 @@ fn run() {
         let items = compute_completions(&db, src, offset, project.entry(), None, None);
         assert!(items.iter().any(|item| {
             item.label == "from_float"
-                && item.detail.as_deref() == Some("F32.from_float(value: Float) -> F32 String!")
+                && item.detail.as_deref() == Some("F32.from_float(value: Float) -> F32 !String")
         }));
     }
 
@@ -886,7 +886,7 @@ fn run() {
         );
         assert!(token_items.iter().any(|item| {
             item.label == "from_u8"
-                && item.detail.as_deref() == Some("Token.from_u8(value: U8) -> Token String!")
+                && item.detail.as_deref() == Some("Token.from_u8(value: U8) -> Token !String")
         }));
         for (unit_site, _) in src.match_indices("Credit.from_int") {
             let unit_items = compute_completions(

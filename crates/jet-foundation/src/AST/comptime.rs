@@ -39,6 +39,10 @@ pub enum FailureContract {
     /// No error domain was written. The callable still has the shared default
     /// route, with `success` describing the value side of the carrier.
     Default { success: Type, error: Type },
+    /// The declaration chose the optional-success view (`?T`). Optional
+    /// absence is already the complete carrier, so it must not acquire the
+    /// callable default `Err` domain as a nested result.
+    Optional { success: Type },
     /// The declaration named its error domain with a `!E` contract.
     Explicit { success: Type, error: Type },
     /// A declared conversion crosses from `source` into `target`.
@@ -63,6 +67,9 @@ impl FailureContract {
                 success: ok.as_ref().clone(),
                 error: err.as_ref().clone(),
             },
+            Some(Type::Option(success)) => Self::Optional {
+                success: success.as_ref().clone(),
+            },
             Some(success) => Self::Default {
                 success: success.clone(),
                 error: Type::Named(crate::Syntax::TYPE_ERR.to_string()),
@@ -80,6 +87,7 @@ impl FailureContract {
                 ok: Box::new(success.clone()),
                 err: Box::new(error.clone()),
             },
+            Self::Optional { success } => Type::Option(Box::new(success.clone())),
             Self::Converted {
                 success, target, ..
             } => Type::Result {
@@ -115,6 +123,7 @@ impl FailureContract {
     pub fn source(&self) -> String {
         match self {
             Self::Default { .. } => "implicit default !Err".to_string(),
+            Self::Optional { .. } => "optional success".to_string(),
             Self::Explicit { error, .. } => {
                 format!("explicit !{}", error.name())
             }
@@ -780,7 +789,7 @@ impl PartialEq for CtValue {
 /// `?T` and `T !E` stop the same way; they differ only in what the report has
 /// to say. A clean report says nothing but the payload it lacks, and is the
 /// comptime twin of the prelude's zero-sized `JetAbsent`. A told report is the
-/// error value on `T E!`'s stop side.
+/// error value on `T !E`'s stop side.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CtReport {
     /// The clean report: an absence, which is not a failure.

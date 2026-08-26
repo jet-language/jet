@@ -98,7 +98,7 @@ fn run() {
 fn block_values_arm_tables_and_early_returns_match_comptime_and_hosted_tiers() {
     assert_packaged_cli_tiers_agree(
         COMPTIME_SOURCE,
-        "one|other|early|late\none|other|early|late\n",
+        "one\nother\nearly\nlate\none\nother\nearly\nlate\n",
     );
 }
 

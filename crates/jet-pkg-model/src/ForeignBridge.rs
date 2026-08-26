@@ -545,7 +545,7 @@ pub fn render_scalar_jet(
                 function.result
             )
         })?;
-        let _ = writeln!(out, ") {result} String! -[{effect}]> {{",);
+        let _ = writeln!(out, ") {result} !String -[{effect}]> {{",);
         let _ = write!(out, "    value :: abi.{}(", function.name);
         for index in 0..function.params.len() {
             if index > 0 {

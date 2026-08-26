@@ -121,7 +121,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **M0** — bootstrap: lexer, parser, Rust codegen, `jet run`, hello-world golden test.
 - **M1–M2** — functions, variables, control flow, basic types.
 - **M3** — structs and enums (data types).
-- **M4** — error handling: `T E!`, `?` propagation, `??`, `panic`.
+- **M4** — error handling: `T !E`, `?` propagation, `??`, `panic`.
 - **M5** — collections: lists, maps, strings.
 - **M6** — tooling: `jet fmt`, `jet test`, multi-file imports.
 - **M7** — FFI: `extern rust` inline crate deps.

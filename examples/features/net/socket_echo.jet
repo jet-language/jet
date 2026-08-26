@@ -5,59 +5,59 @@ use core.tasks as tasks
 use core.time as time
 
 fn run() !(Closed | IOError | NetError | RangeError | TaskFailure) {
-    typed :: net.socket_addr("127.0.0.1", 0)?
-    listener :: net.tcp_listen_addr(typed)?
-    local :: net.listener_local_socket_addr(listener)?
+    typed :: net.socket_addr("127.0.0.1", 0)
+    listener :: net.tcp_listen_addr(typed)
+    local :: net.listener_local_socket_addr(listener)
     print("tcp-listen:{net.socket_host(local)}")
     (ready_tx, ready_rx) :: channel<String>()
     tcp_task :: task {
-        ready_tx.send(net.socket_to_string(net.listener_local_socket_addr(listener)?))
-        stream :: listener.accept()?
-        msg :: stream.read_text(8192)?
-        stream.write_all("tcp:{msg}".bytes())?
+        ready_tx.send(net.socket_to_string(net.listener_local_socket_addr(listener)))
+        stream :: listener.accept()
+        msg :: stream.read_text(8192)
+        stream.write_all("tcp:{msg}".bytes())
     }
-    addr :: ready_rx.receive()?
-    client :: net.tcp_connect(addr)?
-    net.set_timeout(&client, 1000)?
-    net.set_nodelay(&client, true)?
-    nd :: net.nodelay(client)?
+    addr :: ready_rx.receive()
+    client :: net.tcp_connect(addr)
+    net.set_timeout(&client, 1000)
+    net.set_nodelay(&client, true)
+    nd :: net.nodelay(client)
     print("nodelay:{nd}")
-    net.set_ttl(&client, 64)?
-    hops :: net.ttl(client)?
+    net.set_ttl(&client, 64)
+    hops :: net.ttl(client)
     print("ttl:{hops}")
     print("socket_type:{net.socket_type(client)}")
-    client.write_all("ping".bytes())?
-    print(client.read_text(8192)?)
+    client.write_all("ping".bytes())
+    print(client.read_text(8192))
     sf_path :: "/tmp/jet-socket-echo-sf-{time.now()}.txt"
-    fs.write(sf_path, "sf")?
-    sent :: net.sendfile(&client, sf_path)?
+    fs.write(sf_path, "sf")
+    sent :: net.sendfile(&client, sf_path)
     print("sendfile:{sent}")
     _ :: fs.remove(sf_path)
-    client.close()?
-    client.close()?
-    tcp_task.join()?
-    udp_server :: net.udp_bind("127.0.0.1:0")?
-    udp_addr :: net.udp_local_addr(udp_server)?
-    udp_client :: net.udp_bind("127.0.0.1:0")?
-    net.udp_set_timeout(udp_client, 1000)?
-    _sent :: net.udp_send_bytes_to(udp_client, "pong".bytes(), udp_addr)?
-    packet :: net.udp_receive(udp_server, 128)?
+    client.close()
+    client.close()
+    tcp_task.join()
+    udp_server :: net.udp_bind("127.0.0.1:0")
+    udp_addr :: net.udp_local_addr(udp_server)
+    udp_client :: net.udp_bind("127.0.0.1:0")
+    net.udp_set_timeout(udp_client, 1000)
+    _sent :: net.udp_send_bytes_to(udp_client, "pong".bytes(), udp_addr)
+    packet :: net.udp_receive(udp_server, 128)
     print("udp:{net.udp_packet_bytes(packet)}:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")
     path :: "/tmp/jet-socket-echo-{time.now()}.sock"
-    unix_listener :: net.unix_listen(path)?
+    unix_listener :: net.unix_listen(path)
     (unix_tx, unix_rx) :: channel<String>()
     unix_task :: task {
         unix_tx.send("ready")
-        s :: net.unix_accept(unix_listener)?
-        msg :: net.unix_read(&s)?
-        net.unix_write_all_bytes(&s, "unix:{msg}".bytes())?
+        s :: net.unix_accept(unix_listener)
+        msg :: net.unix_read(&s)
+        net.unix_write_all_bytes(&s, "unix:{msg}".bytes())
     }
-    _ready :: unix_rx.receive()?
-    unix_client :: net.unix_connect(path)?
-    net.unix_write_all_bytes(&unix_client, "ok".bytes())?
-    print(net.unix_read(&unix_client)?)
-    net.unix_close(&unix_client)?
-    net.unix_close(&unix_client)?
-    unix_task.join()?
-    fs.remove(path)?
+    _ready :: unix_rx.receive()
+    unix_client :: net.unix_connect(path)
+    net.unix_write_all_bytes(&unix_client, "ok".bytes())
+    print(net.unix_read(&unix_client))
+    net.unix_close(&unix_client)
+    net.unix_close(&unix_client)
+    unix_task.join()
+    fs.remove(path)
 }

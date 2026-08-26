@@ -294,7 +294,7 @@ pub(crate) fn jet_data_bar_svg_checked(groups: &Vec<jet_std::DataGroup>) -> Resu
 }
 
 // Editions before 2027 type these calls as plain `Float`/`[Float]` instead of
-// `Float DataError!`. They run the kernel above and report an undefined
+// `Float !DataError`. They run the kernel above and report an undefined
 // result as `0.0` (an empty list, for `rolling_mean`) instead of an error —
 // the same arithmetic, a weaker report.
 pub(crate) fn jet_data_sum(values: &Vec<f64>) -> f64 {

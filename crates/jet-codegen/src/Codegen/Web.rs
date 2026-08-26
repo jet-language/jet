@@ -4403,7 +4403,7 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
             format!("[{}; {len}]", wasm_storage_ty(elem)?)
         }
         // D-FAIL-CARRIER1=A: the wasm module names the one carrier every
-        // other tier names. `T?` is the view whose report is the clean absence.
+        // other tier names. `?T` is the view whose report is the clean absence.
         Type::Option(inner) => format!("JetOutcome<{}, JetAbsent>", wasm_storage_ty(inner)?),
         Type::Result { ok, err } => format!(
             "JetOutcome<{}, {}>",

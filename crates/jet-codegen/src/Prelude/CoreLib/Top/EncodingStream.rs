@@ -1057,7 +1057,7 @@ impl jet_std::JSONReader {
     }
 }
 
-// D-FAIL-CARRIER1=A: the reader answers `Event? EncodingError!` — the stream
+// D-FAIL-CARRIER1=A: the reader answers `?Event !EncodingError` — the stream
 // ends with a clean absence, and a broken stream with a report.
 fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError> {
     reader.next_event().map(jet_outcome_of)

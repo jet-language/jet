@@ -6,7 +6,11 @@
 //! builds that knowingly drop HTTPS.
 
 use std::io::Read;
+use std::sync::LazyLock;
 use std::time::Duration;
+
+static HTTP_AGENT: LazyLock<ureq::Agent> =
+    LazyLock::new(|| ureq::AgentBuilder::new().redirects(0).build());
 
 pub struct StreamResponse {
     status: u16,
@@ -201,12 +205,12 @@ fn get_stream_with_timeout(url: &str, timeout: Duration) -> Result<StreamRespons
             "unsupported URL scheme `{scheme}`; expected `http://` or `https://`"
         )));
     }
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(timeout)
-        .timeout_read(timeout)
-        .redirects(0)
-        .build();
-    let response = match agent.get(url).set("Accept-Encoding", "identity").call() {
+    let response = match HTTP_AGENT
+        .get(url)
+        .timeout(timeout)
+        .set("Accept-Encoding", "identity")
+        .call()
+    {
         Ok(response) => response,
         Err(ureq::Error::Status(_, response)) => response,
         Err(error) => return Err(FetchError::http(url, error.to_string())),

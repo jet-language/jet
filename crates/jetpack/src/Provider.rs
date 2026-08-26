@@ -2000,10 +2000,19 @@ fn resolve_kind_in_context(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> Pr
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DownloadPlan {
     pub packages: usize,
     pub bytes: Option<u64>,
+}
+
+impl Default for DownloadPlan {
+    fn default() -> Self {
+        Self {
+            packages: 0,
+            bytes: Some(0),
+        }
+    }
 }
 
 impl DownloadPlan {
@@ -2094,7 +2103,7 @@ pub(crate) fn plan_downloads(
                 "download planning has no Hangar roots for closure admission".into(),
             )
         })?;
-        let nix = plan_nix_downloads(roots, &nix_paths, ctx.offline)
+        let nix = plan_nix_downloads(roots, &nix_paths, ctx.offline, current_progress())
             .map_err(|error| nix_cache_error(roots, error))?;
         plan.add(nix.packages, Some(nix.bytes));
     }

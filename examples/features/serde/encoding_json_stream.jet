@@ -5,26 +5,26 @@ use core.files as files
 use core.testing as testing
 
 fn write_catalog(path: Path) Bool !(EncodingError | IOError) {
-    out :: files.create(path)?
+    out :: files.create(path)
     // D-APILABEL1=A: skip the `limits` default and name only the policy that changes.
-    writer :: json.writer(^out, canonical: true)?
-    writer.write(encoding.DataEvent.ObjectStart)?
-    writer.write(encoding.DataEvent.Key("b"))?
-    writer.write(encoding.DataEvent.Int(2))?
-    writer.write(encoding.DataEvent.Key("a"))?
-    writer.write(encoding.DataEvent.Int(1))?
-    writer.write(encoding.DataEvent.ObjectEnd)?
-    writer.flush()?
-    writer.finish()?
+    writer :: json.writer(^out, canonical: true)
+    writer.write(encoding.DataEvent.ObjectStart)
+    writer.write(encoding.DataEvent.Key("b"))
+    writer.write(encoding.DataEvent.Int(2))
+    writer.write(encoding.DataEvent.Key("a"))
+    writer.write(encoding.DataEvent.Int(1))
+    writer.write(encoding.DataEvent.ObjectEnd)
+    writer.flush()
+    writer.finish()
     return Ok(true)
 }
 
 fn run() !(EncodingError | IOError) {
     // `testing.temp_dir` is the shared-Prelude scratch mechanism on every tier.
     path :: Path.from(testing.temp_dir("encoding-json-stream")).join("catalog.json")
-    write_catalog(path)?
-    input :: files.open(path)?
-    reader :: json.reader(^input)?
+    write_catalog(path)
+    input :: files.open(path)
+    reader :: json.reader(^input)
     read_count := 0
     loop event in reader {
         if event == {
@@ -42,6 +42,6 @@ fn run() !(EncodingError | IOError) {
     }
     print("read-count:{read_count}")
     print("eof")
-    print(files.read(path)?)
-    files.remove(path)?
+    print(files.read(path))
+    files.remove(path)
 }

@@ -2109,18 +2109,24 @@ impl Type {
         let unit_success =
             matches!(ok, Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE);
         let error = if default_error {
-            crate::Syntax::TYPE_FALLIBLE_SEP.to_string()
+            None
         } else {
-            format!(
-                "{}{}",
-                crate::Syntax::TYPE_FALLIBLE_SEP,
-                Self::error_contract_name(err)
-            )
+            Some(Self::error_contract_name(err))
         };
         if unit_success {
-            error
+            error.map_or_else(
+                || format!("{}{}", crate::Syntax::TYPE_FALLIBLE_SEP, crate::Syntax::TYPE_ERR),
+                |error| format!("{}{}", crate::Syntax::TYPE_FALLIBLE_SEP, error),
+            )
+        } else if let Some(error) = error {
+            format!(
+                "{} {}{}",
+                ok.name(),
+                crate::Syntax::TYPE_FALLIBLE_SEP,
+                error
+            )
         } else {
-            format!("{} {error}", ok.name())
+            ok.name()
         }
     }
 
@@ -2598,7 +2604,7 @@ mod tests {
                 err: Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
             }
             .name(),
-            "Int !"
+            "Int"
         );
 
         let callback = Type::Fn {

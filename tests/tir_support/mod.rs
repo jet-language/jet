@@ -56,7 +56,39 @@ pub fn build_and_run_full(prefix: &str, name: &str, src: &str) -> (i32, String, 
 ///
 /// Returns `(exit code, stdout, stderr)`.
 pub fn jit_run(name: &str, src: &str) -> (i32, String, String) {
-    jit_run_with_env(name, src, &[])
+    jit_run_with_package(name, src, &[], None)
+}
+
+fn jit_run_with_package(
+    name: &str,
+    src: &str,
+    vars: &[(&str, &str)],
+    package_source: Option<&str>,
+) -> (i32, String, String) {
+    let dir = unique_tmp("jet_jit_run");
+    fs::create_dir_all(&dir).unwrap();
+    let jet_name = format!("{name}.jet");
+    let jet_path = dir.join(&jet_name);
+    fs::write(&jet_path, src).unwrap();
+    if let Some(package_source) = package_source {
+        fs::write(dir.join("package.jet"), package_source).unwrap();
+    }
+    let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+    command
+        .arg("run")
+        .arg(&jet_path)
+        .current_dir(&dir)
+        .env("JET_CACHE_DIR", dir.join("cache"));
+    for (key, value) in vars {
+        command.env(key, value);
+    }
+    let out = command.output().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
 }
 
 pub fn jit_run_traced(name: &str, src: &str) -> (i32, String, String) {
@@ -127,10 +159,21 @@ pub fn jit_run_with_env_args(
 }
 
 pub fn interpreter_run(name: &str, src: &str) -> (i32, String, String) {
+    interpreter_run_with_package(name, src, None)
+}
+
+fn interpreter_run_with_package(
+    name: &str,
+    src: &str,
+    package_source: Option<&str>,
+) -> (i32, String, String) {
     let dir = unique_tmp("jet_interpreter_run");
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join(format!("{name}.jet"));
     fs::write(&path, src).unwrap();
+    if let Some(package_source) = package_source {
+        fs::write(dir.join("package.jet"), package_source).unwrap();
+    }
     let shown = path.to_string_lossy().into_owned();
     let outcome = jet::Interpreter::dev_iteration(&shown, false, true);
     let _ = fs::remove_dir_all(&dir);
@@ -149,13 +192,37 @@ pub fn interpreter_run(name: &str, src: &str) -> (i32, String, String) {
 /// The same snippet on both tiers, asserting they agree. This is the shape I9
 /// actually asks for: not "AOT prints X", but "every tier prints the same X".
 pub fn assert_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
-    let (jit_code, jit_out, jit_err) = jit_run(name, src);
+    assert_tiers_agree_with_package(name, src, expected_stdout, None);
+}
+
+/// Tier parity with a temporary package policy. Effectful snippets need an
+/// application authority decision before the real JIT and interpreter paths
+/// will execute them; the source remains unchanged and the policy is test-only.
+pub fn assert_tiers_agree_with_application_policy(
+    name: &str,
+    src: &str,
+    expected_stdout: &str,
+    package_source: &str,
+) {
+    assert_tiers_agree_with_package(name, src, expected_stdout, Some(package_source));
+}
+
+fn assert_tiers_agree_with_package(
+    name: &str,
+    src: &str,
+    expected_stdout: &str,
+    package_source: Option<&str>,
+) {
+    let (jit_code, jit_out, jit_err_raw) = jit_run_with_package(name, src, &[], package_source);
+    let jit_err = jit_err_raw;
     assert_eq!(jit_code, 0, "`jet run` failed:\n{jit_err}");
     assert_eq!(
         jit_out, expected_stdout,
         "`jet run` (Cranelift/interpreter) disagreed:\n{jit_err}"
     );
-    let (interpreter_code, interpreter_out, interpreter_err) = interpreter_run(name, src);
+    let (interpreter_code, interpreter_out, interpreter_err_raw) =
+        interpreter_run_with_package(name, src, package_source);
+    let interpreter_err = interpreter_err_raw;
     assert_eq!(
         interpreter_code, jit_code,
         "forced interpreter and default JIT exit codes disagree:\ninterpreter stderr: {interpreter_err}\nJIT stderr: {jit_err}"
@@ -169,7 +236,8 @@ pub fn assert_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
         "forced interpreter and default JIT stderr disagree"
     );
     if have_rustc() {
-        let (aot_code, aot_out, aot_err) = build_and_run_full("jet_tir_test", name, src);
+        let (aot_code, aot_out, aot_err_raw) = build_and_run_full("jet_tir_test", name, src);
+        let aot_err = aot_err_raw;
         assert_eq!(
             aot_code, jit_code,
             "AOT and `jet run` exit codes disagree:\n{aot_err}"

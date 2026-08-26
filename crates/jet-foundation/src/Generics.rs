@@ -693,7 +693,7 @@ pub fn generic_depth_exceeded(ty: &Type) -> Option<String> {
                 let mut next = chain.clone();
                 next.push(match ty {
                     Type::List(_) => "List".to_string(),
-                    Type::Option(_) => "T?".to_string(),
+                    Type::Option(_) => "?T".to_string(),
                     _ => "Shared".to_string(),
                 });
                 let depth = next.len();

@@ -82,7 +82,7 @@ one law, not a rule of its own:
 | Rights only shrink as scope nests (D-AUTHORITY-MODEL1) | gaining power is the away-move |
 | Package policy may only tighten safety (D-PACKAGE-POLICY-SCOPE1) | the same law at package scope |
 | Safety facts only tighten at every layer (D-CONF-MERGE1) | the same law on the build |
-| `x != None` narrows `T?` to `T` for free (D-FLOWTYPE1) | gaining certainty is the free move |
+| `x != None` narrows `?T` to `T` for free (D-FLOWTYPE1) | gaining certainty is the free move |
 | A bound task handle must be joined or detached (D-CONC-JOIN1) | abandoning a duty needs the word |
 | Taint spreads on its own; `#Scrub(Tag)` removes it (D-TAG-SURFACE1) | suspicion is gained free, spelled away |
 

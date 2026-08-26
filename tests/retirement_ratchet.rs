@@ -194,6 +194,7 @@ const FAILURE_SURFACE_ROOTS: &[&str] = &[
     "corelib",
     "docs",
     "editors",
+    "tools",
 ];
 
 const FAILURE_SURFACE_EXTENSIONS: &[&str] = &[
@@ -258,7 +259,8 @@ fn failure_surface_files() -> Vec<PathBuf> {
         out.extend(entries.flatten().filter_map(|entry| {
             let path = entry.path();
             (path.is_file()
-                && path.extension().is_some_and(|extension| extension == "jet"))
+                && (path.extension().is_some_and(|extension| extension == "jet")
+                    || file_name(&path) == "llms.text"))
             .then_some(path)
         }));
     }
@@ -423,7 +425,9 @@ fn failure_source_fragments(path: &Path, text: &str) -> Vec<FailureSourceFragmen
         }];
     }
 
-    if path.extension().is_some_and(|extension| extension != "md") {
+    let markdown = path.extension().is_some_and(|extension| extension == "md")
+        || file_name(path) == "llms.text";
+    if !markdown {
         return failure_embedded_fragments(text);
     }
 
@@ -503,7 +507,9 @@ fn failure_is_contract_position(token: &jet::Lexer::Token) -> bool {
     failure_is_type_atom(token)
         || matches!(
             &token.kind,
-            jet::Lexer::TokKind::Colon | jet::Lexer::TokKind::ColonColon
+            jet::Lexer::TokKind::Colon
+                | jet::Lexer::TokKind::ColonColon
+                | jet::Lexer::TokKind::RParen
         )
 }
 

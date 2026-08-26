@@ -83,21 +83,21 @@ fn run() !(HTTPError | IOError | NetError | RangeError | TaskFailure) {
     """
     mux :: http_server.mux()
     mux.get("/", (req: HTTPRequest) -> Ok(http_server.response(200, "ok")))
-    server :: http_server.bind("127.0.0.1:0", mux, tls: http_server.tls(cert, key))?
-    addr :: server.local_addr()?
-    serving :: task { server.serve()? }
-    roots :: tls.RootCertificates.from_pem(ca.bytes())?
-    trusted :: tls.ClientConfig.default().with_trust(.CustomOnly(roots))?
-    config :: trusted.with_version_bounds(min: .Tls13, max: .Tls13)?
-    tcp :: net.tcp_connect(addr)?
-    budget :: Duration.seconds(2)?
-    secure := tls.client(^tcp, server_name: "localhost", config: config, deadline: budget)?
+    server :: http_server.bind("127.0.0.1:0", mux, tls: http_server.tls(cert, key))
+    addr :: server.local_addr()
+    serving :: task { server.serve() }
+    roots :: tls.RootCertificates.from_pem(ca.bytes())
+    trusted :: tls.ClientConfig.default().with_trust(.CustomOnly(roots))
+    config :: trusted.with_version_bounds(min: .Tls13, max: .Tls13)
+    tcp :: net.tcp_connect(addr)
+    budget :: Duration.seconds(2)
+    secure := tls.client(^tcp, server_name: "localhost", config: config, deadline: budget)
     peer :: secure.peer_identity()
     print(peer.verified_server_name)
     print(peer.cipher_suite.starts_with("TLS13_"))
     print(peer.tls_version)
-    secure.close()?
-    grace :: Duration.milliseconds(200)?
-    _ :: server.shutdown(grace)?
-    serving.join()?
+    secure.close()
+    grace :: Duration.milliseconds(200)
+    _ :: server.shutdown(grace)
+    serving.join()
 }

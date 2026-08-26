@@ -29,23 +29,23 @@ fn run() !(NetError | RangeError | TaskFailure) {
     args :: process.argv()
     if args.len() > 1 && (args.get(1) ?? "") == "serve" {
         port :: env.get("JETPACK_SERVICE_PORT") ?? "18080"
-        listener :: net.tcp_listen("127.0.0.1:{port}")?
-        budget :: Duration.milliseconds(10000)?
+        listener :: net.tcp_listen("127.0.0.1:{port}")
+        budget :: Duration.milliseconds(10000)
         print("ready")
         loop {
-            stream :: listener.accept(deadline: budget)?
-            _request :: stream.read_text(8192, deadline: budget)?
-            stream.write_all(http_response(), deadline: budget)?
+            stream :: listener.accept(deadline: budget)
+            _request :: stream.read_text(8192, deadline: budget)
+            stream.write_all(http_response(), deadline: budget)
         }
     }
 
-    listener :: net.tcp_listen("127.0.0.1:0")?
-    address :: listener.local_addr()?
+    listener :: net.tcp_listen("127.0.0.1:0")
+    address :: listener.local_addr()
     print("ready")
-    budget :: Duration.milliseconds(1000)?
+    budget :: Duration.milliseconds(1000)
     server :: task {
-        stream :: listener.accept(deadline: budget)?
-        _request :: stream.read_text(8192, deadline: budget)?
+        stream :: listener.accept(deadline: budget)
+        _request :: stream.read_text(8192, deadline: budget)
         response :: [U8]{
             72,
             84,
@@ -107,10 +107,10 @@ fn run() !(NetError | RangeError | TaskFailure) {
             111,
             107
         }
-        stream.write_all(response, deadline: budget)?
+        stream.write_all(response, deadline: budget)
     }
-    client :: net.tcp_connect(address)?
-    write_ready :: client.ready(NetReadyInterest.Write, deadline: budget)?
+    client :: net.tcp_connect(address)
+    write_ready :: client.ready(NetReadyInterest.Write, deadline: budget)
     print(net.ready_writable(write_ready))
     request :: [U8]{
         71,
@@ -149,9 +149,9 @@ fn run() !(NetError | RangeError | TaskFailure) {
         13,
         10
     }
-    client.write_all(request, deadline: budget)?
-    response :: client.read_text(8192, deadline: budget)?
+    client.write_all(request, deadline: budget)
+    response :: client.read_text(8192, deadline: budget)
     print(response.starts_with("HTTP/1.1 200 OK"))
     print(response.ends_with("ok"))
-    server.join()?
+    server.join()
 }

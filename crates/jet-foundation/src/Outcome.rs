@@ -1,5 +1,5 @@
 // D-FAIL-CARRIER1=A / D-FAIL-MODEL1=A (ratified 2026-08-06) — the one outcome
-// carrier under `T?` and `T E!`.
+// carrier under `?T` and `T !E`.
 //
 // An outcome has three independent facts:
 //
@@ -12,9 +12,9 @@
 // carrier, and nothing converts between them because there is nothing to
 // convert:
 //
-//   * `T?`     is `JetOutcome<T, JetAbsent>` — absence is clean, so the report
+//   * `?T`     is `JetOutcome<T, JetAbsent>` — absence is clean, so the report
 //              is `JetAbsent`, which carries nothing.
-//   * `T E!`  is `JetOutcome<T, E>` — the report matters, so `E` is the report.
+//   * `T !E`  is `JetOutcome<T, E>` — the report matters, so `E` is the report.
 //
 // Happy-path erasure: `JetAbsent` is zero-sized, so `JetOutcome<T, JetAbsent>`
 // has the same layout, the same niche and the same two branches as a bare
@@ -803,7 +803,7 @@ fn jet_error_json_encode_value(value: &crate::EncodingJson::Value) -> String {
         crate::EncodingJson::Value::Float(value) => value.to_string(),
         crate::EncodingJson::Value::Number(value) => value.clone(),
         crate::EncodingJson::Value::Text(value) => {
-            format!("\"{}\"", crate::JSON::json_escape(value))
+            format!("\"{}\"", jet_error_json_escape(value))
         }
         crate::EncodingJson::Value::Array(values) => format!(
             "[{}]",
@@ -820,7 +820,7 @@ fn jet_error_json_encode_value(value: &crate::EncodingJson::Value) -> String {
                 .map(|(name, value)| {
                     format!(
                         "\"{}\":{}",
-                        crate::JSON::json_escape(name),
+                        jet_error_json_escape(name),
                         jet_error_json_encode_value(value)
                     )
                 })
@@ -828,6 +828,22 @@ fn jet_error_json_encode_value(value: &crate::EncodingJson::Value) -> String {
                 .join(",")
         ),
     }
+}
+
+fn jet_error_json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Project one escaping default error and the journey it accumulated into the
@@ -1451,7 +1467,7 @@ mod journey_tests {
     }
 }
 
-/// The clean report: no payload, nothing to say. This is what `T?` puts on the
+/// The clean report: no payload, nothing to say. This is what `?T` puts on the
 /// stop side, which is why an absence is not a failure.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]
 pub struct JetAbsent;
@@ -1478,7 +1494,7 @@ impl JetTaskFailure {
     }
 }
 
-/// The optional view of the carrier: `T?`.
+/// The optional view of the carrier: `?T`.
 ///
 /// Every method here reads the same carrier the fallible view reads. They exist
 /// because the clean report answers different questions than a failure report,
@@ -1547,7 +1563,7 @@ impl<T> JetOptionalView<T> for JetOutcome<T, JetAbsent> {
     }
 }
 
-/// Build a present payload. `T?` and `T E!` build the same carrier.
+/// Build a present payload. `?T` and `T !E` build the same carrier.
 pub fn jet_present<T, E>(value: T) -> JetOutcome<T, E> {
     Ok(value)
 }
@@ -1575,7 +1591,7 @@ pub fn jet_absent<T>() -> JetOutcome<T, JetAbsent> {
 /// Read the part of the payload a failure kept.
 ///
 /// A success held nothing back, so the carrier answers a clean absence and the
-/// caller reads the whole thing as `T?`.
+/// caller reads the whole thing as `?T`.
 pub fn jet_partial<T, E, X: Clone>(
     outcome: &JetOutcome<T, E>,
     kept: impl FnOnce(&E) -> X,
@@ -1601,7 +1617,7 @@ pub fn jet_notes<T, E, N>(outcome: &JetOutcome<T, E>, told: impl FnOnce(&E) -> V
 ///
 /// Rust's own collections answer with `Option`, the same way they hold their
 /// elements in `Vec`. This is the one place that shape becomes a Jet outcome;
-/// past it, `T?` is the carrier and nothing else.
+/// past it, `?T` is the carrier and nothing else.
 pub fn jet_outcome_of<T>(value: Option<T>) -> JetOutcome<T, JetAbsent> {
     value.ok_or(JetAbsent)
 }

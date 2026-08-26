@@ -1255,7 +1255,7 @@ impl Func {
 }
 
 /// D-WEBAPP1=D: does this type name the `App` service builder — `App` itself,
-/// or `App E!`?
+/// or `App !E`?
 ///
 /// One canonical answer (I8). Sema's app-graph extraction, AOT entry emit, the
 /// web artifact front door, and the interpreter entry each carried a private
@@ -1750,7 +1750,7 @@ impl StructDef {
     }
 }
 
-/// D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T, E> :: T E!` — transparent generic type shortcut.
+/// D-TYPEALIAS1 / D-ALIAS-OP1=B: `alias Name<T, E> :: T !E` — transparent generic type shortcut.
 #[derive(Debug, Clone)]
 pub struct TypeAliasDef {
     pub is_pub: bool,

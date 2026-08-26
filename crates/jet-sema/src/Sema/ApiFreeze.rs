@@ -176,7 +176,7 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
             canonical_api_type_name(value, dimensions)
         ),
         Type::Shared(inner) => format!("Shared<{}>", canonical_api_type_name(inner, dimensions)),
-        Type::Option(inner) => format!("{}?", canonical_api_type_name(inner, dimensions)),
+        Type::Option(inner) => format!("?{}", canonical_api_type_name(inner, dimensions)),
         Type::Result { ok, err } => {
             let ok = canonical_api_type_name(ok, dimensions);
             let default_error =
@@ -190,14 +190,14 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
             let unit_success = ok == crate::Syntax::INTERNAL_UNIT_TYPE;
             if unit_success {
                 if default_error {
-                    "!".to_string()
+                    "!Err".to_string()
                 } else {
-                    format!("{err}!")
+                    format!("!{err}")
                 }
             } else if default_error {
-                format!("{ok} !")
+                ok
             } else {
-                format!("{ok} {err}!")
+                format!("{ok} !{err}")
             }
         }
         Type::Fn {
@@ -992,7 +992,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_api_types_use_failure_suffixes_in_alias_and_function_type_shapes() {
+    fn canonical_api_types_use_prefix_roles_in_alias_and_function_type_shapes() {
         let fallible = Type::Result {
             ok: Box::new(Type::Option(Box::new(Type::Int))),
             err: Box::new(Type::Union(vec![
@@ -1002,7 +1002,7 @@ mod tests {
         };
         assert_eq!(
             canonical_api_type_name(&fallible, &HashMap::new()),
-            "Int? (DbError | TimeoutError)!"
+            "?Int !(DbError | TimeoutError)"
         );
 
         let callback = Type::Fn {
@@ -1018,7 +1018,7 @@ mod tests {
         };
         assert_eq!(
             canonical_api_type_name(&callback, &HashMap::new()),
-            "fn(Int? (DbError | TimeoutError)!) IOError! -[]>"
+            "fn(?Int !(DbError | TimeoutError)) !IOError -[]>"
         );
     }
 

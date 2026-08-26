@@ -11,17 +11,17 @@ fn handle_api(req: HTTPRequest) HTTPResponse !HTTPError -> {
 }
 
 fn run() !(HTTPError | IOError | NetError | TaskFailure) {
-    files.write("/tmp/jet_http_static.txt", "0123456789")?
-    listener :: net.tcp_listen("127.0.0.1:0")?
-    addr :: listener.local_addr()?
+    files.write("/tmp/jet_http_static.txt", "0123456789")
+    listener :: net.tcp_listen("127.0.0.1:0")
+    addr :: listener.local_addr()
     mux :: http_server.mux()
     mux.post("/api/:name/*path", (req: HTTPRequest) -> handle_api(req))
     mux.get("/events", (req: HTTPRequest) -> Ok(http_server.sse("ready")))
     mux.get("/file", (req: HTTPRequest) -> Ok(http_server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? http_server.response(500, "range")))
     t :: task {
-        http_server.serve_once_listener(listener, mux)?
-        http_server.serve_once_listener(listener, mux)?
-        http_server.serve_once_listener(listener, mux)?
+        http_server.serve_once_listener(listener, mux)
+        http_server.serve_once_listener(listener, mux)
+        http_server.serve_once_listener(listener, mux)
     }
     req0 :: http_client.request("POST", "http://{addr}/api/ada/profile")
     req1 :: req0.form("tool", "jet")
@@ -29,16 +29,16 @@ fn run() !(HTTPError | IOError | NetError | TaskFailure) {
     req3 :: req2.redirects(0)
     req4 :: req3.connect_timeout(1000)
     req :: req4.read_timeout(1000)
-    resp :: req.send()?
+    resp :: req.send()
     print(resp.status())
     print(resp.body().text(8 * 1024 * 1024) ?? "invalid body")
     print(resp.cookies().len())
-    events :: http_client.get("http://{addr}/events")?
+    events :: http_client.get("http://{addr}/events")
     print(events.header("content-type") ?? "missing")
     print(events.body().text(8 * 1024 * 1024) ?? "invalid body")
     file_req :: http_client.request("GET", "http://{addr}/file")
-    file_resp :: file_req.header("range", "bytes=2-5").send()?
+    file_resp :: file_req.header("range", "bytes=2-5").send()
     print(file_resp.status())
     print(file_resp.body().text(8 * 1024 * 1024) ?? "invalid body")
-    t.join()?
+    t.join()
 }

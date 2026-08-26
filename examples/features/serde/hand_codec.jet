@@ -12,7 +12,7 @@ impl Email.Encode {
 
 impl Email.Decode {
     fn decode(tree: DataTree) Email ![FieldError] -> {
-        address :: tree.text()?
+        address :: tree.text()
         if !address.contains("@") {
             return Err([FieldError{path: "", reason: "not a valid email: {address}"}])
         }
@@ -30,6 +30,6 @@ fn run() ![FieldError] {
     signup :: Signup{name: "Ada", email: Email{address: "ada@lovelace.org"}}
     wire :: json.to_string(signup)
     print(wire)
-    decoded :: json.decode<Signup>(wire)?
+    decoded :: json.decode<Signup>(wire)
     print(decoded.email.address)
 }

@@ -100,10 +100,10 @@ fn run() {
     print(z)
 }
 "#;
-    let errors = error_codes(src);
-    assert!(
-        errors.is_empty(),
-        "alloc-and-use should compile clean, got {errors:?}"
+    assert_eq!(
+        error_codes(src),
+        Vec::<String>::new(),
+        "alloc-and-use should compile clean"
     );
     if let Some(out) = build_and_run("ok", src) {
         assert_eq!(out, "43\n100\n7\n");
@@ -121,23 +121,10 @@ fn run() {
 
 #[test]
 fn view_escape_is_e0631() {
-    let src = r#"
-use core.mem
-
-fn leak() Int -> {
-    arena :: mem.Arena.new()
-    x :: arena.alloc(42)
-    return x
-}
-
-fn run() {
-    print(leak())
-}
-"#;
-    assert!(
-        error_codes(src).contains(&"E0631".to_string()),
-        "a returned arena view must be E0631, got {:?}",
-        error_codes(src)
+    assert_eq!(
+        error_codes(include_str!("ui/arena_view_escape.jet")),
+        vec!["E0631".to_string()],
+        "the arena escape fixture must report exactly E0631"
     );
 }
 
@@ -153,29 +140,19 @@ fn run() {
     print(stash)
 }
 "#;
-    assert!(
-        error_codes(src).contains(&"E0212".to_string()),
-        "moving an owner-backed view while it remains live must be E0212, got {:?}",
-        error_codes(src)
+    assert_eq!(
+        error_codes(src),
+        vec!["E0212".to_string()],
+        "moving an owner-backed view while it remains live must report exactly E0212"
     );
 }
 
 #[test]
 fn use_after_reset_is_e0632() {
-    let src = r#"
-use core.mem
-
-fn run() {
-    arena :: mem.Arena.new()
-    x :: arena.alloc(42)
-    arena.reset()
-    print(x)
-}
-"#;
-    assert!(
-        error_codes(src).contains(&"E0632".to_string()),
-        "reading a view after reset must be E0632, got {:?}",
-        error_codes(src)
+    assert_eq!(
+        error_codes(include_str!("ui/arena_view_after_reset.jet")),
+        vec!["E0632".to_string()],
+        "the arena reset fixture must report exactly E0632"
     );
 }
 
@@ -191,10 +168,10 @@ fn run() {
     print(x)
 }
 "#;
-    assert!(
-        error_codes(src).contains(&"E0212".to_string()),
-        "closing an allocator while its view is live must be E0212, got {:?}",
-        error_codes(src)
+    assert_eq!(
+        error_codes(src),
+        vec!["E0220".to_string(), "E0212".to_string()],
+        "closing an allocator while its view is live must report exactly E0220, E0212"
     );
 }
 
@@ -212,9 +189,10 @@ fn run() {
     print(x)
 }
 "#;
-    assert!(
-        error_codes(src).contains(&"E0632".to_string()),
-        "a reset on a reachable branch must invalidate at the join"
+    assert_eq!(
+        error_codes(src),
+        vec!["E0632".to_string()],
+        "a reset on a reachable branch must report exactly E0632"
     );
 }
 
@@ -233,9 +211,10 @@ fn run() {
     print(x)
 }
 "#;
-    assert!(
-        error_codes(src).contains(&"E0632".to_string()),
-        "a reset in a loop must invalidate after the loop"
+    assert_eq!(
+        error_codes(src),
+        vec!["E0632".to_string()],
+        "a reset in a loop must report exactly E0632"
     );
 }
 
@@ -256,10 +235,10 @@ fn run() {
     print(99)
 }
 "#;
-    assert!(
-        error_codes(src).is_empty(),
-        "a region spanning two arenas should compile clean, got {:?}",
-        error_codes(src)
+    assert_eq!(
+        error_codes(src),
+        Vec::<String>::new(),
+        "a region spanning two arenas should compile clean"
     );
     if let Some(out) = build_and_run("region", src) {
         assert_eq!(out, "1\n2\n99\n");
@@ -282,9 +261,9 @@ fn run() {
     }
 }
 "#;
-    assert!(
-        error_codes(src).contains(&"E0212".to_string()),
-        "moving a region view while its owner remains live must be E0212, got {:?}",
-        error_codes(src)
+    assert_eq!(
+        error_codes(src),
+        vec!["E0212".to_string()],
+        "moving a region view while its owner remains live must report exactly E0212"
     );
 }

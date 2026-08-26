@@ -1911,7 +1911,7 @@ impl Cx {
                 self.root_prefix,
                 self.rust_type(inner)
             ),
-            // D-FAIL-CARRIER1=A: `T?` and `T E!` are two views of one carrier.
+            // D-FAIL-CARRIER1=A: `?T` and `T !E` are two views of one carrier.
             // The optional view's report is `JetAbsent` — absence is clean.
             Type::Option(inner) => format!(
                 "{0}JetOutcome<{1}, {0}JetAbsent>",

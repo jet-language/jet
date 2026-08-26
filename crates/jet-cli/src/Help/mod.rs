@@ -379,7 +379,7 @@ pub fn run_query(query: &str, color: bool) -> String {
     let hits = search(&index, query);
     if hits.is_empty() {
         return format!(
-            "no matches for `{}` — try `{} ?` for the full command palette or `{} help`\n",
+            "No matches for `{}` — try `{} ?` for the full command palette or `{} help`\n",
             query, BINARY_NAME, BINARY_NAME
         );
     }

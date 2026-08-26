@@ -5,7 +5,7 @@
 // D-FAIL-CARRIER1=A: sema declares `Claims.subject`/`.issuer` an
 // `Option<Text>` and `.not_before`/`.issued_at` an `Option<Int>`
 // (jet-sema CheckerCoreLib/core_types.rs), and all four are readable core
-// fields (Codegen/TIR/lower/fields.rs). The one Rust spelling of a Jet `T?`
+// fields (Codegen/TIR/lower/fields.rs). The one Rust spelling of a Jet `?T`
 // is `JetOutcome<T, JetAbsent>`, so a raw `Option` here would hand rustc a
 // `.Val`/`.None` match whose arms are `Ok`/`Err` — an I2 internal compiler
 // error, the same one `ProcessResult.signal` produced.

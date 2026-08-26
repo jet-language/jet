@@ -181,7 +181,7 @@ expr     = precedence climbing over:
   D-FENCE-RANGE1).
 - `#Track name :: value` / `#Track name := value` opt a binding into
   D-TRACK-ORIGIN1 provenance. Read it only as the typed comptime fact
-  `value.@origin -> OriginInfo?`; there is no runtime origin projection.
+  `value.@origin -> ?OriginInfo`; there is no runtime origin projection.
 - Arithmetic: `+ - * /` widen one numeric operand to the other when the ruled
   numeric widening law permits it; `% & | ^ << >>` remain integer-only.
   `+` on `String` is a teaching error pointing at interpolation. Compound
@@ -301,7 +301,7 @@ keep code readable from top to bottom. See
   (D-VERDICT-1321-1). `term.print`/`term.eprint` accept the same variadic
   form. `Float` always prints a decimal part (S21): `-5.0`, not `-5`.
 - `input()` / `input(prompt)` is prelude (D-NAME-ALIAS1); reads a line from
-  stdin, strips the trailing newline, and returns `String IOError!`.
+  stdin, strips the trailing newline, and returns `String !IOError`.
   Use `??` to unwrap or handle the error.
 - Functions: multi-argument calls, checked arity (E0104) and argument
   types (E0112). A function with a return type must return on every path
@@ -668,7 +668,7 @@ the block or register it with `tx.on_commit(…)` on the named form.
 **`Cell<T>`** (D-LOCALCELL1=A) is the local interior-mutation path. It lets a
 read receiver update private state without an `Arc` or an operating-system
 lock. `Cell.new(value)` infers `T`. Value methods are `get`, `set`, `replace`,
-and `get_or_set` for `Cell<T?>`. Closure methods `read` and `edit` keep the
+and `get_or_set` for `Cell<?T>`. Closure methods `read` and `edit` keep the
 dynamic loan inside one call. `get` and `get_or_set` copy their result, so the
 stored result type must support Jet's copy law. Use `read` when it does not.
 
@@ -701,7 +701,7 @@ copyable, comparable index+generation data, never touching `T` itself:
 world := Pool<Player>.new()
 kai :: world.add(Player{ name: "Kai", hp: 100, attack: 15, target: None })
 world[kai].target = Val(rem)          // nested write through a real place
-fallen :: world.remove(kai)           // T?, mirrors Map.remove
+fallen :: world.remove(kai)           // ?T, mirrors Map.remove
 ```
 
 (examples/features/memory/entity_world.jet, entity_tree.jet) `pool[id]`
@@ -782,11 +782,11 @@ close(^file)      // ^ mirrors ^File — file is consumed
 
 ### Optional composition
 
-An access marker composes with `?` (optional presence) directly: `&User?`
-means "write access over an optional User", `^Texture?` means "take an
+An access marker composes with the `?` presence prefix directly: `&?User`
+means "write access over an optional User", `^?Texture` means "take an
 optional Texture". The sigil and `?` follow the same type-side grammar as
-any other type annotation — the sigil is the parameter prefix, `?` is the
-type suffix.
+any other type annotation — the sigil is the parameter prefix, and `?` is the
+optional type prefix.
 
 ### E0029 — two access markers
 
@@ -808,8 +808,8 @@ Access markers use sigils only: bare `T` (read), `&T` (write), `^T`
 Structs and enums carry fields; methods attach behavior (S27). Ratified
 surface (Group 2): struct literals **`Type{f: v}`** (S29; flush, S29-FLUSH); enums with
 **`Type.Variant`** (S30); **`==` pattern tests** (S31); optional
-**`T?`** with **`Val(v)`** / **`None`** (S32); generic args
-**`Type<Args>`** (S33). `None` is only legal for `T?`, never plain `T`.
+**`?T`** with **`Val(v)`** / **`None`** (S32); generic args
+**`Type<Args>`** (S33). `None` is only legal for `?T`, never plain `T`.
 Fresh hidden-state construction uses `Type.new(…)`. Under D-SHAPE3a, the
 receiver may be omitted as `.new(…)` when an expected type from a binding,
 return, field, or call argument determines exactly one receiver. This is
@@ -866,7 +866,7 @@ impl Circle {
   D-AUTODERIVE-SYNTAX1=D). `#Codable` requests both codec directions;
   `#Encode` and `#Decode` request one direction.
 - **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) -> DataTree`
-  and `Decode.decode(tree: DataTree) -> Self [FieldError]!` are ordinary Jet
+  and `Decode.decode(tree: DataTree) -> Self ![FieldError]` are ordinary Jet
   trait methods. `DataTree.decode<T>()` is the one public typed-dispatch path;
   primitive, container, generated, and hand-written implementations all use it.
   Built-in derives build typed Jet items beside the marked type and check them
@@ -891,13 +891,13 @@ impl Circle {
   statement be exactly this shape (E0353), `at:` to name a real field
   (E0354), and purity-checks the whole synthesized function (S60/E3401) —
   a rule may reference only sibling fields and pure calls. `Type.validate(value)`
-  runs the block standalone, returning `value [FieldError]!`. Derived struct
+  runs the block standalone, returning `value ![FieldError]`. Derived struct
   decoders now pass a successfully shaped value through that validator, so
   shape and rule failures share one list. Hand-written codecs still opt into
   validation explicitly. `Validate.over(s)` starts the outside-context
   builder; chained `check(cond, at: field, "msg")` rules use the same field
   vocabulary and accumulate into `[FieldError]`, and `finish()` returns
-  `T [FieldError]!`. The contract ruling is recorded as
+  `T ![FieldError]`. The contract ruling is recorded as
   `D-VALIDATE-DECODE1=B`.
 - **Computed fields (D-FIELDPOL1 / D-FIELDMEMO1):** `name: T -> expr` is an
   unmarked read-time formula over sibling fields. Put `#Memo` immediately
@@ -1003,7 +1003,7 @@ impl Circle {
   **Decode-time migration transparency (D-MIGRATE3=A, retired by
   D-VALIDATE-DECODE1=B):** the separate migration-report result was removed.
   Every codec's typed `decode<T>` is the one canonical contract,
-  `T [FieldError]!` (or `[T] [FieldError]!` for CSV). Published
+  `T ![FieldError]` (or `[T] ![FieldError]` for CSV). Published
   schema migration remains silent inside that call; no second decoder or
   compatibility wrapper exists.
 
@@ -1093,33 +1093,33 @@ uses the ordinary implicit **`!Err`** route: `T` has a non-optional success and
 the default **`Err`** failure. Prefix **`?`** makes success optional, and prefix
 **`!`** names the error domain. Write **`?T !E`** for optional success with an
 explicit error, **`T !E`** for a non-optional success with an explicit error,
-**`!E`** for unit success with an explicit error, and bare **`!`** for unit
-success with the default `Err`. `E` is an allowed error domain. Omitting the
-error declaration on an ordinary return uses the same default-error meaning.
+and **`!E`** for unit success with an explicit error. Omitting the error
+declaration uses the implicit default `Err` route, including for unit success.
 Build outcomes with **`Ok(v)`** and **`Err(e)`**; test them with
 **`== .Ok(n)`** / **`== .Err(e)`** (same pattern machinery as M3 optionals).
-Cross-type **`?`** conversion uses one declared rail (D-ERR-CONV/D-FAIL-CONV1):
+Cross-type failure conversion uses one declared rail (D-ERR-CONV/D-FAIL-CONV1):
 `impl Source -> Target { … }` converts a `Source` error into `Target`, including
-the default `Err` target; `?` applies it automatically. A conversion into
+the default `Err` target; ordinary fallible propagation applies it automatically. A conversion into
 `Err` may name a foreign source type, while typed targets keep the orphan rule
 (S28). D-FAIL-CONV2=A ships that conversion for the standard library's own
-error family, so a plain `fn run() !` can pass a library failure up with `?`
-and declare nothing; a program's own error type still needs its own
+error family, so a plain `fn run()` can pass a library failure up and declare
+nothing; a program's own error type still needs its own
 declaration. `E2402` fires when `?` would need an undeclared conversion; `E2405`
 fires on duplicate declarations; `E2406` fires on typed-target orphan-rule
 violations.
 
-- Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
-  enclosing function must return a compatible fallible type. On **`T?`**,
-  `?` propagates `None` when the function returns an optional.
+- Fallible calls propagate implicitly (S7): they unwrap `ok` and early-return
+  `err`; an optional result similarly propagates `None`. The only postfix
+  journey form is contextual **`?(text)`**, which adds one failure-context
+  frame.
 - Return types use the prefix failure contract like every other type position.
   Write **`T`** for the ordinary implicit `!Err` route, **`?T !E`** for an
   optional success, **`T !(E1 | E2)`** for an explicit error union, and
-  **`!E`** for a unit-fallible result. Bare **`!`** keeps the default `Err`
-  error. Parentheses remain legal grouping where the type requires them.
+  **`!E`** for a unit-fallible result. Parentheses remain legal grouping where
+  the type requires them.
 - **`?? <expr>`** (S35/S71) is the fallback operator on a fallible value or
   optional: yields the success payload or evaluates the right side. Precedence is
-  looser than **`&&`** / **`||`**, so `a? ?? b` and `x == 1 || y ?? 0`
+  looser than **`&&`** / **`||`**, so `a ?? b` and `x == 1 || y ?? 0`
   parse predictably. The right side may be a value, **`return`**, **`return expr`**,
   or **`panic(…)`**. The retired word **`or`** is paused under D-S14-PAUSE and
   gets an ordinary parse error.
@@ -1313,7 +1313,7 @@ C, C++, Python, and JS are active namespace binders. C uses the namespace surfac
 C++ uses the same forms over a
 clang-AST-derived, content-addressed C-ABI shim: namespaces are selected
 explicitly, public scalar classes become owned opaque handles, exceptions become
-`T CppError!`, pure named callbacks keep their checked C ABI, and template
+`T !CppError`, pure named callbacks keep their checked C ABI, and template
 instantiations are requested on demand. `jet inspect bind cpp` requires the
 selected target and absolute clang/archiver paths; include/library search paths
 and link libraries are audited in binding provenance and reused at final link.
@@ -1389,7 +1389,7 @@ function. **`extern rust "std" { … }`** works for Rust standard-library items 
 no extra dependency. Non-`core` crates require an exact version pin (**E0701**).
 
 Allowed boundary types pass **by value**: `Int`, `Float`, `Bool`, `String`,
-`Char`, `[T]`/`[K:V]`/`T?`/`T E!` built from allowed types, and
+`Char`, `[T]`/`[K:V]`/`?T`/`T !E` built from allowed types, and
 structs/enums whose fields are allowed. Capability parameters use the ratified
 `&`/`^` meanings from D-FFI-CAP1; raw foreign calls carrying one require an
 audited `#Unsafe` boundary (**E0702**). Generated typed bindings own the
@@ -1442,7 +1442,7 @@ block of `package.jet` (`c@system` → pkg-config with a bare `-l <lib>` fallbac
 `c@"path"` → local `-L`/`-I`/`-l`) → else `pkg-config <lib>` → **E3201**. Link flags (`-L native=…`,
 `-l <lib>`) are resolved at **build time** (not during front-end checking, I3) and
 threaded into the `rustc` link line. By-value scalars/`String`/C-layout
-structs+enums at the edge; aggregates (`[T]`, maps, `T?`, tuples, …) → **E3203**.
+structs+enums at the edge; aggregates (`[T]`, maps, `?T`, tuples, …) → **E3203**.
 D-CABI-RESULT1 keeps status-plus-out APIs raw: a parameter may be `*T` only
 when `T` is C-safe, and every call is an unsafe-function call requiring an
 audited `#Unsafe("reason")` region. The caller creates the non-null pointer
@@ -1935,8 +1935,8 @@ needs outside the retained `core.ui` paint surface:
 - `web.on(selector, event, handler)` binds a DOM event listener. The handler gets
   a `WebEvent` value; handlers that do not need the event may ignore it.
 - `web.value(selector) -> String` reads an input value or element text.
-- `web.storage.local.get(key) -> String?` and
-  `web.storage.session.get(key) -> String?` read browser storage. Missing keys
+- `web.storage.local.get(key) -> ?String` and
+  `web.storage.session.get(key) -> ?String` read browser storage. Missing keys
   compose with the normal `??` fallback: `web.storage.local.get("tasks") ?? "[]"`.
 - `set(key, value)`, `remove(key)`, and `clear()` mutate local/session storage.
 
@@ -1951,7 +1951,7 @@ becomes the browser API checker.
 ordinary Core values. There is no `event` declaration syntax in this slice.
 
 - `event.new<T>() -> Event<T>` creates a typed many-subscriber event source.
-- `event.async_result<T, E>(policy, failures) -> AsyncEvent<T, E> String!`
+- `event.async_result<T, E>(policy, failures) -> AsyncEvent<T, E> !String`
   creates one scheduler-backed bounded queue; see [Bounded buffering law](#bounded-buffering-law)
   for its pressure behavior. `emit_async` returns `Task<DispatchReport<E>>`;
   queue, running, blocked, failure, cancellation, deadline, close, and overflow
@@ -2337,7 +2337,7 @@ empty `Iter<Unit>` and one input is identity. `partition(f)` returns
 concrete list/map/set `map` and `filter` are eager under D-CORE-EAGER1,
 and `.lazy()` enters the deferred plane explicitly.
 `first()` is the consuming positional terminal: use `skip(n).first()` for a
-zero-based pick, yielding `T?`; an index past the end returns `None`. This is
+zero-based pick, yielding `?T`; an index past the end returns `None`. This is
 the only positional-pick path; `nth` is not part of the API.
 
 D-S14-PAUSE: retired `lambda` / anonymous-function spellings get ordinary
@@ -2360,7 +2360,7 @@ generated prelude (D-CORENS1/D-CORENS-CANON1): file/terminal/env/process I/O,
 math, random, time, args, exact default and fixed-width numeric types, and
 unified `core.encoding` serialization (JSON/CSV/TOML/YAML over
 one `DataTree` value, plus `#Codable` derive). Every fallible call returns
-`T E!`, handled with `?`/`??`/a pattern test like any M4 result. Importing a
+`T !E`, handled with `??`, a pattern test, or contextual `?(text)` like any M4 result. Importing a
 module is free (R10) — codegen only emits the helpers a program actually
 calls. See core-library.md for the full module list, signatures, and
 examples; UI snapshots: `tests/ui/core_*`, teaching errors **E0037**–**E0039**.
@@ -2409,7 +2409,7 @@ Jet ships:
 - whole-number helpers: `is_even`, `is_odd`, `isqrt`, `factorial`, `binomial`,
   `digits`, `leading_ones`, `trailing_ones`, plus checked/saturating/wrapping
   integer families
-- exact ratios: `fraction(n, d) -> Fraction?` with `.numerator()`,
+- exact ratios: `fraction(n, d) -> ?Fraction` with `.numerator()`,
   `.denominator()`, `.to_string()`, `.to_float()`, `.is_zero()`, and arithmetic
 
 Examples: `examples/features/math/math_audit.jet`,
@@ -2453,7 +2453,7 @@ roots while retaining hostname verification. Passwords use the existing
 move-only `Secret`, cross one private extraction boundary, and are zeroized on
 failure and drop. Ambient task cancellation and `#Context` deadlines govern
 every transport wait; interruption after DATA is `DeliveryUnknown`.
-Optional `SMTPConfig.dkim:DkimConfig?` binds one Ed25519 signing identity to
+Optional `SMTPConfig.dkim:?DkimConfig` binds one Ed25519 signing identity to
 every send through that Mailer. The signer uses relaxed/relaxed DKIM over final
 MIME bytes, requires `from`, rejects invalid or absent requested headers before
 connecting, and never falls back to unsigned mail. Environment configuration
@@ -2465,7 +2465,7 @@ D-DATAFRAME1/D-DATA-SURFACE1 define one typed `core.data` path. `Table<T>` and
 filter/sort operations; `plan` inspects them without running selectors, while
 `collect` and reducers materialize them in order. `inner_join` returns stable
 `DataJoin<L, R>` row pairs with full duplicate-key multiplicity. `left_join`
-returns `DataJoin<L, R?>`, preserving every left row and representing an
+returns `DataJoin<L, ?R>`, preserving every left row and representing an
 unmatched right row as `None`.
 
 ## E2-M1 — Concurrency (tasks and channels, verified 2026-08-06)
@@ -2517,7 +2517,7 @@ Example and golden: `examples/features/concurrency/freeze_capture.jet` and
 `tests/ui/frozen_capture_use_after_move.jet` and
 `tests/ui/freeze_shared_source.jet`.
 
-`handle.join() -> T TaskFailure!` waits for the task and consumes its handle.
+`handle.join() -> T !TaskFailure` waits for the task and consumes its handle.
 Calling `.join()` twice is ordinary use-after-move (**E0121**). Dropping a bound
 `Task` without joining, using its result, or detaching it is a compile error
 (**L1101**, D-CONC-JOIN1) because the program may end before the task finishes.
@@ -2577,7 +2577,7 @@ linked send/receive pair, destructured at the call site: `(tx, rx) ::
 channel<T>()`. A second sender is `~tx` — there's no combined
 "channel" value to fetch one off of. `sender.send(value)` moves a `T` into the
 channel (ownership semantics for non-copy values), and
-`receiver.receive() -> T Closed!` blocks until a value arrives or all senders
+`receiver.receive() -> T !Closed` blocks until a value arrives or all senders
 are gone. Close the sender, then `loop value in receiver -> ...` drains until
 the channel closes. Channel payloads
 must be sendable (**E1102**).
@@ -2738,7 +2738,7 @@ refused, and a lambda may not capture the handle — so no child outlives the
 scope that joins it. `self` holds the receiver, never the group, so a method
 opens no new escape. A spawn through a parameter group still owns its captures.
 
-`join()` is fallible: `Task<T>.join() -> T TaskFailure!`. The failure values
+`join()` is fallible: `Task<T>.join() -> T !TaskFailure`. The failure values
 are `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`,
 `TaskStatus`, `.trace()`, and `.exception()` are retired; cancellation and
 deadline behavior use the one failure rail.
@@ -2772,9 +2772,9 @@ Combinators are nested selectors, not methods on a group handle:
 
 | Operation | Completion and cancellation |
 | --- | --- |
-| `task.all { a(), b() }` | Returns `[T] TaskFailure!`; waits for every child and fail-fast cancels the remaining children. |
-| `task.race { a(), b() }` | Returns `T TaskFailure!`; the first successful result wins and cancels the losers. |
-| `task.any { a(), b() }` | Returns `T TaskFailure!`; the first completed result wins and cancels the remaining children. |
+| `task.all { a(), b() }` | Returns `[T] !TaskFailure`; waits for every child and fail-fast cancels the remaining children. |
+| `task.race { a(), b() }` | Returns `T !TaskFailure`; the first successful result wins and cancels the losers. |
+| `task.any { a(), b() }` | Returns `T !TaskFailure`; the first completed result wins and cancels the remaining children. |
 | `task.group g(limit: n) { ... }` | Owns the dynamic children, bounds active children, and joins them at the closing brace. |
 
 - Waiting on several sources at once — a select — is a subjectless `if` table
@@ -3806,7 +3806,7 @@ entry; a program opts into CLI parsing by defining `fn run` with one parameter:
 struct ServeArgs {
     #[Doc("port to listen on"), Env("PORT")] port: Int{3000}
     #Short("v") verbose: Bool
-    config: String?
+    config: ?String
 }
 
 fn run(args: ServeArgs) {
@@ -3849,8 +3849,8 @@ api :: Output.Service{ name: "todo-api", entry: serve }
 release :: Output.Check{ name: "release", entry: verify_release }
 
 fn launch() {}
-fn serve() ! {}
-fn verify_release() ! {}
+fn serve() {}
+fn verify_release() {}
 ```
 
 `Output` is a closed sum with exactly `Library`, `Executable`, `Service`,
@@ -3872,7 +3872,7 @@ D-CLI-POS1=A adds positional filling for required value fields:
 | Field shape | Named form | Bare form | Absent at runtime |
 |---|---|---|---|
 | `Bool` | `--name` (boolean flag) | — | `false` |
-| `T?` (`T` a supported scalar) | `--name VALUE` (optional) | — | `None` |
+| `?T` (`T` a supported scalar) | `--name VALUE` (optional) | — | `None` |
 | scalar with `{expr}` | `--name VALUE` (optional) | — | `expr` |
 | required scalar with `#Flag` | `--name VALUE` only | rejected on purpose | runtime error, `core.args` voice |
 | any other supported scalar | `--name VALUE` | fills by declaration order | runtime error, `core.args` voice — no new diagnostic code |
@@ -3927,7 +3927,7 @@ lowercased command word and its `#Doc` is the command summary:
 ```jet
 #CLI(Standard)
 struct Deploy {
-    #[Doc("configuration file"), Env("DEPLOY_CONFIG")] config: String?
+    #[Doc("configuration file"), Env("DEPLOY_CONFIG")] config: ?String
     #Doc("preview changes") plan = plan_impl
 
     #Doc("apply the deployment")
@@ -4040,7 +4040,7 @@ time the bundle compiled at all) — the same side-channel `jet inspect semindex
   Jet-owned physical layouts; default-layout byte facts remain optional, and
   the lens names the registered diagnostic and reason when they are absent.
 - `origin` (D-TRACK-ORIGIN1=A) — typed `#Track` provenance rows. The projection
-  is the folded `OriginInfo?` value behind `value.@origin`; it carries no
+  is the folded `?OriginInfo` value behind `value.@origin`; it carries no
   runtime metadata channel and never reconstructs movement or ambiguity.
 - `derive` (D-ONCE-DERIVE1) — behavior already attached to structs,
   enums, and distinct types, with their checked identity and source span.
@@ -4349,9 +4349,9 @@ fn run() {
 ```
 
 `Plugin.load(path) -> Plugin` produces a handle (mirrors `core.db`'s
-`open`/`open_memory`); `.call(name, [Float]) -> Float String!`,
-`.call_int(name, [Int]) -> Int String!`, `.call_bool(name, [Bool]) -> Bool
-String!`, and `.call_text(name, [String]) -> String String!` are the typed instance
+`open`/`open_memory`); `.call(name, [Float]) -> Float !String`,
+`.call_int(name, [Int]) -> Int !String`, `.call_bool(name, [Bool]) -> Bool
+!String`, and `.call_text(name, [String]) -> String !String` are the typed instance
 methods. Every exported function remains homogeneous: all parameters and the
 return type use the same `Int`, `Float`, `Bool`, or `Text` shape (E1260). The
 wasmtime host embedded

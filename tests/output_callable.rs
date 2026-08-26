@@ -88,7 +88,7 @@ fn inspect_output_reports_selected_callable_facts() {
         "entry: launch",
         "source path: ",
         "callable identity: output_callable::launch",
-        "failure contract: !",
+        "failure contract: !Err",
         "implicit default !Err",
         "effects: IO",
         "selection reason: sole compatible Output",
@@ -106,7 +106,7 @@ fn inspect_output_reports_selected_callable_facts() {
         String::from_utf8_lossy(&json.stderr)
     );
     let json = String::from_utf8_lossy(&json.stdout);
-    assert!(json.contains("\"failure_contract\":\"!\""), "{json}");
+    assert!(json.contains("\"failure_contract\":\"!Err\""), "{json}");
     assert!(
         json.contains("\"failure_source\":\"implicit default !Err\""),
         "{json}"

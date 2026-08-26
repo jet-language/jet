@@ -2002,6 +2002,7 @@ impl<'a> Checker<'a> {
         // the carrier path, but let every other branch call use the normal
         // automatic propagation rule.
         let saved_expected = self.expected_type.clone();
+        self.normalize_contextual_expr(value);
         if let Some(Type::Result { ok, .. }) = saved_expected.as_ref() {
             if !matches!(value.without_parens(), Expr::Ok(..) | Expr::Err(..)) {
                 self.expected_type = Some((**ok).clone());
