@@ -54,19 +54,11 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     std::fs::create_dir_all(&build)
         .map_err(|e| BindError::IO(format!("could not create Perl build directory: {e}")))?;
 
-    let discoverer = build.join("JetDiscover.pm");
-    std::fs::write(&discoverer, DISCOVERER)
-        .map_err(|e| BindError::IO(format!("could not write Perl binding inspector: {e}")))?;
-    let discovered = run_capture(
-        Command::new(&perl)
-            .arg(format!("-I{}", build.display()))
-            .arg("-MJetDiscover")
-            .arg("-c")
-            .arg(&script)
-            .env("JET_PERL_BIND_SOURCE", &script),
-        "perl",
-    )?;
-    let functions = parse_function_names(&discovered)?;
+    // Discovery is deliberately source-only. `perl -c` executes BEGIN/CHECK
+    // blocks and `use` imports, so it is not a safe parser for attacker-owned
+    // binding input. The worker remains the explicit runtime boundary after a
+    // binding has been generated.
+    let functions = parse_function_names(source.as_bytes())?;
     let worker = cache.join(format!("{lib}_worker.pl"));
     let worker_source = render_worker(&functions);
     std::fs::write(&worker, &worker_source)
@@ -136,29 +128,40 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     Ok(result)
 }
 
-const DISCOVERER: &str = r#"package JetDiscover;
-use strict;
-use warnings;
-use B ();
-CHECK {
-    no strict 'refs';
-    my $target = $ENV{JET_PERL_BIND_SOURCE};
-    for my $name (sort keys %main::) {
-        next if $name !~ /\A[A-Za-z_][A-Za-z0-9_]*\z/;
-        my $code = *{"main::$name"}{CODE};
-        next if !defined($code);
-        my $file = B::svref_2object($code)->GV->FILE;
-        print "$name\n" if defined($file) && $file eq $target;
-    }
-}
-1;
-"#;
-
 fn parse_function_names(bytes: &[u8]) -> Result<Vec<BoundFunction>, BindError> {
     let text = std::str::from_utf8(bytes)
-        .map_err(|_| BindError::Source("Perl returned non-UTF-8 function metadata".into()))?;
+        .map_err(|_| BindError::Source("Perl source is not UTF-8".into()))?;
+    validate_perl_structure(text)?;
     let mut out = Vec::new();
-    for name in text.lines().map(str::trim).filter(|v| !v.is_empty()) {
+    for line in text.lines() {
+        let line = line.trim_start();
+        let Some(rest) = line.strip_prefix("sub") else {
+            continue;
+        };
+        if !rest
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_whitespace())
+        {
+            continue;
+        }
+        let rest = rest.trim_start();
+        let name_len = rest
+            .bytes()
+            .position(|byte| !(byte == b'_' || byte.is_ascii_alphanumeric()))
+            .unwrap_or(rest.len());
+        let name = &rest[..name_len];
+        if name.is_empty() {
+            return Err(BindError::Source(
+                "a Perl sub declaration needs a named function".into(),
+            ));
+        }
+        let tail = rest[name_len..].trim_start();
+        if !matches!(tail.as_bytes().first(), Some(b'(' | b'{' | b':')) {
+            return Err(BindError::Source(format!(
+                "Perl function `{name}` has an unsupported declaration"
+            )));
+        }
         if !ident(name) {
             return Err(BindError::Source(format!(
                 "Perl function `{name}` cannot be projected as a Jet identifier"
@@ -189,6 +192,52 @@ fn parse_function_names(bytes: &[u8]) -> Result<Vec<BoundFunction>, BindError> {
         ));
     }
     Ok(out)
+}
+
+fn validate_perl_structure(source: &str) -> Result<(), BindError> {
+    let mut stack = Vec::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut comment = false;
+    for (line, ch) in source.chars().enumerate() {
+        if comment {
+            if ch == '\n' {
+                comment = false;
+            }
+            continue;
+        }
+        if let Some(active) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == active {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '#' => comment = true,
+            '\'' | '"' | '`' => quote = Some(ch),
+            '(' | '[' | '{' => stack.push((ch, line + 1)),
+            ')' | ']' | '}' => {
+                let expected = match ch {
+                    ')' => '(',
+                    ']' => '[',
+                    '}' => '{',
+                    _ => unreachable!(),
+                };
+                if stack.pop().map(|(open, _)| open) != Some(expected) {
+                    return Err(BindError::Source("the script has a Perl parse error".into()));
+                }
+            }
+            _ => {}
+        }
+    }
+    if quote.is_some() || !stack.is_empty() {
+        return Err(BindError::Source("the script has a Perl parse error".into()));
+    }
+    Ok(())
 }
 
 fn render_worker(functions: &[BoundFunction]) -> String {
@@ -336,59 +385,6 @@ fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> {
     }
 }
 
-fn run_capture(command: &mut Command, tool: &'static str) -> Result<Vec<u8>, BindError> {
-    const CAP: usize = 64 * 1024;
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            BindError::ToolMissing(tool)
-        } else {
-            BindError::IO(format!("could not start `{tool}`: {e}"))
-        }
-    })?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
-    let out = std::thread::spawn(move || drain(stdout, CAP));
-    let err = std::thread::spawn(move || drain(stderr, CAP));
-    let deadline = Instant::now() + Duration::from_secs(60);
-    let status = loop {
-        match child
-            .try_wait()
-            .map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))?
-        {
-            Some(v) => break v,
-            None if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = out.join();
-                let _ = err.join();
-                return Err(BindError::ToolFailed(
-                    tool,
-                    "the tool exceeded the 60 second limit".into(),
-                ));
-            }
-            None => std::thread::sleep(Duration::from_millis(10)),
-        }
-    };
-    let stdout = out
-        .join()
-        .map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
-    let stderr = err
-        .join()
-        .map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
-    if status.success() {
-        Ok(stdout)
-    } else {
-        Err(BindError::ToolFailed(tool, launder(&stderr)))
-    }
-}
-
 fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> {
     let mut out = Vec::new();
     let mut buf = [0u8; 8192];
@@ -451,7 +447,10 @@ fn require_supported_host(unix: bool) -> Result<(), BindError> {
 mod tests {
     #[test]
     fn projects_perl_names_to_jet_casing_without_changing_foreign_lookup() {
-        let functions = super::parse_function_names(b"Fail\nSleep\nTransform\n").unwrap();
+        let functions = super::parse_function_names(
+            b"sub Fail { }\nsub Sleep { }\nsub Transform { }\n",
+        )
+        .unwrap();
         let jet = super::render_jet("ops", &functions);
         let worker = super::render_worker(&functions);
         for (foreign, projected) in [
@@ -468,5 +467,17 @@ mod tests {
     #[test]
     fn non_posix_hosts_fail_instead_of_emitting_a_posix_facade() {
         assert!(super::require_supported_host(false).is_err());
+    }
+
+    #[test]
+    fn source_discovery_does_not_run_compile_time_blocks() {
+        let functions = super::parse_function_names(
+            br#"BEGIN { system("touch pwned") }
+sub Safe { }
+"#,
+        )
+        .unwrap();
+        assert_eq!(functions.len(), 1);
+        assert_eq!(functions[0].jet, "safe");
     }
 }

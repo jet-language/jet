@@ -59,12 +59,10 @@ editors/zed/install.sh
 
 ## How the extension finds the server
 
-In order:
-
-1. `<workspace>/target/debug/jet` when the workspace contains `flake.nix`
-   (developing the compiler in this repo).
-2. `jet` on `$PATH` (e.g. from `nix develop`, or `nix profile install .#jet`).
-3. Falls back to `<workspace>/target/debug/jet` for other projects.
+The extension resolves `jet` from the editor's `$PATH` (for example, from
+`nix develop` or `nix profile install .#jet`). It does not execute a binary
+from the opened worktree; build the compiler and put the trusted binary on
+`$PATH` before opening the project.
 
 `jet self lsp` only runs the front end (no rustc), so the plain cargo binary works.
 Rebuild with `cargo build` and reload Zed to pick up server changes.

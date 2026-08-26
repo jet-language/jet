@@ -5633,13 +5633,7 @@ pub(crate) fn write_web_artifacts(
         }
     };
 
-    fs::create_dir_all(out_dir).map_err(|e| {
-        format!(
-            "error: couldn't create the {} folder: {}",
-            out_dir.display(),
-            e
-        )
-    })?;
+    let output_root = ensure_web_output_dir(out_dir)?;
 
     let manifest_path = out_dir.join("web.manifest.json");
     let dom_path = out_dir.join("jet_dom_runtime.js");
@@ -5649,6 +5643,18 @@ pub(crate) fn write_web_artifacts(
     let wasm_path = out_dir.join("app.wasm");
     let wasm_map_path = out_dir.join("app.wasm.map");
     let html_path = out_dir.join("index.html");
+    for output in [
+        &manifest_path,
+        &dom_path,
+        &js_path,
+        &js_map_path,
+        &wasm_rs_path,
+        &wasm_path,
+        &wasm_map_path,
+        &html_path,
+    ] {
+        validate_web_output_file(output, &output_root)?;
+    }
     // D-HTMLPAIR1 (ratified 2026-07-01, c134): precedence for the served HTML source —
     // (1) an explicit `#HTML("path.html")` marker, relative to the source
     //     file's own directory; a path that doesn't resolve is a hard error
@@ -5791,6 +5797,72 @@ pub(crate) fn write_web_artifacts(
         wasm_map: wasm_map_written,
         html: html_path,
     })
+}
+
+fn ensure_web_output_dir(path: &Path) -> Result<PathBuf, String> {
+    let cwd = fs::canonicalize(".")
+        .map_err(|e| format!("error: couldn't resolve the web output root: {e}"))?;
+    ensure_web_directory(path).map_err(|e| {
+        format!(
+            "error: couldn't create the {} folder safely: {}",
+            path.display(),
+            e
+        )
+    })?;
+    let real = fs::canonicalize(path)
+        .map_err(|e| format!("error: couldn't resolve {}: {e}", path.display()))?;
+    if !real.starts_with(&cwd) {
+        return Err(format!(
+            "error: web output directory `{}` escapes the working directory",
+            path.display()
+        ));
+    }
+    Ok(real)
+}
+
+fn validate_web_output_file(path: &Path, root: &Path) -> Result<(), String> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "error: web output `{}` must not be a symlink",
+                path.display()
+            ));
+        }
+    }
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let real_parent = fs::canonicalize(parent)
+        .map_err(|e| format!("error: couldn't resolve web output parent: {e}"))?;
+    if !real_parent.starts_with(root) {
+        return Err(format!(
+            "error: web output `{}` escapes the output directory",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_web_directory(path: &Path) -> std::io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "web output directory must not be a symlink",
+        )),
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "web output path is not a directory",
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                ensure_web_directory(parent)?;
+            }
+            fs::create_dir(path)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn strip_manifest_source_map(manifest: &str) -> String {

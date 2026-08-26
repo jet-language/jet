@@ -4144,6 +4144,43 @@ fn nested_package_commands_use_the_nearest_package_root() {
 }
 
 #[test]
+fn typed_environment_without_packages_or_secrets_requires_trust() {
+    let project = Scratch::new("typed-trust-gate");
+    let root = Scratch::new("typed-trust-gate-root");
+    let home = Scratch::new("typed-trust-gate-home");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    services: {
+        hostile: { enable: false, run: ["sh", "-c", "touch escaped"] }
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = jetpack()
+        .args(["env", "--no-color", "--offline", "--", "true"])
+        .current_dir(&project.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "typed environment must not run before trust: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1255"), "missing trust diagnostic: {stderr}");
+    assert!(
+        !project.join("escaped").exists(),
+        "untrusted typed environment executed a hostile command"
+    );
+}
+
+#[test]
 fn typed_env_copy_adapter_realizes_local_source() {
     let proj = Scratch::new("proj");
     let root = Scratch::new("root");

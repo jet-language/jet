@@ -30,7 +30,8 @@ mod Types;
 
 pub use Diagnostics::merge_error_to_diagnostic;
 pub use Environment::{
-    valid_env_name, DotenvSpec, EnvironmentIntegration, EnvironmentLifecycle, FileConflict,
+    checked_dotenv_path, valid_env_name, DotenvSpec, EnvironmentIntegration, EnvironmentLifecycle,
+    FileConflict,
     FileMode, FormatterSpec, HookAction, HookSpec, IntegrationKind, LanguageExpansion,
     LanguagePack, LanguagePackCatalog, LanguageProjection, LanguageSpec, ManagedFile,
     ManagedFileError, PackageProfileError, PackageProfileFact, PackageProfilePackage,

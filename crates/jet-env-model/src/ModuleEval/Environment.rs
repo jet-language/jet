@@ -2414,9 +2414,14 @@ pub fn dotenv_from_value(value: &CtValue) -> Result<Vec<DotenvSpec>, String> {
 fn validate_dotenv_spec(spec: &DotenvSpec) -> Result<(), String> {
     if spec.file.is_empty()
         || Path::new(&spec.file).is_absolute()
+        || spec.file.contains(['\\', ':'])
+        || spec.file.chars().any(char::is_control)
         || Path::new(&spec.file)
             .components()
-            .any(|component| component == std::path::Component::ParentDir)
+            .any(|component| {
+                component == std::path::Component::ParentDir
+                    || !matches!(component, std::path::Component::Normal(_))
+            })
     {
         return Err(format!(
             "dotenv file `{}` must stay inside the project",
@@ -2437,6 +2442,33 @@ fn validate_dotenv_spec(spec: &DotenvSpec) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Resolve a declared dotenv file against the real project root. The caller
+/// must read the returned canonical path, never the unchecked joined path.
+pub fn checked_dotenv_path(root: &Path, relative: &str) -> Result<std::path::PathBuf, String> {
+    let relative_path = Path::new(relative);
+    if relative.is_empty()
+        || relative_path.is_absolute()
+        || relative.contains(['\\', ':'])
+        || relative.chars().any(char::is_control)
+        || relative_path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err("dotenv path must be a normal project-relative path".to_string());
+    }
+    let metadata = std::fs::symlink_metadata(root).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err("dotenv project root must be a real directory".to_string());
+    }
+    let real_root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let candidate = real_root.join(relative_path);
+    let real = std::fs::canonicalize(&candidate).map_err(|error| error.to_string())?;
+    if !real.starts_with(&real_root) {
+        return Err("dotenv path escapes the project root through a symlink".to_string());
+    }
+    Ok(real)
 }
 
 pub fn valid_env_name(name: &str) -> bool {

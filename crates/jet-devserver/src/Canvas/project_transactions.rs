@@ -222,6 +222,8 @@ fn project_rename_sources(
     let mut sources = Vec::new();
     for file in ctx.files.iter().filter(|file| file.kind == "source") {
         let path = ctx.project_root.join(&file.path);
+        validate_project_path(&ctx.project_root, &path, &file.path)
+            .map_err(|error| ProjectRenameError::new("stale", error))?;
         if !ctx.parts.should_index(&path) {
             continue;
         }
@@ -364,6 +366,7 @@ pub(super) fn apply_project_add_dependency(
     let spec_text = required_project_string(request, "spec")?;
     let spec = project_dep_spec(&spec_text)?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
+    validate_project_path(&ctx.project_root, &manifest_path, &manifest_rel)?;
     let before =
         fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
     apply_canonical_dependency(
@@ -412,6 +415,7 @@ pub(super) fn apply_project_edit_pkg_field(
     let value = required_project_string(request, "value")?;
     validate_payload_field(&field, &value)?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
+    validate_project_path(&ctx.project_root, &manifest_path, &manifest_rel)?;
     let before =
         fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
     let after =
@@ -450,6 +454,7 @@ pub(super) fn apply_project_add_target(
         &json_string_field(request, "target").unwrap_or_else(|| "executable".to_string()),
     )?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
+    validate_project_path(&ctx.project_root, &manifest_path, &manifest_rel)?;
     let before =
         fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
     let facts = jet_driver::Package::PackageFacts::parse(&before, manifest_rel.clone())
@@ -552,6 +557,8 @@ pub(super) fn apply_project_create_package(
 
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let entry_path = ctx.project_root.join(&entry_rel);
+    validate_project_path(&ctx.project_root, &manifest_path, &manifest_rel)?;
+    validate_project_path(&ctx.project_root, &entry_path, &entry_rel)?;
     if manifest_path.exists() || entry_path.exists() {
         return Err(project_edit_error(
             "conflict",
@@ -621,8 +628,20 @@ pub(super) fn apply_project_add_workspace_member(
         .unwrap_or_else(|| jet_driver::Syntax::WORKSPACE_FILE.to_string());
     let member_path = clean_project_rel_path(&required_project_string(request, "member_path")?)?;
     let member_dir = ctx.project_root.join(&member_path);
-    if !member_dir.join(jet_driver::Syntax::PACKAGE_FILE).is_file()
-        && !member_dir.join(jet_driver::Syntax::PAYLOAD_FILE).is_file()
+    validate_project_path(&ctx.project_root, &member_dir, &member_path)?;
+    let package_path = member_dir.join(jet_driver::Syntax::PACKAGE_FILE);
+    let payload_path = member_dir.join(jet_driver::Syntax::PAYLOAD_FILE);
+    validate_project_path(
+        &ctx.project_root,
+        &package_path,
+        &format!("{member_path}/{}", jet_driver::Syntax::PACKAGE_FILE),
+    )?;
+    validate_project_path(
+        &ctx.project_root,
+        &payload_path,
+        &format!("{member_path}/{}", jet_driver::Syntax::PAYLOAD_FILE),
+    )?;
+    if !package_path.is_file() && !payload_path.is_file()
     {
         return Err(project_edit_error(
             "not_found",
@@ -630,6 +649,7 @@ pub(super) fn apply_project_add_workspace_member(
         ));
     }
     let workspace_path = ctx.project_root.join(&workspace_rel);
+    validate_project_path(&ctx.project_root, &workspace_path, &workspace_rel)?;
     let before = fs::read_to_string(&workspace_path).unwrap_or_default();
     let existed = workspace_path.is_file();
     require_touched_revision(
@@ -675,6 +695,7 @@ pub(super) fn apply_project_add_env_service(
         .transpose()?
         .unwrap_or_else(|| jet_driver::Syntax::ENV_FILE.to_string());
     let env_path = ctx.project_root.join(&env_rel);
+    validate_project_path(&ctx.project_root, &env_path, &env_rel)?;
     let existed = env_path.is_file();
     require_touched_revision(
         touched,
@@ -1081,6 +1102,100 @@ pub(super) fn clean_project_rel_path(path: &str) -> Result<String, String> {
     Ok(parts.join("/"))
 }
 
+/// Check the lexical and real filesystem path before a Canvas transaction can
+/// read, create, replace, or remove it. Missing final components are allowed,
+/// but every existing component must be a real directory or file below the
+/// canonical project root.
+fn validate_project_path(root: &Path, path: &Path, relative: &str) -> Result<(), String> {
+    let root_metadata = fs::symlink_metadata(root).map_err(|error| {
+        project_edit_error("io", &format!("could not inspect the Canvas project root: {error}"))
+    })?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err(project_edit_error(
+            "io",
+            "Canvas project root must be a real directory",
+        ));
+    }
+    let relative_path = Path::new(relative);
+    if relative.is_empty()
+        || relative_path.is_absolute()
+        || relative_path.components().any(|component| {
+            !matches!(component, std::path::Component::Normal(_))
+        })
+        || !path.starts_with(root)
+    {
+        return Err(project_edit_error(
+            "bad_request",
+            "Canvas project paths must stay inside the project",
+        ));
+    }
+    let canonical_root = fs::canonicalize(root).map_err(|error| {
+        project_edit_error("io", &format!("could not resolve the Canvas project root: {error}"))
+    })?;
+    let mut current = root.to_path_buf();
+    let components = relative_path.components().collect::<Vec<_>>();
+    for (index, component) in components.iter().enumerate() {
+        current.push(component.as_os_str());
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(project_edit_error(
+                    "io",
+                    "Canvas project paths must not traverse symlinks",
+                ));
+            }
+            Ok(metadata) if index + 1 < components.len() && !metadata.is_dir() => {
+                return Err(project_edit_error(
+                    "io",
+                    "Canvas project path has a non-directory parent",
+                ));
+            }
+            Ok(_) => {
+                let canonical = fs::canonicalize(&current).map_err(|error| {
+                    project_edit_error("io", &format!("could not resolve Canvas project path: {error}"))
+                })?;
+                if !canonical.starts_with(&canonical_root) {
+                    return Err(project_edit_error(
+                        "io",
+                        "Canvas project path escapes the project root",
+                    ));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => {
+                return Err(project_edit_error(
+                    "io",
+                    &format!("could not inspect Canvas project path: {error}"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_project_directory(path: &Path) -> std::io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "Canvas project directory must not be a symlink",
+        )),
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "Canvas project path is not a directory",
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                ensure_project_directory(parent)?;
+            }
+            fs::create_dir(path)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn is_reserved_project_path_part(part: &str) -> bool {
     matches!(part, ".git" | ".jet" | "target" | "build")
 }
@@ -1125,6 +1240,9 @@ fn finish_project_changes(
     op: &str,
     mut changes: Vec<ProjectChange>,
 ) -> Result<String, String> {
+    for change in &changes {
+        validate_project_path(&ctx.project_root, &change.path, &change.rel)?;
+    }
     if matches!(op, "rename_binding" | "rename_function") {
         normalize_and_format_project_changes(ctx, &mut changes)?;
     } else {
@@ -1300,8 +1418,15 @@ fn write_project_changes_with_rollback(
             if change.before == change.after {
                 continue;
             }
+            validate_project_path(&ctx.project_root, &change.path, &change.rel)
+                .map_err(|error| {
+                    SourceWriteError::Io(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        error,
+                    ))
+                })?;
             if let Some(parent) = change.path.parent() {
-                if let Err(error) = fs::create_dir_all(parent) {
+                if let Err(error) = ensure_project_directory(parent) {
                     rollback_project_writes(&written);
                     return Err(SourceWriteError::Io(error));
                 }

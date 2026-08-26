@@ -24,19 +24,11 @@ impl Extension for JetExtension {
 }
 
 fn find_jet_binary(worktree: &Worktree) -> Result<String> {
-    let root = worktree.root_path();
-    let debug_bin = format!("{root}/target/debug/jet");
-
-    // Developing the compiler itself: prefer the cargo-built debug binary.
-    if worktree.read_text_file("flake.nix").is_ok() {
-        return Ok(debug_bin);
-    }
-
     if let Some(path) = worktree.which("jet") {
         return Ok(path);
     }
 
-    Ok(debug_bin)
+    Err("Jet language server `jet` was not found on PATH".into())
 }
 
 zed::register_extension!(JetExtension);

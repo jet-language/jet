@@ -948,7 +948,13 @@ pub(super) fn canvas_action_candidate(
     let formatted = jet_driver::Formatter::format_source(&changed)
         .map_err(|diags| diagnostics_error(path, src, &diags))?;
     let tmp = temp_canvas_check_path(path);
-    fs::write(&tmp, &formatted).map_err(|e| edit_error("io", &e.to_string()))?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .map_err(|e| edit_error("io", &e.to_string()))?;
+    std::io::Write::write_all(&mut file, formatted.as_bytes())
+        .map_err(|e| edit_error("io", &e.to_string()))?;
     let (check, _) = jet_driver::Driver::check_file(&tmp.display().to_string(), None, true);
     let _ = fs::remove_file(&tmp);
     let errors = check

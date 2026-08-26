@@ -1,0 +1,97 @@
+{
+  "id": "D-MEM-HARDEN1",
+  "cardId": "#1888",
+  "title": "Shipping runtime checks for unsafe islands and foreign edges",
+  "group": "safety",
+  "gist": "Choose how CI watches unsafe code and foreign memory before release.",
+  "lesson": "Jet proves safe code at compile time. An `#Unsafe(\"reason\")` gate marks raw or foreign memory; the compiler records the boundary but cannot prove its promise. Typed obligations name facts such as `valid_ptr`, `aligned`, and `no_alias`. A runtime sentry checks accesses against allocation bounds, liveness, and alignment. FFI means a call to C, C++, or Rust across Jet's boundary. Quarantine gives foreign code tracked allocations, so a bad write faults instead of corrupting Jet's heap. Hardened mode turns checks on at trust boundaries. Safe Jet adds no checks.",
+  "story": "Maya maintains a parser that calls a C tokenizer. Her fuzzing tests can exercise a bad `#Unsafe` index or a foreign write only by leaving Jet's toolchain and using a whole-process sanitizer. She wants CI to run the same tests with island checks, fix each located fault, and ship the normal artifact after the checks pass.",
+  "inWild": "# package.jet\ndeps: .{ tokenizer: c.tokenizer#1.4 }\n\n# src/parser.jet\n#Unsafe(\"C tokenizer writes only within this buffer\") {\n    tokenizer.next(buffer, length)\n}\n\n$ jet test src/parser.jet\ntest result: ok\n\n$ jet test src/parser.jet --profile=hardened\nRuntime fault [R0801]: raw access used an address outside `buffer`\n  --> src/parser.jet:4, in #Unsafe gate\n Why: tokenizer wrote 8 bytes past the live allocation.\n Fix: repair the index or foreign contract, then rerun this profile.\n obligation: valid_ptr = false\n foreign: tokenizer = fenced\nexit: 1",
+  "detail": "Derived plan: ratify one complete contract. Then implement the selected profile through the shared Prelude sentry and fence seams. Prove normal and hardened runs across every applicable execution tier. Register actionable reports, update the audit and dossier projections, and measure safe-only overhead.\n\nOwner gates: I8 approves the new runtime-hardening mechanism. I7 approves any new command or blessed profile name. D-UNSAFE-OBLIG1 decides whether runtime evidence supplements or discharges typed obligations. D-MEM-SENTRY1's existing I9 carve-out covers dev and hardened sentries. A new tier needs another owner ruling. D-MEM-GUARANTEE1 already fixes `harden: true` as all-foreign-dependency containment. Any narrower meaning must name an amendment.\n\nD-BUILDPROFILE1 governs `--profile=<name>`; reuse must not create a second profile axis. D-PACKAGE-POLICY-SCOPE1 owns the typed `policy:` field. D-FFI-UNIFY1 and D-FFI-CAP1/E0702 stay the FFI contract. D-ALLOC-PROGRAM1 stays separate; the fence must not become the program allocator. I1 remains in force. I4 is a mandatory implementation gate for new reports, not an owner choice. I6 remains unchanged because this design adds no dependency.",
+  "options": [
+    {
+      "key": "A",
+      "name": "Built-in `--profile=hardened`, dual proof, and a full foreign fence (recommended)",
+      "detail": "Use the existing named-profile selector on `jet build` and `jet test`. The built-in name turns on sentries for every `#Unsafe` operation and uses the existing all-foreign-dependency fence. Required static obligations still appear and pass. Runtime evidence records whether each asserted obligation held on this run. Safe Jet has no added checks. Gain: one CI command tests the shipping shape and names the gate, operation, obligation, and foreign component. Loss: vendor code inside the fence can run slower.",
+      "technical": "Reuse D-BUILDPROFILE1's `--profile=<name>` selector and D-MEM-GUARANTEE1's `harden: true` containment meaning. Extend `jet test` to accept the same selector. Amend D-UNSAFE-OBLIG1 only to record runtime evidence; missing static assertions remain E3107. Complete D-MEM-SENTRY1's named hardened tier and use its existing I9 carve-out. D-FFI-CAP1 and E0702 keep their current access modes. The selected profile fences every foreign dependency. Add no allocator and no external dependency.",
+      "code": "$ jet test src/parser.jet\ntest result: ok\n\n$ jet test src/parser.jet --profile=hardened\nRuntime fault [R0801]: raw access used an address outside `buffer`\n  --> src/parser.jet:4, in #Unsafe gate\n Why: tokenizer wrote 8 bytes past the live allocation.\n Fix: repair the index or foreign contract, then rerun this profile.\n obligation: valid_ptr = false\n foreign: tokenizer = fenced\nexit: 1\n\n$ jet build src/parser.jet --profile=hardened\nbuilt parser (hardened; foreign dependencies fenced)"
+    },
+    {
+      "key": "B",
+      "name": "Composable `--harden`, runtime discharge, and an edge-only fence",
+      "detail": "Use a separate `--harden` modifier that composes with `--profile=release`, `--profile=debug`, or a package profile. In this mode, the runtime witness may discharge `valid_ptr`, `aligned`, and `no_alias`; a missing postfix assertion is allowed only there. Quarantine covers allocations and access modes visible at each FFI call. Foreign internal allocations remain trusted. Gain: teams can test any optimization profile and pay only at exposed edges. Loss: an untested path keeps no runtime evidence, and this mode cannot claim whole-binary containment.",
+      "technical": "Add a new command flag under I7 instead of adding a blessed profile. Amend D-UNSAFE-OBLIG1 so runtime discharge is legal only for this mode; normal builds retain E3107. This is narrower than D-MEM-GUARANTEE1's `harden: true`, so that existing meaning stays unchanged and the new report must not say `fenced` for foreign internals. D-MEM-SENTRY1's I9 carve-out covers sentries only; no engine may add policy.",
+      "code": "# package.jet\npolicy: .{ unsafe: .Obligations }\n\n# src/parser.jet\n#Unsafe(\"C tokenizer writes only within this buffer\") {\n    tokenizer.next(buffer, length)\n    // no static postfix assertion\n}\n\n$ jet test src/parser.jet\nError [E3107]: `tokenizer.next` is missing `valid_ptr`\n Fix: add a typed assertion or select the hardened modifier.\n\n$ jet test src/parser.jet --profile=release --harden\nRuntime fault [R0801]: raw access used an address outside `buffer`\n obligation: valid_ptr = runtime-failed\n foreign boundary: watched\n foreign internals: TRUSTED\nverdict: exercised boundary only"
+    },
+    {
+      "key": "C",
+      "name": "Manifest `harden: true`, static obligations, and no new command",
+      "detail": "Keep activation in the package manifest. `policy: .{ harden: true }` makes ordinary `jet test` and `jet build` use release sentries and the existing fence for every foreign dependency. Typed obligations keep their current static discharge law; runtime faults remain execution evidence, not a substitute. Gain: the shipping guarantee is versioned with the package and cannot depend on a CI command. Loss: a one-off hardened run needs a manifest change, and every foreign dependency pays the fence cost.",
+      "technical": "Reuse D-MEM-GUARANTEE1=A without a new command flag or profile name. Do not amend D-UNSAFE-OBLIG1. `harden: true` means all foreign dependencies are contained; `contain: [deps]` remains the narrower explicit allowlist when a package does not claim the whole-binary guarantee. D-BUILDPROFILE1 stays optimization-only for this choice. D-ALLOC-PROGRAM1 remains separate.",
+      "code": "# package.jet\npolicy: .{ harden: true }\n\n# src/parser.jet\n#Unsafe(\"C tokenizer writes only within this buffer\") {\n    tokenizer.next(buffer, length)\n        assert valid_ptr, aligned\n}\n\n$ jet test src/parser.jet\nRuntime fault [R0801]: raw access used an address outside `buffer`\n obligation: valid_ptr = false\n foreign: tokenizer = fenced\n\n$ jet build src/parser.jet\nbuilt parser (hardened)"
+    }
+  ],
+  "comparisons": [
+    {
+      "lang": "Rust",
+      "note": "Rust sanitizer workflows instrument an artifact or whole process. They do not make the `unsafe` block or foreign allocation scope a first-class profile.",
+      "code": "RUSTFLAGS=\"-Zsanitizer=address\" cargo test"
+    },
+    {
+      "lang": "Zig",
+      "note": "Zig debug checks cover broad language operations and release removes them. Jet can keep safe code statically proven and spend runtime cost at named trust boundaries.",
+      "code": "zig build -Doptimize=Debug\nzig build -Doptimize=ReleaseFast"
+    },
+    {
+      "lang": "Fil-C",
+      "note": "Fil-C shows that checked foreign code can use tracked pointers with an ABI change and runtime cost. Jet can scope that cost to its named islands.",
+      "code": "fil-c clang source.c -o app"
+    }
+  ],
+  "rec": "A",
+  "recommendation": {
+    "why": "Option A gives CI one explicit profile, preserves compile-time obligations, and reuses the already-ratified all-foreign-dependency fence. It adds runtime evidence without changing safe Jet or the normal release artifact.",
+    "whyNot": [
+      {
+        "key": "B",
+        "reason": "B lets untested code pass the static obligation floor and leaves foreign internals trusted. It helps edge diagnosis, but it cannot support a whole-binary shipping claim."
+      },
+      {
+        "key": "C",
+        "reason": "C is reproducible, but it requires manifest edits for a one-run check and does not give the requested command-level profile. It also keeps runtime evidence separate from obligation discharge."
+      }
+    ],
+    "tradeoff": "Option A accepts the cost of fencing every foreign dependency in hardened builds. The report must show that cost and each component's status, while normal builds remain unchanged."
+  },
+  "hybrid": {
+    "result": "A",
+    "synthesis": "Option A keeps static proof, adds runtime evidence, and uses the existing all-dependency fence.",
+    "harvest": [
+      {
+        "key": "A",
+        "aspect": "Uses the current profile selector.",
+        "use": "Keep the spelling."
+      },
+      {
+        "key": "B",
+        "aspect": "Composes with optimization choices.",
+        "use": "Keep composition as a later extension."
+      },
+      {
+        "key": "C",
+        "aspect": "Keeps policy reproducible.",
+        "use": "Retain package harden as a shipping floor."
+      }
+    ]
+  },
+  "checkInstructions": "Implement one shared profile fact. Route sentry and fence decisions through Prelude functions on every applicable tier. Keep engines as adapters. Prove the normal pass, the hardened fault report, audit projections, and safe-only overhead.",
+  "ballotMode": "full",
+  "shortAuthorizedBy": null,
+  "reviewPasses": {
+    "base": "The base pass compared a named profile, a modifier, and package policy. It kept profile spelling, obligation discharge, and FFI scope in each complete option.",
+    "boilOcean": "The breadth pass tested whole-program checking, garbage collection, sidecar isolation, and sanitizer-only workflows. Those choices either duplicate safe Jet's static proof or leave named islands unprotected.",
+    "hybrid": "The hybrid pass kept the modifier's profile composition and the package policy's reproducibility. It rejected both as the primary surface because they add a second activation story or remove the requested one-command test.",
+    "cooperative": "The cooperative pass gave the losing options their strongest use: B fits debug-plus-release matrices, and C fits repositories that make shipping policy declarative. Neither loses its stated boundary or evidence cost.",
+    "adversarial": "The adversarial pass attacked false confidence from untested paths, foreign code that writes through a borrowed buffer, and accidental allocator replacement. The ballot labels exercised evidence, foreign trust, and the separate program allocator gate."
+  }
+}

@@ -679,7 +679,21 @@ pub(super) fn compose_env_scoped(
             );
             return Err(2);
         }
-        let dotenv_path = plan.project_root.join(relative);
+        let dotenv_path = match jet_env_model::ModuleEval::checked_dotenv_path(
+            &plan.project_root,
+            path,
+        ) {
+            Ok(path) => path,
+            Err(error) => {
+                live.clear();
+                theme.error(
+                    "couldn't load dotenv file",
+                    &format!("`{path}`: {error}"),
+                    "keep dotenv files inside the project and remove symlink escapes.",
+                );
+                return Err(2);
+            }
+        };
         match read_dotenv(&dotenv_path) {
             Ok(values) => {
                 for (name, value) in values {

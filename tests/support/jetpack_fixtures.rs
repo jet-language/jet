@@ -57,14 +57,65 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) {
     }
 }
 
+pub fn studio_addr(line: &str) -> String {
+    let printed = line
+        .trim()
+        .strip_prefix("http://")
+        .expect("Studio service URL must use http");
+    let (host, suffix) = printed
+        .split_once("/studio/")
+        .expect("Studio service URL must point at /studio/");
+    format!("{host}{suffix}")
+}
+
+pub fn studio_raw(addr: &str, request: &str) -> String {
+    let connect_addr = addr.split_once('?').map(|(host, _)| host).unwrap_or(addr);
+    let mut stream = std::net::TcpStream::connect(connect_addr).unwrap();
+    {
+        use std::io::Write;
+        stream.write_all(request.as_bytes()).unwrap();
+    }
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    let mut response = String::new();
+    {
+        use std::io::Read;
+        if let Err(e) = stream.read_to_string(&mut response) {
+            assert_eq!(
+                e.kind(),
+                std::io::ErrorKind::ConnectionReset,
+                "studio HTTP read failed: {e}"
+            );
+        }
+    }
+    response
+}
+
 pub fn studio_http(addr: &str, method: &str, path: &str, body: &str) -> String {
-    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    let (connect_addr, session) = addr.split_once('?').unwrap_or((addr, ""));
+    let target = if session.is_empty() {
+        path.to_string()
+    } else {
+        let separator = if path.contains('?') { '&' } else { '?' };
+        format!("{path}{separator}{session}")
+    };
+    let origin = format!("http://{connect_addr}");
+    let content_type = if method == "POST" {
+        "Content-Type: application/json\r\n"
+    } else {
+        ""
+    };
+    let origin_header = if method == "POST" {
+        format!("Origin: {origin}\r\n")
+    } else {
+        String::new()
+    };
+    let mut stream = std::net::TcpStream::connect(connect_addr).unwrap();
     {
         use std::io::Write;
         write!(
             stream,
-            "{method} {path} HTTP/1.1\r\nHost: local\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
+            "{method} {target} HTTP/1.1\r\nHost: {connect_addr}\r\n{origin_header}{content_type}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len(),
         )
         .unwrap();
     }

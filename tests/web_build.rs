@@ -3284,6 +3284,32 @@ fn run() { print("hello") }
 }
 
 #[test]
+fn embedded_devserver_rejects_windows_absolute_static_paths() {
+    let src = r#"
+use core.web.devserver as devserver
+fn dev() {
+    server :: devserver.app()
+    server.port(8080)
+    server.serve()
+}
+fn run() { print("host") }
+"#;
+    let compiled = jet::compile_with_path(src, "tests/fixtures/web_embedded_devserver.jet")
+        .expect("embedded devserver must compile");
+    assert!(
+        compiled
+            .rust
+            .contains("fn jet_devserver_static_relative_path"),
+        "generated devserver omitted the shared static-path guard"
+    );
+    assert!(
+        compiled.rust.contains("Component::Prefix")
+            && compiled.rust.contains("windows_drive_prefix"),
+        "generated devserver must reject Windows drive and rooted paths"
+    );
+}
+
+#[test]
 fn module_local_dev_is_validated_as_web_runtime() {
     let src = r#"#Target(Web)
 module tools {

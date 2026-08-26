@@ -186,8 +186,8 @@ pub fn keygen(force: bool) -> Result<(PathBuf, String), String> {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("couldn't create keys directory: {e}"))?;
     }
-    std::fs::write(&path, &identity).map_err(|e| format!("couldn't write identity: {e}"))?;
-    set_mode(&path, 0o600);
+    atomic_write_private(&path, identity.as_bytes())
+        .map_err(|e| format!("couldn't write identity: {e}"))?;
     Ok((path, recipient))
 }
 
@@ -222,6 +222,18 @@ pub fn add_recipient(project_dir: &Path, recipient: &str) -> Result<bool, String
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    atomic_write_with_mode(path, bytes, None)
+}
+
+fn atomic_write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    atomic_write_with_mode(path, bytes, Some(0o600))
+}
+
+fn atomic_write_with_mode(
+    path: &Path,
+    bytes: &[u8],
+    mode: Option<u32>,
+) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("`{}` has no parent directory", path.display()))?;
@@ -235,9 +247,14 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .unwrap_or("secret");
     let temp = parent.join(format!(".{file_name}.tmp-{}-{nonce}", std::process::id()));
     let result = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if let Some(mode) = mode {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(mode);
+        }
+        let mut file = options
             .open(&temp)
             .map_err(|e| format!("couldn't create `{}`: {e}", temp.display()))?;
         file.write_all(bytes)
@@ -672,15 +689,6 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-#[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
-}
-
-#[cfg(not(unix))]
-fn set_mode(_path: &Path, _mode: u32) {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -711,6 +719,27 @@ mod tests {
         std::env::set_var("JET_KEYS_DIR", &dir);
         assert_eq!(identity_path(), dir.join("secrets.identity"));
         std::env::remove_var("JET_KEYS_DIR");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_atomic_write_creates_identity_with_restricted_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "jet_secrets_private_write_{}_{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("secrets.identity");
+        atomic_write_private(&path, b"AGE-SECRET-KEY-1-test").unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "private identity must be created with restrictive permissions"
+        );
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]

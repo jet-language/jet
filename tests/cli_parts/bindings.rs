@@ -1315,6 +1315,34 @@ fn powershell_bind_launders_parse_failure_as_e3208() {
 }
 
 #[test]
+fn perl_bind_does_not_execute_compile_time_code() {
+    if Command::new("perl").arg("-v").output().is_err() {
+        return;
+    }
+    let dir = isolated_cwd("perl_bind_compile_time");
+    let script = dir.join("compile_time.pl");
+    fs::write(
+        &script,
+        "BEGIN { system(\"touch compile-time-marker\") }\nsub Safe { return $_[0]; }\n1;\n",
+    )
+    .unwrap();
+    let bind = Command::new(jet())
+        .args(["inspect", "bind", "perl"])
+        .arg(&script)
+        .args(["--pkg", "compile_time"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "Perl bind failed:\n{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    assert!(!dir.join("compile-time-marker").exists());
+}
+
+#[test]
 fn perl_bind_round_trips_datatree_state_timeout_and_cancellation() {
     if Command::new("perl").arg("-v").output().is_err() {
         return;

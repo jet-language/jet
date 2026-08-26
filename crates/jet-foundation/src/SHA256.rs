@@ -184,10 +184,10 @@ pub fn sha256_hex(data: &[u8]) -> String {
 }
 
 /// Compute a canonical tree hash of a source directory.
-/// All .jet files are hashed in sorted order (relative paths + contents).
+/// All copied source files are hashed in sorted order (relative paths + contents).
 pub fn tree_hash(root: &std::path::Path) -> String {
     let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
-    collect_jet_files(root, root, &mut entries);
+    collect_tree_files(root, root, &mut entries);
     entries.sort_by(|a, b| a.0.cmp(&b.0));
 
     let mut hasher_input: Vec<u8> = Vec::new();
@@ -200,7 +200,7 @@ pub fn tree_hash(root: &std::path::Path) -> String {
     format!("sha256-{}", sha256_hex(&hasher_input))
 }
 
-fn collect_jet_files(
+fn collect_tree_files(
     dir: &std::path::Path,
     root: &std::path::Path,
     out: &mut Vec<(String, Vec<u8>)>,
@@ -223,10 +223,8 @@ fn collect_jet_files(
             continue;
         }
         if metadata.is_dir() {
-            collect_jet_files(&p, root, out);
-        } else if metadata.is_file()
-            && p.extension().and_then(|e| e.to_str()) == Some(crate::Syntax::FILE_EXT)
-        {
+            collect_tree_files(&p, root, out);
+        } else if metadata.is_file() {
             if let Ok(content) = std::fs::read(&p) {
                 let rel = p
                     .strip_prefix(root)

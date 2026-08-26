@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub mod BrowserTrace;
 pub mod Canvas;
@@ -213,14 +213,58 @@ fn hex(b: u8) -> Option<u8> {
 }
 
 pub fn static_path(root: &Path, path: &str) -> Result<PathBuf, ()> {
-    if path.contains("..") {
-        return Err(());
-    }
-    Ok(root.join(if path == "/" {
+    let relative = if path == "/" {
         "index.html"
     } else {
         path.trim_start_matches('/')
-    }))
+    };
+    if path.contains("..")
+        || relative.starts_with('/')
+        || relative.starts_with('\\')
+        || has_windows_drive_prefix(relative)
+        || Path::new(relative)
+            .components()
+            .any(|component| matches!(component, Component::Prefix(_) | Component::RootDir))
+    {
+        return Err(());
+    }
+    let root_metadata = std::fs::symlink_metadata(root).map_err(|_| ())?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err(());
+    }
+    let canonical_root = std::fs::canonicalize(root).map_err(|_| ())?;
+    let candidate = root.join(relative);
+    let mut current = root.to_path_buf();
+    for component in Path::new(relative).components() {
+        let Component::Normal(component) = component else {
+            return Err(());
+        };
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Err(()),
+            Ok(_) => {
+                let canonical = std::fs::canonicalize(&current).map_err(|_| ())?;
+                if !canonical.starts_with(&canonical_root) {
+                    return Err(());
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(_) => return Err(()),
+        }
+    }
+    if candidate.exists() {
+        let canonical = std::fs::canonicalize(&candidate).map_err(|_| ())?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err(());
+        }
+        return Ok(canonical);
+    }
+    Ok(candidate)
+}
+
+fn has_windows_drive_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 pub fn content_type_for(path: &Path) -> &'static str {
@@ -324,6 +368,20 @@ mod tests {
     #[test]
     fn traversal_is_rejected() {
         assert!(static_path(Path::new("build"), "/../x").is_err());
+    }
+    #[test]
+    fn windows_absolute_static_paths_are_rejected() {
+        for path in [
+            "/C:/Windows/win.ini",
+            "/C:\\Windows\\win.ini",
+            "/\\\\server\\share\\secret",
+            "/\\Windows\\win.ini",
+        ] {
+            assert!(
+                static_path(Path::new("build"), path).is_err(),
+                "absolute Windows path escaped static root: {path}"
+            );
+        }
     }
     #[test]
     fn canvas_assets_are_owned_routes() {

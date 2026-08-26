@@ -13,6 +13,7 @@ use super::PackageParseError;
 use crate::RefSpec::{self, Source};
 use crate::Syntax;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::path::{Component, Path};
 
 // ── small structural helpers (std-only, comment-stripped input) ────────────
 
@@ -360,6 +361,11 @@ fn ref_error(name: &str, error: &RefSpec::RefError) -> PackageParseError {
 pub(super) fn parse_deps(body: &str) -> Result<BTreeMap<String, DepSource>, PackageParseError> {
     let mut deps = BTreeMap::new();
     for (name, value) in key_value_entries(body)? {
+        if !validate_dependency_name(&name) {
+            return Err(err(format!(
+                "dependency name `{name}` must be one safe path component"
+            )));
+        }
         let trimmed = value.trim();
         let source = if let Some(inner) = trimmed.strip_prefix('{') {
             let inner = inner.strip_suffix('}').unwrap_or(inner);
@@ -403,6 +409,19 @@ pub(super) fn parse_deps(body: &str) -> Result<BTreeMap<String, DepSource>, Pack
         }
     }
     Ok(deps)
+}
+
+/// Dependency names become directory names in the store and project build
+/// tree. Keep that path boundary in the package model, before any resolver or
+/// publisher can turn a manifest key into a filesystem path.
+pub(super) fn validate_dependency_name(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains(['/', '\\', ':'])
+        && !name.chars().any(char::is_control)
+        && matches!(Path::new(name).components().next(), Some(Component::Normal(_)))
+        && Path::new(name).components().nth(1).is_none()
 }
 
 /// Detect a native C-library link ref (S59/D-CFFI2): `c@system` or

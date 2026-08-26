@@ -1854,6 +1854,19 @@ fn manifest_parse_dep_path() {
 }
 
 #[test]
+fn manifest_rejects_traversal_dependency_name() {
+    let raw = manifest_with_deps("root", "0.1.0", "    ../escape: \"1.0.0\",");
+    let error = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
+        .expect_err("dependency names must not become path components");
+    assert!(
+        error.what.contains("dependency name"),
+        "{} {}",
+        error.code,
+        error.what
+    );
+}
+
+#[test]
 fn manifest_parse_dep_git_tag() {
     let raw = manifest_with_deps(
         "root",
@@ -2876,6 +2889,38 @@ fn store_ensure_is_idempotent() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
+#[cfg(unix)]
+#[test]
+fn store_install_rejects_source_and_destination_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tmp_dir("store_symlink_boundary");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    let outside = tmp.join("outside");
+    fs::write(&outside, "must survive\n").unwrap();
+    let source = tmp.join("source");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("package.jet"), "name: \"safe\"\n").unwrap();
+
+    let outcomes = with_store(&store, || {
+        let entry = jet::Store::store_path("safe", "0.1.0", "sha256-safe");
+        symlink(&outside, &entry).unwrap();
+        let destination = jet::Store::ensure_path_dep("safe", "0.1.0", "sha256-safe", &source);
+        fs::remove_file(&entry).unwrap();
+
+        symlink(&outside, source.join("leak")).unwrap();
+        let source_result =
+            jet::Store::ensure_path_dep("safe", "0.1.0", "sha256-source", &source);
+        (destination, source_result)
+    });
+
+    assert!(outcomes.0.is_err(), "store entry symlink must be refused");
+    assert!(outcomes.1.is_err(), "source tree symlink must be refused");
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "must survive\n");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
 // ─────────────────────────────────────────────
 // Store verify / tamper detection (E1204)
 // ─────────────────────────────────────────────
@@ -2964,6 +3009,38 @@ fn content_hash_mismatch_after_tamper() {
     let result = jet::Store::verify_content_hash("mylib", &entry, &original_hash);
     let diag = result.expect_err("tampered entry must fail verify_content_hash");
     assert_eq!(diag.code, "E1204");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn content_hash_covers_non_jet_files_copied_into_store() {
+    let tmp = tmp_dir("castore_non_jet_tamper");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    let src = tmp.join("src");
+    write(&src, "lib.jet", "pub fn x() {}\n");
+    write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
+    fs::write(src.join("runtime.data"), b"trusted bytes\n").unwrap();
+
+    let source_hash = jet::SHA256::tree_hash(&src);
+    fs::write(src.join("runtime.data"), b"hostile bytes\n").unwrap();
+    assert_ne!(
+        source_hash,
+        jet::SHA256::tree_hash(&src),
+        "copied non-.jet files must be part of the source identity"
+    );
+
+    fs::write(src.join("runtime.data"), b"trusted bytes\n").unwrap();
+    let fp = "sha256-cccc0000000000000000000000000000000000000000000000000000000000cc";
+    let (entry, original_hash) = with_store(&store, || {
+        jet::Store::ensure_path_dep("mylib", "0.1.0", fp, &src).unwrap()
+    });
+    fs::write(entry.join("runtime.data"), b"tampered bytes\n").unwrap();
+
+    let error = jet::Store::verify_content_hash("mylib", &entry, &original_hash)
+        .expect_err("tampering a copied non-.jet file must fail verification");
+    assert_eq!(error.code, "E1204");
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -3123,6 +3200,44 @@ fn path_dep_compiles_ok() {
 }
 
 #[test]
+fn transitive_path_dependency_cannot_escape_declaring_package() {
+    let tmp = tmp_dir("transitive_path_escape");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    write(
+        &tmp,
+        "outer/package.jet",
+        &manifest_with_deps("outer", "0.1.0", "    escape: ../outside,"),
+    );
+    write(&tmp, "outer/outer.jet", "pub fn outer() {}\n");
+    write(
+        &tmp,
+        "outside/package.jet",
+        &min_manifest("outside", "0.1.0"),
+    );
+    write(&tmp, "outside/outside.jet", "pub fn hostile() {}\n");
+    let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,");
+    write(&tmp, "package.jet", &raw);
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let options = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+
+    let error = with_store(&store, || {
+        jet::Fetch::fetch(&tmp, &manifest, None, &options)
+            .expect_err("a transitive path escape must be rejected")
+    });
+    assert_eq!(first_diag_code(&error), "E1206");
+    assert!(error[0].what.contains("escapes"));
+    assert!(!store.join("outside").exists(), "escaped package was ingested");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn version_conflict_emits_e1201() {
     let tmp = tmp_dir("ver_conflict");
 
@@ -3251,6 +3366,43 @@ fn fetch_locked_rejects_missing_lock() {
     let diags = result.expect_err("--locked with no lock file should fail");
     assert_eq!(first_diag_code(&diags), "E1202");
 
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn fetch_locked_rejects_tampered_path_dependency_source() {
+    let tmp = tmp_dir("locked_path_tamper");
+    let store = tmp.join("store");
+    let dependency = tmp.join("greeter");
+    fs::create_dir_all(&store).unwrap();
+    write(&dependency, "package.jet", &min_manifest("greeter", "0.1.0"));
+    write(&dependency, "greeter.jet", "pub fn greet() {}\n");
+    let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
+    write(&tmp, "package.jet", &raw);
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let unlocked = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+    let (lock, _) = with_store(&store, || {
+        jet::Fetch::fetch(&tmp, &manifest, None, &unlocked)
+            .expect("initial path fetch should create a content hash")
+    });
+
+    write(&dependency, "greeter.jet", "pub fn compromised() {}\n");
+    let locked = jet::Fetch::FetchOptions {
+        locked: true,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+    let error = with_store(&store, || {
+        jet::Fetch::fetch(&tmp, &manifest, Some(&lock), &locked)
+            .expect_err("locked fetch must reject a changed path source")
+    });
+    assert_eq!(first_diag_code(&error), "E1204");
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -3388,6 +3540,44 @@ fn git_dep_local_bare_repo_fetches_ok() {
 }
 
 #[test]
+fn git_revision_with_multibyte_prefix_does_not_panic() {
+    if !have_git() {
+        eprintln!("note: skipping git_revision_with_multibyte_prefix (git not found)");
+        return;
+    }
+
+    let tmp = tmp_dir("git_revision_utf8");
+    let revision = format!("{}é", "a".repeat(15));
+    let raw = manifest_with_deps(
+        "app",
+        "0.1.0",
+        &format!(
+            "    broken: {{ git: \"file:///definitely/missing.git\", rev: \"{revision}\" }},"
+        ),
+    );
+    write(&tmp, "package.jet", &raw);
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    let options = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        with_store(&store, || jet::Fetch::fetch(&tmp, &manifest, None, &options))
+    }));
+    assert!(
+        result.is_ok(),
+        "a multibyte git revision must return a diagnostic, not panic"
+    );
+    assert!(result.unwrap().is_err(), "the missing repository must fail");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn git_dep_rejects_private_transport_before_network_access() {
     if !have_git() {
         eprintln!("note: skipping git_dep_private_transport (git not found)");
@@ -3421,6 +3611,73 @@ fn git_dep_rejects_private_transport_before_network_access() {
     );
     assert!(rendered.contains("not allowed"), "unexpected diagnostic:\n{rendered}");
     assert!(!tmp.join(".jet").exists(), "rejected transport created project state");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn git_dep_rejects_option_revision_before_git_execution() {
+    if !have_git() {
+        eprintln!("note: skipping git_dep_option_revision (git not found)");
+        return;
+    }
+
+    let tmp = tmp_dir("git_option_revision");
+    let marker = tmp.join("git-option-injection-marker");
+    let raw = manifest_with_deps(
+        "app",
+        "0.1.0",
+        &format!(
+            "    hostile: {{ git: \"file:///definitely/missing.git\", rev: \"--upload-pack=touch {}\" }},",
+            marker.display()
+        ),
+    );
+    write(&tmp, "package.jet", &raw);
+    let mf = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    let opts = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+
+    let diags = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts))
+        .expect_err("an option-shaped revision must be rejected before git");
+    assert_eq!(first_diag_code(&diags), "E1203");
+    assert!(!marker.exists());
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn git_dep_rejects_cache_path_traversal_before_filesystem_access() {
+    if !have_git() {
+        eprintln!("note: skipping git_dep_cache_path_traversal (git not found)");
+        return;
+    }
+
+    let tmp = tmp_dir("git_cache_path_traversal");
+    let escaped = tmp.join("escaped-cache");
+    let raw = manifest_with_deps(
+        "app",
+        "0.1.0",
+        "    hostile: { git: \"file:///definitely/missing.git\", rev: \"../escaped-cache\" },",
+    );
+    write(&tmp, "package.jet", &raw);
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    let options = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+
+    let diagnostics = with_store(&store, || jet::Fetch::fetch(&tmp, &manifest, None, &options))
+        .expect_err("a traversal-shaped revision must be rejected");
+    assert_eq!(first_diag_code(&diagnostics), "E1203");
+    assert!(!escaped.exists(), "rejected revision created an escaped cache");
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -4823,6 +5080,50 @@ fn vendored_offline_locked_build() {
         "vendored project must compile offline"
     );
 
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[cfg(unix)]
+#[test]
+fn vendor_rejects_symlink_sources_and_traversal_names() {
+    use std::collections::HashMap;
+    use std::os::unix::fs::symlink;
+
+    let tmp = tmp_dir("vendor_symlink_boundary");
+    let outside = tmp.join("outside");
+    fs::write(&outside, "must survive\n").unwrap();
+    let source = tmp.join("source");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("package.jet"), "name: \"dep\"\n").unwrap();
+    symlink(&outside, source.join("leak")).unwrap();
+
+    let mut symlink_deps = HashMap::new();
+    symlink_deps.insert("dep".to_string(), source.clone());
+    let symlink_result = jet::Publish::vendor(
+        &tmp,
+        &make_test_lock("dep", "0.1.0", "sha256-dep"),
+        &symlink_deps,
+        &tmp.join("vendor-symlink"),
+    );
+    assert!(symlink_result.is_err(), "vendor must refuse source symlinks");
+    assert_eq!(fs::read_to_string(&outside).unwrap(), "must survive\n");
+
+    let safe_source = tmp.join("safe-source");
+    fs::create_dir_all(&safe_source).unwrap();
+    fs::write(safe_source.join("package.jet"), "name: \"escape\"\n").unwrap();
+    let mut traversal_deps = HashMap::new();
+    traversal_deps.insert("../escape".to_string(), safe_source);
+    let traversal_result = jet::Publish::vendor(
+        &tmp,
+        &make_test_lock("../escape", "0.1.0", "sha256-escape"),
+        &traversal_deps,
+        &tmp.join("vendor-name"),
+    );
+    assert!(
+        traversal_result.is_err(),
+        "vendor must refuse traversal-shaped dependency names"
+    );
+    assert!(!tmp.join("escape").exists());
     let _ = fs::remove_dir_all(&tmp);
 }
 

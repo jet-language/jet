@@ -360,23 +360,6 @@ These dispositions trace all 10 candidates through the current source. Each row 
 | `canvas-project-revision-not-enforced` | `already-fixed` | `crates/jet-devserver/src/Canvas/schema_api.rs:527-545` parses `project_revision` and compares it with the current project revision before dispatch. |
 | `embedded-devserver-windows-absolute-static-path` | `confirmed` | `crates/jet-codegen/src/Prelude/DevServer.rs:460-475` rejects only `..` before `Path::join`, then reads the resulting path. |
 
-### Current dispositions
-
-These dispositions trace each candidate through the current source. `confirmed` means the reported source-to-sink path remains live. `already-fixed` means the current source removes the reported path. Full historical traces remain in `docs/audits/security-deep-scan-2026-08-03-full.md`.
-
-| Candidate ID | Disposition | HEAD evidence |
-|---|---|---|
-| `devserver-cross-origin-mutation` | `already-fixed` | `crates/jet-devserver/src/WebHost.rs:1241-1296` requires an allowed Host/Origin and session capability; `:1496-1499` rejects unauthorized Canvas requests before route dispatch. |
-| `s1-root-studio-remote-read` | `confirmed` | `crates/jetpack/src/CLI/studio_server.rs:53-94` binds the caller-supplied address and accepts peers; `:108-175` returns `context.config` from `/studio/source` without Host, Origin, or session validation. |
-| `s1-root-studio-remote-write` | `confirmed` | `crates/jetpack/src/CLI/studio_server.rs:128-136` exposes the transaction route; `crates/jetpack/src/CLI/studio_transactions.rs:104-145` self-issues sessions and `:323-443` atomically writes `config.jet`. |
-| `s1-root-studio-remote-run` | `confirmed` | `crates/jetpack/src/CLI/studio_server.rs:138-146` forwards `/studio/run`; `crates/jetpack/src/CLI/studio_transactions.rs:631-695,921-926,1107-1156` accepts allowlisted actions and invokes `jet os` without caller authentication. |
-| `s1-root-studio-loopback-csrf` | `confirmed` | `crates/jetpack/src/CLI/bridge_os_studio.rs:131-140` starts loopback Studio; `crates/jetpack/src/CLI/studio_server.rs:108-146` checks no Origin/Host/session before forwarding browser POSTs to the run handler. |
-| `s2-devserver-source-disclosure` | `already-fixed` | `crates/jet-devserver/src/WebHost.rs:1241-1296,1496-1499` enforces Host/Origin/session before the source route; `:1769-1786` is the now-protected `fs::read` sink. |
-| `s2-devserver-debug-trigger` | `already-fixed` | `crates/jet-devserver/src/WebHost.rs:1241-1296,1496-1499` enforces Host/Origin/session before debug dispatch; `:1898-1923` is reachable only after that gate. |
-| `devserver-windows-absolute-static-path` | `confirmed` | `crates/jet-devserver/src/lib.rs:215-223` rejects only `..` then joins the trimmed request path; `crates/jet-devserver/src/WebHost.rs:2154-2168` reads the result, so Windows absolute children can replace `build`. |
-| `canvas-project-revision-not-enforced` | `already-fixed` | `crates/jet-devserver/src/Canvas/schema_api.rs:527-557` compares required `project_revision` with `ctx.project_revision` before touched-file validation and mutation dispatch. |
-| `embedded-devserver-windows-absolute-static-path` | `confirmed` | `crates/jet-codegen/src/Prelude/DevServer.rs:396-457` passes the raw request target to static serving; `:460-475` rejects only `..`, joins onto `build`, and reads the joined path. |
-
 ## command-code-injection
 
 ### Command, shell, editor, and generated-code injection
@@ -405,6 +388,33 @@ These dispositions trace each candidate through the current source. `confirmed` 
 | `envhook-unset-name-shell-injection` | Unvalidated lifecycle unset names inject shell commands into auto-activation | crates/jet-env-model/src/ModuleEval/Environment.rs<br>crates/jetpack/src/Trust.rs | 1 |
 | `claude-hook-relative-path-rce` | Claude hooks prefer cwd-relative scripts, enabling path-hijack command execution | .claude/settings.json | 1 |
 | `perl-bind-compile-exec` | Perl binding inspection executes project compile-time blocks with host authority | Source/CmdDevTools.rs<br>crates/jet-pkg-model/src/PerlBind.rs | 1 |
+
+### Current dispositions
+
+These dispositions trace all 20 candidates through the current source. `confirmed` means the reported source-to-sink path remains live. `already-fixed` means the current source removes the reported path. Each row cites current file:line evidence.
+
+| Candidate ID | Disposition | File:line evidence |
+|---|---|---|
+| `git-ls-remote-option-injection` | `already-fixed` | `crates/jet-pkg-model/src/Package/Blocks.rs:453-487` carries the URL and selector as data; `Source/Fetch.rs:813-828,2305-2314,2452-2461` validates both values and places `--` before the Git operands. |
+| `git-clone-option-injection` | `already-fixed` | `Source/Fetch.rs:813-828,2342-2348,2363-2365,2452-2461` rejects unsafe URL/revision values and invokes `git clone` with `--` before the URL. |
+| `s0-bash-prompt-label-injection` | `confirmed` | `crates/jetpack/src/EnvFile.rs:57-63` and `crates/jet-env-model/src/ModuleEval/Eval.rs:1282-1297` preserve the label; `crates/jetpack/src/Shell.rs:791-799,975-979` embeds it in Bash startup code. |
+| `s0-zsh-prompt-label-injection` | `confirmed` | `crates/jetpack/src/EnvFile.rs:57-63` and `crates/jet-env-model/src/ModuleEval/Eval.rs:1282-1297` preserve the label; `crates/jetpack/src/Shell.rs:801-810,1015-1019` embeds it in Zsh startup code. |
+| `s0-fish-prompt-label-injection` | `confirmed` | `crates/jetpack/src/EnvFile.rs:57-63` and `crates/jet-env-model/src/ModuleEval/Eval.rs:1282-1297` preserve the label; `crates/jetpack/src/Shell.rs:812-815,1049-1053` embeds it in Fish startup code. |
+| `package-git-fetch-option-injection` | `already-fixed` | `crates/jetpack/src/Provider/remote.rs:418-487` preserves `#rev` but rejects control characters and leading `-`; `crates/jetpack/src/Provider/remote.rs:206-221` rechecks before `git fetch`. |
+| `package-git-checkout-option-injection` | `already-fixed` | `crates/jetpack/src/Provider/remote.rs:418-487` validates the parsed revision; `crates/jetpack/src/Provider/remote.rs:543-554` rechecks it immediately before the `git checkout` argument. |
+| `lldb-breakpoint-command-injection` | `already-fixed` | `crates/jet-debug/src/Inferior.rs:521-532,1214-1225` quotes breakpoint paths and rejects controls; `crates/jet-debug/src/Inferior.rs:1870-1875` proves the hostile path case. |
+| `web-codegen-template-injection` | `confirmed` | `crates/jet-codegen/src/Codegen/Web.rs:9781-9809` appends interpolated Jet literal parts directly inside JavaScript backticks; `Source/CmdCompile.rs:5680-5694` writes the generated JS app. |
+| `rustc-build-profile-env-injection` | `already-fixed` | `crates/jet-pkg-model/src/Package/Blocks.rs:778-807` rejects retired profile `env`; `Source/main.rs:271-326,358-408` derives only typed profile flags, and `Source/CmdCompile.rs:6494-6526` launches rustc without profile environment injection. |
+| `jetpack-self-authorized-build-script` | `already-fixed` | `crates/jetpack/src/CLI/realize.rs:515-529` gates Core Cargo before Store realization; `crates/jetpack/src/Trust.rs:910-966` requires an exact build identity grant or explicit approval, while `crates/jetpack/src/Provider.rs:558-562` excludes project metadata from build authorization. |
+| `package-git-kind-probe-option-injection` | `already-fixed` | `crates/jetpack/src/Provider.rs:2220-2237,2289-2304` rejects an unsafe probe revision before `git fetch`; `crates/jetpack/src/Provider/remote.rs:418-487` validates the parsed remote first. |
+| `jetos-storage-disk-command-injection` | `confirmed` | `crates/jetpack/src/JetOS/module_storage_workload.rs:56-62` accepts disk input; `crates/jetpack/src/JetOS/module_storage_workload.rs:112-117` writes the expanded value into a script later executed by `sh`. |
+| `jetos-storage-esp-command-injection` | `confirmed` | `crates/jetpack/src/JetOS/module_storage_workload.rs:61-62` accepts ESP size input; `crates/jetpack/src/JetOS/module_storage_workload.rs:112-117` interpolates it into generated shell source. |
+| `envhook-profile-var-name-shell-injection` | `already-fixed` | `crates/jet-env-model/src/ModuleEval/Environment.rs:2442-2446,2610-2642` validates profile variable names; `crates/jetpack/src/EnvHook.rs:471-480,582-590` validates again at render. |
+| `envhook-unset-name-shell-injection` | `already-fixed` | `crates/jet-env-model/src/ModuleEval/Environment.rs:2300-2302,2598-2607` validates unset names; `crates/jetpack/src/EnvHook.rs:582-590,783-788` enforces and tests the render boundary. |
+| `claude-hook-relative-path-rce` | `confirmed` | `.claude/settings.json:24-45` runs `scripts/agent/*` through cwd-relative lookup before the `$CLAUDE_PROJECT_DIR` fallback. |
+| `vscode-workspace-lsp-rce` | `already-fixed` | `editors/vscode/extension.js:25-50,114-116,151-159` still selects the workspace/server command for trusted workspaces; `editors/vscode/package.json:21-24` disables the extension in untrusted workspaces before activation. |
+| `zed-worktree-lsp-rce` | `confirmed` | `editors/zed/wasm-src/src/lib.rs:12-39` selects `{worktree}/target/debug/jet` and launches it; `editors/zed/extension.toml:15-23` grants process execution. |
+| `perl-bind-compile-exec` | `confirmed` | `Source/CmdDevTools.rs:3751-3817` invokes `PerlBind::bind`; `crates/jet-pkg-model/src/PerlBind.rs:40-68,139-153` runs Perl `-c` with compile-phase hooks. |
 
 ## package-supply-chain
 

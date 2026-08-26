@@ -47,6 +47,14 @@ pub(super) fn replace_source_if_unchanged_locked(
     expected: Option<&str>,
     candidate: Option<&str>,
 ) -> Result<(), SourceWriteError> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() {
+            return Err(SourceWriteError::Io(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Canvas source path must not be a symlink",
+            )));
+        }
+    }
     let current = match fs::read(path) {
         Ok(bytes) => Some(bytes),
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,

@@ -637,8 +637,8 @@ fn grant_matches_project_or_hash(grant: &TrustGrant, project_dir: &Path, hash: &
 /// prefix match. One wildcard shape is all U19 asks for (no glob crate, I6).
 fn matches_pattern(pattern: &str, subject: &str) -> bool {
     match pattern.strip_suffix('*') {
-        Some(prefix) => subject.starts_with(prefix),
-        None => subject == pattern || subject.starts_with(pattern),
+        Some(prefix) => component_prefix_matches(prefix, subject),
+        None => component_prefix_matches(pattern, subject),
     }
 }
 
@@ -652,10 +652,27 @@ fn matches_canonical_pattern(pattern: &str, subject: &str) -> bool {
     };
     let canonical = canonical_prefix.to_string_lossy();
     if wildcard {
-        subject.starts_with(canonical.as_ref())
+        component_prefix_matches(&canonical, subject)
     } else {
-        subject == canonical.as_ref() || subject.starts_with(canonical.as_ref())
+        component_prefix_matches(&canonical, subject)
     }
+}
+
+fn component_prefix_matches(prefix: &str, subject: &str) -> bool {
+    if prefix.is_empty() {
+        return true;
+    }
+    let trimmed = prefix.trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() {
+        return subject.starts_with('/') || subject.starts_with('\\');
+    }
+    if subject == trimmed {
+        return true;
+    }
+    let Some(remainder) = subject.strip_prefix(trimmed) else {
+        return false;
+    };
+    remainder.starts_with('/') || remainder.starts_with('\\')
 }
 
 /// Persist a hash grant (the interactive prompt's "yes"). Returns `true` when
@@ -1003,7 +1020,7 @@ fn gate_with_hash(
     typed: bool,
     lifecycle_hooks: bool,
 ) -> Result<(), i32> {
-    if !is_trust_sensitive_ext(refs, !secrets.is_empty()) && !lifecycle_hooks {
+    if !typed && !is_trust_sensitive_ext(refs, !secrets.is_empty()) && !lifecycle_hooks {
         return Ok(());
     }
     let trusted = if typed {
@@ -1023,7 +1040,9 @@ fn gate_with_hash(
             policy.default
         };
         match decision {
-            Some(TrustDecision::Allow) => return Ok(()),
+            // The project supplies this policy, so its allow decision cannot
+            // be the external approval that authorizes the same project.
+            Some(TrustDecision::Allow) => {}
             Some(TrustDecision::Deny) => {
                 theme.error_coded(
                     "E1255",
@@ -1367,7 +1386,7 @@ mod tests {
             &[],
             false
         )
-        .is_ok());
+        .is_err());
         assert!(gate(
             &theme,
             &deny_dir.join("trust"),

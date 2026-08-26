@@ -19,7 +19,7 @@
 mod jet_devserver_impl {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{TcpListener, TcpStream};
-    use std::path::{Path, PathBuf};
+    use std::path::{Component, Path, PathBuf};
     use std::process::Command;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -231,9 +231,19 @@ mod jet_devserver_impl {
                 return false;
             }
         };
-        let staging_root = PathBuf::from("build").join(".jet-devserver-staging");
-        let _ = std::fs::remove_dir_all(&staging_root);
-        if let Err(e) = std::fs::create_dir_all(&staging_root) {
+        let out_dir = match jet_devserver_build_dir() {
+            Ok(path) => path,
+            Err(e) => {
+                eprintln!("error: web output directory is not safe: {}", e);
+                return false;
+            }
+        };
+        let staging_root = out_dir.join(".jet-devserver-staging");
+        if let Err(e) = jet_devserver_remove_staging(&staging_root) {
+            eprintln!("error: couldn't clear the web staging directory: {}", e);
+            return false;
+        }
+        if let Err(e) = std::fs::create_dir(&staging_root) {
             eprintln!("error: couldn't create a staging folder for the rebuild: {}", e);
             return false;
         }
@@ -266,30 +276,31 @@ mod jet_devserver_impl {
             // here.
             let _ = std::io::stderr().write_all(&out.stdout);
             let _ = std::io::stderr().write_all(&out.stderr);
-            let _ = std::fs::remove_dir_all(&staging_root);
+            let _ = jet_devserver_remove_staging(&staging_root);
             return false;
         }
 
         let staged_build = staging_root.join("build");
         if let Some(html_path) = html_override {
             let source_dir = Path::new(app_file).parent().unwrap_or(Path::new("."));
-            let explicit = source_dir.join(html_path);
-            match std::fs::read(&explicit) {
+            match jet_devserver_read_inside(source_dir, html_path) {
                 Ok(bytes) => {
-                    if let Err(e) = std::fs::write(staged_build.join("index.html"), bytes) {
+                    let staged_index = staged_build.join("index.html");
+                    if let Err(e) = jet_devserver_check_output_file(&staged_index, &staging_root)
+                        .and_then(|_| std::fs::write(&staged_index, bytes))
+                    {
                         eprintln!("error: couldn't write staged index.html: {}", e);
-                        let _ = std::fs::remove_dir_all(&staging_root);
+                        let _ = jet_devserver_remove_staging(&staging_root);
                         return false;
                     }
                 }
                 Err(e) => {
                     eprintln!(
-                        "error: `.html(\"{}\")` names a file that doesn't exist: {} ({})",
+                        "error: `.html(\"{}\")` names a file that doesn't exist: {}",
                         html_path,
-                        explicit.display(),
                         e
                     );
-                    let _ = std::fs::remove_dir_all(&staging_root);
+                    let _ = jet_devserver_remove_staging(&staging_root);
                     return false;
                 }
             }
@@ -303,27 +314,124 @@ mod jet_devserver_impl {
             "app.wasm",
             "index.html",
         ];
-        let out_dir = Path::new("build");
-        if let Err(e) = std::fs::create_dir_all(out_dir) {
-            eprintln!("error: couldn't create the build/ folder: {}", e);
-            let _ = std::fs::remove_dir_all(&staging_root);
-            return false;
-        }
         for name in FILES {
             let src = staged_build.join(name);
             let dst = out_dir.join(name);
+            if let Err(e) = jet_devserver_check_output_file(&src, &staging_root)
+                .and_then(|_| jet_devserver_check_output_file(&dst, &out_dir))
+            {
+                eprintln!("error: unsafe web build output ({}): {}", name, e);
+                let _ = jet_devserver_remove_staging(&staging_root);
+                return false;
+            }
             if let Err(e) = jet_devserver_rename_with_retry(&src, &dst) {
                 eprintln!("error: couldn't finalize web build ({}): {}", name, e);
-                let _ = std::fs::remove_dir_all(&staging_root);
+                let _ = jet_devserver_remove_staging(&staging_root);
                 return false;
             }
         }
-        let _ = std::fs::remove_dir_all(&staging_root);
+        let _ = jet_devserver_remove_staging(&staging_root);
 
         if is_rebuild {
             eprintln!("[dev] rebuilt after change to {}", app_file);
         }
         true
+    }
+
+    fn jet_devserver_build_dir() -> Result<PathBuf, String> {
+        let cwd = std::fs::canonicalize(".").map_err(|e| e.to_string())?;
+        let build = PathBuf::from("build");
+        jet_devserver_ensure_directory(&build).map_err(|e| e.to_string())?;
+        let real = std::fs::canonicalize(&build).map_err(|e| e.to_string())?;
+        if !real.starts_with(&cwd) {
+            return Err("build directory escapes the working directory".to_string());
+        }
+        Ok(real)
+    }
+
+    fn jet_devserver_ensure_directory(path: &Path) -> std::io::Result<()> {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "directory must not be a symlink",
+            )),
+            Ok(metadata) if metadata.is_dir() => Ok(()),
+            Ok(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "path is not a directory",
+            )),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(parent) = path
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                {
+                    jet_devserver_ensure_directory(parent)?;
+                }
+                std::fs::create_dir(path)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn jet_devserver_remove_staging(path: &Path) -> std::io::Result<()> {
+        if let Ok(metadata) = std::fs::symlink_metadata(path) {
+            if metadata.file_type().is_symlink() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "staging path must not be a symlink",
+                ));
+            }
+            if metadata.is_dir() {
+                std::fs::remove_dir_all(path)?;
+            } else {
+                std::fs::remove_file(path)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn jet_devserver_check_output_file(path: &Path, root: &Path) -> std::io::Result<()> {
+        if let Ok(metadata) = std::fs::symlink_metadata(path) {
+            if metadata.file_type().is_symlink() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "output path must not be a symlink",
+                ));
+            }
+        }
+        let parent = path.parent().unwrap_or(Path::new("."));
+        let real_parent = std::fs::canonicalize(parent)?;
+        if !real_parent.starts_with(root) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "output path escapes the output root",
+            ));
+        }
+        Ok(())
+    }
+
+    fn jet_devserver_read_inside(root: &Path, relative: &str) -> std::io::Result<Vec<u8>> {
+        let relative = Path::new(relative);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "HTML path must stay inside the source directory",
+            ));
+        }
+        let root = std::fs::canonicalize(root)?;
+        let path = root.join(relative);
+        let real = std::fs::canonicalize(&path)?;
+        if !real.starts_with(&root) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "HTML path escapes the source directory",
+            ));
+        }
+        std::fs::read(real)
     }
 
     fn jet_devserver_rename_with_retry(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -458,20 +566,27 @@ mod jet_devserver_impl {
     }
 
     fn jet_devserver_serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<()> {
-        if path.contains("..") {
+        let Some(rel) = jet_devserver_static_relative_path(path) else {
             return jet_devserver_write_response(
                 stream,
                 "400 Bad Request",
                 "text/plain; charset=utf-8",
                 b"bad path",
             );
-        }
-        let rel = if path == "/" {
-            "index.html"
-        } else {
-            path.trim_start_matches('/')
         };
-        let file_path = Path::new("build").join(rel);
+        let file_path = match jet_devserver_build_dir()
+            .and_then(|root| jet_devserver_static_path(&root, rel).map_err(|e| e.to_string()))
+        {
+            Ok(path) => path,
+            Err(_) => {
+                return jet_devserver_write_response(
+                    stream,
+                    "400 Bad Request",
+                    "text/plain; charset=utf-8",
+                    b"bad path",
+                );
+            }
+        };
         let bytes = match std::fs::read(&file_path) {
             Ok(b) => b,
             Err(_) => {
@@ -492,6 +607,62 @@ mod jet_devserver_impl {
             return jet_devserver_write_response(stream, "200 OK", content_type, injected.as_bytes());
         }
         jet_devserver_write_response(stream, "200 OK", content_type, &bytes)
+    }
+
+    fn jet_devserver_static_path(root: &Path, relative: &str) -> std::io::Result<PathBuf> {
+        let path = root.join(relative);
+        let mut current = root.to_path_buf();
+        for component in Path::new(relative).components() {
+            let std::path::Component::Normal(component) = component else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "static path is not relative",
+                ));
+            };
+            current.push(component);
+            if let Ok(metadata) = std::fs::symlink_metadata(&current) {
+                if metadata.file_type().is_symlink() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "static path must not traverse a symlink",
+                    ));
+                }
+            }
+        }
+        if path.exists() {
+            let real = std::fs::canonicalize(&path)?;
+            if !real.starts_with(root) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "static path escapes the build directory",
+                ));
+            }
+            return Ok(real);
+        }
+        Ok(path)
+    }
+
+    fn jet_devserver_static_relative_path(path: &str) -> Option<&str> {
+        let relative = if path == "/" {
+            "index.html"
+        } else {
+            path.trim_start_matches('/')
+        };
+        let bytes = relative.as_bytes();
+        let windows_drive_prefix =
+            bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+        if path.contains("..")
+            || relative.starts_with('/')
+            || relative.starts_with('\\')
+            || windows_drive_prefix
+            || Path::new(relative)
+                .components()
+                .any(|component| matches!(component, Component::Prefix(_) | Component::RootDir))
+        {
+            None
+        } else {
+            Some(relative)
+        }
     }
 
     fn jet_devserver_content_type_for(path: &Path) -> &'static str {

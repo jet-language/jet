@@ -18,6 +18,14 @@ pub fn to_manifest(
 
     let mut dependencies = BTreeMap::new();
     for (name, source) in &facts.deps {
+        if !super::Blocks::validate_dependency_name(name)
+            && !matches!(source, DepSource::CLib { .. })
+        {
+            return Err(bad_dep_shape(
+                name,
+                "dependency names must be one safe path component without `/`, `\\`, or `:`",
+            ));
+        }
         let spec = match source {
             // S59/D-CFFI2: a native C-library link dep is not a Jet package —
             // resolved by `Source/CFFI.rs` into linker flags, never realized

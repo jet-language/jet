@@ -56,8 +56,8 @@ use package::{
 #[cfg(test)]
 use remote::file_has_top_level_run;
 use remote::{
-    copy_tree, fetch_remote_repo, infer_package_kind, parse_remote_source, source_cache_dir,
-    source_repo, tree_fingerprint, RemoteSource,
+    copy_tree, fetch_remote_repo, infer_package_kind, parse_remote_source, remote_revision_is_safe,
+    source_cache_dir, source_repo, tree_fingerprint, RemoteSource,
 };
 
 /// A realized package: where its bytes are and what to put on PATH. `bin` is
@@ -648,7 +648,7 @@ pub fn adapter_cache_expectation(
     })?;
     let staged = stage_adapter_source(&source_ref, ctx)?;
     let recipe = adapter_recipe_to_build(&plan.recipe);
-    let source_hash = tree_fingerprint(&staged);
+    let source_hash = tree_fingerprint(&staged).map_err(ProviderError::Adapter)?;
     let source_fingerprint = super::Envelope::try_output_hash_of(&staged.to_string_lossy())
         .map_err(ProviderError::Adapter)?;
     let identity_source = if matches!(&plan.recipe, AdapterRecipe::Build(_)) {
@@ -2287,6 +2287,10 @@ fn remote_has_pack_jet(remote: &RemoteSource) -> bool {
     // A configured `origin` makes the partial fetch register a promisor remote,
     // so the deferred root tree can be lazily fetched on `ls-tree`.
     let rev = remote.rev.as_deref().unwrap_or("HEAD");
+    if !remote_revision_is_safe(remote.rev.as_deref()) {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return false;
+    }
     let set_up = git(&["init", "--quiet"]) && git(&["remote", "add", "origin", &remote.url]);
     let fetched = set_up
         && git(&[
@@ -3862,8 +3866,8 @@ mod tests {
             std::fs::create_dir_all(d.join("bin")).unwrap();
             std::fs::write(d.join("bin/x"), body).unwrap();
         }
-        assert_ne!(tree_fingerprint(&a), tree_fingerprint(&b));
-        assert_eq!(tree_fingerprint(&a), tree_fingerprint(&c));
+        assert_ne!(tree_fingerprint(&a).unwrap(), tree_fingerprint(&b).unwrap());
+        assert_eq!(tree_fingerprint(&a).unwrap(), tree_fingerprint(&c).unwrap());
         std::fs::remove_dir_all(&base).ok();
     }
 

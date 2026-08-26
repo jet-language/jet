@@ -72,6 +72,24 @@ fn cli_tuple_expr(variables: &[String]) -> String {
     }
 }
 
+/// D-MEM-SENTRY1: initialize sentries only when the generated program has an
+/// audited memory edge. The cached runtime still carries the shared kernel,
+/// but safe programs pay no per-process sentry toggle or application reference.
+pub(crate) fn sentry_runtime_needed(generated: &str) -> bool {
+    generated.contains("jet_mem::jet_sentry_")
+}
+
+pub(crate) fn sentry_runtime_init(cx: &Cx, generated: &str) -> String {
+    if sentry_runtime_needed(generated) {
+        format!(
+            "    {}jet_mem::jet_sentry_set_hardened({});\n",
+            cx.root_prefix, cx.package_hardened
+        )
+    } else {
+        String::new()
+    }
+}
+
 fn emit_struct_command_entry(
     cx: &Cx,
     items: &[Item],
@@ -229,10 +247,7 @@ fn emit_struct_command_entry(
             )
         })
         .collect::<String>();
-    let sentry_init = format!(
-        "    {}jet_mem::jet_sentry_set_hardened({});\n",
-        cx.root_prefix, cx.package_hardened
-    );
+    let sentry_init = sentry_runtime_init(cx, out);
     let dispatch = job_dispatch
         .map(|name| format!("    if {name}(&__argv, false) {{ return; }}\n"))
         .unwrap_or_default();
@@ -1152,10 +1167,7 @@ fn emit_direct_cli_entry(
     );
     let tuple = format!("({},)", variables.join(", "));
     let pattern = format!("({},)", variables.join(", "));
-    let sentry_init = format!(
-        "    {}jet_mem::jet_sentry_set_hardened({});\n",
-        cx.root_prefix, cx.package_hardened
-    );
+    let sentry_init = sentry_runtime_init(cx, out);
     let dispatch = job_dispatch
         .map(|name| format!("    if {name}(&__argv, {service_target}) {{ return; }}\n"))
         .unwrap_or_default();
@@ -1233,10 +1245,7 @@ pub(crate) fn emit_cli_entry_if_needed(
     } else {
         return;
     };
-    let sentry_init = format!(
-        "    {}jet_mem::jet_sentry_set_hardened({});\n",
-        cx.root_prefix, cx.package_hardened
-    );
+    let sentry_init = sentry_runtime_init(cx, out);
     if params.is_empty() {
         let invoke = emit_entry_invocation(
             &callable,

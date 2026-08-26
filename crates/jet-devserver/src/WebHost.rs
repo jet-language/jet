@@ -1017,10 +1017,13 @@ pub fn stage_and_swap(staging: &Path, out_dir: &Path) -> std::io::Result<()> {
         "index.html",
     ];
     const MAP_FILES: [&str; 2] = ["app.js.map", "app.wasm.map"];
-    fs::create_dir_all(out_dir)?;
+    let output_root = ensure_real_output_dir(out_dir)?;
+    ensure_existing_real_dir(staging, &output_root)?;
     for name in FILES {
         let src = staging.join(name);
         let dst = out_dir.join(name);
+        reject_symlink_or_escape(&src, &output_root)?;
+        reject_symlink_or_escape(&dst, &output_root)?;
         // `write_web_artifacts` already returned success for every one of
         // these paths (rustc included) before we get here, so a rename
         // failure here is a transient filesystem-visibility race, not a
@@ -1031,7 +1034,9 @@ pub fn stage_and_swap(staging: &Path, out_dir: &Path) -> std::io::Result<()> {
     for name in MAP_FILES {
         let src = staging.join(name);
         let dst = out_dir.join(name);
+        reject_symlink_or_escape(&dst, &output_root)?;
         if src.exists() {
+            reject_symlink_or_escape(&src, &output_root)?;
             rename_with_retry(&src, &dst)?;
         } else if dst.exists() {
             // Release (or map-less) rebuild: drop stale maps with the swap.
@@ -1039,6 +1044,90 @@ pub fn stage_and_swap(staging: &Path, out_dir: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn ensure_real_output_dir(path: &Path) -> std::io::Result<PathBuf> {
+    let cwd = fs::canonicalize(".")?;
+    ensure_directory_without_symlinks(path)?;
+    let real = fs::canonicalize(path)?;
+    if !real.starts_with(&cwd) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "web output directory escapes the working directory",
+        ));
+    }
+    Ok(real)
+}
+
+fn ensure_existing_real_dir(path: &Path, root: &Path) -> std::io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "web staging directory must be a real directory",
+        ));
+    }
+    let real = fs::canonicalize(path)?;
+    if !real.starts_with(root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "web staging directory escapes the output directory",
+        ));
+    }
+    Ok(())
+}
+
+fn reject_symlink_or_escape(path: &Path, root: &Path) -> std::io::Result<()> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "web output paths must not be symlinks",
+            ));
+        }
+        if let Some(parent) = path.parent() {
+            let real_parent = fs::canonicalize(parent)?;
+            if !real_parent.starts_with(root) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "web output path escapes the output directory",
+                ));
+            }
+        }
+    } else if let Some(parent) = path.parent() {
+        let real_parent = fs::canonicalize(parent)?;
+        if !real_parent.starts_with(root) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "web output path escapes the output directory",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_directory_without_symlinks(path: &Path) -> std::io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "web output directory must not be a symlink",
+        )),
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "web output path is not a directory",
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                ensure_directory_without_symlinks(parent)?;
+            }
+            fs::create_dir(path)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn rename_with_retry(src: &Path, dst: &Path) -> std::io::Result<()> {

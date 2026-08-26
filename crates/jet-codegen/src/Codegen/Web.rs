@@ -2621,6 +2621,26 @@ fn json_quote(s: &str) -> String {
     out
 }
 
+fn js_template_text(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '`' => out.push_str("\\`"),
+            '$' if chars.peek() == Some(&'{') => out.push_str("\\${"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// D-FAIL-BREACH1: the JS adapter consumes the same active runtime rows and
 /// Prelude-rendered report template as the native report. It carries no
 /// What/Why/Fix policy of its own.
@@ -9790,7 +9810,7 @@ fn tir_js_string(
         let mut out = String::from("`");
         for part in parts {
             match part {
-                TIR::TStrPart::Lit(text) => out.push_str(text),
+                TIR::TStrPart::Lit(text) => out.push_str(&js_template_text(text)),
                 TIR::TStrPart::Interp(value, _) => {
                     let is_float = value.ty.is_float();
                     let is_measurement = is_measurement_type(&value.ty);
@@ -10631,6 +10651,15 @@ fn js_unary_call(op: &crate::AST::UnOp, ty: &Type, operand: &str) -> String {
 mod tir_contract_tests {
     use super::TIR::THandleOp;
     use super::*;
+
+    #[test]
+    fn hostile_template_text_cannot_close_or_interpolate() {
+        let escaped = js_template_text("`\\${owned}\n");
+        assert!(escaped.contains(r"\`"), "backtick must stay in the literal");
+        assert!(escaped.contains(r"\${"), "template interpolation must stay text");
+        assert!(escaped.contains(r"\\"), "backslash must stay in the literal");
+        assert!(escaped.contains(r"\n"), "newline must stay in the literal");
+    }
 
     #[test]
     fn js_handle_preflight_matches_emit_table() {

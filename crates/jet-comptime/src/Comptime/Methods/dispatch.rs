@@ -8,7 +8,7 @@ mod eval_method;
 mod sequence_parity;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{AccessConvention, CallArg, CtFloat, Expr, Func, LambdaBody, StrPart, Type, UnOp};
@@ -404,7 +404,16 @@ pub fn eval_build_time_io(
     if builtin == crate::Syntax::BUILTIN_FIND {
         return eval_locked_find(base_dir, &rel, embed_inputs, span);
     }
-    let bytes = std::fs::read(base_dir.join(&rel)).map_err(|error| {
+    let full = checked_embed_path(base_dir, &rel).map_err(|error| {
+        Diagnostic::error(
+            "E0955",
+            format!("`{builtin}` can't open `{rel}`"),
+            format!("{error} (looked next to the file doing the embedding)"),
+            "check the path — it is relative to the file's own directory".to_string(),
+            Some(span),
+        )
+    })?;
+    let bytes = std::fs::read(full).map_err(|error| {
         Diagnostic::error(
             "E0955",
             format!("`{builtin}` can't open `{rel}`"),
@@ -502,7 +511,16 @@ pub fn eval_build_embed(
             Some(span),
         ));
     }
-    let bytes = std::fs::read(base_dir.join(path)).map_err(|error| {
+    let full = checked_embed_path(base_dir, rel).map_err(|error| {
+        Diagnostic::error(
+            "E0955",
+            format!("`b.embed` cannot open `{rel}`"),
+            error.to_string(),
+            "check the locked relative path".to_string(),
+            Some(span),
+        )
+    })?;
+    let bytes = std::fs::read(full).map_err(|error| {
         Diagnostic::error(
             "E0955",
             format!("`b.embed` cannot open `{rel}`"),
@@ -530,6 +548,19 @@ pub fn eval_build_embed(
 
 fn normalize_rel(path: &str) -> String {
     path.replace('\\', "/")
+}
+
+fn checked_embed_path(base_dir: &Path, relative: &str) -> std::io::Result<PathBuf> {
+    let root = std::fs::canonicalize(base_dir)?;
+    let candidate = root.join(relative);
+    let real = std::fs::canonicalize(&candidate)?;
+    if !real.starts_with(&root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "embedded path escapes the real source root",
+        ));
+    }
+    Ok(real)
 }
 
 fn split_rel(path: &str) -> Vec<String> {
@@ -1544,7 +1575,18 @@ impl<'a> Interp<'a> {
             .first()
             .ok_or_else(|| unsupported(&format!("{builtin} with no path"), span))?;
         let rel = check_embed_path(builtin, arg, span)?;
-        let full = self.base_dir.join(&rel);
+        let full = match checked_embed_path(&self.base_dir, &rel) {
+            Ok(path) => path,
+            Err(error) => {
+                return Err(Diagnostic::error(
+                    "E0955",
+                    format!("`{builtin}` can't open `{rel}`"),
+                    format!("{error} (looked next to the file doing the embedding)"),
+                    "check the path — it is relative to the file's own directory".to_string(),
+                    Some(span),
+                ));
+            }
+        };
         match std::fs::read(&full) {
             Ok(bytes) => {
                 // D-CTEFFECT1 Tier-1: record the embed input hash for .jet/lock.

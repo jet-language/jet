@@ -68,12 +68,8 @@ fn jetos_studio_headless_opens_installed_app_projection() {
         use std::io::BufRead;
         reader.read_line(&mut line).unwrap();
     }
-    let addr = line
-        .trim()
-        .strip_prefix("http://")
-        .and_then(|s| s.strip_suffix("/studio/"))
-        .expect("default Studio launch must open its local projection service");
-    let page = studio_http(addr, "GET", "/studio/", "");
+    let addr = studio_addr(&line);
+    let page = studio_http(&addr, "GET", "/studio/", "");
     assert!(
         page.contains("data-page-kind=\"dashboard\""),
         "page: {page}"
@@ -119,31 +115,72 @@ fn jetos_studio_serve_exposes_projection_json() {
         use std::io::BufRead;
         reader.read_line(&mut line).unwrap();
     }
-    let addr = line
-        .trim()
-        .strip_prefix("http://")
-        .and_then(|s| s.strip_suffix("/studio/"))
-        .expect("service url");
-    let mut stream = std::net::TcpStream::connect(addr).unwrap();
-    {
-        use std::io::Write;
-        stream
-            .write_all(b"GET /studio/data.json HTTP/1.1\r\nHost: local\r\n\r\n")
-            .unwrap();
-    }
-    let mut response = String::new();
-    {
-        use std::io::Read;
-        stream.read_to_string(&mut response).unwrap();
-    }
+    let addr = studio_addr(&line);
+    let connect_addr = addr.split_once('?').map(|(host, _)| host).unwrap_or(&addr);
+    let response = studio_raw(
+        &addr,
+        &format!(
+            "GET /studio/data.json HTTP/1.1\r\nHost: {connect_addr}\r\nConnection: close\r\n\r\n"
+        ),
+    );
+    assert!(
+        response.contains("401 Unauthorized"),
+        "response: {response}"
+    );
+    let source = studio_raw(
+        &addr,
+        &format!(
+            "GET /studio/source HTTP/1.1\r\nHost: {connect_addr}\r\nConnection: close\r\n\r\n"
+        ),
+    );
+    assert!(
+        source.contains("401 Unauthorized"),
+        "source disclosure response: {source}"
+    );
+    let write = studio_raw(
+        &addr,
+        &format!(
+            "POST /studio/transaction HTTP/1.1\r\nHost: {connect_addr}\r\nOrigin: http://{connect_addr}\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{{\"op\":\"session\"}}"
+        ),
+    );
+    assert!(
+        write.contains("401 Unauthorized"),
+        "write response: {write}"
+    );
+    let token = addr
+        .split_once("?session=")
+        .map(|(_, token)| token)
+        .expect("Studio service URL must carry its session token");
+    let csrf = studio_raw(
+        &addr,
+        &format!(
+            "POST /studio/run HTTP/1.1\r\nHost: {connect_addr}\r\nOrigin: http://evil.test\r\nCookie: jetos_studio={token}\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{{\"action\":\"run\"}}"
+        ),
+    );
+    assert!(csrf.contains("401 Unauthorized"), "CSRF response: {csrf}");
+    let response = studio_http(&addr, "GET", "/studio/data.json", "");
     assert!(response.contains("200 OK"), "response: {response}");
     assert!(
         response.contains("jetos-studio-projection"),
         "response: {response}"
     );
     assert!(response.contains("openssh"), "response: {response}");
-    let page = studio_http(addr, "GET", "/studio/", "");
+    let page = studio_http(&addr, "GET", "/studio/", "");
     assert!(page.contains("200 OK"), "page: {page}");
+    assert!(
+        page.contains("Set-Cookie: jetos_studio="),
+        "Studio bootstrap must establish an HttpOnly session cookie: {page}"
+    );
+    let cookie_data = studio_raw(
+        &addr,
+        &format!(
+            "GET /studio/data.json HTTP/1.1\r\nHost: {connect_addr}\r\nCookie: jetos_studio={token}\r\nSec-Fetch-Site: same-origin\r\nConnection: close\r\n\r\n"
+        ),
+    );
+    assert!(
+        cookie_data.contains("200 OK"),
+        "same-origin Studio cookie request failed: {cookie_data}"
+    );
     assert!(
         page.contains("data-page-kind=\"dashboard\"")
             && page.contains("data-page-registry=\"studio-pages\"")
@@ -210,14 +247,10 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         use std::io::BufRead;
         reader.read_line(&mut line).unwrap();
     }
-    let addr = line
-        .trim()
-        .strip_prefix("http://")
-        .and_then(|s| s.strip_suffix("/studio/"))
-        .expect("service url");
-    let session = studio_session(addr);
-    let other_session = studio_session(addr);
-    let initial_data = studio_http(addr, "GET", "/studio/data.json", "");
+    let addr = studio_addr(&line);
+    let session = studio_session(&addr);
+    let other_session = studio_session(&addr);
+    let initial_data = studio_http(&addr, "GET", "/studio/data.json", "");
     assert!(
         initial_data.contains("live-checked-plan"),
         "data: {initial_data}"
@@ -241,21 +274,21 @@ fn jetos_studio_transaction_previews_and_writes_source() {
             "missing live model `{field}`: {initial_data}"
         );
     }
-    let bypass = studio_stage_option(addr, &session, "network.hostName", "bypass", true);
+    let bypass = studio_stage_option(&addr, &session, "network.hostName", "bypass", true);
     assert!(bypass.contains("400 Bad Request"), "bypass: {bypass}");
     assert!(
         bypass.contains("direct Studio writes are disabled"),
         "bypass: {bypass}"
     );
-    let inserted = studio_stage_option(addr, &session, "network.mtu", "1500", false);
+    let inserted = studio_stage_option(&addr, &session, "network.mtu", "1500", false);
     assert!(inserted.contains("@@ -1,"), "inserted: {inserted}");
     assert!(
         inserted.contains("+            network.mtu: 1500,"),
         "inserted: {inserted}"
     );
     let inserted_owner = studio_changeset_owner(&inserted, &session);
-    let _ = studio_owned_transaction(addr, "discard", &inserted_owner);
-    let preview = studio_stage_option(addr, &session, "network.hostName", "aurora", false);
+    let _ = studio_owned_transaction(&addr, "discard", &inserted_owner);
+    let preview = studio_stage_option(&addr, &session, "network.hostName", "aurora", false);
     assert!(preview.contains("200 OK"), "preview: {preview}");
     assert!(preview.contains("\"write\":false"), "preview: {preview}");
     assert!(
@@ -277,34 +310,34 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         config.contains("network.hostName: halcyon"),
         "config: {config}"
     );
-    let source = studio_http(addr, "GET", "/studio/source", "");
+    let source = studio_http(&addr, "GET", "/studio/source", "");
     assert!(
         source.contains("network.hostName: halcyon"),
         "source: {source}"
     );
-    let stolen_discard = studio_http(addr, "POST", "/studio/transaction", &format!("{{\"op\":\"discard\",\"session_id\":\"{other_session}\",\"token\":\"{}\",\"base_revision\":\"{}\"}}", preview_owner.token, preview_owner.base_revision));
+    let stolen_discard = studio_http(&addr, "POST", "/studio/transaction", &format!("{{\"op\":\"discard\",\"session_id\":\"{other_session}\",\"token\":\"{}\",\"base_revision\":\"{}\"}}", preview_owner.token, preview_owner.base_revision));
     assert!(
         stolen_discard.contains("409 Conflict"),
         "stolen discard: {stolen_discard}"
     );
-    let stolen_apply = studio_http(addr, "POST", "/studio/transaction", &format!("{{\"op\":\"apply\",\"session_id\":\"{other_session}\",\"token\":\"{}\",\"base_revision\":\"{}\"}}", preview_owner.token, preview_owner.base_revision));
+    let stolen_apply = studio_http(&addr, "POST", "/studio/transaction", &format!("{{\"op\":\"apply\",\"session_id\":\"{other_session}\",\"token\":\"{}\",\"base_revision\":\"{}\"}}", preview_owner.token, preview_owner.base_revision));
     assert!(
         stolen_apply.contains("409 Conflict"),
         "stolen apply: {stolen_apply}"
     );
-    let staged = studio_owned_transaction(addr, "status", &preview_owner);
+    let staged = studio_owned_transaction(&addr, "status", &preview_owner);
     assert!(staged.contains("200 OK"), "staged: {staged}");
     assert!(staged.contains("\"state\":\"staged\""), "staged: {staged}");
     assert!(staged.contains("\"staged_count\":1"), "staged: {staged}");
     assert!(staged.contains("network.hostName"), "staged: {staged}");
-    let discarded = studio_owned_transaction(addr, "discard", &preview_owner);
+    let discarded = studio_owned_transaction(&addr, "discard", &preview_owner);
     assert!(
         discarded.contains("\"state\":\"discarded\""),
         "discarded: {discarded}"
     );
-    let empty = studio_session_transaction(addr, "status", &session);
+    let empty = studio_session_transaction(&addr, "status", &session);
     assert!(empty.contains("\"state\":\"empty\""), "empty: {empty}");
-    let preview = studio_stage_option(addr, &session, "network.hostName", "aurora", false);
+    let preview = studio_stage_option(&addr, &session, "network.hostName", "aurora", false);
     assert!(
         preview.contains("\"state\":\"staged\""),
         "preview: {preview}"
@@ -316,7 +349,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         format!("{original}// external edit\n"),
     )
     .unwrap();
-    let stale = studio_owned_transaction(addr, "apply", &preview_owner);
+    let stale = studio_owned_transaction(&addr, "apply", &preview_owner);
     assert!(stale.contains("409 Conflict"), "stale: {stale}");
     assert!(
         stale.contains("changed after this Changeset"),
@@ -336,7 +369,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         .spawn()
         .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(10));
-    let raced_apply = studio_owned_transaction(addr, "apply", &preview_owner);
+    let raced_apply = studio_owned_transaction(&addr, "apply", &preview_owner);
     assert!(compliant_writer.wait().unwrap().success());
     assert!(
         raced_apply.contains("409 Conflict"),
@@ -353,7 +386,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         .arg(format!("i=0; while [ $i -lt 30 ]; do printf '%s\\n' '// noncompliant external process' >> {config_q}; i=$((i + 1)); sleep 0.01; done"))
         .spawn()
         .unwrap();
-    let noncompliant_apply = studio_owned_transaction(addr, "apply", &preview_owner);
+    let noncompliant_apply = studio_owned_transaction(&addr, "apply", &preview_owner);
     assert!(noncompliant_writer.wait().unwrap().success());
     assert!(
         noncompliant_apply.contains("409 Conflict"),
@@ -370,7 +403,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         use std::os::unix::fs::PermissionsExt;
         let original_mode = fs::metadata(&project.path).unwrap().permissions().mode();
         fs::set_permissions(&project.path, fs::Permissions::from_mode(0o555)).unwrap();
-        let failed = studio_owned_transaction(addr, "apply", &preview_owner);
+        let failed = studio_owned_transaction(&addr, "apply", &preview_owner);
         fs::set_permissions(&project.path, fs::Permissions::from_mode(original_mode)).unwrap();
         assert!(
             failed.contains("500 Internal Server Error"),
@@ -378,7 +411,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         );
         assert!(failed.contains("\"reprojected\":false"), "failed: {failed}");
     }
-    let write = studio_owned_transaction(addr, "apply", &preview_owner);
+    let write = studio_owned_transaction(&addr, "apply", &preview_owner);
     assert!(write.contains("200 OK"), "write: {write}");
     assert!(write.contains("\"state\":\"applied\""), "write: {write}");
     assert!(write.contains("\"reprojected\":true"), "write: {write}");
@@ -388,12 +421,12 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         config.contains("network.hostName: aurora"),
         "config: {config}"
     );
-    let source = studio_http(addr, "GET", "/studio/source", "");
+    let source = studio_http(&addr, "GET", "/studio/source", "");
     assert!(
         source.contains("network.hostName: aurora"),
         "source: {source}"
     );
-    let live_data = studio_http(addr, "GET", "/studio/data.json", "");
+    let live_data = studio_http(&addr, "GET", "/studio/data.json", "");
     assert!(live_data.contains("live-checked-plan"), "data: {live_data}");
     assert!(live_data.contains("aurora"), "data: {live_data}");
     assert!(
@@ -414,14 +447,14 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     );
     let stdout = String::from_utf8_lossy(&plan.stdout);
     assert!(stdout.contains("aurora"), "plan: {stdout}");
-    let check = studio_http(addr, "POST", "/studio/run", "{\"action\":\"check\"}");
+    let check = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"check\"}");
     assert!(check.contains("\"success\":true"), "check: {check}");
-    let plan = studio_http(addr, "POST", "/studio/run", "{\"action\":\"plan\"}");
+    let plan = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"plan\"}");
     assert!(plan.contains("\"success\":true"), "plan: {plan}");
     assert!(plan.contains("aurora"), "plan: {plan}");
-    let build = studio_http(addr, "POST", "/studio/run", "{\"action\":\"build\"}");
+    let build = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"build\"}");
     assert!(build.contains("\"success\":true"), "build: {build}");
-    let unproved_switch = studio_http(addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
+    let unproved_switch = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
     assert!(
         unproved_switch.contains("409 Conflict"),
         "switch: {unproved_switch}"
@@ -435,32 +468,32 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         std::thread::sleep(std::time::Duration::from_millis(25));
         fs::write(race_path, raced_source).unwrap();
     });
-    let raced_proof = studio_http(addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
+    let raced_proof = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
     race.join().unwrap();
     assert!(
         raced_proof.contains("\"source_revision\":"),
         "proof race: {raced_proof}"
     );
-    let raced_switch = studio_http(addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
+    let raced_switch = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
     assert!(
         raced_switch.contains("409 Conflict"),
         "proof race switch: {raced_switch}"
     );
-    let failed_proof_state = studio_http(addr, "GET", "/studio/data.json", "");
+    let failed_proof_state = studio_http(&addr, "GET", "/studio/data.json", "");
     assert!(
         failed_proof_state.contains("\"state\":\"unproved\""),
         "failed proof badge: {failed_proof_state}"
     );
     fs::write(&config_path, &proved_source).unwrap();
     let snapshot_mutation = studio_attack_snapshot(server_pid, false);
-    let mutated_proof = studio_http(addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
+    let mutated_proof = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
     snapshot_mutation.join().unwrap();
     assert!(
         mutated_proof.contains("\"success\":true"),
         "sealed snapshot: {mutated_proof}"
     );
     let snapshot_replacement = studio_attack_snapshot(server_pid, true);
-    let replaced_proof = studio_http(addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
+    let replaced_proof = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
     snapshot_replacement.join().unwrap();
     assert!(
         replaced_proof.contains("\"success\":true"),
@@ -468,7 +501,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     );
     let proved_source = format!("{proved_source}// unbuilt proof-only revision\n");
     fs::write(&config_path, &proved_source).unwrap();
-    let proof = studio_http(addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
+    let proof = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"proof\"}");
     assert!(proof.contains("\"success\":true"), "proof: {proof}");
     assert!(proof.contains("aurora"), "proof: {proof}");
     assert!(proof.contains("\"source_revision\":"), "proof: {proof}");
@@ -492,7 +525,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     let proof_input_plan_sha256 = json_string(proof_source, "input_plan_sha256");
     let proof_plan_sha256 = json_string(proof_source, "plan_sha256");
     assert_eq!(proof_source_sha256, proof_revision);
-    let proved_projection = studio_http(addr, "GET", "/studio/data.json", "");
+    let proved_projection = studio_http(&addr, "GET", "/studio/data.json", "");
     assert!(
         proved_projection.contains("\"state\":\"proved\""),
         "proved badge: {proved_projection}"
@@ -508,7 +541,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         std::thread::sleep(std::time::Duration::from_millis(1));
         fs::write(switch_race_path, switch_raced_source).unwrap();
     });
-    let switched = studio_http(addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
+    let switched = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
     switch_race.join().unwrap();
     assert!(
         switched.contains("\"success\":false"),
@@ -524,7 +557,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     fs::write(&config_path, &proved_source).unwrap();
     let candidate_plan_before =
         fs::read(root.join("systems/generations/zz-studio-candidate/plan.json")).unwrap();
-    let switched = studio_http(addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
+    let switched = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"switch\"}");
     assert!(switched.contains("\"success\":true"), "switch: {switched}");
     let current = fs::read_link(root.join("systems/current")).unwrap();
     assert_eq!(current.file_name().unwrap(), proof_generation.as_str());
@@ -549,14 +582,14 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         candidate_plan_before,
         "switch must not rebuild a candidate"
     );
-    let generations = studio_http(addr, "POST", "/studio/run", "{\"action\":\"generations\"}");
+    let generations = studio_http(&addr, "POST", "/studio/run", "{\"action\":\"generations\"}");
     assert!(
         generations.contains("zz-studio-candidate"),
         "generations: {generations}"
     );
     let applied_source = proved_source.replace("// unbuilt proof-only revision\n", "");
     fs::write(&config_path, applied_source).unwrap();
-    let rollback = studio_session_transaction(addr, "stage-rollback", &session);
+    let rollback = studio_session_transaction(&addr, "stage-rollback", &session);
     assert!(
         rollback.contains("\"state\":\"staged\""),
         "rollback: {rollback}"
@@ -570,18 +603,18 @@ fn jetos_studio_transaction_previews_and_writes_source() {
         rollback.contains("+            network.hostName: halcyon,"),
         "rollback: {rollback}"
     );
-    let rollback_apply = studio_owned_transaction(addr, "apply", &rollback_owner);
+    let rollback_apply = studio_owned_transaction(&addr, "apply", &rollback_owner);
     assert!(
         rollback_apply.contains("\"reprojected\":true"),
         "rollback: {rollback_apply}"
     );
-    let restored = studio_http(addr, "GET", "/studio/data.json", "");
+    let restored = studio_http(&addr, "GET", "/studio/data.json", "");
     assert!(restored.contains("halcyon"), "restored: {restored}");
     let literal = "\"café \\\"lab\\\" \\\\share\"";
-    let escaped = studio_stage_option(addr, &session, "network.interface", literal, false);
+    let escaped = studio_stage_option(&addr, &session, "network.interface", literal, false);
     assert!(escaped.contains("café"), "escaped: {escaped}");
     let escaped_owner = studio_changeset_owner(&escaped, &session);
-    let escaped_apply = studio_owned_transaction(addr, "apply", &escaped_owner);
+    let escaped_apply = studio_owned_transaction(&addr, "apply", &escaped_owner);
     assert!(
         escaped_apply.contains("\"reprojected\":true"),
         "escaped: {escaped_apply}"

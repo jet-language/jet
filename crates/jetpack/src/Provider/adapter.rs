@@ -18,7 +18,7 @@ pub(crate) fn realize_adapter(
     let staged = stage_adapter_source(&source_ref, ctx)?;
     let recipe = adapter_recipe_to_build(&plan.recipe);
     let recipe_hash = recipe.recipe_hash();
-    let source_hash = tree_fingerprint(&staged);
+    let source_hash = tree_fingerprint(&staged).map_err(ProviderError::Adapter)?;
     let source_fingerprint = crate::Envelope::try_output_hash_of(&staged.to_string_lossy())
         .map_err(ProviderError::Adapter)?;
     let identity_source = if matches!(&plan.recipe, AdapterRecipe::Build(_)) {

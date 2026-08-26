@@ -349,6 +349,14 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
 
     let port = wait_for_port(stdout);
 
+    for path in ["/C:/Windows/win.ini", "/\\Windows\\win.ini", "/\\\\server\\share\\secret"] {
+        let (status, _) = http_get(port, path).expect("static-path hostile request failed");
+        assert_eq!(
+            status, 400,
+            "Windows absolute static path escaped the build root: {path}"
+        );
+    }
+
     // The initial build must be live and match what the real compile
     // pipeline produces for the same source (in-process, same as
     // tests/web_build.rs's fixtures use).
@@ -2045,6 +2053,14 @@ fn jet_dev_runs_user_defined_dev_fn_and_rebuilds_on_save() {
     let guard = KillOnDrop(child);
 
     wait_for_server_up(port, Duration::from_secs(30));
+
+    for path in ["/C:/Windows/win.ini", "/\\Windows\\win.ini", "/\\\\server\\share\\secret"] {
+        let (status, _) = http_get(port, path).expect("embedded static-path hostile request failed");
+        assert_eq!(
+            status, 400,
+            "embedded Windows absolute static path escaped the build root: {path}"
+        );
+    }
 
     let (status, version_body) =
         http_get(port, "/__jet_dev_version").expect("GET /__jet_dev_version failed");

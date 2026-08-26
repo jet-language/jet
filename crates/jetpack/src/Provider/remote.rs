@@ -204,6 +204,9 @@ fn try_sparse_member_fetch(
     };
 
     let rev = remote.rev.as_deref().unwrap_or("HEAD");
+    if !remote_revision_is_safe(remote.rev.as_deref()) {
+        return SparseOutcome::SparseFailed;
+    }
     if !(git_ok(&["init", "--quiet"]) && git_ok(&["remote", "add", "origin", &remote.url])) {
         return SparseOutcome::SparseFailed;
     }
@@ -425,11 +428,13 @@ pub(super) fn parse_remote_source(upstream: &str) -> Result<RemoteSource, Provid
         }
         let path_rev = parts.collect::<Vec<_>>().join("/");
         let rev = rev.or_else(|| (!path_rev.is_empty()).then_some(path_rev));
-        return Ok(RemoteSource {
+        let remote = RemoteSource {
             url: format!("https://github.com/{owner}/{repo}.git"),
             rev,
             label: format!("github:{owner}/{repo}"),
-        });
+        };
+        validate_remote_source(&remote)?;
+        return Ok(remote);
     }
 
     if base.starts_with("git://")
@@ -438,11 +443,13 @@ pub(super) fn parse_remote_source(upstream: &str) -> Result<RemoteSource, Provid
         || base.starts_with("file://")
         || base.starts_with("git@")
     {
-        return Ok(RemoteSource {
+        let remote = RemoteSource {
             url: base.to_string(),
             rev,
             label: base.to_string(),
-        });
+        };
+        validate_remote_source(&remote)?;
+        return Ok(remote);
     }
 
     Err(ProviderError::CoreBuild(format!(
@@ -456,6 +463,27 @@ fn split_ref(upstream: &str) -> (&str, Option<String>) {
         Some((base, _)) => (base, None),
         None => (upstream, None),
     }
+}
+
+pub(super) fn remote_revision_is_safe(revision: Option<&str>) -> bool {
+    match revision {
+        None => true,
+        Some(revision) => {
+            !revision.is_empty()
+                && !revision.chars().any(char::is_control)
+                && !revision.starts_with('-')
+        }
+    }
+}
+
+fn validate_remote_source(remote: &RemoteSource) -> Result<(), ProviderError> {
+    if remote_revision_is_safe(remote.rev.as_deref()) {
+        return Ok(());
+    }
+    Err(ProviderError::CoreBuild(format!(
+        "remote revision `{}` is not allowed; use a branch, tag, or commit name without leading `-`",
+        remote.rev.as_deref().unwrap_or_default()
+    )))
 }
 
 pub(super) fn fetch_remote_repo(
@@ -494,7 +522,7 @@ pub(super) fn fetch_remote_repo(
     }
 
     let output = Command::new("git")
-        .args(["clone", "--quiet", &remote.url])
+        .args(["clone", "--quiet", "--", &remote.url])
         .arg(&tmp)
         .output()
         .map_err(|e| ProviderError::CoreBuild(format!("could not run `git clone`: {e}")))?;
@@ -513,6 +541,12 @@ pub(super) fn fetch_remote_repo(
     }
 
     if let Some(rev) = &remote.rev {
+        if !remote_revision_is_safe(Some(rev)) {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(ProviderError::CoreBuild(
+                "remote revision is not allowed".to_string(),
+            ));
+        }
         let output = Command::new("git")
             .args(["-C"])
             .arg(&tmp)
@@ -557,6 +591,14 @@ pub(super) fn source_cache_dir(store_dir: &Path, remote: &RemoteSource) -> PathB
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_revision_allowlist_rejects_option_injection() {
+        assert!(remote_revision_is_safe(None));
+        assert!(remote_revision_is_safe(Some("main")));
+        assert!(!remote_revision_is_safe(Some("--upload-pack=touch pwned")));
+        assert!(parse_remote_source("file:///workspace/repo#--upload-pack=touch").is_err());
+    }
 
     #[test]
     fn canonical_member_index_ignores_root_and_deduplicates_migration_markers() {
@@ -605,42 +647,66 @@ mod tests {
 /// path, length, bytes, and (on Unix) mode, in sorted order. Unlike the
 /// compiler's `.jet`-only `tree_hash`, this addresses *any* package tree, so
 /// distinct packages never collide in the store.
-pub(super) fn tree_fingerprint(root: &Path) -> String {
+pub(super) fn tree_fingerprint(root: &Path) -> Result<String, String> {
+    let metadata = std::fs::symlink_metadata(root).map_err(|error| error.to_string())?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!(
+            "fingerprint root must be a real directory: {}",
+            root.display()
+        ));
+    }
+    let real_root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
     let mut files: Vec<PathBuf> = Vec::new();
-    collect_files(root, &mut files);
+    collect_files(root, &mut files)?;
     files.sort();
     let mut input: Vec<u8> = Vec::new();
     for path in &files {
         let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy();
         input.extend_from_slice(rel.as_bytes());
         input.push(0);
-        if let Ok(bytes) = std::fs::read(path) {
-            input.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
-            input.extend_from_slice(&bytes);
+        let real_path = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
+        if !real_path.starts_with(&real_root) {
+            return Err(format!(
+                "fingerprint path escapes its source root: {}",
+                path.display()
+            ));
         }
+        let bytes = std::fs::read(real_path).map_err(|error| error.to_string())?;
+        input.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        input.extend_from_slice(&bytes);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = std::fs::metadata(path) {
-                input.extend_from_slice(&meta.permissions().mode().to_be_bytes());
-            }
+            let meta = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
+            input.extend_from_slice(&meta.permissions().mode().to_be_bytes());
         }
     }
-    SHA256::sha256_hex(&input)
+    Ok(SHA256::sha256_hex(&input))
 }
 
-fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in rd.flatten() {
+fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    for entry in std::fs::read_dir(dir).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
         let p = entry.path();
-        if p.is_dir() {
-            collect_files(&p, out);
-        } else {
+        let metadata = std::fs::symlink_metadata(&p).map_err(|error| error.to_string())?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "refusing symlink in fingerprinted package tree: {}",
+                p.display()
+            ));
+        }
+        if metadata.is_dir() {
+            collect_files(&p, out)?;
+        } else if metadata.is_file() {
             out.push(p);
+        } else {
+            return Err(format!(
+                "unsupported fingerprinted package entry: {}",
+                p.display()
+            ));
         }
     }
+    Ok(())
 }
 
 /// Recursively copy a directory tree, preserving Unix file modes (so `bin/`

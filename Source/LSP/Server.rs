@@ -289,15 +289,32 @@ fn catch_notification<F: FnOnce() -> io::Result<()>>(f: F) -> io::Result<()> {
 }
 
 fn write_log(msg: &str) -> io::Result<()> {
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/jet-lsp.log")
-    {
-        writeln!(f, "[jet-lsp] {}", msg)?;
+    append_log_line(
+        &std::env::temp_dir().join("jet-lsp.log"),
+        &format!("[jet-lsp] {msg}"),
+    )
+}
+
+fn append_log_line(path: &std::path::Path, line: &str) -> io::Result<()> {
+    if let Ok(metadata) = std::fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "LSP log path must not be a symlink",
+            ));
+        }
     }
-    Ok(())
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Linux O_NOFOLLOW: refuse a symlink substituted after the metadata
+        // check and before open.
+        options.custom_flags(0o400000);
+    }
+    let mut file = options.open(path)?;
+    writeln!(file, "{line}")
 }
 
 fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
@@ -415,14 +432,10 @@ fn build_graph_response(
 /// `jet-lsp-timing.json` in the cwd. JSON-lines suits an open-ended request
 /// stream; best-effort, so a write failure never disturbs the server.
 fn record_lsp_latency(method: &str, us: u128) {
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("jet-lsp-timing.json")
-    {
-        let _ = writeln!(f, "{{\"method\":\"{}\",\"us\":{}}}", method, us);
-    }
+    let _ = append_log_line(
+        std::path::Path::new("jet-lsp-timing.json"),
+        &format!("{{\"method\":\"{}\",\"us\":{}}}", method, us),
+    );
 }
 
 fn configure_workspace_roots(server: &mut Server, params: Option<&JSONValue>) {

@@ -727,6 +727,21 @@ impl<'a> Resolver<'a> {
                     normalize_path(&parent_dir.join(path))
                 };
 
+                // A fetched package controls its own transitive path strings,
+                // but it must not turn that control into a read of an
+                // unrelated host directory. Root package paths retain their
+                // existing sibling-path behavior; paths declared by a
+                // dependency stay below that dependency's source root.
+                if parent_dir != self.project_root
+                    && (Path::new(path).is_absolute() || !abs_path.starts_with(parent_dir))
+                {
+                    return Err(vec![path_dependency_escape_diagnostic(
+                        dep_name,
+                        path,
+                        parent_dir,
+                    )]);
+                }
+
                 // Load the dep's manifest.
                 let dep_manifest = self.load_dep_manifest(&abs_path, dep_name)?;
 
@@ -821,10 +836,10 @@ impl<'a> Resolver<'a> {
 
                 // Determine what rev to fetch.
                 let rev_to_fetch = self.resolve_git_rev(dep_name, url, selector)?;
-                let clone_dir = git_cache_dir(url, &rev_to_fetch);
+                let clone_dir = git_cache_dir(url, &rev_to_fetch).map_err(|d| vec![d])?;
 
                 // Clone/fetch if not already cached.
-                if !clone_dir.is_dir() {
+                if !is_real_directory(&clone_dir) {
                     git_clone(url, &rev_to_fetch, &clone_dir)?;
                 }
 
@@ -1395,12 +1410,18 @@ impl<'a> Resolver<'a> {
         selector: &GitSelector,
     ) -> Result<String, Vec<Diagnostic>> {
         match selector {
-            GitSelector::Rev(r) => Ok(r.clone()),
+            GitSelector::Rev(r) => validate_cached_revision(r)
+                .map(|_| r.clone())
+                .map_err(|reason| vec![git_revision_diagnostic(r, &reason)]),
             GitSelector::Tag(t) if t != "@latest" => {
                 // If we have an existing lock and not updating, use locked rev.
                 if !self.dependency_update_requested(dep_name) {
                     if let Some(locked_rev) = self.find_locked_rev(dep_name) {
-                        return Ok(locked_rev);
+                        return validate_cached_revision(&locked_rev)
+                            .map(|_| locked_rev)
+                            .map_err(|reason| {
+                                vec![git_revision_diagnostic("locked revision", &reason)]
+                            });
                     }
                 }
                 // Resolve the tag to a specific commit via ls-remote.
@@ -1410,7 +1431,11 @@ impl<'a> Resolver<'a> {
                 // Moving selector: always re-resolve if updating.
                 if !self.dependency_update_requested(dep_name) {
                     if let Some(locked_rev) = self.find_locked_rev(dep_name) {
-                        return Ok(locked_rev);
+                        return validate_cached_revision(&locked_rev)
+                            .map(|_| locked_rev)
+                            .map_err(|reason| {
+                                vec![git_revision_diagnostic("locked revision", &reason)]
+                            });
                     }
                 }
                 git_resolve_ref(url, b).map_err(|d| vec![d])
@@ -1928,23 +1953,72 @@ fn build_dep_dirs_from_lock(
     let mut dep_dirs = HashMap::new();
     for (dep_name, spec) in &manifest.dependencies {
         let source_dir = match spec {
-            DepSpec::Path { path } => normalize_path(&project_root.join(path)),
-            DepSpec::Git { .. } => {
-                // Find the locked rev and use the git cache dir.
-                let locked_pkg = lock.packages.iter().find(|p| p.name == *dep_name);
-                if let Some(pkg) = locked_pkg {
-                    if let Some(rev) = pkg.locked.as_ref().map(|l| &l.rev) {
-                        if let LockSource::Git { url, .. } = &pkg.source {
-                            git_cache_dir(url, rev)
-                        } else {
-                            project_root.to_path_buf()
-                        }
-                    } else {
-                        project_root.to_path_buf()
-                    }
-                } else {
-                    project_root.to_path_buf()
+            DepSpec::Path { path } => {
+                let source_dir = normalize_path(&project_root.join(path));
+                let Some(package) = lock.packages.iter().find(|package| {
+                    package.name == *dep_name
+                        && matches!(&package.source, LockSource::Path(_))
+                }) else {
+                    return Err(vec![locked_source_diagnostic(
+                        dep_name,
+                        "the lock has no matching path source identity",
+                    )]);
+                };
+                let LockSource::Path(locked_path) = &package.source else {
+                    unreachable!("path package predicate guarantees a path source")
+                };
+                if normalize_path(&project_root.join(locked_path)) != source_dir {
+                    return Err(vec![locked_source_diagnostic(
+                        dep_name,
+                        "the locked path source disagrees with the manifest",
+                    )]);
                 }
+                Store::verify_entry(
+                    dep_name,
+                    &source_dir,
+                    package.content_hash.as_deref().unwrap_or(""),
+                )
+                .map_err(|diagnostic| vec![diagnostic])?;
+                source_dir
+            }
+            DepSpec::Git { url, selector } => {
+                let Some(package) = lock.packages.iter().find(|package| {
+                    package.name == *dep_name
+                        && matches!(&package.source, LockSource::Git { .. })
+                }) else {
+                    return Err(vec![locked_source_diagnostic(
+                        dep_name,
+                        "the lock has no matching git source identity",
+                    )]);
+                };
+                let LockSource::Git {
+                    url: locked_url,
+                    selector: locked_selector,
+                } = &package.source
+                else {
+                    unreachable!("git package predicate guarantees a git source")
+                };
+                let expected_selector = Lock::git_selector_str(selector);
+                if locked_url != url || locked_selector != &expected_selector {
+                    return Err(vec![locked_source_diagnostic(
+                        dep_name,
+                        "the locked git source disagrees with the manifest",
+                    )]);
+                }
+                let Some(revision) = package.locked.as_ref() else {
+                    return Err(vec![locked_source_diagnostic(
+                        dep_name,
+                        "the lock has no pinned git revision",
+                    )]);
+                };
+                let source_dir = git_cache_dir(url, &revision.rev).map_err(|diagnostic| vec![diagnostic])?;
+                let expected_hash = package
+                    .content_hash
+                    .as_deref()
+                    .unwrap_or(&revision.tree_hash);
+                Store::verify_entry(dep_name, &source_dir, expected_hash)
+                    .map_err(|diagnostic| vec![diagnostic])?;
+                source_dir
             }
             DepSpec::Registry(version_req) => {
                 let requirement = VersionReq::parse(version_req).ok_or_else(|| {
@@ -2282,6 +2356,16 @@ fn foreign_locked_diagnostic(dep_name: &str, detail: &str) -> Diagnostic {
     )
 }
 
+fn locked_source_diagnostic(dep_name: &str, detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1204",
+        format!("locked dependency `{dep_name}` failed source verification"),
+        detail.to_string(),
+        "run `jet fetch` to recreate the lock from the verified dependency source".to_string(),
+        None,
+    )
+}
+
 // ──────────────────────────────────────────────
 // Git helpers
 // ──────────────────────────────────────────────
@@ -2290,24 +2374,37 @@ pub fn git_available() -> bool {
     Command::new("git").arg("--version").output().is_ok()
 }
 
-fn git_cache_dir(url: &str, rev: &str) -> PathBuf {
+fn git_cache_dir(url: &str, rev: &str) -> Result<PathBuf, Diagnostic> {
+    if let Err(reason) = validate_cached_revision(rev) {
+        return Err(git_revision_diagnostic(rev, &reason));
+    }
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
     let url_hash = crate::SHA256::sha256_hex(url.as_bytes());
-    PathBuf::from(home)
+    let rev_prefix: String = rev
+        .char_indices()
+        .take_while(|(index, _)| *index < 16)
+        .map(|(_, character)| character)
+        .collect();
+    let path = PathBuf::from(home)
         .join(".jet")
         .join("git-cache")
         .join(&url_hash[..16])
-        .join(&rev[..16.min(rev.len())])
+        .join(rev_prefix);
+    validate_git_cache_path(&path).map_err(|reason| git_cache_diagnostic(&path, &reason))?;
+    Ok(path)
 }
 
 fn git_resolve_ref(url: &str, refname: &str) -> Result<String, Diagnostic> {
     if let Err(reason) = validate_git_transport_url(url) {
         return Err(git_transport_diagnostic(url, &reason));
     }
+    if let Err(reason) = validate_git_revision(refname) {
+        return Err(git_revision_diagnostic(refname, &reason));
+    }
     let out = Command::new("git")
-        .args(["ls-remote", "--exit-code", url, refname])
+        .args(["ls-remote", "--exit-code", "--", url, refname])
         .output()
         .map_err(|_| Lock::e1203())?;
     if !out.status.success() {
@@ -2333,12 +2430,24 @@ fn git_resolve_ref(url: &str, refname: &str) -> Result<String, Diagnostic> {
             None,
         ));
     }
+    if let Err(reason) = validate_cached_revision(&rev) {
+        return Err(git_revision_diagnostic(&rev, &reason));
+    }
     Ok(rev)
 }
 
 fn git_clone(url: &str, rev: &str, dest: &Path) -> Result<(), Vec<Diagnostic>> {
     if let Err(reason) = validate_git_transport_url(url) {
         return Err(vec![git_transport_diagnostic(url, &reason)]);
+    }
+    if let Err(reason) = validate_git_revision(rev) {
+        return Err(vec![git_revision_diagnostic(rev, &reason)]);
+    }
+    if let Err(reason) = validate_cached_revision(rev) {
+        return Err(vec![git_revision_diagnostic(rev, &reason)]);
+    }
+    if let Err(reason) = validate_git_cache_path(dest) {
+        return Err(vec![git_cache_diagnostic(dest, &reason)]);
     }
     std::fs::create_dir_all(dest).map_err(|e| {
         vec![Diagnostic::error(
@@ -2352,10 +2461,25 @@ fn git_clone(url: &str, rev: &str, dest: &Path) -> Result<(), Vec<Diagnostic>> {
 
     // Clone the repository and check out the specific revision.
     let tmp = dest.with_extension("_tmp");
-    let _ = std::fs::remove_dir_all(&tmp);
+    if let Err(reason) = validate_git_cache_path(&tmp) {
+        return Err(vec![git_cache_diagnostic(&tmp, &reason)]);
+    }
+    if let Ok(metadata) = std::fs::symlink_metadata(&tmp) {
+        let result = if metadata.is_dir() {
+            std::fs::remove_dir_all(&tmp)
+        } else {
+            std::fs::remove_file(&tmp)
+        };
+        if let Err(error) = result {
+            return Err(vec![git_cache_diagnostic(
+                &tmp,
+                &format!("could not clear the temporary checkout: {error}"),
+            )]);
+        }
+    }
 
     let clone_ok = Command::new("git")
-        .args(["clone", "--quiet", url, tmp.to_str().unwrap_or(".")])
+        .args(["clone", "--quiet", "--", url, tmp.to_str().unwrap_or(".")])
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
@@ -2420,6 +2544,23 @@ fn normalize_path(p: &Path) -> PathBuf {
     out
 }
 
+fn path_dependency_escape_diagnostic(
+    dep_name: &str,
+    path: &str,
+    parent_dir: &Path,
+) -> Diagnostic {
+    Diagnostic::error(
+        "E1206",
+        format!("path dependency `{dep_name}` escapes its parent package"),
+        format!(
+            "the path `{path}` resolves outside the declaring package directory `{}`",
+            parent_dir.display()
+        ),
+        "use a relative path below the declaring package directory".to_string(),
+        None,
+    )
+}
+
 fn git_transport_diagnostic(url: &str, reason: &str) -> Diagnostic {
     Diagnostic::error(
         "E1203",
@@ -2428,6 +2569,86 @@ fn git_transport_diagnostic(url: &str, reason: &str) -> Diagnostic {
         "use a public HTTPS, SSH, or Git URL, or a local file URL".to_string(),
         None,
     )
+}
+
+fn git_revision_diagnostic(revision: &str, reason: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1203",
+        "git revision is not allowed".to_string(),
+        format!("git revision policy rejected `{revision}`: {reason}"),
+        format!(
+            "use a branch, tag, or commit name without leading `-` in {}",
+            crate::Syntax::PACKAGE_FILE
+        ),
+        None,
+    )
+}
+
+fn git_cache_diagnostic(path: &Path, reason: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1206",
+        format!("git cache path `{}` is not allowed", path.display()),
+        reason.to_string(),
+        "remove the cache symlink or use a safe pinned revision, then run `jet fetch` again"
+            .to_string(),
+        None,
+    )
+}
+
+fn validate_git_revision(revision: &str) -> Result<(), String> {
+    if revision.is_empty() || revision.chars().any(char::is_control) || revision.starts_with('-') {
+        return Err("the revision is empty or contains unsafe characters".to_string());
+    }
+    Ok(())
+}
+
+fn validate_cached_revision(revision: &str) -> Result<(), String> {
+    if revision.is_empty()
+        || revision == "."
+        || revision == ".."
+        || revision.starts_with('-')
+        || revision.contains(['/', '\\', ':'])
+        || revision.chars().any(char::is_control)
+        || !matches!(
+            Path::new(revision).components().next(),
+            Some(std::path::Component::Normal(_))
+        )
+        || Path::new(revision).components().nth(1).is_some()
+    {
+        return Err("the revision must be one safe cache path component".to_string());
+    }
+    Ok(())
+}
+
+fn validate_git_cache_path(path: &Path) -> Result<(), String> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!(
+                    "cache path component `{}` is a symlink",
+                    current.display()
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(format!(
+                    "cache path component `{}` is not a directory",
+                    current.display()
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(())
+}
+
+fn is_real_directory(path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        .unwrap_or(false)
 }
 
 fn validate_git_transport_url(url: &str) -> Result<(), String> {
@@ -2575,4 +2796,14 @@ fn unix_now() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn git_revision_allowlist_rejects_option_and_control_injection() {
+        assert!(super::validate_git_revision("main").is_ok());
+        assert!(super::validate_git_revision("--upload-pack=touch pwned").is_err());
+        assert!(super::validate_git_revision("main\n--upload-pack=touch").is_err());
+    }
 }

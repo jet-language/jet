@@ -47,12 +47,25 @@ pub fn ensure_path_dep(
     fingerprint: &str,
     source_dir: &Path,
 ) -> Result<(PathBuf, String), Diagnostic> {
+    validate_store_component(name).map_err(|reason| {
+        store_path_diagnostic(name, &reason)
+    })?;
+    validate_store_component(version).map_err(|reason| {
+        store_path_diagnostic(version, &reason)
+    })?;
+    let fingerprint = fingerprint.strip_prefix("sha256-").unwrap_or(fingerprint);
+    validate_store_component(fingerprint).map_err(|reason| {
+        store_path_diagnostic(fingerprint, &reason)
+    })?;
+    validate_real_tree_root(source_dir).map_err(|e| io_error("checking package source", source_dir, e))?;
     let dest = store_path(name, version, fingerprint);
-    if dest.is_dir() {
+    validate_store_path(&dest)
+        .map_err(|e| io_error("checking store entry", &dest, e))?;
+    if is_real_dir(&dest).map_err(|e| io_error("checking store entry", &dest, e))? {
         let hash = tree_hash(&dest);
         return Ok((dest, hash));
     }
-    fs::create_dir_all(&dest).map_err(|e| io_error("creating store entry", &dest, e))?;
+    ensure_directory(&dest).map_err(|e| io_error("creating store entry", &dest, e))?;
     copy_jet_tree(source_dir, &dest).map_err(|e| io_error("copying to store", &dest, e))?;
     let hash = tree_hash(&dest);
     Ok((dest, hash))
@@ -65,7 +78,7 @@ pub fn verify_content_hash(
     store_entry: &Path,
     expected_content_hash: &str,
 ) -> Result<(), Diagnostic> {
-    if !store_entry.is_dir() {
+    if !is_real_dir(store_entry).unwrap_or(false) {
         return Err(Diagnostic::error(
             "E1204",
             format!("the store entry for `{}` is missing", pkg_name),
@@ -75,7 +88,7 @@ pub fn verify_content_hash(
         ));
     }
     if expected_content_hash.is_empty() {
-        return Ok(());
+        return Err(missing_content_hash(pkg_name));
     }
     let actual = tree_hash(store_entry);
     if actual != expected_content_hash {
@@ -107,10 +120,10 @@ pub fn ensure_git_dep(
 /// Link a store entry into a project's local deps dir via hardlinks (or copy).
 /// `link_root` is typically `<project>/.jet-build/deps/<name>/`.
 pub fn link_into_project(store_entry: &Path, link_root: &Path) -> Result<(), Diagnostic> {
-    if link_root.is_dir() {
+    if is_real_dir(link_root).map_err(|e| io_error("checking dep link dir", link_root, e))? {
         return Ok(());
     }
-    fs::create_dir_all(link_root).map_err(|e| io_error("creating dep link dir", link_root, e))?;
+    ensure_directory(link_root).map_err(|e| io_error("creating dep link dir", link_root, e))?;
     link_or_copy_tree(store_entry, link_root)
 }
 
@@ -119,11 +132,10 @@ pub fn link_into_project(store_entry: &Path, link_root: &Path) -> Result<(), Dia
 /// mutation risk; registry dependencies therefore use this boundary while
 /// legacy path/git stores retain `link_into_project`'s inode sharing.
 pub fn copy_into_project(store_entry: &Path, project_root: &Path) -> Result<(), Diagnostic> {
-    if project_root.is_dir() {
+    if is_real_dir(project_root).map_err(|e| io_error("checking dep copy dir", project_root, e))? {
         return Ok(());
     }
-    fs::create_dir_all(project_root)
-        .map_err(|e| io_error("creating dep copy dir", project_root, e))?;
+    ensure_directory(project_root).map_err(|e| io_error("creating dep copy dir", project_root, e))?;
     copy_jet_tree(store_entry, project_root)
         .map_err(|e| io_error("copying dep tree", project_root, e))
 }
@@ -134,7 +146,7 @@ pub fn verify_entry(
     store_entry: &Path,
     expected_tree_hash: &str,
 ) -> Result<(), Diagnostic> {
-    if !store_entry.is_dir() {
+    if !is_real_dir(store_entry).unwrap_or(false) {
         return Err(Diagnostic::error(
             "E1204",
             format!("the store entry for `{}` is missing", pkg_name),
@@ -144,7 +156,7 @@ pub fn verify_entry(
         ));
     }
     if expected_tree_hash.is_empty() {
-        return Ok(());
+        return Err(missing_content_hash(pkg_name));
     }
     let actual = tree_hash(store_entry);
     if actual != expected_tree_hash {
@@ -192,7 +204,7 @@ pub fn list_entries() -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = rd
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.is_dir())
+        .filter(|p| is_real_dir(p).unwrap_or(false))
         .collect();
     out.sort();
     out
@@ -221,7 +233,10 @@ pub fn gc(in_use_fingerprints: &std::collections::HashSet<String>) -> Vec<PathBu
 // ──────────────────────────────────────────────
 
 fn copy_jet_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
-    for entry in fs::read_dir(src)?.flatten() {
+    validate_real_tree_root(src)?;
+    ensure_directory(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
         let src_path = entry.path();
         let name = src_path.file_name().unwrap_or_default();
         let name_str = name.to_string_lossy();
@@ -229,36 +244,194 @@ fn copy_jet_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
             continue;
         }
         let dst_path = dst.join(name);
-        if src_path.is_dir() {
-            fs::create_dir_all(&dst_path)?;
+        let metadata = fs::symlink_metadata(&src_path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("refusing symlink in package source tree: {}", src_path.display()),
+            ));
+        }
+        if metadata.is_dir() {
+            ensure_directory(&dst_path)?;
             copy_jet_tree(&src_path, &dst_path)?;
-        } else {
+        } else if metadata.is_file() {
+            reject_existing_symlink(&dst_path)?;
             fs::copy(&src_path, &dst_path)?;
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("unsupported package source entry: {}", src_path.display()),
+            ));
         }
     }
     Ok(())
 }
 
 fn link_or_copy_tree(src: &Path, dst: &Path) -> Result<(), Diagnostic> {
-    for entry in fs::read_dir(src)
-        .map_err(|e| io_error("reading store entry", src, e))?
-        .flatten()
-    {
+    validate_real_tree_root(src).map_err(|e| io_error("checking store entry", src, e))?;
+    ensure_directory(dst).map_err(|e| io_error("creating link dir", dst, e))?;
+    for entry in fs::read_dir(src).map_err(|e| io_error("reading store entry", src, e))? {
+        let entry = entry.map_err(|e| io_error("reading store entry", src, e))?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
-        if src_path.is_dir() {
-            fs::create_dir_all(&dst_path)
+        let metadata = fs::symlink_metadata(&src_path)
+            .map_err(|e| io_error("checking store entry", &src_path, e))?;
+        if metadata.file_type().is_symlink() {
+            return Err(io_error(
+                "linking store entry",
+                &src_path,
+                std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "store entries must not contain symlinks",
+                ),
+            ));
+        }
+        if metadata.is_dir() {
+            ensure_directory(&dst_path)
                 .map_err(|e| io_error("creating link dir", &dst_path, e))?;
             link_or_copy_tree(&src_path, &dst_path)?;
-        } else {
+        } else if metadata.is_file() {
+            reject_existing_symlink(&dst_path)
+                .map_err(|e| io_error("checking dep file", &dst_path, e))?;
             // Try hardlink first, fall back to copy.
             if fs::hard_link(&src_path, &dst_path).is_err() {
                 fs::copy(&src_path, &dst_path)
                     .map_err(|e| io_error("copying dep file", &dst_path, e))?;
             }
+        } else {
+            return Err(io_error(
+                "linking store entry",
+                &src_path,
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "store entries must contain only regular files and directories",
+                ),
+            ));
         }
     }
     Ok(())
+}
+
+fn validate_store_component(value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || value.contains(['/', '\\', ':'])
+        || value.chars().any(char::is_control)
+        || !matches!(Path::new(value).components().next(), Some(std::path::Component::Normal(_)))
+        || Path::new(value).components().nth(1).is_some()
+    {
+        return Err("the value must be one safe path component".to_string());
+    }
+    Ok(())
+}
+
+fn store_path_diagnostic(value: &str, reason: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1206",
+        format!("package store path component `{value}` is not allowed"),
+        reason.to_string(),
+        "use a package name, version, and fingerprint without path separators".to_string(),
+        None,
+    )
+}
+
+fn validate_real_tree_root(path: &Path) -> std::io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "package tree root must be a real directory",
+        ));
+    }
+    let root = fs::canonicalize(path)?;
+    if root != path {
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "package tree root must not be a symlink",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_store_path(path: &Path) -> std::io::Result<()> {
+    let root = store_dir();
+    let root_meta = fs::symlink_metadata(&root);
+    if let Ok(meta) = &root_meta {
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "store root must be a real directory",
+            ));
+        }
+    }
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        if meta.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "store entry must not be a symlink",
+            ));
+        }
+    }
+    if let Ok(root) = fs::canonicalize(&root) {
+        if let Ok(candidate) = fs::canonicalize(path) {
+            if !candidate.starts_with(&root) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "store entry escapes the store root",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_real_dir(path: &Path) -> std::io::Result<bool> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    Ok(metadata.is_dir() && !metadata.file_type().is_symlink())
+}
+
+fn reject_existing_symlink(path: &Path) -> std::io::Result<()> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "destination must not be a symlink",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_directory(path: &Path) -> std::io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "directory must not be a symlink",
+        )),
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "directory path is not a directory",
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                ensure_directory(parent)?;
+            }
+            fs::create_dir(path)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn io_error(action: &str, path: &Path, err: std::io::Error) -> Diagnostic {
@@ -267,6 +440,16 @@ fn io_error(action: &str, path: &Path, err: std::io::Error) -> Diagnostic {
         format!("I/O error while {} at `{}`", action, path.display()),
         "a filesystem operation failed during package installation".to_string(),
         format!("check permissions and disk space: {}", err),
+        None,
+    )
+}
+
+fn missing_content_hash(pkg_name: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1204",
+        format!("the store entry for `{pkg_name}` has no content hash"),
+        "locked package sources must carry a content hash before they are used".to_string(),
+        "run `jet fetch` to recreate the lock with verified content hashes".to_string(),
         None,
     )
 }

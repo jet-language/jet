@@ -304,6 +304,64 @@ fn native_linux_recipe_sandbox_blocks_host_escape_and_records_backend_receipt() 
     std::fs::remove_dir_all(&base).ok();
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn logged_recipe_sandbox_blocks_host_escape() {
+    let _sandbox_guard = sandbox_test_lock();
+    let base = scratch("logged-native-linux");
+    let src = base.join("src");
+    let out = base.join("out");
+    let cache = base.join("cache");
+    let host_marker = base.with_file_name(format!(
+        "{}-logged-host-escape",
+        base.file_name().unwrap().to_string_lossy()
+    ));
+    std::fs::create_dir_all(&src).unwrap();
+
+    let mut tools = HashMap::new();
+    tools.insert("sh".to_string(), host_tool("sh"));
+    let ctx = BuildContext {
+        source_dir: &src,
+        output_root: &out,
+        tools,
+        fetch_cache: &cache,
+        offline: false,
+    };
+    let recipe = BuildRecipe {
+        steps: vec![BuildStep::Exec {
+            tool: "sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                format!(
+                    "if printf hostile > '{}'; then exit 41; fi && printf ok > \"$JET_BUILD_OUTPUT/ok\"",
+                    host_marker.display()
+                ),
+            ],
+        }],
+    };
+    let mut attempt = jetpack::BuildDebug::Attempt::new(
+        "logged-sandbox",
+        "logged-sandbox",
+        "test",
+        "recipe",
+        "source",
+    );
+    let result = Recipe::run_logged(&recipe, &ctx, None, &mut attempt);
+    let status = jet::Comptime::Build::native_sandbox_status();
+    if status.available {
+        let report = result.expect("logged recipe sandbox should run");
+        assert_eq!(report.sandbox_class, "linux-bwrap");
+        assert_eq!(std::fs::read_to_string(out.join("ok")).unwrap(), "ok");
+    } else {
+        assert_eq!(result.unwrap_err().code, "E1275");
+    }
+    assert!(
+        !host_marker.exists(),
+        "logged recipe execution escaped its native sandbox"
+    );
+    std::fs::remove_dir_all(&base).ok();
+}
+
 #[cfg(target_os = "windows")]
 fn windows_command_interpreter() -> PathBuf {
     std::env::var_os("ComSpec")

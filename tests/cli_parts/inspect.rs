@@ -172,6 +172,84 @@ fn hardened_release_sentry_reaches_a_foreign_dependency() {
 }
 
 #[test]
+fn release_hardened_profile_catches_a_local_wrong_unsafe_region() {
+    let source = include_str!("../../examples/features/memory/unsafe_sentries.jet");
+    for (tag, hardened) in [("release_sentry_normal", false), ("release_sentry_hardened", true)] {
+        let dir = isolated_cwd(tag);
+        let policy = if hardened {
+            "policy: .{ harden: true }\n"
+        } else {
+            ""
+        };
+        fs::write(
+            dir.join("package.jet"),
+            format!("name: \"sentry-profile\"\nversion: \"0.1.0\"\n{policy}"),
+        )
+        .unwrap();
+        fs::write(dir.join("main.jet"), source).unwrap();
+
+        let output = Command::new(jet())
+            .args(["run", "--release", "main.jet"])
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if hardened {
+            assert!(!output.status.success(), "hardened profile missed the stale pointer: {stderr}");
+            for marker in [
+                "Runtime fault [R0802]",
+                "pointer is used only after arena reset to prove quarantine",
+                "Why:",
+                "Fix:",
+                "obligation `valid_ptr` was not met on this run",
+            ] {
+                assert!(stderr.contains(marker), "hardened report missing `{marker}`: {stderr}");
+            }
+        } else {
+            assert!(
+                output.status.success(),
+                "normal release must run the deliberately wrong region: {stderr}"
+            );
+            assert_eq!(stdout, "7\n", "normal release did not execute the fixture: {stderr}");
+            assert!(!stderr.contains("Runtime fault [R0802]"), "normal release was hardened: {stderr}");
+        }
+    }
+}
+
+#[test]
+fn safe_release_profiles_emit_no_sentry_runtime_overhead() {
+    for (tag, policy) in [
+        ("safe_release_normal", ""),
+        ("safe_release_hardened", "policy: .{ harden: true }\n"),
+    ] {
+        let dir = isolated_cwd(tag);
+        fs::write(
+            dir.join("package.jet"),
+            format!("name: \"safe-profile\"\nversion: \"0.1.0\"\n{policy}"),
+        )
+        .unwrap();
+        fs::write(dir.join("main.jet"), "fn run() { print(7) }\n").unwrap();
+        let path = dir.join("main.jet");
+        let shown = path.to_string_lossy();
+        let output = jet::compile_with_target_and_gates_and_profile(
+            "",
+            &shown,
+            jet::Policy::GateSet::default(),
+            None,
+            "release",
+        )
+        .unwrap_or_else(|diags| panic!("safe profile rejected: {diags:?}"));
+        assert!(
+            !output.rust.contains("jet_mem::jet_sentry_set_hardened("),
+            "safe {tag} output carries sentry machinery:\n{}",
+            output.rust
+        );
+    }
+}
+
+#[test]
 fn inspect_guarantees_is_honest_for_single_file_and_freestanding() {
     let dir = isolated_cwd("inspect_guarantees_single_file");
     fs::write(dir.join("main.jet"), "fn run() {}\n").unwrap();

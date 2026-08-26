@@ -4899,6 +4899,20 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     let before_apply = fs::read_to_string(app.join("package.jet")).unwrap();
     assert!(!before_apply.contains("logging"), "{before_apply}");
 
+    let stale_revision_request = req.replace(&project_revision, "sha256-stale-project");
+    let stale_project_error =
+        jet::Canvas::apply_project_transaction_json(&entry, &stale_revision_request)
+        .expect_err("stale project revision must conflict before any write");
+    assert!(
+        stale_project_error.contains("\"kind\":\"conflict\""),
+        "{stale_project_error}"
+    );
+    assert_eq!(
+        fs::read_to_string(app.join("package.jet")).unwrap(),
+        before_apply,
+        "a stale project revision must not write the manifest"
+    );
+
     fs::write(
         app.join("helper.jet"),
         "fn helper() Int -> {\n    return 2\n}\n",

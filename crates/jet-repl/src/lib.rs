@@ -1238,6 +1238,26 @@ pub(crate) fn unique_temp_name(tag: &str) -> String {
     format!("__jet_repl_{}_{}_{}.jet", tag, std::process::id(), n)
 }
 
+fn write_unique_temp_file(tag: &str, source: &str) -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write;
+    let path = std::env::temp_dir().join(unique_temp_name(tag));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Linux O_NOFOLLOW: create_new already rejects an existing symlink;
+        // this also rejects a symlink substituted between lookup and open.
+        options.custom_flags(0o400000);
+    }
+    let mut file = options.open(&path)?;
+    if let Err(error) = file.write_all(source.as_bytes()) {
+        let _ = std::fs::remove_file(&path);
+        return Err(error);
+    }
+    Ok(path)
+}
+
 // ── :run ───────────────────────────────────────────────────────────────────
 
 /// Materialize the session + stmt_srcs to a temp `.jet` file and run it
@@ -1280,11 +1300,13 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
     };
 
     // Write to a temp file.
-    let tmp_path = std::env::temp_dir().join(unique_temp_name("run"));
-    if let Err(e) = std::fs::write(&tmp_path, &jet_src) {
+    let tmp_path = match write_unique_temp_file("run", &jet_src) {
+        Ok(path) => path,
+        Err(e) => {
         let _ = writeln!(out_sink, "error: couldn't write temp file: {}", e);
         return;
-    }
+        }
+    };
 
     let _ = write!(out_sink, "{}", dim("compiling session…", color));
     let _ = writeln!(out_sink, " {}", dim("running…", color));
@@ -2024,13 +2046,15 @@ fn run_sema_with_body(
         let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check);
         (diags, bundle)
     } else {
-        let tmp_path = std::env::temp_dir().join(unique_temp_name("check_ast"));
-        if std::fs::write(&tmp_path, base_src).is_err() {
-            return Ok((
-                current_stmts(&mut prog.items, fn_name, current_len),
-                HashMap::new(),
-            ));
-        }
+        let tmp_path = match write_unique_temp_file("check_ast", base_src) {
+            Ok(path) => path,
+            Err(_) => {
+                return Ok((
+                    current_stmts(&mut prog.items, fn_name, current_len),
+                    HashMap::new(),
+                ));
+            }
+        };
         let path_str = tmp_path.to_string_lossy().to_string();
         let result = crate::Loader::load_entry(&path_str).map(|mut bundle| {
             let entry = bundle.entry;
@@ -2162,13 +2186,13 @@ fn checked_program(src: &str) -> Result<crate::AST::ProgramBundle, Vec<Diagnosti
     let mut bundle = if prog.imports.is_empty() {
         program_bundle(src, prog)
     } else {
-        let tmp_path = std::env::temp_dir().join(unique_temp_name("check"));
-        if std::fs::write(&tmp_path, src).is_err() {
-            program_bundle(src, prog)
-        } else {
+        match write_unique_temp_file("check", src) {
+            Err(_) => program_bundle(src, prog),
+            Ok(tmp_path) => {
             let loaded = crate::Loader::load_entry(&tmp_path.to_string_lossy());
             let _ = std::fs::remove_file(&tmp_path);
             loaded?
+            }
         }
     };
     let errors: Vec<_> = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check)

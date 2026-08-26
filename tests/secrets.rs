@@ -81,6 +81,19 @@ fn secrets_keygen_set_get_roundtrip_no_plaintext_on_disk() {
     let proj = Scratch::new("roundtrip-proj");
     let keys = Scratch::new("roundtrip-keys");
     setup_vault(&proj, &keys);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(keys.join("secrets.identity"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+            "the private identity must never be created with ambient permissions"
+        );
+    }
 
     let list_out = jetpack()
         .current_dir(&proj.path)

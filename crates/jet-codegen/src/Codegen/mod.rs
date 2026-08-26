@@ -4446,9 +4446,11 @@ fn emit_test_main_cov_mode(
     } else {
         out.push_str("fn main() {\n");
         out.push_str("    jet_std_env_init();\n");
-        out.push_str(&format!(
-            "    jet_mem::jet_sentry_set_hardened({package_hardened});\n"
-        ));
+        if Items::sentry_runtime_needed(out) {
+            out.push_str(&format!(
+                "    jet_mem::jet_sentry_set_hardened({package_hardened});\n"
+            ));
+        }
         out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
         out.push_str("    jet_test_trace_tier();\n");
         out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) { use std::io::Write as _; if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { let _ = file.write_all(b\"JETTEST2\"); } } }\n");
@@ -4676,9 +4678,11 @@ fn emit_command_override_main(
 ) {
     out.push_str("\nfn main() {\n");
     out.push_str("    jet_std_env_init();\n");
-    out.push_str(&format!(
-        "    jet_mem::jet_sentry_set_hardened({package_hardened});\n"
-    ));
+    if Items::sentry_runtime_needed(out) {
+        out.push_str(&format!(
+            "    jet_mem::jet_sentry_set_hardened({package_hardened});\n"
+        ));
+    }
     out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
     if trace_tier {
         out.push_str("    jet_test_trace_tier();\n");
@@ -5803,10 +5807,8 @@ fn emit_fuzz_main(
 
     out.push_str("fn main() {\n");
     out.push_str("    jet_std_env_init();\n");
-    out.push_str(&format!(
-        "    {}jet_mem::jet_sentry_set_hardened({});\n",
-        cx.root_prefix, cx.package_hardened
-    ));
+    let sentry_init = Items::sentry_runtime_init(cx, out);
+    out.push_str(&sentry_init);
     out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
     out.push_str("    let corpus_dir = std::env::var(\"JET_FUZZ_CORPUS\").unwrap_or_else(|_| \".jet-fuzz-corpus\".to_string());\n");
     out.push_str("    let _ = std::fs::create_dir_all(&corpus_dir);\n");

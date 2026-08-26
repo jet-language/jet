@@ -1414,6 +1414,18 @@ fn os_switch_activates_and_sets_current() {
             && storage_apply_proof.contains("manual-storage-plan-reviewed"),
         "storage_apply_proof: {storage_apply_proof}"
     );
+    let storage_injection_marker = root.path.join("storage-injection-marker");
+    let hostile_storage_apply = Command::new(generation.join("sw/bin/jetos-storage-apply"))
+        .args(["--manual"])
+        .env("JETOS_SYSTEM_ROOT", &generation)
+        .env(
+            "JETOS_STORAGE_DISK",
+            format!("/dev/sda; touch {}", storage_injection_marker.display()),
+        )
+        .output()
+        .unwrap();
+    assert_eq!(hostile_storage_apply.status.code(), Some(2));
+    assert!(!storage_injection_marker.exists());
     let persist_root = root.path.join("persist-root");
     let ephemeral_root = root.path.join("ephemeral-root");
     let persist = Command::new(generation.join("sw/bin/jetos-persist-activate"))

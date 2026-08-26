@@ -3,7 +3,7 @@
 // Server discovery, in order:
 //   1. jet.executablePath setting (supports ${workspaceFolder} and ~)
 //   2. legacy jet.languageServerPath setting
-//   3. <workspaceFolder>/target/debug/jet   (developing the compiler itself)
+//   3. <workspaceFolder>/target/debug/jet   (developing the compiler itself, trusted workspaces only)
 //   4. `jet` on PATH                        (installed, or editor launched from dev shell)
 // `jet self lsp` does not invoke rustc, so the plain cargo binary is enough.
 
@@ -24,8 +24,10 @@ function expandPathSetting(value, workspaceFolder) {
 
 function findServer(workspaceFolder) {
   const settings = vscode.workspace.getConfiguration("jet");
-  const explicit = settings.get("executablePath", "");
-  const legacy = settings.get("languageServerPath", "");
+  // Workspace settings and workspace binaries are both untrusted until the
+  // editor has crossed its workspace-trust boundary.
+  const explicit = vscode.workspace.isTrusted ? settings.get("executablePath", "") : "";
+  const legacy = vscode.workspace.isTrusted ? settings.get("languageServerPath", "") : "";
   const configured = explicit || legacy;
   const configuredName = explicit ? "jet.executablePath" : "jet.languageServerPath";
 
@@ -39,7 +41,7 @@ function findServer(workspaceFolder) {
     );
   }
 
-  if (workspaceFolder) {
+  if (vscode.workspace.isTrusted && workspaceFolder) {
     const debugBin = path.join(workspaceFolder, "target", "debug", "jet");
     if (fs.existsSync(debugBin)) {
       return debugBin;

@@ -59,6 +59,7 @@ pub(super) fn write_storage_facts(dir: &Path, system: &SystemPlan) -> std::io::R
         .map(|s| clean_symbol(&s))
         .unwrap_or_else(|| "GPT".to_string());
     let esp_size = option_value(system, &["storage.disk.main.partitions.esp.size"])
+        .filter(|size| valid_storage_size(size))
         .unwrap_or_else(|| "512M".to_string());
     let root_fs = option_value(system, &["storage.filesystem.root.type"])
         .or_else(|| option_value(system, &["filesystem.root.type"]))
@@ -110,7 +111,7 @@ pub(super) fn write_storage_facts(dir: &Path, system: &SystemPlan) -> std::io::R
     fs::write(&plan_path, plan_script)?;
     make_executable(&plan_path)?;
     let apply_script = format!(
-        "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ndisk=${{JETOS_STORAGE_DISK:-{}}}\nmanual=false\nexecute=false\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    --manual) manual=true ;;\n    --execute) execute=true ;;\n    *) echo \"usage: jetos-storage-apply --manual [--execute]\" >&2; exit 2 ;;\n  esac\ndone\nif [ \"$manual\" != true ]; then\n  echo 'jetos storage: destructive disk plan requires --manual' >&2\n  exit 2\nfi\nlog=${{JETOS_STORAGE_LOG:-$root/storage/apply-plan.sh}}\nproof_dir=${{JETOS_STORAGE_PROOF_DIR:-$root/storage}}\nmkdir -p \"$proof_dir\"\n{{\n  printf '%s\\n' '#!/usr/bin/env sh'\n  printf '%s\\n' 'set -eu'\n  printf 'sfdisk --wipe always %s <<EOF\\nlabel: gpt\\nsize={}, type=U\\ntype=L\\nEOF\\n' \"$disk\"\n  printf 'mkfs.vfat -n JETOS-ESP %s1\\n' \"$disk\"\n  printf 'mkfs.{} -L jetos-root %s2\\n' \"$disk\"\n}} > \"$log\"\nif [ \"$execute\" = true ]; then\n  sh \"$log\"\nfi\nprintf '{{\"kind\":\"jetos.storage-apply\",\"state\":\"planned\",\"executed\":%s,\"disk\":\"%s\",\"proof\":\"manual-storage-plan-reviewed\"}}\\n' \"$execute\" \"$disk\" > \"$proof_dir/apply-proof.json\"\ncat \"$proof_dir/apply-proof.json\"\n",
+        "#!/usr/bin/env sh\nset -eu\nroot=${{JETOS_SYSTEM_ROOT:-/run/current-system}}\ndisk=${{JETOS_STORAGE_DISK:-{}}}\nmanual=false\nexecute=false\nfor arg in \"$@\"; do\n  case \"$arg\" in\n    --manual) manual=true ;;\n    --execute) execute=true ;;\n    *) echo \"usage: jetos-storage-apply --manual [--execute]\" >&2; exit 2 ;;\n  esac\ndone\nif [ \"$manual\" != true ]; then\n  echo 'jetos storage: destructive disk plan requires --manual' >&2\n  exit 2\nfi\ncase \"$disk\" in\n  guided-ext4|/dev/*) ;;\n  *) echo 'jetos storage: disk must be guided-ext4 or an absolute /dev path' >&2; exit 2 ;;\nesac\ncase \"$disk\" in\n  *[!A-Za-z0-9_./-]*) echo 'jetos storage: disk contains unsafe characters' >&2; exit 2 ;;\nesac\nlog=${{JETOS_STORAGE_LOG:-$root/storage/apply-plan.sh}}\nproof_dir=${{JETOS_STORAGE_PROOF_DIR:-$root/storage}}\nmkdir -p \"$proof_dir\"\n{{\n  printf '%s\\n' '#!/usr/bin/env sh'\n  printf '%s\\n' 'set -eu'\n  printf 'sfdisk --wipe always %s <<EOF\\nlabel: gpt\\nsize={}, type=U\\ntype=L\\nEOF\\n' \"$disk\"\n  printf 'mkfs.vfat -n JETOS-ESP %s1\\n' \"$disk\"\n  printf 'mkfs.{} -L jetos-root %s2\\n' \"$disk\"\n}} > \"$log\"\nif [ \"$execute\" = true ]; then\n  sh \"$log\"\nfi\nprintf '{{\"kind\":\"jetos.storage-apply\",\"state\":\"planned\",\"executed\":%s,\"disk\":\"%s\",\"proof\":\"manual-storage-plan-reviewed\"}}\\n' \"$execute\" \"$disk\" > \"$proof_dir/apply-proof.json\"\ncat \"$proof_dir/apply-proof.json\"\n",
         shell_single_quote(&disk),
         esp_size,
         root_fs.to_ascii_lowercase()
@@ -122,6 +123,31 @@ pub(super) fn write_storage_facts(dir: &Path, system: &SystemPlan) -> std::io::R
     let persist_path = bin_dir.join("jetos-persist-activate");
     fs::write(&persist_path, persist_script)?;
     make_executable(&persist_path)
+}
+
+fn valid_storage_size(size: &str) -> bool {
+    let split = size
+        .bytes()
+        .position(|byte| !byte.is_ascii_digit())
+        .unwrap_or(size.len());
+    let (digits, suffix) = size.split_at(split);
+    !digits.is_empty()
+        && suffix.is_ascii()
+        && matches!(suffix, "K" | "M" | "G" | "T" | "KiB" | "MiB" | "GiB" | "TiB")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_storage_size;
+
+    #[test]
+    fn storage_size_allowlist_rejects_shell_source() {
+        assert!(valid_storage_size("512M"));
+        assert!(valid_storage_size("1GiB"));
+        assert!(!valid_storage_size("512M; touch pwned"));
+        assert!(!valid_storage_size("$(touch pwned)"));
+        assert!(!valid_storage_size(""));
+    }
 }
 
 pub(super) fn write_workload_facts(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
