@@ -9,12 +9,14 @@ use super::{
     ProgressHandle, Roots, StoreEntry,
 };
 use crate::{Envelope, RuntimePolicy, SHA256};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 #[cfg(test)]
 use std::io::Write;
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_ENDPOINT: &str = "https://cache.nixos.org";
@@ -163,10 +165,9 @@ pub(crate) fn admit_nix_closure_with_progress(
     result
 }
 
-/// Resolve the signed closure metadata without downloading or publishing any
-/// NAR. The admission path repeats this metadata lookup after the user accepts
-/// the plan; this function is deliberately read-only so a rejected plan has
-/// no acquisition side effect.
+/// Resolve and verify closure metadata without downloading or publishing any
+/// NAR. Admission reuses this process-local signed metadata to open the whole
+/// dependency frontier immediately; a rejected plan still acquires no payload.
 pub(crate) fn plan_nix_downloads(
     roots: &Roots,
     store_paths: &[String],
@@ -192,6 +193,7 @@ pub(crate) fn plan_nix_downloads(
     let mut checked = 0usize;
     let mut packages = 0usize;
     let mut bytes = 0u64;
+    let mut planned_infos = BTreeMap::new();
     if let Some(progress) = progress.as_ref() {
         progress.phase("Planning");
         progress.object_progress(0, scheduled.len());
@@ -270,7 +272,8 @@ pub(crate) fn plan_nix_downloads(
             (Err(_), Err(_)) => std::cmp::Ordering::Equal,
         });
         for result in results {
-            let (_, info) = result?;
+            let (store_path, info) = result?;
+            planned_infos.insert(store_path, info.clone());
             let file_size = info.info.file_size.ok_or_else(|| {
                 NixCacheError::new(
                     NixCacheErrorKind::Metadata,
@@ -302,6 +305,7 @@ pub(crate) fn plan_nix_downloads(
             }
         }
     }
+    remember_planned_narinfos(roots, &endpoint, planned_infos);
 
     Ok(NixDownloadPlan { packages, bytes })
 }
@@ -373,9 +377,11 @@ impl<'a> AdmissionTransaction<'a> {
             .map(|request| request.store_path.clone())
             .collect::<BTreeSet<_>>();
         let mut scheduled = queue.clone();
+        let planned_infos = planned_narinfos(self.roots, &endpoint);
+        expand_planned_closure(&mut queue, &mut scheduled, &planned_infos, store_dir)?;
         let mut fetched = BTreeMap::new();
         if let Some(progress) = progress.as_ref() {
-            progress.phase("Substituting");
+            progress.phase("Downloading");
             progress.object_progress(0, scheduled.len());
         }
 
@@ -418,24 +424,27 @@ impl<'a> AdmissionTransaction<'a> {
                 ));
             }
 
+            if let Some(progress) = progress.as_ref() {
+                progress.phase("Downloading");
+            }
             let results = std::thread::scope(|scope| {
                 let handles = pending
                     .iter()
                     .map(|store_path| {
                         scope.spawn(|| {
-                            let info =
-                                endpoint.narinfo(store_path, store_dir)?.ok_or_else(|| {
-                                    NixCacheError::new(
-                                        NixCacheErrorKind::MissingReference,
-                                        "a requested Nix reference returned no narinfo",
-                                    )
-                                })?;
-                            let object = self.fetch_object(
-                                &endpoint,
-                                &info,
-                                store_dir,
-                                progress.clone(),
-                            )?;
+                            let info = match planned_infos.get(store_path) {
+                                Some(info) => info.clone(),
+                                None => {
+                                    endpoint.narinfo(store_path, store_dir)?.ok_or_else(|| {
+                                        NixCacheError::new(
+                                            NixCacheErrorKind::MissingReference,
+                                            "a requested Nix reference returned no narinfo",
+                                        )
+                                    })?
+                                }
+                            };
+                            let object =
+                                self.fetch_object(&endpoint, &info, store_dir, progress.clone())?;
                             Ok::<_, NixCacheError>((store_path.clone(), object))
                         })
                     })
@@ -474,7 +483,7 @@ impl<'a> AdmissionTransaction<'a> {
         }
 
         if let Some(progress) = progress.as_ref() {
-            progress.phase("Admitting");
+            progress.phase("Installing");
             progress.object_progress(0, fetched.len());
         }
         let closure_receipt = self.publish(&mut fetched, &requests, store_dir, progress)?;
@@ -572,7 +581,7 @@ impl<'a> AdmissionTransaction<'a> {
             })?,
             NixCacheErrorKind::Admission,
         )?;
-        let mut body = HashingReader::new(response, compressed_limit, progress);
+        let mut body = HashingReader::new(response, compressed_limit, progress.clone());
         let stats = match info.info.compression {
             NixCompression::None => super::read_nar_stream(&mut body, &tree, info.info.nar_size),
             NixCompression::Zstd => {
@@ -680,6 +689,7 @@ impl<'a> AdmissionTransaction<'a> {
             hangar_digest,
             references,
             direct_reference_digests: Vec::new(),
+            unpacked_bytes: info.info.nar_size,
             proof,
         })
     }
@@ -710,17 +720,15 @@ impl<'a> AdmissionTransaction<'a> {
         ensure_dir(&objects_dir, NixCacheErrorKind::Admission)?;
         let mut incoming_bytes = 0u64;
         for object in fetched.values() {
-            if let Some(stage) = &object.stage {
-                if !objects_dir.join(&object.hangar_digest).is_dir() {
-                    let staged_bytes = super::admission_size(stage)
-                        .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
-                    incoming_bytes = incoming_bytes.checked_add(staged_bytes).ok_or_else(|| {
+            if object.stage.is_some() && !objects_dir.join(&object.hangar_digest).is_dir() {
+                incoming_bytes = incoming_bytes
+                    .checked_add(object.unpacked_bytes)
+                    .ok_or_else(|| {
                         NixCacheError::new(
                             NixCacheErrorKind::Admission,
                             "Nix cache admission size overflowed",
                         )
                     })?;
-                }
             }
         }
         super::ensure_hangar_capacity(
@@ -771,8 +779,6 @@ impl<'a> AdmissionTransaction<'a> {
                     self.created_objects.push(final_path.clone());
                     super::seal_node(&final_path)
                         .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
-                    super::sync_store_directory(&objects_dir)
-                        .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
                 }
             }
             object.hangar_path = final_path;
@@ -793,6 +799,10 @@ impl<'a> AdmissionTransaction<'a> {
             if let Some(progress) = progress.as_ref() {
                 progress.object_progress(admitted_objects, total_objects);
             }
+        }
+        if !self.created_objects.is_empty() {
+            super::sync_store_directory(&objects_dir)
+                .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
         }
 
         let closure_receipt = closure_receipt_digest(fetched, requests);
@@ -942,6 +952,7 @@ struct FetchedObject {
     hangar_digest: String,
     references: Vec<String>,
     direct_reference_digests: Vec<String>,
+    unpacked_bytes: u64,
     proof: String,
 }
 
@@ -962,6 +973,62 @@ struct CacheInfo {
 struct CacheEndpoint {
     endpoint: String,
     trusted_keys: Vec<NixPublicKey>,
+}
+
+thread_local! {
+    static PLANNED_NARINFOS: RefCell<
+        BTreeMap<(PathBuf, String), Arc<BTreeMap<String, FetchedInfo>>>
+    > = RefCell::new(BTreeMap::new());
+}
+
+fn planned_key(roots: &Roots, endpoint: &CacheEndpoint) -> (PathBuf, String) {
+    (roots.root.clone(), endpoint.endpoint.clone())
+}
+
+fn remember_planned_narinfos(
+    roots: &Roots,
+    endpoint: &CacheEndpoint,
+    infos: BTreeMap<String, FetchedInfo>,
+) {
+    PLANNED_NARINFOS.with(|planned| {
+        planned
+            .borrow_mut()
+            .insert(planned_key(roots, endpoint), Arc::new(infos));
+    });
+}
+
+fn planned_narinfos(roots: &Roots, endpoint: &CacheEndpoint) -> Arc<BTreeMap<String, FetchedInfo>> {
+    PLANNED_NARINFOS.with(|planned| {
+        planned
+            .borrow()
+            .get(&planned_key(roots, endpoint))
+            .cloned()
+            .unwrap_or_else(|| Arc::new(BTreeMap::new()))
+    })
+}
+
+fn expand_planned_closure(
+    queue: &mut BTreeSet<String>,
+    scheduled: &mut BTreeSet<String>,
+    infos: &BTreeMap<String, FetchedInfo>,
+    store_dir: &str,
+) -> Result<(), NixCacheError> {
+    let mut frontier = queue.clone();
+    while let Some(store_path) = frontier.iter().next().cloned() {
+        frontier.remove(&store_path);
+        let Some(info) = infos.get(&store_path) else {
+            continue;
+        };
+        for reference in &info.info.references {
+            let reference = format!("{store_dir}/{reference}");
+            validate_store_path(&reference, store_dir)?;
+            if scheduled.insert(reference.clone()) {
+                queue.insert(reference.clone());
+                frontier.insert(reference);
+            }
+        }
+    }
+    Ok(())
 }
 
 impl CacheEndpoint {
@@ -1283,6 +1350,7 @@ fn existing_object(
         hangar_digest: digest,
         references,
         direct_reference_digests: entry.references,
+        unpacked_bytes: 0,
         proof: producer.facts.get("nix.proof").cloned().unwrap_or_default(),
     }))
 }

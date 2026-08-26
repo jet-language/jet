@@ -1,12 +1,3 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/E1130_kernel_proof.jet:1:41
-    |
-  1 | #Kernel(.parallel) fn noisy(value: Int) => Int {
-    |                                         ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
 Error [E0101]: this program has no `run` function
  Why: running a program starts at `fn run`, and the entry file doesn't define one
  Fix: add `fn run() { ... }` to the entry file
@@ -15,7 +6,7 @@ More: jet-lang.dev/e/E0101
 Error [E1102]: `#Kernel(.parallel)` cannot cross its worker boundary: sema cannot prove no reachable effects or opaque calls
   --> tests/ui/E1130_kernel_proof.jet:1:1
     |
-  1 | #Kernel(.parallel) fn noisy(value: Int) => Int {
+  1 | #Kernel(.parallel) fn noisy(value: Int) Int -> {
     | ^^^^^^^^^^^^^^^^^^
  Why: a safe kernel crosses a worker boundary only after sema proves sendability, bounds, aliasing, captures, races, barriers, and control flow before TIR
  Fix: use a read-only effect-free expression over checked Core compute operations, or move provider/raw code behind its typed `#Unsafe` boundary

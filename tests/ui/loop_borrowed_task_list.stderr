@@ -1,21 +1,3 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/loop_borrowed_task_list.jet:1:27
-    |
-  1 | fn drain(hs: [Task<Int>]) => Int {
-    |                           ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
-Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
-  --> tests/ui/loop_borrowed_task_list.jet:1:34
-    |
-  1 | fn drain(hs: [Task<Int>]) => Int {
-    |                                  ^
- Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
- Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) Error! { ... }` bare.
-More: jet-lang.dev/e/E0080
-
 Error [E0120]: `hs` was not moved here, so this loop can't take its handles
   --> tests/ui/loop_borrowed_task_list.jet:3:15
     |
@@ -24,6 +6,15 @@ Error [E0120]: `hs` was not moved here, so this loop can't take its handles
  Why: each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list with the move marker `^`
  Fix: take the list with the move marker `^`: `hs: ^[Task<Int>]`, or collect the work in a canonical `task.all` or `task.group` block
 More: jet-lang.dev/e/E0120
+
+Error [E0142]: `handles` can't be shared — it must be used exactly once
+  --> tests/ui/loop_borrowed_task_list.jet:9:17
+    |
+  9 |     print(drain(handles))
+    |                 ^^^^^^^
+ Why: this value's type is `#SingleUse`, so it can only be moved (handed over for good); `drain` would borrow or copy it, and a `#SingleUse` value has no second use to give
+ Fix: move it with the move marker `^` (`^handles`) to give it away, or rework the call so it takes ownership through that marker
+More: jet-lang.dev/e/E0142
 
 Error [E0142]: `handles` can't be shared — it must be used exactly once
   --> tests/ui/loop_borrowed_task_list.jet:9:17

@@ -533,6 +533,15 @@ impl<'a> Checker<'a> {
                 if string_view_return {
                     self.allow_string_view_read = true;
                 }
+                // D-ALLOC2 / E0631: capture the returned name BEFORE inferring.
+                // An arena view carries an allocator-view type, so returning it
+                // where the declared type is the payload rewrites `e` through a
+                // deref coercion and it stops being an `Ident`. The escape check
+                // below then silently missed every arena view that escaped.
+                let returned_ident = match &*e {
+                    Expr::Ident(name, span) => Some((name.clone(), *span)),
+                    _ => None,
+                };
                 let mut et = self.infer(e);
                         // D-FAILURE-FOUNDATION1=A: the public return contract
                         // is the shared Result carrier, but source authors
@@ -577,7 +586,7 @@ impl<'a> Checker<'a> {
                 }
                 // D-ALLOC2: E0631 — returning an arena `view` would let
                 // it outlive the arena (the arena drops at scope end).
-                if let Expr::Ident(n, nspan) = &*e {
+                if let Some((n, nspan)) = &returned_ident {
                     if self.is_arena_view(n) || self.is_fixed_backing_view(n) {
                         self.report_view_escape(n, "be returned", *nspan);
                     }

@@ -1,16 +1,7 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/contract_result_misuse.jet:1:68
-    |
-  1 | #Pre(result > 0, "result must be positive") fn add_fee(cents: Int) => Int {
-    |                                                                    ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
 Error [E0144]: `result` isn't available in a `#Pre` condition
   --> tests/ui/contract_result_misuse.jet:1:6
     |
-  1 | #Pre(result > 0, "result must be positive") fn add_fee(cents: Int) => Int {
+  1 | #Pre(result > 0, "result must be positive") fn add_fee(cents: Int) Int -> { return cents + 5 }
     |      ^^^^^^
  Why: `result` names the return value, which only exists once the function has returned — a `#Pre` condition runs at entry, before there is one
  Fix: use `result` only in a `#Post` condition

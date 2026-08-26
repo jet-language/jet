@@ -1,22 +1,4 @@
-Error [E0070]: this uses a retired arrow spelling
-  --> tests/ui/cffi_abi_function_value.jet:4:34
-    |
-  4 |     #ABI(sysv64) fn ping(x: I32) => I32 = "ping"
-    |                                  ^^
- Why: callables, arms, and lambdas use one arrow: `->`
- Fix: replace `:>` or `=>` with `->`
-More: jet-lang.dev/e/E0070
-
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/cffi_abi_function_value.jet:4:34
-    |
-  4 |     #ABI(sysv64) fn ping(x: I32) => I32 = "ping"
-    |                                  ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
-Error [E3203]: `fn(I32) => I32` is not a C-compatible type for a foreign function parameter or return.
+Error [E3203]: `fn(I32) I32` is not a C-compatible type for a foreign function parameter or return.
   --> tests/ui/cffi_abi_function_value.jet:8:19
     |
   8 |     callback :: c.ping

@@ -1,17 +1,8 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/callable_policy_invalid.jet:1:21
-    |
-  1 | fn load(value: Int) => Int {
-    |                     ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
 Error [E0355]: unknown callable policy setting `nope`
-  --> tests/ui/callable_policy_invalid.jet:6:23
+  --> tests/ui/callable_policy_invalid.jet:3:30
     |
-  6 |     selected :: apply(nope(1), load)
-    |                       ^^^^
+  3 | fn run() { selected :: apply(nope(1), load) }
+    |                              ^^^^
  Why: a callable policy name must be a compiler-owned setting or a public policy declared in this package
  Fix: declare `pub policy nope(...) { wrap(call) { … } }
 policy lookup package: tests/ui

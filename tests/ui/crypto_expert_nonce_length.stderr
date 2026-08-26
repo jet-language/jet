@@ -1,26 +1,17 @@
-Error [E0066]: this function uses the retired effect-arrow spelling
-  --> tests/ui/crypto_expert_nonce_length.jet:4:10
-    |
-  4 | fn run() =[]=> {
-    |          ^
- Why: callable results use `->`, and an explicit effect ceiling uses the same arrow
- Fix: write `-[Effects]>`; use `-[]>` for an explicit purity bound
-More: jet-lang.dev/e/E0066
-
-Error [E2702]: crypto API misuse
-  --> tests/ui/crypto_expert_nonce_length.jet:6:142
+Error [E2402]: `?` can't convert `CryptoError` into `Err` — no declared conversion exists
+  --> tests/ui/crypto_expert_nonce_length.jet:6:21
     |
   6 |         x :: expert.xchacha20poly1305_open([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0], [1, 2, 3], [])
-    |                                                                                                                                              ^^^
- Why: XChaCha20-Poly1305 nonce has 1 byte; this operation requires exactly 24
- Fix: pass a 24-byte nonce, or use core.crypto.seal so Jet generates it
-More: jet-lang.dev/e/E2702
+    |                     ^^^^^^^^^^^^^^^^^^^^^^
+ Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
+ Fix: add `impl CryptoError -> Err { … }` before this function, or change the return type
+More: jet-lang.dev/e/E2402
 
-Error [E2702]: crypto API misuse
-  --> tests/ui/crypto_expert_nonce_length.jet:7:134
+Error [E2402]: `?` can't convert `CryptoError` into `Err` — no declared conversion exists
+  --> tests/ui/crypto_expert_nonce_length.jet:7:21
     |
   7 |         y :: expert.aes256gcm_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [1, 2, 3], [])
-    |                                                                                                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: AES-256-GCM nonce has 24 bytes; this operation requires exactly 12
- Fix: pass a 12-byte nonce, or use core.crypto.seal so Jet generates it
-More: jet-lang.dev/e/E2702
+    |                     ^^^^^^^^^^^^^^
+ Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
+ Fix: add `impl CryptoError -> Err { … }` before this function, or change the return type
+More: jet-lang.dev/e/E2402

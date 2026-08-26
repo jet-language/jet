@@ -1,12 +1,3 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/comptime_fuel.jet:1:11
-    |
-  1 | fn spin() => Int {
-    |           ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
 Error [E0952]: compile-time evaluation ran out of steps
   --> tests/ui/comptime_fuel.jet:3:20
     |
@@ -17,10 +8,10 @@ Error [E0952]: compile-time evaluation ran out of steps
 More: jet-lang.dev/e/E0952
 
 Error [E0107]: nothing named `@x` exists here
-  --> tests/ui/comptime_fuel.jet:10:13
+  --> tests/ui/comptime_fuel.jet:9:20
     |
- 10 |     print("{@x}")
-    |             ^^
+  9 | fn run() { print("{@x}") }
+    |                    ^^
  Why: a name must be declared before it's used
  Fix: declare it first: `@x :: ...`
 More: jet-lang.dev/e/E0107

@@ -1,38 +1,11 @@
-Error [E0070]: this uses a retired arrow spelling
-  --> tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:5:19
+Error [E2402]: `?` can't convert `CryptoError` into `Err` — no declared conversion exists
+  --> tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:10:21
     |
-  5 |     fn area(self) => Int
-    |                   ^^
- Why: callables, arms, and lambdas use one arrow: `->`
- Fix: replace `:>` or `=>` with `->`
-More: jet-lang.dev/e/E0070
-
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:5:19
-    |
-  5 |     fn area(self) => Int
-    |                   ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
-Error [E0066]: this function uses the retired effect-arrow spelling
-  --> tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:8:26
-    |
-  8 | fn protect(shape: Shape) =[]=> Int {
-    |                          ^
- Why: callable results use `->`, and an explicit effect ceiling uses the same arrow
- Fix: write `-[Effects]>`; use `-[]>` for an explicit purity bound
-More: jet-lang.dev/e/E0066
-
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:8:26
-    |
-  8 | fn protect(shape: Shape) =[]=> Int {
-    |                          ^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
+ 10 |         _ :: expert.xchacha20poly1305_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0], [], [])
+    |                     ^^^^^^^^^^^^^^^^^^^^^^
+ Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
+ Fix: add `impl CryptoError -> Err { … }` before this function, or change the return type
+More: jet-lang.dev/e/E2402
 
 Error [E0743]: dynamic call `Shape::area` has no effect bound
   --> tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:12:18

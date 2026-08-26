@@ -691,9 +691,10 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        // Capture allocator provenance before inference can elaborate the
-        // method call. The view fact must be registered from the source
-        // binding, not from the post-inference expression shape.
+        // Capture allocator provenance before inference when the receiver's
+        // binding type is already available. Inference also records the
+        // canonical allocator receiver type, so the post-inference fallback
+        // below covers the producer's resolved shape.
         let arena_alloc_source = self.arena_alloc_source(&b.init);
         let diagnostics_before_init = self.diags.len();
         // An immutable `::` binding is a read window. Let the existing
@@ -715,6 +716,7 @@ impl<'a> Checker<'a> {
             self.infer(&mut b.init)
         };
         self.borrow_ctx = saved_borrow_ctx;
+        let arena_alloc_source = arena_alloc_source.or_else(|| self.arena_alloc_source(&b.init));
         if implicit_field_read
             && it
                 .as_ref()

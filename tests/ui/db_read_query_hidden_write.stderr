@@ -1,12 +1,3 @@
-Error [E0066]: this function uses the retired effect-arrow spelling
-  --> tests/ui/db_read_query_hidden_write.jet:8:25
-    |
-  8 | fn touch(conn: DBScope) =[DB.Read]=> {
-    |                         ^
- Why: callable results use `->`, and an explicit effect ceiling uses the same arrow
- Fix: write `-[Effects]>`; use `-[]>` for an explicit purity bound
-More: jet-lang.dev/e/E0066
-
 Error [E0405]: `??` only works on a fallible value, not `DBScope`
   --> tests/ui/db_read_query_hidden_write.jet:15:20
     |
@@ -19,7 +10,7 @@ More: jet-lang.dev/e/E0405
 Error [E0740]: `touch` uses the effect `DB.Write`, which its signature doesn't allow
   --> tests/ui/db_read_query_hidden_write.jet:8:27
     |
-  8 | fn touch(conn: DBScope) =[DB.Read]=> {
+  8 | fn touch(conn: DBScope) -[DB.Read]> {
     |                           ^^^^^^^
  Why: the signature declares `-[DB.Read]>`, so the body may only use those; `DB.Write` is outside that set
  Fix: add `DB.Write` to the effect list, or stop using it in `touch`

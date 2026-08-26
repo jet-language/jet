@@ -126,7 +126,6 @@ fn native_nix_cache_streams_without_process_tools() {
     remove_dir(&destination);
 }
 
-
 #[test]
 fn native_nix_cache_recurses_and_admits_closure_atomically() {
     let root = unique_dir("closure");
@@ -192,16 +191,27 @@ fn native_nix_cache_recurses_and_admits_closure_atomically() {
         leaf_info,
     );
     routes.insert("/nar/leaf.nar".to_string(), leaf_nar.clone());
-    server.replace_routes(routes);
-    let progress = crate::Output::ByteProgress::new();
-    let admitted = admit_nix_closure_with_progress(
+    server.replace_routes(routes.clone());
+    let planning_progress = crate::Output::ByteProgress::new();
+    let plan = plan_nix_downloads(
         &roots,
-        &[request],
+        &[root_path.to_string()],
         false,
-        Some(progress.clone()),
+        Some(planning_progress),
     )
     .unwrap();
     let root_compressed = encode_zstd_deterministic(&root_nar).unwrap();
+    assert_eq!(plan.packages, 2);
+    assert_eq!(
+        plan.bytes,
+        root_compressed.len() as u64 + leaf_nar.len() as u64
+    );
+    routes.retain(|path, _| path == "/nix-cache-info" || path.starts_with("/nar/"));
+    server.replace_routes(routes);
+    let progress = crate::Output::ByteProgress::new();
+    let admitted =
+        admit_nix_closure_with_progress(&roots, &[request], false, Some(progress.clone())).unwrap();
+
     assert_eq!(
         progress.snapshot().total,
         Some(root_compressed.len() as u64 + leaf_nar.len() as u64)
@@ -458,7 +468,9 @@ fn native_nix_cache_reads_canonical_directories_symlinks_and_executables() {
         put(output, b"(");
         put(output, b"type");
         put(output, b"directory");
-        entry(output, b"target", |output| regular(output, b"target", false));
+        entry(output, b"target", |output| {
+            regular(output, b"target", false)
+        });
         put(output, b")");
     });
     entry(&mut nar, b"link", |output| {
@@ -484,12 +496,8 @@ fn native_nix_cache_reads_canonical_directories_symlinks_and_executables() {
 
     let destination = unique_dir("canonical-nar");
     remove_dir(&destination);
-    let stats = super::super::read_nar_stream(
-        Cursor::new(&nar),
-        &destination,
-        nar.len() as u64,
-    )
-    .unwrap();
+    let stats =
+        super::super::read_nar_stream(Cursor::new(&nar), &destination, nar.len() as u64).unwrap();
     assert_eq!(stats.nodes, 6);
     assert_eq!(fs::read(destination.join("bin")).unwrap(), b"tool");
     assert_eq!(fs::read(destination.join("lib/target")).unwrap(), b"target");

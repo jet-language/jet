@@ -1,25 +1,7 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/call_non_function.jet:1:17
-    |
-  1 | fn get_number() => Int :: 42
-    |                 ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
-Error [E0065]: this function uses the retired `::` body marker.
-  --> tests/ui/call_non_function.jet:1:24
-    |
-  1 | fn get_number() => Int :: 42
-    |                        ^^
- Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
- Fix: replace `::` with `->`; `jet fmt` applies this fix.
-More: jet-lang.dev/e/E0065
-
 Error [E0803]: this is Int (a whole number), not a function
-  --> tests/ui/call_non_function.jet:3:15
+  --> tests/ui/call_non_function.jet:4:15
     |
-  3 |     result :: get_number().call(1)
+  4 |     result :: get_number().call(1)
     |               ^^^^^^^^^^^^^^^^^^^
  Why: only a function value can be called with `.call(…)`
  Fix: call a defined `fn` by name, or store a lambda in a binding before `.call(…)`

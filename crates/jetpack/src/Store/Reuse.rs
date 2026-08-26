@@ -303,19 +303,20 @@ pub struct CacheLease {
     snapshot_dir_handle: Option<fs::File>,
     bin_relative: Option<PathBuf>,
     expected_digest: String,
+    direct_cas: bool,
     package: String,
     version: String,
     reference: String,
     store_root: PathBuf,
     status: ConsumptionStatus,
     wrapper_root: Option<PathBuf>,
-    /// Logical `/nix/store/<name>` paths mapped to the verified private
-    /// snapshot or a verified Hangar object. Shell consumers use this only
-    /// inside a rootless namespace.
+    /// Logical `/nix/store/<name>` paths mapped to a verified lease root or
+    /// canonical Hangar object. Shell consumers use this only inside a rootless
+    /// namespace.
     nix_store_projection: Vec<(String, PathBuf)>,
-    /// Verified output roots accepted by `stable_path`: primary output uses
-    /// the private snapshot; named secondary outputs use their leased Hangar
-    /// object (or its stable fd view on Linux).
+    /// Verified output roots accepted by `stable_path`. Linux Nix substitutions
+    /// lease the immutable CAS object by open directory handle; other outputs
+    /// use a private snapshot.
     leased_output_roots: Vec<(PathBuf, PathBuf)>,
     bin_output_root: Option<PathBuf>,
     projected_bin_root: Option<PathBuf>,
@@ -380,16 +381,12 @@ impl CacheLease {
                 } else {
                     "/dev/fd"
                 };
-                return Some(PathBuf::from(format!(
-                    "{prefix}/{}",
-                    directory.as_raw_fd()
-                ))
-                .join(bin));
+                return Some(
+                    PathBuf::from(format!("{prefix}/{}", directory.as_raw_fd())).join(bin),
+                );
             }
         }
-        self.projected_bin_root
-            .as_ref()
-            .map(|root| root.join(bin))
+        self.projected_bin_root.as_ref().map(|root| root.join(bin))
     }
 
     pub(crate) fn nix_store_projection(&self) -> &[(String, PathBuf)] {
@@ -501,17 +498,21 @@ impl CacheLease {
             self.projected_bin_root.as_deref(),
             self.wrapper_root.as_deref(),
         ]
-            .into_iter()
-            .flatten()
-            .chain(self.leased_output_roots.iter().map(|(root, _)| root.as_path()))
-            .any(|root| {
-                let roots = path_variants(root);
-                roots.iter().any(|root| {
-                    resolved_paths
-                        .iter()
-                        .any(|resolved| resolved.starts_with(root))
-                })
-            });
+        .into_iter()
+        .flatten()
+        .chain(
+            self.leased_output_roots
+                .iter()
+                .map(|(root, _)| root.as_path()),
+        )
+        .any(|root| {
+            let roots = path_variants(root);
+            roots.iter().any(|root| {
+                resolved_paths
+                    .iter()
+                    .any(|resolved| resolved.starts_with(root))
+            })
+        });
         if path_is_lease_owned {
             return Err(std::io::Error::other(
                 "caller requested a path inside an executable lease that is not a recorded member",
@@ -675,11 +676,9 @@ impl CacheLease {
                 } else {
                     "/dev/fd"
                 };
-                return Ok(PathBuf::from(format!(
-                    "{prefix}/{}",
-                    directory.as_raw_fd()
-                ))
-                .join(relative));
+                return Ok(
+                    PathBuf::from(format!("{prefix}/{}", directory.as_raw_fd())).join(relative)
+                );
             }
         }
         Ok(lease_root.join(relative))
@@ -689,22 +688,58 @@ impl CacheLease {
     /// archive reader uses no-follow handles and rejects concurrent mutation.
     pub fn validate(&self) -> std::io::Result<()> {
         self.require_consumable()?;
-        if !self.protocol_lease_id.is_empty() {
-            crate::RuntimePolicy::ExecutableLeaseProtocol::open(&self.store_root)?.validate_snapshot(
-                &self.protocol_lease_id,
-                self.protocol_generation,
-                &self.protocol_owner_scope,
-                &self.snapshot_root,
-                &self.expected_digest,
-            )?;
-        }
-        let actual = crate::Envelope::try_output_hash_of(&self.snapshot_root.to_string_lossy())
-            .map_err(std::io::Error::other)?;
-        if actual != self.expected_digest {
-            return Err(std::io::Error::other(format!(
-                "leased output changed: expected {}, got {actual}",
-                self.expected_digest
-            )));
+        if self.direct_cas {
+            let expected = self
+                .store_root
+                .join("hangar")
+                .join(OBJECTS_DIR)
+                .join(&self.expected_digest);
+            if self.snapshot_root != expected {
+                return Err(std::io::Error::other(
+                    "direct CAS lease does not name its digest path",
+                ));
+            }
+            let path_metadata = fs::symlink_metadata(&self.snapshot_root)?;
+            if path_metadata.file_type().is_symlink() || !path_metadata.is_dir() {
+                return Err(std::io::Error::other(
+                    "direct CAS lease root is not a real directory",
+                ));
+            }
+            let opened_metadata = self
+                .snapshot_dir_handle
+                .as_ref()
+                .ok_or_else(|| std::io::Error::other("direct CAS lease lost its directory handle"))?
+                .metadata()?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt as _;
+                if path_metadata.dev() != opened_metadata.dev()
+                    || path_metadata.ino() != opened_metadata.ino()
+                {
+                    return Err(std::io::Error::other(
+                        "direct CAS lease root changed while leased",
+                    ));
+                }
+            }
+        } else {
+            if !self.protocol_lease_id.is_empty() {
+                crate::RuntimePolicy::ExecutableLeaseProtocol::open(&self.store_root)?
+                    .validate_snapshot(
+                        &self.protocol_lease_id,
+                        self.protocol_generation,
+                        &self.protocol_owner_scope,
+                        &self.snapshot_root,
+                        &self.expected_digest,
+                    )?;
+            }
+            let actual = crate::Envelope::try_output_hash_of(&self.snapshot_root.to_string_lossy())
+                .map_err(std::io::Error::other)?;
+            if actual != self.expected_digest {
+                return Err(std::io::Error::other(format!(
+                    "leased output changed: expected {}, got {actual}",
+                    self.expected_digest
+                )));
+            }
         }
         #[cfg(target_os = "linux")]
         for binding in &self.nix_projection_bindings {
@@ -755,17 +790,19 @@ impl CacheLease {
                         binding.logical
                     )));
                 }
-                let actual = crate::Envelope::try_output_hash_of_in_hangar(
-                    &binding.source.to_string_lossy(),
-                    &self.store_root.join("hangar"),
-                    false,
-                )
-                .map_err(std::io::Error::other)?;
-                if actual != binding.digest {
-                    return Err(std::io::Error::other(format!(
-                        "Nix projection `{}` changed: expected {}, got {actual}",
-                        binding.logical, binding.digest
-                    )));
+                if !self.direct_cas {
+                    let actual = crate::Envelope::try_output_hash_of_in_hangar(
+                        &binding.source.to_string_lossy(),
+                        &self.store_root.join("hangar"),
+                        false,
+                    )
+                    .map_err(std::io::Error::other)?;
+                    if actual != binding.digest {
+                        return Err(std::io::Error::other(format!(
+                            "Nix projection `{}` changed: expected {}, got {actual}",
+                            binding.logical, binding.digest
+                        )));
+                    }
                 }
             }
             if path_metadata.is_dir() != opened_metadata.is_dir()
@@ -981,8 +1018,7 @@ impl Drop for CacheLease {
         // The owner lock is still held by this CacheLease while Drop runs. It
         // authenticates publication, but cannot prove a descendant exists;
         // only the inherited container lock is the process-tree lifetime fact.
-        let keep_for_descendant =
-            self.handed_off.get() && lock_held(&self.lease_lock_path);
+        let keep_for_descendant = self.handed_off.get() && lock_held(&self.lease_lock_path);
         if !keep_for_descendant {
             if remove_snapshot_node(&self.lease_root).is_ok()
                 && !self.protocol_lease_id.is_empty()
@@ -993,10 +1029,10 @@ impl Drop for CacheLease {
                 {
                     let released = protocol
                         .release(
-                        &self.protocol_lease_id,
-                        self.protocol_generation,
-                        &self.protocol_owner_scope,
-                    )
+                            &self.protocol_lease_id,
+                            self.protocol_generation,
+                            &self.protocol_owner_scope,
+                        )
                         .is_ok();
                     if released {
                         drop(self.protocol_owner_lock.take());
@@ -1063,10 +1099,31 @@ pub(crate) fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Resu
     })
 }
 
-fn snapshot_lease_unlocked(
-    roots: &Roots,
-    entry: &StoreEntry,
-) -> std::io::Result<CacheLease> {
+#[cfg(target_os = "linux")]
+fn direct_cas_entry(roots: &Roots, entry: &StoreEntry) -> bool {
+    let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
+        return false;
+    };
+    let expected = roots
+        .hangar_dir()
+        .join(OBJECTS_DIR)
+        .join(&entry.envelope.output_hash);
+    let Ok(metadata) = fs::symlink_metadata(&expected) else {
+        return false;
+    };
+    producer.provider == "nix"
+        && Path::new(&entry.out) == expected
+        && !entry.envelope.output_hash.is_empty()
+        && metadata.is_dir()
+        && !metadata.file_type().is_symlink()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn direct_cas_entry(_roots: &Roots, _entry: &StoreEntry) -> bool {
+    false
+}
+
+fn snapshot_lease_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLease> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     use std::sync::atomic::Ordering;
 
@@ -1105,191 +1162,216 @@ fn snapshot_lease_unlocked(
             return Err(error);
         }
     };
-    let snapshot_root = lease_root.join("snapshot");
+    let direct_cas = direct_cas_entry(roots, entry);
+    let lease_snapshot_root = lease_root.join("snapshot");
+    let snapshot_root = if direct_cas {
+        PathBuf::from(&entry.out)
+    } else {
+        lease_snapshot_root.clone()
+    };
     let result = (|| {
         if !Path::new(&entry.out).exists() {
             Ingest::ensure_real_directory(&snapshot_root, "cache lease snapshot")?;
             return Ok(CacheLease {
-            files: Vec::new(),
-            executables: Vec::new(),
+                files: Vec::new(),
+                executables: Vec::new(),
+                out: PathBuf::from(&entry.out),
+                lease_root: lease_root.clone(),
+                lease_lock_path: lease_lock_path.clone(),
+                live_lock: live_lock.take(),
+                handed_off: Cell::new(false),
+                protocol_lease_id: String::new(),
+                protocol_generation: 0,
+                protocol_owner_scope: String::new(),
+                protocol_owner_lock: None,
+                snapshot_root,
+                snapshot_dir_handle: None,
+                bin_relative: None,
+                expected_digest: String::new(),
+                direct_cas: false,
+                package: entry.name.clone(),
+                version: entry.version.clone(),
+                reference: entry.reference.clone(),
+                store_root: roots.root.clone(),
+                status: ConsumptionStatus::NonConsumable {
+                    reason: "realization has no canonical consumable output".to_string(),
+                },
+                wrapper_root: None,
+                nix_store_projection: Vec::new(),
+                leased_output_roots: Vec::new(),
+                bin_output_root: None,
+                projected_bin_root: None,
+                #[cfg(target_os = "linux")]
+                nix_projection_bindings: Vec::new(),
+                _wrapper_dir_handle: None,
+            });
+        }
+        let (sealed_digest, snapshot_dir_handle, files) = if direct_cas {
+            let snapshot_dir_handle = fs::File::open(&snapshot_root).and_then(|file| {
+                clear_close_on_exec(&file)?;
+                Ok(file)
+            })?;
+            (
+                entry.envelope.output_hash.clone(),
+                snapshot_dir_handle,
+                Vec::new(),
+            )
+        } else {
+            let mut hardlinks = BTreeMap::new();
+            copy_snapshot_node(Path::new(&entry.out), &snapshot_root, &mut hardlinks)?;
+            let digest = crate::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
+                .map_err(std::io::Error::other)?;
+            if digest != entry.envelope.output_hash {
+                remove_snapshot_node(&snapshot_root)?;
+                return Err(std::io::Error::other(format!(
+                    "private lease snapshot mismatch: expected {}, got {digest}",
+                    entry.envelope.output_hash
+                )));
+            }
+            seal_local_output(&snapshot_root)?;
+            fsync_tree(&lease_root)?;
+            let sealed_digest =
+                crate::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
+                    .map_err(std::io::Error::other)?;
+            let snapshot_dir_handle = fs::File::open(&snapshot_root).and_then(|file| {
+                clear_close_on_exec(&file)?;
+                Ok(file)
+            })?;
+            let mut files = Vec::new();
+            open_snapshot_files(&snapshot_root, &snapshot_root, &mut files)?;
+            (sealed_digest, snapshot_dir_handle, files)
+        };
+        let projections = nix_store_projection_for_entry(roots, entry, &snapshot_root)?;
+        let mut output_sources = vec![(PathBuf::from(&entry.out), snapshot_root.clone())];
+        let mut seen_output_digests = BTreeSet::from([entry.envelope.output_hash.clone()]);
+        for digest in entry.named_outputs.values() {
+            if !seen_output_digests.insert(digest.clone()) {
+                continue;
+            }
+            let source = projections
+                .iter()
+                .find(|projection| projection.digest == *digest)
+                .map(|projection| projection.source.clone())
+                .unwrap_or(hangar_projection_object(roots, digest, "named output")?);
+            output_sources.push((roots.hangar_dir().join(OBJECTS_DIR).join(digest), source));
+        }
+        #[cfg(target_os = "linux")]
+        let (nix_store_projection, nix_projection_bindings) =
+            open_nix_projection_sources(projections)?;
+        #[cfg(not(target_os = "linux"))]
+        let nix_store_projection = projections
+            .into_iter()
+            .map(|projection| (projection.logical, projection.source))
+            .collect();
+        let leased_output_roots = output_sources
+            .iter()
+            .map(|(output_root, source)| {
+                let lease_root = if source == &snapshot_root {
+                    snapshot_root.clone()
+                } else {
+                    #[cfg(target_os = "linux")]
+                    {
+                        use std::os::fd::AsRawFd as _;
+                        let binding = nix_projection_bindings
+                            .iter()
+                            .find(|binding| binding.source == *source)
+                            .ok_or_else(|| {
+                                std::io::Error::other(format!(
+                                    "named output `{}` has no stable lease handle",
+                                    output_root.display()
+                                ))
+                            })?;
+                        PathBuf::from(format!("/proc/self/fd/{}", binding.handle.as_raw_fd()))
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        source.clone()
+                    }
+                };
+                Ok((output_root.clone(), lease_root))
+            })
+            .collect::<std::io::Result<Vec<_>>>()?;
+        let (bin_output_root, bin_relative, projected_bin_root) = if entry.bin.is_empty() {
+            (None, None, None)
+        } else {
+            let bin = Path::new(&entry.bin);
+            output_sources
+                .iter()
+                .find_map(|(output_root, source)| {
+                    bin.strip_prefix(output_root).ok().map(|relative| {
+                        (
+                            Some(output_root.clone()),
+                            Some(relative.to_path_buf()),
+                            Some(source.clone()),
+                        )
+                    })
+                })
+                .unwrap_or((None, None, None))
+        };
+        let executables = open_snapshot_executables(
+            projected_bin_root.as_deref().unwrap_or(&snapshot_root),
+            bin_relative.as_deref(),
+        )?;
+        let wrappers = create_exec_wrappers(&lease_snapshot_root, &executables)?;
+        let (protocol_lease_id, protocol_generation, protocol_owner_scope, protocol_owner_lock) =
+            if direct_cas {
+                (String::new(), 0, String::new(), None)
+            } else {
+                let protocol = crate::RuntimePolicy::ExecutableLeaseProtocol::open(&roots.root)?;
+                let protocol_lease_id = protocol.new_lease_id()?;
+                let protocol_owner_scope =
+                    crate::RuntimePolicy::ExecutableLeaseProtocol::owner_scope(&protocol_lease_id)?;
+                let protocol_members = executable_lease_members(&executables)?;
+                let (protocol_request, protocol_owner_lock) = protocol.prepare_snapshot(
+                    &protocol_lease_id,
+                    &protocol_owner_scope,
+                    &snapshot_root,
+                    &entry.name,
+                    &entry.version,
+                    &entry.reference,
+                    &sealed_digest,
+                    &protocol_members,
+                )?;
+                let protocol_frame = protocol.encode_request(&protocol_request)?;
+                let protocol_receipt =
+                    protocol.accept_snapshot(&protocol_frame, &sealed_digest, &snapshot_root)?;
+                (
+                    protocol_lease_id,
+                    protocol_receipt.generation,
+                    protocol_owner_scope,
+                    Some(protocol_owner_lock),
+                )
+            };
+        Ok(CacheLease {
+            files,
+            executables,
             out: PathBuf::from(&entry.out),
             lease_root: lease_root.clone(),
             lease_lock_path: lease_lock_path.clone(),
             live_lock: live_lock.take(),
             handed_off: Cell::new(false),
-            protocol_lease_id: String::new(),
-            protocol_generation: 0,
-            protocol_owner_scope: String::new(),
-            protocol_owner_lock: None,
+            protocol_lease_id,
+            protocol_generation,
+            protocol_owner_scope,
+            protocol_owner_lock,
             snapshot_root,
-            snapshot_dir_handle: None,
-            bin_relative: None,
-            expected_digest: String::new(),
+            snapshot_dir_handle: Some(snapshot_dir_handle),
+            bin_relative,
+            expected_digest: sealed_digest,
+            direct_cas,
             package: entry.name.clone(),
             version: entry.version.clone(),
             reference: entry.reference.clone(),
             store_root: roots.root.clone(),
-            status: ConsumptionStatus::NonConsumable {
-                reason: "realization has no canonical consumable output".to_string(),
-            },
-            wrapper_root: None,
-            nix_store_projection: Vec::new(),
-            leased_output_roots: Vec::new(),
-            bin_output_root: None,
-            projected_bin_root: None,
+            status: ConsumptionStatus::Consumable,
+            wrapper_root: wrappers.as_ref().map(|wrapper| wrapper.root.clone()),
+            nix_store_projection,
+            leased_output_roots,
+            bin_output_root,
+            projected_bin_root,
             #[cfg(target_os = "linux")]
-            nix_projection_bindings: Vec::new(),
-            _wrapper_dir_handle: None,
-            });
-        }
-        let mut hardlinks = BTreeMap::new();
-        copy_snapshot_node(Path::new(&entry.out), &snapshot_root, &mut hardlinks)?;
-    let digest = crate::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
-        .map_err(std::io::Error::other)?;
-    if digest != entry.envelope.output_hash {
-        remove_snapshot_node(&snapshot_root)?;
-        return Err(std::io::Error::other(format!(
-            "private lease snapshot mismatch: expected {}, got {digest}",
-            entry.envelope.output_hash
-        )));
-    }
-    seal_local_output(&snapshot_root)?;
-    // Publish the authenticated receipt only after every snapshot byte,
-    // directory entry, and sealed mode is durable. A reboot can then expose
-    // either a complete lease or a recoverable pre-publication container.
-    fsync_tree(&lease_root)?;
-    let sealed_digest = crate::Envelope::try_output_hash_of(&snapshot_root.to_string_lossy())
-        .map_err(std::io::Error::other)?;
-    let snapshot_dir_handle = fs::File::open(&snapshot_root).and_then(|file| {
-        clear_close_on_exec(&file)?;
-        Ok(file)
-    })?;
-    let mut files = Vec::new();
-    open_snapshot_files(&snapshot_root, &snapshot_root, &mut files)?;
-    let projections = nix_store_projection_for_entry(roots, entry, &snapshot_root)?;
-    let mut output_sources = vec![(PathBuf::from(&entry.out), snapshot_root.clone())];
-    let mut seen_output_digests = BTreeSet::from([entry.envelope.output_hash.clone()]);
-    for digest in entry.named_outputs.values() {
-        if !seen_output_digests.insert(digest.clone()) {
-            continue;
-        }
-        let source = projections
-            .iter()
-            .find(|projection| projection.digest == *digest)
-            .map(|projection| projection.source.clone())
-            .unwrap_or(hangar_projection_object(roots, digest, "named output")?);
-        output_sources.push((roots.hangar_dir().join(OBJECTS_DIR).join(digest), source));
-    }
-    #[cfg(target_os = "linux")]
-    let (nix_store_projection, nix_projection_bindings) = open_nix_projection_sources(projections)?;
-    #[cfg(not(target_os = "linux"))]
-    let nix_store_projection = projections
-        .into_iter()
-        .map(|projection| (projection.logical, projection.source))
-        .collect();
-    let leased_output_roots = output_sources
-        .iter()
-        .map(|(output_root, source)| {
-            let lease_root = if source == &snapshot_root {
-                snapshot_root.clone()
-            } else {
-                #[cfg(target_os = "linux")]
-                {
-                    use std::os::fd::AsRawFd as _;
-                    let binding = nix_projection_bindings
-                        .iter()
-                        .find(|binding| binding.source == *source)
-                        .ok_or_else(|| {
-                            std::io::Error::other(format!(
-                                "named output `{}` has no stable lease handle",
-                                output_root.display()
-                            ))
-                        })?;
-                    PathBuf::from(format!("/proc/self/fd/{}", binding.handle.as_raw_fd()))
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    source.clone()
-                }
-            };
-            Ok((output_root.clone(), lease_root))
-        })
-        .collect::<std::io::Result<Vec<_>>>()?;
-    let (bin_output_root, bin_relative, projected_bin_root) = if entry.bin.is_empty() {
-        (None, None, None)
-    } else {
-        let bin = Path::new(&entry.bin);
-        output_sources
-            .iter()
-            .find_map(|(output_root, source)| {
-                bin.strip_prefix(output_root).ok().map(|relative| {
-                    (
-                        Some(output_root.clone()),
-                        Some(relative.to_path_buf()),
-                        Some(source.clone()),
-                    )
-                })
-            })
-            .unwrap_or((None, None, None))
-    };
-    let executables = open_snapshot_executables(
-        projected_bin_root.as_deref().unwrap_or(&snapshot_root),
-        bin_relative.as_deref(),
-    )?;
-    let wrappers = create_exec_wrappers(&snapshot_root, &executables)?;
-    let protocol = crate::RuntimePolicy::ExecutableLeaseProtocol::open(&roots.root)?;
-    let protocol_lease_id = protocol.new_lease_id()?;
-    let protocol_owner_scope =
-        crate::RuntimePolicy::ExecutableLeaseProtocol::owner_scope(&protocol_lease_id)?;
-    let protocol_members = executable_lease_members(&executables)?;
-    let (protocol_request, protocol_owner_lock) = protocol.prepare_snapshot(
-        &protocol_lease_id,
-        &protocol_owner_scope,
-        &snapshot_root,
-        &entry.name,
-        &entry.version,
-        &entry.reference,
-        &sealed_digest,
-        &protocol_members,
-    )?;
-    // Publish the authenticated generation only after every executable
-    // handoff artifact exists.  A failed/interrupted wrapper setup must not
-    // leave a complete receipt for a lease that can never launch.
-    let protocol_frame = protocol.encode_request(&protocol_request)?;
-    let protocol_receipt = protocol.accept_snapshot(
-        &protocol_frame,
-        &sealed_digest,
-        &snapshot_root,
-    )?;
-        Ok(CacheLease {
-        files,
-        executables,
-        out: PathBuf::from(&entry.out),
-        lease_root: lease_root.clone(),
-        lease_lock_path: lease_lock_path.clone(),
-        live_lock: live_lock.take(),
-        handed_off: Cell::new(false),
-        protocol_lease_id,
-        protocol_generation: protocol_receipt.generation,
-        protocol_owner_scope,
-        protocol_owner_lock: Some(protocol_owner_lock),
-        snapshot_root,
-        snapshot_dir_handle: Some(snapshot_dir_handle),
-        bin_relative,
-        expected_digest: sealed_digest,
-        package: entry.name.clone(),
-        version: entry.version.clone(),
-        reference: entry.reference.clone(),
-        store_root: roots.root.clone(),
-        status: ConsumptionStatus::Consumable,
-        wrapper_root: wrappers.as_ref().map(|wrapper| wrapper.root.clone()),
-        nix_store_projection,
-        leased_output_roots,
-        bin_output_root,
-        projected_bin_root,
-        #[cfg(target_os = "linux")]
-        nix_projection_bindings,
-        _wrapper_dir_handle: wrappers.map(|wrapper| wrapper.directory),
+            nix_projection_bindings,
+            _wrapper_dir_handle: wrappers.map(|wrapper| wrapper.directory),
         })
     })();
     if result.is_err() {

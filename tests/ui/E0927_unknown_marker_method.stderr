@@ -1,16 +1,7 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/E0927_unknown_marker_method.jet:4:20
-    |
-  4 |     fn value(self) => Int {
-    |                    ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
 Error [E0927]: `#Bogus` isn't a known applied rule
   --> tests/ui/E0927_unknown_marker_method.jet:3:6
     |
-  3 |     #Bogus
+  3 |     #Bogus fn value(self) Int -> { return 1 }
     |      ^^^^^
  Why: `Bogus` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.
  Fix: check the spelling, or see docs/spec/syntax-decisions.md for the full applied-rule list.

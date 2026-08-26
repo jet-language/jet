@@ -1,17 +1,8 @@
-Error [E0070]: this uses a retired arrow spelling
-  --> tests/ui/cffi_e3205/run.jet:4:24
+Error [E3205]: overlay `add` disagrees with the generated binding
+  --> tests/ui/cffi_e3205/run.jet:4:8
     |
-  4 |     fn add(a: Int) => Int = "demo_add";
-    |                        ^^
- Why: callables, arms, and lambdas use one arrow: `->`
- Fix: replace `:>` or `=>` with `->`
-More: jet-lang.dev/e/E0070
-
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/cffi_e3205/run.jet:4:24
-    |
-  4 |     fn add(a: Int) => Int = "demo_add";
-    |                        ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
+  4 |     fn add(a: Int) Int = "demo_add"
+    |        ^^^
+ Why: user `#Extern module c.demo` may override bindgen symbols, but the signature must stay compatible when replacing
+ Fix: match the generated signature, or rename your overlay function
+More: jet-lang.dev/e/E3205

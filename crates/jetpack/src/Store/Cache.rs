@@ -1888,9 +1888,7 @@ fn endpoint_key(endpoint: &CacheEndpoint, key: &str) -> io::Result<String> {
             validate_path_components(&path)?;
             Ok(path.to_string_lossy().into_owned())
         }
-        CacheEndpoint::Hangar => {
-            Err(invalid("this endpoint does not expose cache object keys"))
-        }
+        CacheEndpoint::Hangar => Err(invalid("this endpoint does not expose cache object keys")),
     }
 }
 
@@ -1907,9 +1905,7 @@ fn endpoint_get(endpoint: &CacheEndpoint, key: &str, limit: u64) -> io::Result<O
         CacheEndpoint::Http(_) => http_get(endpoint_key(endpoint, key)?, limit),
         CacheEndpoint::Ssh { target, .. } => ssh_get(target, &endpoint_key(endpoint, key)?, limit),
         CacheEndpoint::S3(_) => s3_get(endpoint_key(endpoint, key)?, limit),
-        CacheEndpoint::Hangar => {
-            Err(invalid("this endpoint has no cache object read operation"))
-        }
+        CacheEndpoint::Hangar => Err(invalid("this endpoint has no cache object read operation")),
     }
 }
 
@@ -1929,9 +1925,7 @@ fn endpoint_put(endpoint: &CacheEndpoint, key: &str, bytes: &[u8]) -> io::Result
             ssh_put(target, &remote, bytes)
         }
         CacheEndpoint::S3(_) => s3_put(remote, bytes),
-        CacheEndpoint::Hangar => {
-            Err(invalid("this endpoint has no cache object write operation"))
-        }
+        CacheEndpoint::Hangar => Err(invalid("this endpoint has no cache object write operation")),
     }
 }
 

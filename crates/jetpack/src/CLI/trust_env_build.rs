@@ -466,21 +466,15 @@ pub(super) fn compose_env_scoped(
     // a large package set does not become a duplicate status/row ledger.
     let total_steps = plan.refs.len() + plan.adapters.len();
     let live_mode = total_steps > 1;
-    let aggregate_mode = scope == RealizeScope::Use && live_mode;
     let live_tty = live_mode && theme.color && std::io::stderr().is_terminal();
     let mut live = theme.live_region();
     let mut completed_steps = 0usize;
     for spec in plan.refs.iter() {
-        if aggregate_mode {
-            live.set_aggregate_status("Resolving", completed_steps, total_steps);
-        } else if live_tty {
-            live.set_dependency_status(
-                "Resolving",
+        if live_tty {
+            live.set_aggregate_status(
+                &format!("Resolving {}", spec.package),
                 completed_steps,
                 total_steps,
-                spec.source.label(),
-                &spec.package,
-                "Resolving",
             );
         }
         let style = if live_mode {
@@ -488,7 +482,7 @@ pub(super) fn compose_env_scoped(
         } else {
             RowStyle::Ready
         };
-        let live_arg = live_mode.then_some(&mut live);
+        let live_arg = live_tty.then_some(&mut live);
         match realize_ref_outcome(
             theme,
             roots,
@@ -782,10 +776,23 @@ fn reject_unprompted_acquisition(
         RealizeScope::Use => "use".to_string(),
         RealizeScope::UserProfile => "tool".to_string(),
     };
-    if !specs.is_empty() || !plan.adapters.is_empty() {
+    let planning = !specs.is_empty() || !plan.adapters.is_empty();
+    let planning_live = planning && theme.color && std::io::stderr().is_terminal();
+    let mut live = theme.live_region();
+    if planning_live {
+        live.set_aggregate_status("Planning", 0, specs.len() + plan.adapters.len());
+    } else if planning {
         theme.status(&format!("Resolving {label} package plan..."));
     }
-    let mut download = plan_downloads(theme, roots, flags, &plan.table, &specs, scope)?;
+    let result = if planning_live {
+        Store::with_progress(live.progress_handle(), || {
+            plan_downloads(theme, roots, flags, &plan.table, &specs, scope)
+        })
+    } else {
+        plan_downloads(theme, roots, flags, &plan.table, &specs, scope)
+    };
+    live.clear();
+    let mut download = result?;
     if !plan.adapters.is_empty() {
         download.packages = download.packages.saturating_add(plan.adapters.len());
         download.bytes = None;

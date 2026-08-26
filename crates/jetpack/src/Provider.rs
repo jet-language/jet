@@ -791,9 +791,36 @@ fn primary_nix_output_digest(named_output_digests: &BTreeMap<String, String>) ->
         .cloned()
 }
 
-/// Hash every Nix output from its current bytes and prepare the identity that
-/// must survive Store registration. Existing project locks pin the primary
-/// output digest; a missing lock is left for the first successful realization.
+fn admitted_output_digest(
+    ctx: &Ctx,
+    realized: &Realized,
+    name: &str,
+    path: &str,
+) -> Option<String> {
+    if realized.producer.provider != "nix" || realized.source_state != SourceState::Substituted {
+        return None;
+    }
+    let digest = realized
+        .producer
+        .facts
+        .get(&format!("nix.output.{name}.digest"))?
+        .clone();
+    let roots = ctx.nix_roots?;
+    let expected = roots
+        .hangar_dir()
+        .join(super::Store::OBJECTS_DIR)
+        .join(&digest);
+    let metadata = std::fs::symlink_metadata(&expected).ok()?;
+    (Path::new(path) == expected
+        && metadata.is_dir()
+        && !metadata.file_type().is_symlink()
+        && !digest.is_empty())
+    .then_some(digest)
+}
+
+/// Prepare the Nix identity from the authenticated admission digest when this
+/// provider just substituted the object; other paths still hash current bytes.
+/// Existing project locks pin the primary digest.
 pub(crate) fn prepare_nix_identity(
     spec: &RefSpec,
     table: &SourceTable,
@@ -807,11 +834,14 @@ pub(crate) fn prepare_nix_identity(
                 "Nix provider returned an empty named output `{name}`"
             )));
         }
-        let digest = super::Envelope::try_output_hash_of(path).map_err(|reason| {
-            ProviderError::Ingest(format!(
-                "Nix output `{name}` at `{path}` could not be hashed from its bytes: {reason}"
-            ))
-        })?;
+        let digest = match admitted_output_digest(ctx, realized, name, path) {
+            Some(digest) => digest,
+            None => super::Envelope::try_output_hash_of(path).map_err(|reason| {
+                ProviderError::Ingest(format!(
+                    "Nix output `{name}` at `{path}` could not be hashed from its bytes: {reason}"
+                ))
+            })?,
+        };
         if digest.trim().is_empty() {
             return Err(ProviderError::BadOutput(format!(
                 "Nix output `{name}` at `{path}` has an empty byte digest"
@@ -1624,6 +1654,9 @@ fn finalize_nix_realization(
     ctx: &Ctx,
     mut realized: Realized,
 ) -> Result<Realized, ProviderError> {
+    if let Some(progress) = current_progress() {
+        progress.phase("Registering");
+    }
     let identity = prepare_nix_identity(spec, table, ctx, &realized)?;
     realized.cache_identity = identity.cache_identity.clone();
     let previous = realized.producer;
@@ -1786,6 +1819,10 @@ fn realization_from_index(
         }
         named_outputs.insert(name.clone(), hangar_path);
         facts.insert(format!("nix.output.{name}"), store_path.clone());
+        facts.insert(
+            format!("nix.output.{name}.digest"),
+            object.hangar_digest.clone(),
+        );
         facts.insert(
             format!("nix.cache.output.{name}.proof.sha256"),
             object.upstream_proof_sha256.clone(),

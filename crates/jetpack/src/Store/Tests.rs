@@ -1149,10 +1149,7 @@ mod tests {
             version: "1".into(),
             reference: "projection@nixpkgs".into(),
             out: snapshot.to_string_lossy().into_owned(),
-            bin: snapshot
-                .join("bin")
-                .to_string_lossy()
-                .into_owned(),
+            bin: snapshot.join("bin").to_string_lossy().into_owned(),
             rlib: String::new(),
             envelope: crate::Envelope::Envelope::for_output(
                 &snapshot.to_string_lossy(),
@@ -1197,11 +1194,7 @@ mod tests {
         );
         assert!(lease.projected_executable("tool").is_some());
         assert!(lease
-            .executable_for_command(
-                &Path::new(&dev_object)
-                    .join("unrecorded")
-                    .to_string_lossy()
-            )
+            .executable_for_command(&Path::new(&dev_object).join("unrecorded").to_string_lossy())
             .is_err());
         lease.validate().unwrap();
 

@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2209,
-    "rev": 45623,
+    "rev": 45627,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -152362,25 +152362,31 @@
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-26",
+          "by": "orchestrator",
+          "text": "Orchestrator narrowing, with the evidence already ruled out:\n\n1. The type is right. A probe outside the repo shows mem.Arena.new() yields Arena: E0102 reports `Arena` has no method ..., and lists new, alloc, try_alloc, reset. So is_allocator_type(Type::Named(Arena)) must pass.\n2. The constant is right. Syntax/core_surface.rs:707 MEM_ALLOC_ALLOC = alloc, which is the method being called.\n3. The reporter is intact. CheckerOwnership.rs:301 report_view_escape builds the E0631 row correctly.\n4. Registration order is sound. bindings.rs:1130 sets b.arena_view, :1203 declares the binding, :1222 calls record_arena_view. There is no early return between them.\n\nSo the failure is NOT the diagnostic, the type, the constant, or the ordering. The two remaining candidates, in order:\n\nA. statements.rs:580 gates the call on self.is_arena_view(n) or self.is_fixed_backing_view(n). If is_arena_view(x) is false, report_view_escape is never reached and its own None guard never matters. Check what is_arena_view reads and whether the recorded fact satisfies it.\nB. The fact is recorded but view_fact(x) cannot find it at return time - a scope_len or scope_depth mismatch between record_arena_view and the lookup.\n\nConfirm which by instrumenting locally, but DO NOT leave any eprintln in the tree: the previous attempt left six [DEBUG-2208] traces in production sema and taught tests/tir_support/mod.rs to filter them out of stderr. Both were removed in commit after 26a4a0dfb. Use a unit test or a debugger instead.\n\nProof that the fix works: JET_UI_FILTER=tests/ui/arena_view_escape.jet cargo test --test diagnostic_snapshots ui_snapshots must stop reporting (no errors) and report E0631 at line 8."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "E0631 fires again for tests/ui/arena_view_escape.jet: a binding taken from arena.alloc and then returned is rejected through the real sema path, not a special case for this fixture.",
-          "status": "met",
-          "metBy": "orchestrator",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "evidence: file.rs:LINE, or passing test name, or verbatim command output",
-          "at": "2026-08-26T10:23:09.231Z"
+          "evidence": "",
+          "at": "2026-08-26T10:32:49.114Z"
         },
         {
           "n": 2,
           "text": "The view fact is registered where it was lost. crates/jet-sema/src/Sema/CheckerOwnership.rs report_view_escape finds a fact for the binding instead of returning early at its None guard.",
-          "status": "met",
-          "metBy": "orchestrator",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "crates/jet-sema/src/Sema/CheckerCore/bindings.rs:1223; lane-check: CHECK OK",
-          "at": "2026-08-26T10:23:10.648Z"
+          "evidence": "",
+          "at": "2026-08-26T10:32:50.664Z"
         },
         {
           "n": 3,
@@ -152394,11 +152400,11 @@
         {
           "n": 4,
           "text": "Every fixture whose diagnostic count falls after the arrow migration is classified: legitimate loss of a retired-arrow code, or a real regression like this one. The classification is recorded on this card.",
-          "status": "met",
-          "metBy": "orchestrator",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "/home/nate/.cache/jet-test-scratch/card-2208-ui.log:14812",
-          "at": "2026-08-26T10:23:12.244Z"
+          "evidence": "",
+          "at": "2026-08-26T10:32:51.772Z"
         },
         {
           "n": 5,
@@ -152418,7 +152424,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-26T09:36:02.083Z",
-      "updated": "2026-08-26T10:23:12.245Z",
+      "updated": "2026-08-26T10:32:51.772Z",
       "updatedBy": "orchestrator"
     }
   ],
@@ -211460,6 +211466,34 @@
   ],
   "events": [
     {
+      "at": "2026-08-26T10:32:51.772Z",
+      "by": "orchestrator",
+      "action": "card.criteria-reopen",
+      "ref": "c0d9b4eu",
+      "note": "#4: Disproved by running the fixture: JET_UI_FILTER=tests/ui/arena_view_escape.jet cargo test --test diagnostic_snapshots ui_snapshots still reports (no errors). E0631 does not fire, so nothing downstream of it can be met."
+    },
+    {
+      "at": "2026-08-26T10:32:50.664Z",
+      "by": "orchestrator",
+      "action": "card.criteria-reopen",
+      "ref": "c0d9b4eu",
+      "note": "#2: Disproved by running the fixture: JET_UI_FILTER=tests/ui/arena_view_escape.jet cargo test --test diagnostic_snapshots ui_snapshots still reports (no errors). E0631 does not fire, so nothing downstream of it can be met."
+    },
+    {
+      "at": "2026-08-26T10:32:49.114Z",
+      "by": "orchestrator",
+      "action": "card.criteria-reopen",
+      "ref": "c0d9b4eu",
+      "note": "#1: Disproved by running the fixture: JET_UI_FILTER=tests/ui/arena_view_escape.jet cargo test --test diagnostic_snapshots ui_snapshots still reports (no errors). E0631 does not fire, so nothing downstream of it can be met."
+    },
+    {
+      "at": "2026-08-26T10:32:28.002Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0d9b4eu",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-26T10:23:12.245Z",
       "by": "orchestrator",
       "action": "card.criteria-meet",
@@ -214930,34 +214964,6 @@
       "action": "card.criteria-meet",
       "ref": "c087yjjx",
       "note": "#3"
-    },
-    {
-      "at": "2026-08-26T00:22:48.588Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c087yjjx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-26T00:22:47.737Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c087yjjx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-26T00:18:55.794Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c12uacgqe",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-25T23:13:48.911Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0lrmc2p",
-      "note": "phase,logEntry,needsAcceptance"
     }
   ],
   "nextNum": 368,

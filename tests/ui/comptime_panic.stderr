@@ -1,12 +1,3 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/comptime_panic.jet:1:21
-    |
-  1 | fn validate(n: Int) => Int {
-    |                     ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
 Error [E0956]: `require/panic stop` isn't supported by the current evaluator yet
   --> tests/ui/comptime_panic.jet:2:5
     |
@@ -17,10 +8,10 @@ Error [E0956]: `require/panic stop` isn't supported by the current evaluator yet
 More: jet-lang.dev/e/E0956
 
 Error [E0107]: nothing named `@x` exists here
-  --> tests/ui/comptime_panic.jet:9:13
+  --> tests/ui/comptime_panic.jet:8:20
     |
-  9 |     print("{@x}")
-    |             ^^
+  8 | fn run() { print("{@x}") }
+    |                    ^^
  Why: a name must be declared before it's used
  Fix: declare it first: `@x :: ...`
 More: jet-lang.dev/e/E0107

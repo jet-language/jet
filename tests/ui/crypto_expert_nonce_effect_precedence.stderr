@@ -1,29 +1,11 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/crypto_expert_nonce_effect_precedence.jet:4:16
+Error [E2402]: `?` can't convert `CryptoError` into `Err` — no declared conversion exists
+  --> tests/ui/crypto_expert_nonce_effect_precedence.jet:11:26
     |
-  4 | fn next_byte() => U8 {
-    |                ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
-Error [E0066]: this function uses the retired effect-arrow spelling
-  --> tests/ui/crypto_expert_nonce_effect_precedence.jet:9:14
-    |
-  9 | fn protect() =[]=> Int {
-    |              ^
- Why: callable results use `->`, and an explicit effect ceiling uses the same arrow
- Fix: write `-[Effects]>`; use `-[]>` for an explicit purity bound
-More: jet-lang.dev/e/E0066
-
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/crypto_expert_nonce_effect_precedence.jet:9:14
-    |
-  9 | fn protect() =[]=> Int {
-    |              ^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
+ 11 |         sealed :: expert.xchacha20poly1305_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [next_byte()], [], [])
+    |                          ^^^^^^^^^^^^^^^^^^^^^^
+ Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
+ Fix: add `impl CryptoError -> Err { … }` before this function, or change the return type
+More: jet-lang.dev/e/E2402
 
 Error [E3401]: `protect` calls the impure function `next_byte`
   --> tests/ui/crypto_expert_nonce_effect_precedence.jet:11:148

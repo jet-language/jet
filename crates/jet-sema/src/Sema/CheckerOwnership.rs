@@ -187,19 +187,26 @@ impl<'a> Checker<'a> {
 
     /// If `init` is `arena.alloc(value)` on a name, return the arena's name.
     pub(crate) fn arena_alloc_source(&self, init: &Expr) -> Option<String> {
-        if let Expr::MethodCall {
-            receiver, method, ..
-        } = init
-        {
-            if method == Syntax::MEM_ALLOC_ALLOC {
-                if let Expr::Ident(arena, _) = &**receiver {
-                    if self.lookup(arena).is_some_and(|i| is_allocator_type(&i.ty)) {
-                        return Some(arena.clone());
-                    }
-                }
-            }
+        let Expr::MethodCall {
+            receiver,
+            method,
+            recv_type,
+            ..
+        } = init.without_parens()
+        else {
+            return None;
+        };
+        if method != Syntax::MEM_ALLOC_ALLOC {
+            return None;
         }
-        None
+        let Expr::Ident(arena, _) = receiver.as_ref().without_parens() else {
+            return None;
+        };
+        let resolved_allocator = recv_type.as_deref().is_some_and(|name| {
+            matches!(name, "Arena" | "Bump" | "Pool" | "Fixed")
+        });
+        (resolved_allocator || self.lookup(arena).is_some_and(|i| is_allocator_type(&i.ty)))
+            .then(|| arena.clone())
     }
 
     /// Record `name` as a view into `arena`, declared at the current scope depth.

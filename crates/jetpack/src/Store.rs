@@ -57,13 +57,13 @@ mod Nar;
 pub use Nar::*;
 pub(crate) mod NixCache;
 #[cfg(test)]
+pub(crate) use NixCache::admit_nix_closure;
+#[cfg(test)]
 pub(crate) use NixCache::encode_zstd_deterministic;
 pub(crate) use NixCache::{
     admit_nix_closure_with_progress, plan_nix_downloads, AdmittedNixClosure, NixOutputRequest,
     StoreError,
 };
-#[cfg(test)]
-pub(crate) use NixCache::admit_nix_closure;
 mod Broker;
 pub use Broker::*;
 mod Reproducibility;
@@ -192,10 +192,7 @@ pub(crate) fn audit_read_only(roots: &Roots) -> std::io::Result<AuditSnapshot> {
                     continue;
                 }
                 let name = entry.file_name();
-                if name
-                    .to_str()
-                    .is_some_and(is_hangar_internal_directory)
-                {
+                if name.to_str().is_some_and(is_hangar_internal_directory) {
                     continue;
                 }
                 let id = name.to_string_lossy().into_owned();
@@ -283,7 +280,10 @@ pub(crate) fn audit_read_only(roots: &Roots) -> std::io::Result<AuditSnapshot> {
             ProducerRecord::decode(&entry.producer_record).map_err(|error| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("Hangar object `{}` has an invalid producer record: {error}", entry.id),
+                    format!(
+                        "Hangar object `{}` has an invalid producer record: {error}",
+                        entry.id
+                    ),
                 )
             })?;
         }
@@ -482,7 +482,10 @@ fn lease_nodes_unlocked(roots: &Roots) -> std::io::Result<Vec<LeaseNode>> {
         if !metadata.is_dir() && !metadata.file_type().is_symlink() && !metadata.is_file() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Hangar lease `{}` is not a supported filesystem node", path.display()),
+                format!(
+                    "Hangar lease `{}` is not a supported filesystem node",
+                    path.display()
+                ),
             ));
         }
         let stale = if metadata.is_dir() && !metadata.file_type().is_symlink() {
@@ -807,7 +810,10 @@ fn record_realized_mode_unlocked(
     // are the durable output facts.
     let mut named_outputs = BTreeMap::new();
     for (name, path) in &realized.named_outputs {
-        let digest = super::Envelope::try_output_hash_of(path).map_err(std::io::Error::other)?;
+        let digest = match canonical_graph_digest(roots, &graph, path) {
+            Some(digest) => digest,
+            None => super::Envelope::try_output_hash_of(path).map_err(std::io::Error::other)?,
+        };
         if name == "out" && digest != realized.envelope.output_hash {
             return Err(std::io::Error::other(format!(
                 "Nix primary output changed during Store registration: expected {}, got {digest}",
@@ -817,7 +823,7 @@ fn record_realized_mode_unlocked(
         named_outputs.insert(name.clone(), digest);
     }
     let (out, bin, rlib) = if realized.producer.provider == "nix" {
-        project_nix_outputs_unlocked(roots, realized)?
+        project_nix_outputs_unlocked(roots, realized, &graph)?
     } else {
         canonicalize_local_output_unlocked(
             roots,
@@ -896,24 +902,49 @@ fn record_realized_mode_unlocked(
     Ok(entry)
 }
 
+fn canonical_graph_digest(
+    roots: &Roots,
+    graph: &Closure::ClosureGraph,
+    source: &str,
+) -> Option<String> {
+    let source = Path::new(source);
+    let digest = source
+        .strip_prefix(roots.hangar_dir().join(OBJECTS_DIR))
+        .ok()?
+        .to_str()?;
+    if digest.is_empty() || digest.contains(std::path::MAIN_SEPARATOR) {
+        return None;
+    }
+    graph.objects.get(digest).and_then(|object| {
+        (!object.external && Path::new(&object.path) == source).then(|| digest.to_string())
+    })
+}
+
 /// Project every Nix output into the Hangar CAS before Store registration.
 /// The original `/nix/store` spelling is retained in the producer facts for
 /// runtime namespace projection; it is never used as the durable output root.
 fn project_nix_outputs_unlocked(
     roots: &Roots,
     realized: &super::Provider::Realized,
+    graph: &Closure::ClosureGraph,
 ) -> std::io::Result<(String, String, String)> {
     let mut projected = BTreeMap::new();
     let mut seen_sources: BTreeMap<String, String> = BTreeMap::new();
     for (name, source) in &realized.named_outputs {
-        let digest = super::Envelope::try_output_hash_of(source).map_err(std::io::Error::other)?;
+        let trusted_digest = canonical_graph_digest(roots, graph, source);
+        let digest = match trusted_digest.as_ref() {
+            Some(digest) => digest.clone(),
+            None => super::Envelope::try_output_hash_of(source).map_err(std::io::Error::other)?,
+        };
         if name == "out" && digest != realized.envelope.output_hash {
             return Err(std::io::Error::other(format!(
                 "Nix primary output changed during Store projection: expected {}, got {digest}",
                 realized.envelope.output_hash
             )));
         }
-        let canonical = if let Some(existing) = seen_sources.get(source) {
+        let canonical = if trusted_digest.is_some() {
+            source.clone()
+        } else if let Some(existing) = seen_sources.get(source) {
             existing.clone()
         } else {
             let canonical = project_nix_output_unlocked(roots, source, &digest)?;
@@ -1363,6 +1394,9 @@ pub fn realize_verified(
     // that is about to become reusable.
     super::Provider::validate_nix_lock_before_store(ctx, &realized)
         .map_err(RealizeError::Provider)?;
+    if let Some(progress) = current_progress() {
+        progress.phase("Registering");
+    }
     let mut entry = if let Some(action_key) = independent
         .as_ref()
         .and_then(|prepared| prepared.action_key.as_deref())
@@ -1383,6 +1417,9 @@ pub fn realize_verified(
         ) {
             publish_realized_to_bound_caches(roots, &entry);
         }
+    }
+    if let Some(progress) = current_progress() {
+        progress.phase("Activating");
     }
     let lease = snapshot_lease(roots, &entry).map_err(RealizeError::Store)?;
     if let Some(action_key) = independent
@@ -1611,8 +1648,10 @@ fn receipt_source_matches(package: &super::Lock::LockedPackage, reference: &str)
         super::Lock::LockSource::Git { url, .. } => url == reference,
         super::Lock::LockSource::Nix {
             reference: value, ..
-        } => super::RefSpec::canonical_locked_ref(value)
-            == super::RefSpec::canonical_locked_ref(reference),
+        } => {
+            super::RefSpec::canonical_locked_ref(value)
+                == super::RefSpec::canonical_locked_ref(reference)
+        }
         super::Lock::LockSource::Cran {
             reference: value, ..
         }
@@ -2551,7 +2590,7 @@ fn is_live(id: &str, meta: &ParsedMeta, roots: &LiveRoots) -> bool {
 // ── E4-JP1 Hangar Store v2: atomic staged ingest ─────────────────────────
 
 const STAGE_DIR: &str = ".stage";
-const OBJECTS_DIR: &str = "objects";
+pub(crate) const OBJECTS_DIR: &str = "objects";
 const CAS_DIR: &str = "cas";
 const REFERRERS_DIR: &str = "referrers";
 const PARTIAL_SUFFIX: &str = ".partial";

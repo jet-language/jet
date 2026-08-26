@@ -4696,7 +4696,7 @@ fn env_wizard_detects_remembers_catalog_and_shows_progress() {
         "first env output: {first_text}"
     );
     assert!(
-        first_text.contains("resolving env.dev package plan"),
+        first_text.contains("Resolving env.dev package plan"),
         "first env output: {first_text}"
     );
 

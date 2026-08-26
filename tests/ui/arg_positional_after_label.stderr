@@ -1,26 +1,17 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/arg_positional_after_label.jet:1:51
+Error [E0768]: this argument to `schedule` follows a labelled one without a label
+  --> tests/ui/arg_positional_after_label.jet:3:37
     |
-  1 | fn schedule(job: String, delay: Int, repeat: Int) => String :: "{job}"
-    |                                                   ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
-Error [E0065]: this function uses the retired `::` body marker.
-  --> tests/ui/arg_positional_after_label.jet:1:61
-    |
-  1 | fn schedule(job: String, delay: Int, repeat: Int) => String :: "{job}"
-    |                                                             ^^
- Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
- Fix: replace `::` with `->`; `jet fmt` applies this fix.
-More: jet-lang.dev/e/E0065
+  3 | fn run() { _ :: schedule(repeat: 5, "backup", 30) }
+    |                                     ^^^^^^^^
+ Why: labels bind by name, so a bare argument after one has no parameter to fill
+ Fix: label this argument, or move it before the labelled ones
+More: jet-lang.dev/e/E0768
 
 Error [E0768]: this argument to `schedule` follows a labelled one without a label
-  --> tests/ui/arg_positional_after_label.jet:3:30
+  --> tests/ui/arg_positional_after_label.jet:3:37
     |
-  3 |     _ :: schedule(repeat: 5, "backup", 30)
-    |                              ^^^^^^^^
+  3 | fn run() { _ :: schedule(repeat: 5, "backup", 30) }
+    |                                     ^^^^^^^^
  Why: labels bind by name, so a bare argument after one has no parameter to fill
  Fix: label this argument, or move it before the labelled ones
 More: jet-lang.dev/e/E0768

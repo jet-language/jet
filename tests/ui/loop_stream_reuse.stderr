@@ -1,20 +1,11 @@
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/loop_stream_reuse.jet:1:18
+Error [E0805]: `yield` outside a generator
+  --> tests/ui/loop_stream_reuse.jet:4:9
     |
-  1 | fn count(n: Int) => Stream<Int> {
-    |                  ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
-Error [E0080]: A braced callable with a non-unit success result needs `->` before its body.
-  --> tests/ui/loop_stream_reuse.jet:1:33
-    |
-  1 | fn count(n: Int) => Stream<Int> {
-    |                                 ^
- Why: the body arrow marks a declared success value; unit and unit-fallible callables keep bare braces.
- Fix: write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) Error! { ... }` bare.
-More: jet-lang.dev/e/E0080
+  4 |         yield i
+    |         ^^^^^
+ Why: `yield` hands a value to a `Stream<T>` consumer — only a function declared `Stream<T> ->` may use it
+ Fix: declare `Stream<T> ->` on this function, or remove the `yield`
+More: jet-lang.dev/e/E0805
 
 Error [E0121]: `s` was given away earlier, so it can't be used here
   --> tests/ui/loop_stream_reuse.jet:12:15

@@ -6,30 +6,3 @@ Error [E0060]: C FFI modules use `#Extern`, not `#extern`
  Why: C FFI rules use the one PascalCase `#Rule` family in generated and hand-written bindings
  Fix: write `#Extern` before `module c.<lib>`
 More: jet-lang.dev/e/E0060
-
-Error [E0070]: this uses a retired arrow spelling
-  --> tests/ui/cffi_retired_hash_extern.jet:2:15
-    |
-  2 |     fn ping() => Int :: "demo_ping"
-    |               ^^
- Why: callables, arms, and lambdas use one arrow: `->`
- Fix: replace `:>` or `=>` with `->`
-More: jet-lang.dev/e/E0070
-
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/cffi_retired_hash_extern.jet:2:15
-    |
-  2 |     fn ping() => Int :: "demo_ping"
-    |               ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
-
-Error [E0003]: expected `=` before the Rust path, found `::`
-  --> tests/ui/cffi_retired_hash_extern.jet:2:22
-    |
-  2 |     fn ping() => Int :: "demo_ping"
-    |                      ^^
- Why: the structure here isn't what the compiler expected
- Fix: use `=` before the Rust path
-More: jet-lang.dev/e/E0003

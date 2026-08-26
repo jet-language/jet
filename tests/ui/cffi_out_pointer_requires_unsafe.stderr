@@ -1,25 +1,16 @@
-Error [E0070]: this uses a retired arrow spelling
-  --> tests/ui/cffi_out_pointer_requires_unsafe.jet:10:42
+Error [E3103]: `invoke` is an `#Unsafe` function
+  --> tests/ui/cffi_out_pointer_requires_unsafe.jet:19:12
     |
- 10 |     fn store_load(id: U64, out: *Record) => I32 = "store_load"
-    |                                          ^^
- Why: callables, arms, and lambdas use one arrow: `->`
- Fix: replace `:>` or `=>` with `->`
-More: jet-lang.dev/e/E0070
-
-Error [E0068]: this callable uses the retired result-arrow shape.
-  --> tests/ui/cffi_out_pointer_requires_unsafe.jet:10:42
-    |
- 10 |     fn store_load(id: U64, out: *Record) => I32 = "store_load"
-    |                                          ^^
- Why: a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type
- Fix: write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`
-More: jet-lang.dev/e/E0068
+ 19 | fn run() { invoke() }
+    |            ^^^^^^
+ Why: its contract can't be checked by the compiler, so the caller must vouch for it
+ Fix: call it inside `#Unsafe("…") { … }`
+More: jet-lang.dev/e/E3103
 
 Error [E3103]: `invoke` is an `#Unsafe` function
-  --> tests/ui/cffi_out_pointer_requires_unsafe.jet:20:12
+  --> tests/ui/cffi_out_pointer_requires_unsafe.jet:19:12
     |
- 20 | fn run() { invoke() }
+ 19 | fn run() { invoke() }
     |            ^^^^^^
  Why: its contract can't be checked by the compiler, so the caller must vouch for it
  Fix: call it inside `#Unsafe("…") { … }`
