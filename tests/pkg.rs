@@ -3387,6 +3387,43 @@ fn git_dep_local_bare_repo_fetches_ok() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
+#[test]
+fn git_dep_rejects_private_transport_before_network_access() {
+    if !have_git() {
+        eprintln!("note: skipping git_dep_private_transport (git not found)");
+        return;
+    }
+
+    let tmp = tmp_dir("git_private_transport");
+    let raw = manifest_with_deps(
+        "app",
+        "0.1.0",
+        "    private: { git: \"http://127.0.0.1:9/private.git\", rev: \"0000000000000000000000000000000000000000\" },",
+    );
+    write(&tmp, "package.jet", &raw);
+    let mf = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    let opts = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+
+    let diags = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts))
+        .expect_err("private git transport must be rejected before clone");
+    assert_eq!(first_diag_code(&diags), "E1203");
+    let rendered = jet::Diagnostics::render_all(
+        &tmp.join("package.jet").to_string_lossy(),
+        &raw,
+        &diags,
+    );
+    assert!(rendered.contains("not allowed"), "unexpected diagnostic:\n{rendered}");
+    assert!(!tmp.join(".jet").exists(), "rejected transport created project state");
+    let _ = fs::remove_dir_all(&tmp);
+}
+
 // ─────────────────────────────────────────────
 // @latest / branch update rewrites lock
 // ─────────────────────────────────────────────
@@ -7478,7 +7515,22 @@ fn keygen_refuses_existing_key_e1248() {
     let keys = tmp.join("keys");
 
     with_keys(&keys, || {
-        jet::Publish::Sign::keygen("jet", false).expect("first keygen should succeed");
+        let (seed, public, _) =
+            jet::Publish::Sign::keygen("jet", false).expect("first keygen should succeed");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&seed).unwrap().permissions().mode() & 0o7777,
+                0o600,
+                "private signing seed must remain owner-only"
+            );
+            assert_eq!(
+                fs::metadata(&public).unwrap().permissions().mode() & 0o7777,
+                0o644,
+                "public signing key keeps its published mode"
+            );
+        }
         let err = jet::Publish::Sign::keygen("jet", false)
             .expect_err("a second keygen without --force must refuse");
         assert_eq!(err.code, "E1248", "must cite E1248");

@@ -33,12 +33,16 @@ fn skip_if_cranelift_host_unsupported() -> bool {
 }
 
 fn run(source: &str, name: &str) -> Output {
+    run_with_mode(source, name, false)
+}
+
+fn run_with_mode(source: &str, name: &str, use_interpreter: bool) -> Output {
     let dir = common::unique_tmp(name);
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.jet");
     fs::write(&file, source).unwrap();
     jet_jit::reset_jit_trace_for_test();
-    let outcome = dev_iteration(file.to_str().unwrap(), false, false);
+    let outcome = dev_iteration(file.to_str().unwrap(), false, use_interpreter);
     let output = match outcome {
         RunOutcome::Ran {
             stdout,
@@ -123,6 +127,24 @@ fn run() {
 }
 "#;
 
+const HOSTILE_URLS: &str = r#"
+use core.http.client as http_client
+use core.net.ws as ws
+
+fn run() {
+    if http_client.get("http://127.0.0.1:1/path\r\nInjected: yes") == {
+        .Ok(_) -> print("http accepted")
+        .Err(_) -> print("http rejected")
+        else -> print("http unexpected")
+    }
+    if ws.connect("ws://127.0.0.1:1/path\r\nInjected: yes") == {
+        .Ok(_) -> print("ws accepted")
+        .Err(_) -> print("ws rejected")
+        else -> print("ws unexpected")
+    }
+}
+"#;
+
 #[test]
 fn http_web_defaults_stay_resident_in_cranelift() {
     if skip_if_cranelift_host_unsupported() {
@@ -153,5 +175,20 @@ fn http_web_defaults_forced_deopt_uses_prelude_ambient() {
             .contains("CORS credentials need named origins."));
         assert!(jet_jit::deopt_invoked_for_test());
         assert!(!jet_jit::fallback_invoked_for_test());
+    });
+}
+
+#[test]
+fn hostile_http_and_websocket_urls_are_rejected_on_both_dev_tiers() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    on_large_stack(|| {
+        for (use_interpreter, name) in [(false, "http_i9_hostile_jit"), (true, "http_i9_hostile_interpreter")] {
+            let output = run_with_mode(HOSTILE_URLS, name, use_interpreter);
+            assert_eq!(output.stdout, "http rejected\nws rejected\n");
+            assert_eq!(output.stderr, "");
+            assert_eq!(output.exit_code, 0);
+        }
     });
 }

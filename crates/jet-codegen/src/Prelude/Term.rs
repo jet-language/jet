@@ -435,30 +435,136 @@ pub(crate) fn jet_term_progress_finish(is_terminal: bool) -> &'static str {
     if is_terminal { "\n" } else { "" }
 }
 
-#[cfg(unix)]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+))]
 mod jet_term_mode {
     const TCSANOW: i32 = 0;
-    const ECHO: u32 = 0o0000010;
-    const ICANON: u32 = 0o0000002;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    type TermFlag = u32;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    type TermFlag = std::os::raw::c_ulong;
+    #[cfg(any(
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    ))]
+    type TermFlag = u32;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const ECHO: TermFlag = 0o0000010;
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    ))]
+    const ECHO: TermFlag = 0x0008;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const ICANON: TermFlag = 0o0000002;
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    ))]
+    const ICANON: TermFlag = 0x0100;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     const VMIN: usize = 6;
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    ))]
+    const VMIN: usize = 16;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     const VTIME: usize = 5;
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    ))]
+    const VTIME: usize = 17;
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+    ))]
+    type TermSpeed = TermFlag;
+    #[cfg(any(target_os = "openbsd", target_os = "netbsd"))]
+    type TermSpeed = i32;
 
     #[repr(C)]
+    #[derive(Clone, Copy)]
     struct Termios {
-        c_iflag: u32,
-        c_oflag: u32,
-        c_cflag: u32,
-        c_lflag: u32,
-        #[cfg(target_os = "linux")]
+        c_iflag: TermFlag,
+        c_oflag: TermFlag,
+        c_cflag: TermFlag,
+        c_lflag: TermFlag,
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         c_line: u8,
+        #[cfg(target_os = "linux")]
         c_cc: [u8; 32],
-        #[cfg(target_os = "linux")]
-        c_ispeed: u32,
-        #[cfg(target_os = "linux")]
-        c_ospeed: u32,
-        #[cfg(not(target_os = "linux"))]
-        _pad: [u8; 12],
+        #[cfg(target_os = "android")]
+        c_cc: [u8; 19],
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+        ))]
+        c_cc: [u8; 20],
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+        ))]
+        c_ispeed: TermSpeed,
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+        ))]
+        c_ospeed: TermSpeed,
     }
+
+    #[cfg(target_os = "linux")]
+    const _: () = assert!(std::mem::size_of::<Termios>() == 60);
+    #[cfg(target_os = "android")]
+    const _: () = assert!(std::mem::size_of::<Termios>() == 36);
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const _: () = assert!(std::mem::size_of::<Termios>() == 72);
+    #[cfg(any(
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    ))]
+    const _: () = assert!(std::mem::size_of::<Termios>() == 44);
 
     unsafe extern "C" {
         fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
@@ -475,7 +581,7 @@ mod jet_term_mode {
             if tcgetattr(0, &mut mode) != 0 {
                 return false;
             }
-            let saved_mode = std::mem::transmute_copy(&mode);
+            let saved_mode = mode;
             mode.c_lflag &= !ECHO;
             if raw {
                 mode.c_lflag &= !ICANON;
@@ -546,6 +652,27 @@ mod jet_term_mode {
             });
         }
     }
+}
+
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+    ))
+))]
+mod jet_term_mode {
+    // Unknown Unix ABIs do not get a guessed termios layout.
+    pub(super) fn enter(_raw: bool) -> bool {
+        false
+    }
+
+    pub(super) fn leave() {}
 }
 
 #[cfg(not(any(unix, windows)))]

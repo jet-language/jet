@@ -288,6 +288,8 @@ fn failure_surface_allowlisted(path: &str) -> bool {
         // exercise retired-form recovery diagnostics and formatter fixes.
         || path == "crates/jet-parser/src/Parser/mod.rs"
         || path == "tests/fmt.rs"
+        // This file also constructs retired forms as detector test inputs.
+        || path == "tests/retirement_ratchet.rs"
 }
 
 struct FailureSourceFragment {

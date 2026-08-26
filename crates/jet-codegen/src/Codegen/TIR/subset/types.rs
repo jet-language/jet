@@ -27,7 +27,7 @@ pub(crate) fn resolve_self_ty(ty: &Type, type_name: &str) -> Type {
 /// Char, String, a covered *plain user struct* (c109 Phase 3) or generic
 /// struct application (c109 Phase 19), a covered
 /// *plain user enum* (c109 Phase 4), a covered collection (Phase 5), or a covered
-/// *optional* `T?` / *fallible* `T E!` (c109 Phase 8). Generic type variables
+/// *optional* `?T` / *fallible* `T !E` (c109 Phase 8). Generic type variables
 /// are admitted when active in the enclosing function; recursive (boxed) types
 /// remain out of the value subset.
 pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
@@ -604,11 +604,11 @@ pub(crate) fn is_covered_trait_object_ty(ty: &Type, cx: &Cx) -> bool {
     }
 }
 
-/// c109 Phase 8: `ty` is an optional `T?` (`Type::Option`) or a fallible `T E!`
+/// c109 Phase 8: `ty` is an optional `?T` (`Type::Option`) or a fallible `T !E`
 /// (`Type::Result`) whose payload(s) are themselves covered *value* types. Both
 /// lower through `cx.rust_type` (`Option<…>` / `Result<…, …>`) exactly as the AST
 /// path does, so a covered-payload optional/fallible param/return needs no special
-/// emit. A nested `T??` (Option of Option) never reaches here — sema rejects it —
+/// emit. A nested `??T` (Option of Option) never reaches here — sema rejects it —
 /// but the recursion would handle it anyway. A list/map *of* options is still
 /// excluded (`collection_elem_covered` does not admit `Option`/`Result`), because
 /// element clone/coercion for those is deferred.
@@ -622,20 +622,20 @@ pub(crate) fn is_covered_fallible_ty(ty: &Type, cx: &Cx) -> bool {
     }
 }
 
-/// An optional/fallible payload (`T` in `T?`, or `ok`/`err` in `T E!`) the subset
+/// An optional/fallible payload (`T` in `?T`, or `ok`/`err` in `T !E`) the subset
 /// can lower: a scalar, Char, String, a covered struct/enum, a covered collection,
 /// `()` (the ok payload of fallible `run`, rendered as `()`), or sema's
 /// default error type `Err` (`Type::Named("Err")`, which `cx.rust_type`
 /// lowers to the Prelude-owned `JetErr`).
 pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
     // D-ERRSUFFIX1=B: the success side of a fallible signature may itself be
-    // optional (`T? E!`). Keep the composed carrier on the same TIR path as
+    // optional (`?T !E`). Keep the composed carrier on the same TIR path as
     // its AOT lowering; the inner payload follows the same coverage rules.
     if let Type::Option(inner) = ty {
         return fallible_payload_covered(inner, cx);
     }
-    // c109 Phase 30: a type-variable payload (`T` in a generic fn's `T?` return —
-    // `largest<T: Comparable>() -> (T?)`). A type var renders via `cx.rust_type` to the
+    // c109 Phase 30: a type-variable payload (`T` in a generic fn's `?T` return —
+    // `largest<T: Comparable>() ?T ->`). A type var renders via `cx.rust_type` to the
     // bare letter (`Option<T>`), and `value(best)`/`null` lower to `Some(user_best)`/`None`
     // byte-identically (no clone/box decision). A type var only appears where a type param
     // is in scope (sema guarantees), so an `Option<T>` payload is total.
@@ -657,6 +657,12 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         if n == "Unit" {
             return true;
         }
+        // D-FAILURE-FOUNDATION1: `!Never` is the proof-carrying no-failure
+        // route. It still has a Result-shaped carrier in TIR, with an
+        // uninhabited error payload that needs no runtime construction.
+        if n == crate::Syntax::TYPE_NEVER {
+            return true;
+        }
         if n == crate::Syntax::TYPE_ERR {
             return true;
         }
@@ -676,7 +682,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         // `Receiver.receive()` → `Result<T, Closed>` (Source/Collections.rs
         // `receiver_method_return`). It renders
         // via `cx.rust_type` to `{root}jet_std::Closed` (`core_rust_type_name`), so a
-        // `T Closed!` payload (the unwrap target of `ch.receive() ?? …`) is byte-identical.
+        // `T !Closed` payload (the unwrap target of `ch.receive() ?? …`) is byte-identical.
         if n == "Closed" {
             return true;
         }

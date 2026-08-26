@@ -646,6 +646,12 @@ fn accept_key_matches_rfc6455_example() {
 }
 
 #[test]
+fn hostile_url_controls_are_rejected_before_handshake_serialization() {
+    assert!(jet_ws_parse_url("ws://127.0.0.1/path\r\nInjected: yes").is_err());
+    assert!(jet_ws_parse_url("ws://127.0.0.1\r\nInjected: yes/path").is_err());
+}
+
+#[test]
 fn client_and_server_echo_text_over_live_sockets() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();

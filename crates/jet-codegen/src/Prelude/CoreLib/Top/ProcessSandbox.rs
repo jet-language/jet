@@ -6,8 +6,14 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::thread;
+use std::time::Duration;
+
+const MAX_CAPTURED_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 
 #[cfg(target_os = "macos")]
 const MACOS_SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
@@ -342,9 +348,85 @@ pub fn output(
             Ok(())
         },
     )?;
-    child
-        .wait_with_output()
-        .map_err(|error| Error::Io(error.to_string()))
+    wait_with_limited_output(child)
+}
+
+fn read_output_limited<R: Read>(mut reader: R) -> std::io::Result<(Vec<u8>, bool)> {
+    let mut output = Vec::with_capacity(64 * 1024);
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            return Ok((output, false));
+        }
+        let remaining = MAX_CAPTURED_OUTPUT_BYTES.saturating_sub(output.len());
+        let keep = count.min(remaining);
+        output.extend_from_slice(&buffer[..keep]);
+        if keep < count {
+            return Ok((output, true));
+        }
+    }
+}
+
+fn wait_with_limited_output(mut child: Child) -> Result<Output, Error> {
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| Error::Io("sandbox child stdout was not piped".to_string()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| Error::Io("sandbox child stderr was not piped".to_string()))?;
+    let exceeded = Arc::new(AtomicBool::new(false));
+    let stdout_exceeded = Arc::clone(&exceeded);
+    let stderr_exceeded = Arc::clone(&exceeded);
+    let stdout_thread = thread::spawn(move || {
+        let result = read_output_limited(stdout);
+        if result.as_ref().is_ok_and(|(_, exceeded)| *exceeded) {
+            stdout_exceeded.store(true, Ordering::Release);
+        }
+        result
+    });
+    let stderr_thread = thread::spawn(move || {
+        let result = read_output_limited(stderr);
+        if result.as_ref().is_ok_and(|(_, exceeded)| *exceeded) {
+            stderr_exceeded.store(true, Ordering::Release);
+        }
+        result
+    });
+
+    let status = loop {
+        if exceeded.load(Ordering::Acquire) {
+            let _ = child.kill();
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => thread::sleep(Duration::from_millis(5)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(Error::Io(error.to_string()));
+            }
+        }
+    };
+    let stdout = stdout_thread
+        .join()
+        .map_err(|_| Error::Io("sandbox stdout reader panicked".to_string()))?
+        .map_err(|error| Error::Io(error.to_string()))?;
+    let stderr = stderr_thread
+        .join()
+        .map_err(|_| Error::Io("sandbox stderr reader panicked".to_string()))?
+        .map_err(|error| Error::Io(error.to_string()))?;
+    if exceeded.load(Ordering::Acquire) {
+        return Err(Error::Io(format!(
+            "sandbox process output exceeded {MAX_CAPTURED_OUTPUT_BYTES} bytes"
+        )));
+    }
+    Ok(Output {
+        status,
+        stdout: stdout.0,
+        stderr: stderr.0,
+    })
 }
 
 fn real_directory(path: &Path) -> Result<PathBuf, Error> {

@@ -5328,6 +5328,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         if !self.runtime_execution && module == "core.net" && method == "fetch" {
             return crate::Comptime::eval_net_fetch(
                 &argv,
+                &self.base_dir,
                 self.embed_inputs.as_deref_mut(),
                 source_span,
             );

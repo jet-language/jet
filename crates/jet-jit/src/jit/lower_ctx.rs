@@ -12604,11 +12604,11 @@ impl LowerCtx<'_, '_> {
                 }
                 Ok(handle)
             }
-            // D-FAIL-CARRIER1=A: one `Present` carries both the `T?` present
-            // side and the `T E!` ok side, so the value alone cannot say which
-            // physical carrier its reader will use. The slot says it: `T?` is the
+            // D-FAIL-CARRIER1=A: one `Present` carries both the `?T` present
+            // side and the `T !E` ok side, so the value alone cannot say which
+            // physical carrier its reader will use. The slot says it: `?T` is the
             // packed carrier (`pack_option_payload`; absent is the zero word
-            // below), and `T E!` is the result arena (`lower_ct_result`, the
+            // below), and `T !E` is the result arena (`lower_ct_result`, the
             // same `result_new_*` handle the runtime `Ok`/`Err` path builds).
             //
             // This used to be two arms, and the second — the result one — sat
@@ -12667,7 +12667,7 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    /// Build the `T E!` result-arena carrier for one comptime outcome side.
+    /// Build the `T !E` result-arena carrier for one comptime outcome side.
     ///
     /// `payload_slot` is the declared side type when the caller knows it (the
     /// `ok` type for `Present`, the `err` type for `Failed(Told)`); the payload's
@@ -24092,6 +24092,16 @@ impl LowerCtx<'_, '_> {
             .get(site)
             .copied()
             .ok_or_else(|| format!("jit {what} site {site} missing"))?;
+        let abi_args = lam
+            .captures
+            .len()
+            .checked_add(lam.params.len())
+            .ok_or_else(|| format!("jit {what} callback ABI argument count overflow"))?;
+        if abi_args > 4 {
+            return Err(format!(
+                "jit {what} callback ABI argument count {abi_args} > 4"
+            ));
+        }
         let caps = self.lower_spawn_captures(lam)?;
         if caps.len() > 4 {
             return Err(format!("jit {what} capture count {} > 4", caps.len()));

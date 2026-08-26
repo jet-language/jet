@@ -11,6 +11,7 @@ pub const JET_CORE_ARCHIVE_ABI_VERSION: &str = "core.archive.abi.v2";
 
 const TAR_BLOCK: usize = 512;
 const MAX_OUTPUT: usize = 64 * 1024 * 1024;
+const MAX_ENTRIES: usize = 4096;
 const ZIP_READER_STATE: &[u8] = b"JZR1";
 const ZIP_WRITER_STATE: &[u8] = b"JZW1";
 
@@ -124,6 +125,9 @@ fn zip_read_all(data: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
     if central_end > eocd || read_u16(data, eocd + 4)? != 0 || read_u16(data, eocd + 6)? != 0 {
         return None;
     }
+    if count > MAX_ENTRIES {
+        return None;
+    }
     let mut entries = Vec::with_capacity(count);
     let mut offset = central;
     let mut total = 0usize;
@@ -189,12 +193,20 @@ fn zip_read_all(data: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
 }
 
 fn zip_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
+    if entries.len() > MAX_ENTRIES {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     let mut central = Vec::new();
+    let mut total = 0usize;
     for (name, data) in entries {
         if !zip_name_valid(name) || data.len() > MAX_OUTPUT {
             return Vec::new();
         }
+        total = match total.checked_add(data.len()) {
+            Some(total) if total <= MAX_OUTPUT => total,
+            _ => return Vec::new(),
+        };
         let Ok(name_len) = u16::try_from(name.len()) else {
             return Vec::new();
         };
@@ -247,6 +259,14 @@ fn zip_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
     let Ok(central_size) = u32::try_from(central.len()) else {
         return Vec::new();
     };
+    if out
+        .len()
+        .checked_add(central.len())
+        .and_then(|size| size.checked_add(22))
+        .is_none_or(|size| size > MAX_OUTPUT)
+    {
+        return Vec::new();
+    }
     let Ok(count) = u16::try_from(entries.len()) else {
         return Vec::new();
     };
@@ -404,6 +424,8 @@ fn tar_read_all(data: &[u8]) -> Vec<(String, Vec<u8>)> {
     let mut out: Vec<(String, Vec<u8>)> = Vec::new();
     let mut offset = 0usize;
     let mut long_name = None;
+    let mut entries = 0usize;
+    let mut total = 0usize;
     let mut terminated = false;
     while offset < data.len() {
         let Some(header_end) = offset.checked_add(TAR_BLOCK) else {
@@ -422,6 +444,10 @@ fn tar_read_all(data: &[u8]) -> Vec<(String, Vec<u8>)> {
         if !tar_checksum_ok(header) {
             return Vec::new();
         }
+        entries = match entries.checked_add(1) {
+            Some(entries) if entries <= MAX_ENTRIES => entries,
+            _ => return Vec::new(),
+        };
         let Some(size) = tar_number(&header[124..136]).and_then(|n| usize::try_from(n).ok()) else {
             return Vec::new();
         };
@@ -447,8 +473,11 @@ fn tar_read_all(data: &[u8]) -> Vec<(String, Vec<u8>)> {
             if !tar_name_valid(&name) {
                 return Vec::new();
             }
-            let existing: usize = out.iter().map(|(_, bytes)| bytes.len()).sum();
-            if existing.saturating_add(payload.len()) > MAX_OUTPUT {
+            total = match total.checked_add(payload.len()) {
+                Some(total) if total <= MAX_OUTPUT => total,
+                _ => return Vec::new(),
+            };
+            if total > MAX_OUTPUT {
                 return Vec::new();
             }
             out.push((name, payload.to_vec()));
@@ -472,11 +501,19 @@ fn tar_read_all(data: &[u8]) -> Vec<(String, Vec<u8>)> {
 }
 
 fn tar_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
+    if entries.len() > MAX_ENTRIES {
+        return Vec::new();
+    }
     let mut out = Vec::new();
+    let mut total = 0usize;
     for (name, data) in entries {
         if !tar_name_valid(name) || data.len() > MAX_OUTPUT {
             continue;
         }
+        total = match total.checked_add(data.len()) {
+            Some(total) if total <= MAX_OUTPUT => total,
+            _ => return Vec::new(),
+        };
         if split_ustar_name(name).is_none() {
             let mut long = name.as_bytes().to_vec();
             long.push(0);

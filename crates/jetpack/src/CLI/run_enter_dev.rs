@@ -991,9 +991,13 @@ fn task_cache_key(
     }
     for input in &metadata.inputs {
         let path = job_path(project_dir, Some(input), "input", false)?;
-        let digest = if path.is_dir() {
+        let file_type = std::fs::symlink_metadata(&path)
+            .map_err(|error| format!("couldn't inspect job input `{input}`: {error}"))?;
+        let digest = if file_type.file_type().is_symlink() {
+            return Err(format!("job input `{input}` may not be a symlink"));
+        } else if file_type.is_dir() {
             crate::SHA256::tree_hash(&path)
-        } else if path.is_file() {
+        } else if file_type.is_file() {
             crate::SHA256::sha256_file_hex(&path)
                 .map_err(|error| format!("couldn't hash job input `{input}`: {error}"))?
         } else {

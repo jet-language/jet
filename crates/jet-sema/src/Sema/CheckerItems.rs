@@ -3590,7 +3590,7 @@ impl<'a> Checker<'a> {
                         subject_ty.name()
                     ),
                     format!(
-                        "use `== {}(...)` or `== {}(...)` on `T E!`",
+                        "use `== {}(...)` or `== {}(...)` on `T !E`",
                         Syntax::LIT_OK,
                         Syntax::LIT_ERR
                     ),

@@ -859,7 +859,20 @@ fn lower_trait_method_inner(
     cx: &Cx,
     trait_name: &str,
 ) -> TFunc {
-    let return_type = resolve_self_ty(&f.effective_return_type(), type_name);
+    // D-FAILURE-FOUNDATION1: compiler-generated trait bridges implement raw
+    // Rust protocols (`bool`, `Ordering`, `DataTree`, or an explicitly typed
+    // decode result). Their `Func` nodes are Jet-internal producers, not
+    // user-callable declarations, so projecting an omitted contract onto them
+    // would emit `Result<raw, Err>` and violate the Rust trait ABI. Ordinary
+    // user trait methods still use the implicit Error carrier.
+    let declared_return_type = f.return_type.clone().unwrap_or_else(|| {
+        Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
+    });
+    let return_type = if f.compiler_generated {
+        resolve_self_ty(&declared_return_type, type_name)
+    } else {
+        resolve_self_ty(&f.effective_return_type(), type_name)
+    };
     let serde = match trait_name {
         crate::Generics::ENCODE => Some(SerdeCodec::Encode),
         crate::Generics::DECODE => Some(SerdeCodec::Decode),

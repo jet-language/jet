@@ -7,6 +7,8 @@
     pub mod toml {
         use super::DataTree;
 
+        const MAX_TOML_DEPTH: usize = 64;
+
         #[derive(Clone, Debug, PartialEq)]
         pub enum Value {
             String(String),
@@ -331,7 +333,7 @@
                 }
                 self.bump();
                 self.skip_inline_ws();
-                let value = self.value()?;
+                let value = self.value(0)?;
                 self.finish_line()?;
                 Ok(Item::KeyVal { path, value })
             }
@@ -369,12 +371,15 @@
                     None => Err(self.err(crate::jet_encoding_errors::TOML_EXPECTED_KEY)),
                 }
             }
-            fn value(&mut self) -> Result<Value, ParseError> {
+            fn value(&mut self, depth: usize) -> Result<Value, ParseError> {
+                if depth >= MAX_TOML_DEPTH {
+                    return Err(self.err("TOML value is nested too deeply"));
+                }
                 match self.peek() {
                     Some('"') => Ok(Value::String(self.basic_string()?)),
                     Some('\'') => Ok(Value::String(self.literal_string()?)),
-                    Some('[') => self.array(),
-                    Some('{') => self.inline_table(),
+                    Some('[') => self.array(depth),
+                    Some('{') => self.inline_table(depth),
                     Some('t') | Some('f') => self.boolean(),
                     Some('+') | Some('-') | Some('0'..='9') | Some('i') | Some('n') => {
                         self.number_or_datetime()
@@ -570,7 +575,7 @@
                     }
                 }
             }
-            fn array(&mut self) -> Result<Value, ParseError> {
+            fn array(&mut self, depth: usize) -> Result<Value, ParseError> {
                 self.bump();
                 let mut items = Vec::new();
                 loop {
@@ -583,7 +588,7 @@
                         None => return Err(self.err(crate::jet_encoding_errors::TOML_UNTERMINATED_ARRAY)),
                         _ => {}
                     }
-                    items.push(self.value()?);
+                    items.push(self.value(depth + 1)?);
                     self.skip_ws_newlines_comments();
                     match self.peek() {
                         Some(',') => {
@@ -613,7 +618,7 @@
                     }
                 }
             }
-            fn inline_table(&mut self) -> Result<Value, ParseError> {
+            fn inline_table(&mut self, depth: usize) -> Result<Value, ParseError> {
                 self.bump();
                 let mut entries = Vec::new();
                 self.skip_inline_ws();
@@ -629,7 +634,7 @@
                         return Err(self.err(crate::jet_encoding_errors::TOML_EXPECTED_INLINE_EQUALS));
                     }
                     self.skip_inline_ws();
-                    let value = self.value()?;
+                    let value = self.value(depth + 1)?;
                     entries.push((path.join("."), value));
                     self.skip_inline_ws();
                     match self.bump() {

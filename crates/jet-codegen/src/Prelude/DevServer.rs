@@ -17,11 +17,11 @@
 // here would collide with e.g. Prelude/Scheduler.rs's own
 // `TcpStream`/`Ordering`/`Arc`/`Duration` imports.
 mod jet_devserver_impl {
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
@@ -33,6 +33,10 @@ mod jet_devserver_impl {
     /// Live-reload poll interval — mirrors `Source/CmdDevWeb.rs`'s
     /// `LIVE_RELOAD_POLL_MS`.
     const JET_DEVSERVER_LIVE_RELOAD_POLL_MS: u64 = 400;
+    const JET_DEVSERVER_MAX_LINE_BYTES: usize = 8 * 1024;
+    const JET_DEVSERVER_MAX_HEADER_BYTES: usize = 32 * 1024;
+    const JET_DEVSERVER_MAX_HEADER_COUNT: usize = 100;
+    const JET_DEVSERVER_MAX_CONNECTION_THREADS: usize = 64;
 
     struct JetDevServerState {
         app_file: String,
@@ -337,26 +341,92 @@ mod jet_devserver_impl {
     }
 
     fn jet_devserver_serve_forever(listener: TcpListener, version: Arc<AtomicU64>) {
+        let active_connections = Arc::new(AtomicUsize::new(0));
         for stream in listener.incoming() {
             if let Ok(stream) = stream {
+                if !jet_devserver_try_acquire(&active_connections) {
+                    drop(stream);
+                    continue;
+                }
                 let version = Arc::clone(&version);
+                let active_connections = Arc::clone(&active_connections);
                 thread::spawn(move || {
                     let _ = jet_devserver_handle_connection(stream, &version);
+                    active_connections.fetch_sub(1, Ordering::AcqRel);
                 });
             }
         }
     }
 
+    fn jet_devserver_try_acquire(active: &AtomicUsize) -> bool {
+        let mut current = active.load(Ordering::Acquire);
+        loop {
+            if current >= JET_DEVSERVER_MAX_CONNECTION_THREADS {
+                return false;
+            }
+            match active.compare_exchange(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return true,
+                Err(next) => current = next,
+            }
+        }
+    }
+
+    fn jet_devserver_read_line_bounded(
+        reader: &mut impl BufRead,
+        line: &mut String,
+        limit: usize,
+    ) -> std::io::Result<usize> {
+        let read = reader
+            .take(limit.saturating_add(1) as u64)
+            .read_line(line)?;
+        if read > limit {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "devserver request line exceeds 8 KiB",
+            ));
+        }
+        Ok(read)
+    }
+
     fn jet_devserver_handle_connection(stream: TcpStream, version: &AtomicU64) -> std::io::Result<()> {
+        stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(10)))?;
         let mut reader = BufReader::new(stream.try_clone()?);
         let mut request_line = String::new();
-        if reader.read_line(&mut request_line)? == 0 {
+        if jet_devserver_read_line_bounded(
+            &mut reader,
+            &mut request_line,
+            JET_DEVSERVER_MAX_LINE_BYTES,
+        )? == 0
+        {
             return Ok(());
         }
+        let mut header_bytes = 0usize;
+        let mut header_count = 0usize;
         loop {
             let mut line = String::new();
-            if reader.read_line(&mut line)? == 0 || line == "\r\n" || line == "\n" {
+            let read = jet_devserver_read_line_bounded(
+                &mut reader,
+                &mut line,
+                JET_DEVSERVER_MAX_LINE_BYTES,
+            )?;
+            if read == 0 || line == "\r\n" || line == "\n" {
                 break;
+            }
+            header_count = header_count.saturating_add(1);
+            header_bytes = header_bytes.saturating_add(read);
+            if header_count > JET_DEVSERVER_MAX_HEADER_COUNT
+                || header_bytes > JET_DEVSERVER_MAX_HEADER_BYTES
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "devserver headers exceed the request budget",
+                ));
             }
         }
 

@@ -9,6 +9,8 @@
 
 use std::collections::HashSet;
 
+const MAX_FENCE_EXPANSION: usize = 4096;
+
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Lexer::{TokKind, Token};
 use crate::AST::{FencedNames, FencedStatement};
@@ -309,6 +311,16 @@ fn parse_entries(
             {
                 if start <= end {
                     let range_span = Span::new(content[0].span.start, content[2].span.end);
+                    let count = end
+                        .checked_sub(*start)
+                        .and_then(|length| usize::try_from(length).ok())
+                        .and_then(|length| length.checked_add(1));
+                    if !count.is_some_and(|count| count <= MAX_FENCE_EXPANSION) {
+                        return Err(rejected_entry(
+                            range_span,
+                            "a fenced range expands to too many entries",
+                        ));
+                    }
                     let entries = (*start..=*end)
                         .map(|value| {
                             vec![Token {
@@ -471,6 +483,15 @@ fn expand_numbered_range(
         ));
     }
     let width = width.max(end_width);
+    let count = end_number
+        .checked_sub(start_number)
+        .and_then(|length| length.checked_add(1));
+    if !count.is_some_and(|count| count <= MAX_FENCE_EXPANSION) {
+        return Err(rejected_entry(
+            span,
+            "a fenced name range expands to too many entries",
+        ));
+    }
     Ok((start_number..=end_number)
         .map(|number| (format!("{start_prefix}{number:0width$}"), span))
         .collect())
@@ -724,6 +745,27 @@ fn run() {
             let (_, facts) = expanded(source);
             assert_eq!(facts.len(), 1, "{source}");
             assert_eq!(facts[0].copies, 1, "{source}");
+        }
+    }
+
+    #[test]
+    fn hostile_fence_ranges_are_rejected_before_expansion() {
+        for source in [
+            format!(
+                "fn run() {{ print(@[0..{}]@) }}\n",
+                MAX_FENCE_EXPANSION
+            ),
+            "fn run() { @[ task1..task1000000000 ]@ :: work() }\n".to_string(),
+        ] {
+            let (tokens, lex_diags) = Lexer::lex(&source);
+            assert!(lex_diags.is_empty(), "{lex_diags:?}");
+            let diagnostics = expand(&Lexer::without_comments(&tokens)).unwrap_err();
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == "E0371"),
+                "{source}: {diagnostics:?}"
+            );
         }
     }
 

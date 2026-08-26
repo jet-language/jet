@@ -767,7 +767,8 @@ impl<'a> Checker<'a> {
                             ));
             }
             (None, Some(rt)) => {
-                // D-FAIL-EXIT1: implicit `fn run` is `Unit Err!`.
+                // D-FAIL-EXIT1: implicit `fn run` has unit success and the
+                // default `Err` failure contract.
                 // A bare `return` is successful exit, same as falling off
                 // the end of the body.
                 let fallible_void = matches!(

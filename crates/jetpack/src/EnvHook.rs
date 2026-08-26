@@ -281,25 +281,13 @@ fn add_input_path(
         return;
     };
     if metadata.file_type().is_symlink() {
-        let target = match std::fs::canonicalize(path) {
-            Ok(target) if target.starts_with(root) => target,
-            Ok(target) => {
-                entries.push((
-                    format!("{kind}:unsafe-link:{relative}"),
-                    target.to_string_lossy().as_bytes().to_vec(),
-                ));
-                return;
-            }
-            Err(_) => {
-                entries.push((format!("{kind}:unsafe-link:{relative}"), Vec::new()));
-                return;
-            }
-        };
+        let target = std::fs::read_link(path)
+            .map(|target| target.to_string_lossy().into_owned().into_bytes())
+            .unwrap_or_default();
         entries.push((
-            format!("{kind}:link:{relative}"),
-            target.to_string_lossy().as_bytes().to_vec(),
+            format!("{kind}:symlink:{relative}"),
+            target,
         ));
-        add_input_path(root, &target, relative, kind, entries, visited);
         return;
     }
     if let Ok(real) = path.canonicalize() {
@@ -377,17 +365,10 @@ fn collect_definition_files(root: &Path, current: &Path, entries: &mut Vec<(Stri
             continue;
         };
         if metadata.file_type().is_symlink() {
-            if path
-                .extension()
-                .is_some_and(|extension| extension == Syntax::FILE_EXT)
-            {
-                let relative = path
-                    .strip_prefix(root)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .replace(std::path::MAIN_SEPARATOR, "/");
-                add_input(root, &relative, "source", entries);
-            }
+            // Pre-trust discovery must not follow attacker-controlled links.
+            // Explicit inputs are handled by `add_input_path`; this fallback
+            // walk only needs bounded, project-owned regular files.
+            continue;
         } else if metadata.is_dir() {
             collect_definition_files(root, &path, entries);
         } else if metadata.is_file()
@@ -746,6 +727,27 @@ mod tests {
         assert_eq!(definition_fingerprint(&root, None), Some(first.clone()));
         std::fs::write(root.join("tracked.txt"), "two\n").unwrap();
         assert_ne!(definition_fingerprint(&root, None), Some(first));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn malformed_env_fingerprint_does_not_follow_recursive_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jpk-envhook-symlink-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("nested")).unwrap();
+        std::fs::write(root.join(Syntax::ENV_FILE), "not a valid env plan\n").unwrap();
+        std::fs::write(root.join("nested/input.jet"), "// input\n").unwrap();
+        symlink("..", root.join("nested/loop")).unwrap();
+        assert!(definition_fingerprint(&root, None).is_some());
         let _ = std::fs::remove_dir_all(root);
     }
 

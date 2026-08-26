@@ -3878,6 +3878,10 @@ fn web_wasm_string_export_hostile_roundtrip() {
         "string free export missing:\n{wasm}"
     );
     assert!(
+        wasm.contains("jet_abi_require(JET_ABI_STRING_KIND, ptr, len)"),
+        "string ownership boundary must reject untrusted pointers:\n{wasm}"
+    );
+    assert!(
         wasm.contains("-> u64 ")
             && wasm.contains("jet_abi_string_ret(jet_wasm_")
             && wasm.contains("pub extern \"C\" fn jet_export_"),
@@ -3932,6 +3936,10 @@ fn web_wasm_string_param_export_hostile_roundtrip() {
         "string arg helper missing:\n{wasm}"
     );
     assert!(
+        wasm.contains("jet_abi_require(JET_ABI_STRING_KIND, ptr, len)"),
+        "string argument boundary must reject untrusted pointers:\n{wasm}"
+    );
+    assert!(
         wasm.contains("let __jet_s = jet_abi_string_arg(__jet_s)")
             || wasm.contains("let s = jet_abi_string_arg(s)"),
         "export wrapper must unpack String param:\n{wasm}"
@@ -3960,6 +3968,41 @@ fn web_wasm_string_param_export_hostile_roundtrip() {
     assert!(
         stdout.contains("emoji🌍"),
         "Unicode scalar was lost:\n{stdout}"
+    );
+    let hostile = r#"
+import { instantiateWasm, unmarshalAbi } from "./jet_dom_runtime.js";
+
+function mustTrap(call, label) {
+  try {
+    call();
+  } catch (_) {
+    return;
+  }
+  throw new Error(`${label} accepted an untrusted ownership token`);
+}
+
+const instance = await instantiateWasm("./app.wasm");
+mustTrap(
+  () => instance.exports.jet_abi_string_free(0x100, 1),
+  "forged string free",
+);
+const ptr = instance.exports.jet_abi_string_alloc(1);
+new Uint8Array(instance.exports.memory.buffer)[ptr] = 120;
+mustTrap(
+  () => instance.exports.jet_export_echo_str((BigInt(ptr >>> 0) << 32n) | 2n),
+  "string length mismatch",
+);
+const raw = instance.exports.jet_export_echo_str(
+  (BigInt(ptr >>> 0) << 32n) | 1n,
+);
+if (unmarshalAbi(raw, "string", instance) !== "x") {
+  throw new Error("valid registered string allocation did not round-trip");
+}
+console.log("ok");
+"#;
+    assert_eq!(
+        run_node_harness(&dir, "wasm_string_ownership_harness.mjs", hostile),
+        "ok\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -3991,6 +4034,14 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
     assert!(
         wasm.contains("pub extern \"C\" fn jet_abi_list_int_free(ptr: u32, byte_len: u32)"),
         "list-int free export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_abi_require(JET_ABI_LIST_INT_KIND, ptr, len)"),
+        "list-int argument boundary must reject untrusted pointers:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_abi_require(JET_ABI_LIST_INT_KIND, ptr, byte_len)"),
+        "list-int free boundary must reject untrusted pointers:\n{wasm}"
     );
     assert!(
         wasm.contains("let __jet_xs = jet_abi_list_int_arg(__jet_xs)")
@@ -4036,6 +4087,79 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
 }
 
 #[test]
+fn web_wasm_fixed_int_list_rejects_forged_ownership() {
+    // D-JSBIND1: fixed-width integer lists use the separate i64 packed rail.
+    // Hostile proof: a forged pointer and a registered pointer with the wrong
+    // element count both trap before Box reconstruction; the exact token still
+    // round-trips.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm fixed list (need rustc + node)");
+        return;
+    }
+    let src = r#"
+#WasmExport
+fn echo_fixed(xs: [I64]) [I64] -> ~xs
+
+#Target(JS)
+fn run() {
+    print(echo_fixed([1, -2, 3]))
+}
+"#;
+    let dir = build_web_fixture("wasm_list_i64", src, "wasm_list_i64.jet");
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("fn jet_abi_list_i64_arg(packed: u64) -> Vec<i64>")
+            && wasm.contains("jet_abi_require(JET_ABI_LIST_I64_KIND, ptr, byte_len)"),
+        "fixed-list ownership boundary is not guarded:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_list_i64_alloc(len: u32) -> u32")
+            && wasm.contains("pub extern \"C\" fn jet_abi_list_i64_free(ptr: u32, len: u32)"),
+        "fixed-list ownership exports are missing:\n{wasm}"
+    );
+    assert_eq!(run_web_app(&dir), "[1, -2, 3]\n");
+    let hostile = r#"
+import { instantiateWasm, unmarshalAbi } from "./jet_dom_runtime.js";
+
+function mustTrap(call, label) {
+  try {
+    call();
+  } catch (_) {
+    return;
+  }
+  throw new Error(`${label} accepted an untrusted ownership token`);
+}
+
+const instance = await instantiateWasm("./app.wasm");
+mustTrap(
+  () => instance.exports.jet_abi_list_i64_free(0x100, 1),
+  "forged fixed-list free",
+);
+const ptr = instance.exports.jet_abi_list_i64_alloc(2);
+const values = new BigInt64Array(instance.exports.memory.buffer, ptr, 2);
+values[0] = 7n;
+values[1] = -8n;
+mustTrap(
+  () => instance.exports.jet_export_echo_fixed((BigInt(ptr >>> 0) << 32n) | 3n),
+  "fixed-list length mismatch",
+);
+const raw = instance.exports.jet_export_echo_fixed(
+  (BigInt(ptr >>> 0) << 32n) | 2n,
+);
+const out = unmarshalAbi(raw, "list-i64", instance);
+if (out.length !== 2 || out[0] !== 7 || out[1] !== -8) {
+  throw new Error(`valid fixed-list allocation did not round-trip: ${out}`);
+}
+console.log("ok");
+"#;
+    assert_eq!(
+        run_node_harness(&dir, "wasm_list_i64_ownership_harness.mjs", hostile),
+        "ok\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn web_wasm_list_string_export_hostile_roundtrip() {
     // D-JSBIND1 / criterion #3: [String] export params+returns as contiguous
     // LE [count][len][utf8]… packed u64; JS TextEncoder/Decoder + free.
@@ -4066,6 +4190,10 @@ fn web_wasm_list_string_export_hostile_roundtrip() {
     assert!(
         wasm.contains("pub extern \"C\" fn jet_abi_list_string_free(ptr: u32, byte_len: u32)"),
         "list-string free export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_abi_require(JET_ABI_LIST_STRING_KIND, ptr, byte_len)"),
+        "list-string ownership boundary must reject untrusted pointers:\n{wasm}"
     );
     assert!(
         wasm.contains("let __jet_xs = jet_abi_list_string_arg(__jet_xs)")
@@ -4129,6 +4257,10 @@ fn web_wasm_map_string_int_export_hostile_roundtrip() {
                 "pub extern \"C\" fn jet_abi_map_string_int_free(ptr: u32, byte_len: u32)"
             ),
         "map-string-int ownership exports missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_abi_require(JET_ABI_MAP_STRING_INT_KIND, ptr, byte_len)"),
+        "map-string-int ownership boundary must reject untrusted pointers:\n{wasm}"
     );
     assert!(
         wasm.contains("jet_abi_map_string_int_ret(jet_wasm_")

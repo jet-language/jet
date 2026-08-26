@@ -3,7 +3,7 @@
 #![deny(warnings)]
 
 use std::collections::HashMap;
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 
 pub mod BrowserTrace;
@@ -22,6 +22,9 @@ pub use WatchService::{
 };
 
 pub const MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
+pub const MAX_REQUEST_LINE_BYTES: usize = 8 * 1024;
+pub const MAX_REQUEST_HEADER_BYTES: usize = 32 * 1024;
+pub const MAX_REQUEST_HEADER_COUNT: usize = 100;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WatchPolicy {
@@ -54,7 +57,7 @@ pub struct Request {
 impl Request {
     pub fn read(reader: &mut impl BufRead) -> std::io::Result<Option<Self>> {
         let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 {
+        if read_bounded_line(reader, &mut line, MAX_REQUEST_LINE_BYTES)? == 0 {
             return Ok(None);
         }
         let mut parts = line.split_whitespace();
@@ -73,10 +76,25 @@ impl Request {
         }
         let mut content_length = None;
         let mut headers = HashMap::new();
+        let mut header_bytes = 0usize;
+        let mut header_count = 0usize;
         loop {
             let mut header = String::new();
-            if reader.read_line(&mut header)? == 0 || header == "\r\n" || header == "\n" {
+            let read = read_bounded_line(reader, &mut header, MAX_REQUEST_LINE_BYTES)?;
+            if read == 0 || header == "\r\n" || header == "\n" {
                 break;
+            }
+            header_count = header_count.checked_add(1).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "too many devserver headers")
+            })?;
+            header_bytes = header_bytes.checked_add(read).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "devserver headers too large")
+            })?;
+            if header_count > MAX_REQUEST_HEADER_COUNT || header_bytes > MAX_REQUEST_HEADER_BYTES {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "devserver headers exceed the request budget",
+                ));
             }
             let Some((name, value)) = header.trim_end_matches(['\r', '\n']).split_once(':') else {
                 return Err(std::io::Error::new(
@@ -129,6 +147,23 @@ impl Request {
             body,
         }))
     }
+}
+
+fn read_bounded_line(
+    reader: &mut impl BufRead,
+    line: &mut String,
+    limit: usize,
+) -> std::io::Result<usize> {
+    let read = reader
+        .take(limit.saturating_add(1) as u64)
+        .read_line(line)?;
+    if read > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "devserver request line exceeds 8 KiB",
+        ));
+    }
+    Ok(read)
 }
 
 pub fn write_response(
@@ -271,6 +306,20 @@ mod tests {
         );
         let mut oversized = raw.as_bytes();
         assert!(Request::read(&mut oversized).is_err());
+    }
+    #[test]
+    fn request_lines_and_headers_are_bounded_before_allocation() {
+        let raw = format!(
+            "GET /{} HTTP/1.1\r\n\r\n",
+            "x".repeat(MAX_REQUEST_LINE_BYTES)
+        );
+        assert!(Request::read(&mut raw.as_bytes()).is_err());
+
+        let raw = format!(
+            "GET / HTTP/1.1\r\nX-Hostile: {}\r\n\r\n",
+            "x".repeat(MAX_REQUEST_LINE_BYTES)
+        );
+        assert!(Request::read(&mut raw.as_bytes()).is_err());
     }
     #[test]
     fn traversal_is_rejected() {

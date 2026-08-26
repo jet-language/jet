@@ -31,10 +31,16 @@ pub fn jet_compress_gzip_compress(data: &[u8]) -> Vec<u8> {
 pub fn jet_compress_gzip_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
     use flate2::read::GzDecoder;
     use std::io::Read;
+    const MAX_OUTPUT: u64 = 64 * 1024 * 1024;
     let mut dec = GzDecoder::new(data);
     let mut out = Vec::new();
-    dec.read_to_end(&mut out)
+    dec.by_ref()
+        .take(MAX_OUTPUT + 1)
+        .read_to_end(&mut out)
         .map_err(|e| format!("archive.gzip.decompress: invalid gzip data: {e}"))?;
+    if out.len() as u64 > MAX_OUTPUT {
+        return Err("archive.gzip.decompress: output exceeds 64 MiB".to_string());
+    }
     Ok(out)
 }
 
@@ -47,6 +53,17 @@ pub fn jet_compress_zstd_compress(data: &[u8]) -> Vec<u8> {
 /// Decompress zstd-compressed `data`. Returns an error message if `data` is
 /// not a valid zstd frame.
 pub fn jet_compress_zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
-    zstd::stream::decode_all(data)
-        .map_err(|e| format!("archive.zstd.decompress: invalid zstd data: {e}"))
+    use std::io::Read;
+    const MAX_OUTPUT: u64 = 64 * 1024 * 1024;
+    let mut dec = zstd::stream::read::Decoder::new(data)
+        .map_err(|e| format!("archive.zstd.decompress: invalid zstd data: {e}"))?;
+    let mut out = Vec::new();
+    dec.by_ref()
+        .take(MAX_OUTPUT + 1)
+        .read_to_end(&mut out)
+        .map_err(|e| format!("archive.zstd.decompress: invalid zstd data: {e}"))?;
+    if out.len() as u64 > MAX_OUTPUT {
+        return Err("archive.zstd.decompress: output exceeds 64 MiB".to_string());
+    }
+    Ok(out)
 }

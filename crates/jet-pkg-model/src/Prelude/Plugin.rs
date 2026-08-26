@@ -30,10 +30,22 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use wasmtime::component::{Component, Linker, Type, Val};
-use wasmtime::{Engine, Store};
+use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
+
+const PLUGIN_MAX_FUEL: u64 = 10_000_000;
+const PLUGIN_MAX_MEMORY_BYTES: usize = 16 * 1024 * 1024;
+const PLUGIN_MAX_TABLE_ELEMENTS: u32 = 10_000;
+const PLUGIN_TIMEOUT_MS: u64 = 2_000;
+const PLUGIN_MAX_WIRE_BYTES: usize = 16 * 1024 * 1024;
+const PLUGIN_MAX_PARAMS: usize = 1024;
+
+struct PluginHostState {
+    limits: StoreLimits,
+}
 
 struct PluginInstance {
-    store: Store<()>,
+    engine: Engine,
+    store: Store<PluginHostState>,
     instance: wasmtime::component::Instance,
     authority: String,
 }
@@ -44,6 +56,23 @@ thread_local! {
 
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
 
+fn plugin_engine() -> Result<Engine, String> {
+    let mut config = Config::new();
+    config.consume_fuel(true);
+    config.epoch_interruption(true);
+    Engine::new(&config).map_err(|error| format!("plugin engine: {error}"))
+}
+
+fn plugin_limits() -> StoreLimits {
+    StoreLimitsBuilder::new()
+        .memory_size(PLUGIN_MAX_MEMORY_BYTES)
+        .table_elements(PLUGIN_MAX_TABLE_ELEMENTS)
+        .instances(1)
+        .memories(1)
+        .tables(1)
+        .build()
+}
+
 /// Load a plugin `.wasm` Component Model module from `path`. Returns
 /// `"O:<handle>"` (decimal, > 0) on success, or `"E:<message>"` naming why the
 /// load failed — a missing file, a module that isn't a valid component, or a
@@ -52,7 +81,10 @@ static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
 /// rendered as a plain message (I2: no raw loader crash reaches the host
 /// program).
 pub fn jet_plugin_load(path: &str, authority: &str) -> String {
-    let engine = Engine::default();
+    let engine = match plugin_engine() {
+        Ok(engine) => engine,
+        Err(error) => return format!("E:{error}"),
+    };
     let component = match Component::from_file(&engine, path) {
         Ok(c) => c,
         Err(e) => return format!("E:couldn't load plugin `{path}`: {e}"),
@@ -60,8 +92,19 @@ pub fn jet_plugin_load(path: &str, authority: &str) -> String {
     // D-PLUGIN1=B: deny-by-default capabilities — an empty linker means any
     // plugin that imports a host function fails to instantiate here, with a
     // clean message naming the missing import, not a panic.
-    let linker: Linker<()> = Linker::new(&engine);
-    let mut store = Store::new(&engine, ());
+    let linker: Linker<PluginHostState> = Linker::new(&engine);
+    let mut store = Store::new(
+        &engine,
+        PluginHostState {
+            limits: plugin_limits(),
+        },
+    );
+    store.limiter(|state| &mut state.limits);
+    store.set_epoch_deadline(1_000_000_000);
+    store.epoch_deadline_trap();
+    if let Err(error) = store.set_fuel(PLUGIN_MAX_FUEL) {
+        return format!("E:plugin fuel setup failed: {error}");
+    }
     let instance = match linker.instantiate(&mut store, &component) {
         Ok(i) => i,
         Err(e) => {
@@ -74,6 +117,7 @@ pub fn jet_plugin_load(path: &str, authority: &str) -> String {
     PLUGINS.with(|m| {
         m.borrow_mut()
             .insert(handle, PluginInstance {
+                engine,
                 store,
                 instance,
                 authority: authority.to_string(),
@@ -100,12 +144,42 @@ pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
         let Some(plugin) = map.get_mut(&handle) else {
             return "E:no plugin loaded for this handle".to_string();
         };
+        if params_wire.len() > PLUGIN_MAX_WIRE_BYTES {
+            return "E:plugin call arguments exceed the 16 MiB resource budget".to_string();
+        }
+        if let Err(error) = plugin.store.set_fuel(PLUGIN_MAX_FUEL) {
+            return format!("E:plugin fuel setup failed: {error}");
+        }
+        plugin.store.set_epoch_deadline(1);
+        plugin.store.epoch_deadline_trap();
+        let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancelled_timer = std::sync::Arc::clone(&cancelled);
+        let timer_engine = plugin.engine.clone();
+        let timer = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now()
+                + std::time::Duration::from_millis(PLUGIN_TIMEOUT_MS);
+            while std::time::Instant::now() < deadline {
+                if cancelled_timer.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            if !cancelled_timer.load(Ordering::Relaxed) {
+                timer_engine.increment_epoch();
+            }
+        });
         let Some(func) = plugin.instance.get_func(&mut plugin.store, name) else {
+            cancelled.store(true, Ordering::Relaxed);
+            let _ = timer.join();
+            plugin.store.set_epoch_deadline(1_000_000_000);
             return format!("E:plugin has no exported function `{name}`");
         };
         let want_params = func.params(&plugin.store);
         let args = plugin_decode_params(params_wire);
         if args.len() != want_params.len() {
+            cancelled.store(true, Ordering::Relaxed);
+            let _ = timer.join();
+            plugin.store.set_epoch_deadline(1_000_000_000);
             return format!(
                 "E:`{name}` expects {} argument(s), got {}",
                 want_params.len(),
@@ -117,6 +191,9 @@ pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
             match plugin_to_val(arg, ty) {
                 Some(v) => call_args.push(v),
                 None => {
+                    cancelled.store(true, Ordering::Relaxed);
+                    let _ = timer.join();
+                    plugin.store.set_epoch_deadline(1_000_000_000);
                     return format!(
                         "E:argument {} to `{name}` doesn't match the plugin's declared type ({})",
                         i + 1,
@@ -127,20 +204,28 @@ pub fn jet_plugin_call(handle: u64, name: &str, params_wire: &str) -> String {
         }
         let want_results = func.results(&plugin.store);
         if want_results.len() != 1 {
+            cancelled.store(true, Ordering::Relaxed);
+            let _ = timer.join();
+            plugin.store.set_epoch_deadline(1_000_000_000);
             return format!(
                 "E:`{name}` returns {} values — v1 plugin calls support exactly one return value",
                 want_results.len()
             );
         }
         let mut results = vec![plugin_zero_val(&want_results[0])];
-        if let Err(e) = func.call(&mut plugin.store, &call_args, &mut results) {
+        let call_result = func.call(&mut plugin.store, &call_args, &mut results);
+        cancelled.store(true, Ordering::Relaxed);
+        let _ = timer.join();
+        plugin.store.set_epoch_deadline(1_000_000_000);
+        if let Err(e) = call_result {
             return format!("E:calling `{name}` trapped: {e}");
         }
         // Component Model contract: `post_return` must run after every call
         // before the instance can be called again.
         let _ = func.post_return(&mut plugin.store);
         match plugin_from_val(&results[0]) {
-            Some(wire) => format!("O:{wire}"),
+            Some(wire) if wire.len() <= PLUGIN_MAX_WIRE_BYTES => format!("O:{wire}"),
+            Some(_) => "E:plugin result exceeds the 16 MiB resource budget".to_string(),
             None => format!(
                 "E:`{name}`'s return type isn't supported yet (v1 plugin calls support Int/Float/Bool/Text only)"
             ),
@@ -210,8 +295,9 @@ fn plugin_read_tagged(bytes: &[u8], pos: &mut usize) -> Option<(char, String)> {
     }
     let len: usize = std::str::from_utf8(&bytes[len_start..*pos]).ok()?.parse().ok()?;
     *pos += 1; // skip ':'
-    let payload = std::str::from_utf8(bytes.get(*pos..*pos + len)?).ok()?.to_string();
-    *pos += len;
+    let payload_end = (*pos).checked_add(len)?;
+    let payload = std::str::from_utf8(bytes.get(*pos..payload_end)?).ok()?.to_string();
+    *pos = payload_end;
     Some((tag, payload))
 }
 
@@ -223,6 +309,9 @@ fn plugin_decode_params(wire: &str) -> Vec<(char, String)> {
     let Ok(count) = std::str::from_utf8(&bytes[..colon]).unwrap_or("0").parse::<usize>() else {
         return Vec::new();
     };
+    if count > PLUGIN_MAX_PARAMS {
+        return Vec::new();
+    }
     let mut pos = colon + 1;
     let mut out = Vec::with_capacity(count);
     for _ in 0..count {

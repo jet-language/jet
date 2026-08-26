@@ -504,7 +504,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::DequeReverse => apply_mutating(recv, "reverse", args, span),
         TBuiltinOp::DequeSplit => apply_mutating(recv, "split", args, span),
         TBuiltinOp::DequeFrom => CollectionEval::from_list(crate::Syntax::TYPE_QUEUE, recv, span),
-        // D-FAILCOMP1 / D-ITERTOOLS1: materialize Iter<T?E> / [T?E] → T?E.
+        // D-FAILCOMP1 / D-ITERTOOLS1: materialize Iter<?T !E> / [?T !E] → ?T !E.
         TBuiltinOp::TryCollect => {
             let CtValue::List(xs) = recv else {
                 return Err(unsupported("try_collect receiver", span));

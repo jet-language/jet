@@ -6,6 +6,7 @@ use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::exit;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use jet::ExitCodes;
@@ -13,6 +14,7 @@ use jet::REPL::Notebook::{self, ClientKind, Kernel};
 
 const MAX_REQUEST_HEADERS: usize = 64 * 1024;
 const MAX_REQUEST_BODY: usize = 8 * 1024 * 1024;
+const MAX_CONNECTIONS: usize = 64;
 
 /// Dispatch `jet notebook [PATH] [--protocol] [--bind ADDR] [--token TOKEN]`.
 pub(crate) fn run_notebook(raw: &[String]) {
@@ -165,13 +167,29 @@ fn serve_loopback(
     eprintln!("Ctrl-C stops the server; `--protocol` accepts the same session headlessly");
 
     let shared = Arc::new(Mutex::new(kernel));
+    let active = Arc::new(AtomicUsize::new(0));
     for connection in listener.incoming() {
         let Ok(stream) = connection else { continue };
+        if active
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < MAX_CONNECTIONS).then_some(count + 1)
+            })
+            .is_err()
+        {
+            continue;
+        }
         let shared = Arc::clone(&shared);
+        let active_for_thread = Arc::clone(&active);
         let token = token.to_string();
-        std::thread::spawn(move || {
+        let result = std::thread::Builder::new().spawn(move || {
+            let mut stream = stream;
+            let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
             let _ = handle_connection(stream, &shared, &token);
+            active_for_thread.fetch_sub(1, Ordering::AcqRel);
         });
+        if result.is_err() {
+            active.fetch_sub(1, Ordering::AcqRel);
+        }
     }
     Ok(ExitCodes::OK)
 }

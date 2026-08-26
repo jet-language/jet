@@ -349,6 +349,17 @@ pub(crate) fn clear_http_shared_runtime() {
     HTTP_SHARED_RUNTIME.store(0, Ordering::Release);
 }
 
+/// Run the HTTP teardown boundary while no worker can still be inside a JIT
+/// callback. The caller clears the shared pointer and drops the handles while
+/// this guard is held, before the resident module/runtime are released.
+pub(crate) fn with_http_runtime_quiesced<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    let _guard = RuntimeAccessGuard::enter();
+    f()
+}
+
 /// Pin the resident JIT heap onto the current thread for the duration of `f`.
 /// HTTP `Server.serve` workers are raw OS threads; without this, host calls that
 /// touch `with_runtime_mut` silently return `Default` (often `0`).
@@ -356,6 +367,10 @@ pub(crate) fn with_http_jet_runtime<F, R>(f: F) -> R
 where
     F: FnOnce() -> R,
 {
+    // Teardown takes this same guard before clearing the published pointer and
+    // dropping the resident module. Load the pointer only after acquiring it,
+    // so a worker cannot retain a raw runtime address across teardown.
+    let _guard = RuntimeAccessGuard::enter();
     let had = active_runtime_ptr().is_some();
     if !had {
         let addr = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);

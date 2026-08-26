@@ -75,19 +75,19 @@ disposition and does not replace independent security validation.
 
 11 candidates. Priority P0. Milestone `e12-security-boundaries`.
 
-| Candidate ID | Discovery title | Primary locations | Source reports |
-|---|---|---|---:|
-| `tower-default-network-auth-bypass` | Tower's default network authentication bypass exposes read and mutation APIs | plugins/tower/app/server.mjs<br>plugins/tower/app/store.mjs | 116 |
-| `tower-docs-symlink-read` | Tower document reads follow symlinks outside the docs root | plugins/tower/app/docs.mjs<br>plugins/tower/app/server.mjs | 31 |
-| `tower-owner-authorization-bypass` | Tower grants owner-acceptance authority without establishing owner identity | plugins/tower/app/server.mjs<br>plugins/tower/app/store.mjs | 29 |
-| `tower-loopback-csrf` | Tower loopback mutation APIs lack browser-origin and CSRF controls | plugins/tower/app/server.mjs<br>plugins/tower/app/store.mjs | 20 |
-| `tower-owner-payload-forgery` | Tower trusts caller-supplied owner attribution for privileged mutations | plugins/tower/app/server.mjs<br>plugins/tower/app/store.mjs | 18 |
-| `tower-docs-symlink-write` | Tower docs API writes through symlinked directories outside the repository | plugins/tower/app/docs.mjs<br>plugins/tower/app/server.mjs | 17 |
-| `tower-docs-symlink-delete` | Tower docs API deletes or moves files through symlinked directories outside the repository | plugins/tower/app/docs.mjs<br>plugins/tower/app/server.mjs | 14 |
-| `tower-docs-symlink-walk` | Tower docs inventory recursively traverses symlinked directories | plugins/tower/app/docs.mjs<br>plugins/tower/app/server.mjs | 4 |
-| `cd005-tower-token-dns-rebind` | Tower token authentication is bypassed for DNS-rebound loopback requests | plugins/tower/app/server.mjs | 2 |
-| `tower-tracked-state-priority-xss` | Tracked Tower card priority reaches innerHTML without validation or escaping | plugins/tower/app/store.mjs<br>plugins/tower/app/ui/tower.js | 2 |
-| `tower-ratified-decision-integrity-bypass` | Generic API callers can reopen or delete ratified owner decisions without an owner check | plugins/tower/app/server.mjs<br>plugins/tower/app/store.mjs | 1 |
+| Candidate ID | Discovery title | Primary locations | Source reports | Disposition | Current source evidence |
+|---|---|---|---:|---|---|
+| `tower-default-network-auth-bypass` | Tower's default network authentication bypass exposes read and mutation APIs | plugins/tower/app/server.mjs<br>plugins/tower/app/store.mjs | 116 | confirmed | plugins/tower/app/server.mjs:205-206,457-487,504-506 |
+| `tower-docs-symlink-read` | Tower document reads follow symlinks outside the docs root | plugins/tower/app/docs.mjs<br>plugins/tower/app/server.mjs | 31 | confirmed | plugins/tower/app/docs.mjs:83-100,209-213; plugins/tower/app/server.mjs:343-350 |
+| `tower-owner-authorization-bypass` | Tower grants owner-acceptance authority without establishing owner identity | plugins/tower/app/server.mjs<br>plugins/tower/app/store.mjs | 29 | confirmed | plugins/tower/app/server.mjs:176-181,280-284,422-455 |
+| `tower-loopback-csrf` | Tower loopback mutation APIs lack browser-origin and CSRF controls | plugins/tower/app/server.mjs<br>plugins/tower/app/store.mjs | 20 | confirmed | plugins/tower/app/server.mjs:32-35,161-163,205-206,457-487 |
+| `tower-owner-payload-forgery` | Tower trusts caller-supplied owner attribution for privileged mutations | plugins/tower/app/server.mjs<br>plugins/tower/app/store.mjs | 18 | confirmed | plugins/tower/app/server.mjs:457-487; plugins/tower/app/store.mjs:1453-1468 |
+| `tower-docs-symlink-write` | Tower docs API writes through symlinked directories outside the repository | plugins/tower/app/docs.mjs<br>plugins/tower/app/server.mjs | 17 | confirmed | plugins/tower/app/docs.mjs:76-100,225-259; plugins/tower/app/server.mjs:351-359 |
+| `tower-docs-symlink-delete` | Tower docs API deletes or moves files through symlinked directories outside the repository | plugins/tower/app/docs.mjs<br>plugins/tower/app/server.mjs | 14 | confirmed | plugins/tower/app/docs.mjs:76-100,262-293; plugins/tower/app/server.mjs:360-366 |
+| `tower-docs-symlink-walk` | Tower docs inventory recursively traverses symlinked directories | plugins/tower/app/docs.mjs<br>plugins/tower/app/server.mjs | 4 | confirmed | plugins/tower/app/docs.mjs:142-158,182-187; plugins/tower/app/server.mjs:343-350 |
+| `cd005-tower-token-dns-rebind` | Tower token authentication is bypassed for DNS-rebound loopback requests | plugins/tower/app/server.mjs | 2 | confirmed | plugins/tower/app/server.mjs:161-163,205-206,504-506 |
+| `tower-tracked-state-priority-xss` | Tracked Tower card priority reaches innerHTML without validation or escaping | plugins/tower/app/store.mjs<br>plugins/tower/app/ui/tower.js | 2 | confirmed | plugins/tower/app/store.mjs:303-329; plugins/tower/app/ui/tower.js:553-562,1016-1022 |
+| `tower-ratified-decision-integrity-bypass` | Generic API callers can reopen or delete ratified owner decisions without an owner check | plugins/tower/app/server.mjs<br>plugins/tower/app/store.mjs | 1 | confirmed | plugins/tower/app/server.mjs:120-125,457-487; plugins/tower/app/store.mjs:1514-1520,1578-1587 |
 
 ## memory-abi-safety
 
@@ -106,6 +106,22 @@ disposition and does not replace independent security validation.
 | `wasm-string-untrusted-ownership` | Generated WebAssembly string ABI reconstructs and frees unchecked host pointers | crates/jet-codegen/src/Codegen/Web.rs | 1 |
 | `jit-http-worker-runtime-uaf` | Resident JIT teardown can leave HTTP workers with stale runtime and code pointers | crates/jet-jit/src/Concurrency.rs<br>crates/jet-jit/src/net_http_hosts.rs | 1 |
 | `jit-event-four-capture-abi` | Four-capture JIT event callbacks are invoked with the wrong ABI | crates/jet-jit/src/jit/lower_ctx.rs<br>crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs | 1 |
+
+### Current dispositions
+
+The dispositions below are source-backed traces against the current tree. The full traces remain in `docs/audits/security-deep-scan-2026-08-03-full.md`.
+
+| Candidate ID | Disposition | HEAD evidence |
+|---|---|---|
+| `jit-jetarena-vec-layout-casts` | `already-fixed` | The live list hosts use `rt.heap.list_values_mut` and shared `collection_semantics` at `crates/jet-jit/src/Collections.rs:3465-3506`; no `JetArena`-to-`Vec` cast remains. |
+| `wasm-list-i64-untrusted-ownership` | `confirmed` | Generated WASM reconstructs `Box<[i64]>` from the host pointer and length at `crates/jet-codegen/src/Codegen/Web.rs:3791-3805` and frees the same unchecked allocation at `crates/jet-codegen/src/Codegen/Web.rs:3812-3818`. |
+| `wasm-list-string-untrusted-ownership` | `confirmed` | Generated WASM reconstructs host bytes and trusts the embedded count at `crates/jet-codegen/src/Codegen/Web.rs:3903-3931`, then frees the unchecked pointer at `crates/jet-codegen/src/Codegen/Web.rs:3939-3943`. |
+| `wasm-map-untrusted-ownership` | `confirmed` | Generated WASM reconstructs host bytes and trusts serialized counts and lengths at `crates/jet-codegen/src/Codegen/Web.rs:3974-4012`, then frees the unchecked pointer at `crates/jet-codegen/src/Codegen/Web.rs:4019-4024`. |
+| `wasm-string-untrusted-ownership` | `confirmed` | Generated WASM reconstructs `Box<[u8]>` from the host pointer and length at `crates/jet-codegen/src/Codegen/Web.rs:3742-3756` and frees the unchecked pointer at `crates/jet-codegen/src/Codegen/Web.rs:3763-3768`. |
+| `d0017-s1-aot-termios-layout` | `confirmed` | AOT embeds the shared terminal Prelude at `crates/jet-codegen/src/Codegen/mod.rs:255-260`; its hand-written Unix `Termios` reaches `tcgetattr`/`tcsetattr` at `crates/jet-codegen/src/Prelude/Term.rs:446-500` from `crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:488-507`. |
+| `d0017-s1-jit-termios-layout` | `duplicate-of-d0017-s1-aot-termios-layout` | JIT includes the same terminal Prelude at `crates/jet-jit/src/IO.rs:21-23` and calls `jet_term_input_secret` at `crates/jet-jit/src/IO.rs:257-272`; the shared `Termios` FFI is at `crates/jet-codegen/src/Prelude/Term.rs:446-500`. |
+| `jit-http-worker-runtime-uaf` | `confirmed` | HTTP handlers call through the published raw runtime pointer at `crates/jet-jit/src/net_http_hosts.rs:527-564,2247-2279` via `crates/jet-jit/src/Concurrency.rs:339-372`; resident teardown drops runtime/module before clearing that pointer at `crates/jet-jit/src/jit/resident.rs:279-299`. |
+| `jit-event-four-capture-abi` | `confirmed` | JIT callback invocation supports only four capture slots at `crates/jet-jit/src/Reactive.rs:31-62`, event payload insertion is capped at four at `crates/jet-jit/src/Reactive.rs:360-404,722-772`, and lowering passes the payload-bearing callback through `crates/jet-jit/src/jit/lower_ctx.rs:24080-24211` while compilation adds captures plus parameters at `crates/jet-jit/src/jit/functions_compile.rs:448-476` and `crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:3508-3569`. |
 
 ## identity-secrets-crypto
 
@@ -127,6 +143,25 @@ disposition and does not replace independent security validation.
 | `comptime-aes-table-timing-side-channel` | Interpreter AES-256-GCM uses secret-indexed lookup tables and secret-dependent GHASH branches | crates/jet-comptime/src/Comptime/CorePureParity.rs<br>crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs | 1 |
 | `comptime-argon2id-nonstandard` | Comptime expert.argon2id uses a simplified, likely incompatible KDF | crates/jet-comptime/src/Comptime/CryptoLite/Argon2id.rs<br>crates/jet-comptime/src/Comptime/CorePureParity.rs | 1 |
 | `managed-secret-temp-permission-window` | Sensitive managed-file bytes are written before restrictive permissions | crates/jetpack/src/EnvFiles.rs | 1 |
+
+### Current dispositions
+
+These dispositions trace each candidate through the current source. `confirmed` means the reported source-to-sink path remains live. `already-fixed` means the current source removes the reported path. The Claude row is tracked configuration; its regression proof is a config check, not a cargo test.
+
+| Candidate ID | Disposition | HEAD evidence |
+|---|---|---|
+| `cd005-auth-predictable-session-id` | `already-fixed` | `crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:116-125,140-153,293-303,333-359` — password, magic-link, and OAuth sessions use CSPRNG-backed opaque IDs; `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs:2828-2862` lowers the public calls to those Prelude helpers. |
+| `cd005-auth-predictable-magic-token` | `already-fixed` | `crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:116-125,237-264,267-303` — issue uses a CSPRNG-backed opaque token and consume checks it before minting a session; `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs:2837-2849` exposes the same helpers. |
+| `cd005-auth-oauth-predictable-state` | `confirmed` | `crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:306-318,321-343` — state is random but stored only with its provider, and finish accepts it without an initiating-browser binding; `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:636-643,661-664` exposes no browser/session binding argument. |
+| `cd005-auth-oauth-unverified-subject` | `confirmed` | `crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:321-359` — syntax-only caller subject becomes `provider:subject`, creates a user, and receives a session; `crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs:2856-2862` lowers the path and `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:636-643` accepts the subject. |
+| `notebook-zero-token-fallback` | `already-fixed` | `Source/CmdNotebook.rs:56-67,131-137` — token creation uses `read_exact` and entropy failure exits with an error; no all-zero fallback reaches `serve_loopback`. |
+| `signing-key-permission-fail-open` | `confirmed` | `Source/Publish/Sign.rs:110-121,401-408` — seed bytes are written before best-effort `set_mode(0600)`, and permission errors are ignored. |
+| `auth-session-show-token-leak` | `confirmed` | `crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs:156-164,466-468` — `session_show` formats the live `session.id`; `crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs:653-656` exposes the method. |
+| `archive-key-predictable-fallback` | `already-fixed` | `crates/jetpack/src/Store/Archive.rs:1385-1407,1439-1443` — automatic archive-key creation calls bounded OS CSPRNG entropy and fails on error; `crates/jetpack/src/TrustRoot.rs:47-113` has no predictable fallback. |
+| `claude-config-credential-exfil` | `confirmed` | `.claude/settings.local.json:3-8` — tracked permissions allow reads below `~/.config` and unrestricted `gh api`; regression proof is a repository config check, not a cargo test. |
+| `comptime-aes-table-timing-side-channel` | `confirmed` | `crates/jet-comptime/src/Comptime/CryptoLite/Aes256Gcm.rs:53-62,82-85,133-151` — secret-dependent S-box lookups and GHASH branches remain; `crates/jet-comptime/src/Comptime/CorePureParity.rs:1774-1834` dispatches the comptime AEAD calls to this implementation. |
+| `comptime-argon2id-nonstandard` | `confirmed` | `crates/jet-comptime/src/Comptime/CryptoLite/Argon2id.rs:338-390,401-422` — simplified address generation and final-block handling remain; `crates/jet-comptime/src/Comptime/CorePureParity.rs:1844-1904` returns its output from `expert.argon2id`. |
+| `managed-secret-temp-permission-window` | `confirmed` | `crates/jetpack/src/EnvFiles.rs:370-379,472-507,579-604` — temporary files are created with default permissions, written and synced, then restricted before publication. |
 
 ## resource-bounds
 
@@ -172,20 +207,62 @@ disposition and does not replace independent security validation.
 | `archive-urandom-read-to-eof` | Archive key generation reads /dev/urandom to EOF | crates/jetpack/src/Store.rs<br>crates/jetpack/src/Store/Archive.rs | 1 |
 | `module-discovery-symlink-recursion-dos` | Recursive module discovery follows directory symlink cycles without visited-set or depth limit | crates/jet-driver/src/Loader.rs<br>crates/jet-pkg-model/src/PackageManifest/Discovery.rs | 1 |
 
+### Current dispositions
+
+These dispositions trace all 35 candidates through the current source. `confirmed` means the reported source-to-sink path remains live. `already-fixed` means the current source removes the reported path. Each row cites current file:line evidence.
+
+| Candidate ID | Disposition | File:line evidence |
+|---|---|---|
+| `zip-resident-unbounded-output` | `already-fixed` | `crates/jet-comptime/src/Comptime/ArchiveLite.rs:283-288` delegates resident ZIP decompression to the canonical archive kernel; `corelib/core.archive/pkgs/archive/src/lib.rs:128-149,180-189` bounds entry count and expanded output. |
+| `d0002-s1-http1-slow-body` | `already-fixed` | `crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2860-2969` starts a fixed body deadline when body parsing begins and uses it alongside the idle timeout, so successful trickle reads cannot extend the request indefinitely. |
+| `zip-runtime-unbounded-output` | `already-fixed` | `corelib/core.archive/pkgs/archive/src/lib.rs:128-149,180-189` rejects oversized entry counts and declared/actual expanded ZIP output before returning materialized bytes. |
+| `tar-unbounded-materialization` | `already-fixed` | `corelib/core.archive/pkgs/archive/src/lib.rs:13-14,447-483,500` enforces 4096 entries, 64 MiB per-entry output, and 64 MiB aggregate materialization. |
+| `s0-devserver-unbounded-header-line` | `already-fixed` | `crates/jet-devserver/src/lib.rs:24-27,55-98,152-166` bounds each request/header line and enforces cumulative header bytes and header count. |
+| `s0-jit-http-simple-unbounded-response` | `already-fixed` | `crates/jet-jit/src/net_http_hosts.rs:2029-2068,2099-2113` returns a streaming body bridge for simple calls; `crates/jet-pkg-model/src/Prelude/HTTP.rs:4046-4049,4196-4205,4286-4321` bounds declared and streamed response bytes. |
+| `s0-jit-http-request-unbounded-response` | `already-fixed` | `crates/jet-jit/src/net_http_hosts.rs:2071-2096,2509-2517` routes configurable requests through the shared response bridge; `crates/jet-pkg-model/src/Prelude/HTTP.rs:4046-4049,4196-4205,4286-4321` bounds the response body. |
+| `s1-root-net-file-unbounded` | `already-fixed` | `crates/jet-net/src/lib.rs:182-209` routes caller-selected `file://` reads through `read_limited`, which stops at the 64 MiB fetch budget. |
+| `s1-root-net-http-unbounded` | `already-fixed` | `crates/jet-net/src/lib.rs:182-209` routes caller-selected HTTP responses through `read_limited`, which stops at the 64 MiB fetch budget. |
+| `s2-fenced-range-expansion-dos` | `confirmed` | `crates/jet-parser/src/FencedNames.rs:450-476` collects every number in an ascending named range without a cardinality bound. |
+| `s2-runtime-json-depth-dos` | `already-fixed` | `crates/jet-foundation/src/EncodingJson.rs:3,87-98,250-292` applies `MAX_JSON_DEPTH` in the shared recursive parser; `crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs:1-5` uses that parser. |
+| `s2-comptime-json-depth-dos` | `already-fixed` | `crates/jet-comptime/src/Comptime/JSONInterp.rs:147-160` delegates both comptime JSON paths to `EncodingJson`; `crates/jet-foundation/src/EncodingJson.rs:250-292` rejects excessive nesting. |
+| `s2-comptime-toml-depth-dos` | `already-fixed` | `crates/jet-comptime/src/Comptime/EncodingLite.rs:628-636,830-845,877-894` checks `MAX_TOML_DEPTH` and passes depth through array and inline-table recursion. |
+| `s2-comptime-yaml-depth-dos` | `already-fixed` | `crates/jet-comptime/src/Comptime/EncodingLite.rs:1104-1148,1276-1309,1327-1359` checks `MAX_YAML_DEPTH` in block and flow recursion. |
+| `runtime-toml-depth-dos` | `already-fixed` | `crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs:10,374-382,578-592,621-638` checks `MAX_TOML_DEPTH` and carries depth through nested values. |
+| `runtime-yaml-depth-dos` | `already-fixed` | `crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs:10,82-105,109-139,235-273,288-323` checks `MAX_YAML_DEPTH` in block and flow parsing. |
+| `gzip-runtime-unbounded-output` | `already-fixed` | `crates/jet-pkg-model/src/Prelude/Compress.rs:31-44` limits gzip reads to 64 MiB plus one sentinel byte and rejects overflow. |
+| `zstd-runtime-unbounded-output` | `already-fixed` | `crates/jet-pkg-model/src/Prelude/Compress.rs:53-68` limits zstd reads to 64 MiB plus one sentinel byte and rejects overflow. |
+| `processspec-output-limit-late` | `already-fixed` | `crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:422-465,1981-2068,2133-2143` drains output under a shared budget, kills on overflow, and returns `ResourceLimit`; `crates/jet-jit/src/Process.rs:315-344,367-369` calls the Prelude. |
+| `build-action-unbounded-output` | `confirmed` | `crates/jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs:318-347` captures sandbox stdout/stderr with `wait_with_output`; `crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:849-864` consumes the unbounded `Output` after completion. |
+| `notebook-preauth-slowloris` | `already-fixed` | `Source/CmdNotebook.rs:186-204` sets a 10-second read timeout before request parsing; `Source/CmdNotebook.rs:444-459` also caps headers at 64 KiB. |
+| `plugin-call-unbounded-resources` | `already-fixed` | `crates/jet-pkg-model/src/Prelude/Plugin.rs:33-74,95-105` configures fuel, epoch interruption, linear-memory, table, instance, and memory limits; `crates/jet-pkg-model/src/Prelude/Plugin.rs:147-170` arms the two-second call timer and argument budget. |
+| `d0017-s1-tar-pax-allocation` | `confirmed` | `crates/jetpack/src/Provider/fetch.rs:351-397` checks PAX logical size but then allocates metadata with `Vec::with_capacity(stored as usize)`, leaving stored-size allocation unchecked. |
+| `d0017-s3-studio-slowloris` | `confirmed` | `crates/jetpack/src/CLI/studio_server.rs:88-114,192-203` services connections serially and blocks in `read` without a socket read timeout. |
+| `compiler-extension-json-depth-dos` | `already-fixed` | `crates/jet-pkg-model/src/CompilerExtension.rs:484-488` uses `JSON::parse`; `crates/jet-foundation/src/JSON.rs:43-49,80-85,159-199` bounds input and recursive JSON depth. |
+| `nix-json-depth-dos` | `already-fixed` | `crates/jet-nix-eval/src/JSON.rs:6,42-53,80-83,115-138` passes depth through JSON recursion and rejects values beyond the evaluator limit. |
+| `process-pipeline-limits-ignored` | `already-fixed` | `crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs:1645-1777` starts per-stage output drains and enforces timeout/output limits; `crates/jet-jit/src/Process.rs:325-344` calls that Prelude pipeline. |
+| `envhook-pretrust-symlink-recursion-dos` | `already-fixed` | `crates/jetpack/src/EnvHook.rs:279-317,363-392` rejects external links, records cycles with a visited set, and does not recurse through directory symlink entries; `crates/jetpack/src/CLI/run_enter_dev.rs:2814-2820` uses this bounded fingerprint before activation. |
+| `nix-expression-parser-depth-dos` | `already-fixed` | `crates/jet-nix-eval/src/Evaluator.rs:627-670` tracks parser depth and returns `ResourceLimit` before nested expression parsing exceeds `MAX_EVAL_DEPTH`. |
+| `package-treehash-symlink-recursion` | `confirmed` | `crates/jet-foundation/src/SHA256.rs:186-230` recurses on `Path::is_dir` without symlink metadata, a visited set, or root containment; `Source/Fetch.rs:755-756,831-839` uses this tree hash for fetched packages. |
+| `devserver-slowloris-thread-exhaustion` | `already-fixed` | `crates/jet-devserver/src/WebHost.rs:35,1414-1429,1452-1466,1483-1486` caps active connection threads at 64 and applies a ten-second socket read timeout before the bounded request reader. |
+| `archive-urandom-read-to-eof` | `already-fixed` | `crates/jetpack/src/Store/Archive.rs:1399-1407,1439-1443` obtains exactly 32 bytes through the bounded `os_random_bytes` helper and fails on entropy errors. |
+| `embedded-devserver-unbounded-http-resource-use` | `already-fixed` | `crates/jet-codegen/src/Prelude/DevServer.rs:36-39,343-377,379-394,396-430` caps lines, aggregate headers, and active connection threads, and sets ten-second socket timeouts before parsing. |
+| `worktree-tar-entry-count-dos` | `already-fixed` | `corelib/core.archive/pkgs/archive/src/lib.rs:13-14,447-483` is the current canonical TAR parser and rejects more than 4096 entries while bounding materialized output and aggregate bytes. |
+| `module-discovery-symlink-recursion-dos` | `already-fixed` | `crates/jet-pkg-model/src/Package/Discovery.rs:31-38` routes discovery through `AuthorityResolver`; `crates/jet-pkg-model/src/Authority.rs:803-810,1035-1048` rejects symlinks before recursive directory descent. |
+
 ## network-boundaries
 
 ### Network egress, SSRF, HTTP framing, and local disclosure
 
 6 candidates. Priority P1. Milestone `e12-security-data`.
 
-| Candidate ID | Discovery title | Primary locations | Source reports |
-|---|---|---|---:|
-| `comptime-fetch-ssrf` | Hash-pinned compile-time fetch permits arbitrary outbound requests before verification | crates/jet-comptime/src/Comptime/Methods/dispatch.rs<br>crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs | 11 |
-| `cd005-comptime-fetch-local-disclosure` | Hermetic compile-time fetch can disclose arbitrary local text files | crates/jet-net/src/lib.rs<br>crates/jet-comptime/src/Comptime/Methods/dispatch.rs | 9 |
-| `provider-registry-private-network-ssrf` | Project provider policy can authorize private-network HTTPS fetches | crates/jetpack/src/Provider/fetch.rs<br>crates/jetpack/src/Provider/script_registry.rs | 5 |
-| `jit-http-crlf-injection` | JIT generic HTTP request serialization permits CRLF request injection | crates/jet-jit/src/net_http_hosts.rs<br>crates/jet-pkg-model/src/Prelude/HTTP.rs | 4 |
-| `jit-websocket-handshake-crlf-injection` | WebSocket URL permits HTTP handshake CRLF injection | crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs | 1 |
-| `git-dependency-transport-ssrf` | Git dependency fetch allows attacker-selected network destinations |  | 1 |
+| Candidate ID | Discovery title | Primary locations | Disposition | File:line evidence | Source reports |
+|---|---|---|---|---|---:|
+| `comptime-fetch-ssrf` | Hash-pinned compile-time fetch permits arbitrary outbound requests before verification | crates/jet-comptime/src/Comptime/Methods/dispatch.rs<br>crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs | confirmed | `crates/jet-comptime/src/Comptime/Methods/dispatch/eval_method.rs:763-765` — the fetch route has no effect gate; `crates/jet-net/src/lib.rs:180-188` — the caller URL selects a file or HTTP(S) fetch before the hash check | 11 |
+| `cd005-comptime-fetch-local-disclosure` | Hermetic compile-time fetch can disclose arbitrary local text files | crates/jet-net/src/lib.rs<br>crates/jet-comptime/src/Comptime/Methods/dispatch.rs | confirmed | `crates/jet-net/src/lib.rs:180-183` — a caller-selected `file://` path reaches `std::fs::read`; `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:737-756` — the read occurs before digest verification | 9 |
+| `provider-registry-private-network-ssrf` | Project provider policy can authorize private-network HTTPS fetches | crates/jetpack/src/Provider/fetch.rs<br>crates/jetpack/src/Provider/script_registry.rs | confirmed | `crates/jetpack/src/Provider/fetch.rs:204-212` — policy checks only textual allow/deny authority; `crates/jetpack/src/Provider/fetch.rs:520-540` — host validation does not classify resolved addresses; `crates/jetpack/src/Provider/script_registry.rs:141-155` — provider URLs reach the fetch sink | 5 |
+| `jit-http-crlf-injection` | JIT generic HTTP request serialization permits CRLF request injection | crates/jet-jit/src/net_http_hosts.rs<br>crates/jet-pkg-model/src/Prelude/HTTP.rs | confirmed | `crates/jet-jit/src/net_http_hosts.rs:2421-2426,2509-2515` — JIT strings reach the shared HTTP sender; `crates/jet-pkg-model/src/Prelude/HTTP.rs:1623-1635,3428-3442` — the request target is serialized without control-byte rejection | 4 |
+| `jit-websocket-handshake-crlf-injection` | WebSocket URL permits HTTP handshake CRLF injection | crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs | confirmed | `crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:247-283` — URL path and authority accept control bytes; `crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs:573-598` — path and host are written into the raw handshake | 1 |
+| `git-dependency-transport-ssrf` | Git dependency fetch allows attacker-selected network destinations |  | confirmed | `Source/Fetch.rs:2301-2304` — the manifest URL reaches `git ls-remote`; `Source/Fetch.rs:2332-2349` — the same URL reaches `git clone` without destination policy | 1 |
 
 ## filesystem-containment
 
@@ -218,6 +295,35 @@ disposition and does not replace independent security validation.
 | `jetpack-remote-symlink-fingerprint-escape` | Remote package fingerprint traversal follows symlinks outside the checkout | crates/jetpack/src/Provider/remote.rs<br>crates/jetpack/src/Provider.rs | 1 |
 | `repl-run-temp-symlink-overwrite` | REPL :run writes predictable files in the shared temporary directory |  | 1 |
 
+### Current dispositions
+
+These dispositions are source-backed traces against the current tree. `confirmed` means the reported source-to-sink path remains live. `already-fixed` means the current source removes the reported path. Each row cites current file:line evidence.
+
+| Candidate ID | Disposition | HEAD evidence |
+|---|---|---|
+| `package-store-install-symlink-escape` | confirmed | `Source/Store.rs:31-58,107-115,223-260` — raw store/link paths reach recursive `is_dir` and copy operations; `Source/Fetch.rs:779-792,889-895,1197-1204` — dependency sources reach those paths. |
+| `canvas-create-package-symlink-write` | confirmed | `crates/jet-devserver/src/Canvas/project_transactions.rs:518-555,1047-1081,1287-1314` — lexical-only project paths are joined and written; `crates/jet-devserver/src/Canvas/source_model.rs:45-65,78-126` — the write reads and renames the caller path without no-follow containment. |
+| `dependency-name-path-traversal` | confirmed | `crates/jet-pkg-model/src/Package/Blocks.rs:20-33,360-405` — dependency keys are retained without safe-component validation; `crates/jet-pkg-model/src/Package/Convert.rs:19-74` and `Source/Fetch.rs:787-792,890-895,1198-1204` preserve and join the raw name. |
+| `devserver-static-symlink-escape` | confirmed | `crates/jet-devserver/src/lib.rs:180-189` — static paths only reject the substring `..`; `crates/jet-devserver/src/WebHost.rs:2126-2140` joins and reads the accepted path without real-root containment. |
+| `d0002-s2-sparse-copy-symlink` | already-fixed | `crates/jetpack/src/Provider/remote.rs:286-296,648-675` — the sparse-copy fallback checks `symlink_metadata` and rejects symlink or non-file source entries before copying. |
+| `s0-web-test-prefix-traversal` | confirmed | `scripts/web-test/serve.mjs:27-32,35-54` — decoded paths use string-prefix containment, then `statSync` and `createReadStream`, with no component-boundary or realpath check. |
+| `vendor-symlink-escape` | confirmed | `Source/Publish/Vendor.rs:39-55,110-124` — vendoring recursively uses `is_dir` and `fs::copy`, both following dependency symlinks. |
+| `cd005-comptime-embed-file-symlink` | confirmed | `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:290-304,393-415` — only lexical absolute/parent checks run before `fs::read(base_dir.join(rel))`. |
+| `cd005-comptime-embed-bytes-symlink` | confirmed | `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:290-304,393-425` — only lexical absolute/parent checks run before the bytes read follows `base_dir.join(rel)`. |
+| `cd005-build-embed-symlink` | confirmed | `crates/jet-comptime/src/Comptime/Methods/dispatch.rs:480-513` — `b.embed` performs lexical-only validation before `fs::read(base_dir.join(path))`. |
+| `git-revision-cache-path-traversal` | confirmed | `crates/jet-pkg-model/src/Package/Blocks.rs:451-480` — a manifest `rev` is retained verbatim; `Source/Fetch.rs:819-824,2289-2299,2332-2386` uses it to shape cache creation, cleanup, and clone paths. |
+| `jetpack-dotenv-symlink-read` | confirmed | `crates/jetpack/src/CLI/trust_env_build.rs:668-683,990-994` — a lexical-only relative path reaches `read_to_string`; `crates/jet-env-model/src/ModuleEval/Environment.rs:2414-2425` has no physical-root check. |
+| `jetpack-image-files-read-traversal` | already-fixed | `crates/jetpack/src/CLI/add_remove_push_image.rs:1121-1188` — path components are normalized, symlinks are rejected, the target is canonicalized, and canonical containment is enforced before the bounded read. |
+| `jetpack-image-layer-path-traversal` | already-fixed | `crates/jetpack/src/Image.rs:364-376,1362-1400` — every layer path is checked for absolute, parent, prefix, control-byte, length, duplicate, and collision violations before tar emission. |
+| `canvas-action-temp-symlink-overwrite` | confirmed | `crates/jet-devserver/src/Canvas/edit_actions.rs:950-972` — a predictable sibling path is written with `fs::write` and removed afterward, without exclusive or symlink-safe creation. |
+| `jetpack-overlay-patch-path-traversal` | already-fixed | `crates/jetpack/src/Overlay.rs:21-44,67-124,268-309` — patch and target paths reject symlink components and require canonical containment before read or staged write. |
+| `trust-prefix-sibling-overmatch` | confirmed | `crates/jetpack/src/Trust.rs:616-658` — exact and wildcard grants use `starts_with` without a path-component boundary, including canonical subjects. |
+| `devserver-build-symlink-overwrite` | confirmed | `Source/CmdCompile.rs:5636-5651,5688-5707,5774-5783`, `crates/jet-devserver/src/WebHost.rs:1009-1038`, and `crates/jet-codegen/src/Prelude/DevServer.rs:302-316` write or rename web outputs through `build` without real-root validation. |
+| `lsp-predictable-log-symlink-write` | confirmed | `Source/LSP/Server.rs:269-298` turns a caught handler panic into an append through fixed `/tmp/jet-lsp.log`; ordinary `OpenOptions` follows a prepositioned symlink. |
+| `canvas-source-symlink-read` | already-fixed | `crates/jet-devserver/src/Canvas/project_scan.rs:453-465,477-525`, `crates/jet-devserver/src/Canvas/schema_api.rs:287-310`, and `crates/jet-pkg-model/src/Authority.rs:776-800,1035-1063` route discovered files through descriptor-relative no-follow checks and reject symlink entries. |
+| `jetpack-remote-symlink-fingerprint-escape` | confirmed | `crates/jetpack/src/Provider/remote.rs:608-644` recursively follows directory symlinks and reads them through `fs::read`/`metadata`; `crates/jetpack/src/Provider.rs:638-652` applies it to staged provider source. |
+| `repl-run-temp-symlink-overwrite` | confirmed | `crates/jet-repl/src/lib.rs:1232-1239,1282-1301` creates a PID/counter-predictable shared-temp name, writes it with `fs::write`, and later removes it without exclusive or no-follow creation. |
+
 ## devtools-control-plane
 
 ### Devserver, Canvas, Studio, and notebook control planes
@@ -236,6 +342,23 @@ disposition and does not replace independent security validation.
 | `s1-root-studio-loopback-csrf` | A malicious website can trigger loopback Studio JetOS subprocess actions via CSRF (root) | crates/jetpack/src/CLI/studio_server.rs<br>crates/jetpack/src/CLI/studio_transactions.rs | 5 |
 | `canvas-project-revision-not-enforced` | Canvas project transactions parse but do not enforce project_revision | crates/jet-devserver/src/Canvas/schema_api.rs | 2 |
 | `embedded-devserver-windows-absolute-static-path` | Generated embedded devserver can read outside build root on Windows absolute paths | crates/jet-codegen/src/Prelude/DevServer.rs | 2 |
+
+### Current dispositions
+
+These dispositions trace all 10 candidates through the current source. Each row cites current file:line evidence.
+
+| Candidate ID | Disposition | File:line evidence |
+|---|---|---|
+| `devserver-cross-origin-mutation` | `already-fixed` | `crates/jet-devserver/src/WebHost.rs:1241-1297,1496-1500` rejects requests with an invalid Host, Origin, or Canvas session before any Canvas route. |
+| `s1-root-studio-remote-read` | `confirmed` | `crates/jetpack/src/CLI/bridge_os_studio.rs:122-140` accepts the requested bind address; `crates/jetpack/src/CLI/studio_server.rs:108-170` returns project data and config.jet without request authentication. |
+| `s1-root-studio-remote-write` | `confirmed` | `crates/jetpack/src/CLI/studio_server.rs:128-136` forwards unauthenticated transactions; `crates/jetpack/src/CLI/studio_transactions.rs:104-137,323-385` issues sessions to callers and applies their changes to config.jet. |
+| `s1-root-studio-remote-run` | `confirmed` | `crates/jetpack/src/CLI/studio_server.rs:138-146` forwards unauthenticated run requests; `crates/jetpack/src/CLI/studio_transactions.rs:631-695,1107-1147` dispatches them to JetOS subprocess actions. |
+| `s1-root-studio-loopback-csrf` | `confirmed` | `crates/jetpack/src/CLI/bridge_os_studio.rs:131-140` starts the default loopback service; `crates/jetpack/src/CLI/studio_server.rs:108-146,194-208` parses POST requests without Host or Origin validation. |
+| `s2-devserver-source-disclosure` | `already-fixed` | `crates/jet-devserver/src/WebHost.rs:1241-1297,1496-1500` requires the Canvas Host, Origin, and session checks before the graph, project, and source routes at `1638-1786`. |
+| `s2-devserver-debug-trigger` | `already-fixed` | `crates/jet-devserver/src/WebHost.rs:1241-1297,1496-1500` requires the Canvas Host, Origin, and session checks before the debug route at `1898-1923`. |
+| `devserver-windows-absolute-static-path` | `confirmed` | `crates/jet-devserver/src/lib.rs:215-224` rejects only `..` before joining the request path; `crates/jet-devserver/src/WebHost.rs:2154-2167` reads the joined path. |
+| `canvas-project-revision-not-enforced` | `already-fixed` | `crates/jet-devserver/src/Canvas/schema_api.rs:527-545` parses `project_revision` and compares it with the current project revision before dispatch. |
+| `embedded-devserver-windows-absolute-static-path` | `confirmed` | `crates/jet-codegen/src/Prelude/DevServer.rs:460-475` rejects only `..` before `Path::join`, then reads the resulting path. |
 
 ## command-code-injection
 
@@ -292,6 +415,15 @@ disposition and does not replace independent security validation.
 |---|---|---|---:|
 | `secrets-key-permission-window` | Age identity is created with ambient permissions before best-effort chmod | crates/jetpack/src/Secrets.rs | 2 |
 | `jetpack-project-trust-self-allow` | Untrusted projects can self-authorize the trust gate that precedes environment hooks | crates/jetpack/src/Trust.rs<br>crates/jetpack/src/CLI/run_enter_dev.rs | 1 |
+
+### Current dispositions
+
+These dispositions trace both candidates through the current source. `confirmed` means the reported source-to-sink path remains live.
+
+| Candidate ID | Disposition | HEAD evidence |
+|---|---|---|
+| `secrets-key-permission-window` | `confirmed` | `crates/jetpack/src/Secrets.rs:166-191` writes the identity before mode tightening; `crates/jetpack/src/Secrets.rs:675-682` ignores mode-setting errors and uses a no-op on non-Unix platforms. |
+| `jetpack-project-trust-self-allow` | `confirmed` | `crates/jetpack/src/Trust.rs:1009-1026,1103-1107` loads project-supplied trust policy and returns success for `TrustDecision::Allow`; `crates/jetpack/src/CLI/run_enter_dev.rs:285-295,1663-1674` calls this gate before environment entry continues. |
 
 ## Source artifacts
 

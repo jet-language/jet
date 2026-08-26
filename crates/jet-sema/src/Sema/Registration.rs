@@ -26,7 +26,7 @@ fn is_void_named(ty: &Type) -> bool {
 }
 
 /// True when a declared return type carries no value payload: `()` / `Unit`,
-/// or fallible void (`() E!`). Same void-named match used by asm return
+/// or fallible void (`!E`). Same void-named match used by asm return
 /// checks in this file.
 fn is_void_like_return(ty: &Type) -> bool {
     is_void_named(ty) || matches!(ty, Type::Result { ok, .. } if is_void_named(ok))

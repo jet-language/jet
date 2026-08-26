@@ -512,7 +512,7 @@ fn web_stmts_guarantee_return(stmts: &[TIR::TStmt]) -> bool {
     })
 }
 
-fn web_func_guarantees_return(f: &Func, tir: &TIR::TFunc) -> bool {
+fn web_func_guarantees_return(_f: &Func, tir: &TIR::TFunc) -> bool {
     // A generator's normal completion is falling off the body. JavaScript's
     // generator protocol represents that as `{ done: true }`, so it needs no
     // explicit `return Stream<T>` value.
@@ -521,14 +521,15 @@ fn web_func_guarantees_return(f: &Func, tir: &TIR::TFunc) -> bool {
     }
     tir.ret.is_none()
         || web_stmts_guarantee_return(&tir.body)
-        // D-FAIL-EXIT1: the default fallible `fn run()` may complete with the
-        // implicit `Ok(())`; only an explicit Err needs an edge value.
-        || (f.name == "run"
-            && matches!(
-                f.return_type.as_ref(),
-                Some(Type::Result { ok, .. })
-                    if matches!(ok.as_ref(), Type::Named(name) if name == "Unit")
-            ))
+        // D-FAIL-EXIT1: every fallible unit function may complete with the
+        // implicit `Ok(())`; only an explicit Err needs an edge value. Read
+        // the effective TIR return, so omitted contracts and explicit default
+        // contracts share this rule across JS and Wasm.
+        || matches!(
+            tir.ret.as_ref(),
+            Some(Type::Result { ok, .. })
+                if matches!(ok.as_ref(), Type::Named(name) if name == "Unit")
+        )
 }
 
 fn web_match_pattern_supported(pattern: &TIR::TPattern) -> bool {
@@ -679,8 +680,11 @@ fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc, bundle: &ProgramBundle) ->
         // `TFunc::ret` is the effective failure carrier used by hosted tiers;
         // this boundary emits the source function's success payload and keeps
         // its existing `#WasmExport` ABI contract.
-        && f.return_type
-            .as_ref()
+        && (if f.web_marker == Some(WebPartitionMarker::WasmExport) {
+            f.return_type.as_ref()
+        } else {
+            tir.ret.as_ref()
+        })
             .map(|ty| {
                 is_string_like(ty)
                     || is_list_int(ty)
@@ -3727,29 +3731,73 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
     };
     if need_packed_abi(&is_string_like)
         || need_packed_abi(&is_list_default_int)
+        || need_packed_abi(&is_list_fixed_int)
         || need_packed_abi(&is_map_string_int)
     {
+        // D-JSBIND1: a packed pointer is only an ownership token after it
+        // came from the matching Wasm allocator or a returned value. A JS
+        // caller can write any u64, so never reconstruct a Box from that
+        // value until this registry proves its exact allocation and shape.
+        out.push_str(
+            r#"const JET_ABI_STRING_KIND: u8 = 1;
+const JET_ABI_LIST_I64_KIND: u8 = 2;
+const JET_ABI_LIST_INT_KIND: u8 = 3;
+const JET_ABI_LIST_STRING_KIND: u8 = 4;
+const JET_ABI_MAP_STRING_INT_KIND: u8 = 5;
+
+static JET_ABI_ALLOCATIONS: std::sync::Mutex<Vec<(u8, u32, u32)>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn jet_abi_register(kind: u8, ptr: u32, byte_len: u32) {
+    assert!(ptr != 0 && byte_len != 0, "invalid Wasm ABI allocation");
+    let mut allocations = JET_ABI_ALLOCATIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert!(
+        !allocations.iter().any(|&(known_kind, known_ptr, _)| known_kind == kind && known_ptr == ptr),
+        "duplicate Wasm ABI allocation"
+    );
+    allocations.push((kind, ptr, byte_len));
+}
+
+fn jet_abi_take(kind: u8, ptr: u32, byte_len: u32) -> bool {
+    let mut allocations = JET_ABI_ALLOCATIONS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(index) = allocations.iter().position(|&(known_kind, known_ptr, known_len)| {
+        known_kind == kind && known_ptr == ptr && known_len == byte_len
+    }) else {
+        return false;
+    };
+    allocations.swap_remove(index);
+    true
+}
+
+fn jet_abi_require(kind: u8, ptr: u32, byte_len: u32) {
+    assert!(
+        ptr != 0 && byte_len != 0 && jet_abi_take(kind, ptr, byte_len),
+        "untrusted or already-consumed Wasm ABI allocation"
+    );
+}
+
+"#,
+        );
         // D-JSBIND1=A: UTF-8 ownership transfer — packed u64 (ptr<<32)|len.
         // Returns: Wasm owns → JS copies → jet_abi_string_free.
         // Params: JS TextEncoder → jet_abi_string_alloc → Wasm takes via jet_abi_string_arg.
         out.push_str(
             "fn jet_abi_string_ret(s: String) -> u64 {\n\
+             \x20   if s.is_empty() { return 0; }\n\
              \x20   let boxed = s.into_bytes().into_boxed_slice();\n\
              \x20   let len = boxed.len() as u32;\n\
              \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   jet_abi_register(JET_ABI_STRING_KIND, ptr, len);\n\
              \x20   ((ptr as u64) << 32) | (len as u64)\n\
              }\n\n\
              fn jet_abi_string_arg(packed: u64) -> String {\n\
              \x20   let ptr = (packed >> 32) as u32;\n\
              \x20   let len = (packed & 0xffff_ffff) as u32;\n\
              \x20   if len == 0 {\n\
-             \x20       if ptr != 0 {\n\
-             \x20           unsafe {\n\
-             \x20               let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, 0));\n\
-             \x20           }\n\
-             \x20       }\n\
+             \x20       assert_eq!(ptr, 0, \"non-null empty Wasm string allocation\");\n\
              \x20       return String::new();\n\
              \x20   }\n\
+             \x20   jet_abi_require(JET_ABI_STRING_KIND, ptr, len);\n\
              \x20   unsafe {\n\
              \x20       let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize));\n\
              \x20       String::from_utf8(boxed.into_vec()).expect(\"JS TextEncoder UTF-8\")\n\
@@ -3757,12 +3805,16 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              }\n\n\
              #[no_mangle]\n\
              pub extern \"C\" fn jet_abi_string_alloc(len: u32) -> u32 {\n\
+             \x20   if len == 0 { return 0; }\n\
              \x20   let boxed = vec![0u8; len as usize].into_boxed_slice();\n\
-             \x20   Box::into_raw(boxed) as *mut u8 as u32\n\
+             \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   jet_abi_register(JET_ABI_STRING_KIND, ptr, len);\n\
+             \x20   ptr\n\
              }\n\n\
              #[no_mangle]\n\
              pub extern \"C\" fn jet_abi_string_free(ptr: u32, len: u32) {\n\
-             \x20   if ptr == 0 { return; }\n\
+             \x20   if ptr == 0 { assert_eq!(len, 0, \"null Wasm string allocation with length\"); return; }\n\
+             \x20   jet_abi_require(JET_ABI_STRING_KIND, ptr, len);\n\
              \x20   unsafe {\n\
              \x20       let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize));\n\
              \x20   }\n\
@@ -3783,22 +3835,23 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         // Params: JS BigInt64Array → jet_abi_list_i64_alloc → Wasm takes via jet_abi_list_i64_arg.
         out.push_str(
             "fn jet_abi_list_i64_ret(v: Vec<i64>) -> u64 {\n\
+             \x20   if v.is_empty() { return 0; }\n\
              \x20   let boxed = v.into_boxed_slice();\n\
              \x20   let len = boxed.len() as u32;\n\
+             \x20   let byte_len = len.checked_mul(std::mem::size_of::<i64>() as u32).expect(\"list-i64 byte length overflow\");\n\
              \x20   let ptr = Box::into_raw(boxed) as *mut i64 as u32;\n\
+             \x20   jet_abi_register(JET_ABI_LIST_I64_KIND, ptr, byte_len);\n\
              \x20   ((ptr as u64) << 32) | (len as u64)\n\
              }\n\n\
              fn jet_abi_list_i64_arg(packed: u64) -> Vec<i64> {\n\
              \x20   let ptr = (packed >> 32) as u32;\n\
              \x20   let len = (packed & 0xffff_ffff) as u32;\n\
              \x20   if len == 0 {\n\
-             \x20       if ptr != 0 {\n\
-             \x20           unsafe {\n\
-             \x20               let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut i64, 0));\n\
-             \x20           }\n\
-             \x20       }\n\
+             \x20       assert_eq!(ptr, 0, \"non-null empty Wasm list-i64 allocation\");\n\
              \x20       return Vec::new();\n\
              \x20   }\n\
+             \x20   let byte_len = len.checked_mul(std::mem::size_of::<i64>() as u32).expect(\"list-i64 byte length overflow\");\n\
+             \x20   jet_abi_require(JET_ABI_LIST_I64_KIND, ptr, byte_len);\n\
              \x20   unsafe {\n\
              \x20       let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut i64, len as usize));\n\
              \x20       boxed.into_vec()\n\
@@ -3806,12 +3859,18 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              }\n\n\
              #[no_mangle]\n\
              pub extern \"C\" fn jet_abi_list_i64_alloc(len: u32) -> u32 {\n\
+             \x20   if len == 0 { return 0; }\n\
              \x20   let boxed = vec![0i64; len as usize].into_boxed_slice();\n\
-             \x20   Box::into_raw(boxed) as *mut i64 as u32\n\
+             \x20   let ptr = Box::into_raw(boxed) as *mut i64 as u32;\n\
+             \x20   let byte_len = len.checked_mul(std::mem::size_of::<i64>() as u32).expect(\"list-i64 byte length overflow\");\n\
+             \x20   jet_abi_register(JET_ABI_LIST_I64_KIND, ptr, byte_len);\n\
+             \x20   ptr\n\
              }\n\n\
              #[no_mangle]\n\
              pub extern \"C\" fn jet_abi_list_i64_free(ptr: u32, len: u32) {\n\
-             \x20   if ptr == 0 { return; }\n\
+             \x20   if ptr == 0 { assert_eq!(len, 0, \"null Wasm list-i64 allocation with length\"); return; }\n\
+             \x20   let byte_len = len.checked_mul(std::mem::size_of::<i64>() as u32).expect(\"list-i64 byte length overflow\");\n\
+             \x20   jet_abi_require(JET_ABI_LIST_I64_KIND, ptr, byte_len);\n\
              \x20   unsafe {\n\
              \x20       let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut i64, len as usize));\n\
              \x20   }\n\
@@ -3834,20 +3893,23 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              \x20   let boxed = buf.into_boxed_slice();\n\
              \x20   let len = boxed.len() as u32;\n\
              \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   jet_abi_register(JET_ABI_LIST_INT_KIND, ptr, len);\n\
              \x20   ((ptr as u64) << 32) | len as u64\n\
              }\n\n\
              fn jet_abi_list_int_arg(packed: u64) -> Vec<JetWasmInt> {\n\
              \x20   let ptr = (packed >> 32) as u32;\n\
              \x20   let len = (packed & 0xffff_ffff) as u32;\n\
              \x20   if len == 0 {\n\
-             \x20       if ptr != 0 { unsafe { let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, 0)); } }\n\
+             \x20       assert_eq!(ptr, 0, \"non-null empty Wasm list-int allocation\");\n\
              \x20       return Vec::new();\n\
              \x20   }\n\
+             \x20   jet_abi_require(JET_ABI_LIST_INT_KIND, ptr, len);\n\
              \x20   unsafe {\n\
              \x20       let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize));\n\
              \x20       let bytes = boxed.into_vec();\n\
              \x20       assert!(bytes.len() >= 4, \"list-int header\");\n\
              \x20       let count = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;\n\
+             \x20       assert!(count <= (bytes.len() - 4) / 4, \"list-int count\");\n\
              \x20       let mut offset = 4usize;\n\
              \x20       let mut values = Vec::with_capacity(count);\n\
              \x20       for _ in 0..count {\n\
@@ -3867,12 +3929,17 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              }\n\n\
              #[no_mangle]\n\
              pub extern \"C\" fn jet_abi_list_int_alloc(byte_len: u32) -> u32 {\n\
+             \x20   if byte_len == 0 { return 0; }\n\
              \x20   let boxed = vec![0u8; byte_len as usize].into_boxed_slice();\n\
-             \x20   Box::into_raw(boxed) as *mut u8 as u32\n\
+             \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   jet_abi_register(JET_ABI_LIST_INT_KIND, ptr, byte_len);\n\
+             \x20   ptr\n\
              }\n\n\
              #[no_mangle]\n\
              pub extern \"C\" fn jet_abi_list_int_free(ptr: u32, byte_len: u32) {\n\
-             \x20   if ptr != 0 { unsafe { let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize)); } }\n\
+             \x20   if ptr == 0 { assert_eq!(byte_len, 0, \"null Wasm list-int allocation with length\"); return; }\n\
+             \x20   jet_abi_require(JET_ABI_LIST_INT_KIND, ptr, byte_len);\n\
+             \x20   unsafe { let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize)); }\n\
              }\n\n",
         );
     }
@@ -3898,25 +3965,24 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              \x20   let boxed = buf.into_boxed_slice();\n\
              \x20   let byte_len = boxed.len() as u32;\n\
              \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   jet_abi_register(JET_ABI_LIST_STRING_KIND, ptr, byte_len);\n\
              \x20   ((ptr as u64) << 32) | (byte_len as u64)\n\
              }\n\n\
              fn jet_abi_list_string_arg(packed: u64) -> Vec<String> {\n\
              \x20   let ptr = (packed >> 32) as u32;\n\
              \x20   let byte_len = (packed & 0xffff_ffff) as u32;\n\
              \x20   if byte_len == 0 {\n\
-             \x20       if ptr != 0 {\n\
-             \x20           unsafe {\n\
-             \x20               let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, 0));\n\
-             \x20           }\n\
-             \x20       }\n\
+             \x20       assert_eq!(ptr, 0, \"non-null empty Wasm list-string allocation\");\n\
              \x20       return Vec::new();\n\
              \x20   }\n\
+             \x20   jet_abi_require(JET_ABI_LIST_STRING_KIND, ptr, byte_len);\n\
              \x20   unsafe {\n\
              \x20       let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));\n\
              \x20       let buf = boxed.into_vec();\n\
              \x20       let mut i = 0usize;\n\
              \x20       assert!(buf.len() >= 4, \"list-string header\");\n\
              \x20       let count = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;\n\
+             \x20       assert!(count <= (buf.len() - 4) / 4, \"list-string count\");\n\
              \x20       i = 4;\n\
              \x20       let mut out = Vec::with_capacity(count);\n\
              \x20       for _ in 0..count {\n\
@@ -3927,17 +3993,22 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              \x20           out.push(String::from_utf8(buf[i..i + len].to_vec()).expect(\"JS UTF-8\"));\n\
              \x20           i += len;\n\
              \x20       }\n\
+             \x20       assert_eq!(i, buf.len(), \"list-string trailing bytes\");\n\
              \x20       out\n\
              \x20   }\n\
              }\n\n\
              #[no_mangle]\n\
              pub extern \"C\" fn jet_abi_list_string_alloc(byte_len: u32) -> u32 {\n\
+             \x20   if byte_len == 0 { return 0; }\n\
              \x20   let boxed = vec![0u8; byte_len as usize].into_boxed_slice();\n\
-             \x20   Box::into_raw(boxed) as *mut u8 as u32\n\
+             \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   jet_abi_register(JET_ABI_LIST_STRING_KIND, ptr, byte_len);\n\
+             \x20   ptr\n\
              }\n\n\
              #[no_mangle]\n\
              pub extern \"C\" fn jet_abi_list_string_free(ptr: u32, byte_len: u32) {\n\
-             \x20   if ptr == 0 { return; }\n\
+             \x20   if ptr == 0 { assert_eq!(byte_len, 0, \"null Wasm list-string allocation with length\"); return; }\n\
+             \x20   jet_abi_require(JET_ABI_LIST_STRING_KIND, ptr, byte_len);\n\
              \x20   unsafe {\n\
              \x20       let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));\n\
              \x20   }\n\
@@ -3969,25 +4040,24 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              \x20   let boxed = buf.into_boxed_slice();\n\
              \x20   let byte_len = boxed.len() as u32;\n\
              \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   jet_abi_register(JET_ABI_MAP_STRING_INT_KIND, ptr, byte_len);\n\
              \x20   ((ptr as u64) << 32) | (byte_len as u64)\n\
              }\n\n\
              fn jet_abi_map_string_int_arg(packed: u64) -> std::collections::BTreeMap<String, JetWasmInt> {\n\
              \x20   let ptr = (packed >> 32) as u32;\n\
              \x20   let byte_len = (packed & 0xffff_ffff) as u32;\n\
              \x20   if byte_len == 0 {\n\
-             \x20       if ptr != 0 {\n\
-             \x20           unsafe {\n\
-             \x20               let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, 0));\n\
-             \x20           }\n\
-             \x20       }\n\
+             \x20       assert_eq!(ptr, 0, \"non-null empty Wasm map-string-int allocation\");\n\
              \x20       return std::collections::BTreeMap::new();\n\
              \x20   }\n\
+             \x20   jet_abi_require(JET_ABI_MAP_STRING_INT_KIND, ptr, byte_len);\n\
              \x20   unsafe {\n\
              \x20       let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));\n\
              \x20       let buf = boxed.into_vec();\n\
              \x20       let mut i = 0usize;\n\
              \x20       assert!(buf.len() >= 4, \"map-string-int header\");\n\
              \x20       let count = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;\n\
+             \x20       assert!(count <= (buf.len() - 4) / 8, \"map-string-int count\");\n\
              \x20       i = 4;\n\
              \x20       let mut out = std::collections::BTreeMap::new();\n\
              \x20       for _ in 0..count {\n\
@@ -4013,12 +4083,16 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              }\n\n\
              #[no_mangle]\n\
              pub extern \"C\" fn jet_abi_map_string_int_alloc(byte_len: u32) -> u32 {\n\
+             \x20   if byte_len == 0 { return 0; }\n\
              \x20   let boxed = vec![0u8; byte_len as usize].into_boxed_slice();\n\
-             \x20   Box::into_raw(boxed) as *mut u8 as u32\n\
+             \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   jet_abi_register(JET_ABI_MAP_STRING_INT_KIND, ptr, byte_len);\n\
+             \x20   ptr\n\
              }\n\n\
              #[no_mangle]\n\
              pub extern \"C\" fn jet_abi_map_string_int_free(ptr: u32, byte_len: u32) {\n\
-             \x20   if ptr == 0 { return; }\n\
+             \x20   if ptr == 0 { assert_eq!(byte_len, 0, \"null Wasm map-string-int allocation with length\"); return; }\n\
+             \x20   jet_abi_require(JET_ABI_MAP_STRING_INT_KIND, ptr, byte_len);\n\
              \x20   unsafe {\n\
              \x20       let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));\n\
              \x20   }\n\
@@ -4296,7 +4370,7 @@ fn emit_wasm_fn(
         .ok_or_else(|| web_emit_error(f))?;
     out.push_str(&params.join(", "));
     out.push(')');
-    if let Some(ret) = &f.return_type {
+    if let Some(ret) = &f.tir.ret {
         out.push_str(&format!(
             " -> {} ",
             wasm_internal_ty(ret, bundle).ok_or_else(|| web_emit_error(f))?
@@ -4324,12 +4398,11 @@ fn emit_wasm_fn(
         &f.tir.web_param_reconstructions,
     )
     .map_err(|()| web_emit_error(f))?;
-    if f.key == "run"
-        && matches!(
-            f.return_type.as_ref(),
-            Some(Type::Result { ok, .. })
-                if matches!(ok.as_ref(), Type::Named(name) if name == "Unit")
-        )
+    if matches!(
+        f.tir.ret.as_ref(),
+        Some(Type::Result { ok, .. })
+            if matches!(ok.as_ref(), Type::Named(name) if name == "Unit")
+    )
     {
         out.push_str("    Ok(())\n");
     }

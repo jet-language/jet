@@ -216,9 +216,17 @@ fn collect_jet_files(
         if name.starts_with('.') || name == "build" || name == "target" {
             continue;
         }
-        if p.is_dir() {
+        let Ok(metadata) = std::fs::symlink_metadata(&p) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
             collect_jet_files(&p, root, out);
-        } else if p.extension().and_then(|e| e.to_str()) == Some(crate::Syntax::FILE_EXT) {
+        } else if metadata.is_file()
+            && p.extension().and_then(|e| e.to_str()) == Some(crate::Syntax::FILE_EXT)
+        {
             if let Ok(content) = std::fs::read(&p) {
                 let rel = p
                     .strip_prefix(root)
@@ -274,5 +282,26 @@ mod tests {
             streaming.update(std::slice::from_ref(byte));
         }
         assert_eq!(hex(streaming.finalize()), sha256_hex(b"abc"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tree_hash_skips_recursive_symlink_nodes() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-tree-hash-symlink-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/value.txt"), b"stable\n").unwrap();
+        let expected = tree_hash(&root);
+        symlink(".", root.join("src/loop")).unwrap();
+        assert_eq!(tree_hash(&root), expected);
+        let _ = std::fs::remove_dir_all(root);
     }
 }

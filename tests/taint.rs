@@ -549,6 +549,30 @@ mod auth_session_boundary {
             "registered users with invalid delivery identities must not receive magic links"
         );
     }
+
+    #[test]
+    fn session_show_redacts_bearer_and_oauth_fails_closed() {
+        let session = JetAuthSession {
+            id: "sess-live-bearer".to_string(),
+            user_id: "alice".to_string(),
+            expires_at: 42,
+            cookie: "jet_session=sess-live-bearer".to_string(),
+        };
+        let shown = jet_auth_session_show(&session);
+        assert_eq!(
+            shown,
+            "Session(id=<redacted>, user=alice, exp=42, cookie_len=28)"
+        );
+        assert!(!shown.contains("sess-live-bearer"));
+        assert!(jet_auth_oauth_begin("google".to_string()).is_err());
+        assert!(jet_auth_oauth_finish(
+            "state".to_string(),
+            "attacker".to_string(),
+            0,
+            1_000
+        )
+        .is_err());
+    }
 }
 
 /// A clean value (no taint) at `print` is fine — no E0722.

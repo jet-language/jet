@@ -706,6 +706,7 @@ fn integer_width_from_name(name: &str) -> Option<u32> {
 /// record its lock input. Shared by AST and canonical TIR evaluation.
 pub fn eval_net_fetch(
     args: &[CtValue],
+    base_dir: &Path,
     embed_inputs: Option<&mut Vec<crate::AST::ComptimeInput>>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
@@ -734,7 +735,7 @@ pub fn eval_net_fetch(
             )),
         };
 
-    let bytes = jet_net::fetch(&url).map_err(|error| {
+    let bytes = jet_net::fetch_in_root(&url, base_dir).map_err(|error| {
         Diagnostic::error(
             error.diagnostic_code(),
             error.diagnostic_what(&url),

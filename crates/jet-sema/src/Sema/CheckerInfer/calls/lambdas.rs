@@ -713,7 +713,7 @@ impl<'a> Checker<'a> {
                 }
                 // S46 one-line bodies: `() -> transfer(...)` is the brace-free
                 // form of `() -> { transfer(...) }`. When no value is expected
-                // (() / () E! callback, or inferred spawn body), treat the
+                // (() / !E callback, or inferred spawn body), treat the
                 // call as a statement so void functions do not trip E0116.
                 let needs_value = match effective_ret.as_ref() {
                     Some(Type::Named(name)) if name == "Unit" => false,

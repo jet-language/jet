@@ -176,7 +176,7 @@ pub fn eval_program_build_input_method(
             span,
         )),
         "fetch" => Some(
-            crate::Comptime::Methods::eval_net_fetch(args, embed_inputs, span)
+            crate::Comptime::Methods::eval_net_fetch(args, base_dir, embed_inputs, span)
                 .map(|value| CtValue::Present(Box::new(value))),
         ),
         _ => None,

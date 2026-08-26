@@ -14,7 +14,7 @@ use std::fs;
 use std::io::{BufReader, IsTerminal, Write};
 use std::net::{IpAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -32,6 +32,7 @@ use crate::{
 /// generous for a dev tool binding localhost).
 const PORT_RANGE: std::ops::RangeInclusive<u16> = 8080..=8089;
 const CANVAS_SESSION_BYTES: usize = 32;
+const MAX_CONNECTION_THREADS: usize = 64;
 
 /// How often the live-reload script in the browser polls `/__jet_dev_version`
 /// The browser waits 750ms after each completed request before polling again.
@@ -1410,15 +1411,21 @@ fn serve_forever(
     if listener.set_nonblocking(true).is_err() {
         return;
     }
+    let active_connections = Arc::new(AtomicUsize::new(0));
     while !shutdown.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, _)) => {
+                if !try_acquire_connection(&active_connections) {
+                    drop(stream);
+                    continue;
+                }
                 let status = Arc::clone(&status);
                 let debug_sessions = Arc::clone(&debug_sessions);
                 let session = Arc::clone(&session);
                 let canvas_file = canvas_file.clone();
                 let bind_host = bind_host.clone();
                 let session_secret = session_secret.clone();
+                let active_connections = Arc::clone(&active_connections);
                 thread::spawn(move || {
                     let _ = handle_connection(
                         stream,
@@ -1431,12 +1438,31 @@ fn serve_forever(
                         &bind_host,
                         &session_secret,
                     );
+                    active_connections.fetch_sub(1, Ordering::AcqRel);
                 });
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 let _ = wait_for_shutdown(&shutdown, Duration::from_millis(10));
             }
             Err(_) => return,
+        }
+    }
+}
+
+fn try_acquire_connection(active: &AtomicUsize) -> bool {
+    let mut current = active.load(Ordering::Acquire);
+    loop {
+        if current >= MAX_CONNECTION_THREADS {
+            return false;
+        }
+        match active.compare_exchange(
+            current,
+            current + 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return true,
+            Err(next) => current = next,
         }
     }
 }
@@ -1454,6 +1480,8 @@ fn handle_connection(
     bind_host: &str,
     session_secret: &str,
 ) -> std::io::Result<()> {
+    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(10)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let Some(request) = Request::read(&mut reader)? else {
         return Ok(());

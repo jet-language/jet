@@ -32,18 +32,11 @@ struct JetAuthMagicToken {
     delivery_capability: String,
 }
 
-#[derive(Clone, Debug)]
-struct JetAuthOAuthState {
-    state: String,
-    provider: String,
-}
-
 #[derive(Default)]
 struct JetAuthUserStore {
     users: Vec<JetAuthUser>,
     sessions: Vec<JetAuthSession>,
     magic_tokens: Vec<JetAuthMagicToken>,
-    oauth_states: Vec<JetAuthOAuthState>,
 }
 
 static JET_AUTH_STORE: JetAuthOnceLock<JetAuthMutex<JetAuthUserStore>> = JetAuthOnceLock::new();
@@ -155,8 +148,7 @@ fn jet_auth_session_value(
 
 fn jet_auth_session_show(session: &JetAuthSession) -> String {
     format!(
-        "Session(id={}, user={}, exp={}, cookie_len={})",
-        session.id,
+        "Session(id=<redacted>, user={}, exp={}, cookie_len={})",
         session.user_id,
         session.expires_at,
         session.cookie.len()
@@ -307,15 +299,9 @@ fn jet_auth_oauth_begin(provider: String) -> Result<String, String> {
     if !jet_auth_valid_identifier(&provider, 128) {
         return Err("OAuth provider is invalid".to_string());
     }
-    let state = jet_auth_opaque_token("oauth")?;
-    let Ok(mut store) = jet_auth_store().lock() else {
-        return Err("auth store is unavailable".to_string());
-    };
-    store.oauth_states.push(JetAuthOAuthState {
-        state: state.clone(),
-        provider,
-    });
-    Ok(state)
+    // This surface has no browser-session binding or provider metadata
+    // verifier. Do not issue a bearer state that callers cannot safely finish.
+    Err("OAuth requires a browser-bound provider flow".to_string())
 }
 
 fn jet_auth_oauth_finish(
@@ -324,39 +310,11 @@ fn jet_auth_oauth_finish(
     now_ms: i64,
     ttl_ms: i64,
 ) -> Result<JetAuthSession, String> {
-    let _ = jet_auth_expiry(now_ms, ttl_ms)?;
-    if !jet_auth_valid_identifier(&state, 256)
-        || !jet_auth_valid_identifier(&subject, 512)
-    {
-        return Err("OAuth callback is invalid".to_string());
-    }
-    let id = jet_auth_opaque_token("sess")?;
-    let Ok(mut store) = jet_auth_store().lock() else {
-        return Err("auth store is unavailable".to_string());
-    };
-    let idx = store
-        .oauth_states
-        .iter()
-        .position(|entry| jet_auth_constant_time_text_eq(&entry.state, &state))
-        .ok_or_else(|| "missing: oauth_state".to_string())?;
-    let provider = store.oauth_states.remove(idx).provider;
-    let user_id = format!("{provider}:{subject}");
-    if !store.users.iter().any(|user| user.user_id == user_id) {
-        store.users.push(JetAuthUser {
-            user_id: user_id.clone(),
-            password_hash: "oauth".to_string(),
-            delivery_capability: None,
-        });
-    }
-    let expires_at = jet_auth_expiry(now_ms, ttl_ms)?;
-    let session = JetAuthSession {
-        id: id.clone(),
-        user_id,
-        expires_at,
-        cookie: jet_auth_session_cookie_mint(&id),
-    };
-    store.sessions.push(session.clone());
-    Ok(session)
+    let _ = (state, subject, now_ms, ttl_ms);
+    // A raw subject is not an OAuth/OIDC proof. Keep the entire incomplete
+    // flow closed until a provider signature/issuer/audience/nonce check and a
+    // browser binding are available in this shared Prelude seam.
+    Err("OAuth completion requires verified provider proof and browser binding".to_string())
 }
 
 fn jet_auth_session_user(session: &JetAuthSession) -> String {

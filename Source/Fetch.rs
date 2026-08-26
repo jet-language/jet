@@ -15,6 +15,7 @@ use crate::Store;
 use crate::Syntax;
 use crate::SHA256::tree_hash;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -813,6 +814,9 @@ impl<'a> Resolver<'a> {
                 // Check if git is available.
                 if !git_available() {
                     return Err(vec![Lock::e1203()]);
+                }
+                if let Err(reason) = validate_git_transport_url(url) {
+                    return Err(vec![git_transport_diagnostic(url, &reason)]);
                 }
 
                 // Determine what rev to fetch.
@@ -2299,6 +2303,9 @@ fn git_cache_dir(url: &str, rev: &str) -> PathBuf {
 }
 
 fn git_resolve_ref(url: &str, refname: &str) -> Result<String, Diagnostic> {
+    if let Err(reason) = validate_git_transport_url(url) {
+        return Err(git_transport_diagnostic(url, &reason));
+    }
     let out = Command::new("git")
         .args(["ls-remote", "--exit-code", url, refname])
         .output()
@@ -2330,6 +2337,9 @@ fn git_resolve_ref(url: &str, refname: &str) -> Result<String, Diagnostic> {
 }
 
 fn git_clone(url: &str, rev: &str, dest: &Path) -> Result<(), Vec<Diagnostic>> {
+    if let Err(reason) = validate_git_transport_url(url) {
+        return Err(vec![git_transport_diagnostic(url, &reason)]);
+    }
     std::fs::create_dir_all(dest).map_err(|e| {
         vec![Diagnostic::error(
             "E1206",
@@ -2408,6 +2418,156 @@ fn normalize_path(p: &Path) -> PathBuf {
         }
     }
     out
+}
+
+fn git_transport_diagnostic(url: &str, reason: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1203",
+        "git dependency URL is not allowed".to_string(),
+        format!("git transport policy rejected `{url}`: {reason}"),
+        "use a public HTTPS, SSH, or Git URL, or a local file URL".to_string(),
+        None,
+    )
+}
+
+fn validate_git_transport_url(url: &str) -> Result<(), String> {
+    if url.is_empty() || url.chars().any(char::is_control) || url.starts_with('-') {
+        return Err("the URL is empty or contains unsafe characters".to_string());
+    }
+    if let Some(path) = url.strip_prefix("file://") {
+        if path.is_empty() || path.contains(['?', '#']) || !path.starts_with('/') {
+            return Err("file URLs must name a local absolute path".to_string());
+        }
+        return Ok(());
+    }
+    if !url.contains("://") && !looks_like_scp_url(url) {
+        return Ok(());
+    }
+    let (scheme, authority) = if let Some((scheme, rest)) = url.split_once("://") {
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+        (scheme.to_ascii_lowercase(), authority)
+    } else {
+        ("ssh".to_string(), url.split_once(':').map(|(host, _)| host).unwrap_or(""))
+    };
+    if !matches!(scheme.as_str(), "git" | "http" | "https" | "ssh") {
+        return Err(format!("the `{scheme}` transport is not allowed"));
+    }
+    let host = host_from_git_authority(authority)?;
+    let port = if let Some(port) = port_from_git_authority(authority)? {
+        port
+    } else if scheme == "https" {
+        443
+    } else if scheme == "http" {
+        80
+    } else {
+        22
+    };
+    let endpoint = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    let addresses = endpoint
+        .to_socket_addrs()
+        .map_err(|error| format!("could not resolve the destination: {error}"))?
+        .collect::<Vec<_>>();
+    if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
+        return Err("the destination resolves to a non-public address".to_string());
+    }
+    Ok(())
+}
+
+fn looks_like_scp_url(url: &str) -> bool {
+    url.split_once(':')
+        .map(|(host, path)| {
+            !host.is_empty()
+                && !path.is_empty()
+                && !host.contains(['/', '?', '#'])
+                && !host.ends_with('\\')
+        })
+        .unwrap_or(false)
+}
+
+fn host_from_git_authority(authority: &str) -> Result<String, String> {
+    let authority = authority
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(authority);
+    if authority.is_empty() || authority.contains(['@', '\\']) {
+        return Err("the URL has no valid host".to_string());
+    }
+    if let Some(host) = authority.strip_prefix('[') {
+        let (host, suffix) = host
+            .split_once(']')
+            .ok_or_else(|| "the URL has an invalid IPv6 host".to_string())?;
+        if host.is_empty() || (!suffix.is_empty() && !suffix.starts_with(':')) {
+            return Err("the URL has an invalid host".to_string());
+        }
+        return Ok(host.to_string());
+    }
+    let host = authority.rsplit_once(':').map(|(host, _)| host).unwrap_or(authority);
+    if host.is_empty() || host.contains(':') || host.chars().any(char::is_whitespace) {
+        return Err("the URL has an invalid host".to_string());
+    }
+    Ok(host.to_string())
+}
+
+fn port_from_git_authority(authority: &str) -> Result<Option<u16>, String> {
+    let authority = authority
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(authority);
+    let raw_port = if let Some(host) = authority.strip_prefix('[') {
+        host.split_once(']')
+            .and_then(|(_, suffix)| suffix.strip_prefix(':'))
+    } else {
+        authority.rsplit_once(':').map(|(_, port)| port)
+    };
+    raw_port
+        .map(|port| {
+            let port = port
+                .parse::<u16>()
+                .map_err(|_| "the URL has an invalid port".to_string())?;
+            if port == 0 {
+                return Err("the URL has an invalid port".to_string());
+            }
+            Ok(port)
+        })
+        .transpose()
+}
+
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
+            !(a == 0
+                || a == 10
+                || a == 100 && (b & 0b1100_0000) == 0b0100_0000
+                || a == 127
+                || a == 169 && b == 254
+                || a == 172 && (16..=31).contains(&b)
+                || a == 192 && b == 0 && c == 0
+                || a == 192 && b == 0 && c == 2
+                || a == 192 && b == 168
+                || a == 198 && (18..=19).contains(&b)
+                || a == 198 && b == 51 && c == 100
+                || a == 203 && b == 0 && c == 113
+                || a >= 224)
+        }
+        IpAddr::V6(ip) => {
+            if let Some(ipv4) = ip.to_ipv4_mapped() {
+                return is_public_ip(IpAddr::V4(ipv4));
+            }
+            let [first, second, ..] = ip.segments();
+            (first & 0xe000) == 0x2000
+                && !ip.is_unspecified()
+                && !ip.is_loopback()
+                && !ip.is_multicast()
+                && (first & 0xfe00) != 0xfc00
+                && (first & 0xffc0) != 0xfe80
+                && !(first == 0x2001 && second == 0x0db8)
+        }
+    }
 }
 
 fn unix_now() -> u64 {

@@ -21,9 +21,15 @@ fn run() {
     magic_sess :: auth.magic_link_consume(magic, 1_700_000_000_100, 3_600_000) ?? return Err("consume")
     print("magic_user:{auth.session_user(magic_sess)}")
 
-    state :: auth.oauth_begin("google") ?? return Err("oauth begin")
-    oauth_sess :: auth.oauth_finish(state, "carol", 1_700_000_000_200, 3_600_000) ?? return Err("oauth finish")
-    print("oauth_user:{auth.session_user(oauth_sess)}")
+    if auth.oauth_begin("google") == {
+        .Ok(state) -> {
+            if auth.oauth_finish(state, "carol", 1_700_000_000_200, 3_600_000) == {
+                .Ok(oauth_sess) -> print("oauth_user:{auth.session_user(oauth_sess)}")
+                .Err(_) -> print("oauth:rejected")
+            }
+        }
+        .Err(_) -> print("oauth:rejected")
+    }
 
     gate0 :: app.auth("users")
     gate :: app.auth_oauth(gate0, "google github")

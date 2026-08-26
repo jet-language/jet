@@ -88,6 +88,8 @@ pub(super) fn serve_studio(
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
                 let _ = handle_studio_request(&mut stream, app, meta, data, context);
             }
             Err(e) => {

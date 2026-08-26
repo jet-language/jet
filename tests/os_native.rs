@@ -65,6 +65,38 @@ fn temp_dir(label: &str) -> PathBuf {
 }
 
 #[test]
+fn termios_ffi_layout_is_target_specific_and_shared_by_native_tiers() {
+    let term = include_str!("../crates/jet-codegen/src/Prelude/Term.rs");
+    assert!(
+        term.contains("type TermFlag = std::os::raw::c_ulong")
+            && term.contains("target_os = \"macos\"")
+            && term.contains("target_os = \"ios\""),
+        "Darwin termios flags must use the native unsigned-long ABI"
+    );
+    assert!(
+        term.contains("const VMIN: usize = 16") && term.contains("const VTIME: usize = 17"),
+        "Darwin/BSD control-byte offsets must not use Linux VMIN/VTIME"
+    );
+    assert!(
+        term.contains("std::mem::size_of::<Termios>() == 72")
+            && term.contains("std::mem::size_of::<Termios>() == 44")
+            && term.contains("std::mem::size_of::<Termios>() == 36"),
+        "supported Unix termios layouts need compile-time size guards"
+    );
+    assert!(
+        !term.contains("_pad") && !term.contains("[u8; 12]"),
+        "termios must not guess a foreign ABI with padding"
+    );
+
+    let aot = include_str!("../crates/jet-codegen/src/Codegen/mod.rs");
+    let jit = include_str!("../crates/jet-jit/src/IO.rs");
+    let interpreter = include_str!("../crates/jet-codegen/src/Codegen/TIR/eval/mod.rs");
+    assert!(aot.contains("include_str!(\"../Prelude/Term.rs\")"));
+    assert!(jit.contains("include!(\"../../jet-codegen/src/Prelude/Term.rs\")"));
+    assert!(interpreter.contains("include!(\"../../../Prelude/Term.rs\")"));
+}
+
+#[test]
 fn native_os_facts_match_host_and_are_nonempty() {
     let dir = temp_dir("facts");
     let binary = compile(

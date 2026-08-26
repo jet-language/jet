@@ -134,21 +134,6 @@ fn store_block(block: &Block, out: &mut [u8]) {
     }
 }
 
-fn blake2b_g(a: &mut u64, b: &mut u64, c: &mut u64, d: &mut u64) {
-    *a = a
-        .wrapping_add(*b)
-        .wrapping_add(2u64.wrapping_mul((*a & 0xffff_ffff) * (*b & 0xffff_ffff)));
-    *d = (*d ^ *a).rotate_right(32);
-    *c = c.wrapping_add(*d);
-    *b = (*b ^ *c).rotate_right(24);
-    *a = a
-        .wrapping_add(*b)
-        .wrapping_add(2u64.wrapping_mul((*a & 0xffff_ffff) * (*b & 0xffff_ffff)));
-    *d = (*d ^ *a).rotate_right(16);
-    *c = c.wrapping_add(*d);
-    *b = (*b ^ *c).rotate_right(63);
-}
-
 fn permute_block(v: &mut Block) {
     // Argon2 Blake2b round over 16-word columns/rows — use reference G pairs.
     for i in 0..8 {
@@ -177,13 +162,17 @@ fn permute_block(v: &mut Block) {
                 .wrapping_add(a[j])
                 .wrapping_add(2u64.wrapping_mul((a[i] & 0xffff_ffff) * (a[j] & 0xffff_ffff)));
             a[l] = (a[l] ^ a[i]).rotate_right(32);
-            a[k] = a[k].wrapping_add(a[l]);
+            a[k] = a[k]
+                .wrapping_add(a[l])
+                .wrapping_add(2u64.wrapping_mul((a[k] & 0xffff_ffff) * (a[l] & 0xffff_ffff)));
             a[j] = (a[j] ^ a[k]).rotate_right(24);
             a[i] = a[i]
                 .wrapping_add(a[j])
                 .wrapping_add(2u64.wrapping_mul((a[i] & 0xffff_ffff) * (a[j] & 0xffff_ffff)));
             a[l] = (a[l] ^ a[i]).rotate_right(16);
-            a[k] = a[k].wrapping_add(a[l]);
+            a[k] = a[k]
+                .wrapping_add(a[l])
+                .wrapping_add(2u64.wrapping_mul((a[k] & 0xffff_ffff) * (a[l] & 0xffff_ffff)));
             a[j] = (a[j] ^ a[k]).rotate_right(63);
         }
         gb(&mut a, 0, 4, 8, 12);
@@ -199,36 +188,41 @@ fn permute_block(v: &mut Block) {
         }
     }
     for i in 0..8 {
+        let i0 = i * 2;
         let mut a = [
-            v[i],
-            v[i + 8],
-            v[i + 16],
-            v[i + 24],
-            v[i + 32],
-            v[i + 40],
-            v[i + 48],
-            v[i + 56],
-            v[i + 64],
-            v[i + 72],
-            v[i + 80],
-            v[i + 88],
-            v[i + 96],
-            v[i + 104],
-            v[i + 112],
-            v[i + 120],
+            v[i0],
+            v[i0 + 1],
+            v[i0 + 16],
+            v[i0 + 17],
+            v[i0 + 32],
+            v[i0 + 33],
+            v[i0 + 48],
+            v[i0 + 49],
+            v[i0 + 64],
+            v[i0 + 65],
+            v[i0 + 80],
+            v[i0 + 81],
+            v[i0 + 96],
+            v[i0 + 97],
+            v[i0 + 112],
+            v[i0 + 113],
         ];
         fn gb(a: &mut [u64; 16], i: usize, j: usize, k: usize, l: usize) {
             a[i] = a[i]
                 .wrapping_add(a[j])
                 .wrapping_add(2u64.wrapping_mul((a[i] & 0xffff_ffff) * (a[j] & 0xffff_ffff)));
             a[l] = (a[l] ^ a[i]).rotate_right(32);
-            a[k] = a[k].wrapping_add(a[l]);
+            a[k] = a[k]
+                .wrapping_add(a[l])
+                .wrapping_add(2u64.wrapping_mul((a[k] & 0xffff_ffff) * (a[l] & 0xffff_ffff)));
             a[j] = (a[j] ^ a[k]).rotate_right(24);
             a[i] = a[i]
                 .wrapping_add(a[j])
                 .wrapping_add(2u64.wrapping_mul((a[i] & 0xffff_ffff) * (a[j] & 0xffff_ffff)));
             a[l] = (a[l] ^ a[i]).rotate_right(16);
-            a[k] = a[k].wrapping_add(a[l]);
+            a[k] = a[k]
+                .wrapping_add(a[l])
+                .wrapping_add(2u64.wrapping_mul((a[k] & 0xffff_ffff) * (a[l] & 0xffff_ffff)));
             a[j] = (a[j] ^ a[k]).rotate_right(63);
         }
         gb(&mut a, 0, 4, 8, 12);
@@ -240,10 +234,11 @@ fn permute_block(v: &mut Block) {
         gb(&mut a, 2, 7, 8, 13);
         gb(&mut a, 3, 4, 9, 14);
         for j in 0..16 {
-            v[i + j * 8] = a[j];
+            let row = j / 2;
+            let column = i0 + j % 2;
+            v[row * 16 + column] = a[j];
         }
     }
-    let _ = blake2b_g;
 }
 
 fn xor_block(dst: &mut Block, src: &Block) {
@@ -318,12 +313,31 @@ pub(super) fn hash(
 
     for pass in 0..iterations {
         for slice in 0..4usize {
+            let data_independent = pass == 0 && slice < 2;
             for lane in 0..lanes as usize {
-                for index in 0..segment_length {
-                    let pos = lane * lane_length + slice * segment_length + index;
-                    if pass == 0 && slice == 0 && index < 2 {
-                        continue;
+                let mut address_block = [0u64; 128];
+                let mut input_block = [0u64; 128];
+                let zero_block = [0u64; 128];
+                if data_independent {
+                    input_block[..6].copy_from_slice(&[
+                        pass as u64,
+                        lane as u64,
+                        slice as u64,
+                        m as u64,
+                        iterations as u64,
+                        2, // Argon2id
+                    ]);
+                }
+                let first_block = if pass == 0 && slice == 0 {
+                    if data_independent {
+                        update_address_block(&mut address_block, &mut input_block, &zero_block);
                     }
+                    2
+                } else {
+                    0
+                };
+                for index in first_block..segment_length {
+                    let pos = lane * lane_length + slice * segment_length + index;
                     let prev_index = if index == 0 && slice == 0 {
                         lane * lane_length + lane_length - 1
                     } else if index == 0 {
@@ -332,63 +346,35 @@ pub(super) fn hash(
                         pos - 1
                     };
                     let prev = memory[prev_index];
-                    let j1 = (prev[0] & 0xffff_ffff) as u32;
-                    let j2 = ((prev[0] >> 32) & 0xffff_ffff) as u32;
-
-                    // Argon2id addressing: first half pass0 uses data-independent.
-                    let data_independent = pass == 0 && slice < 2;
-                    let (ref_lane, ref_index) = if data_independent {
-                        // Simplified independent address generation via PRNG block.
-                        let mut address_block = [0u64; 128];
-                        let mut input_block = [0u64; 128];
-                        input_block[0] = pass as u64;
-                        input_block[1] = lane as u64;
-                        input_block[2] = slice as u64;
-                        input_block[3] = m as u64;
-                        input_block[4] = iterations as u64;
-                        input_block[5] = 2; // type id
-                        input_block[6] = (index as u64) + 1;
-                        fill_block(&[0u64; 128], &input_block, &mut address_block, false);
-                        let zero = [0u64; 128];
-                        let addr_src = address_block;
-                        fill_block(&zero, &addr_src, &mut address_block, false);
-                        let j1 = (address_block[0] & 0xffff_ffff) as u32;
-                        let j2 = ((address_block[0] >> 32) & 0xffff_ffff) as u32;
-                        let ref_lane = if slice == 0 && pass == 0 {
-                            lane
-                        } else {
-                            (j2 as usize) % lanes as usize
-                        };
-                        let (start, area) = ref_area(
-                            pass,
-                            slice,
-                            index,
-                            lane,
-                            ref_lane,
-                            segment_length,
-                            lane_length,
-                        );
-                        let relative = mapping(j1, area);
-                        (ref_lane, start + relative)
+                    let rand = if data_independent {
+                        let address_index = index % 128;
+                        if address_index == 0 {
+                            update_address_block(
+                                &mut address_block,
+                                &mut input_block,
+                                &zero_block,
+                            );
+                        }
+                        address_block[address_index]
                     } else {
-                        let ref_lane = if slice == 0 && pass == 0 {
-                            lane
-                        } else {
-                            (j2 as usize) % lanes as usize
-                        };
-                        let (start, area) = ref_area(
-                            pass,
-                            slice,
-                            index,
-                            lane,
-                            ref_lane,
-                            segment_length,
-                            lane_length,
-                        );
-                        let relative = mapping(j1, area);
-                        (ref_lane, start + relative)
+                        prev[0]
                     };
-                    let reference = memory[ref_lane * lane_length + (ref_index % lane_length)];
+                    let ref_lane = if pass == 0 && slice == 0 {
+                        lane
+                    } else {
+                        ((rand >> 32) as usize) % lanes as usize
+                    };
+                    let (start, area) = ref_area(
+                        pass,
+                        slice,
+                        index,
+                        lane,
+                        ref_lane,
+                        segment_length,
+                        lane_length,
+                    );
+                    let ref_index = ref_lane * lane_length + (start + mapping(rand as u32, area)) % lane_length;
+                    let reference = memory[ref_index];
                     let with_xor = pass != 0;
                     let mut next = if with_xor { memory[pos] } else { [0u64; 128] };
                     fill_block(&prev, &reference, &mut next, with_xor);
@@ -398,19 +384,8 @@ pub(super) fn hash(
         }
     }
 
-    let mut blockhash = memory[(lanes as usize - 1) * lane_length];
-    for lane in 0..lanes as usize - 1 {
-        xor_block(
-            &mut blockhash,
-            &memory[lane * lane_length + lane_length - 1],
-        );
-    }
-    xor_block(
-        &mut blockhash,
-        &memory[(lanes as usize - 1) * lane_length + lane_length - 1],
-    );
-    // Fix final xor: last block of each lane
-    blockhash = memory[lane_length - 1];
+    // Argon2 finalization XORs the last block of every lane.
+    let mut blockhash = memory[lane_length - 1];
     for lane in 1..lanes as usize {
         xor_block(
             &mut blockhash,
@@ -424,8 +399,15 @@ pub(super) fn hash(
 
 fn mapping(j1: u32, area: usize) -> usize {
     let x = (j1 as u64).wrapping_mul(j1 as u64) >> 32;
-    let y = ((area as u64 - 1) * x) >> 32;
+    let y = (area as u64 * x) >> 32;
     (area as u64 - 1 - y) as usize
+}
+
+fn update_address_block(address_block: &mut Block, input_block: &mut Block, zero_block: &Block) {
+    input_block[6] = input_block[6].wrapping_add(1);
+    fill_block(zero_block, input_block, address_block, false);
+    let address_source = *address_block;
+    fill_block(zero_block, &address_source, address_block, false);
 }
 
 fn ref_area(
@@ -438,31 +420,43 @@ fn ref_area(
     lane_length: usize,
 ) -> (usize, usize) {
     let same_lane = ref_lane == lane;
-    if pass == 0 {
+    let area = if pass == 0 {
         if slice == 0 {
-            (0, index)
+            index - 1
         } else if same_lane {
-            (0, slice * segment_length + index)
-        } else if index == 0 {
-            (0, slice * segment_length)
+            slice * segment_length + index - 1
         } else {
-            (0, slice * segment_length + 1)
+            slice * segment_length - usize::from(index == 0)
         }
     } else if same_lane {
-        let start = ((slice + 1) % 4) * segment_length;
-        (start, lane_length - segment_length + index)
-    } else if index == 0 {
-        let start = ((slice + 1) % 4) * segment_length;
-        (start, lane_length - segment_length)
+        lane_length - segment_length + index - 1
     } else {
-        let start = ((slice + 1) % 4) * segment_length;
-        (start, lane_length - segment_length + 1)
-    }
+        lane_length - segment_length - usize::from(index == 0)
+    };
+    let start = if pass != 0 && slice != 3 {
+        (slice + 1) * segment_length
+    } else {
+        0
+    };
+    (start, area)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blake2b_matches_rfc7693_abc() {
+        let actual = blake2b(b"abc", 64);
+        let expected = [
+            0xba, 0x80, 0xa5, 0x3f, 0x98, 0x1c, 0x4d, 0x0d, 0x6a, 0x27, 0x97, 0xb6, 0x9f,
+            0x12, 0xf6, 0xe9, 0x4c, 0x21, 0x2f, 0x14, 0x68, 0x5a, 0xc4, 0xb7, 0x4b, 0x12,
+            0xbb, 0x6f, 0xdb, 0xff, 0xa2, 0xd1, 0x7d, 0x87, 0xc5, 0x39, 0x2a, 0xab, 0x79,
+            0x2d, 0xc2, 0x52, 0xd5, 0xde, 0x45, 0x33, 0xcc, 0x95, 0x18, 0xd3, 0x8a, 0xa8,
+            0xdb, 0xf1, 0x92, 0x5a, 0xb9, 0x23, 0x86, 0xed, 0xd4, 0x00, 0x99, 0x23,
+        ];
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn rfc9106_section_5_3_argon2id() {

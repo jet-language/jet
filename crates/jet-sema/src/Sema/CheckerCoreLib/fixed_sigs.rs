@@ -3665,7 +3665,7 @@ fn core_fixed_sig_impl(
             Some(result_ty(Type::Named("Mod".to_string()), Type::String)),
         )),
         // D-UUIDENC1=A: hex and base64 codecs. `encode` is infallible; `decode`
-        // returns `[Byte] String!` (invalid input → Err).
+        // returns `[Byte] !String` (invalid input → Err).
         ("core.encoding.hex", "encode") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }

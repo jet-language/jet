@@ -14,6 +14,7 @@
 //! is ever added to `Source/` or `crates/jet-driver`'s own `Cargo.toml`.
 
 use crate::Diagnostics::Diagnostic;
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -111,10 +112,9 @@ pub fn keygen(registry: &str, force: bool) -> Result<(PathBuf, PathBuf, String),
         if let Some(parent) = seed_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| io_error("keys directory", e))?;
         }
-        std::fs::write(&seed_path, &seed).map_err(|e| io_error("signing key", e))?;
-        set_mode(&seed_path, 0o600);
+        write_private_seed(&seed_path, &seed, force)?;
         std::fs::write(&pub_path, pub_hex.as_bytes()).map_err(|e| io_error("public key", e))?;
-        set_mode(&pub_path, 0o644);
+        set_mode(&pub_path, 0o644)?;
         Ok::<_, Diagnostic>(())
     })();
     volatile_zeroize(&mut seed);
@@ -398,14 +398,61 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
 // File permissions
 // ──────────────────────────────────────────────
 
+fn write_private_seed(path: &Path, seed: &[u8], force: bool) -> Result<(), Diagnostic> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+
+        let temp = force.then(|| path.with_extension(format!("ed25519.jet-key-{}.tmp", std::process::id())));
+        let destination = temp.as_deref().unwrap_or(path);
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true).mode(0o600);
+        let mut output = options
+            .open(destination)
+            .map_err(|error| io_error("signing key", error))?;
+        let result = (|| {
+            output
+                .write_all(seed)
+                .and_then(|_| output.sync_all())
+                .map_err(|error| io_error("signing key", error))?;
+            // The mode is restrictive at open time, and this check makes any
+            // later permission change a hard failure before publication.
+            set_mode(destination, 0o600)?;
+            if force {
+                std::fs::rename(destination, path)
+                    .map_err(|error| io_error("signing key", error))?;
+            }
+            Ok::<_, Diagnostic>(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(destination);
+        }
+        result
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, seed, force);
+        Err(io_error(
+            "signing key permissions",
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "private signing-key permissions are unavailable on this platform",
+            ),
+        ))
+    }
+}
+
 #[cfg(unix)]
-fn set_mode(path: &Path, mode: u32) {
+fn set_mode(path: &Path, mode: u32) -> Result<(), Diagnostic> {
     use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+        .map_err(|error| io_error("file permissions", error))
 }
 
 #[cfg(not(unix))]
-fn set_mode(_path: &Path, _mode: u32) {}
+fn set_mode(_path: &Path, _mode: u32) -> Result<(), Diagnostic> {
+    Ok(())
+}
 
 // ──────────────────────────────────────────────
 // Tests (pure encoders — no bridge needed)
@@ -469,5 +516,30 @@ mod tests {
         let mut secret = vec![0xa5; 96];
         volatile_zeroize(&mut secret);
         assert_eq!(secret, vec![0; 96]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn force_keygen_replaces_a_symlink_without_following_it() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let root = std::env::temp_dir().join(format!("jet-sign-seed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("attacker-target");
+        let path = root.join("key.ed25519");
+        std::fs::write(&target, b"sentinel").unwrap();
+        symlink(&target, &path).unwrap();
+
+        let seed = [0x5a; 32];
+        write_private_seed(&path, &seed, true).unwrap();
+
+        assert_eq!(std::fs::read(&target).unwrap(), b"sentinel");
+        assert_eq!(std::fs::read(&path).unwrap(), seed);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o7777,
+            0o600
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

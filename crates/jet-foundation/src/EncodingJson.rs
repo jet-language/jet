@@ -1,5 +1,7 @@
 // One JSON parser for the embedded Prelude and comptime adapters.
 
+pub const MAX_JSON_DEPTH: usize = 64;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Null,
@@ -13,6 +15,19 @@ pub enum Value {
     Text(String),
     Array(Vec<Value>),
     Object(Vec<(String, Value)>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hostile_nested_json_is_rejected_before_unbounded_recursion() {
+        let depth = MAX_JSON_DEPTH + 1;
+        let input = format!("{}0{}", "[".repeat(depth), "]".repeat(depth));
+        let error = parse_json(&input, false).expect_err("depth limit must reject input");
+        assert!(error.message.contains("nested too deeply"));
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -40,7 +55,7 @@ fn parse_json_with_number_mode(
         reject_duplicate_keys,
         preserve_numbers,
     };
-    let value = parser.value()?;
+    let value = parser.value(0)?;
     parser.ws();
     if parser.pos != parser.chars.len() {
         return Err(parser.err(super::jet_encoding_errors::JSON_EXTRA_TEXT));
@@ -82,15 +97,15 @@ impl Parser {
         }
     }
 
-    fn value(&mut self) -> Result<Value, Error> {
+    fn value(&mut self, depth: usize) -> Result<Value, Error> {
         self.ws();
         match self.peek() {
             Some('n') => self.word("null", Value::Null),
             Some('t') => self.word("true", Value::Bool(true)),
             Some('f') => self.word("false", Value::Bool(false)),
             Some('"') => Ok(Value::Text(self.string()?)),
-            Some('[') => self.array(),
-            Some('{') => self.object(),
+            Some('[') => self.array(depth),
+            Some('{') => self.object(depth),
             Some('-') | Some('0'..='9') => self.number(),
             _ => Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_VALUE)),
         }
@@ -245,7 +260,10 @@ impl Parser {
             .map_err(|_| self.err(super::jet_encoding_errors::JSON_BAD_NUMBER))
     }
 
-    fn array(&mut self) -> Result<Value, Error> {
+    fn array(&mut self, depth: usize) -> Result<Value, Error> {
+        if depth >= MAX_JSON_DEPTH {
+            return Err(self.err("JSON value is nested too deeply"));
+        }
         self.pos += 1;
         let mut values = Vec::new();
         loop {
@@ -254,7 +272,7 @@ impl Parser {
                 self.pos += 1;
                 return Ok(Value::Array(values));
             }
-            values.push(self.value()?);
+            values.push(self.value(depth + 1)?);
             self.ws();
             match self.peek() {
                 Some(',') => self.pos += 1,
@@ -266,7 +284,10 @@ impl Parser {
         }
     }
 
-    fn object(&mut self) -> Result<Value, Error> {
+    fn object(&mut self, depth: usize) -> Result<Value, Error> {
+        if depth >= MAX_JSON_DEPTH {
+            return Err(self.err("JSON value is nested too deeply"));
+        }
         self.pos += 1;
         let mut fields = Vec::new();
         loop {
@@ -281,7 +302,7 @@ impl Parser {
                 return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_OBJECT_COLON));
             }
             self.pos += 1;
-            let value = self.value()?;
+            let value = self.value(depth + 1)?;
             if self.reject_duplicate_keys && fields.iter().any(|(field, _)| field == &key) {
                 return Err(self.err(super::jet_encoding_errors::JSON_DUPLICATE_OBJECT_KEY));
             }

@@ -284,7 +284,7 @@ pub fn run_native_sandboxed(
             true,
             output_dir.is_none(),
             None,
-            None,
+            Some(64 * 1024 * 1024),
         )
         .map_err(|error| match error {
             jet_process_sandbox::WindowsSandboxError::Unsupported(detail) => {

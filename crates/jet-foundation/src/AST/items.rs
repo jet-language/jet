@@ -1185,7 +1185,7 @@ impl Func {
     }
 
     /// Every callable has a Result-shaped carrier. An omitted return contract
-    /// is the default `Unit ! Err` route; an explicit prefix contract remains
+    /// is the implicit default `Err` route; an explicit prefix contract remains
     /// typed, including `!Never`.
     pub fn effective_return_type(&self) -> Type {
         self.failure_contract().effective_type()

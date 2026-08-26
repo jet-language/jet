@@ -473,6 +473,7 @@ struct TOMLParser {
     pos: usize,
     line: usize,
 }
+const MAX_TOML_DEPTH: usize = 64;
 struct TOMLParseError {
     line: usize,
     message: String,
@@ -582,7 +583,7 @@ impl TOMLParser {
         }
         self.bump();
         self.skip_inline_ws();
-        let value = self.value()?;
+        let value = self.value(0)?;
         self.finish_line()?;
         Ok(TOMLItem::KeyVal { path, value })
     }
@@ -624,12 +625,15 @@ impl TOMLParser {
             None => Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_KEY)),
         }
     }
-    fn value(&mut self) -> Result<TOMLValue, TOMLParseError> {
+    fn value(&mut self, depth: usize) -> Result<TOMLValue, TOMLParseError> {
+        if depth >= MAX_TOML_DEPTH {
+            return Err(self.err("TOML value is nested too deeply"));
+        }
         match self.peek() {
             Some('"') => Ok(TOMLValue::String(self.basic_string()?)),
             Some('\'') => Ok(TOMLValue::String(self.literal_string()?)),
-            Some('[') => self.array(),
-            Some('{') => self.inline_table(),
+            Some('[') => self.array(depth),
+            Some('{') => self.inline_table(depth),
             Some('t') | Some('f') => self.boolean(),
             Some('+') | Some('-') | Some('0'..='9') | Some('i') | Some('n') => {
                 self.number_or_datetime()
@@ -823,7 +827,7 @@ impl TOMLParser {
             }
         }
     }
-    fn array(&mut self) -> Result<TOMLValue, TOMLParseError> {
+    fn array(&mut self, depth: usize) -> Result<TOMLValue, TOMLParseError> {
         self.bump();
         let mut items = Vec::new();
         loop {
@@ -838,7 +842,7 @@ impl TOMLParser {
                 }
                 _ => {}
             }
-            items.push(self.value()?);
+            items.push(self.value(depth + 1)?);
             self.skip_ws_newlines_comments();
             match self.peek() {
                 Some(',') => {
@@ -870,7 +874,7 @@ impl TOMLParser {
             }
         }
     }
-    fn inline_table(&mut self) -> Result<TOMLValue, TOMLParseError> {
+    fn inline_table(&mut self, depth: usize) -> Result<TOMLValue, TOMLParseError> {
         self.bump();
         let mut entries = Vec::new();
         self.skip_inline_ws();
@@ -886,7 +890,7 @@ impl TOMLParser {
                 return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_INLINE_EQUALS));
             }
             self.skip_inline_ws();
-            let value = self.value()?;
+            let value = self.value(depth + 1)?;
             entries.push((path.join("."), value));
             self.skip_inline_ws();
             match self.bump() {
@@ -1085,7 +1089,7 @@ pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
     }
     let base = p.indent(p.pos);
     let value = p
-        .parse_node(base)
+        .parse_node(base, 0)
         .map_err(|e| json_error_struct(e.line as i64, e.message))?;
     p.skip_ignorable();
     if p.pos < p.lines.len() && !p.at_doc_marker() && !p.at_doc_end() {
@@ -1102,6 +1106,7 @@ struct YAMLParser {
     pos: usize,
     anchors: BTreeMap<String, CtValue>,
 }
+const MAX_YAML_DEPTH: usize = 64;
 struct YAMLParseError {
     line: usize,
     message: String,
@@ -1131,10 +1136,16 @@ impl YAMLParser {
         self.pos < self.lines.len() && self.lines[self.pos].trim() == "..."
     }
 
-    fn parse_node(&mut self, min_indent: usize) -> Result<CtValue, YAMLParseError> {
+    fn parse_node(&mut self, min_indent: usize, depth: usize) -> Result<CtValue, YAMLParseError> {
         self.skip_ignorable();
         if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
             return Ok(json_variant("Null", None));
+        }
+        if depth >= MAX_YAML_DEPTH {
+            return Err(YAMLParseError {
+                line: self.pos + 1,
+                message: "YAML value is nested too deeply".to_string(),
+            });
         }
         let ind = self.indent(self.pos);
         if ind < min_indent {
@@ -1142,16 +1153,16 @@ impl YAMLParser {
         }
         let content = self.content(self.pos);
         if content == "-" || content.starts_with("- ") {
-            self.parse_block_seq(ind)
+            self.parse_block_seq(ind, depth)
         } else if yaml_is_map_entry(&content) {
-            self.parse_block_map(ind)
+            self.parse_block_map(ind, depth)
         } else {
             self.pos += 1;
-            self.parse_inline_value(&content)
+            self.parse_inline_value(&content, depth)
         }
     }
 
-    fn parse_block_seq(&mut self, indent: usize) -> Result<CtValue, YAMLParseError> {
+    fn parse_block_seq(&mut self, indent: usize, depth: usize) -> Result<CtValue, YAMLParseError> {
         let mut items = Vec::new();
         loop {
             self.skip_ignorable();
@@ -1177,13 +1188,13 @@ impl YAMLParser {
                 rebuilt = String::new();
             }
             *line = rebuilt;
-            let item = self.parse_node(indent + 1)?;
+            let item = self.parse_node(indent + 1, depth + 1)?;
             items.push(item);
         }
         Ok(json_array(items))
     }
 
-    fn parse_block_map(&mut self, indent: usize) -> Result<CtValue, YAMLParseError> {
+    fn parse_block_map(&mut self, indent: usize, depth: usize) -> Result<CtValue, YAMLParseError> {
         let mut entries: Vec<(String, CtValue)> = Vec::new();
         loop {
             self.skip_ignorable();
@@ -1212,14 +1223,14 @@ impl YAMLParser {
                     && !self.at_doc_marker()
                     && !self.at_doc_end()
                 {
-                    self.parse_node(indent + 1)?
+                    self.parse_node(indent + 1, depth + 1)?
                 } else {
                     json_variant("Null", None)
                 }
             } else if rest.starts_with('|') || rest.starts_with('>') {
                 self.parse_block_scalar(indent, rest)
             } else {
-                self.parse_inline_value(rest)?
+                self.parse_inline_value(rest, depth + 1)?
             };
             entries.push((key, value));
         }
@@ -1269,16 +1280,16 @@ impl YAMLParser {
         json_variant("Text", Some(CtValue::Str(text)))
     }
 
-    fn parse_inline_value(&mut self, s: &str) -> Result<CtValue, YAMLParseError> {
+    fn parse_inline_value(&mut self, s: &str, depth: usize) -> Result<CtValue, YAMLParseError> {
         let s = s.trim();
         if let Some(rest) = s.strip_prefix('&') {
             let mut it = rest.splitn(2, char::is_whitespace);
             let name = it.next().unwrap_or("").to_string();
             let val_str = it.next().unwrap_or("").trim();
             let value = if val_str.is_empty() {
-                self.parse_node(0)?
+                self.parse_node(0, depth + 1)?
             } else {
-                self.parse_inline_value(val_str)?
+                self.parse_inline_value(val_str, depth + 1)?
             };
             self.anchors.insert(name, value.clone());
             return Ok(value);
@@ -1291,25 +1302,33 @@ impl YAMLParser {
                 .unwrap_or(json_variant("Null", None)));
         }
         if s.starts_with('[') || s.starts_with('{') {
-            return Ok(yaml_parse_flow(s).0);
+            return yaml_parse_flow(s, depth)
+                .map(|(value, _)| value)
+                .map_err(|_| YAMLParseError {
+                    line: self.pos + 1,
+                    message: "YAML value is nested too deeply".to_string(),
+                });
         }
         Ok(yaml_scalar_value(s))
     }
 }
 
-fn yaml_parse_flow(s: &str) -> (CtValue, usize) {
+fn yaml_parse_flow(s: &str, depth: usize) -> Result<(CtValue, usize), ()> {
     let chars: Vec<char> = s.chars().collect();
-    yaml_parse_flow_at(&chars, 0)
+    yaml_parse_flow_at(&chars, 0, depth)
 }
-fn yaml_parse_flow_at(chars: &[char], mut i: usize) -> (CtValue, usize) {
+fn yaml_parse_flow_at(chars: &[char], mut i: usize, depth: usize) -> Result<(CtValue, usize), ()> {
     while i < chars.len() && chars[i].is_whitespace() {
         i += 1;
     }
     if i >= chars.len() {
-        return (json_variant("Null", None), i);
+        return Ok((json_variant("Null", None), i));
     }
     match chars[i] {
         '[' => {
+            if depth >= MAX_YAML_DEPTH {
+                return Err(());
+            }
             i += 1;
             let mut items = Vec::new();
             loop {
@@ -1320,7 +1339,7 @@ fn yaml_parse_flow_at(chars: &[char], mut i: usize) -> (CtValue, usize) {
                     i += 1;
                     break;
                 }
-                let (v, ni) = yaml_parse_flow_at(chars, i);
+                let (v, ni) = yaml_parse_flow_at(chars, i, depth + 1)?;
                 items.push(v);
                 i = ni;
                 while i < chars.len() && chars[i].is_whitespace() {
@@ -1333,9 +1352,12 @@ fn yaml_parse_flow_at(chars: &[char], mut i: usize) -> (CtValue, usize) {
                     break;
                 }
             }
-            (json_array(items), i)
+            Ok((json_array(items), i))
         }
         '{' => {
+            if depth >= MAX_YAML_DEPTH {
+                return Err(());
+            }
             i += 1;
             let mut entries = Vec::new();
             loop {
@@ -1354,7 +1376,7 @@ fn yaml_parse_flow_at(chars: &[char], mut i: usize) -> (CtValue, usize) {
                 if i < chars.len() && chars[i] == ':' {
                     i += 1;
                 }
-                let (v, nj) = yaml_parse_flow_at(chars, i);
+                let (v, nj) = yaml_parse_flow_at(chars, i, depth + 1)?;
                 i = nj;
                 entries.push((key.trim().to_string(), v));
                 while i < chars.len() && chars[i].is_whitespace() {
@@ -1367,11 +1389,11 @@ fn yaml_parse_flow_at(chars: &[char], mut i: usize) -> (CtValue, usize) {
                     break;
                 }
             }
-            (json_object(entries), i)
+            Ok((json_object(entries), i))
         }
         _ => {
             let (raw, ni) = yaml_scan_flow_scalar(chars, i, false);
-            (yaml_scalar_value(raw.trim()), ni)
+            Ok((yaml_scalar_value(raw.trim()), ni))
         }
     }
 }
@@ -3392,4 +3414,30 @@ pub(super) fn json_events(v: &CtValue) -> String {
     let mut out = Vec::new();
     walk(String::new(), v, &mut out);
     out.join("\n")
+}
+
+#[cfg(test)]
+mod depth_tests {
+    use super::*;
+
+    #[test]
+    fn hostile_toml_and_yaml_nesting_is_rejected() {
+        let toml_depth = MAX_TOML_DEPTH + 1;
+        let toml = format!(
+            "value = {}0{}",
+            "[".repeat(toml_depth),
+            "]".repeat(toml_depth)
+        );
+        assert!(toml_parse(&toml).is_err());
+
+        let yaml_depth = MAX_YAML_DEPTH + 1;
+        let mut yaml = String::new();
+        for depth in 0..yaml_depth {
+            yaml.push_str(&"  ".repeat(depth));
+            yaml.push_str("value:\n");
+        }
+        yaml.push_str(&"  ".repeat(yaml_depth));
+        yaml.push_str("0\n");
+        assert!(yaml_parse(&yaml).is_err());
+    }
 }

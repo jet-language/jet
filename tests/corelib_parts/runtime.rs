@@ -943,6 +943,95 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn core_auth_session_secrets_and_oauth_rejection_match_all_tiers() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_auth_session_security_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = |user: &str| {
+        format!(
+            r#"use core.auth as auth
+
+fn run() {{
+    auth.register_user("{user}", "hash") ?? panic("register")
+    session :: auth.password_login("{user}", "hash", 1_700_000_000_000, 3_600_000) ?? panic("login")
+    shown :: auth.session_show(session)
+    if shown.contains("sess-") -> print("show-leaked") else -> print("show-safe")
+    if auth.oauth_begin("google") == {{
+        .Ok(_) -> print("oauth-accepted")
+        .Err(_) -> print("oauth-rejected")
+    }}
+    if auth.oauth_finish("state", "attacker", 1_700_000_000_000, 3_600_000) == {{
+        .Ok(_) -> print("oauth-finish-accepted")
+        .Err(_) -> print("oauth-finish-rejected")
+    }}
+}}
+"#
+        )
+    };
+    let expected = "show-safe\noauth-rejected\noauth-finish-rejected\n";
+
+    let aot_source = source("tier-aot");
+    let (code, aot_stdout, stderr) = build_and_run(
+        &dir,
+        "auth_session_security",
+        &aot_source,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "auth session security AOT failed: {stderr}");
+    assert_eq!(aot_stdout, expected);
+
+    let dev_source = source("tier-interpreter");
+    let dev_path = dir.join("auth_session_security.jet");
+    fs::write(&dev_path, &dev_source).unwrap();
+    let shown_path = dev_path.to_string_lossy().to_string();
+    match jet::Interpreter::dev_iteration(&shown_path, false, true) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "forced interpreter failed: {stderr}");
+            assert_eq!(stderr, "");
+            assert_eq!(stdout, expected);
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("forced interpreter rejected auth session security fixture: {diags:?}")
+        }
+    }
+
+    let resident_source = source("tier-jit");
+    fs::write(&dev_path, &resident_source).unwrap();
+    jet_jit::reset_jit_trace_for_test();
+    match jet::Interpreter::dev_iteration(&shown_path, false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "resident JIT failed: {stderr}");
+            assert_eq!(stderr, "");
+            assert_eq!(stdout, expected);
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            panic!("resident JIT rejected auth session security fixture: {diags:?}")
+        }
+    }
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "auth session security fixture must execute resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "auth session security fixture must not deopt or fall back"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 // D-AUTH2=A / D-AUTH-TOKENPOLICY1=A: exercise the public Jet surface so the
 // existing JSON parser, HMAC implementation, Ed25519 bridge, nominal claims,
 // codegen, and linker all participate in the proof.

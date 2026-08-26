@@ -277,7 +277,15 @@ fn jet_ws_parse_url(url: &str) -> Result<(String, u16, String), JetWsError> {
     } else {
         (authority.to_string(), 80)
     };
-    if host.is_empty() || !path.starts_with('/') {
+    if host.is_empty()
+        || !path.starts_with('/')
+        || host
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+        || path
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
         return Err(JetWsError::InvalidUrl);
     }
     Ok((host, port, path))

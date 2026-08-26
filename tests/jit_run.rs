@@ -195,6 +195,114 @@ fn bounded_workers_example_has_total_tir() {
     );
 }
 
+#[test]
+fn jit_event_four_captures_plus_payload_is_rejected_before_native_call() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_event_four_captures_payload");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("event_four_captures.jet");
+    let source = r#"use core.event as event
+
+fn run() {
+    first :: 1
+    second :: 2
+    third :: 3
+    fourth :: 4
+    scope :: event.scope()
+    hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    hook.on(scope, (value: Int) -> {
+        print("{first}|{second}|{third}|{fourth}|{value}")
+        HookDecision.Continue
+    })
+    hook.run(5)
+}
+"#;
+    fs::write(&file, source).unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown).expect("event fixture loads");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.is_empty(),
+        "event fixture must type-check: {diagnostics:#?}"
+    );
+
+    let aot = run_jet(&file, true);
+    assert_eq!(
+        aot.status.code(),
+        Some(0),
+        "AOT event fixture failed: {}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&aot.stdout),
+        "1|2|3|4|5\n",
+        "AOT event callback lost its payload or captures"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!("forced interpreter rejected event fixture: {diags:?}"),
+    };
+    assert_eq!(
+        interpreted,
+        "1|2|3|4|5\n",
+        "interpreter event callback lost its payload or captures"
+    );
+
+    let error = jet_jit::try_compile_bundle(&bundle)
+        .expect_err("JIT must reject five callback ABI arguments before native code");
+    assert!(
+        error.contains("callback ABI argument count 5 > 4"),
+        "JIT rejected the callback for the wrong reason: {error}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jit_http_worker_teardown_quiesces_runtime_before_resident_drop() {
+    let prelude = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
+    assert!(
+        prelude.contains("for worker in workers {\n        let _ = worker.join();")
+            && !prelude.contains("if worker.is_finished() { let _ = worker.join(); }"),
+        "HTTP teardown must join every worker, including unfinished workers"
+    );
+
+    let concurrency = include_str!("../crates/jet-jit/src/Concurrency.rs");
+    assert!(
+        concurrency.contains("let _guard = RuntimeAccessGuard::enter();")
+            && concurrency.contains("HTTP_SHARED_RUNTIME.load(Ordering::Acquire)"),
+        "HTTP callbacks must pin the shared runtime before loading its pointer"
+    );
+    let hosts = include_str!("../crates/jet-jit/src/net_http_hosts.rs");
+    assert!(
+        hosts.contains("jet_http_server_shutdown(&server, &grace)")
+            && hosts.contains("Concurrency::with_http_runtime_quiesced(||"),
+        "JIT teardown must stop HTTP servers and quiesce callbacks"
+    );
+
+    let resident = include_str!("../crates/jet-jit/src/jit/resident.rs");
+    let handles = resident
+        .find("crate::net_http_rt::clear_net_http_handles();")
+        .expect("resident teardown must clear HTTP handles");
+    let module = resident
+        .find("RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);")
+        .expect("resident teardown must drop the module");
+    assert!(
+        handles < module,
+        "HTTP handles must be quiesced before the resident module is dropped"
+    );
+    assert!(
+        !resident.contains(
+            "Concurrency::set_active_runtime(None);\n        Concurrency::clear_http_shared_runtime();"
+        ),
+        "normal resident invocation must not clear the shared HTTP runtime while workers live"
+    );
+}
+
 /// The Cranelift host path is not available on every architecture. Mirrors
 /// `tests/dev.rs`: CI sets `JET_REQUIRE_CRANELIFT_HOST=1` so a missing host is
 /// a loud failure, never a quiet green skip.

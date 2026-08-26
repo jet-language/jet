@@ -762,7 +762,12 @@ impl<'a> Interp<'a> {
                 }
                 // D-CTEFFECT1 Tier-1: fetch is hermetic (sha256-pinned); no gate.
                 if module == "core.net" && method == "fetch" {
-                    return eval_net_fetch(&argv, Some(&mut self.embed_inputs), span);
+                    return eval_net_fetch(
+                        &argv,
+                        self.base_dir,
+                        Some(&mut self.embed_inputs),
+                        span,
+                    );
                 }
                 // U13 (D-JPK-SECRETCRYPTO1): `core.crypto.vault.get` is denied at build time
                 // unconditionally — unlike the Tier-2 effects below, there is no
@@ -2191,7 +2196,12 @@ impl<'a> Interp<'a> {
             _ => {}
         }
         if is_build_context && method == "fetch" {
-            return eval_net_fetch(&argv, Some(&mut self.embed_inputs), span)
+            return eval_net_fetch(
+                &argv,
+                self.base_dir,
+                Some(&mut self.embed_inputs),
+                span,
+            )
                 .map(|value| CtValue::Present(Box::new(value)));
         }
         if is_build_context && method == "embed" {

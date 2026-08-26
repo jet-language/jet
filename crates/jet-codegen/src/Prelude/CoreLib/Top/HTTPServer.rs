@@ -967,6 +967,7 @@ fn jet_http_server_run_listener(
     }
 
     let mut report = JetHTTPShutdownReport::default();
+    let mut accept_error = None;
     while !shutdown.load(Ordering::Acquire) {
         match listener.accept() {
             Ok((mut stream, peer)) => {
@@ -1015,7 +1016,14 @@ fn jet_http_server_run_listener(
                 }
             },
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(std::time::Duration::from_millis(2)),
-            Err(error) => return Err(format!("http accept failed: {error}")),
+            Err(error) => {
+                accept_error = Some(format!("http accept failed: {error}"));
+                force_cancel.store(true, Ordering::Release);
+                for stream in active.lock().unwrap().iter() {
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                }
+                break;
+            }
         }
     }
     drop(tx);
@@ -1033,14 +1041,16 @@ fn jet_http_server_run_listener(
         }
     };
     let deadline = jet_http_instant_from_unix_ms(deadline_ms);
-    while completed.load(Ordering::Acquire) < report.user_accepted as usize
+    while accept_error.is_none()
+        && completed.load(Ordering::Acquire) < report.user_accepted as usize
         && std::time::Instant::now() < deadline
     {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     // H2 may observe the shared deadline only after its poll read times out.
     let observe = deadline + std::time::Duration::from_millis(30);
-    while completed.load(Ordering::Acquire) < report.user_accepted as usize
+    while accept_error.is_none()
+        && completed.load(Ordering::Acquire) < report.user_accepted as usize
         && std::time::Instant::now() < observe
     {
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -1054,7 +1064,10 @@ fn jet_http_server_run_listener(
         for stream in active.lock().unwrap().iter() { let _ = stream.shutdown(std::net::Shutdown::Both); }
     }
     for worker in workers {
-        if worker.is_finished() { let _ = worker.join(); }
+        let _ = worker.join();
+    }
+    if let Some(error) = accept_error {
+        return Err(error);
     }
     Ok(report)
 }
@@ -1838,7 +1851,7 @@ struct JetHTTP2RequestStream {
     inbound_closed: bool,
     response_done: bool,
     control: Option<std::sync::Arc<JetTaskControl>>,
-    last_body: std::time::Instant,
+    body_started: std::time::Instant,
     trailers: std::sync::Arc<std::sync::Mutex<JetHTTPHeaders>>,
 }
 
@@ -2232,7 +2245,7 @@ fn jet_http2_serve_inner(
         let now = std::time::Instant::now();
         let expired = requests.iter()
             .filter_map(|(id, request)| (!request.inbound_closed
-                && now.duration_since(request.last_body) >= options.read_body_timeout).then_some(*id))
+                && now.duration_since(request.body_started) >= options.read_body_timeout).then_some(*id))
             .collect::<Vec<_>>();
         for id in expired {
             jet_http2_write_frame(stream, 3, 0, id, &8u32.to_be_bytes())?;
@@ -2286,7 +2299,6 @@ fn jet_http2_serve_inner(
                 if connection_receive_window < 0 || *receive_window < 0 { return Err("HTTP/2 receive flow-control window exceeded".to_string()); }
                 request.received = request.received.saturating_add(data.len());
                 request.unconsumed_flow = request.unconsumed_flow.saturating_add(flow_bytes);
-                request.last_body = std::time::Instant::now();
                 if request.received > options.max_body_bytes { return Err("HTTP/2 request body is too large".to_string()); }
                 if flow_bytes > 0 { request.pending.push_back(JetHTTP2BodyPart::Data { bytes: data.to_vec(), flow_bytes }); }
                 if frame.flags & 0x1 != 0 {
@@ -2388,7 +2400,7 @@ fn jet_http2_serve_inner(
                     inbound_closed,
                     response_done: false,
                     control: Some(control),
-                    last_body: std::time::Instant::now(),
+                    body_started: std::time::Instant::now(),
                     trailers,
                 };
                 if inbound_closed { request.pending.push_back(JetHTTP2BodyPart::End); }
@@ -2483,10 +2495,19 @@ fn jet_http2_serve_inner(
 struct JetHTTPContinueReader<R> {
     inner: R,
     stream: Option<std::net::TcpStream>,
+    timeout_stream: Option<std::net::TcpStream>,
+    deadline: std::time::Instant,
 }
 
 impl<R: std::io::Read> std::io::Read for JetHTTPContinueReader<R> {
     fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        let remaining = self
+            .deadline
+            .checked_duration_since(std::time::Instant::now())
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::TimedOut, "request body timed out"))?;
+        if let Some(stream) = self.timeout_stream.as_ref() {
+            stream.set_read_timeout(Some(remaining))?;
+        }
         if let Some(mut stream) = self.stream.take() {
             std::io::Write::write_all(&mut stream, b"HTTP/1.1 100 Continue\r\n\r\n")?;
             std::io::Write::flush(&mut stream)?;
@@ -2708,6 +2729,11 @@ fn jet_http_srv_read_streaming(
         status: 500,
         message: "request stream could not be cloned",
     })?;
+    let timeout_stream = body_stream.try_clone().map_err(|_| JetHTTPReadError {
+        status: 500,
+        message: "request timeout stream could not be cloned",
+    })?;
+    let body_deadline = std::time::Instant::now() + options.read_body_timeout;
     let continue_stream = if head.expect_continue && !body_already_arrived {
         Some(stream.try_clone().map_err(|_| JetHTTPReadError {
             status: 500,
@@ -2722,7 +2748,12 @@ fn jet_http_srv_read_streaming(
             if length > options.max_body_bytes {
                 return Err(JetHTTPReadError { status: 413, message: "request body is too large" });
             }
-            JetHTTPBody::reader(JetHTTPContinueReader { inner: body_stream.take(length as u64), stream: continue_stream }, Some(length))
+            JetHTTPBody::reader(JetHTTPContinueReader {
+                inner: body_stream.take(length as u64),
+                stream: continue_stream,
+                timeout_stream: Some(timeout_stream),
+                deadline: body_deadline,
+            }, Some(length))
         }
         JetHTTPRequestFraming::Chunked => JetHTTPBody::reader(
             JetHTTPContinueReader {
@@ -2738,6 +2769,8 @@ fn jet_http_srv_read_streaming(
                     trailers: trailers.clone(),
                 },
                 stream: continue_stream,
+                timeout_stream: Some(timeout_stream),
+                deadline: body_deadline,
             },
             None,
         ),
@@ -2837,6 +2870,7 @@ fn jet_http_srv_read_buffered(
     let mut reading_body = false;
     let mut continue_sent = false;
     let mut chunked = None;
+    let mut body_deadline = None;
     let started = std::time::Instant::now();
     let mut header_deadline = (!keep_alive || !pending.is_empty()).then(|| started + options.read_header_timeout);
     let mut idle_deadline = started
@@ -2853,6 +2887,8 @@ fn jet_http_srv_read_buffered(
             let head = jet_http_validate_headers(&pending[..header_end])?;
             if !reading_body {
                 reading_body = true;
+                let deadline = std::time::Instant::now() + options.read_body_timeout;
+                body_deadline = Some(deadline);
                 idle_deadline = std::time::Instant::now()
                     + options.read_body_timeout.min(options.read_idle_timeout);
             }
@@ -2889,7 +2925,9 @@ fn jet_http_srv_read_buffered(
         }
 
         let deadline = if reading_body {
-            idle_deadline
+            body_deadline
+                .unwrap_or(idle_deadline)
+                .min(idle_deadline)
         } else if let Some(deadline) = header_deadline {
             deadline.min(idle_deadline)
         } else {

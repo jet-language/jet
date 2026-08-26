@@ -6,6 +6,8 @@
     // tags (`!!str`, `!MyType`) are deferred to c153 (frozen). No external crates (I6).
     pub mod yaml {
         use super::DataTree;
+
+        const MAX_YAML_DEPTH: usize = 64;
         use std::collections::BTreeMap;
 
         #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,7 +36,7 @@
                 return Ok(DataTree::Null);
             }
             let base = p.indent(p.pos);
-            let value = p.parse_node(base)?;
+            let value = p.parse_node(base, 0)?;
             p.skip_ignorable();
             if p.pos < p.lines.len() && !p.at_doc_marker() && !p.at_doc_end() {
                 return Err(ParseError {
@@ -77,10 +79,16 @@
                 self.pos < self.lines.len() && self.lines[self.pos].trim() == "..."
             }
 
-            fn parse_node(&mut self, min_indent: usize) -> Result<DataTree, ParseError> {
+            fn parse_node(&mut self, min_indent: usize, depth: usize) -> Result<DataTree, ParseError> {
                 self.skip_ignorable();
                 if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
                     return Ok(DataTree::Null);
+                }
+                if depth >= MAX_YAML_DEPTH {
+                    return Err(ParseError {
+                        line: self.pos + 1,
+                        message: "YAML value is nested too deeply".to_string(),
+                    });
                 }
                 let ind = self.indent(self.pos);
                 if ind < min_indent {
@@ -88,17 +96,17 @@
                 }
                 let content = self.content(self.pos);
                 if content == "-" || content.starts_with("- ") {
-                    self.parse_block_seq(ind)
+                    self.parse_block_seq(ind, depth)
                 } else if is_map_entry(&content) {
-                    self.parse_block_map(ind)
+                    self.parse_block_map(ind, depth)
                 } else {
                     // A bare scalar node (possibly anchored/aliased/flow/quoted).
                     self.pos += 1;
-                    self.parse_inline_value(&content)
+                    self.parse_inline_value(&content, depth)
                 }
             }
 
-            fn parse_block_seq(&mut self, indent: usize) -> Result<DataTree, ParseError> {
+            fn parse_block_seq(&mut self, indent: usize, depth: usize) -> Result<DataTree, ParseError> {
                 let mut items = Vec::new();
                 loop {
                     self.skip_ignorable();
@@ -128,13 +136,13 @@
                         rebuilt = String::new();
                     }
                     *line = rebuilt;
-                    let item = self.parse_node(indent + 1)?;
+                    let item = self.parse_node(indent + 1, depth + 1)?;
                     items.push(item);
                 }
                 Ok(DataTree::Array(items))
             }
 
-            fn parse_block_map(&mut self, indent: usize) -> Result<DataTree, ParseError> {
+            fn parse_block_map(&mut self, indent: usize, depth: usize) -> Result<DataTree, ParseError> {
                 let mut entries: Vec<(String, DataTree)> = Vec::new();
                 loop {
                     self.skip_ignorable();
@@ -164,14 +172,14 @@
                             && !self.at_doc_marker()
                             && !self.at_doc_end()
                         {
-                            self.parse_node(indent + 1)?
+                            self.parse_node(indent + 1, depth + 1)?
                         } else {
                             DataTree::Null
                         }
                     } else if rest.starts_with('|') || rest.starts_with('>') {
                         self.parse_block_scalar(indent, rest)
                     } else {
-                        self.parse_inline_value(rest)?
+                        self.parse_inline_value(rest, depth + 1)?
                     };
                     entries.push((key, value));
                 }
@@ -224,7 +232,7 @@
                 DataTree::Text(text)
             }
 
-            fn parse_inline_value(&mut self, s: &str) -> Result<DataTree, ParseError> {
+            fn parse_inline_value(&mut self, s: &str, depth: usize) -> Result<DataTree, ParseError> {
                 let s = s.trim();
                 // Anchor: `&name <value?>` — register the parsed value under `name`.
                 if let Some(rest) = s.strip_prefix('&') {
@@ -233,9 +241,9 @@
                     let val_str = it.next().unwrap_or("").trim();
                     let value = if val_str.is_empty() {
                         // The value is a nested block following this line.
-                        self.parse_node(0)?
+                        self.parse_node(0, depth + 1)?
                     } else {
-                        self.parse_inline_value(val_str)?
+                        self.parse_inline_value(val_str, depth + 1)?
                     };
                     self.anchors.insert(name, value.clone());
                     return Ok(value);
@@ -249,29 +257,42 @@
                         .unwrap_or(DataTree::Null));
                 }
                 if s.starts_with('[') {
-                    return Ok(parse_flow(s).0);
+                    return parse_flow(s, depth)
+                        .map(|(value, _)| value)
+                        .map_err(|_| ParseError {
+                            line: self.pos + 1,
+                            message: "YAML value is nested too deeply".to_string(),
+                        });
                 }
                 if s.starts_with('{') {
-                    return Ok(parse_flow(s).0);
+                    return parse_flow(s, depth)
+                        .map(|(value, _)| value)
+                        .map_err(|_| ParseError {
+                            line: self.pos + 1,
+                            message: "YAML value is nested too deeply".to_string(),
+                        });
                 }
                 Ok(scalar_value(s))
             }
         }
 
         // ── Flow `[...]` / `{...}` (single-line) ─────────────────────────────────
-        fn parse_flow(s: &str) -> (DataTree, usize) {
+        fn parse_flow(s: &str, depth: usize) -> Result<(DataTree, usize), ()> {
             let chars: Vec<char> = s.chars().collect();
-            parse_flow_at(&chars, 0)
+            parse_flow_at(&chars, 0, depth)
         }
-        fn parse_flow_at(chars: &[char], mut i: usize) -> (DataTree, usize) {
+        fn parse_flow_at(chars: &[char], mut i: usize, depth: usize) -> Result<(DataTree, usize), ()> {
             while i < chars.len() && chars[i].is_whitespace() {
                 i += 1;
             }
             if i >= chars.len() {
-                return (DataTree::Null, i);
+                return Ok((DataTree::Null, i));
             }
             match chars[i] {
                 '[' => {
+                    if depth >= MAX_YAML_DEPTH {
+                        return Err(());
+                    }
                     i += 1;
                     let mut items = Vec::new();
                     loop {
@@ -282,7 +303,7 @@
                             i += 1;
                             break;
                         }
-                        let (v, ni) = parse_flow_at(chars, i);
+                        let (v, ni) = parse_flow_at(chars, i, depth + 1)?;
                         items.push(v);
                         i = ni;
                         while i < chars.len() && chars[i].is_whitespace() {
@@ -295,9 +316,12 @@
                             break;
                         }
                     }
-                    (DataTree::Array(items), i)
+                    Ok((DataTree::Array(items), i))
                 }
                 '{' => {
+                    if depth >= MAX_YAML_DEPTH {
+                        return Err(());
+                    }
                     i += 1;
                     let mut entries = Vec::new();
                     loop {
@@ -317,7 +341,7 @@
                         if i < chars.len() && chars[i] == ':' {
                             i += 1;
                         }
-                        let (v, nj) = parse_flow_at(chars, i);
+                        let (v, nj) = parse_flow_at(chars, i, depth + 1)?;
                         i = nj;
                         entries.push((key.trim().to_string(), v));
                         while i < chars.len() && chars[i].is_whitespace() {
@@ -330,11 +354,11 @@
                             break;
                         }
                     }
-                    (DataTree::Object(entries), i)
+                    Ok((DataTree::Object(entries), i))
                 }
                 _ => {
                     let (raw, ni) = scan_flow_scalar(chars, i, false);
-                    (scalar_value(raw.trim()), ni)
+                    Ok((scalar_value(raw.trim()), ni))
                 }
             }
         }

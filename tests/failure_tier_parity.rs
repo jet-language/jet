@@ -96,8 +96,7 @@ impl StoreFailure -> Err {
 fn read() Int !StoreFailure -> Err(StoreFailure.Missing)
 
 fn run() {
-    value :: read()
-    return Ok()
+    read()
 }
 "#;
 
@@ -158,7 +157,12 @@ fn declared_conversion_keeps_one_report_across_runtime_tiers() {
 
 #[test]
 fn failure_contract_matrix_matches_comptime_and_hosted_tiers() {
-    tir_support::assert_tiers_agree("failure_contract_matrix_tiers", MATRIX, MATRIX_STDOUT);
+    tir_support::assert_tiers_agree_with_application_policy(
+        "failure_contract_matrix_tiers",
+        MATRIX,
+        MATRIX_STDOUT,
+        "name: \"failure_contract_matrix_tiers\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO, Mem.Alloc] } }\n",
+    );
 }
 
 #[test]

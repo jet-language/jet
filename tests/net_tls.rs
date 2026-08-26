@@ -1,6 +1,8 @@
 mod common;
 
 use std::fs;
+use std::net::TcpListener;
+use std::time::{Duration, Instant};
 
 #[test]
 fn tls_client_diagnostic_snapshot_covers_e42xx_explain_codes() {
@@ -33,4 +35,53 @@ fn tls_client_diagnostic_snapshot_covers_e42xx_explain_codes() {
         text,
         fs::read_to_string("tests/cli/tls_client_diagnostics.txt").unwrap()
     );
+}
+
+#[test]
+fn comptime_fetch_rejects_outside_files_and_private_networks() {
+    let root = common::unique_tmp("comptime_fetch_root");
+    let outside = common::unique_tmp("comptime_fetch_outside");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(&outside, "private fixture").unwrap();
+    let source_path = root.join("main.jet");
+    let file_source = format!(
+        "use core.net as net\n@data :: net.fetch(\"file://{}\", sha256: \"{}\")\nfn run() {{}}\n",
+        outside.display(),
+        "0".repeat(64)
+    );
+    fs::write(&source_path, &file_source).unwrap();
+    let file_diags = jet::compile_with_path(&file_source, source_path.to_str().unwrap())
+        .expect_err("comptime fetch must not read outside its source directory");
+    assert!(file_diags.iter().any(|diag| diag.code == "E3414"));
+
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match listener.accept() {
+                Ok(_) => return true,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return false;
+                    }
+                    std::thread::yield_now();
+                }
+                Err(_) => return false,
+            }
+        }
+    });
+    let network_source = format!(
+        "use core.net as net\n@data :: net.fetch(\"http://127.0.0.1:{port}/secret\", sha256: \"{}\")\nfn run() {{}}\n",
+        "0".repeat(64)
+    );
+    fs::write(&source_path, &network_source).unwrap();
+    let network_diags = jet::compile_with_path(&network_source, source_path.to_str().unwrap())
+        .expect_err("comptime fetch must reject loopback destinations");
+    assert!(network_diags.iter().any(|diag| diag.code == "E3414"));
+    assert!(!server.join().unwrap(), "private destination was contacted");
+
+    let _ = fs::remove_dir_all(root);
+    let _ = fs::remove_file(outside);
 }

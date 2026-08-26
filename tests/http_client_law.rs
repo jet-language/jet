@@ -95,6 +95,44 @@ fn run() {{
 }
 
 #[test]
+fn h1_rejects_request_target_controls_before_connecting() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match listener.accept() {
+                Ok(_) => return true,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return false;
+                    }
+                    std::thread::yield_now();
+                }
+                Err(_) => return false,
+            }
+        }
+    });
+    let src = format!(
+        r#"
+use core.http.client as http
+fn run() {{
+    if http.get("http://{addr}/safe\r\nInjected: yes") == {{
+        .Ok(_) -> print("accepted")
+        .Err(_) -> print("rejected")
+        else -> print("unexpected")
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = common::build_and_run("jet_http_client_law", "target_controls", &src);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "rejected\n");
+    assert!(!server.join().unwrap(), "malformed request target reached the socket");
+}
+
+#[test]
 fn h1_skips_early_hints_reuses_final_response_and_rejects_upgrade() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();

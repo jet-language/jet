@@ -155,9 +155,15 @@ impl Authority {
                     .map_err(|error| format!("could not copy registry fixture: {error}"))?;
                 return Ok(());
             }
+            let authority = authority_of(&current)?;
+            let addresses = jet_net::resolve_public_addresses(&authority, 443)?;
             let headers = scratch.join(format!("fetch-{}-{redirect}.headers", stable_suffix(url)));
             let body = scratch.join(format!("fetch-{}-{redirect}.body", stable_suffix(url)));
             let mut command = hardened_curl(&self.curl);
+            for address in addresses {
+                command
+                    .args(["--resolve", &format!("{authority}:443:{}", address.ip())]);
+            }
             let output = command
                 .args(["--dump-header"])
                 .arg(&headers)
@@ -385,6 +391,11 @@ fn inspect_tar_stream(mut input: impl Read) -> Result<(), String> {
                 "source archive expands beyond {MAX_ARCHIVE_TOTAL_BYTES} bytes"
             ));
         }
+        if stored > MAX_ARCHIVE_ENTRY_BYTES {
+            return Err(format!(
+                "source archive payload is {stored} bytes; per-entry limit is {MAX_ARCHIVE_ENTRY_BYTES}"
+            ));
+        }
         let mut payload = if metadata {
             Vec::with_capacity(stored as usize)
         } else {
@@ -537,6 +548,11 @@ fn authority_of(url: &str) -> Result<String, String> {
         if !valid_host(&authority) {
             return Err(format!("provider URL has invalid authority `{authority}`"));
         }
+        if let Ok(ip) = authority.parse() {
+            if !jet_net::is_public_ip(ip) {
+                return Err(format!("provider URL targets a non-public address `{authority}`"));
+            }
+        }
         return Ok(authority);
     }
     #[cfg(test)]
@@ -671,6 +687,9 @@ mod tests {
         assert!(authority_of("http://example.test/x").is_err());
         assert!(authority_of("https://bad host.example/x").is_err());
         assert!(authority_of("https://example.test/x\r\nInjected: yes").is_err());
+        assert!(authority_of("https://127.0.0.1/x").is_err());
+        assert!(authority_of("https://169.254.169.254/latest").is_err());
+        assert!(jet_net::resolve_public_addresses("localhost", 443).is_err());
         let authority = Authority {
             provider: "php".into(),
             registry: "https://repo.example.test".into(),

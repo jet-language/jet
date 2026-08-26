@@ -1017,7 +1017,7 @@ pub(crate) fn missing_pattern_coverage(
     }
 }
 
-/// `T E!` passed where plain `T` is expected (E0401).
+/// `T !E` passed where plain `T` is expected (E0401).
 pub(crate) fn result_used_where_plain_expected(want: &Type, got: &Type) -> bool {
     matches!(got, Type::Result { ok, .. } if want.unwrap_result().is_none() && **ok == *want)
 }
@@ -1488,7 +1488,7 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
 /// D-FAIL-CONV2=A: the standard library's own error family. Membership is
 /// derived, not chosen: a Core error type is a member when the Prelude registers
 /// it printable (`TraitRegistry::register_synthetic_display_debug`), a Core
-/// signature returns it in the error position of a `T E!` result, and showing it
+/// signature returns it in the error position of a `T !E` result, and showing it
 /// is not prohibited. `Prelude/Errors.jet` declares one `impl <member> => Err`
 /// for exactly this list, and the Prelude owns each member's failure text, so the
 /// family renders through the same display hook every other shown Core type uses.

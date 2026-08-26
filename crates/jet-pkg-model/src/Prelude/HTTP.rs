@@ -67,6 +67,8 @@ const HTTP_UPLOAD_CHUNK: usize = 64 * 1024;
 /// Cap for buffering a streaming upload so 307/308 can replay it. Matches the
 /// former `Body.bytes(1GiB)` send ceiling; oversize fails closed.
 const HTTP_UPLOAD_REPLAY_CAP: usize = 1024 * 1024 * 1024;
+const HTTP_RESPONSE_BODY_LIMIT: usize = 64 * 1024 * 1024;
+const HTTP_RESPONSE_READ_CHUNK_LIMIT: usize = 64 * 1024;
 
 /// Private, typed transport failures. Generated code exhaustively projects these
 /// to the public closed HTTPError without carrying backend prose across the seam.
@@ -1626,6 +1628,12 @@ fn parse_url(url: &str) -> Result<ParsedUrl, JetHTTPBridgeError> {
         value if value.starts_with('/') => value.to_string(),
         _ => return Err(JetHTTPBridgeError::InvalidUrl),
     };
+    if target
+        .bytes()
+        .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        return Err(JetHTTPBridgeError::InvalidUrl);
+    }
     Ok(ParsedUrl {
         scheme: scheme.to_string(),
         host: host.to_ascii_lowercase(),
@@ -1948,7 +1956,7 @@ pub fn jet_http_client_body_read_impl(
         .get(&handle)
         .cloned()
         .ok_or(JetHTTPBridgeError::Internal)?;
-    let mut chunk = vec![0; max_chunk];
+    let mut chunk = vec![0; max_chunk.min(HTTP_RESPONSE_READ_CHUNK_LIMIT)];
     let read = reader
         .lock()
         .map_err(|_| JetHTTPBridgeError::Internal)?
@@ -3723,6 +3731,9 @@ fn read_h2_response(
             header_first(&headers, "content-encoding").map(str::to_string);
     }
     let length = content_length(&headers)?;
+    if length.is_some_and(|length| length > HTTP_RESPONSE_BODY_LIMIT) {
+        return Err(JetHTTPBridgeError::InvalidFraming);
+    }
     let reader = H2BodyReader {
         connection: Some(connection),
         stream_id,
@@ -3879,6 +3890,12 @@ impl H2BodyReader {
                             "HTTP/2 body too large",
                         )
                     })?;
+                    if self.received > HTTP_RESPONSE_BODY_LIMIT {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "HTTP/2 body exceeds 64 MiB",
+                        ));
+                    }
                     if self
                         .expected
                         .is_some_and(|expected| self.received > expected)
@@ -4039,6 +4056,9 @@ fn read_response(
         return Err(JetHTTPBridgeError::InvalidFraming);
     }
     let length = content_length(&headers)?;
+    if length.is_some_and(|length| length > HTTP_RESPONSE_BODY_LIMIT) {
+        return Err(JetHTTPBridgeError::InvalidFraming);
+    }
     if !transfer.is_empty() && length.is_some() {
         return Err(JetHTTPBridgeError::InvalidFraming);
     }
@@ -4069,6 +4089,7 @@ fn read_response(
         framing,
         reusable,
         chunk_remaining: 0,
+        received: 0,
         finished: false,
         facts: facts.clone(),
         request_started,
@@ -4124,6 +4145,7 @@ struct ResponseBodyReader {
     framing: BodyFraming,
     reusable: bool,
     chunk_remaining: usize,
+    received: usize,
     finished: bool,
     facts: Arc<Mutex<ResponseFacts>>,
     request_started: Instant,
@@ -4181,6 +4203,19 @@ impl ResponseBodyReader {
             )
         })?;
         stream.read(out)
+    }
+
+    fn account_body_bytes(&mut self, count: usize) -> std::io::Result<()> {
+        self.received = self.received.checked_add(count).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "HTTP body too large")
+        })?;
+        if self.received > HTTP_RESPONSE_BODY_LIMIT {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "HTTP body exceeds 64 MiB",
+            ));
+        }
+        Ok(())
     }
 
     fn read_exact_raw(&mut self, out: &mut [u8]) -> std::io::Result<()> {
@@ -4244,6 +4279,7 @@ impl Read for ResponseBodyReader {
                         "truncated HTTP body",
                     ));
                 }
+                self.account_body_bytes(read)?;
                 self.framing = BodyFraming::Length(remaining - read);
                 if remaining == read {
                     self.finish();
@@ -4252,6 +4288,7 @@ impl Read for ResponseBodyReader {
             }
             BodyFraming::Close => {
                 let read = self.read_raw(out)?;
+                self.account_body_bytes(read)?;
                 if read == 0 {
                     self.finished = true;
                     self.stream.take();
@@ -4261,6 +4298,16 @@ impl Read for ResponseBodyReader {
             BodyFraming::Chunked => {
                 if self.chunk_remaining == 0 {
                     self.chunk_remaining = self.chunk_size()?;
+                    if self
+                        .received
+                        .checked_add(self.chunk_remaining)
+                        .is_none_or(|total| total > HTTP_RESPONSE_BODY_LIMIT)
+                    {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "HTTP body exceeds 64 MiB",
+                        ));
+                    }
                     if self.chunk_remaining == 0 {
                         let mut end = [0; 2];
                         self.read_exact_raw(&mut end)?;
@@ -4282,6 +4329,7 @@ impl Read for ResponseBodyReader {
                         "truncated chunk",
                     ));
                 }
+                self.account_body_bytes(read)?;
                 self.chunk_remaining -= read;
                 if self.chunk_remaining == 0 {
                     let mut end = [0; 2];

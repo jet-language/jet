@@ -121,10 +121,19 @@ fn run() {
 
 #[test]
 fn view_escape_is_e0631() {
+    let src = r#"
+use core.mem
+
+fn make() Int -> {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    return x
+}
+"#;
     assert_eq!(
-        error_codes(include_str!("ui/arena_view_escape.jet")),
+        error_codes(src),
         vec!["E0631".to_string()],
-        "the arena escape fixture must report exactly E0631"
+        "returning an arena view must report exactly E0631"
     );
 }
 

@@ -55,7 +55,24 @@ fn lock_handles() -> MutexGuard<'static, Vec<Option<NetHttpHandle>>> {
 }
 
 pub(crate) fn clear_net_http_handles() {
-    lock_handles().clear();
+    let servers = {
+        let handles = lock_handles();
+        handles
+            .iter()
+            .filter_map(|handle| match handle.as_ref() {
+                Some(NetHttpHandle::HTTPServer(server)) => Some(Arc::clone(server)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let grace = jet_std::Duration { ns: 0 };
+    for server in servers {
+        let _ = jet_http_server_shutdown(&server, &grace);
+    }
+    Concurrency::with_http_runtime_quiesced(|| {
+        lock_handles().clear();
+        Concurrency::clear_http_shared_runtime();
+    });
 }
 
 fn push_handle(value: NetHttpHandle) -> i64 {

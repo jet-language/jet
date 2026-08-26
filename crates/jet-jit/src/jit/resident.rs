@@ -409,7 +409,6 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         super::runtime_host::run_jit_atexit_handlers(runtime);
         jet_codegen::task_group::jet_task_deadline_clear_pending();
         Concurrency::set_active_runtime(None);
-        Concurrency::clear_http_shared_runtime();
         if let Some(rendered) = runtime.deadline_exceeded.take() {
             // Match AOT `#Context(deadline:)`: keep prior stdout and emit the
             // compiler-owned E3003 without reclassifying it as a task panic.

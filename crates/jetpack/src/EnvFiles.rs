@@ -320,6 +320,19 @@ fn object_permissions(declaration: &ManagedFile) -> u32 {
         .unwrap_or_else(|| if declaration.sensitive { 0o400 } else { 0o444 })
 }
 
+fn create_new_file(path: &Path, permissions: Option<u32>) -> io::Result<fs::File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if let Some(permissions) = permissions {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(permissions & 0o7777);
+    }
+    #[cfg(not(unix))]
+    let _ = permissions;
+    options.open(path)
+}
+
 fn object_permissions_match(path: &Path, declaration: &ManagedFile) -> Result<bool, String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -472,10 +485,7 @@ fn ensure_object(
             let temp =
                 plan.objects_dir
                     .join(format!(".{}.tmp-{}", file.digest, std::process::id()));
-            let mut output = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temp)
+            let mut output = create_new_file(&temp, Some(object_permissions(&file.declaration)))
                 .map_err(|error| {
                     format!(
                         "couldn't create managed object `{}`: {error}",
@@ -580,11 +590,11 @@ fn install_file(file: &PlannedFile, object: &Path) -> Result<(), String> {
     let result = match file.declaration.mode {
         FileMode::Symlink => make_symlink(object, &temp),
         FileMode::Seed | FileMode::Copy => {
-            let mut output = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temp)
-                .map_err(|error| {
+            let permissions = file
+                .declaration
+                .permissions
+                .or_else(|| file.declaration.sensitive.then_some(0o600));
+            let mut output = create_new_file(&temp, permissions).map_err(|error| {
                     format!(
                         "couldn't create `{}`: {error}",
                         file.declaration.destination
@@ -896,6 +906,20 @@ mod tests {
             conflict: jet_env_model::ModuleEval::FileConflict::Refuse,
             ..ManagedFile::default()
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sensitive_temp_is_restricted_before_first_write() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = project_dir("jet-env-files-temp-mode");
+        fs::create_dir_all(&root).unwrap();
+        let temp = root.join("secret.tmp");
+        let output = create_new_file(&temp, Some(0o600)).unwrap();
+        assert_eq!(output.metadata().unwrap().permissions().mode() & 0o7777, 0o600);
+        drop(output);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]
