@@ -284,7 +284,7 @@ fn collect_scene_attachments(stmts: &[Stmt], scenes: &mut std::collections::BTre
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. } => collect_scene_attachments(body, scenes),
+            | Stmt::AuthorityScope { body, .. } => collect_scene_attachments(body, scenes),
             _ => {}
         }
     }

@@ -19,7 +19,7 @@ const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self", "shared"];
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "DataTree", "Decimal", "Derived", "Duration", "Effect", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "JSONError", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
-const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Abilities", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "HTML", "Impure", "Inline", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
+const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "FX", "HTML", "Impure", "Inline", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
 const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "@", "@[", "]@", "^", "~"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "{", "|", "|=", "||", "~|", "~|="];
 // END GENERATED JET SYNTAX HIGHLIGHTS
@@ -155,33 +155,32 @@ module.exports = grammar({
         /[a-z_][A-Za-z0-9_]*(-[A-Za-z0-9_]+)*(\.[a-z_][A-Za-z0-9_]*(-[A-Za-z0-9_]+)*)*/,
       ),
 
-    // A marker that introduces a top-level brace-list declaration:
-    // `#UnitFamily(Currency) { usd, eur }` (D-QUAL3) mints one type per member.
-    // D-BOUND-SINK1=A: a library-declared checked text head is a separate
-    // marker declaration, not an applied marker: `marker Name on [.Text] {
-    // check … hole … }`.
+    // A marker declaration has one named parameter list. Ordinary names carry
+    // typed use-site arguments; `@` names carry fixed declaration metadata.
+    // D-MARKER-SITES1=B: `@sites: [...]` is the sole legal-site form.
     marker_decl: ($) =>
-      choice(
-        $.checked_text_head_decl,
-        seq($.attribute, "{", commaSep($.identifier), "}"),
-      ),
-
-    checked_text_head_decl: ($) =>
       seq(
         "marker",
         field("name", $.marker_name),
-        "on",
-        "[",
-        ".",
-        "Text",
-        "]",
-        "{",
-        "check",
-        field("check", $._expr),
-        "hole",
-        field("hole", $._expr),
-        "}",
+        $.marker_decl_params,
+        optional($.derive_body),
       ),
+
+    marker_decl_params: ($) => seq("(", commaSep($.marker_decl_param), ")"),
+
+    marker_decl_param: ($) =>
+      choice(
+        seq(field("name", $.marker_fact_name), ":", $._expr),
+        seq(
+          field("name", $.identifier),
+          ":",
+          optional("..."),
+          field("type", $._type),
+          optional(seq("{", field("default", $._expr), "}")),
+        ),
+      ),
+
+    marker_fact_name: ($) => seq("@", $.identifier),
 
     // ── Use (S16, D-MOD3) ────────────────────────────────────────────────────
     // `use core.encoding.json as json`, `use "./file.jet"`, or a member list
@@ -761,8 +760,8 @@ module.exports = grammar({
         $.expr_stmt,
       ),
 
-    // A rule-introduced block: `#Abilities(IO) { … }` (D-EFF1),
-    // named `#Abilities(abilities: FS) { … }` (D-AUTHORITY-SCOPE1), `#Transact(order) { … }` (D-TXN4).
+    // A rule-introduced block: `#FX(IO) { … }` (D-EFF1),
+    // named `#FX(grant: FS) { … }` (D-ABILITY-NAME2), `#Transact(order) { … }` (D-TXN4).
     marker_block_stmt: ($) =>
       seq(choice($.attribute, $._lower_marker), $.scoped_block),
 
@@ -939,6 +938,7 @@ module.exports = grammar({
         $.binary_expr,
         $.unary_expr,
         $.capability_expr,
+        $.result_handler_expr,
         $.try_expr,
         $.paren_expr,
         $.index_expr,
@@ -1404,6 +1404,26 @@ module.exports = grammar({
 
     // Postfix `?` propagation (S7).
     try_expr: ($) => prec.left(5, seq($._expr, "?")),
+
+    // D-RESULT-DECON2=B: one exhaustive Result handler. The contextual
+    // `?`/`!` pair is distinct from postfix propagation, optional chaining,
+    // unary `!`, and ordinary arm arrows by the two payload-name + arrow
+    // slots.
+    result_handler_expr: ($) =>
+      prec.left(
+        5,
+        seq(
+          field("subject", $._expr),
+          "?",
+          field("ok", $.identifier),
+          "->",
+          field("success", choice($.block, $._expr)),
+          "!",
+          field("error", $.identifier),
+          "->",
+          field("failure", choice($.block, $._expr)),
+        ),
+      ),
 
     paren_expr: ($) => seq("(", $._expr, ")"),
 

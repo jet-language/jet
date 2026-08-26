@@ -35,6 +35,9 @@ impl<'a> Parser<'a> {
                 self.bump();
                 continue;
             }
+            if self.at_state_section() {
+                return Err(self.reject_state_section("module"));
+            }
             match &self.peek().kind {
                 TokKind::Ident(n)
                     if n == Syntax::MODULE_FIELD_SOURCES
@@ -140,6 +143,9 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
                 continue;
+            }
+            if self.at_state_section() {
+                return Err(self.reject_state_section("module"));
             }
             match &self.peek().kind {
                 TokKind::Ident(n)
@@ -954,6 +960,9 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
                 continue;
+            }
+            if self.at_state_section() {
+                return Err(self.reject_state_section("module"));
             }
             if self.at_code_module_import() {
                 match self.code_module_import() {

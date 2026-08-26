@@ -596,7 +596,7 @@ pub(crate) fn emit_tir_method(
 pub(crate) fn emit_tir_trait_method(
     tir: &TFunc,
     is_unsafe: bool,
-    self_conv: AccessConvention,
+    self_conv: Option<AccessConvention>,
     serde: Option<SerdeCodec>,
     cx: &Cx,
     out: &mut String,
@@ -646,18 +646,20 @@ pub(crate) fn emit_tir_trait_method(
     };
     // D-MUTSELF1: the receiver honors the source convention — `&self` / `&mut self` /
     // `self` — matching `emit_trait_method` and the trait declaration (emit_trait_def).
-    let self_recv = match self_conv {
-        AccessConvention::Read if borrows_receiver => {
-            jet_format!("&'{jet_prefix}view self")
-        }
-        AccessConvention::Write if borrows_receiver => {
-            jet_format!("&'{jet_prefix}view mut self")
-        }
-        AccessConvention::Read => "&self".to_string(),
-        AccessConvention::Write => "&mut self".to_string(),
-        AccessConvention::Move => "self".to_string(),
-    };
-    let mut params: Vec<String> = vec![self_recv];
+    let mut params: Vec<String> = self_conv
+        .map(|conv| match conv {
+            AccessConvention::Read if borrows_receiver => {
+                jet_format!("&'{jet_prefix}view self")
+            }
+            AccessConvention::Write if borrows_receiver => {
+                jet_format!("&'{jet_prefix}view mut self")
+            }
+            AccessConvention::Read => "&self".to_string(),
+            AccessConvention::Write => "&mut self".to_string(),
+            AccessConvention::Move => "self".to_string(),
+        })
+        .into_iter()
+        .collect();
     for (index, (rust_name, ty, conv)) in tir.params.iter().enumerate() {
         let rust = rust_param_type(cx, *conv, ty);
         let rust = if view_provenance.is_some_and(|map| {
@@ -677,8 +679,9 @@ pub(crate) fn emit_tir_trait_method(
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{pad}{unsafe_kw}fn {name}{view_generic}({params}){ret} {{\n",
+        "{pad}{unsafe_kw}fn {name}{generics}{view_generic}({params}){ret} {{\n",
         name = tir.name,
+        generics = tir.generics,
         view_generic = if has_view_return {
             jet_format!("<'{jet_prefix}view>")
         } else {

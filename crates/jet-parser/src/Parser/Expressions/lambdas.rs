@@ -260,7 +260,13 @@ impl<'a> Parser<'a> {
     ) -> Result<(LambdaBody, usize), Diagnostic> {
         if matches!(self.peek().kind, TokKind::LBrace) {
             self.expect(TokKind::LBrace, "to open the lambda body")?;
+            // D-TAIL-RETURN1=A: a block lambda keeps one unadorned final
+            // expression in the existing `Stmt::Expr` node. Expected-result
+            // checking belongs to sema, including the unit diagnostic.
+            let previous_tail_depth = self.callable_tail_block_depth;
+            self.callable_tail_block_depth = Some(self.block_depth + 1);
             let statements = self.block_stmts();
+            self.callable_tail_block_depth = previous_tail_depth;
             // `block_stmts` consumes the closing brace. Keep it in the
             // lambda span: formatter comment ownership must distinguish a
             // comment inside the lambda from one trailing the enclosing

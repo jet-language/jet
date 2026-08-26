@@ -6916,50 +6916,48 @@ fn run() {
 }
 
 #[test]
-fn tracked_float_origin_matches_aot_in_default_dev() {
+fn tracked_origin_fact_matches_aot_in_default_dev() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let dir = common::unique_tmp("jet_float_binding_origin_dev");
+    let dir = common::unique_tmp("jet_origin_fact_dev");
     fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("float_binding_origin.jet");
+    let file = dir.join("origin_fact.jet");
     fs::write(
         &file,
-        "fn run() {\n    #Track speed :: Float{3.5}\n    plain :: Float{3.5}\n    copied :: speed\n    print(speed.origin())\n    print((speed).origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() Float {\n    print(\"evaluated\")\n    return Float{3.5}\n}\n",
+        "fn run() {\n    #Track speed :: Float{3.5}\n    plain :: Float{3.5}\n    copied :: speed\n    @speed_origin :: speed.@origin\n    @plain_origin :: plain.@origin\n    @copied_origin :: copied.@origin\n    print(@speed_origin?.tracked ?? false)\n    print(@speed_origin?.source ?? \"missing\")\n    print(@speed_origin?.line ?? 0)\n    print(@speed_origin?.column ?? 0)\n    print(@plain_origin == None)\n    print(@copied_origin == None)\n}\n",
     )
     .unwrap();
     let shown = file.to_string_lossy().to_string();
-    let expected_stdout = format!(
-        "tracked `speed` at {shown}:2:12: #Track speed :: Float{{3.5}}\ntracked `speed` at {shown}:2:12: #Track speed :: Float{{3.5}}\nuntracked\nuntracked\nevaluated\nuntracked\n"
-    );
+    let expected_stdout = "true\nspeed\n2\n12\ntrue\ntrue\n".to_string();
     let aot = compiled_binary_output(
         &dir,
-        "float_binding_origin",
+        "origin_fact",
         0,
-        "float_binding_origin",
+        "origin_fact",
         &shown,
     );
-    let resident = run_cranelift_resident_file(&shown, "float_binding_origin");
-    let dev = match dev_iteration_with_timeout("float_binding_origin", &shown, false) {
+    let resident = run_cranelift_resident_file(&shown, "origin_fact");
+    let dev = match dev_iteration_with_timeout("origin_fact", &shown, false) {
         RunOutcome::Ran {
             stdout,
             stderr,
             exit_code,
         } => ProgramOutput::ran(stdout, stderr, exit_code),
-        RunOutcome::Problems(diags) => panic!("default dev failed Float origin: {diags:?}"),
+        RunOutcome::Problems(diags) => panic!("default dev failed origin fact: {diags:?}"),
     };
 
     assert_eq!(aot, ProgramOutput::ran(expected_stdout, String::new(), 0));
     assert_eq!(resident, aot);
     assert_eq!(dev, aot);
 
-    let interpreted = match dev_iteration_with_timeout("float_binding_origin", &shown, true) {
+    let interpreted = match dev_iteration_with_timeout("origin_fact", &shown, true) {
         RunOutcome::Ran {
             stdout,
             stderr,
             exit_code,
         } => ProgramOutput::ran(stdout, stderr, exit_code),
-        RunOutcome::Problems(diags) => panic!("forced interpreter failed Float origin: {diags:?}"),
+        RunOutcome::Problems(diags) => panic!("forced interpreter failed origin fact: {diags:?}"),
     };
     assert_eq!(interpreted, aot);
     let _ = fs::remove_dir_all(&dir);

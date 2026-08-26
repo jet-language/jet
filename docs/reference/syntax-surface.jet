@@ -398,20 +398,9 @@ fn typed_head_bodies() {
     regex :: Regex{"\d+{{2}}"}               // Regex still rejects holes
 }
 
-// Libraries declare checked text heads on the existing marker rail
-// (D-BOUND-SINK1=A). The sink takes the checked type; `.raw()` is the audited
-// escape for text that was checked elsewhere.
-marker Selector on [.Text] {
-    check @body
-    hole @value
-}
-fn accept_selector(selector: Selector) { }
-fn checked_text() {
-    value :: "cart"
-    selected :: Selector{"#cart {value}"}
-    accept_selector(selected)
-    accept_selector(Selector.raw("already checked"))
-}
+// Marker declarations use one named parameter list
+// (D-MARKER-SITES1=B). `@sites` is the legal-site metadata value.
+marker Selector(@sites: [.Text], @repeatable: true)
 
 
 // ============================================================================
@@ -494,9 +483,9 @@ fn announce(label: String, n: Int) -[IO]> {    // upper bound: may use IO
 fn run_all(cb: fn(Int) Int -[]>) { }           // lever 1: param-type effect bound
 fn map_each(f: fn(Int) Int) -[via f]> { }       // lever 2: callback pass-through
 
-// Scoped abilities: bound in a lexical scope, revoked at scope end (D-AUTHORITY-SCOPE1).
+// Scoped Authority: bound in a lexical scope, revoked at scope end (D-ABILITY-NAME2).
 fn with_fs() {
-    #Abilities(caps: FS) {
+    #FX(grant: FS) {
         // FS effect authorized only inside this block
     }
 }
@@ -599,7 +588,10 @@ tag Reviewed                                   // marker tag, erases at runtime
 tag Internal { }
 trait Greeter { fn greet(self) String }
 
-// Typestate via transitioning tags (D-STATE1): require a state, or transition states.
+// Typestate facts live in the owning struct section (D-STATE-HOME1=A).
+struct File {
+    state { Closed, Open }
+}
 #State(Open) fn write_line(self, s: String) { }       // valid only when Open
 #Transition(Closed, Open) fn open(self) File -> { } // consume Closed, yield Open
 

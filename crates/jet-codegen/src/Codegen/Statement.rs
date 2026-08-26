@@ -26,7 +26,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let is_email =
         etype.is_some_and(|t| matches!(t, "SMTPSecurity" | "RecipientPolicy" | "EmailError"));
     let is_auth = etype == Some("AuthError");
-    let is_service_receipt = etype == Some("ServiceReceipt");
+    let is_delivery_state = etype == Some("DeliveryState");
     let is_service_error = etype == Some("ServiceError");
     // D-CONC-FAIL1=A: task failures are published by the shared Prelude, not
     // emitted as the Prelude task-failure enum.
@@ -100,7 +100,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 // definition codegen in Items.rs) rather than always assuming a
                 // tuple variant. `VariantPayload::Single` is the only real tuple case.
                 let real_names = variant_field_names(cx, variant).map(|names| {
-                    if is_email || is_auth || is_service_receipt || is_service_error {
+                    if is_email || is_auth || is_delivery_state || is_service_error {
                         names
                             .into_iter()
                             .map(|name| {
@@ -299,7 +299,7 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                                 | "SMTPAuth"
                                 | "TLSTrust"
                                 | "AuthError"
-                                | "ServiceReceipt"
+                                | "DeliveryState"
                                 | "ServiceError"
                         )
                     });

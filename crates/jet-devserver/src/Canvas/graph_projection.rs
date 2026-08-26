@@ -3,7 +3,7 @@ use std::path::Path;
 
 use jet_driver::Diagnostics::Span;
 use jet_driver::AST::{self, Expr, Item, Stmt};
-use jet_semindex::{SemIndex, SemIndexEffectFacts, SourceSpan, SymbolKind};
+use jet_semindex::{SemIndex, SemIndexEffectFacts, SourceSpan, StateGraphFact, SymbolKind};
 
 use super::graph_helpers::{
     assignment_title, binding_type, call_has_effects, call_ret, effect_badges, expr_title,
@@ -66,7 +66,7 @@ pub(super) fn project_checked(
     let enum_catalog = enum_catalog_json(bundle);
     let pattern_catalog = pattern_catalog_json(bundle);
     let json = format!(
-        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\"],\"enum_variants\":{},\"pattern_variants\":{},\"blueprint\":{}}}}}",
+        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\",\"state_graphs\"],\"enum_variants\":{},\"pattern_variants\":{},\"blueprint\":{}}}}}",
         GRAPH_SCHEMA_VERSION,
         json_str(source_id),
         json_str(&source_revision(src)),
@@ -437,15 +437,66 @@ fn canvas_blueprint_facts_json(
         .map(jet_semindex::workspace_overlay_policy_json)
         .unwrap_or_else(|| "null".to_string());
     let event_dispatchers = event_dispatcher_facts(path, src, bundle, index).join(",");
+    let state_graphs = index
+        .state_graphs()
+        .iter()
+        .map(state_graph_json)
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"runtime_events\":{},\"event_dispatchers\":[{}],\"interfaces\":[{}],\"task_flows\":[{}],\"outputs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"source_truth\":\"ordinary_jet_source\"}}",
+        "{{\"runtime_events\":{},\"event_dispatchers\":[{}],\"interfaces\":[{}],\"task_flows\":[{}],\"outputs\":[{}],\"state_graphs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"source_truth\":\"ordinary_jet_source\"}}",
         runtime_events.unwrap_or("null"),
         event_dispatchers,
         interfaces.join(","),
         task_flows,
         outputs,
+        state_graphs,
         package_facts,
         workspace_overlays,
+    )
+}
+
+fn state_graph_json(graph: &StateGraphFact) -> String {
+    let states = graph
+        .states
+        .iter()
+        .map(|state| {
+            let reachable = state
+                .reachable
+                .map_or_else(|| "null".to_string(), |value| value.to_string());
+            format!(
+                "{{\"name\":{},\"terminal\":{},\"reachable\":{},\"span\":{}}}",
+                json_str(&state.name),
+                state.terminal,
+                reachable,
+                span_json(state.span)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let transitions = graph
+        .transitions
+        .iter()
+        .map(|transition| {
+            let from = transition
+                .from
+                .as_ref()
+                .map_or_else(|| "null".to_string(), |value| json_str(value));
+            format!(
+                "{{\"operation\":{},\"from\":{},\"to\":{}}}",
+                json_str(&transition.operation),
+                from,
+                json_str(&transition.to)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"owner\":{},\"module\":{},\"states\":[{}],\"transitions\":[{}]}}",
+        json_str(&graph.owner),
+        json_str(&graph.module_path),
+        states,
+        transitions
     )
 }
 
@@ -1940,7 +1991,7 @@ fn project_stmt(
             add_region(g, ordinal, "layout", name, *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 150, x + 230, y + 70);
         }
-        Stmt::Caps {
+        Stmt::AuthorityScope {
             caps, body, span, ..
         } => {
             let title = caps

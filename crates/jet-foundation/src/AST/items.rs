@@ -54,13 +54,9 @@ pub enum Item {
     /// `migration TypeName { rename a -> b }`
     /// block — declares field renames on a `#PublishedSchema` struct.
     Migration(MigrationDecl),
-    /// D-STATE-DECL (ratified 2026-06-25, option B): `state TypeName { A, B, C }` —
-    /// declares the bounded set of states for a typestate machine. The set erases at
-    /// runtime (pure compile-time, no discriminant). Each name in the body is a state
-    /// label; `#State(S)` / `#Transition(From, To)` markers on `TypeName::*` methods
-    /// must reference names from this set (unknown state = E0151). A declared state with
-    /// no outgoing `#Transition` is a dead-end warning (L0151). Declaration family sibling
-    /// of `tag`/`struct`/`enum`.
+    /// D-STATE-HOME1=A (amends D-STATE-NS1): top-level state companions are
+    /// recognized only for the E0157 rewrite. Accepted source stores the one
+    /// bounded fact set in `StructDef::state`.
     StateDecl(StateDecl),
     /// D-PROTO1 / D-PROTO2, amended by D-ARROW-CONTROL1:
     /// `protocol Name { client: Msg(…) }` declares an ordered exchange and expands (R11) into
@@ -113,9 +109,9 @@ pub struct MarkerDecl {
     /// its declaration facts; present means the body may reject or emit
     /// checked Jet items through the same typed template model as derives.
     pub body: Option<Vec<DeriveBodyItem>>,
-    /// D-BOUND-SINK1=A: a library-owned checked text head. The declaration
-    /// uses `marker Name on [.Text] { check … hole … }` so the type and its
-    /// construction contract share the marker vocabulary.
+    /// Retired checked-text declaration payload. New source declarations
+    /// never populate this field; it remains only while the checked-text
+    /// lowering path is removed by its owning change.
     pub text: Option<MarkerTextDecl>,
     pub span: Span,
 }
@@ -773,10 +769,9 @@ pub struct ProtocolDecl {
     pub span: Span,
 }
 
-/// D-STATE-DECL (ratified 2026-06-25, option B): `state TypeName { A, B, C }` —
-/// a bounded compile-time state-set declaration. Each string in `states` is a valid
-/// state label; `#State(X)` / `#Transition(A, B)` markers on `TypeName::*` methods
-/// must reference labels from this set. Erases in codegen (I3, no runtime discriminant).
+/// D-STATE-HOME1=A: the nested `state { A, B, C }` section owned by one named
+/// struct. `type_name` identifies its owner for the erased `Type.State` fact
+/// registry; the section itself is not a runtime type or item.
 #[derive(Debug, Clone)]
 pub struct StateDecl {
     pub is_pub: bool,
@@ -1674,6 +1669,9 @@ pub struct StructDef {
     /// S45: `<T>` after the struct name.
     pub type_params: Vec<TypeParam>,
     pub fields: Vec<Field>,
+    /// D-STATE-HOME1=A: the owning struct carries its erased typestate set.
+    /// The declaration never becomes a second runtime type or item.
+    pub state: Option<StateDecl>,
     pub methods: Vec<Func>,
     /// D-CLI-GLOBAL1=E: callable members bound with `name = function` are
     /// commands, not stored data. They stay separate from fields so ordinary
@@ -1763,7 +1761,7 @@ pub struct DistinctDef {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) Name :: distinct Base`.
     pub is_package_pub: bool,
-    /// Source-ordered applied rules. Ability requests are lowered into the
+    /// Source-ordered applied rules. Effect requests are lowered into the
     /// ordinary derive rows below; this is the one declaration-side home for
     /// every derived capability.
     pub type_markers: Vec<Marker>,

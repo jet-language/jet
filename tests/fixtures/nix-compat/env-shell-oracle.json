@@ -105,5 +105,54 @@
     "JET_NIX_TMP_CLEANED": "native no-op marker",
     "shellHook.banner": "Shell.enter presentation"
   },
+  "native_projection": {
+    "tools": [
+      {
+        "definition": "jetDev",
+        "command": "jet",
+        "relative_binary": "target/debug/jet",
+        "mode": "direct"
+      },
+      {
+        "definition": "jetpackDev",
+        "command": "jetpack",
+        "relative_binary": "target/debug/jetpack",
+        "mode": "direct"
+      }
+    ],
+    "facts": [
+      {
+        "variable": "JET_ROOT",
+        "kind": "project-root"
+      },
+      {
+        "variable": "TZDIR",
+        "kind": "output-path",
+        "package": "tzdata",
+        "relative": "share/zoneinfo",
+        "platform": "any"
+      },
+      {
+        "variable": "JET_ENV_DISABLE",
+        "kind": "constant",
+        "value": "1",
+        "decision": "D-ENVHOOK1"
+      },
+      {
+        "variable": "LD_LIBRARY_PATH",
+        "kind": "ordered-output-paths",
+        "packages": ["vulkan-loader", "raylib"],
+        "relative": "lib",
+        "platform": "linux",
+        "append": "inherited"
+      },
+      {
+        "variable": "JET_NIX_TMP_CLEANED",
+        "kind": "not-created-marker",
+        "value": "1",
+        "executes": false
+      }
+    ]
+  },
   "unsupported_hook_facts": []
 }

@@ -7529,7 +7529,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             crate::Codegen::TIR::TFuncKind::Method {
                                 self_conv: Some(_),
                                 ..
-                            } | crate::Codegen::TIR::TFuncKind::TraitMethod { .. }
+                            } | crate::Codegen::TIR::TFuncKind::TraitMethod {
+                                self_conv: Some(_),
+                                ..
+                            }
                         );
                         if has_receiver {
                             if let Some(memo_field) = &func.memo_field {
@@ -9575,6 +9578,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 op,
                 lhs,
                 rhs,
+                ..
             } => {
                 let l = self.eval_expr_child(lhs, scope)?;
                 let r = self.eval_expr_child(rhs, scope)?;
@@ -9614,6 +9618,8 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     "mul" => crate::AST::BinOp::Mul,
                     "div" => crate::AST::BinOp::Div,
                     "rem" => crate::AST::BinOp::Rem,
+                    "pow" => crate::AST::BinOp::Pow,
+                    "rotate_left" | "rotate_right" => crate::AST::BinOp::Add,
                     other => {
                         return Err(unsupported(
                             &format!("OverflowOpt op `{other}`"),
@@ -9621,6 +9627,18 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         ));
                     }
                 };
+                let right_signed = !matches!(&rhs.ty, Type::IntN { signed: false, .. });
+                if *prefix == "checked_policy" {
+                    return crate::Comptime::MathLayout::integer_binop(
+                        bin,
+                        a,
+                        b,
+                        signed,
+                        bits,
+                        right_signed,
+                        self.span(),
+                    );
+                }
                 crate::Comptime::MathLayout::overflow_opt(
                     prefix,
                     bin,
@@ -10069,9 +10087,6 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             TNumericOp::Predicate(method) => {
                 crate::Comptime::Builtins::apply_method(v, method, vec![], self.span())
             }
-            TNumericOp::Origin { origin } => Ok(CtValue::Str(
-                crate::float_provenance::jet_float_origin(Some(origin.as_str())),
-            )),
             TNumericOp::CastAs { dst_rust } => {
                 // Match AOT `(({recv}) as {dst_rust})` / JIT CastAs lowering:
                 // int→float and F32↔F64 must change the CtFloat width tag so

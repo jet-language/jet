@@ -69,7 +69,6 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/Authority.js"),
     "\n",
-    include_str!("../Prelude/Core/FloatProvenance.js"),
     "\n",
     include_str!("../Prelude/Core/InlineRange.js"),
     "\n",
@@ -579,7 +578,7 @@ fn is_default_int(ty: &Type) -> bool {
 
 fn web_type_uses_authority(ty: &Type) -> bool {
     match ty {
-        Type::Named(name) => name == Syntax::TYPE_ABILITIES,
+        Type::Named(name) => name == Syntax::TYPE_AUTHORITY,
         Type::Tagged { inner, .. }
         | Type::InlineRange { base: inner, .. }
         | Type::List(inner)
@@ -1009,6 +1008,7 @@ fn web_wasm_expr_supported(
             op,
             lhs,
             rhs,
+            ..
         } if web_overflow_opt_supported(prefix, op) => {
             web_wasm_expr_supported(lhs, bundle, file_prefix, reconstructions)
                 && web_wasm_expr_supported(rhs, bundle, file_prefix, reconstructions)
@@ -1096,8 +1096,7 @@ fn web_wasm_expr_supported(
         },
         TIR::TExprKind::NumericMethod {
             recv,
-            op: TIR::TNumericOp::Origin { .. }
-                | TIR::TNumericOp::CastAs { .. }
+            op: TIR::TNumericOp::CastAs { .. }
                 | TIR::TNumericOp::InlineRange { .. },
         } => web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions),
         TIR::TExprKind::BuiltinMethod {
@@ -1166,7 +1165,7 @@ fn web_wasm_expr_supported(
         } => {
             let authority = matches!(
                 &recv.ty,
-                Type::Named(type_name) if type_name == Syntax::TYPE_ABILITIES
+                Type::Named(type_name) if type_name == Syntax::TYPE_AUTHORITY
             ) && matches!(method.name.as_str(), "with" | "without")
                 && args.len() == 1;
             let computed = method.mangled
@@ -1759,6 +1758,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
             op,
             lhs,
             rhs,
+            ..
         } if web_overflow_opt_supported(prefix, op) => {
             web_expr_supported(lhs) && web_expr_supported(rhs)
         }
@@ -1804,7 +1804,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         }
         E::MethodCall {
             recv, method, args, ..
-        } if matches!(&recv.ty, Type::Named(name) if name == Syntax::TYPE_ABILITIES)
+        } if matches!(&recv.ty, Type::Named(name) if name == Syntax::TYPE_AUTHORITY)
             && matches!(method.name.as_str(), "with" | "without")
             && args.len() == 1 =>
         {
@@ -1926,8 +1926,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::NumericMethod {
             recv,
             op:
-                TIR::TNumericOp::Origin { .. }
-                | TIR::TNumericOp::CastAs { .. }
+                TIR::TNumericOp::CastAs { .. }
                 | TIR::TNumericOp::FloatToInt { .. }
                 | TIR::TNumericOp::InlineRange { .. },
         } => web_expr_supported(recv),
@@ -4144,7 +4143,7 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
         Type::InlineRange { base, .. } => wasm_ty(base),
         Type::Int => Some("JetWasmInt"),
         Type::IntN { signed: true, .. } => Some("i64"),
-        Type::Named(name) if name == Syntax::TYPE_ABILITIES => Some("JetAuthority"),
+        Type::Named(name) if name == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
         Type::Named(name) if name == Syntax::DURATION_TYPE || name == Syntax::TYPE_INSTANT => {
             Some("i64")
         }
@@ -4178,7 +4177,7 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
         Type::Tagged { inner, .. } => wasm_storage_ty(inner)?,
         Type::InlineRange { base, .. } => wasm_storage_ty(base)?,
         Type::Named(name) if name == "Unit" => "()".to_string(),
-        Type::Named(name) if name == Syntax::TYPE_ABILITIES => "JetAuthority".to_string(),
+        Type::Named(name) if name == Syntax::TYPE_AUTHORITY => "JetAuthority".to_string(),
         Type::Named(name) if name == Syntax::TYPE_COMPLEX => "JetComplex".to_string(),
         Type::Named(name) if name == Syntax::TYPE_FRACTION => "JetWasmFraction".to_string(),
         Type::Named(name) if name == Syntax::TYPE_DECIMAL => "JetWasmDecimal".to_string(),
@@ -4230,7 +4229,7 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
         Type::Tagged { inner, .. } => wasm_internal_ty(inner, bundle)?,
         Type::InlineRange { base, .. } => wasm_internal_ty(base, bundle)?,
         Type::Named(name) if name == "Unit" => "()".to_string(),
-        Type::Named(name) if name == Syntax::TYPE_ABILITIES => "JetAuthority".to_string(),
+        Type::Named(name) if name == Syntax::TYPE_AUTHORITY => "JetAuthority".to_string(),
         Type::Named(name) if name == Syntax::TYPE_COMPLEX => "JetComplex".to_string(),
         Type::Named(name) if name == Syntax::TYPE_FRACTION => "JetWasmFraction".to_string(),
         Type::Named(name) if name == Syntax::TYPE_DECIMAL => "JetWasmDecimal".to_string(),
@@ -6354,6 +6353,7 @@ fn wasm_emit_expr(
             op,
             lhs,
             rhs,
+            ..
         } if web_overflow_opt_supported(prefix, op) => {
             let lhs = wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?;
             let rhs = wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?;
@@ -6515,7 +6515,7 @@ fn wasm_emit_expr(
         }
         TIR::TExprKind::MethodCall {
             recv, method, args, ..
-        } if matches!(&recv.ty, Type::Named(name) if name == Syntax::TYPE_ABILITIES)
+        } if matches!(&recv.ty, Type::Named(name) if name == Syntax::TYPE_AUTHORITY)
             && matches!(method.name.as_str(), "with" | "without")
             && args.len() == 1 => {
             let receiver = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
@@ -6566,14 +6566,6 @@ fn wasm_emit_expr(
                 .collect::<Result<Vec<_>, _>>()?;
             format!("{helper}({})", args.join(", "))
         }
-        TIR::TExprKind::NumericMethod {
-            recv,
-            op: TIR::TNumericOp::Origin { origin },
-        } => format!(
-            "{{ let _ = ({}); jet_float_origin(Some({:?})) }}",
-            wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?,
-            origin
-        ),
         TIR::TExprKind::NumericMethod {
             recv,
             op: TIR::TNumericOp::CastAs { dst_rust },
@@ -8609,6 +8601,7 @@ fn tir_js_expr(
             op,
             lhs,
             rhs,
+            ..
         } if web_overflow_opt_supported(prefix, op) => {
             let lhs = tir_js_expr(lhs, funcs, file_prefix)?;
             let rhs = tir_js_expr(rhs, funcs, file_prefix)?;
@@ -8829,7 +8822,7 @@ fn tir_js_expr(
         }
         E::MethodCall {
             recv, method, args, ..
-        } if matches!(&recv.ty, Type::Named(name) if name == Syntax::TYPE_ABILITIES)
+        } if matches!(&recv.ty, Type::Named(name) if name == Syntax::TYPE_AUTHORITY)
             && matches!(method.name.as_str(), "with" | "without")
             && args.len() == 1 =>
         {
@@ -9052,11 +9045,6 @@ fn tir_js_expr(
             }
         }
         E::NumericMethod { recv, op } => match op {
-            TIR::TNumericOp::Origin { origin } => format!(
-                "jet_float_origin({}, {})",
-                tir_js_expr(recv, funcs, file_prefix)?,
-                json_quote(origin)
-            ),
             TIR::TNumericOp::CastAs { dst_rust }
                 if dst_rust.contains("i") || dst_rust.contains("u") =>
             {
@@ -9919,7 +9907,6 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/FixedList.rs"),
     "\n",
-    include_str!("../Prelude/Core/FloatProvenance.rs"),
     "\n",
     include_str!("../Prelude/Core/Power.rs"),
     "\n",

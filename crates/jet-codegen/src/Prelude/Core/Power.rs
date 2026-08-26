@@ -17,6 +17,8 @@ const JET_POW_OVERFLOW: &str = JET_ARITHMETIC_POWER_OVERFLOW;
 
 trait JetPow: Copy {
     fn jet_pow(self, exponent: i128, file: &str, line: u32) -> Self;
+    fn jet_wrapping_pow(self, exponent: i128, file: &str, line: u32) -> Self;
+    fn jet_saturating_pow(self, exponent: i128, file: &str, line: u32) -> Self;
 }
 macro_rules! jet_pow_impl {
     ($($t:ty),*) => { $(
@@ -30,6 +32,24 @@ macro_rules! jet_pow_impl {
                 }
                 self.checked_pow(exponent as u32)
                     .unwrap_or_else(|| jet_arithmetic_stop(file, line, JET_POW_OVERFLOW))
+            }
+            fn jet_wrapping_pow(self, exponent: i128, file: &str, line: u32) -> Self {
+                if exponent < 0 {
+                    jet_arithmetic_stop(file, line, JET_POW_NEGATIVE);
+                }
+                if exponent > u32::MAX as i128 {
+                    jet_arithmetic_stop(file, line, JET_POW_OVERFLOW);
+                }
+                self.wrapping_pow(exponent as u32)
+            }
+            fn jet_saturating_pow(self, exponent: i128, file: &str, line: u32) -> Self {
+                if exponent < 0 {
+                    jet_arithmetic_stop(file, line, JET_POW_NEGATIVE);
+                }
+                if exponent > u32::MAX as i128 {
+                    jet_arithmetic_stop(file, line, JET_POW_OVERFLOW);
+                }
+                self.saturating_pow(exponent as u32)
             }
         }
     )* };

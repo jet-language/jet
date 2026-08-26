@@ -11,7 +11,14 @@ use crate::AST::{Expr, Type, VariantField, VariantPayload};
 /// a phantom return from `on_commit`/`on_rollback` (registration is side-effect);
 /// those calls are intentionally ignorable. `Task` stays on L1101.
 pub(crate) fn core_must_use_type(name: &str) -> bool {
-    matches!(name, "ScopeGuard" | "Iter")
+    matches!(name, "ScopeGuard" | "Iter" | "Delivery")
+}
+
+/// D-SERVICE-RECEIPT2=A: a bound `Delivery` owns one linear observation or
+/// control obligation. The handle itself is not a cancellation token: moving
+/// it to a return, storage, or another call transfers that obligation.
+pub(crate) fn core_single_use_type(name: &str) -> bool {
+    name == "Delivery"
 }
 
 pub(crate) fn unit_ty() -> Type {
@@ -157,18 +164,19 @@ pub(crate) fn is_text_error_type_name(name: &str) -> bool {
     name == "TextError"
 }
 
-/// D-FACT-HOME1=A: the fixed marker-argument menu (`Ability`, `InlineMode`,
+/// D-FACT-HOME1=A: the fixed marker-argument menu (`Effect`, `InlineMode`,
 /// etc.) is a fact vocabulary published for reflection, never a general type —
 /// no constructor exists outside `#Marker(param: Name.Variant)` position. Each
 /// fix names the real path: the living counterpart when one exists (only
-/// `Ability` has one — `Abilities`/`[Right]`), otherwise the marker that
+/// `Effect` has no general-position use here; it is written inside `#FX`,
+/// otherwise the marker that
 /// legitimately writes the name. `Layout` is excluded: it is also a real
 /// dot-ctor value type (D-LAYOUT-CTOR1, see the `matches!` in
 /// `core_type_known`), so that name resolves before this ever runs.
 fn phantom_fact_menu_fix(name: &str) -> Option<&'static str> {
     Some(match name {
         "ABI" => "write it only inside `#ABI(name: system)`",
-        "Ability" => "take `Abilities` (the rights value), or a rights list `[Right]`; inside a marker, write it in `#Abilities(...)`",
+        "Effect" => "write it only inside `#FX(Net, FS)` or another `#FX(...)` effect scope",
         "FfiLanguage" => "write it only inside `#FFI(language: c)`",
         "InlineMode" => "write it only inside `#Inline(mode: Always)`",
         "IntType" => "write it only inside `#Layout(tag: I32)`",
@@ -200,13 +208,32 @@ pub(crate) fn phantom_fact_menu_diag(name: &str, span: Span) -> Option<Diagnosti
     ))
 }
 
+/// D-ABILITY-NAME2=A: the old authority vocabulary is refused at a type site.
+/// These spellings are not aliases. Reusing E0119 keeps the retirement in the
+/// existing registered type-diagnostic family while the message gives the
+/// exact source replacement.
+pub(crate) fn retired_authority_vocabulary_diag(name: &str, span: Span) -> Option<Diagnostic> {
+    let fix = match name {
+        "Ability" => "write `Effect` only inside `#FX(...)`",
+        "Abilities" | "Capability" | "Caps" => "write `Authority` for the rights value",
+        _ => return None,
+    };
+    Some(Diagnostic::error(
+        "E0119",
+        format!("`{name}` is retired"),
+        "Jet has one effect menu, one Authority value, and one `#FX` scope; the old authority spellings are not types".to_string(),
+        fix.to_string(),
+        Some(span),
+    ))
+}
+
 pub(crate) fn core_type_known(name: &str) -> bool {
     if Syntax::typed_head_kind(name).is_some_and(|kind| kind.is_typed_text()) {
         return true;
     }
     matches!(
         name,
-        "Unit" | "U8" | Syntax::TYPE_ERR | Syntax::TYPE_TASK_FAILURE | "ProcessResult" | "ProcessReceipt" | "ProcessPlan" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
+        "Unit" | "U8" | Syntax::TYPE_ERR | Syntax::TYPE_NEVER | Syntax::TYPE_TASK_FAILURE | "ProcessResult" | "ProcessReceipt" | "ProcessPlan" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
         | "Claims" | "AuthError" | "Session" | "Auth"
         | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy"
         // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum
@@ -227,7 +254,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-DET1: deterministic injected capability handles.
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         // D-AUTHORITY-NAME1=A: one ordinary, nameable rights carrier.
-        | Syntax::TYPE_ABILITIES
+        | Syntax::TYPE_AUTHORITY
         | "Clock" | "Rng" | "Fake" | "Duration" | "DurationUnit" | "RangeError" | "Condition" | "Path"
         | "TestSuite"
         | "GameScene" | "GameAssets" | "GameInputMap"
@@ -269,7 +296,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "SparseTensor"
         // D-SERVICE1=D: structured service tree handles.
         | "ServiceTree" | "ServiceWorkflow" | "ServiceEndpoint" | "ServiceError" | "ServiceRestart"
-        | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" | "ServiceReceipt"
+        | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" | "Delivery"
+        | "DeliveryReceipt" | "DeliveryEvent"
         | "ServiceUpgradeReceipt" | "TaskOutcome" | "TaskStatus"
         | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPClient" | "HTTPClientType"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
@@ -380,7 +408,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "MeasureInfo" | "ExactnessInfo" | "ExactnessKind" | "LayoutFact"
         | "ClassificationInfo" | "NominalInfo" | "ObligationInfo"
         | "ObligationParamInfo" | "ParamZone"
-        | "SendabilityInfo" | "MovednessInfo" | "AttributionInfo" | "TrackOriginInfo"
+        | "SendabilityInfo" | "MovednessInfo" | "AttributionInfo" | "OriginInfo"
         | "ViewProvenanceInfo" | "UnitScaleProvenanceInfo" | "UnitScaleProvenanceKind"
         | "MaturityInfo" | "Maturity"
         | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "MethodInfo" | "FieldInfo" | "TypeParamInfo"
@@ -941,6 +969,8 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         return match field {
             "name" => Some(Type::String),
             "path" => Some(Type::Named("StateRef".to_string())),
+            "terminal" => Some(Type::Bool),
+            "reachable" => Some(Type::Option(Box::new(Type::Bool))),
             _ => None,
         };
     }
@@ -1007,8 +1037,8 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "attribution" => Some(Type::Option(Box::new(Type::Named(
                 "AttributionInfo".to_string(),
             )))),
-            "track_origin" => Some(Type::Option(Box::new(Type::Named(
-                "TrackOriginInfo".to_string(),
+            "origin" => Some(Type::Option(Box::new(Type::Named(
+                "OriginInfo".to_string(),
             )))),
             "unit_scale_provenance" => Some(Type::Option(Box::new(Type::Named(
                 "UnitScaleProvenanceInfo".to_string(),
@@ -1083,10 +1113,12 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
-    if type_name == "TrackOriginInfo" {
+    if type_name == "OriginInfo" {
         return match field {
             "tracked" => Some(Type::Bool),
             "source" => Some(Type::Option(Box::new(Type::String))),
+            "line" | "column" => Some(Type::Option(Box::new(Type::Int))),
+            "ambiguity" => Some(Type::Bool),
             _ => None,
         };
     }
@@ -2004,46 +2036,30 @@ pub(crate) fn core_key_variants(
     m
 }
 
-/// D-SERVICE-AUTHORITY1: durable delivery receipts are a closed sum. The
-/// receipt, not a Boolean, tells callers whether the message was enqueued,
-/// executed, retained, dead-lettered, rejected, or unavailable.
-pub(crate) fn core_service_receipt_variants(
+/// D-SERVICE-RECEIPT2=A: lifecycle is the only public delivery sum. Attempts,
+/// retention, deadlines, idempotency, and authority generation are facts on
+/// the handle's signed receipt, not additional variants.
+pub(crate) fn core_delivery_state_variants(
     enum_name: &str,
 ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
 {
     use crate::Diagnostics::Span;
-    use crate::AST::{VariantField, VariantPayload};
-    if enum_name != "ServiceReceipt" {
+    use crate::AST::VariantPayload;
+    if enum_name != "DeliveryState" {
         return None;
     }
     let zero = Span::new(0, 0);
     Some(
         [
-            ("Enqueued", VariantPayload::Single(Type::String, zero)),
-            ("Executed", VariantPayload::Single(Type::String, zero)),
-            (
-                "Retained",
-                VariantPayload::Named(vec![
-                    VariantField {
-                        name: "id".to_string(),
-                        name_span: zero,
-                        ty: Type::String,
-                        ty_span: zero,
-                    },
-                    VariantField {
-                        name: "until".to_string(),
-                        name_span: zero,
-                        ty: Type::Int,
-                        ty_span: zero,
-                    },
-                ]),
-            ),
-            ("DeadLettered", VariantPayload::Single(Type::String, zero)),
-            ("Rejected", VariantPayload::Single(Type::String, zero)),
-            ("Unavailable", VariantPayload::Single(Type::String, zero)),
+            "Pending",
+            "Accepted",
+            "Delivering",
+            "Delivered",
+            "DeadLettered",
+            "Cancelled",
         ]
         .into_iter()
-        .map(|(name, payload)| (name.to_string(), (zero, payload)))
+        .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
         .collect(),
     )
 }

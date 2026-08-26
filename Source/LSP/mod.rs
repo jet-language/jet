@@ -200,6 +200,39 @@ mod tests {
     }
 
     #[test]
+    fn marker_hover_and_completion_show_one_canonical_parameter_list() {
+        let src = "marker Needs(value: String, @sites: [.Function, .Method], @repeatable: true)\n#Needs(\"x\") fn work() {}\nfn run() {\n    \n}\n";
+        let (project, diagnostics, bundle, facts) = check_test_document(src);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "marker declaration should check: {diagnostics:#?}"
+        );
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let (tokens, _) = crate::Lexer::lex(src);
+        let expected = "marker Needs(value: String, @sites: [.Function, .Method], @repeatable: true)";
+        let name_offset = src.find("Needs(value").expect("marker declaration") + 1;
+        let hover = compute_hover(&db, &tokens, src, project.entry(), name_offset)
+            .expect("marker hover");
+        assert!(hover.contains(expected), "{hover}");
+        let completion_offset = src.rfind("    \n").expect("completion line") + 4;
+        let completion = compute_completions(
+            &db,
+            src,
+            completion_offset,
+            project.entry(),
+            None,
+            None,
+        )
+        .into_iter()
+        .find(|item| item.label == "Needs")
+        .expect("marker completion");
+        assert_eq!(completion.detail.as_deref(), Some(expected));
+    }
+
+    #[test]
     fn hover_shows_callable_access_defaults_and_policies() {
         let src = "#Policy(trace(\"users.load\"))\nfn load(value: &Int, label: String{\"user\"}) Int { return 1 }\nfn run() {}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);
@@ -415,7 +448,7 @@ mod tests {
         let src = r#"UserId :: distinct Int
 alias Count :: Int
 #UnitFamily(Length) { meter }
-state Door { Open }
+struct Door { state { Open } }
 protocol Wire { client: Send(value: Int) }
 module holder<T> { pub struct Box { value: T } }
 module cache :: holder<Int>

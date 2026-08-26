@@ -125,7 +125,7 @@ fn core_tls_repl_requests_use_the_net_effect() {
         resolved_ret: None,
         checked_widen: false,
     };
-    let stmts = vec![Stmt::Caps {
+    let stmts = vec![Stmt::AuthorityScope {
         caps: vec![("Net".to_string(), span)],
         caps_span: span,
         binding: Some("caps".to_string()),

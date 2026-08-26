@@ -72,7 +72,7 @@ Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 - [Stmt::Policy] status=graph scoped policy region with declared keys in the title, nested body projection, and source edits; projection:tests/canvas.rs::canvas_projects_policy_region.
 - [Stmt::TaskGroup] status=readonly task scope, source edits.
 - [Stmt::Layout] status=readonly layout scope, source edits.
-- [Stmt::Caps] status=readonly effect restriction and named handle, source edits.
+- [Stmt::AuthorityScope] status=readonly effect restriction and named Authority handle, source edits.
 - [Stmt::ComptimeIf] status=readonly comptime branch, source edits.
 - [Stmt::ComptimeSwitch] status=readonly comptime switch, source edits.
 - [Stmt::ComptimeBlock] status=readonly comptime block, source edits.

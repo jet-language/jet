@@ -3500,14 +3500,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     });
                 }
                 // c109 Phase 28: the overflow opt-out builtins `wrapping(e)`/`saturating(e)`/
-                // `checked(e)` (D-NUMOPS1). The gate proved the name is one of the three (not
+                // `checked(e)` (D-NUMOPS1), plus the sema-only checked wrapper used by
+                // D-WRAP-SCOPE1=A. The gate proved the name is one of the three (not
                 // shadowed) and the sole arg is an integer `Expr::Binary`. Reproduce
                 // `emit_call`'s arm (Expression.rs ~L1756): `(lhs).{name}_{op}(rhs)` with PLAIN
                 // operands (no trap helper). `checked_*` returns `Option<T>`; the others return
                 // `T` — set the result type accordingly so a `checked(...) ?? x` composes.
                 if matches!(
                     call.name.as_str(),
-                    Syntax::BUILTIN_WRAPPING | Syntax::BUILTIN_SATURATING | Syntax::BUILTIN_CHECKED
+                    Syntax::BUILTIN_WRAPPING
+                        | Syntax::BUILTIN_SATURATING
+                        | Syntax::BUILTIN_CHECKED
+                        | Syntax::INTERNAL_ARITHMETIC_CHECKED
                 ) && !cx.sigs.contains_key(&call.name)
                     && !env.locals.contains_key(&call.name)
                 {
@@ -3518,22 +3522,36 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 BinOp::Sub => "sub",
                                 BinOp::Mul => "mul",
                                 BinOp::Div => "div",
+                                BinOp::Pow => "pow",
                                 // Sema validated an arithmetic op; mirror the AST default.
                                 _ => "add",
                             };
                             let lhs = lower_expr(l, cx, env);
                             let rhs = lower_expr(r, cx, env);
+                            let line = crate::Diagnostics::span_line_col(&cx.src, call.name_span.start).0
+                                as u32;
                             let val_ty = lhs.ty.clone();
                             let result_ty = if call.name == Syntax::BUILTIN_CHECKED {
                                 Type::Option(Box::new(val_ty))
                             } else {
                                 val_ty
                             };
+                            let policy = call
+                                .args
+                                .first()
+                                .and_then(|arg| arg.flags.arithmetic_policy);
+                            let prefix = if call.name == Syntax::INTERNAL_ARITHMETIC_CHECKED {
+                                "checked_policy".to_string()
+                            } else {
+                                call.name.clone()
+                            };
                             return TExpr {
                                 ty: result_ty,
                                 kind: TExprKind::OverflowOpt {
-                                    prefix: call.name.clone(),
+                                    prefix,
                                     op: op_suffix,
+                                    line,
+                                    policy,
                                     lhs: Box::new(lhs),
                                     rhs: Box::new(rhs),
                                 },

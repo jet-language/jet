@@ -22,7 +22,8 @@ use super::runtime_host::{
     HostFns, JitZipColumn, JitZipPlan, JitZipValueKind, INTN_MODE_CHECKED, INTN_MODE_SATURATING,
     INTN_MODE_TRAP, INTN_MODE_WRAPPING, INTN_OP_ADD, INTN_OP_BIT_AND, INTN_OP_BIT_OR,
     INTN_OP_BIT_XOR, INTN_OP_DIV, INTN_OP_FLOOR_DIV, INTN_OP_MOD, INTN_OP_MUL, INTN_OP_POW,
-    INTN_OP_REM, INTN_OP_SHL, INTN_OP_SHR, INTN_OP_SUB,
+    INTN_OP_REM, INTN_OP_ROTATE_LEFT, INTN_OP_ROTATE_RIGHT, INTN_OP_SHL, INTN_OP_SHR,
+    INTN_OP_SUB,
 };
 use super::safety::{
     collect_select_arms_jit, flatten_string, is_packed_process_signal, jit_closure_elem_type,
@@ -13406,6 +13407,15 @@ impl LowerCtx<'_, '_> {
             ("core.services", "send") => Some(3),
             (
                 "core.services",
+                "delivery_wait"
+                    | "delivery_status"
+                    | "delivery_retry"
+                    | "delivery_cancel"
+                    | "delivery_receipt"
+                    | "delivery_events",
+            ) => Some(1),
+            (
+                "core.services",
                 "receive" | "mailbox_depth" | "restarts" | "fail_worker" | "drain_worker"
                 | "partition_worker" | "reconcile_worker",
             ) => Some(2),
@@ -18835,7 +18845,7 @@ impl LowerCtx<'_, '_> {
                     // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the host
                     // only marshals the heap handle. The shared Prelude owns
                     // the holds relation and the E0712 denial.
-                    if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ABILITIES)
+                    if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_AUTHORITY)
                         && args.len() == 1
                         && matches!(method.name.as_str(), "with" | "without")
                     {
@@ -20396,30 +20406,53 @@ impl LowerCtx<'_, '_> {
                 op,
                 lhs,
                 rhs,
+                line,
             } => in_own_frame(|| -> Result<Value, String> {
                 let (signed, bits) = match &lhs.ty {
                     Type::IntN { signed, bits } => (*signed, *bits),
                     Type::Int => (true, 64),
                     _ => return Err("jit overflow opt-out needs fixed-width integers".to_string()),
                 };
+                let left = self.lower_expr(lhs)?;
+                let right = self.lower_expr(rhs)?;
+                let right_signed = !matches!(&rhs.ty, Type::IntN { signed: false, .. });
+                if let Some(op_code) = match *op {
+                    "rotate_left" => Some(INTN_OP_ROTATE_LEFT),
+                    "rotate_right" => Some(INTN_OP_ROTATE_RIGHT),
+                    _ => None,
+                } {
+                    let mode = match prefix.as_str() {
+                        "wrapping" | "saturating" | "checked" => INTN_MODE_WRAPPING,
+                        _ => return Err("jit overflow opt-out mode unsupported".to_string()),
+                    };
+                    return self.lower_intn_values_code(
+                        op_code,
+                        mode,
+                        left,
+                        right,
+                        signed,
+                        bits,
+                        right_signed,
+                        *line,
+                    );
+                }
                 let op = match *op {
                     "add" => BinOp::Add,
                     "sub" => BinOp::Sub,
                     "mul" => BinOp::Mul,
                     "div" => BinOp::Div,
                     "rem" => BinOp::Rem,
+                    "pow" => BinOp::Pow,
                     _ => return Err("jit overflow opt-out operator unsupported".to_string()),
                 };
                 let mode = match prefix.as_str() {
                     "wrapping" => INTN_MODE_WRAPPING,
                     "saturating" => INTN_MODE_SATURATING,
                     "checked" => INTN_MODE_CHECKED,
+                    "checked_policy" => INTN_MODE_TRAP,
                     _ => return Err("jit overflow opt-out mode unsupported".to_string()),
                 };
-                let left = self.lower_expr(lhs)?;
-                let right = self.lower_expr(rhs)?;
-                let right_signed = !matches!(&rhs.ty, Type::IntN { signed: false, .. });
-                self.lower_intn_values(op, mode, left, right, signed, bits, right_signed, 0)
+                self.lower_intn_values(op, mode, left, right, signed, bits, right_signed, *line)
             }),
             TExprKind::FnValue { kind } => match kind {
                 TFnValueKind::NamedFn {
@@ -22653,12 +22686,6 @@ impl LowerCtx<'_, '_> {
                     self.host.inline_range
                 };
                 Ok(self.call_host(host, &[value, lo, hi]))
-            }
-            TNumericOp::Origin { origin } => {
-                let _ = value; // preserve receiver evaluation before the adapter call
-                let text = jet_codegen::float_provenance::jet_float_origin(Some(origin.as_str()));
-                let h = self.runtime.heap.alloc_string(text);
-                Ok(self.b.ins().iconst(types::I64, h))
             }
         }
     }
@@ -26626,6 +26653,20 @@ impl LowerCtx<'_, '_> {
             BinOp::Mod => INTN_OP_MOD,
             _ => return Err("jit fixed-width integer operation unsupported".to_string()),
         };
+        self.lower_intn_values_code(op, mode, left, right, signed, bits, right_signed, line)
+    }
+
+    fn lower_intn_values_code(
+        &mut self,
+        op: i64,
+        mode: i64,
+        left: Value,
+        right: Value,
+        signed: bool,
+        bits: u8,
+        right_signed: bool,
+        line: u32,
+    ) -> Result<Value, String> {
         let args = [
             left,
             right,

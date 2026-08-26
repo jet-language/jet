@@ -81,14 +81,14 @@ fn share_node(path: &Path, shared: &Path, used: &mut BTreeSet<String>) -> std::i
         return Ok(());
     }
     let bytes = fs::read(path)?;
-    let mode = permission_identity(&metadata);
+    let mode = permission_identity(&metadata) & !0o222;
     let key = format!("{}-{:08x}", super::super::SHA256::sha256_hex(&bytes), mode);
     // Hardlinking two equal files within one output changes its canonical
     // archive identity. Share only the first occurrence in each output tree.
     if !used.insert(key.clone()) {
         return Ok(());
     }
-    let (shared_file, created) = ensure_shared_file(shared, &key, &bytes, &metadata)?;
+    let (shared_file, created) = ensure_shared_file(shared, &key, &bytes, &metadata, mode)?;
     if same_file_inode(path, &shared_file) {
         return Ok(());
     }
@@ -110,6 +110,7 @@ fn ensure_shared_file(
     key: &str,
     bytes: &[u8],
     source: &fs::Metadata,
+    mode: u32,
 ) -> std::io::Result<(PathBuf, bool)> {
     let destination = shared.join(key);
     match fs::symlink_metadata(&destination) {
@@ -124,7 +125,7 @@ fn ensure_shared_file(
         }
         Ok(metadata) => {
             if metadata.len() != bytes.len() as u64
-                || permission_identity(&metadata) != permission_identity(source)
+                || permission_identity(&metadata) != mode
                 || fs::read(&destination)? != bytes
             {
                 return Err(std::io::Error::new(
@@ -150,11 +151,19 @@ fn ensure_shared_file(
     use std::io::Write as _;
     file.write_all(bytes)?;
     file.sync_all()?;
-    fs::set_permissions(&partial, source.permissions())?;
+    let mut permissions = source.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        permissions.set_mode(mode);
+    }
+    #[cfg(not(unix))]
+    permissions.set_readonly(true);
+    fs::set_permissions(&partial, permissions)?;
     if let Err(error) = fs::rename(&partial, &destination) {
         let _ = fs::remove_file(&partial);
         if error.kind() == std::io::ErrorKind::AlreadyExists {
-            return ensure_shared_file(shared, key, bytes, source);
+            return ensure_shared_file(shared, key, bytes, source, mode);
         }
         return Err(error);
     }

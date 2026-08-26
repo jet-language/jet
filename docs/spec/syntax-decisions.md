@@ -719,6 +719,15 @@ code may opt in per operation with `wrapping(…)` / `saturating(…)` /
 `value.checked_add(other)`. Per-type `MIN`/`MAX`, float
 `INFINITY`/`NAN`/`EPSILON`, bit ops. **D-FLOATW1**: `core.math` is width-generic.
 
+**D-WRAP-SCOPE1=A** *(owner outcome, card #2171)*: `#Arithmetic(.Checked | .Wrapping |
+.Saturating)` is the one lexical policy for fixed-width `+`, `-`, `*`, unary
+negation, and `^`. It may attach to a function, method, or block; the
+innermost block wins, and a declaration policy does not cross a call boundary.
+`.Checked` is the explicit spelling of the default. Division, remainder,
+shifts, conversions, indexing, slicing, bounds, and exact `Int` keep their
+existing rules and do not inherit this policy. The operation keeps the exact
+source span of its active policy for tooling and diagnostics.
+
 **D-INTLIT-WIDTH1=F / D-VERDICT-1304-1 / D-NUMWIDEN-CROSS1=E** *(ratified
 2026-07-28)*: one numeric widening law applies to operators, arguments,
 returns, and assignments. One operand may widen to the other; Jet never
@@ -1072,11 +1081,19 @@ arbitrary-precision base-10 `Decimal` in `core.math`; default-on lint L0504
 fires when a money-named field holds a float (`#[allow(float_money)]`
 suppresses).
 
-**D-STATE1 — Typestate** *(D-STATE-REQ/TRANS/DECL)*: states declared in a
-`state TypeName { A, B, C }` block; `#State(S) fn m(self)` requires state S;
-`#Transition(From, To) fn` advances it (`_` from-state = entry constructor).
-Wrong-state call E0150; markers erase in codegen. Ordering falls out of the
-transition graph.
+**D-STATE1 — Typestate** *(D-STATE-REQ/TRANS/DECL)*: states declared in one
+`state { A, B, C }` section inside their named `struct` body;
+`#State(S) fn m(self)` requires state S; `#Transition(From, To) fn` advances
+it (`_` from-state = entry constructor). Wrong-state call E0150; markers erase
+in codegen. Ordering falls out of the transition graph.
+
+**D-STATE-TERMINAL1=A** *(card #2184)*: a checked state with no outgoing
+transition is a valid terminal state. The compiler stores `terminal: true` only
+in erased reflection facts. A self-loop or reopen transition keeps the state
+nonterminal. If entry transitions exist, the compiler reports a distinct
+unreachable-state lint for declarations that no entry path reaches. With no
+entry transition, reachability stays unknown and the compiler does not invent
+an initial state. This outcome adds no syntax.
 
 **D-REFINE1 — Refinements** *(retired by D-TYPE2-REFINE1=A)*: the former
 `#Invariant("value >= lo && value < hi")` spelling is retired. Use
@@ -2013,18 +2030,28 @@ the required trailing block separates it from leading-dot enum values
 construction and S74 destructuring. Other block markers may declare members
 under the same law — each addition is an API decision, not a syntax one.
 
-**D-PROVENANCE1=B — Binding-level provenance tracking**: `#Track` may prefix
-a sigil binding:
+**D-PROVENANCE1=B — Binding-level provenance tracking (superseded by
+D-TRACK-ORIGIN1=A)**: `#Track` may prefix a binding:
 
 ```jet
 #Track speed :: compute_speed()
 #Track correction: Float := 0.0
 ```
 
-The marker records provenance for that binding without changing its type.
-Current implementation records Float local origins; `speed.origin() -> String`
-returns the tracked source note, and untracked Floats return `"untracked"`.
-No `Tracked<T>` wrapper exists and no general value-history type is introduced.
+The marker records provenance for that binding without changing its type. The
+retired runtime projection and `Tracked<T>` wrapper are not part of the current
+surface.
+
+**D-TRACK-ORIGIN1=A — Read tracked origin as one typed compiler fact**:
+`value.@origin` is the only public read of `#Track` origin and has type
+`OriginInfo?`. `OriginInfo` has the fields `tracked: Bool`, `source: String?`,
+`line: Int?`, `column: Int?`, and `ambiguity: Bool`. The fact is derived only
+from sema flow facts. A copy, move, mutable replacement, shadow refusal,
+loop-carried value, or branch merge never invents an exact origin; an
+ambiguous merge returns an `OriginInfo` with `ambiguity` set and no exact
+source location. `.origin()` and `.@track_origin` are retired. Runtime output
+is possible only when ordinary comptime folding produces the value; no runtime
+metadata channel exists.
 
 **D-QUAL2 — Tag vs trait**: exactly two qualifier kinds — `trait` (has
 methods and dispatches) and `tag` (declares an erased dataflow fact and its
@@ -6422,6 +6449,13 @@ qualified spelling is accepted there and is required for unambiguous
 reflection. A state path in value position is an error because state facts
 erase. Card #1296.
 
+**2026-08-25 — D-STATE-HOME1=A** *(amends D-STATE-NS1, card #2186)*: the
+state set belongs to its named struct and is written once inside the body:
+`struct Type { state { Name, ... } ... }`. `state Type { ... }` is retired
+source shape and receives a teaching rewrite. The nested section is one erased
+`Type.State` fact row, not another item or runtime type. Enums, traits, aliases,
+impls, modules, and anonymous shapes cannot own a state section.
+
 **2026-07-29 — D-RULEARG-TYPES1=A, D-LANGNS-NAME1=A**: every nonprimitive
 marker argument type is a generated ordinary enum under `core.lang`. The
 marker registry generates exactly fourteen declarations and supplies parser,
@@ -6843,11 +6877,11 @@ widening is written and audited.
   process, plugin and session boundaries; `ProcessAuthority` becomes
   `Authority`, while `ProcessPlan` and `ProcessReceipt` stay. Implementation:
   #1569.
-- **D-AUTHORITY-SCOPE1=A**: `#Abilities` is the one block marker. A bare list
-  narrows (`#Abilities(FS, Net)`); a name-before-list head binds the handle
-  (`#Abilities(g: FS, Net)`). The retired marker spellings are deleted, and their error
-  points to `#Abilities`. This amends D-EFF1, D-SCAP1 and D-ARROW-CONTROL1. Implementation:
-  #1573.
+- **D-AUTHORITY-SCOPE1=A**: the scoped authority mechanism has one block
+  marker. Its current spelling is governed by D-ABILITY-NAME2; a bare list
+  narrows (`#FX(FS, Net)`), and a name-before-list head binds the handle
+  (`#FX(g: FS, Net)`). This amends D-EFF1, D-SCAP1 and D-ARROW-CONTROL1.
+  Implementation: #1573 / #2187.
 - **D-AUTHORITY-MANIFEST1=A**: one `authority:` block holds package bounds,
   dependency grants, trust defaults and provider bounds; replaced keys are
   migrated and deleted. This amends D-EFFBUDGET1,
@@ -6862,13 +6896,15 @@ widening is written and audited.
 - **D-AUTHORITY-WORD1=A**: `capability` leaves user-facing surfaces; borrow
   diagnostics say `write access`, the rights value is `Authority`, and the
   product claim surface is `feature claims`. Implementation: #1572.
-- **D-AUTHORITY-WORD2=E** *(ratified 2026-08-17, amendment to
-  D-AUTHORITY-NAME1, D-AUTHORITY-SCOPE1, and D-AUTHORITY-WORD1; #1572)*:
-  Jet uses `Ability` for the fact menu, `Abilities` for the carried rights
-  value, and `#Abilities` for the block marker. The browser reader is
-  `BrowserAbilities` with `.abilities()`, and the CLI flag is
-  `--abilities-json`. The retired spellings are deleted with no aliases.
-  `capabilities` remains only where it is the WebDriver wire-protocol word.
+- **D-ABILITY-NAME2=A** *(ratified 2026-08-25, card #2187; amends
+  D-AUTHORITY-NAME1, D-AUTHORITY-SCOPE1, and D-AUTHORITY-WORD1)*:
+  `#FX` is the short source boundary for expert effect scopes. The
+  nameable rights value is `Authority`; the effect fact menu is `Effect`.
+  Beginner functions omit effect and authority lists, and operator-facing
+  surfaces use `Effect` and `Authority` in full. `#Abilities`, `Abilities`,
+  `Ability`, `Capability`, `Caps`, and their losing source spellings are
+  retired with no aliases. `BrowserAbilities` and protocol `capabilities`
+  remain unrelated wire/API vocabulary.
 
 Outcome-to-card map:
 
@@ -7120,6 +7156,15 @@ rule, such as `@sites` and `@repeatable`. There is no second parameter list,
 trailing clause, or scope block. A new rule fact is a new named parameter. Typed
 rule arguments use D-RULEARG-TYPES1.
 
+**D-MARKER-SITES1=B — one legal-site declaration form** *(ratified
+2026-08-25, card #2183)*: Every marker declaration uses the one named
+parameter list from D-META-FORM1. Ordinary names have types and are use-site
+arguments. `@` names have fixed declaration metadata values. `@sites: [Site]`
+is the sole public form for legal sites; a trailing `on [...]`, a second
+parameter list, and the former checked-text marker contract are retired and
+must be rejected. This supersedes the declaration spelling in D-BOUND-SINK1=A;
+the typed-text boundary remains library-owned.
+
 **D-META-USER1=A — user rules record facts or add code** *(ratified 2026-08-06,
 card #1540)*: A bodyless rule records its facts. A rule body adds code through the
 same checked path. The rule law is additive: it does not mutate or shadow an
@@ -7279,7 +7324,7 @@ is a value and never mints a type, and `D-FACTMODEL1` holds, facts classify and
 never dispatch. Card #1623.
 
 **D-FACT-HOME1 = A — home the user-facing orphans.** Send-safety, failure
-attribution, `#Track` origin (`D-PROVENANCE1`), view provenance
+attribution, `#Track` origin (`D-TRACK-ORIGIN1`), view provenance
 (`D-MEMPROVENANCE3`), unit-scale provenance, and maturity become typed registry
 rows, readable like every other fact. Prover internals — uninit tracking and
 exhaustiveness — stay engine-side and gain no row, matching the wall in
@@ -7403,7 +7448,8 @@ target.
 The marker vocabulary is written as ordinary Jet source, not as a Rust table.
 
 - `crates/jet-codegen/src/Prelude/Markers.jet` holds one `marker Name(params…)`
-  declaration per rule, in the ratified D-META-FORM1=A form. A plain parameter
+  declaration per rule, in the ratified D-META-FORM1=A / D-MARKER-SITES1=B
+  form. A plain parameter
   is an argument the use site writes; an `@`-marked parameter is a fact about
   the rule: `@sites`, `@repeatable`, `@owns_menu`, `@inherits`, `@resolution`,
   `@scopes`, `@companion`, `@retired`.
@@ -7746,6 +7792,15 @@ fallback block ends with one bare value or one real diverging tail, so
 This amends D-FAIL-BIND1 at the block-tail boundary and adds no token, binder,
 or second fallback mechanism.
 
+**2026-08-25 — D-RESULT-DECON2=B** *(card #2173; ratified 2026-08-25)*: the
+existing `?`, `!`, and `->` tokens form one fixed exhaustive Result handler:
+`result ? ok -> success ! error -> failure`. Each identifier binds one
+branch-local payload, source order is success then failure, and neither branch
+may be omitted or repeated. The parser lowers the form to the existing `.Ok`
+and `.Err` pattern-test AST; sema, TIR, codegen, JIT, and interpreter add no
+carrier or handler API. `?` propagation, `?.`, unary `!`, ordinary `->` arms,
+and `??` retain their current meanings. This adds no keyword or sigil.
+
 **2026-08-19 — D-CALLPOS1=A** *(card #2042; ratified 2026-08-19)*: bare call
 arguments fill one callable left to right when the mapping is deterministic;
 defaults fill after supplied arguments, and a final variadic slot owns the bare
@@ -7853,6 +7908,15 @@ expression. `return` narrows to early exit only. The rule is checked, not
 inferred: Jet always writes the return type in the signature, so a stray
 trailing value is an ordinary type mismatch. This is what lets a function body,
 a REPL cell and a notebook cell obey one rule.
+
+**2026-08-25 — D-TAIL-RETURN1=A** *(card #2180; amendment to D-BODY-LAST1)*:
+every value-expected function, method, lambda, and value block gives its
+expected type to the sole final expression. That expression is the block value;
+it is not rewritten into a source `return`. Explicit `return` remains an early
+exit. A semicolon-terminated expression, assignment, declaration, or other
+statement tail produces unit and is diagnosed when a value is required. The
+same law applies to value arm tables and fallback blocks; engines lower the
+checked value through the existing TIR return path.
 
 **2026-08-20 — D-SIG-SHAPE1=B** *(card #2125)*: the return type sits bare after
 the parameter list, and `:>` becomes the one body arrow across the whole
@@ -8583,6 +8647,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-SQL-ARG1` | B | `c0t5khxi` |
 | `D-SQL-SURFACE1` | C | `c00pxltq` |
 | `D-STATE-NS1` | A | `c0ts6lkx` |
+| `D-STATE-HOME1` | A | card #2186 |
 | `D-STM1` | A | `c0n6vj96` |
 | `D-STR-DECLINE1` | C | `c01y8s93` |
 | `D-STRUCT-EDGE1` | A | `c0b6kkbv` |

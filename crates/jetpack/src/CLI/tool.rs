@@ -25,7 +25,7 @@ use crate::SHA256;
 use jet_env_model::ModuleEval;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -319,6 +319,15 @@ fn tool_profile_generations(theme: &Theme, parsed: &Parsed) -> i32 {
 }
 
 fn report_tool_profile_error(theme: &Theme, error: &io::Error) -> i32 {
+    if error.to_string().contains("managed tool `") {
+        theme.error_coded(
+            "E1340",
+            &error.to_string(),
+            "the tool is managed by jetpack and its projected bytes are read-only",
+            "run `jetpack update tools -y` to move the declarative pin to the installed tool",
+        );
+        return 2;
+    }
     theme.error(
         "user-tools profile failed",
         &error.to_string(),
@@ -516,13 +525,26 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
             0
         }
         Err(e) => {
-            theme.error(
-                "tool install failed",
-                &e,
-                "check permissions on `~/.jet` and retry.",
-            );
+            report_tool_install_error(theme, &e);
             2
         }
+    }
+}
+
+fn report_tool_install_error(theme: &Theme, error: &str) {
+    if error.contains("managed tool `") {
+        theme.error_coded(
+            "E1340",
+            error,
+            "the tool is managed by jetpack and its projected bytes are read-only",
+            "run `jetpack update tools -y` to move the declarative pin to the installed tool",
+        );
+    } else {
+        theme.error(
+            "tool install failed",
+            error,
+            "check permissions on `~/.jet` and retry.",
+        );
     }
 }
 
@@ -764,6 +786,162 @@ enum UserToolsUpdateOutcome {
     Cancelled,
     Applied { changed: bool },
     Failed(i32),
+}
+
+struct ToolDrift {
+    name: String,
+    installed_reference: String,
+    installed_version: String,
+    pinned_reference: String,
+    pinned_version: String,
+}
+
+/// Compare the manifest's recorded identity with the current generation.
+/// This path reads only bounded metadata. It never realizes a ref or opens a
+/// tool binary, so ordinary commands do not pay for a closure or a hash.
+pub(super) fn check_user_tools_drift(theme: &Theme, parsed: &Parsed) -> i32 {
+    if !tool_manifest_path().is_file() || !current_path().is_file() {
+        return 0;
+    }
+    let manifest = match read_tool_manifest() {
+        Ok(manifest) => manifest,
+        Err(_) => return 0,
+    };
+    let installed = match read_current_tools() {
+        Ok(installed) => installed,
+        Err(_) => return 0,
+    };
+    let mut drifts = Vec::new();
+    for entry in &manifest.tools {
+        let Some(tool) = installed.iter().find(|tool| tool.name == entry.name) else {
+            continue;
+        };
+        let recorded = if entry.tier == "pinned" {
+            &entry.reference
+        } else {
+            &entry.resolved
+        };
+        if canonical_tool_reference(recorded) == canonical_tool_reference(&tool.reference) {
+            continue;
+        }
+        let installed_version = if tool.version.is_empty() {
+            reference_version(&tool.reference)
+        } else {
+            tool.version.clone()
+        };
+        drifts.push(ToolDrift {
+            name: entry.name.clone(),
+            installed_reference: canonical_tool_reference(&tool.reference),
+            installed_version,
+            pinned_version: reference_version(recorded),
+            pinned_reference: canonical_tool_reference(recorded),
+        });
+    }
+    if drifts.is_empty() {
+        return 0;
+    }
+
+    for drift in &drifts {
+        theme.status(&format!(
+            "{} drifted: installed {}, pinned {}",
+            drift.name, drift.installed_version, drift.pinned_version
+        ));
+    }
+
+    if parsed.flags.assume_yes {
+        return match move_tool_pins(&drifts) {
+            Ok(()) => {
+                theme.ok("moved user-tools pins to the installed identities");
+                0
+            }
+            Err(error) => report_tool_profile_error(theme, &error),
+        };
+    }
+    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
+        theme.detail("move the pin with `jetpack update tools -y`");
+        return 0;
+    }
+
+    let mut move_drifts = Vec::new();
+    let mut restore_drifts = Vec::new();
+    for drift in drifts {
+        eprint!(
+            "  jetpack  move the pin to {}? [Y/n/r=restore] ",
+            drift.installed_version
+        );
+        let _ = io::stderr().flush();
+        let mut answer = String::new();
+        if io::stdin().read_line(&mut answer).is_err() {
+            continue;
+        }
+        match answer.trim().to_ascii_lowercase().as_str() {
+            "" | "y" | "yes" => move_drifts.push(drift),
+            "r" | "restore" => restore_drifts.push(drift),
+            _ => {}
+        }
+    }
+    if !move_drifts.is_empty() {
+        if let Err(error) = move_tool_pins(&move_drifts) {
+            return report_tool_profile_error(theme, &error);
+        }
+        theme.ok("moved user-tools pins to the installed identities");
+    }
+    if !restore_drifts.is_empty() {
+        if let Err(error) = restore_tool_pins(&restore_drifts) {
+            return report_tool_profile_error(theme, &error);
+        }
+        match build_tool_manifest_generation(theme, parsed) {
+            Ok(_) => theme.ok("restored the pinned user-tools identities"),
+            Err(error) => return report_tool_profile_error(theme, &error),
+        }
+    }
+    0
+}
+
+fn move_tool_pins(drifts: &[ToolDrift]) -> io::Result<()> {
+    RuntimePolicy::with_lock(&tools_state_dir(), PROFILE_LOCK_SCOPE, || {
+        let mut manifest = read_tool_manifest()?;
+        for drift in drifts {
+            if let Some(entry) = manifest
+                .tools
+                .iter_mut()
+                .find(|entry| entry.name == drift.name)
+            {
+                entry.reference = drift.installed_reference.clone();
+                entry.resolved = drift.installed_reference.clone();
+                entry.tier = "pinned".to_string();
+            }
+        }
+        write_tool_manifest(&manifest)
+    })
+}
+
+fn restore_tool_pins(drifts: &[ToolDrift]) -> io::Result<()> {
+    RuntimePolicy::with_lock(&tools_state_dir(), PROFILE_LOCK_SCOPE, || {
+        let mut manifest = read_tool_manifest()?;
+        for drift in drifts {
+            if let Some(entry) = manifest
+                .tools
+                .iter_mut()
+                .find(|entry| entry.name == drift.name)
+            {
+                entry.resolved = drift.pinned_reference.clone();
+            }
+        }
+        write_tool_manifest(&manifest)
+    })
+}
+
+fn canonical_tool_reference(reference: &str) -> String {
+    RefSpec::migrate_persisted_ref(reference).canonical
+}
+
+fn reference_version(reference: &str) -> String {
+    let version = reference
+        .rsplit_once(Syntax::REF_CHANNEL_MARKER)
+        .map(|(_, version)| version)
+        .unwrap_or(reference);
+    version.strip_prefix('v').unwrap_or(version).to_string()
 }
 
 fn render_tool_update_plan(theme: &Theme, updates: &[ToolSourceUpdate]) {
@@ -2008,6 +2186,7 @@ fn materialize_generation_bins(
             if proof.mode & 0o111 == 0 {
                 return Err(io::Error::other("profile projection is not executable"));
             }
+            make_profile_projection_read_only(&destination)?;
             member_digests.push(proof.digest);
         }
         tool.member_digests = member_digests;
@@ -2094,8 +2273,52 @@ fn publish_generation(generation: u64, witness: &str, tools: &[InstalledTool]) -
             "legacy profile bin symlink requires explicit migration",
         ));
     }
-    for bin in tools.iter().flat_map(|tool| &tool.bins) {
-        ensure_dispatcher(bin)?;
+    let previous = read_current_tools().unwrap_or_default();
+    let active = tools
+        .iter()
+        .flat_map(|tool| tool.bins.iter())
+        .map(|bin| ProfileDispatch::physical_bin_name(bin))
+        .collect::<BTreeSet<_>>();
+    for bin in previous.iter().flat_map(|tool| &tool.bins) {
+        let physical = ProfileDispatch::physical_bin_name(bin);
+        if active.contains(&physical) {
+            continue;
+        }
+        let path = user_bin_dir().join(&physical);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(io::Error::other(format!(
+                    "managed tool `{bin}` cannot remove symlink projection `{}`",
+                    path.display()
+                )))
+            }
+            Ok(metadata) if metadata.is_file() => fs::remove_file(path)?,
+            Ok(_) => {
+                return Err(io::Error::other(format!(
+                    "managed tool `{bin}` projection is not a regular file"
+                )))
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    for tool in tools {
+        for bin in &tool.bins {
+            let path = user_bin_dir().join(ProfileDispatch::physical_bin_name(bin));
+            install_profile_projection(generation, bin).map_err(|error| {
+                if error.kind() == io::ErrorKind::PermissionDenied {
+                    io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!(
+                            "managed tool `{bin}` cannot write `{}`: {error}",
+                            path.display()
+                        ),
+                    )
+                } else {
+                    error
+                }
+            })?;
+        }
     }
     Store::sync_store_directory(&user_bin_dir())?;
 
@@ -2114,8 +2337,61 @@ fn publish_generation(generation: u64, witness: &str, tools: &[InstalledTool]) -
     atomic_write_profile_pointer(profile.as_bytes())
 }
 
-fn ensure_dispatcher(bin: &str) -> io::Result<()> {
-    ProfileDispatch::install_dispatcher(&user_bin_dir(), bin).map(|_| ())
+fn install_profile_projection(generation: u64, bin: &str) -> io::Result<()> {
+    validate_bin_name(bin).map_err(io::Error::other)?;
+    let physical = ProfileDispatch::physical_bin_name(bin);
+    let source = generations_dir()
+        .join(generation.to_string())
+        .join("bin")
+        .join(&physical);
+    let destination = user_bin_dir().join(&physical);
+    match fs::symlink_metadata(&destination) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(io::Error::other(format!(
+                "managed projection `{}` is a symlink",
+                destination.display()
+            )))
+        }
+        Ok(metadata) if !metadata.is_file() => {
+            return Err(io::Error::other(format!(
+                "managed projection `{}` is not a regular file",
+                destination.display()
+            )))
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let partial = user_bin_dir().join(format!(
+        ".projection-{physical}-{}.partial",
+        std::process::id()
+    ));
+    if fs::symlink_metadata(&partial).is_ok() {
+        fs::remove_file(&partial)?;
+    }
+    if let Err(error) = fs::hard_link(&source, &partial) {
+        if error.kind() == io::ErrorKind::PermissionDenied {
+            return Err(error);
+        }
+        fs::copy(&source, &partial)?;
+    }
+    finalize_profile_pointer(&partial, &destination)
+}
+
+fn make_profile_projection_read_only(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = fs::metadata(path)?.permissions().mode() & 0o777;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode & !0o222))?;
+    }
+    #[cfg(not(unix))]
+    {
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
 }
 
 fn validate_bin_name(value: &str) -> Result<(), String> {

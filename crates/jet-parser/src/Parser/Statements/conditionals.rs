@@ -2,6 +2,271 @@ use super::super::*;
 use crate::Diagnostics::TextEdit;
 
 impl<'a> Parser<'a> {
+    /// D-RESULT-DECON2=B: the compact exhaustive Result handler starts only
+    /// after a postfix `?` whose next token is a payload name. `?.` remains
+    /// optional chaining, and a bare `?` keeps the ordinary propagation path.
+    pub(in crate::Parser) fn result_handler_follows(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Question)
+            && matches!(self.peek2().kind, TokKind::Ident(_))
+    }
+
+    /// D-RESULT-DECON2=B: lower
+    /// `result ? ok -> success ! error -> failure` to the existing exhaustive
+    /// pattern-test `if` chain. The parser owns only the two fixed roles; all
+    /// typing, flow, effects, ownership, and lowering remain ordinary Result
+    /// pattern handling.
+    pub(in crate::Parser) fn parse_result_handler(
+        &mut self,
+        subject: Expr,
+        question_span: Span,
+    ) -> Result<Expr, Diagnostic> {
+        let (ok_binding, ok_binding_span) =
+            self.expect_ident("for the success payload binding after `?`")?;
+        if ok_binding == Syntax::PAT_WILDCARD_SLOT {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a Result handler success branch needs a payload binding".to_string(),
+                "the compact handler exposes the success payload inside its branch".to_string(),
+                "name the payload after `?`, for example `? ok -> ...`".to_string(),
+                Some(ok_binding_span),
+            ));
+        }
+        self.expect_unified_arrow("after the success payload binding")?;
+        let (ok_body, ok_value) = self.parse_result_handler_branch()?;
+
+        if !matches!(self.peek().kind, TokKind::Bang) {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a Result handler needs a `!` failure branch".to_string(),
+                "the compact handler is exhaustive: it has one success branch and one failure branch"
+                    .to_string(),
+                "add `! error -> failure` after the success branch".to_string(),
+                Some(self.peek().span),
+            ));
+        }
+        let bang_span = self.bump().span;
+        let (err_binding, err_binding_span) =
+            self.expect_ident("for the failure payload binding after `!`")?;
+        if err_binding == Syntax::PAT_WILDCARD_SLOT {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a Result handler failure branch needs a payload binding".to_string(),
+                "the compact handler exposes the failure payload inside its branch".to_string(),
+                "name the payload after `!`, for example `! error -> ...`".to_string(),
+                Some(err_binding_span),
+            ));
+        }
+        if err_binding == ok_binding {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a Result handler cannot bind both payloads to the same name".to_string(),
+                "the success and failure payloads are distinct branch-local values".to_string(),
+                "give the success and failure payloads different names".to_string(),
+                Some(err_binding_span),
+            ));
+        }
+        self.expect_unified_arrow("after the failure payload binding")?;
+        let (err_body, err_value) = self.parse_result_handler_branch()?;
+
+        if self.result_handler_separator_ahead() {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a Result handler cannot have two failure branches".to_string(),
+                "the compact handler has exactly one success role and one failure role".to_string(),
+                "keep one `! error -> ...` branch".to_string(),
+                Some(self.peek().span),
+            ));
+        }
+
+        // Preserve the receiver in both existing pattern-test nodes. This is
+        // the same shape ordinary value dispatch already uses; sema and TIR
+        // remain the owners of receiver typing and lowering.
+        let pattern_subject = subject.clone();
+        let ok_pattern_span = Span::new(question_span.start, ok_binding_span.end);
+        let err_pattern_span = Span::new(bang_span.start, err_binding_span.end);
+        let ok_cond = Expr::PatternTest {
+            subject: Box::new(pattern_subject.clone()),
+            pattern: Pattern::Ok {
+                binding: ok_binding,
+                binding_span: ok_binding_span,
+                span: ok_pattern_span,
+            },
+            span: ok_pattern_span,
+        };
+        let err_cond = Expr::PatternTest {
+            subject: Box::new(pattern_subject),
+            pattern: Pattern::Err {
+                binding: err_binding,
+                binding_span: err_binding_span,
+                span: err_pattern_span,
+            },
+            span: err_pattern_span,
+        };
+        let end = err_value.span().end;
+        let span = Span::new(subject.span().start, end);
+        let err_if = Expr::If {
+            cond: Box::new(err_cond),
+            then_body: err_body,
+            then_value: Box::new(err_value),
+            else_body: Vec::new(),
+            else_value: Box::new(Expr::NoElse(Span::new(end, end))),
+            span,
+        };
+        Ok(Expr::If {
+            cond: Box::new(ok_cond),
+            then_body: ok_body,
+            then_value: Box::new(ok_value),
+            else_body: Vec::new(),
+            else_value: Box::new(err_if),
+            span,
+        })
+    }
+
+    fn parse_result_handler_branch(&mut self) -> Result<(Vec<Stmt>, Expr), Diagnostic> {
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            return self.parse_result_handler_block();
+        }
+        if matches!(self.peek().kind, TokKind::KwReturn) {
+            let return_span = self.bump().span;
+            let value = if self.result_handler_separator_ahead()
+                || matches!(
+                    self.peek().kind,
+                    TokKind::RBrace | TokKind::Semi | TokKind::Eof
+                ) {
+                None
+            } else {
+                Some(self.expr()?)
+            };
+            let end = value
+                .as_ref()
+                .map_or(return_span.end, |expr| expr.span().end);
+            return Ok((
+                vec![Stmt::Return(value, return_span)],
+                Expr::NoElse(Span::new(end, end)),
+            ));
+        }
+        let value = self.parse_selected_value()?;
+        if matches!(
+            &value.1,
+            Expr::Call(Call { name, .. }) if name == Syntax::BUILTIN_PANIC
+        ) {
+            let end = value.1.span().end;
+            return Ok((vec![Stmt::Expr(value.1)], Expr::NoElse(Span::new(end, end))));
+        }
+        Ok(value)
+    }
+
+    fn parse_result_handler_block(&mut self) -> Result<(Vec<Stmt>, Expr), Diagnostic> {
+        self.expect(TokKind::LBrace, "to open this Result handler branch")?;
+        let mut stmts = Vec::new();
+        loop {
+            match self.peek().kind {
+                TokKind::RBrace => {
+                    let span = self.bump().span;
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "a Result handler branch cannot be empty".to_string(),
+                        "each exhaustive branch must produce a value or diverge".to_string(),
+                        "add a value, `return`, or another diverging tail".to_string(),
+                        Some(span),
+                    ));
+                }
+                TokKind::Eof => {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "expected `}` to close this Result handler branch".to_string(),
+                        "every `{` needs a matching `}`".to_string(),
+                        "add a closing `}`".to_string(),
+                        Some(self.peek().span),
+                    ));
+                }
+                _ => {}
+            }
+            let save = self.pos;
+            let saved_diags = self.diags.len();
+            if let Ok(value) = self.expr() {
+                if matches!(self.peek().kind, TokKind::Semi)
+                    && matches!(self.peek2().kind, TokKind::RBrace)
+                {
+                    self.bump();
+                }
+                if matches!(self.peek().kind, TokKind::RBrace) {
+                    self.bump();
+                    if matches!(
+                        &value,
+                        Expr::Call(Call { name, .. }) if name == Syntax::BUILTIN_PANIC
+                    ) {
+                        let end = value.span().end;
+                        stmts.push(Stmt::Expr(value));
+                        return Ok((stmts, Expr::NoElse(Span::new(end, end))));
+                    }
+                    return Ok((stmts, value));
+                }
+            }
+            self.pos = save;
+            self.diags.truncate(saved_diags);
+            let stmt = self.stmt()?;
+            let diverges = matches!(
+                &stmt,
+                Stmt::Return(..)
+                    | Stmt::Break(..)
+                    | Stmt::BreakValue(..)
+                    | Stmt::Continue(..)
+                    | Stmt::BreakLabel(..)
+                    | Stmt::BreakLabelValue(..)
+                    | Stmt::ContinueLabel(..)
+            ) || matches!(
+                &stmt,
+                Stmt::Expr(Expr::Call(Call { name, .. })) if name == Syntax::BUILTIN_PANIC
+            );
+            stmts.push(stmt);
+            if diverges && matches!(self.peek().kind, TokKind::RBrace) {
+                let close = self.bump().span;
+                return Ok((stmts, Expr::NoElse(Span::new(close.start, close.start))));
+            }
+        }
+    }
+
+    fn result_handler_separator_ahead(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Bang)
+            && matches!(self.peek2().kind, TokKind::Ident(_))
+            && Self::at_unified_arrow_token(&self.peek3().kind)
+    }
+
+    /// The compact handler is the only expression-if shape accepted as a
+    /// standalone effect statement. Ordinary value-producing `if` expressions
+    /// keep their existing statement-position rules.
+    pub(in crate::Parser) fn is_result_handler_expr(expr: &Expr) -> bool {
+        let Expr::If {
+            cond, else_value, ..
+        } = expr
+        else {
+            return false;
+        };
+        let Expr::PatternTest {
+            pattern: Pattern::Ok { .. },
+            ..
+        } = cond.as_ref()
+        else {
+            return false;
+        };
+        let Expr::If {
+            cond: err_cond,
+            else_value: terminal,
+            ..
+        } = else_value.as_ref()
+        else {
+            return false;
+        };
+        matches!(
+            err_cond.as_ref(),
+            Expr::PatternTest {
+                pattern: Pattern::Err { .. },
+                ..
+            }
+        ) && matches!(terminal.as_ref(), Expr::NoElse(_))
+    }
+
     /// D-DOTSCOPE1: parse a scope-member statement `.name { … }` /
     /// `.name(args) { … }`. Purely structural — whether `name` is a valid member
     /// of the enclosing marker (E0614), legal here at all (E0615), correctly

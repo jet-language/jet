@@ -321,7 +321,7 @@ fn use_unavailable_provider_is_e1298_not_silent() {
 }
 
 #[test]
-fn tool_install_publishes_stable_dispatcher_and_generation() {
+fn tool_install_publishes_real_projection_and_generation() {
     let root = Scratch::new("tool-inst-root");
     let proj = Scratch::new("tool-inst-proj");
     let fixtures = Scratch::new("tool-inst-fx");
@@ -359,13 +359,11 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
         "missing PATH projection at {}",
         link.display()
     );
-    #[cfg(unix)]
-    {
-        assert!(
-            link.symlink_metadata().unwrap().file_type().is_file(),
-            "install must create a stable dispatcher"
-        );
-    }
+    assert_eq!(
+        fs::read(&link).unwrap(),
+        b"#!/bin/sh\necho installed greet\n",
+        "install must project the tool bytes, not jetpack"
+    );
     let path = env::join_paths(
         std::iter::once(link.parent().unwrap().to_path_buf()).chain(
             env::var_os("PATH")
@@ -493,12 +491,7 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
         "stderr: {}",
         String::from_utf8_lossy(&removed.stderr)
     );
-    assert!(
-        link.exists(),
-        "stable dispatcher must remain after uninstall"
-    );
-    let rejected = Command::new(&link).output().unwrap();
-    assert_eq!(rejected.status.code(), Some(127));
+    assert!(!link.exists(), "uninstall must remove the managed projection");
     let empty_meta = fs::read_to_string(home.join(".jet/tools/generations/2/meta.json")).unwrap();
     assert!(empty_meta.contains("\"tools\": [\n  ]"), "{empty_meta}");
     assert!(home.join(".jet/tools/generations/2/complete").is_file());
@@ -637,6 +630,97 @@ fn native_omp_recipe_admits_hangar_projects_and_rolls_back() {
         String::from_utf8_lossy(&rolled_back.stdout).trim(),
         "omp version one"
     );
+}
+
+#[test]
+fn tool_profile_reports_drift_without_prompt_and_yes_moves_pin() {
+    let root = Scratch::new("tool-drift-root");
+    let project = Scratch::new("tool-drift-project");
+    let fixtures = Scratch::new("tool-drift-fixtures");
+    let home = Scratch::new("tool-drift-home");
+    write_native_omp_fixture(&fixtures.path, "1.0.0", "#!/bin/sh\necho omp version one\n");
+
+    let installed = jetpack()
+        .args([
+            "tool",
+            "install",
+            "omp@releases#1.0.0",
+            "--no-color",
+            "--offline",
+            "--fixtures",
+        ])
+        .arg(&fixtures.path)
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        installed.status.success(),
+        "install failed: {}",
+        String::from_utf8_lossy(&installed.stderr)
+    );
+
+    let manifest_path = home.join(".jet/tools/manifest.json");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    fs::write(
+        &manifest_path,
+        manifest.replace(
+            "\"reference\":\"omp@releases#1.0.0\"",
+            "\"reference\":\"omp@releases#0.9.0\"",
+        ),
+    )
+    .unwrap();
+
+    let report = || {
+        jetpack()
+            .args(["tool", "list", "--no-color"])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &root.path)
+            .env("HOME", &home.path)
+            .output()
+            .unwrap()
+    };
+    let first = report();
+    let first_stderr = String::from_utf8_lossy(&first.stderr);
+    assert!(first.status.success(), "stderr: {first_stderr}");
+    assert!(first_stderr.contains("omp drifted"), "stderr: {first_stderr}");
+    assert!(first_stderr.contains("installed 1.0.0"), "stderr: {first_stderr}");
+    assert!(first_stderr.contains("pinned 0.9.0"), "stderr: {first_stderr}");
+    assert!(
+        !first_stderr.contains("[Y/n]"),
+        "non-interactive drift check prompted: {first_stderr}"
+    );
+    assert!(
+        fs::read_to_string(&manifest_path)
+            .unwrap()
+            .contains("\"reference\":\"omp@releases#0.9.0\"")
+    );
+
+    let second = report();
+    let second_stderr = String::from_utf8_lossy(&second.stderr);
+    assert!(second.status.success(), "stderr: {second_stderr}");
+    assert!(second_stderr.contains("omp drifted"), "stderr: {second_stderr}");
+
+    let reconciled = jetpack()
+        .args(["tool", "list", "--no-color", "-y"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        reconciled.status.success(),
+        "reconcile failed: {}",
+        String::from_utf8_lossy(&reconciled.stderr)
+    );
+    assert!(
+        fs::read_to_string(&manifest_path)
+            .unwrap()
+            .contains("\"reference\":\"omp@releases#1.0.0\"")
+    );
+    let tool = Command::new(home.join(".jet/bin/omp")).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&tool.stdout).trim(), "omp version one");
 }
 
 #[test]

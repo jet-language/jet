@@ -714,8 +714,8 @@ impl<'a> Fmt<'a> {
                 });
                 self.end_block();
             }
-            // D-EFF1 / D-QUAL1: `#Abilities(Net, DB) { … }` effect-restriction region.
-            Stmt::Caps { body, .. } => {
+            // D-EFF1 / D-QUAL1: `#FX(Net, DB) { … }` effect-restriction region.
+            Stmt::AuthorityScope { body, .. } => {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
@@ -788,7 +788,7 @@ impl<'a> Fmt<'a> {
                 dsl,
                 ..
             } => {
-                if *dsl {
+                if *dsl || name == crate::Syntax::MARKER_ARITHMETIC {
                     self.write(&format!("#{}", name));
                 } else {
                     self.write(&format!(".{}", name));

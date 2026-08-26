@@ -251,10 +251,10 @@ pub const RETIREMENTS: &[Retirement] = &[
     Retirement {
         id: "scope-marker-grant",
         retired: "#Grant",
-        canonical: "#Abilities",
+        canonical: "#FX",
         kind: RetirementKind::Semantic,
-        decision: "D-AUTHORITY-SCOPE1",
-        since: "2026-08-06",
+        decision: "D-ABILITY-NAME2",
+        since: "2026-08-25",
         code: Some("E0077"),
     },
     Retirement {

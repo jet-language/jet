@@ -1100,7 +1100,7 @@ fn collect_capture_statements(
             | Stmt::Region { body, .. }
             | Stmt::Policy { body, .. }
             | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
+            | Stmt::AuthorityScope { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::Transact { body, .. } => {
                 collect_capture_statements(body, aliases, local_functions, sites)

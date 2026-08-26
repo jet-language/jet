@@ -76,7 +76,7 @@ fn spelling(row: &AppliedRule) -> String {
     if row.name == "Env" {
         args[0] = "\"PORT\"".to_string();
     }
-    if row.name == Syntax::KW_CAPS {
+    if row.name == Syntax::KW_FX {
         args[0] = "IO".to_string();
     }
     if row.name == "Target" {
@@ -629,7 +629,7 @@ fn orphan_fact_rows_have_one_home() {
     for name in [
         "Sendability",
         "Attribution",
-        "TrackOrigin",
+        "Origin",
         "ViewProvenance",
         "UnitScaleProvenance",
         "Maturity",

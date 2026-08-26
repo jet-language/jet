@@ -33,6 +33,8 @@ pub const ADD: &str = "Add";
 pub const SUB: &str = "Sub";
 pub const MUL: &str = "Mul";
 pub const DIV: &str = "Div";
+/// D-TEXTHEAD-TYPE1=A: the ordinary library-defined checked text contract.
+pub const CHECKED_TEXT: &str = "CheckedText";
 
 pub fn quantity_bound(dimension: &str, kind: &str) -> String {
     format!("{}<{}, .{}>", Syntax::BOUND_QUANTITY, dimension, kind)
@@ -50,7 +52,7 @@ pub fn parse_quantity_bound(bound: &str) -> Option<(&str, &str)> {
 
 pub const BUILTIN_TRAITS: &[&str] = &[
     PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE, RENDERABLE, CLOSE, ADD, SUB, MUL,
-    DIV,
+    DIV, CHECKED_TEXT,
 ];
 
 pub fn is_builtin_trait(name: &str) -> bool {
@@ -77,6 +79,7 @@ pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
         SUB => Some("__jet_Sub"),
         MUL => Some("__jet_Mul"),
         DIV => Some("__jet_Div"),
+        CHECKED_TEXT => Some("__jet_CheckedText"),
         _ => None,
     }
 }

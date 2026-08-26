@@ -33,9 +33,6 @@ fn main() {
     {
         std::process::exit(run_build_plugin_host(&args[1..]));
     }
-    if let Some(code) = jetpack::CLI::ProfileDispatch::dispatch_current_process() {
-        std::process::exit(code);
-    }
     // D-JPK-DISPATCH1=B (A1): `jet` queries this before exec-ing any real
     // verb, to catch a `jet`/`jetpack` version mismatch as E1227 instead of
     // an engine that mysteriously doesn't understand a verb `jet` sent it.

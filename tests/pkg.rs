@@ -4835,7 +4835,7 @@ fn sbom_spdx_golden() {
     // Golden structure checks (not full byte comparison because Created: timestamp varies).
     assert!(sbom.starts_with("SPDXVersion: SPDX-2.3\n"));
     assert!(sbom.contains("DataLicense: CC0-1.0\n"));
-    assert!(sbom.contains("DocumentNamespace: https://jet-lang.org/spdx/myapp-0.5.0-"));
+    assert!(sbom.contains("DocumentNamespace: https://jet-lang.dev/spdx/myapp-0.5.0-"));
     assert!(sbom.contains("PackageName: logger\n"));
     assert!(sbom.contains("PackageVersion: 1.2.3\n"));
     assert!(sbom.contains("PackageChecksum: SHA256: deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb\n"));

@@ -1,6 +1,6 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, BinOp, Call, CallArg, EnumLitArg, Expr, ForKind, OrFallback, Pattern,
+    AccessConvention, BinOp, Call, CallArg, EnumLitArg, Expr, ForKind, OrFallback, Pattern, Stmt,
     StrPart, Type, UnOp,
 };
 
@@ -67,6 +67,171 @@ impl<'a> Fmt<'a> {
             self.write(" ");
             self.fmt_value_block(else_body, else_value, inline);
         }
+    }
+
+    /// D-RESULT-DECON2=B: recover the compact two-arm surface from the same
+    /// nested `Expr::If`/`PatternTest` shape used by ordinary value dispatch.
+    fn result_handler_parts<'b>(
+        &self,
+        expr: &'b Expr,
+    ) -> Option<(
+        &'b Expr,
+        &'b str,
+        &'b [Stmt],
+        &'b Expr,
+        &'b str,
+        &'b [Stmt],
+        &'b Expr,
+    )> {
+        let Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_value,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        let Expr::PatternTest {
+            subject,
+            pattern: Pattern::Ok { binding, .. },
+            ..
+        } = cond.as_ref()
+        else {
+            return None;
+        };
+        let Expr::If {
+            cond: err_cond,
+            then_body: err_body,
+            then_value: err_value,
+            else_value: terminal,
+            ..
+        } = else_value.as_ref()
+        else {
+            return None;
+        };
+        let Expr::PatternTest {
+            pattern:
+                Pattern::Err {
+                    binding: err_binding,
+                    ..
+                },
+            ..
+        } = err_cond.as_ref()
+        else {
+            return None;
+        };
+        if !matches!(terminal.as_ref(), Expr::NoElse(_)) {
+            return None;
+        }
+        let start = Self::expr_start(expr);
+        let source = self.src.get(start..expr.span().end)?;
+        let question = source.find('?')?;
+        if !source[question + 1..].contains('!') {
+            return None;
+        }
+        Some((
+            subject.as_ref(),
+            binding,
+            then_body,
+            then_value,
+            err_binding,
+            err_body,
+            err_value,
+        ))
+    }
+
+    fn result_handler_branch_inlineable(&self, body: &[Stmt], value: &Expr) -> bool {
+        if !body.is_empty()
+            || matches!(value, Expr::NoElse(_))
+            || self.is_result_handler_source(value)
+            || self.value_was_braced(value)
+        {
+            return false;
+        }
+        let start = Self::expr_start(value);
+        let end = value.span().end;
+        self.src
+            .get(start..end)
+            .is_some_and(|text| !text.contains('\n') && !self.span_has_comment(start, end))
+    }
+
+    fn result_handler_compact_source(&self, expr: &Expr) -> bool {
+        let start = Self::expr_start(expr);
+        self.src
+            .get(start..expr.span().end)
+            .is_some_and(|_| !self.span_has_comment(start, expr.span().end))
+    }
+
+    fn is_result_handler_source(&self, expr: &Expr) -> bool {
+        self.result_handler_parts(expr).is_some()
+    }
+
+    fn fmt_result_handler_branch(&mut self, body: &[Stmt], value: &Expr, expanded: bool) {
+        if !expanded && self.result_handler_branch_inlineable(body, value) {
+            self.fmt_expr(value, Prec::OrFallback);
+            return;
+        }
+        if matches!(value, Expr::NoElse(_)) {
+            self.write(" {");
+            self.newline();
+            self.with_indent(|f| f.fmt_block_stmts(body));
+            self.end_block();
+        } else {
+            self.fmt_value_block(body, value, false);
+        }
+    }
+
+    fn fmt_result_handler_expr(&mut self, expr: &Expr) {
+        let Some((subject, ok_binding, ok_body, ok_value, err_binding, err_body, err_value)) =
+            self.result_handler_parts(expr)
+        else {
+            unreachable!("result handler formatter called for another if shape");
+        };
+        let compact = self.result_handler_compact_source(expr)
+            && self.result_handler_branch_inlineable(ok_body, ok_value)
+            && self.result_handler_branch_inlineable(err_body, err_value);
+        if compact {
+            let saved_out = self.out.len();
+            let saved_col = self.col;
+            let saved_line_start = self.at_line_start;
+            let saved_pending_blank = self.pending_blank;
+            let saved_comment_i = self.comment_i;
+            self.fmt_expr(subject, Prec::OrFallback);
+            self.write(" ? ");
+            self.write(ok_binding);
+            self.write(" ");
+            self.write(Syntax::OP_UNIFIED_ARROW);
+            self.write(" ");
+            self.fmt_result_handler_branch(ok_body, ok_value, false);
+            self.write(" ! ");
+            self.write(err_binding);
+            self.write(" ");
+            self.write(Syntax::OP_UNIFIED_ARROW);
+            self.write(" ");
+            self.fmt_result_handler_branch(err_body, err_value, false);
+            if self.col <= MAX_WIDTH && !self.out[saved_out..].contains('\n') {
+                return;
+            }
+            self.out.truncate(saved_out);
+            self.col = saved_col;
+            self.at_line_start = saved_line_start;
+            self.pending_blank = saved_pending_blank;
+            self.comment_i = saved_comment_i;
+        }
+        self.fmt_expr(subject, Prec::OrFallback);
+        self.write(" ? ");
+        self.write(ok_binding);
+        self.write(" ");
+        self.write(Syntax::OP_UNIFIED_ARROW);
+        self.fmt_result_handler_branch(ok_body, ok_value, true);
+        self.newline();
+        self.write("! ");
+        self.write(err_binding);
+        self.write(" ");
+        self.write(Syntax::OP_UNIFIED_ARROW);
+        self.fmt_result_handler_branch(err_body, err_value, true);
     }
 
     /// The offset of an expression's first source byte.
@@ -498,25 +663,19 @@ impl<'a> Fmt<'a> {
                 self.write(">");
             }
             Type::Option(inner) => {
-                self.fmt_type(inner);
+                // D-FAILURE-FOUNDATION1=A: the optional-success contract is
+                // prefix-owned, so `?Success` cannot be confused with the
+                // error contract that follows it.
                 self.write("?");
+                self.fmt_type(inner);
             }
             Type::Result { ok, err } => {
                 if Self::is_unit_type(ok) {
-                    if Self::is_default_error(err) {
-                        self.write(Syntax::TYPE_FALLIBLE_SEP);
-                    } else {
-                        self.fmt_error_suffix(err);
-                    }
+                    self.fmt_error_prefix(err);
                 } else {
                     self.fmt_type(ok);
-                    if Self::is_default_error(err) {
-                        self.write(" ");
-                        self.write(Syntax::TYPE_FALLIBLE_SEP);
-                    } else {
-                        self.write(" ");
-                        self.fmt_error_suffix(err);
-                    }
+                    self.write(" ");
+                    self.fmt_error_prefix(err);
                 }
             }
             Type::Fn {
@@ -739,11 +898,8 @@ impl<'a> Fmt<'a> {
         matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
     }
 
-    fn is_default_error(ty: &Type) -> bool {
-        matches!(ty, Type::Named(name) if name == Syntax::TYPE_ERR)
-    }
-
-    fn fmt_error_suffix(&mut self, err: &Type) {
+    fn fmt_error_prefix(&mut self, err: &Type) {
+        self.write(Syntax::TYPE_FALLIBLE_SEP);
         if matches!(err, Type::Union(_)) {
             self.write("(");
             self.fmt_type(err);
@@ -751,7 +907,6 @@ impl<'a> Fmt<'a> {
         } else {
             self.fmt_type(err);
         }
-        self.write(Syntax::TYPE_FALLIBLE_SEP);
     }
 
     pub(super) fn return_type_has_value(ty: &Type) -> bool {
@@ -760,16 +915,8 @@ impl<'a> Fmt<'a> {
     }
 
     pub(super) fn fmt_unit_fallible_return(&mut self, ty: &Type) {
-        let Type::Result { err, .. } = ty else {
-            unreachable!("unit-fallible return formatter received a non-result type");
-        };
-        if Self::is_default_error(err) {
-            self.write(" ");
-            self.write(Syntax::TYPE_FALLIBLE_SEP);
-        } else {
-            self.write(" ");
-            self.fmt_error_suffix(err);
-        }
+        self.write(" ");
+        self.fmt_type(ty);
     }
 
     pub(super) fn fmt_return_type(&mut self, ty: &Type) {
@@ -782,6 +929,10 @@ impl<'a> Fmt<'a> {
         match expr {
             // S68 (D-SG2): `if` used as a value.
             Expr::If { .. } => {
+                if self.is_result_handler_source(expr) {
+                    self.fmt_result_handler_expr(expr);
+                    return;
+                }
                 if self.is_guard_expr(expr) {
                     self.fmt_guard_expr(expr);
                     return;
@@ -1512,10 +1663,12 @@ impl<'a> Fmt<'a> {
             }
             Expr::Try(inner, _, _, note) => {
                 self.fmt_expr(inner, Prec::Postfix);
-                self.write("?");
                 if let Some(note) = note {
-                    self.write(" ");
+                    self.write("?(");
                     self.fmt_expr(note, Prec::Postfix);
+                    self.write(")");
+                } else {
+                    self.write("?");
                 }
             }
             Expr::OrFallback {
@@ -1882,22 +2035,13 @@ impl<'a> Fmt<'a> {
         match (&lam.result_type, &lam.error_type) {
             (Some(result), Some(error)) if Self::is_unit_type(result) => {
                 self.write(" ");
-                if Self::is_default_error(error) {
-                    self.write(Syntax::TYPE_FALLIBLE_SEP);
-                } else {
-                    self.fmt_error_suffix(error);
-                }
+                self.fmt_error_prefix(error);
             }
             (Some(result), Some(error)) => {
                 self.write(" ");
                 self.fmt_type(result);
-                if Self::is_default_error(error) {
-                    self.write(" ");
-                    self.write(Syntax::TYPE_FALLIBLE_SEP);
-                } else {
-                    self.write(" ");
-                    self.fmt_error_suffix(error);
-                }
+                self.write(" ");
+                self.fmt_error_prefix(error);
             }
             (Some(result), None) => {
                 self.write(" ");
@@ -1906,7 +2050,7 @@ impl<'a> Fmt<'a> {
             (None, None) => {}
             (None, Some(error)) => {
                 self.write(" ");
-                self.fmt_error_suffix(error);
+                self.fmt_error_prefix(error);
             }
         }
         if let Some(effects) = &lam.effects {

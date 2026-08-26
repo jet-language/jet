@@ -158,6 +158,10 @@ Top-level fields:
 `facts.blueprint` contains source-derived Canvas affordances that do not change
 program meaning, plus an optional live Event projection:
 
+- `state_graphs`: checked typestate diagram facts from sema. Each state carries
+  `terminal`, `reachable` (`null` when no entry transition exists), and its
+  source span; each edge carries its operation, source state, and destination.
+  This is erased compile-time metadata, not runtime state storage.
 - `runtime_events`: `null` unless Canvas is opened as `/canvas?pid=<live Jet
   pid>`. With a PID, the graph request uses the same owner/identity/age checks as
   `jet inspect live` and projects only executed, payload-free

@@ -30,6 +30,50 @@ pub struct Call {
     pub widen_approx: bool,
 }
 
+/// D-WRAP-SCOPE1=A: the one lexical fixed-width arithmetic mode. Exact `Int`
+/// and the checked fixed-width default stay outside this opt-in surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArithmeticMode {
+    Checked,
+    Wrapping,
+    Saturating,
+}
+
+impl ArithmeticMode {
+    pub fn from_expr(expr: &Expr) -> Option<Self> {
+        let name = match expr {
+            Expr::Ident(name, _) => name.as_str(),
+            Expr::Field(_, name, _) => name.as_str(),
+            Expr::EnumLit { variant, .. } => variant.as_str(),
+            _ => return None,
+        };
+        match name {
+            "Checked" => Some(Self::Checked),
+            "Wrapping" => Some(Self::Wrapping),
+            "Saturating" => Some(Self::Saturating),
+            _ => None,
+        }
+    }
+
+    pub const fn builtin(self) -> &'static str {
+        match self {
+            Self::Checked => crate::Syntax::INTERNAL_ARITHMETIC_CHECKED,
+            Self::Wrapping => crate::Syntax::BUILTIN_WRAPPING,
+            Self::Saturating => crate::Syntax::BUILTIN_SATURATING,
+        }
+    }
+}
+
+/// Source provenance for one operation selected by a lexical arithmetic mode.
+/// The operation span and scope span remain together through AST, TIR, and
+/// editor-facing consumers; execution tiers ignore the record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArithmeticPolicyFact {
+    pub mode: ArithmeticMode,
+    pub scope_span: Span,
+    pub operation_span: Span,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct CallArgFlags {
     pub implicit_clone: bool,
@@ -75,10 +119,13 @@ pub struct CallArgFlags {
     /// callable argument of `apply`; lowering unwraps the value through the
     /// shared callable seam and never rebuilds its signature.
     pub callable_policy: Option<CallablePolicyChain>,
-    /// D-AUTHORITY-NAME1=A: sema proved this argument is the scoped `Abilities`
+    /// D-ABILITY-NAME2=A: sema proved this argument is the scoped `Authority`
     /// value crossing the one approved process/plugin boundary. The escape
     /// checker uses this fact; engines do not.
     pub authority_boundary: bool,
+    /// D-WRAP-SCOPE1=A: compiler-synthesized arithmetic policy provenance on
+    /// the single operand of a lexical arithmetic operation.
+    pub arithmetic_policy: Option<ArithmeticPolicyFact>,
 }
 
 #[derive(Debug, Clone)]
@@ -1113,7 +1160,7 @@ impl Expr {
                 | Stmt::Switched { body, .. }
                 | Stmt::Region { body, .. }
                 | Stmt::Policy { body, .. }
-                | Stmt::Caps { body, .. }
+                | Stmt::AuthorityScope { body, .. }
                 | Stmt::ComptimeBlock { body, .. }
                 | Stmt::Live { body, .. }
                 | Stmt::Transact { body, .. } => walk_stmts(body, f),

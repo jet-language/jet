@@ -192,7 +192,7 @@ pub(super) struct Interp<'a> {
     /// E2-M18 / c133: true only in `run_repl_step` — enables REPL-specific
     /// diagnostics for native-only Core modules (E1802-style wording).
     pub(super) repl_mode: bool,
-    /// Active lexical `#Abilities` values in REPL mode. Sema proves the
+    /// Active lexical `#FX` values in REPL mode. Sema proves the
     /// region statically; this same named carrier gates host authorization
     /// dynamically.
     pub(super) repl_grants: Vec<CtValue>,
@@ -352,10 +352,10 @@ impl<'a> Interp<'a> {
         if stmts.is_empty() {
             return Ok(Flow::Normal);
         }
-        // TIR keeps a named `#Abilities` value as an ordinary local. Keep the
+        // TIR keeps a named `#FX` value as an ordinary local. Keep the
         // same value in the REPL host frame before the bridge evaluates a body;
         // boundary authorization consumes this carrier directly.
-        if self.repl_mode && stmts.iter().any(|stmt| matches!(stmt, Stmt::Caps { .. })) {
+        if self.repl_mode && stmts.iter().any(|stmt| matches!(stmt, Stmt::AuthorityScope { .. })) {
             for stmt in stmts {
                 match self.exec_stmt(stmt, scope)? {
                     Flow::Normal => {}
@@ -521,7 +521,7 @@ impl<'a> Interp<'a> {
             res?;
         }
         let result = if self.repl_mode {
-            if let Stmt::Caps {
+            if let Stmt::AuthorityScope {
                 caps,
                 binding,
                 body,

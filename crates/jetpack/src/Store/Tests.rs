@@ -1213,6 +1213,7 @@ mod tests {
         fs::create_dir_all(&survivor).unwrap();
         fs::create_dir_all(&expected).unwrap();
         fs::write(survivor.join("keep"), "survivor").unwrap();
+        seal_node(&survivor).unwrap();
         fs::write(expected.join("bad"), "candidate").unwrap();
         let envelope = super::super::super::Envelope::Envelope::for_output(
             &survivor.to_string_lossy(),

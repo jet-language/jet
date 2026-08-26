@@ -932,6 +932,7 @@ fn run() {{
     assert!(compiled.rust.contains("TerminateJobObject"));
     assert!(compiled.rust.contains("ClosePseudoConsole"));
     assert!(compiled.rust.contains("input.write_all(&[3])"));
+    assert!(!compiled.rust.contains("CREATE_NEW_PROCESS_GROUP"));
     assert!(!compiled.rust.contains("GenerateConsoleCtrlEvent"));
 }
 

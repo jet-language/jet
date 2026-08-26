@@ -1142,7 +1142,7 @@ impl RuleSite {
     }
 }
 
-/// D-META-FORM1=A: `@sites` on a `marker` declaration takes `[Site]`, so the
+/// D-META-FORM1=A / D-MARKER-SITES1=B: `@sites` on a `marker` declaration takes `[Site]`, so the
 /// eighteen attachment points are published as an ordinary `core.compiler.lang` enum
 /// beside the other marker-argument menus (D-RULEARG-TYPES1=A). `RuleSite::ALL`
 /// stays the one source; `site_variants_match_the_enum` proves this list is it.
@@ -1231,7 +1231,7 @@ pub struct RuleArgDeclaration {
     pub name: &'static str,
     pub variants: &'static [&'static str],
     /// Which segment of a written path names the variant. `core.compiler.lang.Target.Web`
-    /// and `Ability.FS` are read from the front because their variants own
+    /// and `Effect.FS` are read from the front because their variants own
     /// nested names; every other menu reads the last segment.
     pub variant_segment: VariantSegment,
 }
@@ -1253,7 +1253,8 @@ pub struct CompanionSite {
 fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
     Some(match name {
         "ABI" => &["system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"],
-        "Ability" => crate::Authority::EFFECT_ROOTS.as_slice(),
+        "Effect" => crate::Authority::EFFECT_ROOTS.as_slice(),
+        "ArithmeticMode" => &["Checked", "Wrapping", "Saturating"],
         "FfiLanguage" => &["c", "cpp", "asm"],
         "InlineMode" => &["Hint", "Always", "Never"],
         "JobScope" => crate::Syntax::JOB_SCOPE_VARIANTS,
@@ -1350,12 +1351,12 @@ pub static RULE_ARG_DECLARATIONS: LazyLock<Vec<RuleArgDeclaration>> = LazyLock::
         .collect()
 });
 
-/// D-RULEARG-TYPES1=A: `Ability` and `Target` variants own nested names
+/// D-RULEARG-TYPES1=A: `Effect` and `Target` variants own nested names
 /// (`FS.read`, `Web.dom`), so the written path names its variant in the first
 /// segment after the enum. Every other menu names it in the last.
 const fn canonical_variant_segment(name: &str) -> VariantSegment {
     match name.as_bytes() {
-        b"Ability" | b"Target" => VariantSegment::First,
+        b"Effect" | b"Target" => VariantSegment::First,
         _ => VariantSegment::Last,
     }
 }
@@ -2124,7 +2125,7 @@ mod tests {
             &["camel", "snake", "pascal", "kebab", "screaming"]
         );
         assert_eq!(
-            variants("Ability"),
+            variants("Effect"),
             crate::Authority::EFFECT_ROOTS.as_slice()
         );
     }
@@ -2173,7 +2174,7 @@ mod tests {
 
         // Which path segment names a variant is declaration data.
         assert_eq!(
-            super::rule_arg_declaration("Ability")
+            super::rule_arg_declaration("Effect")
                 .unwrap()
                 .variant_segment,
             super::VariantSegment::First
@@ -2192,7 +2193,7 @@ mod tests {
         );
 
         // D-VERDICT-1455-1: the two ghost rows are gone for good.
-        assert!(super::applied_rule("Abilities").is_none());
+        assert!(super::applied_rule("Authority").is_none());
         assert!(super::applied_rule("Summarize").is_none());
         assert!(!super::DERIVE_RULES.contains(&"Summarize"));
     }

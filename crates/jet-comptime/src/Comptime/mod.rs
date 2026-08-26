@@ -263,12 +263,15 @@ pub use Reflect::{
     build_enum_layout_info_with_engine, build_function_type_info, build_maturity_info,
     build_movedness_info, build_program_info, build_program_info_with_index, build_range_info,
     build_registered_fact_info, build_registered_fact_infos, build_sendability_info,
-    build_state_infos, build_state_ref, build_state_refs, build_struct_layout_info,
+    build_state_infos, build_state_infos_with_graph, build_state_ref, build_state_refs,
+    build_struct_layout_info,
     build_struct_layout_info_with_engine, build_struct_type_info, build_struct_type_info_with_path,
     build_struct_type_info_with_path_and_vocabulary,
     build_struct_type_info_with_path_and_vocabulary_and_engine, build_struct_type_info_with_states,
-    build_track_origin_info, build_unit_scale_provenance_info, build_view_provenance_info,
+    build_origin_info, build_origin_option, build_unit_scale_provenance_info,
+    build_view_provenance_info,
     program_reflection_identity, reflect_type_value, reflect_type_value_with_target,
+    reflect_type_value_with_target_and_graph,
     reflected_fact_field, registered_fact_value, ProgramIndexView, ProgramSemanticFacts,
 };
 
@@ -1394,7 +1397,7 @@ fn run_repl_step_inner(
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
-        // D-REPLCOREEFFECT1=A: only a lexical `#Abilities` opens this depth.
+        // D-REPLCOREEFFECT1=A: only a lexical `#FX` opens this depth.
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         repl_mode: true,

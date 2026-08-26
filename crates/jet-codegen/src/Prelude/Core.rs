@@ -1049,6 +1049,12 @@ trait JetArith: Copy {
     fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self;
     fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self;
     fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self;
+    fn jet_wrapping_add(self, rhs: Self) -> Self;
+    fn jet_wrapping_sub(self, rhs: Self) -> Self;
+    fn jet_wrapping_mul(self, rhs: Self) -> Self;
+    fn jet_saturating_add(self, rhs: Self) -> Self;
+    fn jet_saturating_sub(self, rhs: Self) -> Self;
+    fn jet_saturating_mul(self, rhs: Self) -> Self;
     fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self;
     fn jet_rem(self, rhs: Self, file: &str, line: u32) -> Self;
     // D-NUMOPS1: a shift by a bit-count `>=` the value's width is undefined in C
@@ -1056,6 +1062,8 @@ trait JetArith: Copy {
     // an `i128` so any integer width (signed or unsigned) reaches here losslessly.
     fn jet_shl(self, bits: i128, file: &str, line: u32) -> Self;
     fn jet_shr(self, bits: i128, file: &str, line: u32) -> Self;
+    fn jet_rotate_left(self, bits: i128, file: &str, line: u32) -> Self;
+    fn jet_rotate_right(self, bits: i128, file: &str, line: u32) -> Self;
 }
 macro_rules! jet_arith_impl {
     ($($t:ty),*) => { $(
@@ -1071,6 +1079,24 @@ macro_rules! jet_arith_impl {
             fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self {
                 self.checked_mul(rhs).unwrap_or_else(|| jet_arithmetic_stop(file, line,
                     JET_ARITHMETIC_MUL_OVERFLOW))
+            }
+            fn jet_wrapping_add(self, rhs: Self) -> Self {
+                self.wrapping_add(rhs)
+            }
+            fn jet_wrapping_sub(self, rhs: Self) -> Self {
+                self.wrapping_sub(rhs)
+            }
+            fn jet_wrapping_mul(self, rhs: Self) -> Self {
+                self.wrapping_mul(rhs)
+            }
+            fn jet_saturating_add(self, rhs: Self) -> Self {
+                self.saturating_add(rhs)
+            }
+            fn jet_saturating_sub(self, rhs: Self) -> Self {
+                self.saturating_sub(rhs)
+            }
+            fn jet_saturating_mul(self, rhs: Self) -> Self {
+                self.saturating_mul(rhs)
             }
             fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self {
                 jet_division(
@@ -1102,6 +1128,18 @@ macro_rules! jet_arith_impl {
                     jet_arithmetic_stop(file, line, &message);
                 }
                 self >> (bits as u32)
+            }
+            fn jet_rotate_left(self, bits: i128, file: &str, line: u32) -> Self {
+                if bits < 0 {
+                    jet_arithmetic_stop(file, line, JET_ARITHMETIC_ROTATE_NEGATIVE);
+                }
+                self.rotate_left((bits % Self::BITS as i128) as u32)
+            }
+            fn jet_rotate_right(self, bits: i128, file: &str, line: u32) -> Self {
+                if bits < 0 {
+                    jet_arithmetic_stop(file, line, JET_ARITHMETIC_ROTATE_NEGATIVE);
+                }
+                self.rotate_right((bits % Self::BITS as i128) as u32)
             }
         }
     )* };

@@ -539,13 +539,13 @@ fn visit_statement_gates(source: &str, body: &[Stmt], ledger: &mut GateLedger) {
                     "missing"
                 },
             )),
-            Stmt::Caps { caps, span, .. } => ledger.push(source_entry(
+            Stmt::AuthorityScope { caps, span, .. } => ledger.push(source_entry(
                 GateKind::DependencyGrant,
                 "security",
                 "block",
                 source,
                 *span,
-                "#Abilities",
+                "#FX",
                 None,
                 &format!(
                     "abilities: {}",

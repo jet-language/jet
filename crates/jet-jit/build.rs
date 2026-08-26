@@ -229,9 +229,9 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
             "JetDispatchState",
         ),
         (
-            "ServiceReceipt",
+            "DeliveryState",
             "../jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs",
-            "JetServiceReceipt",
+            "JetDeliveryState",
         ),
         (
             "TaskOutcome",

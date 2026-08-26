@@ -756,7 +756,7 @@ pub const TARGET_FIELD_EXPORT: &str = "export";
 /// `take` rode the S10 ownership keywords, since superseded by D-CAP7's
 /// capability sigils (memory model v5: bare/`&`/`^`). `edit` and `share`
 /// never left reserved-spelling status under that word law and are not wired
-/// into the parser; check docs/spec/syntax-decisions.md's Abilities
+/// into the parser; check docs/spec/syntax-decisions.md's Authority
 /// section for current sigil-based capability law before reusing these.
 pub const CAPABILITY_EDIT: &str = "edit";
 pub const CAPABILITY_SHARE: &str = "share";

@@ -855,8 +855,8 @@ pub(crate) fn tir_enum_rust_path(cx: &Cx, type_name: &str) -> (String, bool) {
     if type_name == "AuthError" {
         return at_root("JetAuthError");
     }
-    if type_name == "ServiceReceipt" {
-        return at_root("JetServiceReceipt");
+    if type_name == "DeliveryState" {
+        return at_root("JetDeliveryState");
     }
     if type_name == "TaskOutcome" {
         return at_root("JetTaskOutcome");

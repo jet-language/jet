@@ -781,7 +781,7 @@ impl<'a> ComptimeTypeResolver<'a> {
                 | Stmt::Policy { body, .. }
                 | Stmt::TaskGroup { body, .. }
                 | Stmt::Layout { body, .. }
-                | Stmt::Caps { body, .. }
+                | Stmt::AuthorityScope { body, .. }
                 | Stmt::ComptimeBlock { body, .. }
                 | Stmt::Live { body, .. }
                 | Stmt::Transact { body, .. }

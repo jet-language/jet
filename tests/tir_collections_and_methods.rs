@@ -758,7 +758,7 @@ fn string_after_before() {
     }
     let src = "\
 fn run() {
-    email := \"nate@jet.dev\"
+    email := \"nate@jet-lang.dev\"
     print(email.after(\"@\"))
     print(email.before(\"@\"))
     plain := \"no-separator\"
@@ -768,7 +768,7 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_string_after_before", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "jet.dev\nnate\nno-separator\nno-separator\n");
+    assert_eq!(stdout, "jet-lang.dev\nnate\nno-separator\nno-separator\n");
 }
 
 /// Map methods: add, add_new, get, has_key, lazy keys/values, len, clear.

@@ -453,8 +453,7 @@ impl<'a> Parser<'a> {
         self.toks.windows(3).any(|tokens| {
             matches!(&tokens[0].kind, TokKind::Ident(marker) if marker == Syntax::KW_MARKER)
                 && matches!(&tokens[1].kind, TokKind::Ident(declared) if declared == name)
-                && (matches!(tokens[2].kind, TokKind::LParen)
-                    || matches!(&tokens[2].kind, TokKind::Ident(on) if on == Syntax::TEXT_HEAD_ON))
+                && matches!(tokens[2].kind, TokKind::LParen)
         })
     }
 
@@ -1776,6 +1775,9 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
                 continue;
+            }
+            if self.at_state_section() {
+                return Err(self.reject_state_section("trait"));
             }
             // D-LIB2: `type Name;` associated type declaration.
             if let TokKind::Ident(ref kw) = self.peek().kind.clone() {

@@ -11,7 +11,6 @@ const TIER_PARITY_STEMS: [&str; 7] = [
     "comptime/embed_bytes",
     "comptime/find",
     "comptime/find_empty",
-    "tooling/declared_text_head",
 ];
 
 fn copy_comptime_fixture(root: &Path, destination: &Path, stem: &str) -> String {
@@ -186,13 +185,6 @@ fn tier_parity_examples_run_through_aot_jit_and_interpreter() {
     for stem in TIER_PARITY_STEMS {
         assert_tier_parity_case(&root, &scratch, stem);
     }
-}
-
-#[test]
-fn declared_text_head_runs_through_aot_jit_and_interpreter() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let scratch = common::Scratch::new("declared_text_head_parity");
-    assert_tier_parity_case(&root, &scratch, "tooling/declared_text_head");
 }
 
 #[test]

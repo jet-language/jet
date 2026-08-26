@@ -133,7 +133,7 @@ fn desugar_stmt(stmt: &mut Stmt) {
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::Live { body, .. } => desugar_stmts(body),

@@ -675,9 +675,7 @@ fn try_output_hash_of_with_hook(
             let shared_cas = canonical_real_directory(&crate::Store::shared_cas_dir());
             let mut hangars = vec![hangar.clone()];
             for machine_root in crate::Store::Roots::machine_roots() {
-                if let Some(machine_hangar) =
-                    canonical_real_directory(&machine_root.hangar_dir())
-                {
+                if let Some(machine_hangar) = canonical_real_directory(&machine_root.hangar_dir()) {
                     add_allowed_hangar_root(&mut hangars, machine_hangar);
                 }
             }
@@ -685,12 +683,14 @@ fn try_output_hash_of_with_hook(
             let mut local_cas_paths = Vec::new();
             for hangar in &hangars {
                 let local_cas = canonical_real_directory(&hangar.join("cas"));
-                let excluded = [local_cas.as_ref(), shared_cas.as_ref()]
+                let mut excluded = vec![root.as_path()];
+                for pool in [local_cas.as_ref(), shared_cas.as_ref()]
                     .into_iter()
                     .flatten()
-                    .filter(|pool| pool.starts_with(hangar) && *pool != hangar)
-                    .map(PathBuf::as_path)
-                    .collect::<Vec<_>>();
+                    .filter(|pool| pool.starts_with(hangar) && pool.as_path() != hangar.as_path())
+                {
+                    excluded.push(pool.as_path());
+                }
                 allowed_peers += count_inode_peers_under_except(hangar, *key, &excluded);
                 if let Some(local_cas) = &local_cas {
                     local_cas_paths.push(local_cas.clone());
@@ -699,7 +699,8 @@ fn try_output_hash_of_with_hook(
                     }
                 }
             }
-            if let (Some(shared_cas), Some(cas_key)) = (shared_cas.as_ref(), link.cas_key.as_deref())
+            if let (Some(shared_cas), Some(cas_key)) =
+                (shared_cas.as_ref(), link.cas_key.as_deref())
             {
                 if !local_cas_paths
                     .iter()
@@ -709,10 +710,9 @@ fn try_output_hash_of_with_hook(
                 }
             }
             let required_peers = link.total.saturating_sub(link.seen);
-            if allowed_peers >= required_peers {
+            if allowed_peers == required_peers {
                 // In-Hangar dedupe and local/shared CAS entries are legitimate;
-                // every other inode peer remains untrusted. Overlapping
-                // trusted roots may count an admitted peer more than once.
+                // every other inode peer remains untrusted.
                 continue;
             }
         }
@@ -881,9 +881,8 @@ fn encode_node(
             }
             validate_nix_store_symlink_target(&target)?;
         } else {
-            let resolved = fs::canonicalize(path).map_err(|e| {
-                format!("symlink `{}` is dangling or cyclic: {e}", path.display())
-            })?;
+            let resolved = fs::canonicalize(path)
+                .map_err(|e| format!("symlink `{}` is dangling or cyclic: {e}", path.display()))?;
             if !resolved.starts_with(root) {
                 return Err(format!("symlink `{}` escapes output root", path.display()));
             }
@@ -1314,8 +1313,8 @@ mod tests {
         fs::write(&file, "trusted").unwrap();
         fs::hard_link(&file, pool.join("not-the-content-key")).unwrap();
 
-        let error = try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false)
-            .unwrap_err();
+        let error =
+            try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap_err();
         assert!(error.contains("only 1 are inside"), "{error}");
         fs::remove_dir_all(hangar).ok();
     }

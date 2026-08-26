@@ -163,8 +163,8 @@ pub(crate) fn refresh_provider_facts(
         .facts
         .get(NIX_NATIVE_FORMAT)
         .filter(|format| !format.trim().is_empty());
-    match (producer.provider.as_str(), native_format, native_document) {
-        ("nix", Some(format), Some(document)) => shared.set_native_document(format, document),
+    match (native_format, native_document) {
+        (Some(format), Some(document)) => shared.set_native_document(format, document),
         _ => shared.set_native_document("jet-producer-record-v1", &native.encode()),
     }
     for (key, value) in &producer.facts {
@@ -453,6 +453,11 @@ pub fn cache_expectation(
         // entry → None, so offline keeps failing loudly (E1276), never serving a
         // spelling-trusted stale copy (card #418).
         ProviderKind::Nix => {
+            if let Some(index) = ctx.nix_index {
+                if let Ok(Some(recipe)) = index.resolve_native_recipe(&spec.package) {
+                    return Some(native::catalog_cache_expectation(spec, &recipe, ctx));
+                }
+            }
             let project = ctx.project_dir?;
             let (output, env) = super::Lock::nix_realization(project, &spec.raw)?;
             if env.output_hash.is_empty() {
@@ -834,7 +839,7 @@ pub(crate) fn prepare_nix_identity(
         output_hash,
         platform: super::Envelope::host_platform(),
         signature: String::new(),
-        provenance: format!("{} via nix", spec.raw),
+        provenance: realized.envelope.provenance.clone(),
     };
     let cache_identity =
         nix_cache_identity(&envelope.output_hash, &envelope.platform, spec, table, ctx);
@@ -982,7 +987,18 @@ pub(crate) fn validate_nix_lock_before_store(
     ctx: &Ctx,
     realized: &Realized,
 ) -> Result<(), ProviderError> {
-    if realized.producer.provider != "nix" {
+    let local_native = realized.producer.provider == "jetpackage"
+        && realized
+            .producer
+            .facts
+            .get("source.kind")
+            .is_some_and(|kind| kind == "local-unofficial-catalog")
+        && realized
+            .producer
+            .facts
+            .get("nix.index.tier")
+            .is_some_and(|tier| tier == "local-unofficial");
+    if realized.producer.provider != "nix" && !local_native {
         return Ok(());
     }
     let Some(expected) = realized.producer.facts.get("nix.lock.digest") else {
@@ -1012,17 +1028,26 @@ pub(crate) fn record_nix_lock_after_store(
     let Some(project) = ctx.project_dir.filter(|path| path.is_dir()) else {
         return Ok(entry.clone());
     };
-    if entry.reference.is_empty()
-        || entry.envelope.output_hash.is_empty()
-        || entry.cache_identity.source_fingerprint != entry.envelope.output_hash
-        || entry.cache_identity.recipe_fingerprint != SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes())
-    {
+    if entry.reference.is_empty() || entry.envelope.output_hash.is_empty() {
         return Ok(entry.clone());
     }
     let Ok(producer) = super::Store::ProducerRecord::decode(&entry.producer_record) else {
         return Ok(entry.clone());
     };
-    if producer.provider != "nix" {
+    let nix_realization = producer.provider == "nix"
+        && entry.cache_identity.source_fingerprint == entry.envelope.output_hash
+        && entry.cache_identity.recipe_fingerprint
+            == SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes());
+    let local_native = producer.provider == "jetpackage"
+        && producer
+            .facts
+            .get("source.kind")
+            .is_some_and(|kind| kind == "local-unofficial-catalog")
+        && producer
+            .facts
+            .get("nix.index.tier")
+            .is_some_and(|tier| tier == "local-unofficial");
+    if !nix_realization && !local_native {
         return Ok(entry.clone());
     }
     let Some(expected_lock_digest) = producer.facts.get("nix.lock.digest") else {
@@ -1038,15 +1063,18 @@ pub(crate) fn record_nix_lock_after_store(
         )));
     }
     let expected_lock_digest = expected_lock_digest.to_string();
+    let local_import = producer.facts.contains_key("nix.fallback.provenance");
     let catalog_tier = producer
         .facts
         .get("nix.index.tier")
         .cloned()
+        .or_else(|| local_import.then(|| "local-import".into()))
         .unwrap_or_default();
     let catalog_trust = producer
         .facts
         .get("nix.index.trust")
         .cloned()
+        .or_else(|| local_import.then(|| "unverified-local-nix".into()))
         .unwrap_or_default();
     let refreshed = super::RuntimePolicy::with_project_lock(
         project,
@@ -1472,7 +1500,7 @@ impl Provider for NixProvider {
                 ))
             } else {
                 ProviderError::Unsupported(format!(
-                    "native Nix package realization needs a locked signed-index record for `{}`; Jetpack does not invoke an installed Nix executable",
+                    "Nix package realization needs an exact signed-index record or an exact-lock local fallback policy for `{}`; ambient nixpkgs is never accepted",
                     spec.raw
                 ))
             }
@@ -1558,6 +1586,9 @@ fn realize_from_local_nix(
         .facts
         .insert(NIX_NATIVE_DOCUMENT.to_string(), native_document);
     realized.producer.facts.extend(invocation.facts);
+    if let Some(provenance) = realized.producer.facts.get("nix.fallback.provenance") {
+        realized.envelope.provenance = format!("local-nix:{provenance}");
+    }
     finalize_nix_realization(spec, table, ctx, realized)
 }
 
@@ -1998,6 +2029,13 @@ pub(crate) fn plan_downloads(
                         spec.raw
                     ))
                 })?;
+                if let Some(recipe) = index
+                    .resolve_native_recipe(&spec.package)
+                    .map_err(ProviderError::NixIndex)?
+                {
+                    plan.add(1, native::catalog_download_size(&recipe)?);
+                    continue;
+                }
                 let host_system = host_nix_system().ok_or_else(|| {
                     ProviderError::Unsupported(
                         "the host system is not supported by the signed nixpkgs index".into(),
@@ -2006,9 +2044,10 @@ pub(crate) fn plan_downloads(
                 let key = locked_nix_index_key(spec, table, ctx, host_system)?;
                 let verified = match index.resolve(&key) {
                     Ok(verified) => verified,
-                    Err(NixIndexError::NotIndexed { .. })
-                        if crate::NixFallbackPolicy::allowed_from_environment(ctx.offline) =>
-                    {
+                    Err(NixIndexError::NotIndexed { .. }) => {
+                        // The policy and executable are checked during
+                        // realization. Planning must not turn an authorized
+                        // fallback into a false signed-index failure.
                         plan.add(1, None);
                         continue;
                     }
@@ -2095,7 +2134,17 @@ pub(crate) fn realize(
     ctx: &Ctx,
 ) -> Result<Realized, ProviderError> {
     let kind = resolve_kind(spec, table, ctx.offline, ctx.store_dir);
-    let mut realized = provider_for(kind).realize(spec, table, ctx)?;
+    let mut realized = if let Some(index) = ctx.nix_index {
+        match index
+            .resolve_native_recipe(&spec.package)
+            .map_err(ProviderError::NixIndex)?
+        {
+            Some(recipe) => native::realize_catalog_recipe(spec, &recipe, ctx)?,
+            None => provider_for(kind).realize(spec, table, ctx)?,
+        }
+    } else {
+        provider_for(kind).realize(spec, table, ctx)?
+    };
     refresh_provider_facts(&mut realized.producer, &realized.reference)?;
     Ok(realized)
 }

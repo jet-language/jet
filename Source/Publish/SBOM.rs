@@ -23,7 +23,7 @@ pub fn emit_spdx(lock: &LockFile, root_name: &str, root_version: &str) -> String
     out.push_str("DataLicense: CC0-1.0\n");
     out.push_str(&format!("SPDXID: SPDXRef-DOCUMENT\n"));
     out.push_str(&format!(
-        "DocumentNamespace: https://jet-lang.org/spdx/{}-{}-{}\n",
+        "DocumentNamespace: https://jet-lang.dev/spdx/{}-{}-{}\n",
         root_name, root_version, lock_digest
     ));
     out.push_str(&format!("DocumentName: {}-{}\n", root_name, root_version));
@@ -168,7 +168,7 @@ pub(super) fn registry_spdx(
     let mut out = match lock {
         Some(lock) => emit_spdx(lock, root_name, root_version),
         None => format!(
-            "SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\nSPDXID: SPDXRef-DOCUMENT\nDocumentNamespace: https://jet-lang.org/spdx/{root_name}-{root_version}-{subject}\nDocumentName: {root_name}-{root_version}\nCreator: Tool: jet\nCreated: 1970-01-01T00:00:00Z\n\nPackageName: {root_name}\nSPDXID: SPDXRef-root\nPackageVersion: {root_version}\nFilesAnalyzed: false\nPackageChecksum: SHA256: {}\nPackageDownloadLocation: NOASSERTION\n",
+            "SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\nSPDXID: SPDXRef-DOCUMENT\nDocumentNamespace: https://jet-lang.dev/spdx/{root_name}-{root_version}-{subject}\nDocumentName: {root_name}-{root_version}\nCreator: Tool: jet\nCreated: 1970-01-01T00:00:00Z\n\nPackageName: {root_name}\nSPDXID: SPDXRef-root\nPackageVersion: {root_version}\nFilesAnalyzed: false\nPackageChecksum: SHA256: {}\nPackageDownloadLocation: NOASSERTION\n",
             subject.strip_prefix("sha256-").unwrap_or(subject)
         ),
     };

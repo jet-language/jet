@@ -509,7 +509,7 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "Numeric",
         "Printable",
         "CodableAsBase",
-        "Abilities",
+        "FX",
         "Grant",
         "Unsafe",
         "Impure",
@@ -535,7 +535,7 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "MARKER_LAYOUT",
         "MARKER_CODABLE",
         "APPLIED_RULES",
-        "KW_CAPS",
+        "KW_FX",
         "KW_COMPTIME",
         "KW_DERIVE",
         "MARKER_TRACK",
@@ -562,6 +562,52 @@ fn marker_plane_matrix_covers_current_marker_families() {
             "live syntax decisions must retain `{decision_anchor}`"
         );
     }
+}
+
+#[test]
+fn authority_vocabulary_has_one_live_name_and_retired_marker_tombstones() {
+    let live_surfaces = [
+        "crates/jet-foundation/src/Syntax/effects_surface.rs",
+        "crates/jet-foundation/src/Syntax/core_surface.rs",
+        "crates/jet-foundation/src/AST/statements.rs",
+        "crates/jet-parser/src/Parser/Statements/control.rs",
+        "crates/jet-sema/src/Sema/CheckerCore/statements.rs",
+        "crates/jet-sema/src/Sema/Effects.rs",
+        "crates/jet-codegen/src/Codegen/TIR/lower/statements.rs",
+    ];
+    let retired_words = [
+        concat!("Abil", "ity"),
+        concat!("Abil", "ities"),
+        concat!("Capabil", "ity"),
+        "Caps",
+        "KW_CAPS",
+        "TYPE_ABILITIES",
+        "CAP_HANDLE_TYPE",
+        "Stmt::Caps",
+    ];
+    let mut failures = Vec::new();
+    for relative in live_surfaces {
+        let text = fs::read_to_string(relative).expect("read live authority surface");
+        for retired in retired_words {
+            if text.contains(retired) {
+                failures.push(format!("{relative} contains retired `{retired}`"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "live authority vocabulary drift:\n{failures:#?}");
+
+    assert_eq!(jet::Syntax::KW_FX, "FX");
+    assert_eq!(jet::Syntax::TYPE_AUTHORITY, "Authority");
+    for retired in ["Abilities", "Caps"] {
+        assert_eq!(
+            jet::Policy::applied_rule(retired).map(|row| row.status),
+            Some(jet::Policy::RuleStatus::Retired {
+                replacement: "#FX"
+            }),
+            "{retired} must remain a diagnostic-only tombstone"
+        );
+    }
+    assert!(jet::Policy::applied_rule("Authority").is_none());
 }
 
 #[test]

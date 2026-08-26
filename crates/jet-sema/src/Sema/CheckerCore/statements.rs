@@ -802,6 +802,10 @@ impl<'a> Checker<'a> {
                             self.diags.push(diagnostic);
                         }
                         self.clear_moved_binding(name);
+                        // D-TRACK-ORIGIN1=A: a mutable replacement ends the
+                        // old value's provenance. Do not let a later fact read
+                        // report metadata from the value that was replaced.
+                        self.flow.origins.remove(name);
                         // D-CONC-FREEZE1=A: rebinding a local replaces its
                         // frozen proof only after the write check above.
                         // A rejected write through a frozen target keeps
@@ -2664,6 +2668,35 @@ impl<'a> Checker<'a> {
                 self.check_block(body, true);
                 self.exit_memory_policy_region();
             }
+            // D-WRAP-SCOPE1=A: one lexical fixed-width arithmetic mode. The
+            // mode is a sema fact only; codegen sees the ordinary shared
+            // checked/wrapping/saturating operation after expression typing.
+            Stmt::ScopeMember {
+                name,
+                args,
+                body,
+                span,
+                ..
+            } if name == crate::Syntax::MARKER_ARITHMETIC => {
+                let Some(mode) = args
+                    .first()
+                    .and_then(crate::AST::ArithmeticMode::from_expr)
+                else {
+                    self.diags.push(crate::Policy::marker_argument_shape_error(
+                        crate::Syntax::MARKER_ARITHMETIC,
+                        *span,
+                    ));
+                    self.check_block(body, true);
+                    return;
+                };
+                self.arithmetic_policy_stack.push(crate::AST::ArithmeticPolicyFact {
+                    mode,
+                    scope_span: *span,
+                    operation_span: *span,
+                });
+                self.check_block(body, true);
+                self.arithmetic_policy_stack.pop();
+            }
             // D-CONC-SPAWN1=D: `task.group g { … }` — structured task scope.
             Stmt::TaskGroup {
                 name,
@@ -2846,11 +2879,11 @@ impl<'a> Checker<'a> {
                 }
                 self.pop_scope();
             }
-            // D-EFF1 / D-AUTHORITY-SCOPE1: bare `#Abilities(Net, DB) { … }`
-            // restricts effects. A named `#Abilities(auth: FS, Net) { … }`
-            // also binds a scoped Abilities handle and uses the same
+            // D-EFF1 / D-ABILITY-NAME2: bare `#FX(Net, DB) { … }`
+            // restricts effects. A named `#FX(grant: FS, Net) { … }`
+            // also binds a scoped Authority handle and uses the same
             // subset check for both forms.
-            Stmt::Caps {
+            Stmt::AuthorityScope {
                 caps,
                 caps_span,
                 binding,
@@ -2890,12 +2923,12 @@ impl<'a> Checker<'a> {
                     let binding_span = binding_span
                         .as_ref()
                         .copied()
-                        .expect("named #Abilities binding has a span");
+                        .expect("named #FX binding has a span");
                     self.push_scope();
                     self.declare_loop_var(
                         binding.clone(),
                         binding_span,
-                        &Type::Named(crate::Syntax::CAP_HANDLE_TYPE.to_string()),
+                        &Type::Named(crate::Syntax::AUTHORITY_HANDLE_TYPE.to_string()),
                     );
                 }
                 self.region_stack.push(crate::Sema::RegionAccum {
@@ -2911,7 +2944,7 @@ impl<'a> Checker<'a> {
                     if let Some(escape_span) = grant_handle_escape(body, binding) {
                         self.diags.push(crate::Sema::e0711(
                             binding,
-                            crate::Syntax::KW_CAPS,
+                            crate::Syntax::KW_FX,
                             escape_span,
                         ));
                     }

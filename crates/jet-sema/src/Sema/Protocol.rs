@@ -71,14 +71,12 @@ fn generate_protocol_source(decl: &ProtocolDecl) -> String {
     let states: Vec<String> = (0..state_count).map(|i| format!("S{i}")).collect();
     let state_list = states.join(", ");
 
-    out.push_str(&format!("state {client} {{ {state_list} }}\n"));
-    out.push_str(&format!("state {server} {{ {state_list} }}\n\n"));
     out.push_str(&format!(
-        "#{} struct {client} {{\n    _token: Int,\n}}\n\n",
+        "#{} struct {client} {{\n    state {{ {state_list} }}\n    _token: Int,\n}}\n\n",
         Syntax::MARKER_SINGLE_USE
     ));
     out.push_str(&format!(
-        "#{} struct {server} {{\n    _token: Int,\n}}\n\n",
+        "#{} struct {server} {{\n    state {{ {state_list} }}\n    _token: Int,\n}}\n\n",
         Syntax::MARKER_SINGLE_USE
     ));
 

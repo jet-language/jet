@@ -371,7 +371,8 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
 }
 use super::core_surface::{
     CLOCK_TYPE, KW_CONST, KW_COPY, KW_MOVE, KW_MUTATE, KW_YIELD, LIT_NULL, RETIRED_TYPE_ERROR,
-    TYPE_DATETIME, TYPE_ERR, TYPE_FRACTION, TYPE_INSTANT, TYPE_PATH, TYPE_REGEX, TYPE_URL,
+    TYPE_DATETIME, TYPE_ERR, TYPE_FRACTION, TYPE_INSTANT, TYPE_NEVER, TYPE_PATH, TYPE_REGEX,
+    TYPE_URL,
 };
 use super::effects_surface::KW_STATE_DECL;
 use super::math_layout::{
@@ -480,6 +481,7 @@ pub fn is_reserved_generated_name(name: &str) -> bool {
                 | TYPE_FRACTION
                 | TYPE_RESULT
                 | TYPE_ERR
+                | TYPE_NEVER
                 | RETIRED_TYPE_ERROR
         )
 }

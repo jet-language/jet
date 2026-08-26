@@ -4,24 +4,15 @@ use core.testing as testing
 
 fn orders_worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) String -> {
-    if receipt == {
-        .Enqueued(id) -> { return id }
-        .Executed(id) -> { return id }
-        .Retained(id, _) -> { return id }
-        .DeadLettered(id) -> { return id }
-    }
-    return ""
-}
-
-fn receipt_kind(receipt: ServiceReceipt) String -> {
-    if receipt == {
-        .Enqueued(_) -> { return "enqueued" }
-        .Executed(_) -> { return "executed" }
-        .Retained(_, _) -> { return "retained" }
-        .DeadLettered(_) -> { return "dead" }
-        .Rejected(_) -> { return "rejected" }
-        .Unavailable(_) -> { return "unavailable" }
+fn state_label(delivery: Delivery) String -> {
+    state :: delivery.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "pending" }
+        .Accepted -> { return "accepted" }
+        .Delivering -> { return "delivering" }
+        .Delivered -> { return "delivered" }
+        .DeadLettered -> { return "dead" }
+        .Cancelled -> { return "cancelled" }
     }
     return "unknown"
 }
@@ -37,14 +28,12 @@ fn run() {
     tree.start() ?? panic("start")
 
     first :: tree.send_durable(endpoint, "order", key: "order-1") ?? panic("first")
-    id :: receipt_id(first)
-    if id == "" -> panic("missing receipt id")
-    print("first:{receipt_kind(first)}")
+    print("first:{state_label(first)}")
     duplicate :: tree.send_durable(endpoint, "order", key: "order-1") ?? panic("duplicate")
-    print("duplicate:{receipt_kind(duplicate)}")
+    print("duplicate:{state_label(duplicate)}")
     delivered :: tree.receive(endpoint) ?? panic("deliver")
     print("delivered:{delivered}")
-    tree.append_event("committed:{id}") ?? panic("event")
+    tree.append_event("committed") ?? panic("event")
     print("events:{tree.event_count()}")
     tree.fail_worker(endpoint) ?? panic("restart")
     print("restarted:{tree.restarts(endpoint) ?? panic("restarts")}")

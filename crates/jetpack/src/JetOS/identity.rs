@@ -17,7 +17,7 @@ pub(super) fn jetos_release_label(prerelease: bool) -> String {
 pub(super) fn render_jetos_os_release(prerelease: bool) -> String {
     let suffix = if prerelease { "-pre" } else { "" };
     format!(
-        "NAME=jetos\nID=jetos\nVERSION=\"{}{} ({})\"\nVERSION_ID={}{}\nVERSION_CODENAME={}\nPRETTY_NAME=\"{}\"\nHOME_URL=\"https://jet.dev/jetos\"\n",
+        "NAME=jetos\nID=jetos\nVERSION=\"{}{} ({})\"\nVERSION_ID={}{}\nVERSION_CODENAME={}\nPRETTY_NAME=\"{}\"\nHOME_URL=\"https://jet-lang.dev/jetos\"\n",
         JETOS_RELEASE_VERSION,
         suffix,
         JETOS_RELEASE_CODENAME,
@@ -64,7 +64,7 @@ mod identity_tests {
         assert_eq!(jetos_release_label(true), "jetos 26.10-pre (Apex)");
         assert_eq!(
             render_jetos_os_release(true),
-            "NAME=jetos\nID=jetos\nVERSION=\"26.10-pre (Apex)\"\nVERSION_ID=26.10-pre\nVERSION_CODENAME=apex\nPRETTY_NAME=\"jetos 26.10-pre (Apex)\"\nHOME_URL=\"https://jet.dev/jetos\"\n"
+            "NAME=jetos\nID=jetos\nVERSION=\"26.10-pre (Apex)\"\nVERSION_ID=26.10-pre\nVERSION_CODENAME=apex\nPRETTY_NAME=\"jetos 26.10-pre (Apex)\"\nHOME_URL=\"https://jet-lang.dev/jetos\"\n"
         );
         for surface in [
             render_jetos_os_release(false),

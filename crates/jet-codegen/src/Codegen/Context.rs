@@ -468,7 +468,7 @@ pub(crate) fn is_db_value_type_name(name: &str) -> bool {
 pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&'static str> {
     match name {
         n if n == Syntax::TYPE_MEMO_STATS => Some("JetMemoStats"),
-        n if n == Syntax::TYPE_ABILITIES => Some("JetAuthority"),
+        n if n == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
         _ => None,
     }
 }
@@ -779,7 +779,10 @@ pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
         "ServiceRuntime" => Some("JetServiceRuntime"),
         "ServiceStateStore" => Some("JetServiceStateStore"),
         "ServiceUpgradeReceipt" => Some("JetServiceUpgradeReceipt"),
-        "ServiceReceipt" => Some("JetServiceReceipt"),
+        "Delivery" => Some("JetDelivery"),
+        "DeliveryState" => Some("JetDeliveryState"),
+        "DeliveryReceipt" => Some("JetDeliveryReceipt"),
+        "DeliveryEvent" => Some("JetDeliveryEvent"),
         "TaskOutcome" => Some("JetTaskOutcome"),
         "TaskStatus" => Some("JetTaskStatus"),
         _ => None,
@@ -2223,8 +2226,8 @@ impl Cx {
             Type::Named(name) if name == "EffectInfo" && !self.type_names.contains(name) => {
                 format!("{}JetEffectInfo", self.root_prefix)
             }
-            Type::Named(name) if name == "TrackOriginInfo" && !self.type_names.contains(name) => {
-                format!("{}JetTrackOriginInfo", self.root_prefix)
+            Type::Named(name) if name == "OriginInfo" && !self.type_names.contains(name) => {
+                format!("{}JetOriginInfo", self.root_prefix)
             }
             Type::Named(name) if name == Syntax::TYPE_EFFECT && !self.type_names.contains(name) => {
                 format!("{}jet_std::JetReactiveEffect", self.root_prefix)
@@ -3711,52 +3714,26 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         .any(|module| matches!(module.as_str(), "core.service" | "core.services"))
     {
         let zero = Span::new(0, 0);
-        let variants = vec![
-            (
-                "Enqueued".to_string(),
-                VariantPayload::Single(Type::String, zero),
-            ),
-            (
-                "Executed".to_string(),
-                VariantPayload::Single(Type::String, zero),
-            ),
-            (
-                "Retained".to_string(),
-                VariantPayload::Named(vec![
-                    VariantField {
-                        name: "id".to_string(),
-                        name_span: zero,
-                        ty: Type::String,
-                        ty_span: zero,
-                    },
-                    VariantField {
-                        name: "until".to_string(),
-                        name_span: zero,
-                        ty: Type::Int,
-                        ty_span: zero,
-                    },
-                ]),
-            ),
-            (
-                "DeadLettered".to_string(),
-                VariantPayload::Single(Type::String, zero),
-            ),
-            (
-                "Rejected".to_string(),
-                VariantPayload::Single(Type::String, zero),
-            ),
-            (
-                "Unavailable".to_string(),
-                VariantPayload::Single(Type::String, zero),
-            ),
-        ];
+        let variants = [
+            "Pending",
+            "Accepted",
+            "Delivering",
+            "Delivered",
+            "DeadLettered",
+            "Cancelled",
+        ]
+        .into_iter()
+        .map(|name| (name.to_string(), VariantPayload::Unit))
+        .collect::<Vec<_>>();
         for (variant, _) in &variants {
             cx.variant_owner
-                .insert(variant.clone(), "ServiceReceipt".to_string());
+                .insert(variant.clone(), "DeliveryState".to_string());
         }
         cx.enum_variants
-            .insert("ServiceReceipt".to_string(), variants);
-        cx.cloneable.insert("ServiceReceipt".to_string());
+            .insert("DeliveryState".to_string(), variants);
+        for name in ["Delivery", "DeliveryReceipt", "DeliveryEvent"] {
+            cx.cloneable.insert(name.to_string());
+        }
         let workflow_outcomes = vec![
             ("Finished".to_string(), VariantPayload::Unit),
             (

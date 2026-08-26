@@ -109,6 +109,7 @@ pub const INTEGER_POWER_NEGATIVE: &str =
     "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)";
 pub const INTEGER_POWER_OVERFLOW: &str =
     "this power overflows the value's type (the result is outside its range)";
+pub const INTEGER_ROTATE_NEGATIVE: &str = "a rotation count cannot be negative";
 /// D-FLOORDIV1=A / D-MODSEM1=A: the division-family traps. Same contract as the
 /// power ones above — `Prelude/Core/Division.rs` owns the rule, these carry its
 /// exact wording to the tiers that cannot include that file, and
@@ -704,17 +705,81 @@ pub fn overflow_opt(
             BinOp::Mul => a.checked_mul(b),
             BinOp::Div => a.checked_div(b),
             BinOp::Rem => a.checked_rem(b),
+            BinOp::Pow => u32::try_from(b).ok().and_then(|exponent| a.checked_pow(exponent)),
             _ => None,
         }
     };
     let a = integer_widen(left, signed);
     let b = integer_widen(right, signed);
+    if matches!(mode, "rotate_left" | "rotate_right") {
+        if b < 0 {
+            return Err(comptime_panic(INTEGER_ROTATE_NEGATIVE, span));
+        }
+        let width = u32::from(bits);
+        let mask = if bits == 64 {
+            u128::from(u64::MAX)
+        } else {
+            (1_u128 << bits) - 1
+        };
+        let value = (a as u128) & mask;
+        let count = (b as u128 % u128::from(width)) as u32;
+        let rotated = if count == 0 {
+            value
+        } else if mode == "rotate_left" {
+            ((value << count) | (value >> (width - count))) & mask
+        } else {
+            ((value >> count) | (value << (width - count))) & mask
+        };
+        return Ok(CtValue::Int(integer_narrow(rotated as i128, signed, bits)));
+    }
+    let wrapping_pow = |base: i128, exponent: i128| -> i64 {
+        let mask = if bits == 64 {
+            u128::from(u64::MAX)
+        } else {
+            (1_u128 << bits) - 1
+        };
+        let mut base = (base as u128) & mask;
+        let mut exponent = exponent as u128;
+        let mut result = 1_u128 & mask;
+        while exponent != 0 {
+            if exponent & 1 != 0 {
+                result = result.wrapping_mul(base) & mask;
+            }
+            exponent >>= 1;
+            if exponent != 0 {
+                base = base.wrapping_mul(base) & mask;
+            }
+        }
+        integer_narrow(result as i128, signed, bits)
+    };
+    let saturating_pow = |base: i128, exponent: i128| -> i64 {
+        let clamp_product = |left: i128, right: i128| {
+            left.checked_mul(right).map(|value| value.clamp(lo, hi)).unwrap_or_else(|| {
+                if (left < 0) == (right < 0) { hi } else { lo }
+            })
+        };
+        let mut base = base.clamp(lo, hi);
+        let mut exponent = exponent;
+        let mut result = 1_i128;
+        while exponent != 0 {
+            if exponent & 1 != 0 {
+                result = clamp_product(result, base);
+            }
+            exponent >>= 1;
+            if exponent != 0 {
+                base = clamp_product(base, base);
+            }
+        }
+        integer_narrow(result, signed, bits)
+    };
     match mode {
         Syntax::BUILTIN_WRAPPING => {
             let raw = match op {
                 BinOp::Add => a.wrapping_add(b),
                 BinOp::Sub => a.wrapping_sub(b),
                 BinOp::Mul => a.wrapping_mul(b),
+                BinOp::Pow if b < 0 => return Err(comptime_panic(INTEGER_POWER_NEGATIVE, span)),
+                BinOp::Pow => return Ok(CtValue::Int(wrapping_pow(a, b))),
                 BinOp::Div => {
                     if b == 0 {
                         return Err(unsupported("division by zero", span));
@@ -730,6 +795,8 @@ pub fn overflow_opt(
                 BinOp::Add => a.saturating_add(b),
                 BinOp::Sub => a.saturating_sub(b),
                 BinOp::Mul => a.saturating_mul(b),
+                BinOp::Pow if b < 0 => return Err(comptime_panic(INTEGER_POWER_NEGATIVE, span)),
+                BinOp::Pow => return Ok(CtValue::Int(saturating_pow(a, b))),
                 BinOp::Div => {
                     if b == 0 {
                         return Err(unsupported("division by zero", span));

@@ -650,16 +650,53 @@ impl JetShow for JetServiceRuntime {
     }
 }
 
-impl JetShow for JetServiceReceipt {
+impl JetShow for JetDeliveryState {
     fn jet_show(&self) -> String {
         match self {
-            JetServiceReceipt::Enqueued(id) => format!("Enqueued({id})"),
-            JetServiceReceipt::Executed(id) => format!("Executed({id})"),
-            JetServiceReceipt::Retained { id, until } => format!("Retained({id}, {until})"),
-            JetServiceReceipt::DeadLettered(id) => format!("DeadLettered({id})"),
-            JetServiceReceipt::Rejected(reason) => format!("Rejected({reason})"),
-            JetServiceReceipt::Unavailable(reason) => format!("Unavailable({reason})"),
+            JetDeliveryState::Pending => "Pending".to_string(),
+            JetDeliveryState::Accepted => "Accepted".to_string(),
+            JetDeliveryState::Delivering => "Delivering".to_string(),
+            JetDeliveryState::Delivered => "Delivered".to_string(),
+            JetDeliveryState::DeadLettered => "DeadLettered".to_string(),
+            JetDeliveryState::Cancelled => "Cancelled".to_string(),
         }
+    }
+}
+
+impl JetShow for JetDelivery {
+    fn jet_show(&self) -> String {
+        format!("Delivery({})", self.id)
+    }
+}
+
+impl JetShow for JetDeliveryReceipt {
+    fn jet_show(&self) -> String {
+        format!(
+            "DeliveryReceipt(id={}, state={}, attempts={}, retention_until={}, deadline={}, key={}, duplicate={}, authority={}, generation={}, signature={})",
+            self.id,
+            self.state.jet_show(),
+            self.attempts,
+            self.retention_until,
+            self.deadline,
+            self.idempotency_key,
+            self.duplicate,
+            self.authority,
+            self.generation,
+            self.signature,
+        )
+    }
+}
+
+impl JetShow for JetDeliveryEvent {
+    fn jet_show(&self) -> String {
+        format!(
+            "DeliveryEvent(sequence={}, state={}, attempts={}, timestamp={}, signature={})",
+            self.sequence,
+            self.state.jet_show(),
+            self.attempts,
+            self.timestamp,
+            self.signature,
+        )
     }
 }
 
@@ -2430,7 +2467,7 @@ fn jet_services_send_durable(
     endpoint: &JetServiceEndpoint,
     message: String,
     idempotency_key: String,
-) -> Result<JetServiceReceipt, JetServiceError> {
+) -> Result<JetDelivery, JetServiceError> {
     if tree.delivery != JetServiceDelivery::DurableAtLeastOnce {
         return Err(JetServiceError::Policy(
             "send_durable requires DurableAtLeastOnce delivery".to_string(),
@@ -2479,10 +2516,20 @@ fn jet_services_send_durable(
         .iter()
         .any(|id| id == &local_id)
     {
-        return Ok(JetServiceReceipt::Executed(local_id));
+        return Ok(JetDelivery {
+            id: local_id,
+            store: runtime.store.clone(),
+            duplicate: true,
+            authority: endpoint.authority.clone(),
+            generation: endpoint.generation,
+        });
     }
-    match jet_services_runtime_send(&runtime, endpoint, &message, &idempotency_key)? {
-        JetServiceReceipt::Enqueued(id) => {
+    let delivery = jet_services_runtime_send(&runtime, endpoint, &message, &idempotency_key)?;
+    let id = delivery.id.clone();
+    if jet_services_delivery_status(&delivery)? != JetDeliveryState::Accepted {
+        return Ok(delivery);
+    }
+    {
             let before = tree
                 .workers
                 .iter()
@@ -2496,7 +2543,7 @@ fn jet_services_send_durable(
                 })?;
             if let Err(error) = jet_services_send(tree, endpoint, message.clone()) {
                 if let JetServiceError::Full(_) = error {
-                    let _ = jet_services_runtime_dead_letter(&runtime, &id);
+                    let _ = jet_services_runtime_dead_letter(&runtime, &delivery);
                     if tree.dead_letters.len() < MAX_SERVICE_DEAD_LETTERS {
                         tree.dead_letters.push(id);
                     }
@@ -2533,18 +2580,7 @@ fn jet_services_send_durable(
                 tree.idempotency_seen
                     .push((idempotency_key, endpoint.clone(), message));
             }
-            Ok(JetServiceReceipt::Enqueued(id))
-        }
-        receipt @ JetServiceReceipt::Executed(_) => Ok(receipt),
-        receipt @ JetServiceReceipt::Retained { .. } => Ok(receipt),
-        JetServiceReceipt::DeadLettered(id) => {
-            if tree.dead_letters.len() < MAX_SERVICE_DEAD_LETTERS {
-                tree.dead_letters.push(id.clone());
-            }
-            Ok(JetServiceReceipt::DeadLettered(id))
-        }
-        JetServiceReceipt::Rejected(reason) => Err(JetServiceError::Policy(reason)),
-        JetServiceReceipt::Unavailable(reason) => Err(JetServiceError::Unavailable(reason)),
+            Ok(delivery)
     }
 }
 

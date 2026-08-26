@@ -112,7 +112,7 @@ pub const SIGIL_BIND_MUT: &str = ":=";
 pub const SIGIL_FENCE_OPEN: &str = "@[";
 pub const SIGIL_FENCE_CLOSE: &str = "]@";
 
-/// D-PROVENANCE1=B: binding-level tracking marker, written before the binding:
+/// D-TRACK-ORIGIN1=A: binding-level tracking marker, written before the binding:
 /// `#Track name :: expr` / `#Track name := expr`.
 pub const MARKER_TRACK: &str = "Track";
 
@@ -202,6 +202,9 @@ pub const TYPE_STRING: &str = "String";
 /// S80 (ratified; amended by D-FAIL-ERROR1=A): default error type and
 /// constructor share `Err`.
 pub const TYPE_ERR: &str = "Err";
+/// D-FAILURE-FOUNDATION1=A: bottom error domain for an explicit unreachable
+/// contract. It is a source type name, not a second runtime carrier.
+pub const TYPE_NEVER: &str = "Never";
 /// D-FAIL-BIND1=A (ratified 2026-08-06): ambient failure report inside a
 /// fallible `??` fallback. This is an ordinary contextual identifier, not a
 /// lexer keyword.
@@ -484,11 +487,9 @@ pub const TYPE_CHECKED_TEXT: &str = "__JetCheckedText";
 /// checked text head's hole encoder has produced ordinary `String` text.
 pub const BUILTIN_CHECKED_TEXT_WRAP: &str = "__jet_checked_text_wrap";
 
-/// D-BOUND-SINK1=A: contextual words in a checked text-head declaration. They
-/// are not global keywords; the parser recognizes them only in this contract.
+/// D-MARKER-SITES1=B: the retired declaration word is kept only so the parser
+/// can give a focused migration diagnostic. It is not part of marker grammar.
 pub const TEXT_HEAD_ON: &str = "on";
-pub const TEXT_HEAD_CHECK: &str = "check";
-pub const TEXT_HEAD_HOLE: &str = "hole";
 
 /// D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: one descriptor for every typed literal
 /// constructor. Parser, sema, TIR, and engine adapters carry this value
@@ -906,9 +907,9 @@ pub const TYPE_DECIMAL: &str = "Decimal";
 // D-NUMTYPE1=A: an exact ratio of two whole numbers, kept reduced.
 pub const TYPE_FRACTION: &str = "Fraction";
 
-/// D-AUTHORITY-WORD2=E: the one nameable Abilities value at process, plugin,
+/// D-ABILITY-NAME2=A: the one nameable Authority value at process, plugin,
 /// and session boundaries. It is the rights carrier; there is no alias.
-pub const TYPE_ABILITIES: &str = "Abilities";
+pub const TYPE_AUTHORITY: &str = "Authority";
 
 /// D-BUILDENTRY1/D-BUILDTARGET1/D-BUILDACTION1: typed build-program values.
 /// These names are compiler-known only while the selected root `fn build`
@@ -947,7 +948,9 @@ pub const COMPILER_FACT_EFFECTS: &str = "@effects";
 pub const COMPILER_FACT_SENDABILITY: &str = "@sendability";
 pub const COMPILER_FACT_MOVEDNESS: &str = "@movedness";
 pub const COMPILER_FACT_ATTRIBUTION: &str = "@attribution";
-pub const COMPILER_FACT_TRACK_ORIGIN: &str = "@track_origin";
+/// D-TRACK-ORIGIN1=A: the sole public read of the typed, optional `#Track`
+/// origin fact.
+pub const COMPILER_FACT_ORIGIN: &str = "@origin";
 pub const COMPILER_FACT_VIEW_PROVENANCE: &str = "@view_provenance";
 pub const COMPILER_FACT_UNIT_SCALE_PROVENANCE: &str = "@unit_scale_provenance";
 pub const COMPILER_FACT_MATURITY: &str = "@maturity";

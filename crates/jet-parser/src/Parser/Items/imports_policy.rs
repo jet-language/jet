@@ -1257,9 +1257,9 @@ impl<'a> Parser<'a> {
                                     continue;
                                 }
                             },
-                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => self
-                                .state_decl_with_pkg(is_pub, is_package_pub)
-                                .map(Item::StateDecl),
+                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => {
+                                self.reject_top_level_state_decl(is_pub, is_package_pub)
+                            }
                             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_PROTOCOL => self
                                 .protocol_decl_with_pkg(is_pub, is_package_pub)
                                 .map(Item::ProtocolDecl),
@@ -1347,10 +1347,10 @@ impl<'a> Parser<'a> {
                             TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
                             TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
                             TokKind::KwTag => self.tag_def(false).map(Item::Tag),
-                            // D-STATE-DECL: `pub state TypeName { A, B, C }`
+                            // D-STATE-HOME1=A: retired `pub state TypeName { A, B, C }`
                             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => {
                                 self.bump(); // consume `pub`
-                                self.state_decl(true).map(Item::StateDecl)
+                                self.reject_top_level_state_decl(true, false)
                             }
                             // D-PROTO1/D-PROTO2: `pub protocol Name { … }`
                             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_PROTOCOL => {
@@ -1432,11 +1432,10 @@ impl<'a> Parser<'a> {
                 TokKind::Ident(n) if n == Syntax::KW_MIGRATION && self.at_migration_block() => {
                     self.migration_decl().map(Item::Migration)
                 }
-                // D-STATE-DECL: `state TypeName { A, B, C }`
+                // D-STATE-HOME1=A: retired `state TypeName { A, B, C }`
                 TokKind::Ident(n) if n == Syntax::KW_STATE_DECL && self.at_state_block() => {
                     let (is_pub, is_package_pub) = self.parse_item_visibility();
-                    self.state_decl_with_pkg(is_pub, is_package_pub)
-                        .map(Item::StateDecl)
+                    self.reject_top_level_state_decl(is_pub, is_package_pub)
                 }
                 // D-PROTO1/D-PROTO2 + D-ARROW-CONTROL1:
                 // `protocol Name { client: Msg(…) }`

@@ -54,6 +54,9 @@ fn main() {
 
 fn generate(args: &[String], write_signature_request: bool) -> Result<(), String> {
     let options = options(args)?;
+    if write_signature_request && options.contains_key("native-recipes") {
+        return Err("--native-recipes is only valid with generate-local".to_string());
+    }
     let channel = required(&options, "channel")?;
     let system = required(&options, "system")?;
     let requested_revision = required(&options, "revision")?;
@@ -65,6 +68,18 @@ fn generate(args: &[String], write_signature_request: bool) -> Result<(), String
     let oracle_path = required_path(&options, "oracle")?;
     let store_paths_path = required_path(&options, "store-paths")?;
     let output_root = required_path(&options, "output")?;
+    let native_recipes = options
+        .get("native-recipes")
+        .map(PathBuf::from)
+        .map(|path| {
+            NixIndex::canonical_local_native_recipes(&read_file(
+                &path,
+                NixIndex::MAX_NATIVE_RECIPE_BYTES,
+                "native recipes",
+            )?)
+            .map_err(|error| error.to_string())
+        })
+        .transpose()?;
     let actual_revision = fs::read_to_string(&revision_file)
         .map_err(|error| format!("read git-revision: {error}"))?
         .trim()
@@ -164,6 +179,12 @@ fn generate(args: &[String], write_signature_request: bool) -> Result<(), String
         &target_dir.join(format!("{digest}.generation-report.json")),
         report.as_bytes(),
     )?;
+    if let Some(native_recipes) = native_recipes {
+        write_immutable(
+            &output_root.join("recipes-v1.json"),
+            &native_recipes,
+        )?;
+    }
     println!(
         "generated channel={channel} revision={requested_revision} system={system} compressed_bytes={} decoded_bytes={} target_sha256={digest}",
         compressed.len(),

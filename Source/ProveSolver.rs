@@ -725,7 +725,7 @@ fn statement_is_flow_boundary(statement: &jet::AST::Stmt) -> bool {
         | jet::AST::Stmt::Policy { .. }
         | jet::AST::Stmt::TaskGroup { .. }
         | jet::AST::Stmt::Layout { .. }
-        | jet::AST::Stmt::Caps { .. }
+        | jet::AST::Stmt::AuthorityScope { .. }
         | jet::AST::Stmt::ComptimeBlock { .. }
         | jet::AST::Stmt::Live { .. }
         | jet::AST::Stmt::AssumeDet { .. }
@@ -890,7 +890,7 @@ fn visit_stmt_calls(statement: &jet::AST::Stmt, calls: &mut impl FnMut(&jet::AST
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::Live { body, .. }
         | Stmt::AssumeDet { body, .. }

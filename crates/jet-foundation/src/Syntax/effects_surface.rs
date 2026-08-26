@@ -97,15 +97,13 @@ pub const KW_STATE: &str = "State";
 /// for owner confirmation as D-STATE-TRANS.
 pub const KW_TRANSITION: &str = "Transition";
 
-/// D-STATE-DECL (ratified 2026-06-25, option B): the typestate **state-set
-/// declaration** contextual keyword — `state TypeName { Pending, Confirmed, CheckedIn }`.
-/// Declares the bounded set of states for a type, tied to the type by name. The set
-/// erases at runtime (pure compile-time, no discriminant). A dead-end state (no
-/// outgoing `#Transition`) is a warning (L0151). A state referenced in `#State(X)` or
-/// `#Transition(A, B)` that is not in the declared set is E0151. Contextual: the
-/// word `state` stays usable as an ordinary identifier outside a top-level declaration
-/// position (like `migration`). Declaration family sibling of `tag`/`struct`/`enum`.
-pub const KW_STATE_DECL: &str = "state"; // D-STATE-DECL
+/// D-STATE-HOME1=A (amends D-STATE-NS1): the typestate **state-set section**
+/// contextual keyword — `struct TypeName { state { Pending, Confirmed, CheckedIn } }`.
+/// The bounded set is owned by the named struct, erases at runtime, and is checked
+/// against its markers. A state referenced in `#State(X)` or `#Transition(A, B)`
+/// that is not in the set is E0151. Contextual: `state` stays an ordinary identifier
+/// outside a struct-body section.
+pub const KW_STATE_DECL: &str = "state"; // D-STATE-HOME1=A
 
 /// D-PROTO1 / D-PROTO2, amended by D-ARROW-CONTROL1=A: the session/protocol
 /// declaration contextual keyword — `protocol Name { client: Msg(…) }`.
@@ -118,9 +116,8 @@ pub const KW_PROTOCOL: &str = "protocol"; // D-PROTO1, D-PROTO2
 pub const PROTO_CLIENT: &str = "client"; // D-PROTO2
 pub const PROTO_SERVER: &str = "server"; // D-PROTO2
 
-/// D-META-NAME1=A: the rule-declaration contextual keyword —
-/// `marker Name(params…)`, with checked text heads using
-/// `marker Name on [.Text] { check … hole … }`. Declares one applied rule as
+/// D-META-NAME1=A / D-MARKER-SITES1=B: the rule-declaration contextual keyword —
+/// `marker Name(params…)`. Declares one applied rule as
 /// an ordinary Jet declaration in Prelude (or, later, library) source; the
 /// rule's own arguments and facts about the rule (`@sites`, `@repeatable`, …)
 /// share one named-parameter list under D-META-FORM1=A, the facts marked with
@@ -128,7 +125,7 @@ pub const PROTO_SERVER: &str = "server"; // D-PROTO2
 /// side parse only (card #1456); lowering the parsed declaration into the
 /// runtime registry row the rest of the compiler consumes is #1457's and
 /// #1458's job.
-pub const KW_MARKER: &str = "marker"; // D-META-NAME1, D-META-FORM1
+pub const KW_MARKER: &str = "marker"; // D-META-NAME1, D-META-FORM1, D-MARKER-SITES1
 
 /// D-FACTDECL1=A: the one non-code fact declaration word —
 /// `fact Name(@holds: …, @safe: …, …)`. It reuses the marker declaration
@@ -139,22 +136,20 @@ pub const KW_FACT: &str = "fact"; // D-FACTDECL1
 /// "from no prior state". Reuses the existing `_` wildcard glyph.
 pub const STATE_ENTRY: &str = "_";
 
-/// D-AUTHORITY-SCOPE1=A / D-AUTHORITY-WORD2=E (ratified 2026-08-06/17;
-/// implementation #1572): one scope marker serves both narrowed blocks and
-/// named handles. Bare `#Abilities(Net, DB) { … }` narrows the block;
-/// `#Abilities(g: FS, Net) { … }` binds `g` for the block. The retired Grant
-/// marker remains only as a parser tombstone. PascalCase per D-CASING1.
-/// Erased in codegen (I3).
-pub const KW_CAPS: &str = "Abilities";
+/// D-ABILITY-NAME2=A (ratified 2026-08-25): `#FX` is the short expert-source
+/// boundary for inferred effects and scoped authority. Bare `#FX(Net, DB)`
+/// narrows the block; `#FX(grant: FS, Net)` also binds `grant`. PascalCase
+/// effect roots remain the canonical values. Erased in codegen (I3).
+pub const KW_FX: &str = "FX";
 
 /// D-AUTHORITY-SCOPE1: parser tombstone for the retired Grant marker.
 pub const RETIRED_MARKER_GRANT: &str = "Grant";
 
-/// D-AUTHORITY-SCOPE1 / D-AUTHORITY-WORD2: the type of a scoped Abilities
-/// handle bound by `#Abilities(abilities: FS, Net) { … }`. It is an ordinary
-/// value type; the block still erases in codegen, but the handle can cross only
-/// where the surrounding API accepts Abilities.
-pub const CAP_HANDLE_TYPE: &str = "Abilities";
+/// D-ABILITY-NAME2=A: the type of a scoped Authority handle bound by
+/// `#FX(grant: FS, Net) { … }`. It is an ordinary value type; the block still
+/// erases in codegen, but the handle can cross only where the surrounding API
+/// accepts Authority.
+pub const AUTHORITY_HANDLE_TYPE: &str = "Authority";
 
 /// D-CONC-SPAWN1=D: parser-only receiver used while lowering `task` sugar.
 pub const INTERNAL_TASK_RECEIVER: &str = "\0jet.task";

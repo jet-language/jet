@@ -3,7 +3,7 @@
 mod common;
 
 use jet_semindex::{
-    open, open_symbols, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
+    build_symbol_db, open, open_symbols, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
     SemanticSymbolKind, SymbolKind, ViewProjectionFact, ViewSourceFact, SCHEMA_VERSION,
 };
 use std::fs;
@@ -300,8 +300,86 @@ fn semantic_visibility_retains_explicit_qualified_alternatives() {
 
 #[test]
 fn semindex_schema_version() {
-    // D-EFFECT-OMIT1 added effect provenance and normalized inferred rows.
-    assert_eq!(SCHEMA_VERSION, 14);
+    // D-STATE-TERMINAL1 adds checked typestate graph facts.
+    assert_eq!(SCHEMA_VERSION, 15);
+}
+
+#[test]
+fn semindex_projects_terminal_and_reachability_graph() {
+    let path = temp_fixture(
+        "terminal_state_graph.jet",
+        r#"
+struct Door {
+    state { Closed, Open, Orphan }
+}
+impl Door {
+    #Transition(_, Closed) fn close() Door -> Door{}
+    #Transition(Closed, Open) fn open(self: ^Door) Door -> self
+    #Transition(Closed, Closed) fn hold(self: ^Door) Door -> self
+}
+fn run() {}
+"#,
+    );
+    let index = open(&path).expect("state graph indexes");
+    let graph = index
+        .state_graphs()
+        .iter()
+        .find(|graph| graph.owner == "Door")
+        .expect("Door graph");
+    let closed = graph
+        .states
+        .iter()
+        .find(|state| state.name == "Closed")
+        .unwrap();
+    let open_state = graph
+        .states
+        .iter()
+        .find(|state| state.name == "Open")
+        .unwrap();
+    let orphan = graph
+        .states
+        .iter()
+        .find(|state| state.name == "Orphan")
+        .unwrap();
+    assert!(!closed.terminal);
+    assert!(open_state.terminal);
+    assert_eq!(closed.reachable, Some(true));
+    assert_eq!(open_state.reachable, Some(true));
+    assert_eq!(orphan.reachable, Some(false));
+    assert!(index.to_json().contains("\"state_graphs\":[{"));
+}
+
+#[test]
+fn semindex_hover_projects_terminal_and_reachability_facts() {
+    let path = temp_fixture(
+        "terminal_state_hover.jet",
+        r#"struct Door {
+    state { Closed, Open, Orphan }
+}
+impl Door {
+    #Transition(_, Closed) fn new() Door -[]> { return Door{} }
+    #Transition(Closed, Open) fn open(self: ^Door) Door -[]> { return self }
+}
+fn run() {}
+"#,
+    );
+    let (diagnostics, bundle, facts) =
+        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let bundle = bundle.expect("checked bundle");
+    let db = build_symbol_db(&bundle, &facts);
+    let closed = db
+        .hover
+        .iter()
+        .find(|hover| hover.text.contains("Door.State.Closed"))
+        .expect("Closed hover");
+    assert!(closed.text.contains("nonterminal; reachable"), "{closed:?}");
+    let orphan = db
+        .hover
+        .iter()
+        .find(|hover| hover.text.contains("Door.State.Orphan"))
+        .expect("Orphan hover");
+    assert!(orphan.text.contains("terminal; unreachable"), "{orphan:?}");
 }
 
 #[test]
@@ -390,15 +468,15 @@ fn run() {
 
 #[test]
 fn tracked_float_symbol_exposes_its_binding_site() {
-    let src = "fn run() {\n    #Track speed :: 3.5\n    print(speed.origin())\n}\n";
+    let src = "fn run() {\n    #Track speed :: 3.5\n    @origin :: speed.@origin\n    print(@origin?.source ?? \"missing\")\n}\n";
     let path = temp_fixture("tracked_float_binding.jet", src);
-    let symbols = open_symbols(&path).expect("tracked Float semantic symbols");
+    let symbols = open_symbols(&path).expect("tracked-value semantic symbols");
     let speed = symbols
         .lookup("speed")
         .into_iter()
         .find(|symbol| symbol.kind == SemanticSymbolKind::Local)
-        .expect("tracked Float local");
-    let span = speed.span.expect("tracked Float binding span");
+        .expect("tracked local");
+    let span = speed.span.expect("tracked binding span");
     let binding_start = src.find("speed ::").expect("binding name");
 
     assert_eq!(speed.signature, "speed: Float");

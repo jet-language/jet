@@ -106,61 +106,6 @@ fn run() {
 }
 
 #[test]
-fn declared_text_head_owns_validation_holes_and_raw_escape() {
-    let source = r#"
-use core.regex as re
-
-marker Pattern on [.Text] {
-    check re.is_match(@body.replace("{{}}", "x"), "")?
-    hole re.escape(@value)
-}
-
-marker Identity on [.Text] {
-    check @body
-    hole @value
-}
-
-fn accept_pattern(pattern: Pattern) {}
-fn accept_identity(identity: Identity) {}
-
-fn run() {
-    value :: "a.b"
-    pattern :: Pattern.{"a-{value}"}
-    accept_pattern(pattern)
-    trusted :: Pattern.raw("already checked")
-    accept_pattern(trusted)
-    identity :: Identity.{"a-{value}"}
-    accept_identity(identity)
-}
-"#;
-    jet::compile(source).expect("a declared text head should own its checked construction path");
-    let formatted = jet::format_source(source).expect("checked text heads should format");
-    assert!(formatted.contains("marker Pattern on [.Text]"));
-    assert_eq!(jet::format_source(&formatted).unwrap(), formatted);
-
-    let invalid = r#"
-marker Pattern on [.Text] {
-    check @body
-    hole @value
-}
-
-fn accept_pattern(pattern: Pattern) {}
-
-fn run() {
-    raw :: "untrusted"
-    accept_pattern(raw)
-}
-"#;
-    let diagnostics = jet::compile(invalid).expect_err("a bare String must not reach a text sink");
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E0149"),
-        "custom text sinks should use the checked-text mismatch: {diagnostics:?}"
-    );
-}
-
-#[test]
 fn boundary_typed_heads_validate_and_compile() {
     let source = r#"
 fn run() {

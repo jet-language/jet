@@ -213,23 +213,6 @@ impl<'a> Checker<'a> {
     /// Shared tail of `check_func_body` / `check_func_body_bundle`:
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
-        // D-BODY-LAST1=B: an explicit *value* result contract makes the
-        // final expression of a multiline body its normal result. () / Unit
-        // and fallible () (`() ? …`) keep a trailing expression as a
-        // statement — rewriting `print(...)` into `return print(...)` would
-        // force value-context inference (E0116). Lower after parsing so
-        // source-preserving formatter paths keep the written expression
-        // instead of printing an explicit `return`.
-        if f.return_type
-            .as_ref()
-            .is_some_and(|ty| !is_void_like_return(ty))
-        {
-            if let Some(Stmt::Expr(expr)) = f.body.last().cloned() {
-                let span = expr.span();
-                *f.body.last_mut().expect("body has a final expression") =
-                    Stmt::Return(Some(expr), span);
-            }
-        }
         for param in &f.type_params {
             self.warn_soft_public_declared_type(
                 &Type::TraitObject(param.bounds.clone()),
@@ -526,7 +509,37 @@ impl<'a> Checker<'a> {
             }));
         let prev_unsafe = self.in_unsafe;
         self.in_unsafe = self.in_unsafe || f.is_unsafe;
-        self.check_block(&mut f.body, false);
+        let arithmetic_policy_depth = self.arithmetic_policy_stack.len();
+        if let Some(marker) = f
+            .markers
+            .iter()
+            .find(|marker| marker.name == Syntax::MARKER_ARITHMETIC)
+        {
+            if let Some(mode) = marker
+                .args
+                .first()
+                .and_then(crate::AST::ArithmeticMode::from_expr)
+            {
+                self.arithmetic_policy_stack.push(crate::AST::ArithmeticPolicyFact {
+                    mode,
+                    scope_span: marker.span,
+                    operation_span: marker.span,
+                });
+            }
+        }
+        let is_generator =
+            matches!(&f.return_type, Some(Type::Apply { name, .. }) if name == "Stream");
+        let value_return = f
+            .return_type
+            .as_ref()
+            .filter(|ty| !is_void_like_return(ty) && !is_generator)
+            .cloned();
+        if let Some(expected) = value_return.as_ref() {
+            self.check_value_block(&mut f.body, expected, false, f.span);
+        } else {
+            self.check_block(&mut f.body, false);
+        }
+        self.arithmetic_policy_stack.truncate(arithmetic_policy_depth);
         self.in_unsafe = prev_unsafe;
         // D-LINT-UNUSED1: all local and parameter references are known after
         // the body pass, including references in nested scopes and defaults.
@@ -544,8 +557,6 @@ impl<'a> Checker<'a> {
         self.check_single_use_consumed_in_current_scope();
         // D-STREAMYIELD1: a generator (`Stream<T> ->`) falling off the end is
         // exactly a bare `return;` — it just ends the stream. Never E0114.
-        let is_generator =
-            matches!(&f.return_type, Some(Type::Apply { name, .. }) if name == "Stream");
         let is_entry_fallible_void = f.name == "run"
             && f.return_type
                 .as_ref()
@@ -553,6 +564,7 @@ impl<'a> Checker<'a> {
         if !is_generator
             && !is_entry_fallible_void
             && f.return_type.is_some()
+            && value_return.is_none()
             && !block_definitely_returns(&f.body)
         {
             let rt = f.return_type.clone().unwrap();

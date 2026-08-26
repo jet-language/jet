@@ -70,7 +70,7 @@ And the machinery census (file:line from the code sweep):
 | 6 | Send-safety | stray `sendable` flag on `LocalInfo`, `mod.rs:756` | a plane-shaped fact outside every registry (concurrency proposal flags it) |
 | 7 | Twelve hand-added fact columns | `LocalInfo`, `mod.rs:746-772` | per-binding facts grown one field at a time (row 6 is one of them) |
 | 8 | Reflection string fallback | `Reflect.rs:151` | facts leave the compiler as strings |
-| 9 | Fact-like orphans | uninit, exhaustiveness, `#Track` provenance (D-PROVENANCE1), view provenance (D-MEMPROVENANCE3), unit-scale provenance, maturity, attribution | each held, checked, and erased — none registered, most unreadable |
+| 9 | Fact-like orphans | uninit, exhaustiveness, `#Track` provenance (D-TRACK-ORIGIN1), view provenance (D-MEMPROVENANCE3), unit-scale provenance, maturity, attribution | each held, checked, and erased — none registered, most unreadable |
 | 10 | Four audit sources | `jet unsafe`, `git diff jet.lock`, `~/.jet/trust`, shell history | the authority proposal unifies its four; scrubs, demotions, and `.Force` still live outside |
 
 The four rethinks each cleaned their quadrant. Rows 2–9 are the seams between the quadrants — exactly where a capstone has to act before cards #1517–#1579 pour concrete into them.

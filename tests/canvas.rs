@@ -1917,6 +1917,36 @@ fn canvas_statement_state_nodes_and_toggle_transaction() {
 }
 
 #[test]
+fn canvas_projects_typestate_diagram_facts() {
+    let path = write_fixture(
+        "typestate_diagram",
+        r#"struct Door {
+    state { Closed, Open, Orphan }
+}
+impl Door {
+    #Transition(_, Closed) fn new() Door -[]> { return Door{} }
+    #Transition(Closed, Open) fn open(self: ^Door) Door -[]> { return self }
+}
+fn run() {}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("typestate diagram");
+    assert!(graph.contains("\"state_graphs\":[{"), "{graph}");
+    assert!(
+        graph.contains("\"name\":\"Open\",\"terminal\":true"),
+        "{graph}"
+    );
+    assert!(
+        graph.contains("\"name\":\"Orphan\",\"terminal\":true,\"reachable\":false"),
+        "{graph}"
+    );
+    assert!(
+        graph.contains("\"operation\":\"open\",\"from\":\"Closed\",\"to\":\"Open\""),
+        "{graph}"
+    );
+}
+
+#[test]
 fn canvas_debug_only_execution_path_keeps_source_backed_incoming_wires() {
     let path = write_fixture(
         "debug_only_execution_flow",

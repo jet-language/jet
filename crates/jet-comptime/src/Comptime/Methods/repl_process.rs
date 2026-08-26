@@ -191,7 +191,7 @@ pub fn apply_repl_authorized_core_call_with_type(
         ));
     };
     authorizer.preflight(&request, span)?;
-    // The two-argument boundary form carries the actual named Abilities value.
+    // The two-argument boundary form carries the actual named Authority value.
     // One-argument REPL calls use the active lexical authority values, which
     // are the same CtValue carrier rather than a copied list of right names.
     let boundary_authority = args.len() == 2
@@ -219,10 +219,10 @@ pub fn apply_repl_authorized_core_call_with_type(
                 "{}.{} for `{}` has no REPL runtime authority",
                 request.root, request.operation, request.resource
             ),
-            "REPL host effects require both lexical `#Abilities` access and invocation policy; no host operation ran"
+            "REPL host effects require both lexical `#FX` access and invocation policy; no host operation ran"
                 .to_string(),
             format!(
-                "wrap this operation in `#Abilities(abilities: {}) {{ ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`",
+                "wrap this operation in `#FX(abilities: {}) {{ ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`",
                 request.root,
                 request.root.to_ascii_lowercase()
             ),

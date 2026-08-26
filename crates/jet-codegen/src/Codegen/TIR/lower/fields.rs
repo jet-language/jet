@@ -498,9 +498,11 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "DimensionAxis" => matches!(member, "name" | "exponent"),
         "DimensionInfo" => matches!(member, "axes" | "identity" | "display"),
         "StateRef" => matches!(member, "owner" | "name" | "path"),
-        "StateInfo" => matches!(member, "name" | "path"),
+        "StateInfo" => matches!(member, "name" | "path" | "terminal" | "reachable"),
         "EffectInfo" => member == "values",
-        "TrackOriginInfo" => matches!(member, "tracked" | "source"),
+        "OriginInfo" => {
+            matches!(member, "tracked" | "source" | "line" | "column" | "ambiguity")
+        }
         n if n == Syntax::TYPE_JSON_ERROR || n == "JSONError" => {
             matches!(member, "line" | "message")
         }

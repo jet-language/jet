@@ -410,7 +410,7 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
         // but the named form also introduces a real Authority local for TIR.
         // Keep that local in the subset environment so the gate and lowering
         // agree on the same executable body.
-        Stmt::Caps { binding, body, .. } => {
+        Stmt::AuthorityScope { binding, body, .. } => {
             let mut scoped = locals.clone();
             if let Some(binding) = binding {
                 scoped.insert(binding.clone());

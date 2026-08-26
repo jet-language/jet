@@ -788,7 +788,7 @@ fn core_fixed_sig_impl(
         ("core.process", "exit") => Some((vec![(read, int)], None)),
         ("core.process", "workspace") => Some((
             vec![],
-            Some(Type::Named(Syntax::TYPE_ABILITIES.to_string())),
+            Some(Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
         )),
         ("core.process", "run") => Some((
             vec![(read, Type::Named(Syntax::TYPE_SH.to_string()))],
@@ -1525,7 +1525,7 @@ fn core_fixed_sig_impl(
                 (read, Type::String),
             ],
             Some(result_ty(
-                Type::Named("ServiceReceipt".into()),
+                Type::Named("Delivery".into()),
                 Type::Named("ServiceError".to_string()),
             )),
         )),

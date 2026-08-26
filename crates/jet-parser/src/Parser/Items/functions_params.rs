@@ -273,13 +273,11 @@ impl<'a> Parser<'a> {
                 .push(Self::missing_callable_body_arrow(self.peek().span));
         }
         self.expect(TokKind::LBrace, "to open the function body")?;
+        // D-TAIL-RETURN1=A (amends D-BODY-LAST1): keep the final expression
+        // in the existing statement node. Sema decides whether this callable
+        // expects a value; the parser only admits the unadorned tail shape.
         let previous_tail_depth = self.callable_tail_block_depth;
-        if return_type
-            .as_ref()
-            .is_some_and(|ty| Self::return_type_has_value(ty))
-        {
-            self.callable_tail_block_depth = Some(self.block_depth + 1);
-        }
+        self.callable_tail_block_depth = Some(self.block_depth + 1);
         let body = self.block_stmts();
         self.callable_tail_block_depth = previous_tail_depth;
         let declaration_end = self.toks[self.pos.saturating_sub(1)].span.end;
@@ -1090,6 +1088,7 @@ impl<'a> Parser<'a> {
         let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LBrace, "to open the struct body")?;
         let mut fields = Vec::new();
+        let mut state = None;
         let mut methods = Vec::new();
         let mut cli_bindings = Vec::new();
         let mut trait_impls = Vec::new();
@@ -1099,6 +1098,18 @@ impl<'a> Parser<'a> {
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
+                continue;
+            }
+            if self.at_state_section() {
+                let section = self.state_section(name.clone(), name_span)?;
+                if state.is_some() {
+                    return Err(Diagnostic::from_row(
+                        "E0168",
+                        &[("type", name.as_str())],
+                        Some(section.span),
+                    ));
+                }
+                state = Some(section);
                 continue;
             }
             if self.method_starts_here() {
@@ -1171,6 +1182,7 @@ impl<'a> Parser<'a> {
             name_span,
             type_params,
             fields,
+            state,
             methods,
             cli_bindings,
             trait_impls,

@@ -2,8 +2,9 @@
 //!
 //! `T.reflect()` in a derive body receives a `TypeInfo` value whose `.fields`,
 //! `.methods`, `.type_params`, `.markers`, and `.expanded_markers` expose the
-//! target type's shape. `.markers` preserves written markers; the expanded
-//! view contains only derives lowered from them.
+//! target type's shape. `.markers` preserves written markers and their
+//! canonical declaration metadata (`sites`, `repeatable`); the expanded view
+//! contains only derives lowered from them.
 
 use crate::AST::{
     Dimension, DistinctDef, EnumDef, Exactness, Expr, Field, Func, FunctionCallMetadata,
@@ -424,13 +425,39 @@ pub fn build_attribution_info(source: &str, code: Option<&str>) -> CtValue {
     )
 }
 
-pub fn build_track_origin_info(origin: Option<&str>) -> CtValue {
+pub fn build_origin_info(
+    tracked: bool,
+    source: Option<&str>,
+    line: Option<usize>,
+    column: Option<usize>,
+    ambiguity: bool,
+) -> CtValue {
     ct_struct(
-        "TrackOriginInfo",
+        "OriginInfo",
         &[
-            ("tracked", ct_bool(origin.is_some())),
-            ("source", optional_value(origin.map(ct_str), "String")),
+            ("tracked", ct_bool(tracked)),
+            ("source", optional_value(source.map(ct_str), "String")),
+            (
+                "line",
+                optional_value(line.map(|line| CtValue::Int(line as i64)), "Int"),
+            ),
+            (
+                "column",
+                optional_value(column.map(|column| CtValue::Int(column as i64)), "Int"),
+            ),
+            ("ambiguity", ct_bool(ambiguity)),
         ],
+    )
+}
+
+pub fn build_origin_option(
+    origin: Option<(bool, Option<&str>, Option<usize>, Option<usize>, bool)>,
+) -> CtValue {
+    optional_value(
+        origin.map(|(tracked, source, line, column, ambiguity)| {
+            build_origin_info(tracked, source, line, column, ambiguity)
+        }),
+        "OriginInfo",
     )
 }
 
@@ -534,7 +561,7 @@ fn fact_value(
             ),
             ("movedness", optional_value(None, "MovednessInfo")),
             ("attribution", optional_value(None, "AttributionInfo")),
-            ("track_origin", optional_value(None, "TrackOriginInfo")),
+            ("origin", optional_value(None, "OriginInfo")),
             (
                 "unit_scale_provenance",
                 optional_value(None, "UnitScaleProvenanceInfo"),
@@ -812,10 +839,10 @@ fn declared_function_facts(
             build_movedness_info(false),
         ),
         (
-            "TrackOrigin",
-            "track_origin",
-            "track_origin",
-            build_track_origin_info(None),
+            "Origin",
+            "origin",
+            "origin",
+            build_origin_info(false, None, None, None, false),
         ),
     ] {
         facts.push(fact_info(
@@ -1012,6 +1039,7 @@ fn marker_info(
     // marker-only table beside it. A marker is the row whose target is written
     // code, so its signature rides on the row.
     let row = jet_foundation::Registry::row(&marker.name).and_then(|row| row.rule);
+    let declaration = vocabulary.and_then(|vocabulary| vocabulary.declaration(&marker.name));
     let bindings = row.and_then(|row| row.signature.marker_argument_bindings(marker));
     let args = marker
         .args
@@ -1076,13 +1104,65 @@ fn marker_info(
             )
         })
         .collect();
-    marker_info_value(&marker.name, args)
+    let sites = row
+        .map(|row| row.sites.iter().map(|site| ct_str(site.name())).collect())
+        .or_else(|| declaration.map(marker_declaration_sites))
+        .unwrap_or_default();
+    let repeatable = row
+        .map(|row| row.repeatable)
+        .or_else(|| declaration.map(marker_declaration_repeatable))
+        .unwrap_or(false);
+    marker_info_value(&marker.name, args, sites, repeatable)
 }
 
-fn marker_info_value(name: &str, args: Vec<CtValue>) -> CtValue {
+fn marker_declaration_sites(declaration: &crate::AST::MarkerDecl) -> Vec<CtValue> {
+    declaration
+        .params
+        .iter()
+        .find(|parameter| parameter.name == "@sites")
+        .and_then(|parameter| parameter.value.as_deref())
+        .and_then(|value| match value {
+            Expr::ListLit(values, _) => Some(values.as_slice()),
+            _ => None,
+        })
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| match value {
+                    Expr::Ident(name, _) => Some(name.trim_start_matches('.')),
+                    Expr::Field(_, member, _) => Some(member.as_str()),
+                    Expr::EnumLit { variant, .. } => Some(variant.as_str()),
+                    _ => None,
+                })
+                .map(ct_str)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn marker_declaration_repeatable(declaration: &crate::AST::MarkerDecl) -> bool {
+    declaration
+        .params
+        .iter()
+        .find(|parameter| parameter.name == "@repeatable")
+        .and_then(|parameter| parameter.value.as_deref())
+        .is_some_and(|value| matches!(value, Expr::Bool(true, _)))
+}
+
+fn marker_info_value(
+    name: &str,
+    args: Vec<CtValue>,
+    sites: Vec<CtValue>,
+    repeatable: bool,
+) -> CtValue {
     ct_struct(
         "MarkerInfo",
-        &[("name", ct_str(name)), ("args", ct_list(args))],
+        &[
+            ("name", ct_str(name)),
+            ("args", ct_list(args)),
+            ("sites", ct_list(sites)),
+            ("repeatable", ct_bool(repeatable)),
+        ],
     )
 }
 
@@ -1271,7 +1351,7 @@ fn derived_marker_info(name: &str) -> CtValue {
     let name = jet_foundation::Registry::row(name)
         .map(|row| row.name)
         .unwrap_or(name);
-    marker_info_value(name, Vec::new())
+    marker_info_value(name, Vec::new(), Vec::new(), false)
 }
 
 /// Keep user-written markers separate from derives lowered from them. The
@@ -1344,15 +1424,34 @@ pub fn build_state_refs(owner: &str, states: &[String]) -> CtValue {
 
 /// Build the same state rows that the aggregate `TypeInfo.states` view uses.
 pub fn build_state_infos(owner: &str, states: &[String]) -> CtValue {
+    build_state_infos_with_graph(owner, states, None)
+}
+
+pub fn build_state_infos_with_graph(
+    owner: &str,
+    states: &[String],
+    graph: Option<&jet_foundation::Facts::StateGraph>,
+) -> CtValue {
     ct_list(
         states
             .iter()
             .map(|state| {
+                let node =
+                    graph.and_then(|graph| graph.states.iter().find(|node| node.name == *state));
                 ct_struct(
                     "StateInfo",
                     &[
                         ("name", ct_str(state)),
                         ("path", build_state_ref(owner, state)),
+                        ("terminal", ct_bool(node.is_some_and(|node| node.terminal))),
+                        (
+                            "reachable",
+                            node.and_then(|node| node.reachable)
+                                .map(|reachable| {
+                                    CtValue::Present(Box::new(CtValue::Bool(reachable)))
+                                })
+                                .unwrap_or_else(|| CtValue::absent(crate::AST::Type::Bool)),
+                        ),
                     ],
                 )
             })
@@ -1401,8 +1500,8 @@ pub fn registered_fact_value(
         jet_foundation::Registry::FactRead::Attribution if subject == "report" => {
             Some(build_attribution_info("report", None))
         }
-        jet_foundation::Registry::FactRead::TrackOrigin if declared(subject) => {
-            Some(build_track_origin_info(None))
+        jet_foundation::Registry::FactRead::Origin if declared(subject) => {
+            Some(build_origin_info(false, None, None, None, false))
         }
         jet_foundation::Registry::FactRead::ViewProvenance => items.iter().find_map(|item| {
             let Item::Func(function) = item else {
@@ -1475,31 +1574,50 @@ pub fn reflect_type_value_with_target(
     module: &str,
     target: &TargetLayout,
 ) -> Option<CtValue> {
+    reflect_type_value_with_target_and_graph(items, type_name, module, target, None)
+}
+
+pub fn reflect_type_value_with_target_and_graph(
+    items: &[Item],
+    type_name: &str,
+    module: &str,
+    target: &TargetLayout,
+    graph: Option<&jet_foundation::Facts::StateGraph>,
+) -> Option<CtValue> {
     let module = if module.is_empty() { "main" } else { module };
     let layout_engine = TargetLayoutEngine::new(items.iter(), target.clone());
     for item in items {
         match item {
             Item::Struct(def) if def.name == type_name => {
-                let states = items
-                    .iter()
-                    .find_map(|item| match item {
-                        Item::StateDecl(state) if state.type_name == type_name => Some(
-                            state
-                                .states
-                                .iter()
-                                .map(|(name, _)| name.clone())
-                                .collect::<Vec<_>>(),
-                        ),
-                        _ => None,
+                let states = def
+                    .state
+                    .as_ref()
+                    .map(|state| {
+                        state
+                            .states
+                            .iter()
+                            .map(|(name, _)| name.clone())
+                            .collect::<Vec<_>>()
+                    })
+                    .or_else(|| {
+                        items.iter().find_map(|item| match item {
+                            Item::StateDecl(state) if state.type_name == def.name => {
+                                Some(state.states.iter().map(|(name, _)| name.clone()).collect())
+                            }
+                            _ => None,
+                        })
                     })
                     .unwrap_or_default();
-                return Some(build_struct_type_info_with_path_and_vocabulary_and_engine(
-                    def,
-                    &states,
-                    &format!("{module}.{type_name}"),
-                    None,
-                    &layout_engine,
-                ));
+                return Some(
+                    build_struct_type_info_with_path_and_vocabulary_and_engine_and_graph(
+                        def,
+                        &states,
+                        &format!("{module}.{type_name}"),
+                        None,
+                        &layout_engine,
+                        graph,
+                    ),
+                );
             }
             Item::Enum(def) if def.name == type_name => {
                 let path = format!("{module}.{type_name}");
@@ -1639,14 +1757,16 @@ pub fn fact_read_value(
             _ => None,
         }),
         jet_foundation::Registry::FactRead::States => items.iter().find_map(|item| match item {
-            Item::StateDecl(decl) if decl.type_name == subject_name => Some(build_state_infos(
-                subject_name,
-                &decl
-                    .states
-                    .iter()
-                    .map(|(name, _)| name.clone())
-                    .collect::<Vec<_>>(),
-            )),
+            Item::Struct(def) if def.name == subject_name => def.state.as_ref().map(|decl| {
+                build_state_infos(
+                    subject_name,
+                    &decl
+                        .states
+                        .iter()
+                        .map(|(name, _)| name.clone())
+                        .collect::<Vec<_>>(),
+                )
+            }),
             _ => None,
         }),
         jet_foundation::Registry::FactRead::Effects => items.iter().find_map(|item| match item {
@@ -1667,7 +1787,7 @@ pub fn fact_read_value(
         jet_foundation::Registry::FactRead::Sendability
         | jet_foundation::Registry::FactRead::Movedness
         | jet_foundation::Registry::FactRead::Attribution
-        | jet_foundation::Registry::FactRead::TrackOrigin
+        | jet_foundation::Registry::FactRead::Origin
         | jet_foundation::Registry::FactRead::ViewProvenance
         | jet_foundation::Registry::FactRead::UnitScaleProvenance
         | jet_foundation::Registry::FactRead::Maturity
@@ -1838,6 +1958,24 @@ pub fn build_struct_type_info_with_path_and_vocabulary_and_engine(
     vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
     layout_engine: &TargetLayoutEngine<'_>,
 ) -> CtValue {
+    build_struct_type_info_with_path_and_vocabulary_and_engine_and_graph(
+        s,
+        states,
+        path,
+        vocabulary,
+        layout_engine,
+        None,
+    )
+}
+
+pub fn build_struct_type_info_with_path_and_vocabulary_and_engine_and_graph(
+    s: &StructDef,
+    states: &[String],
+    path: &str,
+    vocabulary: Option<&jet_foundation::Policy::MarkerVocabulary>,
+    layout_engine: &TargetLayoutEngine<'_>,
+    graph: Option<&jet_foundation::Facts::StateGraph>,
+) -> CtValue {
     let reflection_fields = jet_foundation::Reflection::fields(s);
     let fields_info: Vec<CtValue> = reflection_fields
         .iter()
@@ -1854,18 +1992,9 @@ pub fn build_struct_type_info_with_path_and_vocabulary_and_engine(
         .map(|method| build_method_info_with_vocabulary(method, vocabulary))
         .collect();
     let type_params_info: Vec<CtValue> = s.type_params.iter().map(build_type_param_info).collect();
-    let state_info = states
-        .iter()
-        .map(|state| {
-            ct_struct(
-                "StateInfo",
-                &[
-                    ("name", ct_str(state)),
-                    ("path", build_state_ref(&s.name, state)),
-                ],
-            )
-        })
-        .collect::<Vec<_>>();
+    let CtValue::List(state_info) = build_state_infos_with_graph(&s.name, states, graph) else {
+        unreachable!("state info builder always returns a list")
+    };
     let transition_info = s
         .methods
         .iter()
@@ -2280,25 +2409,29 @@ pub fn build_program_info_with_index(
                         .items
                         .iter()
                         .find_map(|item| match item {
-                            crate::AST::Item::StateDecl(state) if state.type_name == def.name => {
-                                Some(
+                            crate::AST::Item::Struct(owner) if owner.name == def.name => {
+                                owner.state.as_ref().map(|state| {
                                     state
                                         .states
                                         .iter()
                                         .map(|(name, _)| name.clone())
-                                        .collect::<Vec<_>>(),
-                                )
+                                        .collect::<Vec<_>>()
+                                })
                             }
                             _ => None,
                         })
                         .unwrap_or_default();
+                    let state_graph = facts
+                        .fact_registry
+                        .state_graph(&format!("{}.State", def.name));
                     let mut info = qualify_info(
-                        build_struct_type_info_with_path_and_vocabulary_and_engine(
+                        build_struct_type_info_with_path_and_vocabulary_and_engine_and_graph(
                             def,
                             &states,
                             &def.name,
                             None,
                             &layout_engine,
+                            state_graph,
                         ),
                         &module_name,
                         &program_reflection_identity(
@@ -2674,6 +2807,7 @@ mod tests {
                 bounds: vec!["Comparable".to_string()],
             }],
             fields: vec![field("x", "T", true), field("secret", "Int", false)],
+            state: None,
             methods: vec![method("tag", true)],
             cli_bindings: Vec::new(),
             trait_impls: Vec::new(),

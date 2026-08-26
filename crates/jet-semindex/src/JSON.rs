@@ -17,8 +17,8 @@ use crate::Symbols::canonical_symbol_name;
 use crate::Types::{
     BypassFact, BypassKind, CallEdge, CallableParameterFact, CallableSignatureFact, DefinitionFact,
     EffectFact, ExpandProjection, ExpandValue, InstanceFact, MemberFact, MemberKind, MemberOrigin,
-    OutputFact, SemIndex, SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
-    ViewProjectionFact, ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
+    OutputFact, SemIndex, SourceSpan, StateGraphFact, SymbolDef, SymbolKind, SymbolRef,
+    TypeDossier, ViewProjectionFact, ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
 };
 
 fn json_instance(value: &InstanceFact) -> String {
@@ -745,6 +745,50 @@ fn json_member(m: &MemberFact) -> String {
     )
 }
 
+fn json_state_graph(graph: &StateGraphFact) -> String {
+    let states = graph
+        .states
+        .iter()
+        .map(|state| {
+            let reachable = state
+                .reachable
+                .map_or_else(|| "null".to_string(), |value| value.to_string());
+            format!(
+                "{{\"name\":{},\"terminal\":{},\"reachable\":{},\"span\":{}}}",
+                json_str(&state.name),
+                state.terminal,
+                reachable,
+                json_span(state.span)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let transitions = graph
+        .transitions
+        .iter()
+        .map(|transition| {
+            let from = transition
+                .from
+                .as_ref()
+                .map_or_else(|| "null".to_string(), |value| json_str(value));
+            format!(
+                "{{\"operation\":{},\"from\":{},\"to\":{}}}",
+                json_str(&transition.operation),
+                from,
+                json_str(&transition.to)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"owner\":{},\"module\":{},\"states\":[{}],\"transitions\":[{}]}}",
+        json_str(&graph.owner),
+        json_str(&graph.module_path),
+        states,
+        transitions
+    )
+}
+
 impl SemIndex {
     /// Stable JSON document for tests and `jet inspect semindex --json`.
     pub fn to_json(&self) -> String {
@@ -771,6 +815,7 @@ impl SemIndex {
             .collect();
         let instances: Vec<String> = self.instances().iter().map(json_instance).collect();
         let outputs: Vec<String> = self.outputs().iter().map(json_output).collect();
+        let state_graphs: Vec<String> = self.state_graphs().iter().map(json_state_graph).collect();
         let package = self
             .package_facts()
             .map(package_facts_json)
@@ -783,12 +828,13 @@ impl SemIndex {
             .map(|value| format!(",\"expand\":{}", json_expand_projection(value)))
             .unwrap_or_default();
         let payload = format!(
-            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]{}}}",
+            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"state_graphs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]{}}}",
             self.schema_version(),
             defs.join(","),
             definition_facts.join(","),
             instances.join(","),
             outputs.join(","),
+            state_graphs.join(","),
             package,
             workspace_overlays,
             refs.join(","),
@@ -865,14 +911,16 @@ impl TypeDossier {
         let members: Vec<String> = self.members.iter().map(json_member).collect();
         let refs: Vec<String> = self.references.iter().map(json_ref).collect();
         let bypasses: Vec<String> = self.bypass_facts.iter().map(json_bypass).collect();
+        let state_graphs: Vec<String> = self.state_graphs.iter().map(json_state_graph).collect();
         let payload = format!(
-            "{{\"schema_version\":{},\"target\":{},\"definition\":{},\"members\":[{}],\"references\":[{}],\"bypass_facts\":[{}]}}",
+            "{{\"schema_version\":{},\"target\":{},\"definition\":{},\"members\":[{}],\"references\":[{}],\"bypass_facts\":[{}],\"state_graphs\":[{}]}}",
             self.schema_version,
             json_str(&self.target),
             def_json,
             members.join(","),
             refs.join(","),
-            bypasses.join(",")
+            bypasses.join(","),
+            state_graphs.join(","),
         );
         render_status_json(
             "ok",
@@ -911,6 +959,36 @@ impl TypeDossier {
                 m.span.start,
                 m.span.end
             ));
+        }
+        out.push_str("state graphs\n");
+        if self.state_graphs.is_empty() {
+            out.push_str("  none\n");
+        }
+        for graph in &self.state_graphs {
+            out.push_str(&format!("  {} @ {}\n", graph.owner, graph.module_path));
+            for state in &graph.states {
+                let reachability = match state.reachable {
+                    Some(true) => "reachable",
+                    Some(false) => "unreachable",
+                    None => "reachability unknown",
+                };
+                let terminality = if state.terminal {
+                    "terminal"
+                } else {
+                    "nonterminal"
+                };
+                out.push_str(&format!(
+                    "    state {} ({terminality}; {reachability}) @ {}:{}..{}\n",
+                    state.name, graph.module_path, state.span.start, state.span.end
+                ));
+            }
+            for transition in &graph.transitions {
+                let from = transition.from.as_deref().unwrap_or("_");
+                out.push_str(&format!(
+                    "    transition {}: {} -> {}\n",
+                    transition.operation, from, transition.to
+                ));
+            }
         }
         out.push_str(&format!("references\n  count: {}\n", self.references.len()));
         for r in &self.references {

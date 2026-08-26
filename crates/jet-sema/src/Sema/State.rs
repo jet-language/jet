@@ -1,4 +1,4 @@
-//! Typestate (D-STATE1 / D-STATE-DECL / D-STATE-REQ / D-STATE-TRANS).
+//! Typestate (D-STATE1 / D-STATE-HOME1 / D-STATE-REQ / D-STATE-TRANS).
 //!
 //! A value moves through a named set of *states*. Operations declare the state they
 //! need and the state they leave the value in, via two fn markers:
@@ -12,12 +12,13 @@
 //!     from-state may be `_` (an *entry* transition: a constructor that produces the
 //!     initial state from nothing — e.g. `#Transition(_, Pending) fn new() R ->`).
 //!
-//! D-STATE-DECL (ratified 2026-06-25, option B): states are declared in a dedicated
-//! block `state TypeName { Pending, Confirmed, CheckedIn }`. When present:
+//! D-STATE-HOME1=A: states are declared in one dedicated section
+//! `state { Pending, Confirmed, CheckedIn }` inside the owning struct.
+//! When present:
 //!   - `#State(X)` / `#Transition(A, B)` on `TypeName::*` must reference declared
 //!     state names; an unknown name is **E0151** (typo against the set).
-//!   - A declared state with no outgoing `#Transition(S, …)` is a dead-end warning
-//!     **L0151** (a half-built machine still compiles).
+//!   - A declared state with no outgoing `#Transition(S, …)` is a terminal state.
+//!     The checked graph stores that fact for reflection and semantic tools.
 //!   - The set erases (compile-time only, no runtime discriminant).
 //!
 //! The current state of a value is a **compile-time fact** threaded by intraprocedural
@@ -31,7 +32,7 @@ use crate::Sema::FlowFacts::{FlowFacts, Plane};
 use crate::Sema::{KnowledgeGate, KnowledgePlane};
 use crate::Syntax::edit_distance;
 use crate::AST::{Call, Expr, Func, Item, LValue, Stmt};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// D-STATE1: the state a value is in. One plane of the checker's flow facts —
 /// this file supplies the join rule and nothing else about merging.
@@ -74,10 +75,134 @@ pub struct StateTable {
     /// method name (`Type::method` → to-state). Lets a binding `r := Type.ctor()`
     /// seed `r`'s initial state.
     entry_ctors: HashMap<String, String>,
-    /// D-STATE-DECL: type name → declared state labels with their spans. When a type
-    /// has a `state TypeName { … }` block, every `#State(X)` / `#Transition(A, B)`
+    /// D-STATE-HOME1=A: type name → declared state labels with their spans. When a type
+    /// has a nested `state { … }` section, every `#State(X)` / `#Transition(A, B)`
     /// marker on its methods must reference a name from this set (else E0151).
     declared: HashMap<String, Vec<(String, Span)>>,
+}
+
+fn methods_for_type<'a>(items: &'a [Item], type_name: &str) -> Vec<&'a Func> {
+    items
+        .iter()
+        .flat_map(|item| match item {
+            Item::Impl(i) if i.type_name == type_name => i.methods.iter().collect(),
+            Item::Struct(s) if s.name == type_name => {
+                let mut methods: Vec<&Func> = s.methods.iter().collect();
+                for block in &s.trait_impls {
+                    methods.extend(block.methods.iter());
+                }
+                methods
+            }
+            Item::Enum(e) if e.name == type_name => e.methods.iter().collect(),
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+/// Build checked state facts from one module's declarations and transitions.
+/// Invalid marker references are omitted; the diagnostic pass reports them.
+pub(crate) fn checked_state_graphs(
+    items: &[Item],
+) -> HashMap<String, jet_foundation::Facts::StateGraph> {
+    let declarations: HashMap<String, Vec<String>> = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(structure) => structure.state.as_ref().map(|state| {
+                (
+                    structure.name.clone(),
+                    state.states.iter().map(|(name, _)| name.clone()).collect(),
+                )
+            }),
+            Item::StateDecl(state) => Some((
+                state.type_name.clone(),
+                state.states.iter().map(|(name, _)| name.clone()).collect(),
+            )),
+            _ => None,
+        })
+        .collect();
+
+    declarations
+        .into_iter()
+        .map(|(type_name, states)| {
+            let state_names: HashSet<&str> = states.iter().map(String::as_str).collect();
+            let mut outgoing = HashSet::new();
+            let mut edges: HashMap<String, Vec<String>> = HashMap::new();
+            let mut entries = Vec::new();
+            let mut transitions = Vec::new();
+
+            for method in methods_for_type(items, &type_name) {
+                let Some(transition) = &method.state_transition else {
+                    continue;
+                };
+                let from = if let Some(raw) = &transition.from {
+                    let Some(leaf) = StateTable::state_leaf(&type_name, raw) else {
+                        continue;
+                    };
+                    if !state_names.contains(leaf) {
+                        continue;
+                    }
+                    Some(leaf.to_string())
+                } else {
+                    None
+                };
+                let Some(to) = StateTable::state_leaf(&type_name, &transition.to)
+                    .filter(|leaf| state_names.contains(leaf))
+                    .map(str::to_string)
+                else {
+                    continue;
+                };
+
+                if let Some(from_state) = &from {
+                    outgoing.insert(from_state.clone());
+                    edges
+                        .entry(from_state.clone())
+                        .or_default()
+                        .push(to.clone());
+                } else {
+                    entries.push(to.clone());
+                }
+                transitions.push(jet_foundation::Facts::StateTransition {
+                    operation: method.name.clone(),
+                    from,
+                    to,
+                });
+            }
+
+            let reachable = if entries.is_empty() {
+                None
+            } else {
+                let mut seen = HashSet::new();
+                let mut queue = VecDeque::from(entries);
+                while let Some(state) = queue.pop_front() {
+                    if !seen.insert(state.clone()) {
+                        continue;
+                    }
+                    if let Some(next) = edges.get(&state) {
+                        queue.extend(next.iter().cloned());
+                    }
+                }
+                Some(seen)
+            };
+
+            let nodes = states
+                .into_iter()
+                .map(|name| jet_foundation::Facts::StateNode {
+                    terminal: !outgoing.contains(&name),
+                    reachable: reachable
+                        .as_ref()
+                        .map(|reachable| reachable.contains(&name)),
+                    name,
+                })
+                .collect();
+            (
+                type_name,
+                jet_foundation::Facts::StateGraph {
+                    states: nodes,
+                    transitions,
+                },
+            )
+        })
+        .collect()
 }
 
 impl StateTable {
@@ -94,8 +219,8 @@ impl StateTable {
     /// Register every typestate marker in `items` into this table. Methods key as
     /// `Type::method`; entry transitions (`_ -> To`) also register under
     /// `entry_ctors` so a constructor call can seed a local's initial state.
-    /// D-STATE-DECL: `state TypeName { … }` blocks are also registered here so
-    /// `validate_declarations` can check markers against declared sets.
+    /// D-STATE-HOME1=A: nested struct state sections are registered here so
+    /// `validate_declarations` can check markers against the owning set.
     /// Idempotent across modules — call once per module for a bundle.
     pub fn add_items(&mut self, items: &[Item]) {
         for item in items {
@@ -107,6 +232,14 @@ impl StateTable {
                     }
                 }
                 Item::Struct(s) => {
+                    if let Some(state) = &s.state {
+                        self.facts.declare(
+                            jet_foundation::Facts::FactKind::State,
+                            format!("{}.State", s.name),
+                            state.states.iter().map(|(name, _)| name.clone()),
+                        );
+                        self.declared.insert(s.name.clone(), state.states.clone());
+                    }
                     for m in &s.methods {
                         self.add_method(&s.name, m);
                     }
@@ -121,7 +254,7 @@ impl StateTable {
                         self.add_method(&e.name, m);
                     }
                 }
-                // D-STATE-DECL: register the bounded state-set for this type.
+                // D-STATE-HOME1=A: register the bounded state-set for this type.
                 Item::StateDecl(sd) => {
                     self.facts.declare(
                         jet_foundation::Facts::FactKind::State,
@@ -169,12 +302,42 @@ impl StateTable {
         );
     }
 
-    /// D-STATE-DECL: validate that every `#State(X)` / `#Transition(A, B)` marker
-    /// on methods of a type that has a `state TypeName { … }` declaration references
-    /// a state in the declared set. Unknown state → E0151. Also warns (L0151) about
-    /// declared states with no outgoing `#Transition(S, …)` (dead-end states).
-    pub fn validate_declarations(&self, items: &[Item], diags: &mut Vec<Diagnostic>) {
+    /// D-STATE-HOME1=A: validate that every `#State(X)` / `#Transition(A, B)` marker
+    /// on methods of a type that has a nested `state { … }` section references
+    /// a state in the declared set. Unknown state → E0151. The checked graph records
+    /// terminal and entry reachability facts without adding a runtime policy.
+    pub fn validate_declarations(&mut self, items: &[Item], diags: &mut Vec<Diagnostic>) {
+        let graphs = checked_state_graphs(items);
         for (type_name, decl_states) in &self.declared {
+            if decl_states.is_empty() {
+                diags.push(e0169(type_name, self.state_span(items, type_name)));
+            }
+            let mut seen = HashSet::new();
+            for (state, span) in decl_states {
+                if !seen.insert(state) {
+                    diags.push(e0166(state, type_name, *span));
+                }
+            }
+            if let Some(structure) = items.iter().find_map(|item| match item {
+                Item::Struct(s) if s.name == *type_name => Some(s),
+                _ => None,
+            }) {
+                let members: HashSet<&str> =
+                    structure
+                        .fields
+                        .iter()
+                        .map(|field| field.name.as_str())
+                        .chain(structure.methods.iter().map(|method| method.name.as_str()))
+                        .chain(structure.trait_impls.iter().flat_map(|block| {
+                            block.methods.iter().map(|method| method.name.as_str())
+                        }))
+                        .collect();
+                for (state, span) in decl_states {
+                    if members.contains(state.as_str()) {
+                        diags.push(e0167(state, type_name, *span));
+                    }
+                }
+            }
             let plane = format!("{type_name}.State");
             let state_names: HashSet<&str> = self
                 .facts
@@ -182,9 +345,6 @@ impl StateTable {
                 .into_iter()
                 .flat_map(|fact| fact.members.iter().map(String::as_str))
                 .collect();
-
-            // Collect all method markers for this type.
-            let mut outgoing: HashSet<String> = HashSet::new();
 
             // Helper to check a single state name against the declared set.
             let check_state = |state: &str, span: Span, diags: &mut Vec<Diagnostic>| {
@@ -201,48 +361,67 @@ impl StateTable {
             };
 
             // Walk all method markers on this type.
-            for item in items {
-                let methods: Vec<&Func> = match item {
-                    Item::Impl(i) if i.type_name == *type_name => i.methods.iter().collect(),
-                    Item::Struct(s) if s.name == *type_name => {
-                        let mut ms: Vec<&Func> = s.methods.iter().collect();
-                        for block in &s.trait_impls {
-                            ms.extend(block.methods.iter());
-                        }
-                        ms
+            for m in methods_for_type(items, type_name) {
+                if let Some((state, span)) = &m.state_requires {
+                    check_state(state, *span, diags);
+                }
+                if let Some(tr) = &m.state_transition {
+                    if let Some(from) = &tr.from {
+                        check_state(from, tr.span, diags);
                     }
-                    Item::Enum(e) if e.name == *type_name => e.methods.iter().collect(),
-                    _ => continue,
-                };
-                for m in methods {
-                    if let Some((state, span)) = &m.state_requires {
-                        check_state(state, *span, diags);
-                    }
-                    if let Some(tr) = &m.state_transition {
-                        if let Some(from) = &tr.from {
-                            check_state(from, tr.span, diags);
-                            if let Some(leaf) = Self::state_leaf(type_name, from) {
-                                outgoing.insert(leaf.to_string());
-                            }
-                        }
-                        check_state(&tr.to, tr.span, diags);
-                    }
+                    check_state(&tr.to, tr.span, diags);
                 }
             }
 
-            // L0151: dead-end state — declared but no outgoing transition.
-            // D-PROTO2: protocol handle terminal states are intentional completion points.
-            let protocol_handle = type_name.contains('.')
-                && (type_name.ends_with(".Client") || type_name.ends_with(".Server"));
-            for (i, (state, span)) in decl_states.iter().enumerate() {
-                if !outgoing.contains(state.as_str()) {
-                    if protocol_handle && i + 1 == decl_states.len() {
-                        continue;
+            if let Some(graph) = graphs.get(type_name).cloned() {
+                for node in &graph.states {
+                    if node.reachable == Some(false) {
+                        let span = decl_states
+                            .iter()
+                            .find(|(state, _)| state == &node.name)
+                            .map(|(_, span)| *span)
+                            .unwrap_or_else(|| Span::new(0, 0));
+                        diags.push(l0153(&node.name, type_name, span));
                     }
-                    diags.push(l0151(state, type_name, *span));
+                }
+                self.facts
+                    .set_state_graph(format!("{type_name}.State"), graph);
+            }
+        }
+
+        // A typestate marker on a struct/enum/impl without its owning state
+        // section is a distinct error. Free functions keep their existing
+        // marker shape; they have no nominal owner to attach a state set to.
+        for item in items {
+            let (type_name, methods): (&str, Vec<&Func>) = match item {
+                Item::Impl(i) => (i.type_name.as_str(), i.methods.iter().collect()),
+                Item::Struct(s) => {
+                    let mut methods = s.methods.iter().collect::<Vec<_>>();
+                    methods.extend(s.trait_impls.iter().flat_map(|b| b.methods.iter()));
+                    (s.name.as_str(), methods)
+                }
+                Item::Enum(e) => (e.name.as_str(), e.methods.iter().collect()),
+                _ => continue,
+            };
+            if type_name == crate::Syntax::TYPE_TASK || self.declared.contains_key(type_name) {
+                continue;
+            }
+            for method in methods {
+                if method.state_requires.is_some() || method.state_transition.is_some() {
+                    diags.push(e0159(type_name, method.span));
                 }
             }
         }
+    }
+
+    fn state_span(&self, items: &[Item], type_name: &str) -> Span {
+        items
+            .iter()
+            .find_map(|item| match item {
+                Item::Struct(s) if s.name == type_name => s.state.as_ref().map(|state| state.span),
+                _ => None,
+            })
+            .unwrap_or_else(|| Span::new(0, 0))
     }
 
     fn add_method(&mut self, type_name: &str, m: &Func) {
@@ -574,7 +753,7 @@ impl<'a> StateCtx<'a> {
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
+            | Stmt::AuthorityScope { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. }
             | Stmt::ScopeMember { body, .. }
@@ -1045,8 +1224,8 @@ mod tests {
     }
 }
 
-/// E0151 (D-STATE-DECL): a `#State(X)` or `#Transition(A, B)` marker references a
-/// state name that is not in the `state TypeName { … }` declaration for that type.
+/// E0151 (D-STATE-HOME1=A): a `#State(X)` or `#Transition(A, B)` marker references a
+/// state name that is not in the owning struct's `state { … }` section for that type.
 /// Includes a typo suggestion when the edit distance is ≤ 2.
 pub fn e0151(state: &str, type_name: &str, candidates: &[&str], span: Span) -> Diagnostic {
     let candidate_name = state.rsplit('.').next().unwrap_or(state);
@@ -1081,7 +1260,7 @@ pub fn e0151(state: &str, type_name: &str, candidates: &[&str], span: Span) -> D
         "E0151",
         format!("`{state}` is not a declared state of `{type_name}`"),
         format!(
-            "typestate (D-STATE-DECL): `state {type_name} {{ … }}` defines the valid state labels; \
+            "typestate (D-STATE-HOME1=A): `struct {type_name} {{ state {{ … }} }}` defines the valid state labels; \
              `{state}` is not among them — a typo here would silently create a phantom state that no \
              transition reaches"
         ),
@@ -1097,12 +1276,40 @@ pub fn e0151(state: &str, type_name: &str, candidates: &[&str], span: Span) -> D
     diagnostic
 }
 
-/// L0151 (D-STATE-DECL): a declared state has no outgoing `#Transition(S, …)`,
-/// making it a dead end — a value in this state can never advance further.
-/// This is a warning (not an error) so a half-built machine still compiles.
-pub fn l0151(state: &str, type_name: &str, span: Span) -> Diagnostic {
+/// E0159 (D-STATE-HOME1=A): a nominal owner uses typestate markers without
+/// declaring the one state section that owns their fact set.
+pub fn e0159(type_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::from_row("E0159", &[("type", type_name)], Some(span))
+}
+
+/// E0166: one struct state section repeats a state label.
+pub fn e0166(state: &str, type_name: &str, span: Span) -> Diagnostic {
     Diagnostic::from_row(
-        "L0151",
+        "E0166",
+        &[("state", state), ("type", type_name)],
+        Some(span),
+    )
+}
+
+/// E0167: a state label would collide with a normal member of its owner.
+pub fn e0167(state: &str, type_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::from_row(
+        "E0167",
+        &[("state", state), ("type", type_name)],
+        Some(span),
+    )
+}
+
+/// E0169: a state section has no labels.
+pub fn e0169(type_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::from_row("E0169", &[("type", type_name)], Some(span))
+}
+
+/// L0153 (D-STATE-TERMINAL1): a declared state is unreachable from every entry
+/// transition in a graph that declares an entry.
+pub fn l0153(state: &str, type_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::from_row(
+        "L0153",
         &[("state", state), ("type", type_name)],
         Some(span),
     )

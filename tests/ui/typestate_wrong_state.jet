@@ -1,9 +1,8 @@
 // D-STATE1: calling a typestate operation in the wrong state is E0150. Here
 // `check_in` requires a `Confirmed` reservation, but `r` is still `Pending`
 // (payment was skipped) — the order-of-events bug typestate prevents.
-state Reservation { Pending, Confirmed, CheckedIn }
-
 struct Reservation {
+    state { Pending, Confirmed, CheckedIn }
     guest: String
 }
 

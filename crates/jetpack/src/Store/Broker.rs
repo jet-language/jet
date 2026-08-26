@@ -2616,7 +2616,6 @@ mod tests {
                 "--user",
                 "--map-users=100000,0,1",
                 "--map-groups=100000,0,1",
-                "--setgroups=deny",
                 "--",
             ])
             .arg(std::env::current_exe().unwrap())

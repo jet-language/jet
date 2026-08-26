@@ -14,7 +14,7 @@ pub mod Parser;
 mod generic_module_tests {
     use super::{
         Formatter, Lexer, Parser, Syntax, AST,
-        AST::{GenericModuleParam, Item, ModuleArg, Type},
+        AST::{Expr, GenericModuleParam, Item, ModuleArg, Pattern, Stmt, Type},
     };
 
     #[test]
@@ -131,6 +131,132 @@ mod generic_module_tests {
             !formatted.contains("fn run"),
             "formatter must keep script syntax: {formatted}"
         );
+    }
+
+    #[test]
+    fn result_handler_desugars_to_ok_and_err_value_tests() {
+        let source = "fn pick(value: Int !String) String -> value ? ok -> ok ! error -> error\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let program = Parser::parse(&tokens).expect("Result handler should parse");
+        let Item::Func(function) = &program.items[0] else {
+            panic!("function")
+        };
+        let Stmt::Return(
+            Some(Expr::If {
+                cond, else_value, ..
+            }),
+            _,
+        ) = &function.body[0]
+        else {
+            panic!("Result handler should lower as a value if")
+        };
+        assert!(matches!(
+            cond.as_ref(),
+            Expr::PatternTest {
+                pattern: Pattern::Ok { binding, .. },
+                ..
+            } if binding == "ok"
+        ));
+        let Expr::If { cond: err_cond, .. } = else_value.as_ref() else {
+            panic!("Result handler must retain its failure branch")
+        };
+        assert!(matches!(
+            err_cond.as_ref(),
+            Expr::PatternTest {
+                pattern: Pattern::Err { binding, .. },
+                ..
+            } if binding == "error"
+        ));
+    }
+
+    #[test]
+    fn result_handler_accepts_multiline_and_effectful_branches() {
+        let source = "fn run(value: Int !String) ! {\n    value ? ok -> print(ok) // success\n    ! error -> print(error)\n}\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let program = Parser::parse(&tokens).expect("multiline Result handler should parse");
+        let Item::Func(function) = &program.items[0] else {
+            panic!("function")
+        };
+        assert!(matches!(
+            &function.body[0],
+            Stmt::Expr(Expr::If { cond, else_value, .. })
+                if matches!(
+                    cond.as_ref(),
+                    Expr::PatternTest {
+                        subject,
+                        pattern: Pattern::Ok { binding, .. },
+                        ..
+                    } if matches!(subject.as_ref(), Expr::Ident(name, _) if name == "value")
+                        && binding == "ok"
+                ) && matches!(
+                    else_value.as_ref(),
+                    Expr::If {
+                        cond: err_cond,
+                        then_body,
+                        ..
+                    } if matches!(
+                        err_cond.as_ref(),
+                        Expr::PatternTest {
+                            pattern: Pattern::Err { binding, .. },
+                            ..
+                        } if binding == "error"
+                    ) && then_body.len() == 1
+                )
+        ));
+    }
+
+    #[test]
+    fn result_handler_allows_nested_value_handlers() {
+        let source = "fn pick(value: Int !String) String -> value ? ok -> ok ? inner -> inner ! inner_error -> inner_error ! error -> error\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        Parser::parse(&tokens).expect("nested Result handlers should parse");
+    }
+
+    #[test]
+    fn result_handler_reports_fixed_shape_errors_at_the_offending_token() {
+        let cases = [
+            (
+                "fn pick(value: Int !String) String -> value ? ok -> ok\n",
+                "a Result handler needs a `!` failure branch",
+                "E0003",
+            ),
+            (
+                "fn pick(value: Int !String) String -> value ? same -> same ! same -> same\n",
+                "a Result handler cannot bind both payloads to the same name",
+                "E0003",
+            ),
+            (
+                "fn pick(value: Int !String) String -> value ? _ -> value ! error -> error\n",
+                "a Result handler success branch needs a payload binding",
+                "E0003",
+            ),
+            (
+                "fn pick(value: Int !String) String -> value ? ok => ok ! error -> error\n",
+                "this uses a retired arrow spelling",
+                "E0070",
+            ),
+            (
+                "fn pick(value: Int !String) String -> value ? ok -> ok ! error -> error ! again -> again\n",
+                "a Result handler cannot have two failure branches",
+                "E0003",
+            ),
+        ];
+        for (source, expected, code) in cases {
+            let (tokens, lexer_diagnostics) = Lexer::lex(source);
+            assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+            let diagnostics = Parser::parse(&tokens).expect_err("invalid handler should fail");
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.what == expected)
+                .unwrap_or_else(|| panic!("missing {expected:?} in {diagnostics:?}"));
+            assert_eq!(diagnostic.code, code);
+            assert!(diagnostic.span.is_some(), "diagnostic needs an exact span");
+            assert!(!diagnostic.why.is_empty());
+            assert!(!diagnostic.fix.is_empty());
+        }
     }
 
     #[test]

@@ -11,7 +11,7 @@
 //! |---|---|---|
 //! | [`Binding`] | everything a declaration says about a name | `CheckerCore` |
 //! | [`Sendability`] | whether a value may cross a concurrent boundary | ownership prover |
-//! | [`TrackOrigin`] | source name recorded by `#Track` | `CheckerCore` |
+//! | [`Origin`] | source and site recorded by `#Track` | `CheckerCore` |
 //! | [`Frozen`] | freeze site that proved a value deeply immutable | ownership prover |
 //! | [`Narrow`] | a binding refined by a proven test (D-FLOWTYPE1) | `CheckerCore` |
 //! | [`Moved`] | the use that gave a place away | `CheckerOwnership` |
@@ -416,16 +416,44 @@ impl Plane for Sendability {
     }
 }
 
-/// D-PROVENANCE1: the source name recorded by an actual `#Track` binding.
-/// The marker stays on the AST; this plane makes its erased fact readable
-/// while sema is folding `@track_origin`.
-pub(crate) enum TrackOrigin {}
+/// D-TRACK-ORIGIN1=A: one `#Track` binding fact. The marker stays on the AST;
+/// this flow plane carries only the checked source identity and declaration
+/// site. `None` means no origin fact. A present ambiguous row means paths met
+/// with different provenance, so consumers cannot accidentally display one
+/// path's stale source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OriginFact {
+    pub(crate) tracked: bool,
+    pub(crate) source: Option<String>,
+    pub(crate) line: Option<usize>,
+    pub(crate) column: Option<usize>,
+    pub(crate) ambiguity: bool,
+}
 
-impl Plane for TrackOrigin {
-    type Fact = String;
+impl OriginFact {
+    fn ambiguous() -> Self {
+        Self {
+            tracked: false,
+            source: None,
+            line: None,
+            column: None,
+            ambiguity: true,
+        }
+    }
+}
+
+pub(crate) enum Origin {}
+
+impl Plane for Origin {
+    type Fact = OriginFact;
 
     fn join(left: Option<&Self::Fact>, right: Option<&Self::Fact>) -> Option<Self::Fact> {
-        keep_left(left, right)
+        match (left, right) {
+            (None, None) => None,
+            (Some(_), None) | (None, Some(_)) => Some(OriginFact::ambiguous()),
+            (Some(left), Some(right)) if left == right => Some(left.clone()),
+            (Some(_), Some(_)) => Some(OriginFact::ambiguous()),
+        }
     }
 }
 
@@ -551,7 +579,7 @@ pub(crate) struct FlowFacts {
     pub(crate) reachable: bool,
     pub(crate) bindings: Facts<Binding>,
     pub(crate) sendability: Facts<Sendability>,
-    pub(crate) track_origins: Facts<TrackOrigin>,
+    pub(crate) origins: Facts<Origin>,
     pub(crate) frozen: Facts<Frozen>,
     pub(crate) narrow: Facts<Narrow>,
     pub(crate) moved: Facts<Moved>,
@@ -567,7 +595,7 @@ impl Default for FlowFacts {
             reachable: true,
             bindings: Facts::default(),
             sendability: Facts::default(),
-            track_origins: Facts::default(),
+            origins: Facts::default(),
             frozen: Facts::default(),
             narrow: Facts::default(),
             moved: Facts::default(),
@@ -588,7 +616,7 @@ impl FlowFacts {
         let depth = self.depth;
         self.bindings.leave_depth(depth);
         self.sendability.leave_depth(depth);
-        self.track_origins.leave_depth(depth);
+        self.origins.leave_depth(depth);
         self.frozen.leave_depth(depth);
         self.narrow.leave_depth(depth);
         self.views.leave_depth(depth);
@@ -638,9 +666,9 @@ impl FlowFacts {
                 &Self::plane(&paths, |facts| &facts.sendability),
                 &mut Vec::new(),
             ),
-            track_origins: Facts::merge_paths(
-                &before.track_origins,
-                &Self::plane(&paths, |facts| &facts.track_origins),
+            origins: Facts::merge_paths(
+                &before.origins,
+                &Self::plane(&paths, |facts| &facts.origins),
                 &mut Vec::new(),
             ),
             frozen: Facts::merge_paths(
@@ -700,11 +728,7 @@ impl FlowFacts {
                 &after_body.sendability,
                 &mut Vec::new(),
             ),
-            track_origins: Facts::after_loop(
-                &before.track_origins,
-                &after_body.track_origins,
-                &mut Vec::new(),
-            ),
+            origins: Facts::after_loop(&before.origins, &after_body.origins, &mut Vec::new()),
             frozen: Facts::after_loop(&before.frozen, &after_body.frozen, &mut Vec::new()),
             narrow: Facts::after_loop(&before.narrow, &after_body.narrow, &mut Vec::new()),
             moved: Facts::after_loop(&before.moved, &after_body.moved, &mut Vec::new()),
@@ -842,6 +866,59 @@ mod tests {
         assert_eq!(store.get("window"), Some(&20));
         store.leave_depth(2);
         assert_eq!(store.get("window"), Some(&10));
+    }
+
+    fn origin(source: &str, line: usize) -> OriginFact {
+        OriginFact {
+            tracked: true,
+            source: Some(source.to_string()),
+            line: Some(line),
+            column: Some(12),
+            ambiguity: false,
+        }
+    }
+
+    #[test]
+    fn origin_join_keeps_only_equal_provenance() {
+        let before: Facts<Origin> = Facts::new();
+        let mut then: Facts<Origin> = Facts::new();
+        then.set("value", origin("speed", 2));
+        let mut otherwise: Facts<Origin> = Facts::new();
+        otherwise.set("value", origin("speed", 2));
+        let merged = Facts::merge_paths(&before, &[then, otherwise], &mut Vec::new());
+        assert_eq!(merged.get("value"), Some(&origin("speed", 2)));
+    }
+
+    #[test]
+    fn origin_join_marks_missing_or_different_paths_ambiguous() {
+        let before: Facts<Origin> = Facts::new();
+        let mut then = Facts::new();
+        then.set("value", origin("speed", 2));
+        let otherwise: Facts<Origin> = Facts::new();
+        let merged = Facts::merge_paths(&before, &[then.clone(), otherwise], &mut Vec::new());
+        assert_eq!(merged.get("value").map(|fact| fact.ambiguity), Some(true));
+
+        let mut other = Facts::new();
+        other.set("value", origin("other", 4));
+        let merged = Facts::merge_paths(&before, &[then, other], &mut Vec::new());
+        assert_eq!(merged.get("value").map(|fact| fact.ambiguity), Some(true));
+        assert_eq!(
+            merged.get("value").and_then(|fact| fact.source.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn origin_loop_join_does_not_retain_a_stale_exact_site() {
+        let mut before = FlowFacts::default();
+        before.origins.set("value", origin("speed", 2));
+        let mut after_body = before.clone();
+        after_body.origins.set("value", origin("other", 4));
+        let merged = FlowFacts::after_loop(&before, &after_body);
+        assert_eq!(
+            merged.origins.get("value").map(|fact| fact.ambiguity),
+            Some(true)
+        );
     }
 
     #[test]

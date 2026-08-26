@@ -474,7 +474,7 @@ pub(super) fn substitute_stmts(
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
+            | Stmt::AuthorityScope { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::Live { body, .. } => substitute_stmts(body, types, &values),

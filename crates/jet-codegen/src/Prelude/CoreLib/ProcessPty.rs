@@ -406,7 +406,6 @@ mod windows {
     type Handle = RawHandle;
 
     const CREATE_SUSPENDED: u32 = 0x0000_0004;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     const CREATE_UNICODE_ENVIRONMENT: u32 = 0x0000_0400;
     const EXTENDED_STARTUPINFO_PRESENT: u32 = 0x0008_0000;
     const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE: usize = 0x0002_0016;
@@ -996,6 +995,9 @@ mod windows {
             process_id: 0,
             thread_id: 0,
         };
+        // Keep the hosted process in the pseudoconsole's console group. A
+        // separate group disables Ctrl+C, so an ETX byte written to the
+        // ConPTY input would not reach the child's default handler.
         // SAFETY: every pointer stays live until CreateProcessW returns; the
         // child is suspended until its Job Object boundary is installed.
         if unsafe {
@@ -1005,10 +1007,7 @@ mod windows {
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 0,
-                EXTENDED_STARTUPINFO_PRESENT
-                    | CREATE_SUSPENDED
-                    | CREATE_NEW_PROCESS_GROUP
-                    | CREATE_UNICODE_ENVIRONMENT,
+                EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
                 environment.as_mut_ptr().cast(),
                 current_directory
                     .as_ref()

@@ -37,7 +37,7 @@ fn agent_executor_rejects_unenforced_grants_before_spawn_on_all_tiers() {
 use core.process as process
 
 fn run() {{
-    policy :: Abilities.from_rights(["FS.Read:home"])
+    policy :: Authority.from_rights(["FS.Read:home"])
     spec :: process.cmd(["sh", "-c", "printf escaped > '{marker}'"]).under(policy)
     if spec.plan() == {{
         .Ok(_) -> print("escaped")

@@ -131,7 +131,7 @@ fn jp6a_bootstrap_threshold_delegation_snapshot_and_identities() {
     .unwrap();
 
     // Distinct identity domains + hybrid publisher proofs
-    eng.bind_identity(BoundIdentity::registry("registry.jet.dev"))
+    eng.bind_identity(BoundIdentity::registry("registry.jet-lang.dev"))
         .unwrap();
     eng.bind_identity(BoundIdentity::cache_builder("builder.ci"))
         .unwrap();

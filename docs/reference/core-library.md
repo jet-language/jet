@@ -84,7 +84,7 @@ These are ordinary generated enums. The marker registry is their source, so
 diagnostics, `jet explain`, hover, completion, documentation, and reflection
 show the same declaration.
 
-The generated enum types are `ABI`, `Ability`, `FfiLanguage`, `InlineMode`,
+The generated enum types are `ABI`, `Effect`, `FfiLanguage`, `InlineMode`,
 `IntType`, `Layout`, `Maturity`, `NamingCase`, `ObligationMode`,
 `PolicySetting`, `State`, `TaintKind`, `Target`, and `Track`.
 
@@ -1473,22 +1473,22 @@ is an `IOError`, not a silently ignored limit.
 
 #### Authority-bound execution (D-AGENT-EXEC1=A)
 
-`process.workspace()` returns the ordinary `Abilities` value for the safe
+`process.workspace()` returns the ordinary `Authority` value for the safe
 workspace default. It grants repository reads and private build-directory
 writes. It denies network, home, secrets, devices, and inherited handles. Bind
-that value to the existing process object with `under(abilities)`:
+that value to the existing process object with `under(authority)`:
 
 ```jet
-abilities :: process.workspace()
-spec :: process.cmd(["cargo", "test"]).under(abilities)
+authority :: process.workspace()
+spec :: process.cmd(["cargo", "test"]).under(authority)
 plan :: spec.plan()
 ```
 
 Experts provide exact rights on the same value before binding it. The existing
-`Abilities` constructor keeps the grant data explicit and reviewable:
+`Authority` constructor keeps the grant data explicit and reviewable:
 
 ```jet
-policy :: Abilities.from_rights([
+policy :: Authority.from_rights([
     "FS.Read:repo",
     "FS.Write:.jet/build",
     "Exec:/usr/bin/cargo",
@@ -4021,12 +4021,34 @@ fn run() {
 
 `service.runtime(store, retention: duration)` creates the typed durable
 authority used by `ServiceRuntime.send`, retry, commit, retain, and
-dead-letter operations. The retention value is explicit; a process restart
-reopens the same authority log rather than creating a silent retry path.
+dead-letter operations. Every accepted send returns one `Delivery` handle.
+The handle keeps its identity across retries, restart, retention, dead letter,
+and cancellation. The retention value is explicit; a process restart reopens
+the same authority log rather than creating a silent retry path.
 `ServiceTree.send_durable` refuses admission after `drain_worker` publishes
 the drain gate. Use `ServiceRuntime.send` for an explicit durable receipt that
 was accepted before or during a drain; `retry` is the only operation that
-requests redelivery of a receipt already handed to a worker.
+requests redelivery of a receipt already handed to a worker. Runtime control
+methods take the `Delivery` handle, not a detached string identifier.
+
+The public lifecycle is exactly `Pending`, `Accepted`, `Delivering`,
+`Delivered`, `DeadLettered`, and `Cancelled`. Attempts, deadlines, retention,
+idempotency, duplicate status, authority, and generation remain facts on the
+signed immutable receipt. Observe or control a handle explicitly:
+
+```jet
+delivery :: tree.send_durable(api, "order", key: "order-1") ?? panic("send")
+state :: delivery.status() ?? panic("status")
+receipt :: (~delivery).receipt() ?? panic("receipt")
+history :: (~delivery).events() ?? panic("events")
+retry :: delivery.retry() ?? panic("retry")
+runtime.commit(retry) ?? panic("commit")
+```
+
+`receipt()` is authenticated with the shared Prelude HMAC-SHA-256 generation
+key. `events()` returns the complete append-only history with monotonic
+sequence numbers. Observing or dropping a handle does not cancel accepted
+work; cancellation is explicit with `delivery.cancel()`.
 
 Sema checks worker names, capacity types, endpoint identity, delivery keys,
 policy values, state-store values, workflow IDs, and directory endpoint types.

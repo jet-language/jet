@@ -262,6 +262,15 @@ fn alternatives_only_bar_formatting_is_stable() {
         "formatter must not invent a flow path"
     );
 }
+
+#[test]
+fn typestate_section_stays_inside_its_struct() {
+    let src = "struct Door { state { Open, Closed } value: Int }\nfn run() {}\n";
+    let formatted = jet::format_source(src).expect("nested state section should format");
+    assert!(formatted.contains("state { Open, Closed }"), "{formatted}");
+    assert!(!formatted.contains("\nstate Door"), "{formatted}");
+    assert_eq!(formatted, jet::format_source(&formatted).unwrap());
+}
 use std::path::PathBuf;
 
 #[path = "support/fmt_lossless.rs"]
@@ -1794,6 +1803,38 @@ fn fmt_preserves_single_line_if_expr_branch() {
     // If-expression branches (routed through fmt_value_block) follow the rule.
     let src = "fn run() {\n    a :: true\n    n :: if a -> 1 else -> 2\n    print(\"{n}\")\n}\n";
     assert_fmt_stable(src, "single-line if-expression");
+}
+
+#[test]
+fn fmt_compact_result_handler_is_one_line_when_it_fits() {
+    let src = "fn pick(value: Int !String) String -> value ? ok -> ok ! error -> error\n";
+    let out = jet::format_source(src).expect("compact Result handler should format");
+    assert!(
+        out.contains("value ? ok -> ok ! error -> error"),
+        "fitting handler should stay on one line:\n{out}"
+    );
+    assert_eq!(
+        out,
+        jet::format_source(&out).expect("compact handler should be idempotent")
+    );
+}
+
+#[test]
+fn fmt_compact_result_handler_expands_long_branches_deterministically() {
+    let long_ok = "ok_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz";
+    let long_err = "error_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz";
+    let src = format!(
+        "fn pick(value: Int !String) String -> value ? ok -> {long_ok} ! error -> {long_err}\n"
+    );
+    let out = jet::format_source(&src).expect("long Result handler should format");
+    assert!(
+        out.contains("\n! error ->"),
+        "long handler should use the two-arm layout:\n{out}"
+    );
+    assert_eq!(
+        out,
+        jet::format_source(&out).expect("expanded handler should be idempotent")
+    );
 }
 
 // ── Marker / turbofish round-trip survival (the c-fmt data-loss regression) ──
@@ -3631,8 +3672,8 @@ fn fmt_preserves_dotted_effect_paths() {
     // `Net.HTTP.Get`) — a leaf under one of the ten D-EFF4/5 roots. The name
     // is stored as one opaque string end to end, so fmt needs no new emission
     // logic; this pins that the dot survives every printer that touches an
-    // effect list (`#(…)` bounds, prohibitions, and `#Abilities` regions).
-    let src = "fn load(path: String) String -[FS.Read]> {\n    return path\n}\n\nfn archive(path: String) -[FS.Write]> {\n    print(path)\n}\n\nfn read_only(path: String) -[FS.Read, !FS.Write]> {\n    load(path)\n}\n\nfn boot() -[FS]> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    #Abilities(Net.HTTP.Get) {\n        print(\"net\")\n    }\n    #Abilities(caps: FS.Read) {\n        load(\"app.conf\")\n    }\n}\n";
+    // effect list (`#(…)` bounds, prohibitions, and `#FX` regions).
+    let src = "fn load(path: String) String -[FS.Read]> {\n    return path\n}\n\nfn archive(path: String) -[FS.Write]> {\n    print(path)\n}\n\nfn read_only(path: String) -[FS.Read, !FS.Write]> {\n    load(path)\n}\n\nfn boot() -[FS]> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    #FX(Net.HTTP.Get) {\n        print(\"net\")\n    }\n    #FX(caps: FS.Read) {\n        load(\"app.conf\")\n    }\n}\n";
     assert_fmt_stable(src, "dotted effect paths (D-EFFTREE1)");
 }
 

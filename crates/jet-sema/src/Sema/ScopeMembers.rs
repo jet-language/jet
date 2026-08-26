@@ -138,7 +138,7 @@ fn statement_has_assertion(statement: &Stmt) -> bool {
         | Stmt::Region { .. }
         | Stmt::Policy { .. }
         | Stmt::Layout { .. }
-        | Stmt::Caps { .. }
+        | Stmt::AuthorityScope { .. }
         | Stmt::ComptimeBlock { .. }
         | Stmt::Live { .. }
         | Stmt::Transact { .. } => false,
@@ -187,7 +187,7 @@ pub(crate) fn statement_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -421,6 +421,11 @@ fn check_marker_body(
                 if *dsl {
                     continue;
                 }
+                // D-WRAP-SCOPE1=A: `#Arithmetic(...) { … }` is a lexical
+                // policy region, not a marker member of the enclosing test.
+                if name == Syntax::MARKER_ARITHMETIC {
+                    continue;
+                }
                 validate_member(
                     marker,
                     name,
@@ -453,7 +458,7 @@ fn reject_nested(
     diags: &mut Vec<Diagnostic>,
 ) {
     walk_members(body, &mut |name, dot_span, dsl| {
-        if dsl {
+        if dsl || name == Syntax::MARKER_ARITHMETIC {
             return;
         }
         diags.push(Diagnostic::error(
@@ -477,7 +482,7 @@ fn reject_all(
     diags: &mut Vec<Diagnostic>,
 ) {
     walk_members(body, &mut |name, dot_span, dsl| {
-        if dsl {
+        if dsl || name == Syntax::MARKER_ARITHMETIC {
             return;
         }
         diags.push(Diagnostic::error(
@@ -863,7 +868,7 @@ fn child_bodies(s: &Stmt) -> Vec<&[Stmt]> {
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }

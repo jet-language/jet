@@ -211,6 +211,9 @@ impl<'a> Parser<'a> {
                 self.bump();
                 continue;
             }
+            if self.at_state_section() {
+                return Err(self.reject_state_section("anonymous shape"));
+            }
             let (field, field_span) = self.expect_ident("for a field name")?;
             let value = if matches!(self.peek().kind, TokKind::Colon) {
                 self.bump();

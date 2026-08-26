@@ -11,7 +11,8 @@ use crate::Symbols::{build_semantic_symbol_index, canonical_symbol_name, Semanti
 use crate::Types::{
     BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact,
     InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex,
-    StructuralNode, StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind,
+    StateGraphFact, StateNodeFact, StateTransitionFact, StructuralNode, StructuralSlotBoundary,
+    StructuralSlotKind, SymbolDef, SymbolKind,
 };
 use crate::JSON::{convert_defs, convert_effects, convert_refs};
 
@@ -211,6 +212,8 @@ impl SymbolDB {
             self.nodes.clone(),
             definition_facts,
         );
+        self.index
+            .set_state_graphs(build_state_graphs(bundle, facts));
         self.index.set_bypasses(self.bypasses.clone());
         self.index.set_instances(
             bundle
@@ -1051,10 +1054,102 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
         apply_inferred_effect_rows(&mut db, module_idx, module, facts);
     }
     add_import_alias_definitions(&mut db, &facts.name_ledger);
+    add_state_graph_hovers(&mut db, bundle, facts);
     add_breadcrumb_hints(&mut db);
     db.finalize_index(facts, bundle);
     db.symbols = build_semantic_symbol_index(&db, bundle);
     db
+}
+
+fn state_declarations(module: &LoadedModule) -> Vec<(String, Vec<(String, Span)>)> {
+    module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(structure) => structure
+                .state
+                .as_ref()
+                .map(|state| (structure.name.clone(), state.states.clone())),
+            Item::StateDecl(state) => Some((state.type_name.clone(), state.states.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn build_state_graphs(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<StateGraphFact> {
+    let mut graphs = Vec::new();
+    for module in &bundle.modules {
+        for (owner, declarations) in state_declarations(module) {
+            let key = format!("{owner}.State");
+            let Some(graph) = facts.fact_registry.state_graph(&key) else {
+                continue;
+            };
+            let states = graph
+                .states
+                .iter()
+                .map(|node| StateNodeFact {
+                    name: node.name.clone(),
+                    terminal: node.terminal,
+                    reachable: node.reachable,
+                    span: declarations
+                        .iter()
+                        .find(|(name, _)| name == &node.name)
+                        .map(|(_, span)| (*span).into())
+                        .expect("checked state graph node must have a declaration"),
+                })
+                .collect();
+            let transitions = graph
+                .transitions
+                .iter()
+                .map(|transition| StateTransitionFact {
+                    operation: transition.operation.clone(),
+                    from: transition.from.clone(),
+                    to: transition.to.clone(),
+                })
+                .collect();
+            graphs.push(StateGraphFact {
+                owner,
+                module_path: module.display.clone(),
+                states,
+                transitions,
+            });
+        }
+    }
+    graphs
+}
+
+fn add_state_graph_hovers(db: &mut SymbolDB, bundle: &ProgramBundle, facts: &SemIndexEffectFacts) {
+    for module in &bundle.modules {
+        for (owner, declarations) in state_declarations(module) {
+            let key = format!("{owner}.State");
+            let Some(graph) = facts.fact_registry.state_graph(&key) else {
+                continue;
+            };
+            for (name, span) in declarations {
+                let Some(node) = graph.states.iter().find(|node| node.name == name) else {
+                    continue;
+                };
+                let terminal = if node.terminal {
+                    "terminal"
+                } else {
+                    "nonterminal"
+                };
+                let reachability = match node.reachable {
+                    Some(true) => "reachable",
+                    Some(false) => "unreachable",
+                    None => "reachability unknown",
+                };
+                db.hover.push(HoverEntry {
+                    span,
+                    module_path: module.display.clone(),
+                    text: format!(
+                        "state `{}.State.{}` ({terminal}; {reachability})",
+                        owner, name
+                    ),
+                });
+            }
+        }
+    }
 }
 
 fn add_import_alias_definitions(db: &mut SymbolDB, ledger: &jet_foundation::Names::NameLedger) {
@@ -1647,6 +1742,40 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 module_path: mp.to_string(),
                 text: format!("struct `{}`", s.name),
             });
+            if let Some(state) = &s.state {
+                for (name, span) in &state.states {
+                    ctx.db.defs.push(SymDef {
+                        identity: format!(
+                            "state:{}::{}.State.{}",
+                            ctx.scope_identity, s.name, name
+                        ),
+                        name: name.clone(),
+                        def_span: *span,
+                        module_path: mp.to_string(),
+                        kind: SymKind::EnumVariant {
+                            parent: s.name.clone(),
+                        },
+                    });
+                    ctx.db.hover.push(HoverEntry {
+                        span: *span,
+                        module_path: mp.to_string(),
+                        text: format!("state `{}` of `{}`", name, s.name),
+                    });
+                    ctx.db.members.push(MemberFact {
+                        owner: s.name.clone(),
+                        name: name.clone(),
+                        identity: format!(
+                            "state:{}::{}.State.{}",
+                            ctx.scope_identity, s.name, name
+                        ),
+                        kind: MemberKind::Variant,
+                        origin: MemberOrigin::TypeBody,
+                        signature: format!("{}.State.{}", s.name, name),
+                        module_path: mp.to_string(),
+                        span: (*span).into(),
+                    });
+                }
+            }
             for f in &s.fields {
                 ctx.db.defs.push(SymDef {
                     identity: member_identity(&ctx.scope_identity, &s.name, "field", &f.name),
@@ -2661,7 +2790,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         | AST::Stmt::Policy { body, .. }
         | AST::Stmt::TaskGroup { body, .. }
         | AST::Stmt::Layout { body, .. }
-        | AST::Stmt::Caps { body, .. }
+        | AST::Stmt::AuthorityScope { body, .. }
         | AST::Stmt::Transact { body, .. }
         | AST::Stmt::AssumeDet { body, .. } => {
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));

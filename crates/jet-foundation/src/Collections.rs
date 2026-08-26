@@ -32,7 +32,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::DURATION_UNIT_TYPE,
     Syntax::DURATION_RANGE_ERROR_TYPE,
     Syntax::EXPIRING_VALUE_TYPE,
-    Syntax::TYPE_ABILITIES,
+    Syntax::TYPE_AUTHORITY,
     // D-VALIDATE1: the `Validate.over(s)` namespace is compiler-owned; it is
     // not a user-defined data type that can shadow the validation surface.
     Syntax::TYPE_VALIDATE,
@@ -296,8 +296,8 @@ pub fn builtin_method_return(
         Type::String => string_method_return(method, arg_count),
         // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: one ordinary rights value;
         // both operations return another narrowed value of the same type.
-        Type::Named(n) if n == Syntax::TYPE_ABILITIES => match (method, arg_count) {
-            ("with" | "without", 1) => Some(Some(Type::Named(Syntax::TYPE_ABILITIES.to_string()))),
+        Type::Named(n) if n == Syntax::TYPE_AUTHORITY => match (method, arg_count) {
+            ("with" | "without", 1) => Some(Some(Type::Named(Syntax::TYPE_AUTHORITY.to_string()))),
             _ => None,
         },
         Type::Named(n) if n == Syntax::TYPE_ORDERING => match (method, arg_count) {
@@ -965,6 +965,10 @@ pub fn numeric_overflow_method(
         "saturating_add" => ("saturating", "add", false),
         "saturating_sub" => ("saturating", "sub", false),
         "saturating_mul" => ("saturating", "mul", false),
+        // D-PORT-ROTATE1: fixed-width rotations are the standard bit-pattern
+        // methods, carried through the same numeric TIR seam as policy ops.
+        "rotate_left" => ("rotate_left", "rotate", false),
+        "rotate_right" => ("rotate_right", "rotate", false),
         _ => return None,
     })
 }
@@ -989,9 +993,6 @@ fn numeric_method_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
     if matches!(ty, Type::Float | Type::Float32) && nargs == 0 {
         if let "is_nan" | "is_infinite" | "is_finite" = method {
             return Some(Some(Type::Bool));
-        }
-        if matches!(ty, Type::Float) && method == "origin" {
-            return Some(Some(Type::String));
         }
     }
     // D-NUMOPS1: integer bit-population queries (count -> Int).
@@ -1106,10 +1107,10 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "now", 0) if n == crate::Syntax::CLOCK_TYPE => {
             Some(Some(Type::Named("Instant".to_string())))
         }
-        // D-AUTHORITY-WORD2=E: `Abilities.workspace()` constructs the one
+        // D-ABILITY-NAME2=A: `Authority.workspace()` constructs the one
         // named rights carrier. Its narrowing methods are a later slice.
-        (Type::Named(n), "workspace", 0) if n == crate::Syntax::TYPE_ABILITIES => {
-            Some(Some(Type::Named(crate::Syntax::TYPE_ABILITIES.to_string())))
+        (Type::Named(n), "workspace", 0) if n == crate::Syntax::TYPE_AUTHORITY => {
+            Some(Some(Type::Named(crate::Syntax::TYPE_AUTHORITY.to_string())))
         }
         (Type::Named(n), "today", 0) if n == "Date" => Some(Some(Type::Named("Date".to_string()))),
         (Type::Named(n), "home", 0) if n == "Path" => Some(Some(Type::Named("Path".to_string()))),
@@ -2507,7 +2508,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         }
     }
     match recv_ty {
-        Type::Named(n) if n == Syntax::TYPE_ABILITIES && matches!(method, "with" | "without") => {
+        Type::Named(n) if n == Syntax::TYPE_AUTHORITY && matches!(method, "with" | "without") => {
             Some(vec![Type::String])
         }
         Type::Named(n) if n == Syntax::TYPE_ORDERING => match method {

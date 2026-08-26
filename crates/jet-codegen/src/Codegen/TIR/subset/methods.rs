@@ -77,7 +77,7 @@ pub(crate) fn method_call_in_subset(
     // D-AUTHORITY-NAME1=A: the carried Authority value
     // has exactly one instance family. Keep both operations in TIR as ordinary
     // receiver calls; their policy lives in the shared Prelude helpers.
-    if recv_type.as_deref() == Some(Syntax::TYPE_ABILITIES)
+    if recv_type.as_deref() == Some(Syntax::TYPE_AUTHORITY)
         && matches!(method, "with" | "without")
         && args.len() == 1
     {
@@ -1418,13 +1418,13 @@ pub(crate) fn static_method_call_in_subset(
         ("Clock", "new", 1)
             | ("Clock", "system", 0)
             | ("Clock", "now", 0)
-            | (Syntax::TYPE_ABILITIES, "workspace", 0)
+            | (Syntax::TYPE_AUTHORITY, "workspace", 0)
             | ("Date", "today", 0)
             | ("Path", "home", 0)
     ) {
         return true;
     }
-    if type_name == Syntax::TYPE_ABILITIES && method == "from_rights" && args.len() == 1 {
+    if type_name == Syntax::TYPE_AUTHORITY && method == "from_rights" && args.len() == 1 {
         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
     if matches!((type_name, method, args.len()), ("ExpiringValue", "new", 3)) {

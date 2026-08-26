@@ -469,7 +469,7 @@ fn execution_stmt(g: &mut GraphBuilder, src: &str, stmt: &AST::Stmt) -> Executio
         | AST::Stmt::Policy { body, .. }
         | AST::Stmt::TaskGroup { body, .. }
         | AST::Stmt::Layout { body, .. }
-        | AST::Stmt::Caps { body, .. }
+        | AST::Stmt::AuthorityScope { body, .. }
         | AST::Stmt::ComptimeBlock { body, .. }
         | AST::Stmt::ContextBlock { body, .. }
         | AST::Stmt::Live { body, .. }
@@ -569,7 +569,7 @@ fn stmt_execution_anchor(stmt: &AST::Stmt) -> Option<SourceSpan> {
         | AST::Stmt::Policy { span, .. }
         | AST::Stmt::TaskGroup { span, .. }
         | AST::Stmt::Layout { span, .. }
-        | AST::Stmt::Caps { span, .. }
+        | AST::Stmt::AuthorityScope { span, .. }
         | AST::Stmt::ComptimeBlock { span, .. }
         | AST::Stmt::ContextBlock { span, .. }
         | AST::Stmt::Live { span, .. }

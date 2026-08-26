@@ -10,21 +10,21 @@ fn worker_b() {}
 
 fn status_label(status: TaskStatus) String -> {
     if status == {
-        .Running -> { return "running" }
-        .Paused -> { return "paused" }
-        .CancelRequested -> { return "cancel-requested" }
+        .Running -> { "running" }
+        .Paused -> { "paused" }
+        .CancelRequested -> { "cancel-requested" }
+        else -> { "unknown" }
     }
-    return "unknown"
 }
 
 fn outcome_label(outcome: TaskOutcome) String -> {
     if outcome == {
-        .Finished -> { return "finished" }
-        .Panicked(_) -> { return "panicked" }
-        .Cancelled -> { return "cancelled" }
-        .DeadlineBlown -> { return "deadline-blown" }
+        .Finished -> { "finished" }
+        .Panicked(_) -> { "panicked" }
+        .Cancelled -> { "cancelled" }
+        .DeadlineBlown -> { "deadline-blown" }
+        else -> { "unknown" }
     }
-    return "unknown"
 }
 
 fn status_is_paused(status: TaskStatus) Bool -> {
@@ -72,7 +72,11 @@ fn run() {
     probe :: task service_probe()
     print("probe:{probe.join() ?? panic("probe join")}")
 
-    tree.send_durable(a, "ping", key: "k1") ?? panic("durable")
+    delivery :: tree.send_durable(a, "ping", key: "k1") ?? panic("durable")
+    state :: (~delivery).status() ?? panic("delivery status")
+    history :: delivery.events() ?? panic("delivery events")
+    if history.len() == 0 -> panic("delivery history")
+    print("delivery:{state}")
     tree.append_event("pinged") ?? panic("event")
     print("events:{tree.event_count()}")
 

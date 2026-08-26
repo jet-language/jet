@@ -88,7 +88,7 @@ pub const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 /// this larger cap also bounds host startup, IPC, and crash cleanup.
 pub const HOST_PROCESS_TIMEOUT_MS: u64 = 5_000;
 
-/// Abilities a v1 component may negotiate. Later stages extend this set
+/// Authority a v1 component may negotiate. Later stages extend this set
 /// rather than inventing a second plugin system (D-DX5-HOOK1 hybrid law).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Ability {

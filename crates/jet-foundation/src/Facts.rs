@@ -161,6 +161,30 @@ pub enum FactKind {
     Tag,
 }
 
+/// Checked typestate facts. The graph is compile-time metadata only; engines
+/// never receive a state discriminator or transition policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateGraph {
+    pub states: Vec<StateNode>,
+    pub transitions: Vec<StateTransition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateNode {
+    pub name: String,
+    pub terminal: bool,
+    /// `None` means that the declaration has no entry transition, so
+    /// reachability from an initial state is not defined.
+    pub reachable: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateTransition {
+    pub operation: String,
+    pub from: Option<String>,
+    pub to: String,
+}
+
 impl FactKind {
     pub const fn name(self) -> &'static str {
         match self {
@@ -187,6 +211,7 @@ pub struct FactDeclaration {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FactRegistry {
     declarations: BTreeMap<(FactKind, String), FactDeclaration>,
+    state_graphs: BTreeMap<String, StateGraph>,
 }
 
 impl FactRegistry {
@@ -244,6 +269,15 @@ impl FactRegistry {
             })
             .members
             .insert(member);
+    }
+
+    /// Attach the checked graph to its erased state fact row.
+    pub fn set_state_graph(&mut self, name: impl Into<String>, graph: StateGraph) {
+        self.state_graphs.insert(name.into(), graph);
+    }
+
+    pub fn state_graph(&self, name: &str) -> Option<&StateGraph> {
+        self.state_graphs.get(name)
     }
 
     pub fn contains(&self, kind: FactKind, name: &str) -> bool {

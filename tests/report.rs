@@ -288,7 +288,7 @@ fn zero_telemetry_policy_docs_and_source_audit() {
         "reqwest",
         "ureq",
         "curl",
-        "reports.jet-lang.org",
+        "reports.jet-lang.dev",
     ] {
         assert!(
             !report_src.contains(forbidden),
@@ -297,8 +297,8 @@ fn zero_telemetry_policy_docs_and_source_audit() {
     }
 
     let forbidden_endpoints = [
-        "reports.jet-lang.org",
-        "telemetry.jet-lang.org",
+        "reports.jet-lang.dev",
+        "telemetry.jet-lang.dev",
         "/v1/telemetry",
         "sentry.io",
         "crashlytics",

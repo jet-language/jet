@@ -1351,8 +1351,8 @@ mod tests {
         assert_eq!(string_to_upper("\u{A7CF}"), "\u{A7CF}");
         assert_eq!(string_trim("\u{2003}jet\u{2003}"), "jet");
         assert_eq!(string_replace("one two one", "one", "1"), "1 two 1");
-        assert_eq!(string_after("nate@jet.dev", "@"), "jet.dev");
-        assert_eq!(string_before("nate@jet.dev", "@"), "nate");
+        assert_eq!(string_after("nate@jet-lang.dev", "@"), "jet-lang.dev");
+        assert_eq!(string_before("nate@jet-lang.dev", "@"), "nate");
         assert_eq!(string_after("no-at-sign", "@"), "no-at-sign");
         assert_eq!(string_before("no-at-sign", "@"), "no-at-sign");
     }

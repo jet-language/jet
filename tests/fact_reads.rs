@@ -185,8 +185,12 @@ fn registry_derived_plane_reads_are_typed_and_folded() {
 
 #[test]
 fn tracked_binding_origin_reads_the_track_marker() {
-    let source = "fn run() {\n    #Track tracked :: 1.0\n    @origin :: tracked.@track_origin\n    print(@origin.tracked)\n    print(@origin.source ?? \"missing\")\n}\n";
-    tir_support::assert_tiers_agree("tracked-binding-origin", source, "true\ntracked\n");
+    let source = "fn run() {\n    #Track tracked :: 1.0\n    @origin :: tracked.@origin\n    print(@origin?.tracked ?? false)\n    print(@origin?.source ?? \"missing\")\n    print(@origin?.line ?? 0)\n    print(@origin?.column ?? 0)\n    print(@origin?.ambiguity ?? false)\n}\n";
+    tir_support::assert_tiers_agree(
+        "tracked-binding-origin",
+        source,
+        "true\ntracked\n2\n12\nfalse\n",
+    );
     let output = jet::compile(source).expect("a tracked binding should publish its typed origin");
     assert!(!has_runtime_fact_dispatch(&output.rust));
 }
@@ -271,7 +275,7 @@ fn typed_fact_fixture_is_accepted_by_comptime_repl_and_web() {
 #[test]
 fn derive_bodies_read_the_same_typed_fact() {
     let output = jet::compile(
-        "derive T.Debug {\n    states :: T.@states\n    fn derived_fact_read() String -> \"ok\"\n}\n\nstate Report { Draft, Published }\n\n#Debug\nstruct Report {\n    value: Int\n}\n\nfn run() {}\n",
+        "derive T.Debug {\n    states :: T.@states\n    fn derived_fact_read() String -> \"ok\"\n}\n\n#Debug\nstruct Report {\n    state { Draft, Published }\n    value: Int\n}\n\nfn run() {}\n",
     )
     .expect("derive fact read should compile");
     assert!(output.rust.contains("derived_fact_read"));

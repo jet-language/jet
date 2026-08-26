@@ -2559,7 +2559,6 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     TNumericOp::FloatToInt { .. } | TNumericOp::FloatNarrow { .. } => recv.ty.is_float(),
                     TNumericOp::TryFrom { .. } => recv.ty.is_integer(),
                     TNumericOp::InlineRange { .. } => recv.ty.is_integer(),
-                    TNumericOp::Origin { .. } => true,
                 }
         }
         TExprKind::DistinctConvert { arg, .. } | TExprKind::DistinctRaw(arg) => {

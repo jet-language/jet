@@ -1,5 +1,5 @@
+use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TirWorklist;
-use crate::Codegen::TIR::{TBindingOrigin, TLocal};
 use crate::AST::{Expr, LValue, Stmt, Type};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 /// Per-function lowering environment: a local name -> (structured slot, type).
 /// Built from params, extended by `let` bindings. The slot already accounts for
-/// parameter deref and binding provenance, so every TIR consumer sees the same
+/// parameter deref, so every TIR consumer sees the same
 /// local facts.
 ///
 /// The type is `Option<Type>`: a binding can carry a *resolved* type, or `None`
@@ -199,11 +199,6 @@ impl LowerEnv {
             Some((slot, _)) => slot.clone(),
             None => TLocal::user(name),
         }
-    }
-    pub(super) fn origin_of(&self, name: &str) -> Option<TBindingOrigin> {
-        self.locals
-            .get(name)
-            .and_then(|(slot, _)| slot.origin.clone())
     }
     pub(super) fn place_of(&self, name: &str) -> String {
         self.local_of(name).rust_place()
@@ -414,7 +409,7 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
+            | Stmt::AuthorityScope { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
             | Stmt::AssumeDet { body, .. } => work.extend(body.iter().rev()),

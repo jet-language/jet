@@ -6,7 +6,7 @@ use jet_pkg_model::Package::PackageFacts;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 14;
+pub const SCHEMA_VERSION: u32 = 15;
 
 /// Canonical JSON values for additive tooling projections. Keeping this small
 /// value model in the semantic-index crate prevents CLI consumers from
@@ -285,6 +285,7 @@ pub struct TypeDossier {
     /// `target`, so a dossier is where a reviewer sees every expert escape
     /// hatch at once.
     pub bypass_facts: Vec<BypassFact>,
+    pub state_graphs: Vec<StateGraphFact>,
 }
 
 /// One named definition in the program.
@@ -439,6 +440,31 @@ pub struct OutputEntryFact {
     pub effects: Vec<String>,
 }
 
+/// One state node in the checked typestate graph.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateNodeFact {
+    pub name: String,
+    pub terminal: bool,
+    pub reachable: Option<bool>,
+    pub span: SourceSpan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateTransitionFact {
+    pub operation: String,
+    pub from: Option<String>,
+    pub to: String,
+}
+
+/// Generated state-diagram data for one declared typestate owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateGraphFact {
+    pub owner: String,
+    pub module_path: String,
+    pub states: Vec<StateNodeFact>,
+    pub transitions: Vec<StateTransitionFact>,
+}
+
 /// Versioned semantic index over one checked program bundle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemIndex {
@@ -456,6 +482,7 @@ pub struct SemIndex {
     bypasses: Vec<BypassFact>,
     instances: Vec<InstanceFact>,
     outputs: Vec<OutputFact>,
+    state_graphs: Vec<StateGraphFact>,
     /// Canonical Package/Config facts for the owning source tree, when this
     /// index was built for a package entry.
     package_facts: Option<PackageFacts>,
@@ -491,6 +518,7 @@ impl SemIndex {
             bypasses: Vec::new(),
             instances: Vec::new(),
             outputs: Vec::new(),
+            state_graphs: Vec::new(),
             package_facts: None,
             workspace_overlay_policy: None,
         }
@@ -514,6 +542,14 @@ impl SemIndex {
     }
     pub fn outputs(&self) -> &[OutputFact] {
         &self.outputs
+    }
+
+    pub fn state_graphs(&self) -> &[StateGraphFact] {
+        &self.state_graphs
+    }
+
+    pub(crate) fn set_state_graphs(&mut self, graphs: Vec<StateGraphFact>) {
+        self.state_graphs = graphs;
     }
 
     pub fn package_facts(&self) -> Option<&PackageFacts> {
@@ -635,6 +671,12 @@ impl SemIndex {
                 .cmp(&b.module_path)
                 .then(a.span.start.cmp(&b.span.start))
         });
+        let state_graphs = self
+            .state_graphs
+            .iter()
+            .filter(|graph| graph.owner == owner)
+            .cloned()
+            .collect();
         TypeDossier {
             schema_version: SCHEMA_VERSION,
             target: owner.to_string(),
@@ -642,6 +684,7 @@ impl SemIndex {
             members,
             references,
             bypass_facts,
+            state_graphs,
         }
     }
 

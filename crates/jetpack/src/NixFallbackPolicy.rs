@@ -162,7 +162,7 @@ pub(crate) fn run(
             "--system",
             &identity.system,
         ])
-        .arg(input)
+        .arg(&input)
         .env_remove("NIX_PATH")
         .env_remove("NIX_CONFIG")
         .env_remove("NIX_USER_CONF_FILES")
@@ -209,6 +209,7 @@ pub(crate) fn run(
         "nix.fallback.locked-input".into(),
         identity.locked_nixpkgs_input(),
     );
+    facts.insert("nix.fallback.request".into(), input);
     facts.insert("nix.fallback.system".into(), identity.system.clone());
     facts.insert("nix.fallback.attr".into(), identity.attrpath());
     facts.insert("nix.fallback.lock.sha256".into(), identity.lock_sha256.clone());

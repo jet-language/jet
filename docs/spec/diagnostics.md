@@ -323,7 +323,14 @@ reports, not compiler warnings.
 | E0148 | sema  | a str-match pattern used in an `if == {}` table with no `else` arm (D-PARSESTR1) |
 | E0149 | sema  | a runtime `String` used where `SQL`/`HTML` is expected (D-TYPEDTEXT1) |
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
-| E0151 | sema  | typestate: `#State(X)` or `#Transition(A, B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
+| E0151 | sema  | typestate: `#State(X)` or `#Transition(A, B)` references a state not in the owning `state { … }` section (D-STATE-HOME1=A) |
+| E0157 | parse | top-level typestate companion declaration (D-STATE-HOME1=A) |
+| E0158 | parse | typestate state section attached to an ineligible declaration (D-STATE-HOME1=A) |
+| E0159 | sema  | typestate marker on an owner without a state section (D-STATE-HOME1=A) |
+| E0166 | sema  | duplicate typestate name (D-STATE-HOME1=A) |
+| E0167 | sema  | typestate name collides with a struct member (D-STATE-HOME1=A) |
+| E0168 | parse | duplicate typestate state section (D-STATE-HOME1=A) |
+| E0169 | sema  | empty typestate state section (D-STATE-HOME1=A) |
 | E0152 | sema  | a bare `String`, interpolated pattern, or invalid pattern is used as a typed `Regex` literal (D-REGEX-LIT1) |
 | E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |
 | E0155 | sema  | typed URL, Path, or DateTime literal is invalid or contains unsupported interpolation (D-BOUND-HEAD1) |
@@ -343,8 +350,8 @@ reports, not compiler warnings.
 | L0103 | sema  | unused import (D-LINT-UNUSED1, warning) |
 | L0104 | sema  | unused private function (D-LINT-UNUSED1, warning) |
 | L0105 | sema  | unreachable package-scoped export (D-STRUCT-LIVE1, warning) |
-| L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S, …)` — a dead-end state (D-STATE-DECL, warning) |
 | L0152 | sema  | typestate: two paths meet and leave one value in different states, so it is untracked from there (D-STATE1, D-FACT-FLOW1, warning) |
+| L0153 | sema  | typestate: a declared state is unreachable from every entry transition (D-STATE-TERMINAL1, warning) |
 | E0201 | sema  | the move marker `^` is required; value can't be copied |
 | E0202 | sema  | the write-access marker `&` is required at call site — write access not granted |
 | E0203 | sema  | move marker `^` used on a non-consuming parameter |
@@ -546,11 +553,11 @@ reports, not compiler warnings.
 | E0704 | jet   | foreign crate fetch/build failed (cargo detail indented) |
 | E0705 | jet   | `= "rust::path"` doesn't match the Jet signature |
 | E0740 | sema  | a function's inferred effects exceed its declared `-[…]>` bound (D-EFF1) |
-| E0741 | sema  | retired duplicate of the unified `#Abilities` ability check (D-AUTHORITY-SCOPE1) |
+| E0741 | sema  | retired duplicate of the unified `#FX` authority check (D-AUTHORITY-SCOPE1) |
 | E0742 | sema  | a trait-method impl uses effects beyond the trait method's declared bound (D-EFF3) |
 | E0743 | sema  | dynamic trait dispatch has no declared effect bound under an enclosing effect ceiling (D-EFF3) |
-| E0711 | sema  | the `Abilities` handle bound by a named `#Abilities(…)` region escapes its scope — returned, stored, or captured (D-AUTHORITY-SCOPE1) |
-| E0712 | sema  | an effect used inside a `#Abilities(…)` region has no ability — it isn't in the ability list (D-AUTHORITY-SCOPE1) |
+| E0711 | sema  | the `Authority` handle bound by a named `#FX(…)` region escapes its scope — returned, stored, or captured (D-AUTHORITY-SCOPE1) |
+| E0712 | sema  | an effect used inside a `#FX(…)` region has no authority — it isn't in the authority list (D-AUTHORITY-SCOPE1) |
 | E0721 | sema  | a tagged value reaches a destination denied by that tag declaration (D-TAG-SURFACE1) |
 | E0722 | sema  | a `#Credential` value reaches a log, display, or serialization destination (D-TAG-SURFACE1) |
 | E0725 | sema  | a `#Replayable` function reaches ambient `Time`/`Rand`/`Net`/`IO` (D-REPLAY1) |
@@ -663,7 +670,7 @@ reports, not compiler warnings.
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
 | E1801 | repl  | per-input fuel cap hit — snippet ran more than ~10M interpreter steps |
 | E1802 | repl  | hard-rejected feature in the REPL (FFI, tasks, `#Unsafe`, OS-level APIs) |
-| E1803 | repl  | a REPL Core effect lacks lexical or invocation ability, or its exact operation/resource was denied |
+| E1803 | repl  | a REPL Core effect lacks lexical or invocation authority, or its exact operation/resource was denied |
 | E0801 | sema  | lambda parameter type unknown |
 | E0803 | sema  | calling a value that isn't a function |
 | E-CALL-VALUE | parse | function values use `.call(…)`, not the retired adjacent-call spelling `)(` (D-CALLVALUE1=B) |
@@ -983,7 +990,8 @@ copy:
 
 ## Callable and control syntax diagnostics
 
-These diagnostics cover the body rules ratified by D-BODY-LAST1=B,
+These diagnostics cover the body rules ratified by D-BODY-LAST1=B and amended
+by D-TAIL-RETURN1=A,
 D-SIG-SHAPE1=B, and D-CALLABLE-ONE1=A, plus the existing control rules in D-ARROW-CONTROL1,
 D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 
@@ -997,10 +1005,11 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E0071 | This retired effect-only result-arrow teaching is no longer emitted. | Effect-only one-line bodies use `->` for one statement; braces hold multiple statements or a scope. | Follow the current one-line body rule. |
 | E0072 | This collecting loop cannot return a List because it has no finite exhaustion edge. | A collecting loop must finish after a statically finite source or C-style condition. Bare infinite and condition-only loops do not provide that boundary. | Remove `->`, or iterate a finite source. Return one final value from an ordinary loop with `break value`. |
 | E0073 | This collecting loop path produces no item. | Every accepted iteration must contribute one non-unit value unless `next` explicitly omits it. | Return a value on this path, or use `next` to omit the item. Remove `->` if the loop only performs effects. |
+| E0114 | A value-expected block reaches its end without a value. | Its final expression is the block value; a statement or semicolon-terminated expression yields unit. | Put one unadorned expression last, or use `return ...` for an early exit. |
 | E0074 | This collecting loop produces incompatible item types. | One collecting loop builds one `[T]`, so every contributed item must have the same type. | Convert the items to one type, or split the operations into separate loops. |
 | E0075 | This collecting loop cannot use a break payload. | Its result is already the accumulated `[T]`. A second payload would give the same exit two result channels. | Write `break` to return the accumulated list, or return one final value from an ordinary loop. |
 | E0076 | This result loop has a missing or incompatible break payload. | An ordinary loop used as a value has one final result type. Every exit that targets it must provide that type. | Add the missing payload and make every payload the same type, or target an inner effect-only loop. |
-| E0077 | The `#Grant` scope marker is retired. | `#Abilities` now narrows a block and binds an `Abilities` handle when its head has a name. | Write `#Abilities(abilities: FS, Net) { ... }`. |
+| E0077 | The `#Grant` scope marker is retired. | `#FX` now narrows a block and binds an `Authority` handle when its head has a name. | Write `#FX(grant: FS, Net) { ... }`. |
 | E0078 | This finite value loop needs a written exhaustion route, or cannot use an immediate `?? next`/`?? break` route. | A finite source can end without a matching `break`; `next` and `break` after the closing brace would control the loop that just closed instead of naming a target. | Add `?? fallback` after the closing `}`, or write a labeled search such as `found :: loop { ... break(found, value) }`. |
 | E0079 | This effect-only loop uses a result exit. | A break payload makes an effect-only loop a value expression. | Bind the loop with `::`, or remove the payload. |
 | E0080 | A braced callable with a non-unit success result needs `->` before its body. | The body arrow marks a declared success value; unit and unit-fallible callables keep bare braces. | Write `fn name(...) Type -> { ... }`; keep `fn name(...) { ... }` and `fn name(...) Error! { ... }` bare. |
@@ -1715,7 +1724,7 @@ signature.
 | E0383 | This source loop uses a retired comma between its binding and source. | A source loop uses `in` to mark the binding/source boundary; commas remain for later clauses such as a stride. | Replace the comma after the binding with `in`, for example `loop item in items { … }`. |
 | E0384 | Jet has no membership operator here; `in` only joins a source-loop binding to its source. | Expression `x in xs` has no operator meaning in Jet. Collection membership is a method call. | Write `xs.contains(x)` (the `.contains(x)` method) instead of `x in xs`. |
 | E0376 | C-style counter loop headers are retired. | A three-slot loop header is binding, source, and step rule — not init, condition, and assignment (D-LOOP-HEADER3=D). | Write `loop i in 0..<n { … }` or `loop i in 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state. |
-| E0381 | A fact about an ordinary `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause or a second parameter list. | Ordinary marker arguments and facts share one named-parameter list; checked text heads use the separate `marker Name on [.Text] { check … hole … }` form (D-BOUND-SINK1=A). | For an ordinary marker, use `@sites: […]` or `@repeatable: true`; for a checked text head, write `marker Name on [.Text] { check … hole … }`. |
+| E0381 | A marker declaration used a retired trailing `on` clause, second parameter list, or checked-text contract. | D-MARKER-SITES1=B gives every marker one named parameter list: ordinary names have types, and `@` names have fixed metadata values. | Write `marker Name(args..., @sites: [...], @repeatable: true, ...)`; checked-text marker declarations have no replacement form. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 
@@ -1737,12 +1746,12 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0740 | `{fn}` uses the effect `{effect}`, which its signature doesn't allow. | A `-[…]>` list is an upper bound on what the body may do; the inferred effects must be a subset. An effect the body reaches that the bound omits breaks that contract. | Add the named effect to the `-[…]>` list, or stop using it (drop the Core call that introduces it, or move it out of this function). |
-| E0741 | *Retired by D-AUTHORITY-SCOPE1.* | The unified `#Abilities` subset check reports E0712 for bare and named regions. | Fix the E0712 diagnostic, then add the effect to the `#Abilities(…)` list or move the work outside the region. |
+| E0741 | *Retired by D-AUTHORITY-SCOPE1.* | The unified `#FX` subset check reports E0712 for bare and named regions. | Fix the E0712 diagnostic, then add the effect to the `#FX(…)` list or move the work outside the region. |
 | E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`fn hash(self) -[]>`, `fn render(self) -[GPU]>`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
 | E0743 | Dynamic call `{trait}::{method}` has no effect bound. | A trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound (D-EFF3). | Declare an effect row on the trait method, such as `-[]>` for pure dispatch, or move the dynamic call outside the bounded function. |
 | E0745 | *Retired by D-SHAPE8=A.* | This code diagnosed the former contradiction between `#Pure fn` and a non-empty `#(…)` effect list. Both spellings are now rejected earlier by E0066. | Use one canonical effect arrow: `-[]>` for an empty row or `-[Effects]>` for a bounded row. |
-| E0711 | The `Abilities` handle `{handle}` can't escape its `#Abilities` block. | `#Abilities(…)` revokes the `Abilities` at scope end (RAII); returning, storing, or capturing the handle would let revoked rights outlive the scope. | Use the handle only inside the `#Abilities` block, or perform the work that needs it there. |
-| E0712 | This `#Abilities` region uses the effect `{effect}`, which it has no ability for. | `#Abilities(…)` allows exactly the listed effects; an effect reached inside — even transitively through a call — that the list omits has no ability backing it. | Add the named effect to the `#Abilities(…)` list, or move that work outside the region. |
+| E0711 | The `Authority` handle `{handle}` can't escape its `#FX` block. | `#FX(…)` revokes the `Authority` at scope end (RAII); returning, storing, or capturing the handle would let revoked rights outlive the scope. | Use the handle only inside the `#FX` block, or perform the work that needs it there. |
+| E0712 | This `#FX` region uses the effect `{effect}`, which has no authority backing. | `#FX(…)` allows exactly the listed effects; an effect reached inside — even transitively through a call — that the list omits has no authority backing it. | Add the named effect to the `#FX(…)` list, or move that work outside the region. |
 | E0721 | A `{tag}` value is denied at `{api}`. | The declaration for `{tag}` lists a destination that covers `{api}`. The tag spreads with derived data until an exact-tag scrubber removes it. | Remove the destination use, change the declaration if its policy is wrong, or pass the value through `#Scrub({tag})`. |
 | E0722 | A `Credential` value is denied at `{sink}`. | The Prelude `Credential` tag denies logging, display, and serialization destinations because they would leak a secret. | Log a non-secret field, or pass the value through a matching `#Scrub(Credential)` function. |
 | E0725 | `{fn}` is `#Replayable` but reaches `{effect}`. | `#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge. | Inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function. |
@@ -1837,21 +1846,43 @@ codegen** (zero runtime cost). When the checker cannot follow a value's state
 precisely (it escapes into a field, a non-local receiver, a state-divergent branch
 join) it stays silent rather than risk a false error on correct code.
 
-States are declared in a dedicated block (D-STATE-DECL, option B):
+States are declared once in the owning named struct body (D-STATE-HOME1=A):
 
 ```jet
-state Reservation { Pending, Confirmed, CheckedIn }
+struct Reservation {
+    state { Pending, Confirmed, CheckedIn }
+    guest: String
+}
 ```
 
-When a `state TypeName { … }` block is present, every `#State(X)` /
+When a `state { … }` section is present, every `#State(X)` /
 `#Transition(A, B)` marker on `TypeName` methods must reference a name from the declared set
 (unknown name = **E0151**). A declared state with no outgoing `#Transition(S, …)`
-is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
+is a terminal state. The checked graph records this fact for reflection and
+semantic tools.
+
+The retired top-level companion form `state TypeName { … }` receives **E0157**
+with the exact nested rewrite. Enums, traits, aliases, impls, modules, and
+anonymous shapes receive **E0158** if they contain a state section. Empty,
+repeated, duplicate-name, and member-collision cases receive **E0169**,
+**E0168**, **E0166**, and **E0167** respectively. A typestate marker on a
+struct without its section receives **E0159**.
+
+When entry transitions exist, a state that no entry path reaches emits the
+separate reachability warning **L0153**. A state graph with no entry transition
+does not invent an initial state and does not emit that warning.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0150 | `{op}` needs `{type}` in state `{required}`, but `{value}` is in state `{current}`. | Typestate (D-STATE1): an operation is valid only in a given state; calling it out of order is the bug typestate prevents. | Transition the value into `{required}` first — call the transition that reaches it (e.g. `pay` to reach `Confirmed`). |
-| E0151 | `{state}` is not a declared state of `{type}`. | Typestate (D-STATE-DECL): `state {type} { … }` defines the valid state labels; a name not in that set is likely a typo — a phantom state no transition can reach. | Correct the spelling, or add the name to the `state {type} { … }` declaration. |
+| E0151 | `{state}` is not a declared state of `{type}`. | Typestate (D-STATE-HOME1=A): `struct {type} { state { … } }` defines the valid state labels; a name not in that set is likely a typo — a phantom state no transition can reach. | Correct the spelling, or add the name to the `state { … }` section inside `struct {type}`. |
+| E0157 | `state {type} { … }` is not a type declaration. | Typestate facts belong to the struct that owns them; a sibling declaration repeats the type name and creates a false namespace boundary. | Write `struct {type}` with `state {states}` inside its body. |
+| E0158 | `state { … }` is not valid inside a {owner}. | State sections attach only to named struct bodies; other declarations have no state-set owner. | Move `state { … }` into the named struct body. |
+| E0159 | `{type}` has a `#State` or `#Transition` marker but no `state { … }` section. | Markers describe facts owned by the struct; without its declared set the marker cannot be checked or reflected. | Add one `state { Name, … }` section inside `struct {type}`, or remove the typestate marker. |
+| E0166 | `state {state}` is declared more than once for `{type}`. | The owning struct has one bounded state set, so a repeated name would make `Type.State.{state}` ambiguous. | Keep one declaration of `{state}` in the struct's `state { … }` section. |
+| E0167 | `state {state}` collides with a member of `{type}`. | State facts and ordinary members share the owning type's namespace. | Rename the state or the member so `Type.State.{state}` is unique. |
+| E0168 | `{type}` may declare only one `state { … }` section. | The state set is one erased fact row owned by the struct. | Merge the state names into one `state { … }` section. |
+| E0169 | `{type}` has an empty `state { … }` section. | An empty state set cannot validate markers or provide a useful reflected fact. | Add at least one state name, or remove the section. |
 | E0155 | a typed URL, Path, or DateTime literal is invalid or contains unsupported interpolation. | Typed literal heads are checked before the program runs; URL and Path holes must stay inside components, and DateTime heads must be complete. | Write a valid typed literal with holes only in URL or Path components, or parse a runtime `String` explicitly. |
 | E0156 | this operation would loosen `{plane}`. | knowledge only tightens silently; loosening `{plane}` must be named with a written gate. | write `{gate}(value)` at this boundary. |
 | E0153 | protocol `{name}` failed to expand into handle types. | Protocol/session types (D-PROTO1): the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the `protocol` block — a generated fragment did not parse. | Check the protocol declaration for typos; if this persists, file a bug. |
@@ -1862,8 +1893,8 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 | E0164 | compound assignment can't target an indexed slot. | A compound update reads an indexed slot before it writes; that read can panic when a map key is missing. | Write a total update, such as `map[key] = (map.get(key) ?? 0) {op} 1`. |
 | E0165 | compound assignment needs a mutable place. | S17 permits updates only on a mutable name or an `&` parameter; a computed value has no place to update. | Bind the value with `:=`, then write `name {op} value`. |
 | E0154 | A protocol line does not name `client:` or `server:` as its sender. | A two-endpoint protocol needs only the sender. The other endpoint is the receiver, so a transport arrow repeats information. | Write `client: Message(…)` when the client sends, or `server: Message(…)` when the server sends. |
-| L0151 | `{state}` (in `state {type}`) has no outgoing transition. | Typestate (D-STATE-DECL): a state with no `#Transition({state}, …)` is a dead end — a value that reaches it can never advance further. | Add `#Transition({state}, NextState) fn …`, or remove `{state}` from the declaration. |
 | L0152 | `{value}` ends in state `{one}` on one path and `{other}` on another. | Typestate (D-STATE1, D-FACT-FLOW1): after two paths meet, a state holds only when both paths agree — here they do not, so the value is untracked from this point and later state checks on it stay silent. | Bring both paths to the same state before they meet, or do the work that needs the state inside the path that reaches it. |
+| L0153 | `{state}` (in `state {type}`) is unreachable from every entry transition. | When a state graph has entry transitions, no entry path reaches this state. It may be an unused branch or a state name that is not connected to the protocol. | Add an entry or transition path to `{state}`, or remove it from the declaration. |
 
 `check_in` requires a `Confirmed` reservation, but the value is still `Pending`:
 
@@ -1925,7 +1956,7 @@ REPL step number in place of a file span (`<repl:N>`).
 |------|------|-----|-----|
 | E1801 | This snippet ran more than `{N}` interpreter steps without finishing. | The REPL interpreter caps each input to avoid hanging your session; this almost always means a loop that never ends. | Check any loops for a condition that never becomes false. Use `:run` to allow unbounded execution (compiles and runs instead of interpreting). |
 | E1802 | The REPL interpreter can't run `{feature}`. | The REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler. | Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler. |
-| E1803 | `{Root}.{Operation}` for `{resource}` was denied. | REPL host effects require both an enclosing `#Abilities` and runtime invocation ability; denied operations stop before touching host state. | Approve the exact operation interactively, or restart with the matching `jet repl --allow-{root}` flag. `--deny-{root}` always wins. |
+| E1803 | `{Root}.{Operation}` for `{resource}` was denied. | REPL host effects require both an enclosing `#FX` and runtime invocation authority; denied operations stop before touching host state. | Approve the exact operation interactively, or restart with the matching `jet repl --allow-{root}` flag. `--deny-{root}` always wins. |
 
 ## Source import diagnostics (D-JPK-IMPORTTODO1, D-MIGRATE-SRC1)
 

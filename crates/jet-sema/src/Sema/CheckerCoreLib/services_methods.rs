@@ -258,7 +258,7 @@ impl<'a> Checker<'a> {
                         &mut args[2],
                     );
                 }
-                service_result_ty(Type::Named("ServiceReceipt".to_string()))
+                service_result_ty(Type::Named("Delivery".to_string()))
             }
             "receive" => {
                 if self.service_method_arity("ServiceTree.receive", args, 1, span) {
@@ -658,7 +658,7 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg("ServiceRuntime.send", 2, &Type::String, &mut args[2]);
                 }
                 Some(Some(result_ty(
-                    Type::Named("ServiceReceipt".to_string()),
+                    Type::Named("Delivery".to_string()),
                     Type::Named("ServiceError".to_string()),
                 )))
             }
@@ -670,7 +670,9 @@ impl<'a> Checker<'a> {
                         self.infer(&mut arg.expr);
                     }
                 } else {
-                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    let expected = Type::Named("Delivery".to_string());
+                    self.expect_core_arg(method, 0, &expected, &mut args[0]);
+                    args[0].convention = crate::AST::AccessConvention::Move;
                 }
                 if method == "commit" {
                     Some(Some(result_ty(
@@ -679,7 +681,7 @@ impl<'a> Checker<'a> {
                     )))
                 } else {
                     Some(Some(result_ty(
-                        Type::Named("ServiceReceipt".to_string()),
+                        Type::Named("Delivery".to_string()),
                         Type::Named("ServiceError".to_string()),
                     )))
                 }
@@ -696,22 +698,64 @@ impl<'a> Checker<'a> {
                         self.infer(&mut arg.expr);
                     }
                 } else {
-                    self.expect_core_arg("ServiceRuntime.retain", 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg(
+                        "ServiceRuntime.retain",
+                        0,
+                        &Type::Named("Delivery".to_string()),
+                        &mut args[0],
+                    );
+                    args[0].convention = crate::AST::AccessConvention::Move;
                 }
                 Some(Some(result_ty(
-                    Type::Named("ServiceReceipt".to_string()),
+                    Type::Named("Delivery".to_string()),
                     Type::Named("ServiceError".to_string()),
                 )))
             }
             _ => None,
         }
     }
+
+/// D-SERVICE-RECEIPT2=A: one Delivery handle owns every observation and
+/// control operation. Observation does not cancel accepted work.
+pub(crate) fn check_service_delivery_method(
+    &mut self,
+    method: &str,
+    args: &mut Vec<crate::AST::CallArg>,
+    span: Span,
+) -> Option<Option<Type>> {
+    let result = |ty| {
+        Some(Some(result_ty(
+            ty,
+            Type::Named("ServiceError".to_string()),
+        )))
+    };
+    match method {
+        "wait" | "status" => {
+            self.service_method_arity(&format!("Delivery.{method}"), args, 0, span);
+            result(Type::Named("DeliveryState".to_string()))
+        }
+        "retry" | "cancel" => {
+            self.service_method_arity(&format!("Delivery.{method}"), args, 0, span);
+            result(Type::Named("Delivery".to_string()))
+        }
+        "receipt" => {
+            self.service_method_arity("Delivery.receipt", args, 0, span);
+            result(Type::Named("DeliveryReceipt".to_string()))
+        }
+        "events" => {
+            self.service_method_arity("Delivery.events", args, 0, span);
+            result(Type::List(Box::new(Type::Named("DeliveryEvent".to_string()))))
+        }
+        _ => None,
+    }
+}
+
 }
 
 pub fn service_runtime_method_return_ty(method: &str) -> Option<Type> {
     match method {
         "send" | "retry" | "dead_letter" | "retain" => Some(result_ty(
-            Type::Named("ServiceReceipt".to_string()),
+            Type::Named("Delivery".to_string()),
             Type::Named("ServiceError".to_string()),
         )),
         "commit" => Some(result_ty(

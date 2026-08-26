@@ -254,14 +254,14 @@ fn run() -[!Mem.Alloc(above: {bound})]> {{
     assert!(facts.solved["run"].contains("IO"));
 }
 
-/// I3: a `#Abilities(…)` region lowers to a plain lexical block — the generated Rust
+/// I3: a `#FX(…)` region lowers to a plain lexical block — the generated Rust
 /// carries no effect machinery (no marker, no `#(`, no effect runtime), and the
 /// body runs unchanged.
 #[test]
 fn caps_region_erases_to_plain_block() {
     let src = r#"
 fn run() {
-    #Abilities(IO) {
+    #FX(IO) {
         print("inside");
     }
     print("outside");
@@ -269,8 +269,8 @@ fn run() {
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
     assert!(
-        !rust.contains("Caps"),
-        "generated Rust must not mention Caps:\n{rust}"
+        !rust.contains("AuthorityScope"),
+        "generated Rust must not mention AuthorityScope:\n{rust}"
     );
     assert!(
         !rust.contains("#("),
@@ -560,14 +560,14 @@ fn run() { print(caller()); }
 }
 
 /// A lambda callback's effects flow into the enclosing function too (the lambda
-/// body is walked inline), so a `#Abilities` region catches an effect inside it.
+/// body is walked inline), so a `#FX` region catches an effect inside it.
 #[test]
 fn lambda_callback_flows_into_region() {
     let src = r#"
 use core.files as fs
 fn apply(f: fn() String) String { return f(); }
 fn run() {
-    #Abilities(Net) {
+    #FX(Net) {
         r :: apply(() -> fs.read("x") ?? "");
         print(r);
     }
@@ -613,13 +613,13 @@ fn run() { print(readit("x")); }
     );
 }
 
-/// A `#Abilities(…)` region whose body stays within the ability set compiles clean.
+/// A `#FX(…)` region whose body stays within the ability set compiles clean.
 #[test]
 fn caps_region_within_set_ok() {
     let src = r#"
 fn announce(n: Int) -[IO]> { print("{n}"); }
 fn run() {
-    #Abilities(IO) {
+    #FX(IO) {
         announce(1);
     }
 }
@@ -631,13 +631,13 @@ fn run() {
     );
 }
 
-/// An effect used inside a `#Abilities(…)` region but not in its ability list is E0712.
+/// An effect used inside a `#FX(…)` region but not in its ability list is E0712.
 #[test]
 fn caps_region_out_of_set_is_e0712() {
     let src = r#"
 use core.files as fs
 fn run() {
-    #Abilities(Net) {
+    #FX(Net) {
         text :: fs.read("x") ?? "";
         print(text);
     }
@@ -650,7 +650,7 @@ fn run() {
     );
 }
 
-/// A `#Abilities(…)` region restriction is transitive: an effect reached only through
+/// A `#FX(…)` region restriction is transitive: an effect reached only through
 /// a call still trips E0712.
 #[test]
 fn caps_region_transitive_is_e0712() {
@@ -658,7 +658,7 @@ fn caps_region_transitive_is_e0712() {
 use core.files as fs
 fn helper(p: String) String { return fs.read(p) ?? ""; }
 fn run() {
-    #Abilities(IO) {
+    #FX(IO) {
         text :: helper("x");
         print(text);
     }
@@ -697,8 +697,8 @@ fn declared_effect_leaf_is_checked_everywhere() {
 effect Log.Audit
 fn audit() -[Log.Audit]> {}
 fn run() {
-    #Abilities(Log.Audit) { audit() }
-    #Abilities(caps: Log.Audit) { audit() }
+    #FX(Log.Audit) { audit() }
+    #FX(caps: Log.Audit) { audit() }
 }
 "#;
     assert!(
@@ -709,8 +709,8 @@ fn run() {
 
     for source in [
         "effect Log.Audit\nfn audit() -[Log.Aduut]> {}\nfn run() {}\n",
-        "effect Log.Audit\nfn run() { #Abilities(Log.Aduut) {} }\n",
-        "effect Log.Audit\nfn run() { #Abilities(caps: Log.Aduut) {} }\n",
+        "effect Log.Audit\nfn run() { #FX(Log.Aduut) {} }\n",
+        "effect Log.Audit\nfn run() { #FX(caps: Log.Aduut) {} }\n",
     ] {
         let diagnostics = jet::compile(source).expect_err("typo under a checked root must fail");
         let error = diagnostics
@@ -819,14 +819,14 @@ fn dependency_effect_declaration_joins_the_package_view() {
 
 // ── Scoped capabilities (D-SCAP1) ─────────────────────────────────────────────
 
-/// D-AUTHORITY-SCOPE1: a named `#Abilities(caps: FS) { … }` whose body stays within
+/// D-AUTHORITY-SCOPE1: a named `#FX(caps: FS) { … }` whose body stays within
 /// the listed set compiles clean.
 #[test]
 fn grant_within_set_ok() {
     let src = r#"
 use core.files as fs
 fn run() {
-    #Abilities(caps: FS, IO) {
+    #FX(caps: FS, IO) {
         text :: fs.read("x") ?? "";
         print(text);
     }
@@ -839,14 +839,14 @@ fn run() {
     );
 }
 
-/// D-AUTHORITY-SCOPE1: an effect used inside a named `#Abilities(…)` that the list
+/// D-AUTHORITY-SCOPE1: an effect used inside a named `#FX(…)` that the list
 /// doesn't authorize has no authority — E0712.
 #[test]
 fn grant_out_of_set_is_e0712() {
     let src = r#"
 use core.files as fs
 fn run() {
-    #Abilities(caps: Net) {
+    #FX(caps: Net) {
         text :: fs.read("x") ?? "";
         print(text);
     }
@@ -859,7 +859,7 @@ fn run() {
     );
 }
 
-/// D-AUTHORITY-SCOPE1: the named `#Abilities` restriction is transitive — an effect reached only through
+/// D-AUTHORITY-SCOPE1: the named `#FX` restriction is transitive — an effect reached only through
 /// a call still trips E0712.
 #[test]
 fn grant_transitive_is_e0712() {
@@ -867,7 +867,7 @@ fn grant_transitive_is_e0712() {
 use core.files as fs
 fn helper(p: String) String { return fs.read(p) ?? ""; }
 fn run() {
-    #Abilities(caps: IO) {
+    #FX(caps: IO) {
         text :: helper("x");
         print(text);
     }
@@ -880,13 +880,13 @@ fn run() {
     );
 }
 
-/// D-AUTHORITY-SCOPE1: the Abilities handle may not escape its block — aliasing it to
+/// D-AUTHORITY-SCOPE1: the Authority handle may not escape its block — aliasing it to
 /// another binding is E0711.
 #[test]
 fn grant_handle_alias_is_e0711() {
     let src = r#"
 fn run() {
-    #Abilities(caps: IO) {
+    #FX(caps: IO) {
         alias :: caps;
         print("hi");
     }
@@ -900,12 +900,12 @@ fn run() {
 }
 
 /// D-SCAP1: not naming the handle anywhere (never escaping it) compiles clean —
-/// the named `#Abilities` block is the authorizing context, the handle need not be used.
+/// the named `#FX` block is the authorizing context, the handle need not be used.
 #[test]
 fn grant_unused_handle_ok() {
     let src = r#"
 fn run() {
-    #Abilities(caps: IO) {
+    #FX(caps: IO) {
         print("granted");
     }
 }
@@ -917,13 +917,13 @@ fn run() {
     );
 }
 
-/// D-AUTHORITY-SCOPE1: an unknown effect name in a `#Abilities(…)` list is E0119 and
+/// D-AUTHORITY-SCOPE1: an unknown effect name in a `#FX(…)` list is E0119 and
 /// suppresses the E0712 subset check.
 #[test]
 fn grant_unknown_effect_is_e0119() {
     let src = r#"
 fn run() {
-    #Abilities(caps: Bogus) {
+    #FX(caps: Bogus) {
         print("hi");
     }
 }
@@ -941,14 +941,14 @@ fn run() {
     );
 }
 
-/// I3: a named `#Abilities(…)` region lowers to a plain lexical block — the generated
+/// I3: a named `#FX(…)` region lowers to a plain lexical block — the generated
 /// Rust carries no ability machinery (no handle value or revoke), no effect
 /// annotation, and NO `unsafe`. The body runs unchanged.
 #[test]
 fn grant_region_erases_to_plain_block() {
     let src = r#"
 fn run() {
-    #Abilities(caps: IO) {
+    #FX(caps: IO) {
         print("inside");
     }
     print("outside");
@@ -960,7 +960,7 @@ fn run() {
         "generated Rust must not mention grant:\n{rust}"
     );
     assert!(
-        !rust.contains("Ability"),
+        !rust.contains("Authority"),
         "generated Rust must not mention the handle type:\n{rust}"
     );
     assert!(
@@ -977,14 +977,14 @@ fn run() {
     );
 }
 
-/// I3 (D-AUTHORITY-SCOPE1): a named `#Abilities(…)` region lowers to the SAME plain
-/// Rust block as the already-erased bare `#Abilities(…)` region — the handle is
+/// I3 (D-AUTHORITY-SCOPE1): a named `#FX(…)` region lowers to the SAME plain
+/// Rust block as the already-erased bare `#FX(…)` region — the handle is
 /// sema-only and erased.
 #[test]
 fn grant_lowers_like_caps_region() {
     let granted = r#"
 fn run() {
-    #Abilities(caps: IO) {
+    #FX(caps: IO) {
         print("a");
         print("b");
     }
@@ -992,7 +992,7 @@ fn run() {
 "#;
     let caps = r#"
 fn run() {
-    #Abilities(IO) {
+    #FX(IO) {
         print("a");
         print("b");
     }
@@ -1002,7 +1002,7 @@ fn run() {
     let b = jet::compile(caps).expect("caps compiles").rust;
     assert_eq!(
         a, b,
-        "named #Abilities region must lower identically to the erased #Abilities region (I3)"
+        "named #FX region must lower identically to the erased #FX region (I3)"
     );
 }
 

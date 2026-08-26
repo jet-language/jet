@@ -61,6 +61,9 @@ pub struct TraitRegistry {
     /// Maps (source_type_name, target_type_name) → the span where it was declared.
     /// Used for duplicate detection and orphan-rule checking.
     pub error_conversions: HashMap<(String, String), Span>,
+    /// D-TEXTHEAD-TYPE1=A: nominal bases are retained in the ordinary trait
+    /// registry so CheckedText validation has no parallel text-head table.
+    pub distinct_bases: HashMap<String, Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -264,6 +267,7 @@ impl TraitRegistry {
     }
 
     pub fn register_items(&mut self, items: &[Item], diags: &mut Vec<Diagnostic>) {
+        self.register_synthetic_checked_text();
         for item in items {
             match item {
                 Item::Trait(t) => self.register_trait(t, diags),
@@ -405,6 +409,7 @@ impl TraitRegistry {
 
     fn register_distinct_meta(&mut self, d: &DistinctDef) {
         self.local_types.insert(d.name.clone());
+        self.distinct_bases.insert(d.name.clone(), d.base.clone());
         self.auto_equatable.insert(d.name.clone());
         if d.derives.iter().any(|(name, _)| name == PRINTABLE) {
             self.trait_impls
@@ -442,6 +447,82 @@ impl TraitRegistry {
                 .entry(d.name.clone())
                 .or_default()
                 .insert(DECODE.to_string());
+        }
+    }
+
+    /// D-TEXTHEAD-TYPE1=A: `CheckedText` is an ordinary trait contract. Its
+    /// implementation is restricted to a nominal `distinct String` and must
+    /// expose one associated error plus two pure static functions.
+    fn check_checked_text_impl(
+        &self,
+        type_name: &str,
+        methods: &[Func],
+        assoc_type_impls: &[(String, Span, Type)],
+        span: Span,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let Some(Type::String) = self.distinct_bases.get(type_name) else {
+            diags.push(e0907(Generics::CHECKED_TEXT, "check", span));
+            return;
+        };
+        let error = assoc_type_impls
+            .iter()
+            .find(|(name, _, _)| name == "Error")
+            .map(|(_, _, ty)| ty.clone());
+        if error.is_none() {
+            diags.push(e0913(Generics::CHECKED_TEXT, &["Error".to_string()], span));
+        }
+        if assoc_type_impls.iter().any(|(name, _, _)| name != "Error") {
+            diags.push(e0907(Generics::CHECKED_TEXT, "check", span));
+        }
+        let check = methods.iter().find(|method| method.name == "check");
+        let hole = methods.iter().find(|method| method.name == "encode_hole");
+        let check_ok = check.is_some_and(|method| {
+            method.params.len() == 1
+                && method.params[0].name != Syntax::KW_SELF
+                && method.params[0].convention == AccessConvention::Read
+                && method.params[0].ty == Type::String
+                && method.is_pure
+                && matches!(
+                    &method.return_type,
+                    Some(Type::Result { ok, err })
+                        if **ok == Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
+                            && error.as_ref().is_some_and(|expected| err.as_ref() == expected)
+                )
+        });
+        let hole_ok = hole.is_some_and(|method| {
+            method.params.len() == 1
+                && method.params[0].name != Syntax::KW_SELF
+                && method.params[0].convention == AccessConvention::Read
+                && method.params[0].ty == Type::Named("T".to_string())
+                && method.return_type == Some(Type::String)
+                && method.is_pure
+                && method.type_params.len() == 1
+                && method.type_params[0].name == "T"
+                && method.type_params[0]
+                    .bounds
+                    .iter()
+                    .any(|bound| bound == PRINTABLE)
+        });
+        if !check_ok {
+            diags.push(e0907(
+                Generics::CHECKED_TEXT,
+                "check",
+                check.map_or(span, |method| method.name_span),
+            ));
+        }
+        if !hole_ok {
+            diags.push(e0907(
+                Generics::CHECKED_TEXT,
+                "encode_hole",
+                hole.map_or(span, |method| method.name_span),
+            ));
+        }
+        if methods
+            .iter()
+            .any(|method| !matches!(method.name.as_str(), "check" | "encode_hole"))
+        {
+            diags.push(e0907(Generics::CHECKED_TEXT, "check", span));
         }
     }
 
@@ -880,6 +961,10 @@ impl TraitRegistry {
             self.check_serde_impl_methods(type_name, trait_name, methods, span, diags);
             return;
         }
+        if trait_name == Generics::CHECKED_TEXT {
+            self.check_checked_text_impl(type_name, methods, assoc_type_impls, span, diags);
+            return;
+        }
         if operator_trait {
             let expected_method = match trait_name {
                 Syntax::TRAIT_ADD => "add",
@@ -1306,7 +1391,7 @@ impl TraitRegistry {
                 | Syntax::TYPE_STRING
                 | Syntax::TYPE_CHAR
         ) && Generics::is_builtin_trait(trait_name)
-            && trait_name != CLOSE
+            && !matches!(trait_name, CLOSE | Generics::CHECKED_TEXT)
         {
             if trait_name == Syntax::TRAIT_COMPARABLE && type_name == Syntax::TYPE_FLOAT {
                 return false;
@@ -1365,10 +1450,12 @@ impl TraitRegistry {
     pub fn type_implements_trait(&self, ty: &Type, trait_name: &str) -> bool {
         match ty {
             Type::IntN { .. } | Type::InlineRange { .. } => {
-                Generics::is_builtin_trait(trait_name) && trait_name != CLOSE
+                Generics::is_builtin_trait(trait_name)
+                    && !matches!(trait_name, CLOSE | Generics::CHECKED_TEXT)
             }
             Type::Float32 => {
-                Generics::is_builtin_trait(trait_name) && !matches!(trait_name, CLOSE | COMPARABLE)
+                Generics::is_builtin_trait(trait_name)
+                    && !matches!(trait_name, CLOSE | COMPARABLE | Generics::CHECKED_TEXT)
             }
             Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. }
                 if trait_name == EQUATABLE =>
@@ -2548,6 +2635,69 @@ impl TraitRegistry {
             TraitInfo {
                 methods,
                 assoc_types: Vec::new(),
+                span: dummy,
+            },
+        );
+    }
+
+    /// D-TEXTHEAD-TYPE1=A: the canonical Prelude contract is represented in
+    /// the same trait table as every user trait. The source declaration is
+    /// documented in `core/prelude.jet`; this metadata keeps all module
+    /// registries on one contract without injecting a hidden marker item.
+    fn register_synthetic_checked_text(&mut self) {
+        if self.traits.contains_key(Generics::CHECKED_TEXT) {
+            return;
+        }
+        let dummy = Span { start: 0, end: 0 };
+        let param = |name: &str, ty: Type| crate::AST::Param {
+            name: name.to_string(),
+            name_span: dummy,
+            ty,
+            ty_span: dummy,
+            convention: AccessConvention::Read,
+            root: false,
+            default: None,
+            variadic: false,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
+            public_label: None,
+            zone: crate::AST::ParamZone::Either,
+        };
+        let check = TraitMethodSig {
+            name: "check".to_string(),
+            name_span: dummy,
+            params: vec![param("text", Type::String)],
+            return_type: Some(Type::Result {
+                ok: Box::new(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+                err: Box::new(Type::Named("Error".to_string())),
+            }),
+            span: dummy,
+            default_body: None,
+            is_pure: true,
+            declared_effects: Some(Vec::new()),
+            return_view_provenance: Default::default(),
+            declared_return_view_provenance: None,
+        };
+        let encode_hole = TraitMethodSig {
+            name: "encode_hole".to_string(),
+            name_span: dummy,
+            params: vec![param("value", Type::Named("T".to_string()))],
+            return_type: Some(Type::String),
+            span: dummy,
+            default_body: None,
+            is_pure: true,
+            declared_effects: Some(Vec::new()),
+            return_view_provenance: Default::default(),
+            declared_return_view_provenance: None,
+        };
+        let mut methods = HashMap::new();
+        methods.insert(check.name.clone(), check);
+        methods.insert(encode_hole.name.clone(), encode_hole);
+        self.traits.insert(
+            Generics::CHECKED_TEXT.to_string(),
+            TraitInfo {
+                methods,
+                assoc_types: vec!["Error".to_string()],
                 span: dummy,
             },
         );

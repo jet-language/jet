@@ -1435,7 +1435,7 @@ impl<'a> Checker<'a> {
                 | Stmt::Policy { body, .. }
                 | Stmt::TaskGroup { body, .. }
                 | Stmt::Layout { body, .. }
-                | Stmt::Caps { body, .. }
+                | Stmt::AuthorityScope { body, .. }
                 | Stmt::Transact { body, .. }
                 | Stmt::AssumeDet { body, .. }
                 | Stmt::Live { body, .. } => {
@@ -3731,6 +3731,9 @@ impl<'a> Checker<'a> {
         let Some(name) = ty.base_name() else {
             return false;
         };
+        if super::CheckerCoreLib::core_single_use_type(name) {
+            return true;
+        }
         if self.registry.is_single_use(name) {
             return true;
         }
@@ -4034,6 +4037,11 @@ impl<'a> Checker<'a> {
             }
         }
         self.flow.moved.set(&Self::place_name(&place), span);
+        if place.projections.is_empty() {
+            // D-TRACK-ORIGIN1=A: moving a whole binding ends access to its
+            // origin fact; no stale metadata survives a move.
+            self.flow.origins.remove(&name);
+        }
     }
 
     pub(crate) fn mark_moved(&mut self, name: String, span: Span) {

@@ -504,7 +504,7 @@ pub(crate) fn collect_core_stmts(
             | Stmt::Region { body, .. }
             | Stmt::Policy { body, .. }
             | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
+            | Stmt::AuthorityScope { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. } => {
                 collect_core_stmts(body, imports, used, spans, ffi_cb)

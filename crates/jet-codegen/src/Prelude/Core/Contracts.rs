@@ -95,6 +95,7 @@ pub(crate) const JET_ARITHMETIC_POWER_NEGATIVE: &str =
     "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)";
 pub(crate) const JET_ARITHMETIC_POWER_OVERFLOW: &str =
     "this power overflows the value's type (the result is outside its range)";
+pub(crate) const JET_ARITHMETIC_ROTATE_NEGATIVE: &str = "a rotation count cannot be negative";
 pub(crate) const JET_ARITHMETIC_REMAINDER_OVERFLOW: &str =
     "attempt to calculate the remainder with overflow";
 
@@ -108,6 +109,7 @@ pub(crate) fn jet_arithmetic_message(kind: &str) -> &'static str {
         "divide_overflow" => JET_ARITHMETIC_DIVIDE_OVERFLOW,
         "pow_negative" => JET_ARITHMETIC_POWER_NEGATIVE,
         "pow" => JET_ARITHMETIC_POWER_OVERFLOW,
+        "rotate_negative" => JET_ARITHMETIC_ROTATE_NEGATIVE,
         "remainder" => JET_ARITHMETIC_REMAINDER_OVERFLOW,
         _ => "this operation overflows the value's type (the result is outside its range)",
     }

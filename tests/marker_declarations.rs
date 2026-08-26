@@ -11,6 +11,7 @@
 mod common;
 
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use jet::AST::{Expr, Item, MarkerDecl, StrPart};
 use jet_foundation::Facts;
@@ -56,6 +57,75 @@ fn every_registry_row_is_one_written_declaration() {
     }
 }
 
+/// D-MARKER-SITES1=B: old declaration spellings may survive only where their
+/// rejection is demonstrated or where ratified decision history records them.
+#[test]
+fn retired_marker_declaration_forms_are_confined_to_fixtures_and_history() {
+    fn visit(path: &Path, files: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+                if matches!(
+                    name,
+                    ".git" | ".claude" | ".opencode" | "node_modules" | "target"
+                ) {
+                    continue;
+                }
+                visit(&path, files);
+            } else if path.is_file() {
+                files.push(path);
+            }
+        }
+    }
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let allowed = [
+        "docs/spec/syntax-decisions.md",
+        "tests/ui/marker_decl_rejected_forms.jet",
+        "tests/ui/marker_decl_rejected_forms.stderr",
+    ];
+    let marker_word = ["mark", "er "].concat();
+    let on_clause = [" ", "on", " ", "["].concat();
+    let second_list = [")", "("].concat();
+    let checked_text_node = ["checked", "_text_head_decl"].concat();
+    let mut files = Vec::new();
+    visit(root, &mut files);
+    let mut offenders = Vec::new();
+    for path in files {
+        let relative = path
+            .strip_prefix(root)
+            .expect("walked under the repository root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if allowed.contains(&relative.as_str()) {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for (line_number, line) in source.lines().enumerate() {
+            if (line.contains(&marker_word)
+                && (line.contains(&on_clause) || line.contains(&second_list)))
+                || line.contains(&checked_text_node)
+            {
+                offenders.push(format!("{relative}:{}: {line}", line_number + 1));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "retired marker declaration forms escaped their fixture/history allowlist:\n{}",
+        offenders.join("\n")
+    );
+}
+
 /// The real parser and the registry reader agree on what each row says.
 #[test]
 fn the_parser_and_the_registry_read_the_same_rows() {
@@ -74,6 +144,17 @@ fn the_parser_and_the_registry_read_the_same_rows() {
         assert!(
             facts.contains(&"@sites"),
             "`{}` must say where it may be written",
+            declaration.name
+        );
+        assert!(
+            declaration.params.iter().all(|parameter| {
+                if jet::Syntax::is_comptime_name(&parameter.name) {
+                    parameter.ty.is_none() && parameter.value.is_some()
+                } else {
+                    parameter.ty.is_some()
+                }
+            }),
+            "`{}` must keep typed arguments and fixed metadata separate",
             declaration.name
         );
 
@@ -113,6 +194,44 @@ fn the_parser_and_the_registry_read_the_same_rows() {
                 declaration.name
             );
         }
+
+        let written_sites = declaration
+            .params
+            .iter()
+            .find(|parameter| parameter.name == "@sites")
+            .and_then(|parameter| parameter.value.as_deref())
+            .and_then(|value| match value {
+                Expr::ListLit(values, _) => Some(
+                    values
+                        .iter()
+                        .filter_map(|value| match value {
+                            Expr::EnumLit { variant, .. } => Some(variant.as_str()),
+                            Expr::Field(_, member, _) => Some(member.as_str()),
+                            Expr::Ident(name, _) => Some(name.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .expect("@sites is a list value");
+        assert_eq!(
+            written_sites,
+            row.sites.iter().map(|site| site.name()).collect::<Vec<_>>(),
+            "`{}` site metadata",
+            declaration.name
+        );
+        let written_repeatable = declaration
+            .params
+            .iter()
+            .find(|parameter| parameter.name == "@repeatable")
+            .and_then(|parameter| parameter.value.as_deref())
+            .is_some_and(|value| matches!(value, Expr::Bool(true, _)));
+        assert_eq!(
+            written_repeatable, row.repeatable,
+            "`{}` repeatability metadata",
+            declaration.name
+        );
     }
 }
 
@@ -334,6 +453,36 @@ fn run() {
                         && matches!(value, jet::AST::CtValue::Str(value) if value == "Recorded")
                 })
         )
+    }));
+    let reflected_add_greeting = markers
+        .iter()
+        .find(|marker| {
+            matches!(
+                marker,
+                jet::AST::CtValue::Struct { fields, .. }
+                    if fields.iter().any(|(name, value)| {
+                        name == "name"
+                            && matches!(value, jet::AST::CtValue::Str(value) if value == "AddGreeting")
+                    })
+            )
+        })
+        .expect("AddGreeting reflection");
+    let jet::AST::CtValue::Struct { fields, .. } = reflected_add_greeting else {
+        panic!("marker reflection must be a struct");
+    };
+    assert!(fields.iter().any(|(name, value)| {
+        name == "sites"
+            && matches!(
+                value,
+                jet::AST::CtValue::List(values)
+                    if values.iter().any(|value| matches!(
+                        value,
+                        jet::AST::CtValue::Str(site) if site == "Type"
+                    ))
+            )
+    }));
+    assert!(fields.iter().any(|(name, value)| {
+        name == "repeatable" && matches!(value, jet::AST::CtValue::Bool(false))
     }));
 }
 

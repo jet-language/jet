@@ -168,7 +168,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-STATE-DECL: true when `state <TypeName> {` is at the cursor (contextual).
+    /// D-STATE-HOME1=A: true when retired `state <TypeName> {` is at the cursor
+    /// (contextual), so it can receive the exact nested-form rewrite.
     /// D-VALIDATE1 (ratified 2026-07-12, card #506): true when the cursor is
     /// at `validate {` — a struct's in-body validation block. Token stream:
     /// `validate {`.
@@ -192,8 +193,16 @@ impl<'a> Parser<'a> {
         Ok((stmts, Span::new(start.start, end)))
     }
 
+    pub(in crate::Parser) fn at_state_section(&self) -> bool {
+        matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL)
+            && matches!(self.peek2().kind, TokKind::LBrace)
+    }
+
     pub(super) fn at_state_block(&self) -> bool {
         if !matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL) {
+            return false;
+        }
+        if !matches!(self.peek2().kind, TokKind::Ident(_)) {
             return false;
         }
         // `state Reservation {` or `state Payment.Client {` — scan to the `{`.
@@ -206,15 +215,6 @@ impl<'a> Parser<'a> {
             }
         }
         false
-    }
-
-    /// D-STATE-DECL (ratified 2026-06-25, option B): parse
-    /// `[pub] state TypeName { A, B, C }`.
-    ///
-    /// The state names are comma-separated PascalCase identifiers. The block may have
-    /// a trailing comma; semicolons between names are allowed for formatting flexibility.
-    pub(super) fn state_decl(&mut self, is_pub: bool) -> Result<crate::AST::StateDecl, Diagnostic> {
-        self.state_decl_with_pkg(is_pub, false)
     }
 
     pub(super) fn state_decl_with_pkg(
@@ -250,6 +250,74 @@ impl<'a> Parser<'a> {
             states,
             span: Span::new(start.start, end),
         })
+    }
+
+    /// D-STATE-HOME1=A: parse the sole state section owned by a named struct.
+    pub(super) fn state_section(
+        &mut self,
+        type_name: String,
+        type_name_span: Span,
+    ) -> Result<crate::AST::StateDecl, Diagnostic> {
+        let start = self.peek().span;
+        self.bump(); // consume `state`
+        self.expect(TokKind::LBrace, "to open the state section")?;
+        let mut states = Vec::new();
+        while !matches!(&self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(&self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                self.bump();
+                continue;
+            }
+            let (name, name_span) = self.expect_ident("a state name inside `state { … }`")?;
+            states.push((name, name_span));
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
+        }
+        self.expect(TokKind::RBrace, "to close the state section")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(crate::AST::StateDecl {
+            is_pub: false,
+            is_package_pub: false,
+            type_name,
+            type_name_span,
+            states,
+            span: Span::new(start.start, end),
+        })
+    }
+
+    /// Consume a valid nested-shaped block and report its forbidden owner.
+    pub(in crate::Parser) fn reject_state_section(&mut self, owner: &str) -> Diagnostic {
+        let start = self.peek().span;
+        let section_span = self
+            .state_section(String::new(), start)
+            .map(|section| section.span)
+            .unwrap_or(start);
+        Diagnostic::from_row("E0158", &[("owner", owner)], Some(section_span))
+    }
+
+    /// D-STATE-HOME1=A: top-level companion declarations are recognized only
+    /// to teach the exact move into `struct Type { state { … } }`.
+    pub(super) fn reject_top_level_state_decl(
+        &mut self,
+        is_pub: bool,
+        is_package_pub: bool,
+    ) -> Result<crate::AST::Item, Diagnostic> {
+        let declaration = self.state_decl_with_pkg(is_pub, is_package_pub)?;
+        let state_names = declaration
+            .states
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let states = format!("{{ {state_names} }}");
+        Err(Diagnostic::from_row(
+            "E0157",
+            &[
+                ("type", declaration.type_name.as_str()),
+                ("states", states.as_str()),
+            ],
+            Some(declaration.span),
+        ))
     }
 
     /// D-PROTO1/D-PROTO2: true when `protocol Name {` is at the cursor (contextual).
@@ -580,8 +648,10 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-META-NAME1=A / D-BOUND-SINK1=A: true when a marker declaration
-    /// (`marker Name(…)` or `marker Name on [.Text]`) is at the cursor.
+    /// D-META-NAME1=A / D-MARKER-SITES1=B: true when a canonical marker
+    /// declaration (`marker Name(…)`) or a retired declaration spelling is
+    /// at the cursor. The retired lookahead keeps its teaching diagnostic in
+    /// the marker parser instead of producing a generic item error.
     pub(super) fn at_marker_decl(&self) -> bool {
         matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_MARKER)
             && matches!(&self.peek2().kind, TokKind::Ident(_))
@@ -597,93 +667,25 @@ impl<'a> Parser<'a> {
             && matches!(&self.peek3().kind, TokKind::LParen)
     }
 
-    /// D-META-FORM1=A / D-META-USER1=A / D-BOUND-SINK1=A: parse an
-    /// ordinary `marker Name(params…)` or a checked text head
-    /// `marker Name on [.Text] { check … hole … }`. The ordinary rule's
-    /// arguments and facts still share one named-parameter list, told
-    /// apart by `@` marks.
+    /// D-META-FORM1=A / D-META-USER1=A / D-MARKER-SITES1=B: parse the one
+    /// canonical `marker Name(params…)` declaration. Ordinary rule
+    /// arguments and fixed declaration metadata share this named-parameter
+    /// list, told apart by `@` marks. Retired checked-text declarations are
+    /// rejected before they can become an AST marker declaration.
     pub(super) fn marker_decl(&mut self) -> Result<crate::AST::MarkerDecl, Diagnostic> {
         let start = self.peek().span;
         self.bump(); // consume `marker`
         let (name, name_span) = self.expect_ident("the marker name in `marker Name(params…)`")?;
         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::TEXT_HEAD_ON) {
-            self.bump();
-            let target = self.expr_no_struct_lit()?;
-            let valid_target = matches!(
-                &target,
-                crate::AST::Expr::ListLit(items, _)
-                    if items.len() == 1
-                        && matches!(&items[0], crate::AST::Expr::EnumLit {
-                            variant,
-                            leading_dot: true,
-                            args,
-                            ..
-                        } if variant == "Text" && args.is_empty())
-            );
-            if !valid_target {
-                self.diags.push(Diagnostic::error(
-                        "E0381",
-                        "a checked text head must attach to `[.Text]`".to_string(),
-                        "D-BOUND-SINK1=A reserves the `Text` rule site for library-declared checked text heads".to_string(),
-                        "write `marker Name on [.Text] { check … hole … }`".to_string(),
-                        Some(target.span()),
-                    ));
-            }
-            self.expect(TokKind::LBrace, "to open a checked text head contract")?;
-            let (check_name, _) = self.expect_ident("`check` in a checked text head contract")?;
-            if check_name != Syntax::TEXT_HEAD_CHECK {
-                return Err(Diagnostic::error(
-                    "E0381",
-                    "a checked text head contract needs `check` first".to_string(),
-                    "the check expression validates the literal body before construction"
-                        .to_string(),
-                    "write `check validator.parse(@body)?`".to_string(),
-                    Some(self.toks[self.pos - 1].span),
-                ));
-            }
-            let check = self.expr_no_struct_lit()?;
-            if matches!(self.peek().kind, TokKind::Semi) {
-                self.bump();
-            }
-            let (hole_name, _) = self.expect_ident("`hole` in a checked text head contract")?;
-            if hole_name != Syntax::TEXT_HEAD_HOLE {
-                return Err(Diagnostic::error(
-                    "E0381",
-                    "a checked text head contract needs `hole` second".to_string(),
-                    "the hole expression encodes each interpolated value".to_string(),
-                    "write `hole encoder.escape(@value)`".to_string(),
-                    Some(self.toks[self.pos - 1].span),
-                ));
-            }
-            let hole = self.expr_no_struct_lit()?;
-            if matches!(self.peek().kind, TokKind::Semi) {
-                self.bump();
-            }
-            self.expect(TokKind::RBrace, "to close a checked text head contract")?;
-            let end = self.toks[self.pos - 1].span.end;
-            let text = crate::AST::MarkerTextDecl {
-                check,
-                hole,
-                span: Span::new(target.span().start, end),
-            };
-            let params = vec![crate::AST::MarkerDeclParam {
-                name: "@sites".to_string(),
-                name_span: target.span(),
-                ty: None,
-                value: Some(Box::new(target)),
-                variadic: false,
-            }];
-            if matches!(self.peek().kind, TokKind::Semi) {
-                self.bump();
-            }
-            return Ok(crate::AST::MarkerDecl {
-                name,
-                name_span,
-                params,
-                body: None,
-                text: Some(text),
-                span: Span::new(start.start, end),
-            });
+            let span = self.peek().span;
+            self.skip_marker_trailer_balanced();
+            return Err(Diagnostic::error(
+                "E0381",
+                "the checked-text marker declaration is retired".to_string(),
+                "D-MARKER-SITES1=B: every marker declaration uses one named parameter list; `@sites` records legal sites, and checked-text contracts are not a separate marker form".to_string(),
+                format!("write `marker {name}(@sites: [.Text])` for a plain rule, or use a built-in typed text head"),
+                Some(span),
+            ));
         }
         self.expect(TokKind::LParen, "to open the marker's parameter list")?;
         let params = self.marker_decl_param_list()?;
@@ -770,7 +772,7 @@ impl<'a> Parser<'a> {
                 } else {
                     // D-VARIADIC1: `name: ...T` is the one rest-parameter
                     // spelling, so a marker that takes a list of arguments
-                    // (`#Abilities(Net, FS)`) writes it the same way a function does.
+                    // (`#FX(Net, FS)`) writes it the same way a function does.
                     if matches!(self.peek().kind, TokKind::DotDotDot) {
                         self.bump();
                         variadic = true;
@@ -808,24 +810,22 @@ impl<'a> Parser<'a> {
         Ok(params)
     }
 
-    /// D-META-FORM1=A rejects a trailing `on` clause and a second
-    /// parameter list. A scope body is the checked code form from
-    /// D-META-USER1=A and is consumed by `marker_decl` above. Recognize
-    /// and consume rejected trailers so the writer sees one teaching error,
-    /// so the writer sees one teaching error naming the ratified fix,
-    /// not a cascade of unrelated parse errors.
+    /// D-MARKER-SITES1=B rejects a trailing `on` clause and a second
+    /// parameter list. Recognize and consume rejected trailers so the
+    /// writer sees one teaching error naming the ratified fix, not a
+    /// cascade of unrelated parse errors.
     fn reject_marker_decl_trailer(&mut self) -> Option<Diagnostic> {
         let (code, what, why, fix): (&str, &str, &str, String) = match &self.peek().kind {
                 TokKind::Ident(n) if n == Syntax::TEXT_HEAD_ON => (
                     "E0381",
                     "a trailing `on` clause isn't how a marker states a fact",
-                    "D-META-FORM1=A: a fact about the rule (its legal sites, whether it repeats) is an ordinary named parameter in the same list, marked with the compile-time `@` sigil — not a clause after the list",
+                    "D-MARKER-SITES1=B: every marker declaration uses one named parameter list; ordinary arguments are typed parameters and `@` names are fixed metadata values — not a clause after the list",
                     "move the sites into the parameter list as `@sites: [.Function, …]`".to_string(),
                 ),
                 TokKind::LParen => (
                     "E0381",
                     "a second parameter list isn't how a marker states a fact",
-                    "D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `@` sigil — not two parameter lists",
+                    "D-MARKER-SITES1=B: the rule's own typed arguments and fixed metadata share one named-parameter list, told apart by the compile-time `@` sigil — not two parameter lists",
                     "fold the second list's facts into the first as `@sites: […]`, `@repeatable: true`".to_string(),
                 ),
 
@@ -843,9 +843,9 @@ impl<'a> Parser<'a> {
     }
 
     /// Consume the rejected trailer `reject_marker_decl_trailer` just
-    /// identified — the `on` word plus its bracketed list, the second
-    /// parameter list, or the scope block — so parsing resumes cleanly
-    /// after the one teaching diagnostic.
+    /// identified — the `on` word plus its bracketed list or the second
+    /// parameter list — so parsing resumes cleanly after the one teaching
+    /// diagnostic.
     fn skip_marker_trailer_balanced(&mut self) {
         let mut depth: i32 = 0;
         let mut opened = false;
@@ -864,6 +864,9 @@ impl<'a> Parser<'a> {
                     self.bump();
                     depth -= 1;
                     if depth == 0 {
+                        if matches!(self.peek().kind, TokKind::LBrace) {
+                            continue;
+                        }
                         return;
                     }
                 }
@@ -908,6 +911,69 @@ mod marker_decl_tests {
         assert_eq!(decl.params[1].name, "@sites");
     }
 
+    /// D-MARKER-SITES1=B: an empty site value is still a fixed metadata value,
+    /// and every published site name uses the same list grammar.
+    #[test]
+    fn empty_and_every_published_site_value_parse_in_the_same_list() {
+        let no_parameters = "marker NoParameters()\nfn run() {}\n";
+        let (tokens, lex_diags) = Lexer::lex(no_parameters);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let program = Parser::parse(&tokens).expect("zero declaration parameters must parse");
+        let decl = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                AST::Item::MarkerDecl(decl) => Some(decl),
+                _ => None,
+            })
+            .expect("a NoParameters marker declaration");
+        assert!(decl.params.is_empty());
+
+        let empty = "marker Empty(@sites: [], @repeatable: false)\nfn run() {}\n";
+        let (tokens, lex_diags) = Lexer::lex(empty);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let program = Parser::parse(&tokens).expect("empty metadata list must parse");
+        let decl = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                AST::Item::MarkerDecl(decl) => Some(decl),
+                _ => None,
+            })
+            .expect("an Empty marker declaration");
+        assert_eq!(decl.params.len(), 2);
+        assert!(decl.params.iter().all(|param| param.ty.is_none()));
+        assert!(decl.params.iter().all(|param| param.value.is_some()));
+
+        let many = "marker Many(@sites: [.Type, .Field], @repeatable: true, @inherits: false, @scopes: [.Type, .Field], @resolution: .Merge)\nfn run() {}\n";
+        let (tokens, lex_diags) = Lexer::lex(many);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let program = Parser::parse(&tokens).expect("many metadata values must parse");
+        let decl = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                AST::Item::MarkerDecl(decl) => Some(decl),
+                _ => None,
+            })
+            .expect("a Many marker declaration");
+        assert_eq!(decl.params.len(), 5);
+        assert!(decl.params.iter().all(|param| param.ty.is_none()));
+        assert!(decl.params.iter().all(|param| param.value.is_some()));
+
+        for site in jet_foundation::Policy::RuleSite::ALL {
+            let source = format!(
+                "marker Uses(@sites: [.{site}])\nfn run() {{}}\n",
+                site = site.name()
+            );
+            let (tokens, lex_diags) = Lexer::lex(&source);
+            assert!(lex_diags.is_empty(), "{site:?}: {lex_diags:?}");
+            Parser::parse(&tokens).unwrap_or_else(|diagnostics| {
+                panic!("{site:?} must use the canonical @sites list: {diagnostics:?}")
+            });
+        }
+    }
+
     /// D-FACTDECL1=A: fact declarations reuse the marker parameter AST shape.
     #[test]
     fn fact_declaration_parses_its_law_columns() {
@@ -942,35 +1008,28 @@ mod marker_decl_tests {
     }
 
     #[test]
-    fn checked_text_head_declaration_parses_its_contract() {
-        let source = r#"
-marker Selector on [.Text] {
-    check @body
-    hole @value
-}
-fn run() {}
-"#;
+    fn retired_checked_text_head_declaration_is_rejected() {
+        let source = concat!(
+            "\nmarker Selector",
+            " on [.Text] {\n",
+            "    check @body\n",
+            "    hole @value\n",
+            "}\nfn run() {}\n"
+        );
         let (tokens, lex_diags) = Lexer::lex(source);
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
-        let program = Parser::parse(&tokens).expect("checked text head must parse");
-        let decl = program
-            .items
-            .iter()
-            .find_map(|item| match item {
-                AST::Item::MarkerDecl(decl) => Some(decl),
-                _ => None,
-            })
-            .expect("a MarkerDecl item");
-        assert_eq!(decl.name, "Selector");
-        assert!(decl.body.is_none());
-        assert!(decl.text.is_some());
-        assert_eq!(decl.params[0].name, "@sites");
+        let diagnostics =
+            Parser::parse(&tokens).expect_err("retired marker form must be rejected");
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E0381");
+        assert!(diagnostics[0].what.contains("retired"));
+        assert!(diagnostics[0].fix.contains("@sites"));
     }
 
     /// D-META-FORM1=A: `@repeatable` is a named parameter like every other
     /// fact about a rule, never a trailing word. A new fact about rules is a
     /// new named parameter, so the list stays open-ended and the grammar does
-    /// not grow. `@sites` takes `[Site]`, the nineteen-member menu published in
+    /// not grow. `@sites` takes `[Site]`, the eighteen-member menu published in
     /// `core.compiler.lang` (`Policy::SITE_VARIANTS`).
     #[test]
     fn a_fact_about_the_rule_is_one_more_named_parameter() {
@@ -1012,16 +1071,15 @@ fn run() {}
 
     /// D-META-FORM1=A rejects a trailing `on` clause and a second parameter
     /// list in favor of `@`-marked named parameters in the declaration's own
-    /// list. D-META-USER1=A makes the scope body the checked code form.
+    /// list. D-MARKER-SITES1=B also retires the former checked-text branch.
     #[test]
     fn rejected_spellings_each_teach_the_ratified_named_parameter_form() {
-        let source = r#"
-marker Inline(mode: String) on [.Function]
-
-marker Pre(condition: String)(sites: [.Function])
-
-fn run() {}
-"#;
+        let source = concat!(
+            "\nmarker Inline(mode: String)",
+            " on [.Function]\n\n",
+            "marker Pre(condition: String)",
+            "(sites: [.Function])\n\nfn run() {}\n"
+        );
         let (tokens, lex_diags) = Lexer::lex(source);
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         let diagnostics = match Parser::parse(&tokens) {
@@ -1035,6 +1093,68 @@ fn run() {}
                 diagnostic.fix.contains('@'),
                 "fix must name the ratified @-marked named-parameter form: {diagnostic:?}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod state_section_tests {
+    use crate::{AST, Lexer, Parser};
+
+    #[test]
+    fn nested_state_section_is_stored_on_struct_not_as_an_item() {
+        let source = "struct Door {\n    state { Open, Closed }\n    value: Int\n}\nfn run() {}\n";
+        let (tokens, lex_diags) = Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let program = Parser::parse(&tokens).expect("nested state section must parse");
+        let definition = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                AST::Item::Struct(definition) => Some(definition),
+                _ => None,
+            })
+            .expect("the struct item");
+        let state = definition.state.as_ref().expect("the struct-owned state set");
+        assert_eq!(
+            state.states.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+            ["Open", "Closed"]
+        );
+        assert!(program
+            .items
+            .iter()
+            .all(|item| !matches!(item, AST::Item::StateDecl(_))));
+    }
+
+    #[test]
+    fn top_level_state_companion_is_rejected_with_a_spanned_rewrite() {
+        let source = "state Door { Open, Closed }\nstruct Door { value: Int }\nfn run() {}\n";
+        let (tokens, lex_diags) = Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let diagnostics = Parser::parse(&tokens).expect_err("the retired companion must fail");
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].code, "E0157");
+        assert!(diagnostics[0].span.is_some());
+        assert!(diagnostics[0].fix.contains("struct Door"));
+        assert!(diagnostics[0].fix.contains("state { Open, Closed }"));
+    }
+
+    #[test]
+    fn ineligible_state_section_uses_one_registered_parser_diagnostic() {
+        for (source, owner) in [
+            ("enum Door { state { Open } }\nfn run() {}\n", "enum"),
+            ("trait Door { state { Open } }\nfn run() {}\n", "trait"),
+            ("alias Door :: state { Open };\nfn run() {}\n", "alias"),
+            ("impl Door { state { Open } }\nfn run() {}\n", "impl"),
+            ("module Door<T> { state { Open } }\nfn run() {}\n", "module"),
+        ] {
+            let (tokens, lex_diags) = Lexer::lex(source);
+            assert!(lex_diags.is_empty(), "{owner}: {lex_diags:?}");
+            let diagnostics = Parser::parse(&tokens).expect_err(owner);
+            assert_eq!(diagnostics.len(), 1, "{owner}: {diagnostics:?}");
+            assert_eq!(diagnostics[0].code, "E0158", "{owner}: {diagnostics:?}");
+            assert!(diagnostics[0].what.contains(owner), "{owner}: {diagnostics:?}");
+            assert!(diagnostics[0].span.is_some(), "{owner}: {diagnostics:?}");
         }
     }
 }

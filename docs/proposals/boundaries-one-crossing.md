@@ -112,11 +112,11 @@ Plain `"…"` strings keep the 4-entry table unchanged — beginners see no diff
 
 ### 4. Users declare heads; sinks are just types — D-BOUND-SINK1 *(new surface on the ratified D-META marker rail; implements the half deferred by the 2026-07-28 type-unification audit F9)*
 
-The head list is closed: SQL, HTML, Sh, Regex, plus binary patterns. D-META-DSL1=A already ratified that a library may declare a block language with `marker … on [.Block] { check …; add … }` — ratified, unbuilt (#1508). The same rail, pointed at text, opens heads. One prior direction is amended openly here: the 2026-07-28 type-unification audit's F9 note recorded "types, not markers" for future user heads, before D-META-DSL1 ratified the marker rail for the sibling job. The ballot names that divergence and lets the owner pick either shape:
+The head list is closed: SQL, HTML, Sh, Regex, plus binary patterns. D-META-DSL1=A already ratified that a library may declare a block language with `marker …(@sites: [.Block]) { check …; add … }` — ratified, unbuilt (#1508). The same rail, pointed at text, opens heads. One prior direction is amended openly here: the 2026-07-28 type-unification audit's F9 note recorded "types, not markers" for future user heads, before D-META-DSL1 ratified the marker rail for the sibling job. The ballot names that divergence and lets the owner pick either shape:
 
 ```jet
 // library code — proposed spelling, option A
-marker Selector on [.Text] {
+marker Selector(@sites: [.Text]) {
     check css.parse(@body)?              // comptime: bad selector = compile error
     hole  css.escape(@value)             // the hole law for this head
 }
@@ -263,7 +263,7 @@ One table, whole model, every rung opt-in, and no upper rung changes what the ru
 | a literal | `URL.{"https://…"}` | compile-time check, safe holes, no Result ceremony |
 | a marker | `#[PublishedSchema, Codable]` | evolution: migration steps + unknown-field preservation |
 | a command | `jet inspect bind json sample.json` | a visible, ownable Jet module from a foreign schema |
-| a declaration | `marker Selector on [.Text] { … }` | your own head, your own hole law; sinks by parameter type |
+| a declaration | `marker Selector(@sites: [.Text])` | one legal-site fact; sinks by parameter type |
 | a contract | `#Undo(refund_card)` on an FFI fn | foreign calls legal inside `#Transact` |
 | a gate | `#Scrub(origin)` / `.raw("…")` | hand-audited laundering, every site in `jet inspect gates` |
 | the authority | `authority: .{ trust: { require: attested } }` | you decide what bytes may enter the build |
@@ -322,7 +322,7 @@ one crossing law: name the schema, leave the fact
 │    ├─ stdlib heads     SQL.{}  HTML.{}  Sh.{}  Regex.{}  [U8].{}     (shipped)
 │    ├─ new heads        URL.{}  Path.{}  DateTime.{}                  [HEAD1]
 │    ├─ head-owned text  Regex.{"\d+"}                                 [RAW1]
-│    └─ user heads       marker X on [.Text] { check…; hole… }         [SINK1]
+│    └─ user marker declarations use one `@sites` list                  [SINK1]
 │
 ├─ build time — the manifest and the bytes cross
 │    ├─ hash integrity   E1204 + .jet/lock                             (shipped)

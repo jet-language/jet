@@ -492,7 +492,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_TODO,
     // D-TAG-SURFACE1=A retired `Tainted`/`Sanitizer`; direct declared tags and
     // `#Scrub(Tag)` come from the applied-rule registry.
-    // Typestate (D-STATE1 / D-STATE-DECL / D-STATE-REQ / D-STATE-TRANS)
+    // Typestate (D-STATE1 / D-STATE-HOME1 / D-STATE-REQ / D-STATE-TRANS)
     KW_STATE,
     KW_TRANSITION,
     KW_STATE_DECL,
@@ -500,7 +500,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_PROTOCOL,
     PROTO_CLIENT,
     PROTO_SERVER,
-    // Rule declarations (D-META-NAME1 / D-META-FORM1)
+    // Rule declarations (D-META-NAME1 / D-META-FORM1 / D-MARKER-SITES1)
     KW_MARKER,
     // In-body struct validation (D-VALIDATE1, card #506)
     KW_VALIDATE_BLOCK,

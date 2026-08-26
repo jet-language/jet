@@ -3,13 +3,15 @@
 mod common;
 
 use jet::Comptime::{
-    build_distinct_type_info, build_registered_fact_info, build_struct_type_info, CtReport, CtValue,
+    build_distinct_type_info, build_registered_fact_info, build_state_infos_with_graph,
+    build_struct_type_info, CtReport, CtValue,
 };
 use jet::Diagnostics::Span;
 use jet::AST::{
     AccessConvention, Dimension, DistinctDef, Expr, Field, Func, InternalTag, Marker, Param,
     ParamZone, QuantityKind, StructDef, TagMarker, Type, TypeParam,
 };
+use jet_foundation::Facts::{StateGraph, StateNode};
 
 fn span() -> Span {
     Span::new(0, 1)
@@ -121,6 +123,72 @@ fn list_struct_field<'a>(v: &'a CtValue, index: usize, name: &str) -> &'a CtValu
 }
 
 #[test]
+fn state_info_exposes_terminal_and_reachability_facts() {
+    let graph = StateGraph {
+        states: vec![
+            StateNode {
+                name: "Open".to_string(),
+                terminal: false,
+                reachable: Some(true),
+            },
+            StateNode {
+                name: "Closed".to_string(),
+                terminal: true,
+                reachable: Some(true),
+            },
+        ],
+        transitions: Vec::new(),
+    };
+    let states = vec!["Open".to_string(), "Closed".to_string()];
+    let value = build_state_infos_with_graph("Door", &states, Some(&graph));
+    assert!(matches!(
+        list_struct_field(&value, 0, "terminal"),
+        CtValue::Bool(false)
+    ));
+    assert!(matches!(
+        list_struct_field(&value, 1, "terminal"),
+        CtValue::Bool(true)
+    ));
+    assert!(matches!(
+        list_struct_field(&value, 0, "reachable"),
+        CtValue::Present(value) if matches!(value.as_ref(), CtValue::Bool(true))
+    ));
+    assert!(matches!(
+        list_struct_field(&value, 1, "reachable"),
+        CtValue::Present(value) if matches!(value.as_ref(), CtValue::Bool(true))
+    ));
+}
+
+#[test]
+fn state_info_keeps_no_entry_reachability_unknown() {
+    let graph = StateGraph {
+        states: vec![
+            StateNode {
+                name: "Raw".to_string(),
+                terminal: false,
+                reachable: None,
+            },
+            StateNode {
+                name: "Done".to_string(),
+                terminal: true,
+                reachable: None,
+            },
+        ],
+        transitions: Vec::new(),
+    };
+    let states = vec!["Raw".to_string(), "Done".to_string()];
+    let value = build_state_infos_with_graph("Unseeded", &states, Some(&graph));
+    assert!(matches!(
+        list_struct_field(&value, 0, "reachable"),
+        CtValue::Failed(CtReport::Clean(_))
+    ));
+    assert!(matches!(
+        list_struct_field(&value, 1, "reachable"),
+        CtValue::Failed(CtReport::Clean(_))
+    ));
+}
+
+#[test]
 fn type_info_exposes_methods_type_params_and_markers() {
     let s = StructDef {
         span: span(),
@@ -134,6 +202,7 @@ fn type_info_exposes_methods_type_params_and_markers() {
             bounds: vec!["Comparable".to_string()],
         }],
         fields: vec![field("value", "T", true), field("hidden", "Int", false)],
+        state: None,
         methods: vec![method("show", true)],
         cli_bindings: Vec::new(),
         trait_impls: Vec::new(),
@@ -207,6 +276,7 @@ fn field_info_carries_visibility() {
         name_span: span(),
         type_params: Vec::new(),
         fields: vec![field("visible", "Int", true), field("hidden", "Int", false)],
+        state: None,
         methods: Vec::new(),
         cli_bindings: Vec::new(),
         trait_impls: Vec::new(),
@@ -259,6 +329,7 @@ fn marker_arguments_are_typed_in_the_written_view() {
         name_span: span(),
         type_params: Vec::new(),
         fields: Vec::new(),
+        state: None,
         methods: Vec::new(),
         cli_bindings: Vec::new(),
         trait_impls: Vec::new(),
@@ -412,6 +483,7 @@ fn registered_type_planes_reflect_as_typed_values() {
         name_span: span(),
         type_params: Vec::new(),
         fields,
+        state: None,
         methods: Vec::new(),
         cli_bindings: Vec::new(),
         trait_impls: Vec::new(),
@@ -640,7 +712,7 @@ fn orphan_fact_rows_are_typed_and_readable() {
     for (name, kind) in [
         ("Sendability", "Sendability"),
         ("Attribution", "Attribution"),
-        ("TrackOrigin", "TrackOrigin"),
+        ("Origin", "Origin"),
         ("ViewProvenance", "ViewProvenance"),
         ("UnitScaleProvenance", "UnitScaleProvenance"),
         ("Maturity", "Maturity"),

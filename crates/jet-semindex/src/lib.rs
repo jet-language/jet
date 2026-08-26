@@ -30,7 +30,8 @@ pub use Types::{
     InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact,
     OutputFact, SemIndex, SourceSpan, StructuralAudit, StructuralNode, StructuralSlotBoundary,
     StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier, ViewProjectionFact,
-    ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact, SCHEMA_VERSION,
+    ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact, StateGraphFact, StateNodeFact,
+    StateTransitionFact, SCHEMA_VERSION,
 };
 pub use JSON::{package_facts_json, workspace_overlay_policy_json};
 

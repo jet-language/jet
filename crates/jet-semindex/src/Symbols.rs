@@ -466,12 +466,15 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
         };
         let display_name = display_type(&def.name);
         let display_owner = owner.as_deref().map(|name| display_type(name));
-        let (kind, signature) = semantic_shape(
+        let (kind, mut signature) = semantic_shape(
             &display_name,
             &def.kind,
             display_owner.as_deref(),
             &display_type,
         );
+        if let Some(marker_signature) = marker_declaration_signature(bundle, def) {
+            signature = marker_signature;
+        }
         let mut docs = sources
             .get(def.module_path.as_str())
             .map(|source| source_docs(source, def.def_span.start))
@@ -1049,6 +1052,65 @@ fn semantic_shape(
             format!("{name}: {}", display_type(&ty.name())),
         ),
     }
+}
+
+/// D-MARKER-SITES1=B: marker declarations use the same semantic symbol
+/// presentation as every other declaration, but their signature must retain
+/// the one canonical parameter list. The AST is the source of truth; source
+/// spans supply expression spellings for fixed metadata values and defaults.
+fn marker_declaration_signature(
+    bundle: &ProgramBundle,
+    def: &crate::Build::SymDef,
+) -> Option<String> {
+    if !def.identity.starts_with("rule:") {
+        return None;
+    }
+    let module = bundle
+        .modules
+        .iter()
+        .find(|module| module.display == def.module_path || module.alias == def.module_path)?;
+    let declaration = module.items.iter().find_map(|item| match item {
+        AST::Item::MarkerDecl(declaration)
+            if declaration.name == def.name && declaration.name_span == def.def_span =>
+        {
+            Some(declaration)
+        }
+        _ => None,
+    })?;
+    let params = declaration
+        .params
+        .iter()
+        .map(|parameter| {
+            if let Some(ty) = &parameter.ty {
+                let variadic = parameter.variadic.then_some("...").unwrap_or("");
+                let default = parameter
+                    .value
+                    .as_deref()
+                    .map(|value| format!("{{{}}}", marker_expr_source(&module.source, value)))
+                    .unwrap_or_default();
+                format!("{}: {variadic}{}{default}", parameter.name, ty.name())
+            } else {
+                let value = parameter
+                    .value
+                    .as_deref()
+                    .map(|value| marker_expr_source(&module.source, value))
+                    .unwrap_or_else(|| "…".to_string());
+                format!("{}: {value}", parameter.name)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!("marker {}({params})", declaration.name))
+}
+
+fn marker_expr_source(source: &str, expression: &AST::Expr) -> String {
+    let span = expression.span();
+    source
+        .get(span.start..span.end)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "…".to_string())
 }
 
 fn source_docs(source: &str, def_start: usize) -> (String, Vec<String>) {

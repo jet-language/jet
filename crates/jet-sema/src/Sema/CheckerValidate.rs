@@ -504,6 +504,7 @@ fn build_validate_builder_struct(span: Span) -> StructDef {
             generated_field("value", Type::Named("T".to_string()), span),
             generated_field("errors", Type::List(Box::new(field_error_ty())), span),
         ],
+        state: None,
         methods: Vec::new(),
         cli_bindings: Vec::new(),
         trait_impls: Vec::new(),

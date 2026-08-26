@@ -426,9 +426,10 @@ impl<'a> Parser<'a> {
                 | Syntax::CTX_BLOCK
                 | Syntax::MARKER_REGION
                 | Syntax::MARKER_POLICY
+                | Syntax::MARKER_ARITHMETIC
                 | Syntax::MARKER_LIVE
                 | Syntax::MARKER_NONDETERMINISTIC
-                | Syntax::KW_CAPS
+                | Syntax::KW_FX
                 | Syntax::RETIRED_MARKER_GRANT
                 | Syntax::KW_TRANSACT
                 | Syntax::KW_IMPURE
@@ -1274,40 +1275,40 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-EFF1 / D-QUAL1: parse a `#Abilities(Net, DB) { … }` effect-restriction region
+    /// D-EFF1 / D-ABILITY-NAME2: parse a `#FX(Net, DB) { … }` effect-restriction region
     /// in statement position. Cursor is on the `#` token. Effect names are bare
     /// idents; sema validates them against the known effect vocabulary (E0119).
-    pub(super) fn at_caps_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+    pub(super) fn at_fx_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         if matches!(self.peek3().kind, TokKind::LParen)
             && matches!(self.peek4().kind, TokKind::Ident(_))
             && matches!(self.peek5().kind, TokKind::Colon)
         {
             let start = self.bump().span; // `#`
             let marker_name_span = self.peek().span;
-            self.expect_ident(&format!("`#{}`", Syntax::KW_CAPS))?;
-            self.expect(TokKind::LParen, "after `#Abilities`")?;
-            let (binding, binding_span) = self.expect_ident("as the scoped Abilities handle")?;
-            self.expect(TokKind::Colon, "after the scoped Abilities handle")?;
+            self.expect_ident(&format!("`#{}`", Syntax::KW_FX))?;
+            self.expect(TokKind::LParen, "after `#FX`")?;
+            let (binding, binding_span) = self.expect_ident("as the scoped Authority handle")?;
+            self.expect(TokKind::Colon, "after the scoped Authority handle")?;
             let mut caps = Vec::new();
             let mut marker_args = Vec::new();
             loop {
-                let (name, span) = self.expect_effect_path_name("as an ability-bound effect")?;
-                let name = Self::strip_marker_enum_prefix(name, "Ability");
+                let (name, span) = self.expect_effect_path_name("as an authority-bound effect")?;
+                let name = Self::strip_marker_enum_prefix(name, "Effect");
                 marker_args.push(crate::AST::Expr::Ident(name.clone(), span));
                 caps.push((name, span));
                 if matches!(self.peek().kind, TokKind::RParen) {
                     break;
                 }
-                self.expect(TokKind::Comma, "between capped effects")?;
+                self.expect(TokKind::Comma, "between scoped effects")?;
             }
             let caps_start = caps
                 .first()
                 .map_or(binding_span.end, |(_, span)| span.start);
-            self.expect(TokKind::RParen, "to close `#Abilities`")?;
+            self.expect(TokKind::RParen, "to close `#FX`")?;
             let caps_end = self.toks[self.pos - 1].span.end;
             self.record_rule_fact(
                 crate::AST::Marker {
-                    name: Syntax::KW_CAPS.to_string(),
+                    name: Syntax::KW_FX.to_string(),
                     negated: false,
                     name_span: marker_name_span,
                     args: marker_args,
@@ -1318,7 +1319,7 @@ impl<'a> Parser<'a> {
                 None,
                 crate::Policy::RuleSite::Block,
             );
-            self.expect(TokKind::LBrace, "after `#Abilities(abilities: Effects)`")?;
+            self.expect(TokKind::LBrace, "after `#FX(grant: Effects)`")?;
             let body = self.block_stmts();
             let end = self.toks[self.pos - 1].span.end;
             self.bind_rule_fact(
@@ -1326,7 +1327,7 @@ impl<'a> Parser<'a> {
                 Some(Span::new(start.start, end)),
                 crate::Policy::RuleSite::Block,
             );
-            return Ok(Stmt::Caps {
+            return Ok(Stmt::AuthorityScope {
                 caps,
                 caps_span: Span::new(caps_start, caps_end),
                 binding: Some(binding),
@@ -1339,15 +1340,15 @@ impl<'a> Parser<'a> {
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let mut caps = Vec::with_capacity(marker.args.len());
         for argument in arguments.variadic() {
-            let Some(name) = Self::marker_enum_path(argument, "Ability") else {
+            let Some(name) = Self::marker_enum_path(argument, "Effect") else {
                 return Err(crate::Policy::marker_argument_shape_error(
-                    Syntax::KW_CAPS,
+                    Syntax::KW_FX,
                     argument.span(),
                 ));
             };
             caps.push((name, argument.span()));
         }
-        self.expect(TokKind::LBrace, &format!("after `#{}(…)`", Syntax::KW_CAPS))?;
+        self.expect(TokKind::LBrace, &format!("after `#{}(…)`", Syntax::KW_FX))?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         self.bind_rule_fact(
@@ -1355,7 +1356,7 @@ impl<'a> Parser<'a> {
             Some(Span::new(marker.span.start, end)),
             crate::Policy::RuleSite::Block,
         );
-        Ok(Stmt::Caps {
+        Ok(Stmt::AuthorityScope {
             caps,
             caps_span: Span::new(marker.name_span.end, marker.span.end),
             binding: None,
@@ -1374,9 +1375,9 @@ impl<'a> Parser<'a> {
         Err(Diagnostic::error(
             "E0077",
             "the `#Grant` scope marker is retired".to_string(),
-            "`#Abilities` now narrows a block and binds an Abilities handle when its head has a name"
+            "`#FX` now narrows a block and binds an Authority handle when its head has a name"
                 .to_string(),
-            "write `#Abilities(abilities: FS, Net) { ... }`".to_string(),
+            "write `#FX(grant: FS, Net) { ... }`".to_string(),
             Some(marker.span),
         ))
     }
@@ -2601,7 +2602,7 @@ impl<'a> Parser<'a> {
                     | Syntax::MARKER_POLICY
                     | Syntax::MARKER_LIVE
                     | Syntax::MARKER_NONDETERMINISTIC
-                    | Syntax::KW_CAPS
+                    | Syntax::KW_FX
                     | Syntax::RETIRED_MARKER_GRANT
                     | Syntax::KW_TRANSACT
                     | Syntax::KW_IMPURE
@@ -2640,9 +2641,9 @@ impl<'a> Parser<'a> {
                 {
                     return self.at_nondeterministic_stmt();
                 }
-                // D-EFF1 / D-QUAL1: `#Abilities(Net, DB) { … }` effect-restriction region.
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_CAPS) {
-                    return self.at_caps_stmt();
+                // D-EFF1 / D-ABILITY-NAME2: `#FX(Net, DB) { … }` effect-restriction region.
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_FX) {
+                    return self.at_fx_stmt();
                 }
                 // D-AUTHORITY-SCOPE1: retired Grant marker tombstone.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::RETIRED_MARKER_GRANT)
@@ -2862,6 +2863,7 @@ impl<'a> Parser<'a> {
                     | Expr::Try(_, _, _, _)
                     | Expr::OrFallback { .. }
                     | Expr::IncDec { .. } => {}
+                    Expr::If { .. } if Self::is_result_handler_expr(&expr) => {}
                     // D-LAYOUT1: inside a `layout NAME { … }` body, a bare
                     // `>=`/`<=`/`==` line is a constraint statement — GATE 1
                     // gives it a real side effect (registers into the
@@ -3080,7 +3082,7 @@ fn rewrite_collect_root_exits(stmts: &mut [Stmt], target: &str, nested_loop_dept
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
+            | Stmt::AuthorityScope { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }

@@ -130,7 +130,7 @@ pub(crate) fn authority_value_from_rights(rights: Vec<String>) -> CtValue {
 
 fn authority_value(rights: std::collections::BTreeSet<String>) -> CtValue {
     CtValue::Struct {
-        type_name: crate::Syntax::TYPE_ABILITIES.to_string(),
+        type_name: crate::Syntax::TYPE_AUTHORITY.to_string(),
         fields: vec![(
             "rights".to_string(),
             CtValue::List(rights.into_iter().map(CtValue::Str).collect()),
@@ -142,7 +142,7 @@ pub(crate) fn authority_holds(value: &CtValue) -> Option<jet_foundation::Authori
     let CtValue::Struct { type_name, fields } = value else {
         return None;
     };
-    if type_name != crate::Syntax::TYPE_ABILITIES {
+    if type_name != crate::Syntax::TYPE_AUTHORITY {
         return None;
     }
     fields.iter().find_map(|(name, value)| {
@@ -172,20 +172,20 @@ fn apply_authority_method(
     if !matches!(
         recv,
         CtValue::Struct { type_name, .. }
-            if type_name == crate::Syntax::TYPE_ABILITIES
+            if type_name == crate::Syntax::TYPE_AUTHORITY
     ) || !matches!(method, "with" | "without")
     {
         return None;
     }
     if args.len() != 1 {
         return Some(Err(unsupported(
-            &format!("Abilities.{method} expects one String right"),
+            &format!("Authority.{method} expects one String right"),
             span,
         )));
     }
     let CtValue::Str(requested) = &args[0] else {
         return Some(Err(unsupported(
-            &format!("Abilities.{method} expects a String right"),
+            &format!("Authority.{method} expects a String right"),
             span,
         )));
     };
@@ -196,9 +196,9 @@ fn apply_authority_method(
                 Ok(rights) => Ok(authority_value(rights)),
                 Err(message) => Err(Diagnostic::error(
                     "E0712",
-                    format!("this Abilities value cannot narrow to `{requested}`"),
-                    "the requested right is not held by this Abilities value".to_string(),
-                    format!("use a right already held by the Abilities value: {message}"),
+                    format!("this Authority value cannot narrow to `{requested}`"),
+                    "the requested right is not held by this Authority value".to_string(),
+                    format!("use a right already held by the Authority value: {message}"),
                     Some(span),
                 )),
             },
@@ -740,7 +740,7 @@ pub fn apply_static_type_method(
     // D-AUTHORITY-NAME1=A: the interpreter/comptime carrier has the same
     // ordinary-data shape as the Prelude value. Boundary narrowing uses the
     // same rights relation as AOT and JIT.
-    if matches!(type_name, crate::Syntax::TYPE_ABILITIES | "JetAuthority")
+    if matches!(type_name, crate::Syntax::TYPE_AUTHORITY | "JetAuthority")
         && method == "workspace"
         && args.is_empty()
     {
@@ -748,12 +748,12 @@ pub fn apply_static_type_method(
             authority_semantics::jet_authority_workspace_rights(),
         )));
     }
-    if matches!(type_name, crate::Syntax::TYPE_ABILITIES | "JetAuthority")
+    if matches!(type_name, crate::Syntax::TYPE_AUTHORITY | "JetAuthority")
         && method == "from_rights"
     {
         let Some(CtValue::List(rights)) = args.into_iter().next() else {
             return Some(Err(unsupported(
-                "Abilities.from_rights expects one list of String rights",
+                "Authority.from_rights expects one list of String rights",
                 span,
             )));
         };
@@ -761,7 +761,7 @@ pub fn apply_static_type_method(
         for right in rights {
             let CtValue::Str(right) = right else {
                 return Some(Err(unsupported(
-                    "Abilities.from_rights expects String rights",
+                    "Authority.from_rights expects String rights",
                     span,
                 )));
             };

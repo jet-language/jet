@@ -17,7 +17,6 @@ use crate::Codegen::TIR::lower::lower_spawn_lambda_for_jit_with_shared_block;
 use crate::Codegen::TIR::lower::lower_string_view_init;
 use crate::Codegen::TIR::lower::reactive_block_env;
 use crate::Codegen::TIR::lower::render_reactive_block_closure;
-use crate::Codegen::TIR::lower::tracked_float_slot;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_forin_collection;
 use crate::Codegen::TIR::lower_owned_expr;
@@ -27,7 +26,6 @@ use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::ScopeMemberKind;
-use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TExpr;
@@ -415,7 +413,7 @@ fn collect_interrupt_callback_scan(
                         | Stmt::Policy { body, .. }
                         | Stmt::TaskGroup { body, .. }
                         | Stmt::Layout { body, .. }
-                        | Stmt::Caps { body, .. }
+                        | Stmt::AuthorityScope { body, .. }
                         | Stmt::ContextBlock { body, .. }
                         | Stmt::Live { body, .. }
                         | Stmt::AssumeDet { body, .. }
@@ -581,7 +579,7 @@ fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>
                 | Stmt::Policy { body, .. }
                 | Stmt::TaskGroup { body, .. }
                 | Stmt::Layout { body, .. }
-                | Stmt::Caps { body, .. }
+                | Stmt::AuthorityScope { body, .. }
                 | Stmt::ContextBlock { body, .. }
                 | Stmt::Live { body, .. }
                 | Stmt::AssumeDet { body, .. }
@@ -764,7 +762,7 @@ fn collect_interrupt_lambda_captures(stmts: &[Stmt], captures: &mut Vec<(String,
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
+            | Stmt::AuthorityScope { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
             | Stmt::AssumeDet { body, .. }
@@ -1069,7 +1067,7 @@ impl<'a> LowerBlock<'a> {
                     self.out.push(TStmt::LineMarker(view.candidate.line));
                 }
             }
-            let mut candidate = view.candidate;
+            let candidate = view.candidate;
             let elem_ty = match tir_recv_jet_ty(&candidate.owner, &self.env) {
                 Some(Type::List(elem) | Type::FixedList { elem, .. }) => Some(*elem),
                 _ => None,
@@ -1078,10 +1076,6 @@ impl<'a> LowerBlock<'a> {
                 TLocal::user(&candidate.name).through_ref()
             } else {
                 TLocal::user(&candidate.name)
-            };
-            let slot = match candidate.origin.take() {
-                Some(origin) => slot.with_origin(origin),
-                None => slot,
             };
             self.env.bind(&candidate.name, slot, candidate.ty.clone());
             // D-TASKBORROW1=A: engines that keep a window record rather than a
@@ -1344,7 +1338,6 @@ struct SplitViewCandidate {
     owner_key: String,
     name: String,
     ty: Option<Type>,
-    origin: Option<TBindingOrigin>,
     start: i64,
     end: i64,
     single: bool,
@@ -1504,10 +1497,6 @@ fn split_view_candidate(stmt: &Stmt, stmt_index: usize, cx: &Cx) -> Option<Split
         owner_key,
         name: binding.name.clone(),
         ty: binding.ty.clone(),
-        origin: binding
-            .ty
-            .as_ref()
-            .and_then(|ty| crate::Codegen::TIR::lower::tracked_float_origin(binding, ty)),
         start,
         end,
         single,
@@ -2213,7 +2202,6 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             } else {
                                 TLocal::user(&b.name).as_uninit_scalar()
                             };
-                            let slot = tracked_float_slot(b, ty, slot);
                             env.bind(&b.name, slot, b.ty.clone());
                             ready_return!(TStmt::Let {
                                 name: b.name.clone(),
@@ -2242,11 +2230,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     if b.arena_view {
                         return in_own_frame(|| {
                             let init = lower_expr(&b.init, cx, env);
-                            let slot = tracked_float_slot(
-                                b,
-                                b.ty.as_ref().unwrap_or(&init.ty),
-                                TLocal::user(&b.name).through_ref(),
-                            );
+                            let slot = TLocal::user(&b.name).through_ref();
                             env.bind(&b.name, slot, b.ty.clone());
                             ready_return!(TStmt::Let {
                                 name: b.name.clone(),
@@ -2277,8 +2261,6 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             } else {
                                 TLocal::user(&b.name).through_ref()
                             };
-                            let slot =
-                                tracked_float_slot(b, b.ty.as_ref().unwrap_or(&init.ty), slot);
                             let binding_ty = if init.ty.is_compute_view_mut() {
                                 Some(init.ty.clone())
                             } else {
@@ -2415,15 +2397,11 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                                     },
                                                 );
                                                 TExprKind::CtLit(value)
-                                            })
-                                            .unwrap_or(TExprKind::DefaultLit)
+                                    })
+                                    .unwrap_or(TExprKind::DefaultLit)
                                     }),
                             };
-                            let slot = tracked_float_slot(
-                                b,
-                                b.ty.as_ref().unwrap_or(&init.ty),
-                                TLocal::user(&b.name),
-                            );
+                            let slot = TLocal::user(&b.name);
                             env.bind(&b.name, slot, b.ty.clone());
                             ready_return!(TStmt::Let {
                                 name: b.name.clone(),
@@ -2685,7 +2663,6 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         } else {
                             TLocal::user(&binding_name)
                         };
-                        let slot = tracked_float_slot(b, &ty, slot);
                         env.bind(&b.name, slot, Some(ty));
                         if b.gc_promotion.is_some() || b.gc_transferred {
                             env.mark_gc(&b.name);
@@ -3689,9 +3666,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 });
             });
         }
-        // c109 Phase 26: a bare `#Abilities(IO) { … }` effect-restriction region
+        // c109 Phase 26: a bare `#FX(IO) { … }` effect-restriction region
         // (D-EFF1). Effects erase at codegen (I3).
-        Stmt::Caps {
+        Stmt::AuthorityScope {
             caps,
             binding: Some(binding),
             body,
@@ -3702,7 +3679,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 // Authority value. Its rights are the already-resolved marker
                 // list; construction remains a Prelude call so every engine
                 // receives the same carrier and relation.
-                let authority_ty = Type::Named(Syntax::TYPE_ABILITIES.to_string());
+                let authority_ty = Type::Named(Syntax::TYPE_AUTHORITY.to_string());
                 let authority = TLocal::user(binding);
                 let mut scoped = clone_env(env);
                 scoped.bind(binding, authority, Some(authority_ty.clone()));
@@ -3759,7 +3736,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     used
                 });
                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
-                    let mut lowered = lowered.pop().expect("caps body was deferred");
+                    let mut lowered = lowered.pop().expect("FX body was deferred");
                     if binding_used {
                         lowered.insert(
                             0,
@@ -3777,11 +3754,11 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 });
             });
         }
-        Stmt::Caps { body, .. } => {
+        Stmt::AuthorityScope { body, .. } => {
             return in_own_frame(|| {
                 let scoped = clone_env(env);
                 return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
-                    TStmt::Region(lowered.pop().expect("caps body was deferred"))
+                    TStmt::Region(lowered.pop().expect("FX body was deferred"))
                 });
             });
         }
@@ -3840,6 +3817,18 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         );
                     });
                 }
+                // D-WRAP-SCOPE1=A: arithmetic policy is a sema-only lexical
+                // fact. Preserve the region boundary while its expressions
+                // lower through the ordinary shared arithmetic nodes.
+                if name == Syntax::MARKER_ARITHMETIC {
+                    let scoped = clone_env(env);
+                    return deferred_stmt(
+                        vec![LowerBody::scoped(body, scoped)],
+                        |mut lowered| {
+                            TStmt::Region(lowered.pop().expect("arithmetic body was deferred"))
+                        },
+                    );
+                }
                 let kind = if name == Syntax::SCOPE_TEST_SETUP {
                     ScopeMemberKind::Setup
                 } else if name == Syntax::SCOPE_TEST_EXPECT_FAIL {
@@ -3874,7 +3863,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             });
         }
         // D-DET1: `assume_deterministic { … }` erases to a plain `TStmt::Region`
-        // (byte-for-byte the `Stmt::Region`/`Stmt::Caps` shape). The determinism
+        // (byte-for-byte the `Stmt::Region`/`Stmt::AuthorityScope` shape). The determinism
         // suspension is a sema-only fact; nothing runtime, no `unsafe` (I3).
         Stmt::AssumeDet { body, .. } => {
             return in_own_frame(|| {

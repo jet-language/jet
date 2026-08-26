@@ -802,7 +802,7 @@ impl<'a> TaintCtx<'a> {
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
+            | Stmt::AuthorityScope { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::AssumeDet { body, .. }
             | Stmt::ScopeMember { body, .. }

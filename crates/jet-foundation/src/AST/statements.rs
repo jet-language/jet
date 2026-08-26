@@ -290,12 +290,12 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-EFF1 / D-AUTHORITY-SCOPE1: a `#Abilities(Net, DB) { … }` effect-restriction
-    /// region, optionally with a named authority handle:
-    /// `#Abilities(auth: FS, Net) { … }`. Bare `#Abilities` narrows; the named form also
-    /// binds the handle for the block. The caps list is validated in sema and
-    /// the lexical scope is emitted as a plain Rust block.
-    Caps {
+    /// D-EFF1 / D-ABILITY-NAME2: a `#FX(Net, DB) { … }` effect-restriction
+    /// region, optionally with a named Authority handle:
+    /// `#FX(grant: FS, Net) { … }`. Bare `#FX` narrows; the named form also
+    /// binds the handle for the block. The effect list is validated in sema
+    /// and the lexical scope is emitted as a plain Rust block.
+    AuthorityScope {
         caps: Vec<(String, Span)>,
         caps_span: Span,
         binding: Option<String>,
@@ -543,7 +543,7 @@ impl Stmt {
                 | Stmt::Switched { body, .. }
                 | Stmt::Region { body, .. }
                 | Stmt::Policy { body, .. }
-                | Stmt::Caps { body, .. }
+                | Stmt::AuthorityScope { body, .. }
                 | Stmt::ComptimeBlock { body, .. }
                 | Stmt::Live { body, .. }
                 | Stmt::Transact { body, .. }
@@ -703,7 +703,7 @@ impl Stmt {
                     span: current,
                     ..
                 }
-                | Stmt::Caps {
+                | Stmt::AuthorityScope {
                     body,
                     span: current,
                     ..
@@ -844,7 +844,7 @@ impl Stmt {
             | Stmt::Policy { span, .. }
             | Stmt::TaskGroup { span, .. }
             | Stmt::Layout { span, .. }
-            | Stmt::Caps { span, .. }
+            | Stmt::AuthorityScope { span, .. }
             | Stmt::ComptimeIf { span, .. }
             | Stmt::ComptimeSwitch { span, .. }
             | Stmt::ComptimeBlock { span, .. }

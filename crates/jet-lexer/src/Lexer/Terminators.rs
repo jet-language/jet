@@ -253,6 +253,17 @@ fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
     )
 }
 
+/// D-RESULT-DECON2=B: a compact Result handler may put its failure separator
+/// on the next line. Only `! name ->` suppresses the line terminator; a normal
+/// leading unary `!` keeps the ordinary statement boundary.
+fn result_handler_failure_starts_at(toks: &[Token], i: usize) -> bool {
+    matches!(toks.get(i).map(|t| &t.kind), Some(TokKind::Bang))
+        && matches!(toks.get(i + 1).map(|t| &t.kind), Some(TokKind::Ident(_)))
+        && toks
+            .get(i + 2)
+            .is_some_and(|token| matches!(token.kind, TokKind::UnifiedArrow))
+}
+
 /// S6-R post-pass: walk the code tokens (comments are trivia, skipped but kept
 /// in the stream) and insert a synthetic `Semi` whenever a statement-ending
 /// token is followed — across a line break — by a token that does not continue
@@ -349,6 +360,9 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
                     // statement, so a terminator before it is never grammatical
                     // (multi-line call args / list / map). Suppress it. A `}` is
                     // NOT suppressed: a block close legitimately ends a statement.
+                    // D-RESULT-DECON2=B: the second compact handler arm may
+                    // begin on its own line without becoming a new statement.
+                    && !result_handler_failure_starts_at(toks, i)
                     && !matches!(cur.kind, TokKind::RParen | TokKind::RBracket)
                 {
                     out.push(Token {

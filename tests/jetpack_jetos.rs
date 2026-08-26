@@ -1949,7 +1949,7 @@ fn os_switch_activates_and_sets_current() {
         "vm_gates: {vm_gates}"
     );
     let os_release = fs::read_to_string(generation.join("etc/os-release")).unwrap();
-    let expected_os_release = "NAME=jetos\nID=jetos\nVERSION=\"26.10 (Apex)\"\nVERSION_ID=26.10\nVERSION_CODENAME=apex\nPRETTY_NAME=\"jetos 26.10 (Apex)\"\nHOME_URL=\"https://jet.dev/jetos\"\n";
+    let expected_os_release = "NAME=jetos\nID=jetos\nVERSION=\"26.10 (Apex)\"\nVERSION_ID=26.10\nVERSION_CODENAME=apex\nPRETTY_NAME=\"jetos 26.10 (Apex)\"\nHOME_URL=\"https://jet-lang.dev/jetos\"\n";
     assert_eq!(os_release, expected_os_release);
     assert_eq!(
         fs::read_to_string(generation.join("usr/lib/os-release")).unwrap(),

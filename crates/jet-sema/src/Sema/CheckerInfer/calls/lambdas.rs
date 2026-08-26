@@ -726,25 +726,43 @@ impl<'a> Checker<'a> {
                 }
             }
             LambdaBody::Block(stmts) => {
-                // The body may never run (a spawned task, a callback), so a
-                // `return` inside it is a conditional return of the enclosing
-                // function, not an unconditional one (card #2006).
-                self.check_conditional_block(stmts, false);
-                let mut last_ret = None;
-                for s in stmts.iter_mut().rev() {
-                    match s {
-                        Stmt::Return(Some(e), _) => {
-                            last_ret = self.infer(e);
-                            break;
+                let value_expected = effective_ret.as_ref().filter(|ty| {
+                    !matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                        && !matches!(
+                            ty,
+                            Type::Result { ok, .. }
+                                if matches!(ok.as_ref(), Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                        )
+                });
+                if let Some(expected) = value_expected {
+                    // A callback body may never run. Its value tail still uses
+                    // the ordinary return checker, but must not make the
+                    // enclosing function unreachable.
+                    let reachable = self.flow.reachable;
+                    self.check_value_block(stmts, expected, false, lam.span);
+                    self.flow.reachable = reachable;
+                    Some(expected.clone())
+                } else {
+                    // The body may never run (a spawned task, a callback), so
+                    // a `return` inside it is a conditional return of the
+                    // enclosing function, not an unconditional one (card #2006).
+                    self.check_conditional_block(stmts, false);
+                    let mut last_ret = None;
+                    for s in stmts.iter_mut().rev() {
+                        match s {
+                            Stmt::Return(Some(e), _) => {
+                                last_ret = self.infer(e);
+                                break;
+                            }
+                            Stmt::Expr(e) => {
+                                last_ret = self.infer_fallible_stmt(e);
+                                break;
+                            }
+                            _ => {}
                         }
-                        Stmt::Expr(e) => {
-                            last_ret = self.infer_fallible_stmt(e);
-                            break;
-                        }
-                        _ => {}
                     }
+                    last_ret
                 }
-                last_ret
             }
         };
         if collecting_loop {
@@ -1003,7 +1021,7 @@ fn rewrite_inline_loop_target(stmts: &mut [Stmt], old: &str, new: &str) {
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
+            | Stmt::AuthorityScope { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
@@ -1091,7 +1109,7 @@ fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
+            | Stmt::AuthorityScope { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::AssumeDet { body, .. }
             | Stmt::ScopeMember { body, .. } => rewrite_collect_yields(body, target),

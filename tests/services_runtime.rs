@@ -72,24 +72,19 @@ use core.time as time
 
 fn orders_worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) String {
-    if receipt == {
-        .Enqueued(id) -> { return id }
-        .Executed(id) -> { return id }
-        .Retained(id, _) -> { return id }
-        .DeadLettered(id) -> { return id }
-    }
-    return ""
+fn receipt_id(receipt: Delivery) Delivery {
+    return receipt
 }
 
-fn receipt_kind(receipt: ServiceReceipt) String {
-    if receipt == {
-        .Enqueued(_) -> { return "enqueued" }
-        .Executed(_) -> { return "executed" }
-        .Retained(_, _) -> { return "retained" }
-        .DeadLettered(_) -> { return "dead" }
-        .Rejected(_) -> { return "rejected" }
-        .Unavailable(_) -> { return "unavailable" }
+fn receipt_kind(receipt: Delivery) String {
+    state :: receipt.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "pending" }
+        .Accepted -> { return "accepted" }
+        .Delivering -> { return "delivering" }
+        .Delivered -> { return "delivered" }
+        .DeadLettered -> { return "dead" }
+        .Cancelled -> { return "cancelled" }
     }
     return "unknown"
 }
@@ -105,15 +100,14 @@ fn run() {
     tree.start() ?? panic("start")
 
     first :: runtime.send(endpoint, "order", key: "order-1") ?? panic("first")
-    id :: receipt_id(first)
-    if id == "" { panic("missing receipt id") }
-    print("first:enqueued")
+    id :: receipt_id(~first)
+    print("first:accepted")
     recovered := services.runtime(store, retention: retention)
-    recovered_duplicate :: recovered.retry(id) ?? panic("recover")
+    recovered_duplicate :: recovered.retry(~id) ?? panic("recover")
     print("recovered:{receipt_kind(recovered_duplicate)}")
     delivered :: tree.receive(endpoint) ?? panic("deliver")
     print("delivered:{delivered}")
-    runtime.commit(id) ?? panic("commit")
+    runtime.commit(first) ?? panic("commit")
     print("committed:ok")
     tree.fail_worker(endpoint) ?? panic("restart")
     print("restarted:{tree.restarts(endpoint) ?? panic("restarts")}")
@@ -121,13 +115,13 @@ fn run() {
     duplicate :: recovered.send(endpoint, "order", key: "order-1") ?? panic("duplicate")
     print("duplicate:{receipt_kind(duplicate)}")
 
-    retained :: runtime.retain(id) ?? panic("retain")
+    retained :: runtime.retain(~id) ?? panic("retain")
     print("retain:{receipt_kind(retained)}")
-    retry :: recovered.retry(id) ?? panic("retry")
+    retry :: recovered.retry(~id) ?? panic("retry")
     print("retry:{receipt_kind(retry)}")
     redelivered :: tree.receive(endpoint) ?? panic("redeliver")
     print("redelivered:{redelivered}")
-    runtime.commit(id) ?? panic("redelivery commit")
+    runtime.commit(~id) ?? panic("redelivery commit")
     dead :: runtime.dead_letter(id) ?? panic("dead")
     print("dead:{receipt_kind(dead)}")
     tree.stop() ?? panic("stop")
@@ -151,7 +145,7 @@ fn service_authority_receipts_survive_reopen_and_lifecycle() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "first:enqueued\nrecovered:enqueued\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:executed\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
+        "first:accepted\nrecovered:accepted\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:delivered\nretain:accepted\nretry:accepted\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
     );
 }
 
@@ -165,7 +159,7 @@ fn service_authority_receipts_match_default_run() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
-        "first:enqueued\nrecovered:enqueued\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:executed\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
+        "first:accepted\nrecovered:accepted\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:delivered\nretain:accepted\nretry:accepted\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
     );
 }
 
@@ -179,7 +173,7 @@ fn service_authority_receipts_match_interpreter() {
     );
     assert_eq!(
         stdout,
-        "first:enqueued\nrecovered:enqueued\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:executed\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
+        "first:accepted\nrecovered:accepted\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:delivered\nretain:accepted\nretry:accepted\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
     );
 }
 
@@ -190,24 +184,19 @@ use core.time as time
 
 fn orders_worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) String {
-    if receipt == {
-        .Enqueued(id) -> { return id }
-        .Executed(id) -> { return id }
-        .Retained(id, _) -> { return id }
-        .DeadLettered(id) -> { return id }
-    }
-    return ""
+fn receipt_id(receipt: Delivery) Delivery {
+    return receipt
 }
 
-fn receipt_kind(receipt: ServiceReceipt) String {
-    if receipt == {
-        .Enqueued(_) -> { return "enqueued" }
-        .Executed(_) -> { return "executed" }
-        .Retained(_, _) -> { return "retained" }
-        .DeadLettered(_) -> { return "dead" }
-        .Rejected(_) -> { return "rejected" }
-        .Unavailable(_) -> { return "unavailable" }
+fn receipt_kind(receipt: Delivery) String {
+    state :: receipt.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "pending" }
+        .Accepted -> { return "accepted" }
+        .Delivering -> { return "delivering" }
+        .Delivered -> { return "delivered" }
+        .DeadLettered -> { return "dead" }
+        .Cancelled -> { return "cancelled" }
     }
     return "unknown"
 }
@@ -223,16 +212,17 @@ fn run() {
     tree.start() ?? panic("start")
     if phase == "send" {
         receipt :: runtime.send(endpoint, "order", key: "order-restart") ?? panic("send")
-        print(receipt_id(receipt))
+        print("accepted")
     } else {
-        id :: env.get("JET_SERVICE_AUTH_ID") ?? panic("id")
         tree.fail_worker(endpoint) ?? panic("restart")
         print("restarted:{tree.restarts(endpoint) ?? panic("restarts")}")
-        retry :: runtime.retry(id) ?? panic("retry")
-        print(receipt_kind(retry))
+        receipt :: runtime.send(endpoint, "order", key: "order-restart") ?? panic("recover")
+        retry :: runtime.retry(receipt) ?? panic("retry")
+        retry_copy :: ~retry
+        print(receipt_kind(retry_copy))
         message :: tree.receive(endpoint) ?? panic("receive")
         print(message)
-        runtime.commit(id) ?? panic("commit")
+        runtime.commit(retry) ?? panic("commit")
     }
 }
 "#;
@@ -333,7 +323,7 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     assert!(!id.is_empty(), "send process did not return a receipt id");
     assert_eq!(
         run_restart_process(&bin, &store, "recover", Some(id)),
-        "restarted:1\nenqueued\norder\n"
+        "restarted:1\naccepted\norder\n"
     );
 
     let default_store = dir.join("authority-default.log");
@@ -345,7 +335,7 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     );
     assert_eq!(
         run_restart_process(&bin, &default_store, "recover", Some(id)),
-        "restarted:1\nenqueued\norder\n"
+        "restarted:1\naccepted\norder\n"
     );
 
     let aot_store = dir.join("authority-aot-to-default.log");
@@ -357,7 +347,7 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     );
     assert_eq!(
         run_restart_default_process(&dir, &aot_store, "recover", Some(id)),
-        "restarted:1\nenqueued\norder\n"
+        "restarted:1\naccepted\norder\n"
     );
 
     // A validly framed but altered receipt field must not become a restart
@@ -1124,16 +1114,24 @@ fn run() {
     worker :: tree.worker("worker", failure_worker, capacity: 1) ?? panic("worker")
     tree.start() ?? panic("start")
 
-    tree.send_durable(worker, "first", key: "k1") ?? panic("first")
-    tree.send_durable(worker, "first", key: "k1") ?? panic("duplicate")
+    first :: tree.send_durable(worker, "first", key: "k1") ?? panic("first")
+    first.status() ?? panic("first status")
+    duplicate :: tree.send_durable(worker, "first", key: "k1") ?? panic("duplicate")
+    duplicate.status() ?? panic("duplicate status")
     conflicting :: tree.send_durable(worker, "different", key: "k1")
     if conflicting == {
-        .Ok(_) -> { print("conflict:accepted") }
+        .Ok(delivery) -> {
+            delivery.cancel() ?? panic("unexpected conflict delivery")
+            print("conflict:accepted")
+        }
         .Err(_) -> { print("conflict:rejected") }
     }
     full :: tree.send_durable(worker, "second", key: "k2")
     if full == {
-        .Ok(_) -> { print("full:accepted") }
+        .Ok(delivery) -> {
+            delivery.cancel() ?? panic("unexpected full delivery")
+            print("full:accepted")
+        }
         .Err(_) -> { print("full:rejected") }
     }
     print("dead_letters:{tree.dead_letter_count()}")
@@ -1246,14 +1244,8 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) String {
-    if receipt == {
-        .Enqueued(id) -> { return id }
-        .Executed(id) -> { return id }
-        .Retained(id, _) -> { return id }
-        .DeadLettered(id) -> { return id }
-    }
-    return ""
+fn receipt_id(receipt: Delivery) Delivery {
+    return receipt
 }
 
 fn run() {
@@ -1268,7 +1260,6 @@ fn run() {
     tree.drain_worker(endpoint) ?? panic("drain")
     receipt :: runtime.send(endpoint, "after", key: "after") ?? panic("send")
     id :: receipt_id(receipt)
-    if id == "" { panic("missing receipt") }
     print("accepted")
     print("first:{tree.receive(endpoint) ?? panic("first")}")
     print("second:{tree.receive(endpoint) ?? panic("second")}")
@@ -1307,24 +1298,19 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) String {
-    if receipt == {
-        .Enqueued(id) -> { return id }
-        .Executed(id) -> { return id }
-        .Retained(id, _) -> { return id }
-        .DeadLettered(id) -> { return id }
-    }
-    return ""
+fn receipt_id(receipt: Delivery) Delivery {
+    return receipt
 }
 
-fn receipt_kind(receipt: ServiceReceipt) String {
-    if receipt == {
-        .Enqueued(_) -> { return "enqueued" }
-        .Executed(_) -> { return "executed" }
-        .Retained(_, _) -> { return "retained" }
-        .DeadLettered(_) -> { return "dead" }
-        .Rejected(_) -> { return "rejected" }
-        .Unavailable(_) -> { return "unavailable" }
+fn receipt_kind(receipt: Delivery) String {
+    state :: receipt.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "pending" }
+        .Accepted -> { return "accepted" }
+        .Delivering -> { return "delivering" }
+        .Delivered -> { return "delivered" }
+        .DeadLettered -> { return "dead" }
+        .Cancelled -> { return "cancelled" }
     }
     return "unknown"
 }
@@ -1339,7 +1325,7 @@ fn run() {
     tree.start() ?? panic("start")
 
     receipt :: runtime.send(endpoint, "pending", key: "pending") ?? panic("send")
-    id :: receipt_id(receipt)
+    id :: receipt_id(~receipt)
     print("sent:{receipt_kind(receipt)}")
     print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
     print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
@@ -1351,7 +1337,7 @@ fn run() {
 "#;
 
 const RUNTIME_HANDOFF_PENDING_OUTPUT: &str =
-    "sent:enqueued\nhandoff:2\nreceipt:ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=api)\nreceived:pending\nnext:3\n";
+    "sent:accepted\nhandoff:2\nreceipt:ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=api)\nreceived:pending\nnext:3\n";
 
 #[test]
 fn runtime_receipt_pins_pending_shard_across_handoff_aot() {
@@ -1394,14 +1380,8 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) String {
-    if receipt == {
-        .Enqueued(id) -> { return id }
-        .Executed(id) -> { return id }
-        .Retained(id, _) -> { return id }
-        .DeadLettered(id) -> { return id }
-    }
-    return ""
+fn receipt_id(receipt: Delivery) Delivery {
+    return receipt
 }
 
 fn run() {
@@ -1415,7 +1395,6 @@ fn run() {
     tree.drain_worker(endpoint) ?? panic("drain")
     receipt :: runtime.send(endpoint, "after", key: "after") ?? panic("send")
     id :: receipt_id(receipt)
-    if id == "" { panic("missing receipt") }
     print("accepted")
     print("received:{tree.receive(endpoint) ?? panic("receive")}")
     runtime.commit(id) ?? panic("commit")
@@ -1454,14 +1433,8 @@ use core.time as time
 
 fn worker() {}
 
-fn receipt_id(receipt: ServiceReceipt) String {
-    if receipt == {
-        .Enqueued(id) -> { return id }
-        .Executed(id) -> { return id }
-        .Retained(id, _) -> { return id }
-        .DeadLettered(id) -> { return id }
-    }
-    return ""
+fn receipt_id(receipt: Delivery) Delivery {
+    return receipt
 }
 
 fn run() {
@@ -1485,9 +1458,9 @@ fn run() {
         .Ok(_) -> { print("duplicate:accepted") }
         .Err(_) -> { print("duplicate:rejected") }
     }
-    runtime.retry(id) ?? panic("retry")
+    retry :: runtime.retry(id) ?? panic("retry")
     print("retry:{tree.receive(endpoint) ?? panic("retry receive")}")
-    runtime.commit(id) ?? panic("commit")
+    runtime.commit(retry) ?? panic("commit")
     tree.stop() ?? panic("stop")
 }
 "#;
@@ -1809,9 +1782,11 @@ fn run() {
     worker :: tree.worker("a", durable_worker, capacity: 4) ?? panic("worker")
     tree.start() ?? panic("start")
 
-    tree.send_durable(worker, "ping", key: "k1") ?? panic("durable send")
+    first :: tree.send_durable(worker, "ping", key: "k1") ?? panic("durable send")
+    first.status() ?? panic("first status")
     tree.append_event("after-durable-send") ?? panic("append after durable send")
-    tree.send_durable(worker, "pong", key: "k2") ?? panic("second durable send")
+    second :: tree.send_durable(worker, "pong", key: "k2") ?? panic("second durable send")
+    second.status() ?? panic("second status")
     tree.append_event("after-second-send") ?? panic("append after second send")
 
     print("events:{tree.event_count()}")

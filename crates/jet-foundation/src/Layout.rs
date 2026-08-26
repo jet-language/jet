@@ -474,6 +474,7 @@ mod tests {
             name_span: Span::new(0, 0),
             type_params: Vec::new(),
             fields,
+            state: None,
             methods: Vec::new(),
             cli_bindings: Vec::new(),
             trait_impls: Vec::new(),

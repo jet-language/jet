@@ -726,12 +726,12 @@ mod registration_tests {
         let bytes = fs::read(&receipt).unwrap();
         let text = String::from_utf8(bytes.clone()).unwrap();
         assert!(text.starts_with("jet-development-receipt-v1\n"));
-        assert!(text.contains("act\t\t7061636b6167652d7265616c697a6174696f6e\t"));
+        assert!(text.contains("act\t\t7061636b6167652d7265616c697a6174696f6e\n"));
         assert!(text.contains("closure\t\t7368613235362d"));
         assert!(text.contains("action\t706c616e6e6564\t"));
         assert!(text.contains("activation-proof\t\t\n"));
         assert!(text.contains("witness\t\t"));
-        assert!(text.contains("outcome\t\t706173736564\t"));
+        assert!(text.contains("outcome\t\t706173736564\n"));
         let source_digest = format!("sha256-{}", SHA256::sha256_hex("source-v1".as_bytes()));
         let source_input = format!(
             "input\t{}\t{}",
@@ -1916,6 +1916,12 @@ fn render_receipt(entry: &StoreEntry) -> String {
             ("catalog-tier", "nix.index.tier"),
             ("catalog-trust", "nix.index.trust"),
             ("signature-chain", "nix.index.signature-chain"),
+            ("fallback-provenance", "nix.fallback.provenance"),
+            ("fallback-request", "nix.fallback.request"),
+            ("fallback-policy", "nix.fallback.policy.receipt"),
+            ("fallback-graph", "nix.fallback.graph"),
+            ("fallback-losses", "nix.fallback.losses"),
+            ("fallback-proof", "nix.fallback.proof"),
         ] {
             if let Some(value) = producer.facts.get(key) {
                 inputs.push(receipt_input(name, value));

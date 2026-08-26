@@ -442,6 +442,8 @@ pub const KW_AS: &str = "as";
 /// non-memory settings such as `copies: .Explicit`.
 pub const MARKER_POLICY: &str = "Policy"; // D-POLICY-WORD1
 pub const POLICY_COPIES: &str = "copies"; // D-MEM-COPYSEM1
+/// D-WRAP-SCOPE1=A: lexical fixed-width arithmetic mode marker.
+pub const MARKER_ARITHMETIC: &str = "Arithmetic";
 
 /// S51 / D-CORENS-CANON1: compiler-known `core.*` library root.
 pub const CORE_SHORT: &str = "core";
@@ -650,6 +652,7 @@ pub const BUILTIN_PANIC: &str = "panic";
 pub const BUILTIN_WRAPPING: &str = "wrapping";
 pub const BUILTIN_SATURATING: &str = "saturating";
 pub const BUILTIN_CHECKED: &str = "checked";
+pub const INTERNAL_ARITHMETIC_CHECKED: &str = "__jet_arithmetic_checked";
 /// D-NUMWIDEN-CROSS1=E (ratified 2026-07-28): accept a possibly inexact
 /// integer-to-float crossing at one use site.
 pub const BUILTIN_APPROX: &str = "approx";
@@ -674,7 +677,7 @@ pub const BUILTIN_FETCH: &str = "fetch";
 /// S43 (ratified M6; PascalCase marker D-CASING1 follow-on 2026-06-21):
 /// top-level test-declaration block, written as the marker `#Test("name") { … }`.
 /// D-TESTPAREN1=A (ratified 2026-06-26): the name is now a parenthesized string
-/// argument, matching the `#Abilities(…)` marker family.
+/// argument, matching the `#FX(…)` marker family.
 /// D-TESTFAULT1=A (ratified 2026-08-12): the optional `faults: [Effect]`
 /// argument names effect-root call sites for the deterministic test harness.
 /// The bare lowercase `test` keyword (FOREIGN_TEST) is the retired spelling,

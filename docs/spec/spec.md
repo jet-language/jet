@@ -38,10 +38,9 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
   literal words become argv items and each `{hole}` becomes exactly one argv
   item; neither word splitting, glob expansion, nor shell parsing touches a
   hole. Runtime `String` conversion is E0149; `Sh.raw(text)` is the audited
-  escape. Bare `"…"` never elaborates into these types. Libraries extend the
-  same rail with `marker Name on [.Text] { check … hole … }`: the check runs
-  at comptime, the hole expression encodes each value, and a sink accepts only
-  `Name` or audited `Name.raw(text)`.
+  escape. Bare `"…"` never elaborates into these types. Marker declarations
+  use one list: `marker Name(args..., @sites: [...], @repeatable: ..., ...)`.
+  Typed-text declarations do not add a second marker declaration form.
 - Numbers (S67): exact arbitrary-precision decimal `Int` and `Float`
   (digits `.` digits, optional `e`/`E` exponent). `_` digit separators are
   allowed anywhere among the digits (`1_000_000`); base prefixes `0x`/`0o`/`0b`
@@ -99,6 +98,7 @@ block    = "{" { stmt } [ expr ] "}" ;   // S3: multiline grouping
 // attached to the declaration head. `NL` denotes that synthetic terminator.
 stmt     = binding | assign | if | loop | fenced-stmt
          | break | next | "return" [ expr ] NL
+         | result-handler NL
          | expr NL ;
 binding  = [ "#Track" ] ( ident "::" expr     // immutable
          | ident ":=" expr ) NL               // mutable
@@ -125,6 +125,9 @@ guard-stmt-body = block | non-if-stmt ;
 arm-head = value | range | condition ; // bare value ⇒ `subject == value`; range `lo..hi` ⇒ membership (D-PATR/D-RANGE1); else a Bool condition (D-IF2 Q3)
 range    = expr ".." expr ;            // inclusive (S22); no `..=` (E0318), no `step` in arm head (E0319)
 arm-body = block | stmt ;        // `{ … }` block or one braceless statement (D-IF2 Q2)
+result-handler = expr "?" ident "->" handler-branch
+                 "!" ident "->" handler-branch ; // D-RESULT-DECON2=B
+handler-branch = block | expr ;  // one fixed `.Ok` arm and one `.Err` arm
 loop     = [ ident "::" ] loop-body ;            // D-LOOPLABEL3: optional ordinary-name label
 loop-body= "loop" effect-body
          | "loop" cond effect-body
@@ -177,8 +180,8 @@ expr     = precedence climbing over:
   fences need plain names. A fence is not a list or destructure (D-FENCE-GLYPH1,
   D-FENCE-RANGE1).
 - `#Track name :: value` / `#Track name := value` opt a binding into
-  D-PROVENANCE1 provenance. Today this records Float binding origins for
-  `value.origin() -> String`; untracked Floats return `"untracked"`.
+  D-TRACK-ORIGIN1 provenance. Read it only as the typed comptime fact
+  `value.@origin -> OriginInfo?`; there is no runtime origin projection.
 - Arithmetic: `+ - * /` widen one numeric operand to the other when the ruled
   numeric widening law permits it; `% & | ^ << >>` remain integer-only.
   `+` on `String` is a teaching error pointing at interpolation. Compound
@@ -207,6 +210,13 @@ keep code readable from top to bottom. See
   braces for multiple statements or scoped bodies. Arm-table arrows select an
   arm, including an arm yielding `()`. Value branches require `else` unless a closed
   subject is exhaustive; result types unify. Braces group multiline bodies.
+- A fallible Result may use the compact exhaustive handler
+  `result ? ok -> success ! error -> failure`. The two identifiers are
+  branch-local payload bindings. The parser lowers this fixed form to the
+  ordinary `.Ok` and `.Err` pattern tests, so branch typing, effects,
+  divergence, ownership, and every execution tier use the existing mechanism.
+  The `?` is contextual here; postfix propagation, `?.`, unary `!`, and `??`
+  keep their existing meanings.
 - `loop` has infinite,
   conditional, source (`loop x in source [, stride]`), map-pair
   (`loop (key, value) in source`), and explicit-state
@@ -533,7 +543,7 @@ zero-copy view into the receiver's own buffer, invisible in the local type
 binding can't outlive its owner:
 
 ```jet
-padded := "  nate@jet.dev  "
+padded := "  nate@jet-lang.dev  "
 email :: padded.trim()
 domain :: email.after("@")
 print("padded still readable: {padded}")   // reading the owner still works
@@ -3290,7 +3300,7 @@ The package view merges its declarations with loaded dependency and Prelude
 declarations. After a root has any declared leaves, dotted uses under that root
 must match a declaration exactly. Bare roots remain valid, and a root with no
 declared leaves remains open. The same check applies to function effect rows,
-`#Abilities` and package effect budgets. Declarations have no runtime
+`#FX` and package effect budgets. Declarations have no runtime
 representation.
 
 | Effect  | Carried by |
@@ -3420,21 +3430,21 @@ purity violation (reported as **E3401**, the established purity diagnostic).
 Effects are erased: `-[FS]>`, `-[]>`, and an unannotated function with the same
 body all generate byte-identical Rust.
 
-### Restricting a region — `#Abilities(…) { … }`
+### Restricting a region — `#FX(…) { … }`
 
-Where `-[…]>` bounds a whole function, `#Abilities(…) { … }` restricts a **block**.
+Where `-[…]>` bounds a whole function, `#FX(…) { … }` restricts a **block**.
 Inside the region, the only effects allowed — directly or through any call it
 reaches — are the ones listed; anything else is **E0712**. It is a hard local
 ceiling, not a grant: the effects still happen and still count toward the
 enclosing function's set.
 
 ```ebnf
-caps_region = "#Abilities" "(" effect { "," effect } ")" block ;
+caps_region = "#FX" "(" effect { "," effect } ")" block ;
 ```
 
 ```jet
 fn run() {
-    #Abilities(FS, IO) {
+    #FX(FS, IO) {
         text :: core.files.read("x") ?? "";   // FS — allowed
         print(text);                            // IO — allowed
     }
@@ -3443,7 +3453,7 @@ fn run() {
 
 A call inside the region that transitively touches `Net` would be E0712 even
 though no `Net` call appears literally in the block. Like every effect
-construct, `#Abilities` is a plain lexical block in codegen — it erases.
+construct, `#FX` is a plain lexical block in codegen — it erases.
 
 ### Higher-order effects — transparent flow-through (D-EFF2)
 
@@ -3559,7 +3569,7 @@ Lists, maps, options, results, structs, enums, and closures are not rebuilt
 from display text; explicit binding annotations remain available to `:type`.
 
 Pure Core calls run directly. Ambient Core calls use normal Jet authority:
-the call must be inside `#Abilities(root)`, and the REPL must authorize the exact
+the call must be inside `#FX(root)`, and the REPL must authorize the exact
 operation and resource before it touches host state. A TTY prompts for once,
 session, or deny. A session allowance is an exact tuple and offers continue
 or revoke on reuse. `--allow-fs`, `--allow-env`, `--allow-exec`,

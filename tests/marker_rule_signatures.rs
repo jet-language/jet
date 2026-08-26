@@ -75,8 +75,8 @@ use core.compiler.lang as lang
 fn helper() {}
 
 fn run() {
-    #Abilities(lang.Ability.Net) {}
-    #Abilities(caps: lang.Ability.Net) {}
+    #FX(lang.Effect.Net) {}
+    #FX(grant: lang.Effect.Net) {}
 }
 "#,
     );
@@ -86,12 +86,12 @@ fn run() {
 #[test]
 fn qualified_state_namespace_is_valid_and_not_a_value() {
     let valid = codes(
-        "state Door { Closed Open }\nstruct Door {\n#State(Door.State.Closed) fn close(self) {}\n#Transition(Door.State.Closed, Door.State.Open) fn open(self) {}\n}\nfn run() {}",
+        "struct Door { state { Closed, Open }\n#State(Door.State.Closed) fn close(self) {}\n#Transition(Door.State.Closed, Door.State.Open) fn open(self) {}\n}\nfn run() {}",
     );
     assert!(!valid.iter().any(|code| code == "E0151"), "{valid:?}");
 
     let value =
-        codes("state Door { Closed Open }\nstruct Door {}\nfn run() { print(Door.State.Open) }");
+        codes("struct Door { state { Closed, Open } }\nfn run() { print(Door.State.Open) }");
     assert!(value.iter().any(|code| code == "E0302"), "{value:?}");
 }
 
@@ -146,8 +146,8 @@ fn field_and_variant_sites_reject_every_non_applicable_example() {
 #[test]
 fn method_markers_share_the_ordered_registry_collector() {
     let source = r#"
-state Door { Ready }
 struct Door {
+    state { Ready }
     #[Inline, State(Ready)]
     fn open(self) {}
 }
@@ -156,7 +156,7 @@ fn run() {}
     let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
     let program = jet::Parser::parse(&tokens).expect("method marker list should parse");
-    let jet::AST::Item::Struct(door) = &program.items[1] else {
+    let jet::AST::Item::Struct(door) = &program.items[0] else {
         panic!("Door struct")
     };
     assert!(door.methods[0].is_inline);
@@ -331,7 +331,7 @@ fn task_metadata_binds_typed_platform_skip_limits_and_formats_stably() {
 #[test]
 fn adjacent_method_markers_keep_the_shared_e0999_rewrite() {
     let source =
-        "state Door { Ready }\nstruct Door { #Inline #State(Ready) fn open(self) {} }\nfn run() {}";
+        "struct Door { state { Ready } #Inline #State(Ready) fn open(self) {} }\nfn run() {}";
     let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
     let (_, diagnostics) =

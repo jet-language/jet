@@ -6,7 +6,7 @@ use super::package_hangar_vendor::{cmd_audit, cmd_hangar};
 use super::profile::cmd_profile;
 use super::run_enter_dev::{cmd_env, cmd_use};
 use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_service_probe, cmd_services};
-use super::tool::cmd_tool;
+use super::tool::{check_user_tools_drift, cmd_tool};
 use super::trust_env_build::cmd_trust;
 use super::update_search_info::{
     cmd_explain, cmd_info, cmd_logs, cmd_outdated, cmd_override, cmd_search, cmd_update,
@@ -522,6 +522,11 @@ pub fn main(args: Vec<String>) -> i32 {
             );
             return 2;
         }
+    }
+
+    let drift_code = check_user_tools_drift(&theme, &parsed);
+    if drift_code != 0 {
+        return drift_code;
     }
 
     match verb.as_str() {

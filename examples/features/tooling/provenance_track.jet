@@ -1,6 +1,11 @@
 fn run() {
     #Track speed :: Float{3.5}
     plain :: Float{3.5}
-    print(speed.origin().starts_with("tracked `speed` at examples/features/tooling/provenance_track.jet:2:12"))
-    print(plain.origin())
+    @speed_origin :: speed.@origin
+    @plain_origin :: plain.@origin
+    print(@speed_origin?.tracked ?? false)
+    print(@speed_origin?.source ?? "missing")
+    print(@speed_origin?.line ?? 0)
+    print(@speed_origin?.column ?? 0)
+    print(@plain_origin == None)
 }

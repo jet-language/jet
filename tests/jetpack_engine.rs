@@ -4319,6 +4319,123 @@ fn local_unofficial_nixpkgs_catalog_is_explicit_and_auditable() {
 }
 
 #[test]
+fn local_catalog_mixes_native_recipe_and_nix_mapping() {
+    let project = Scratch::new("local-catalog-native-project");
+    let root = Scratch::new("local-catalog-native-root");
+    let catalog = Scratch::new("local-catalog-native-catalog");
+    let server = nix_index_cache_server::NixIndexCacheServer::start_ripgrep(&project.path);
+    server.install(&root.path);
+    server.install_local_catalog(&catalog.path);
+
+    let artifact = project.join("native-tool");
+    fs::write(&artifact, b"#!/bin/sh\necho native catalog\n").unwrap();
+    let digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
+    let url = format!("file://{}", artifact.display());
+    let recipes = format!(
+        "{{\"schema\":1,\"recipes\":[{{\"name\":\"native-tool\",\"version\":\"1.0.0\",\"kind\":\"prebuilt\",\"url\":\"{}\",\"sha256\":\"{}\",\"bin\":\"native-tool\"}}]}}",
+        jet_foundation::JSON::json_escape(&url),
+        digest,
+    );
+    fs::write(catalog.join("recipes-v1.json"), recipes).unwrap();
+    fs::write(
+        project.join("env.jet"),
+        format!(
+            "module dev {{\n    sources: {{ default: NixOS/nixpkgs/{REVISION}@github }}\n    env.dev: Env{{ packages: [native-tool, default.ripgrep] }}\n}}\n",
+            REVISION = nix_index_cache_server::REVISION,
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(project.join(".jet")).unwrap();
+    fs::write(
+        project.join(".jet/lock"),
+        format!(
+            "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"{}\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
+            nix_index_cache_server::CHANNEL,
+            nix_index_cache_server::REVISION,
+        ),
+    )
+    .unwrap();
+
+    let output = jetpack()
+        .args([
+            "build",
+            "--no-color",
+            "--trust",
+            "--local-nix-catalog",
+            catalog.path.to_str().unwrap(),
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.status.success(), "build output: {text}");
+
+    let roots = jetpack::Store::Roots::at(root.path.clone());
+    let entries = jetpack::Store::list_checked(&roots).unwrap();
+    let native = entries
+        .iter()
+        .find(|entry| entry.name == "native-tool")
+        .expect("native recipe entry");
+    let native_producer = jetpack::Store::ProducerRecord::decode(&native.producer_record).unwrap();
+    assert_eq!(native_producer.provider, "jetpackage");
+    assert_eq!(
+        native_producer.facts.get("source.kind").map(String::as_str),
+        Some("local-unofficial-catalog")
+    );
+    assert_eq!(
+        native_producer.facts.get("nix.index.tier").map(String::as_str),
+        Some("local-unofficial")
+    );
+    assert_eq!(
+        native_producer
+            .facts
+            .get("nix.index.signature-chain")
+            .map(String::as_str),
+        Some("none")
+    );
+    assert!(!native_producer.facts.contains_key("nix.drv_path"));
+    assert!(Path::new(&native.out).join("bin/native-tool").is_file());
+
+    let nix = entries
+        .iter()
+        .find(|entry| entry.name == "ripgrep")
+        .expect("nix mapping entry");
+    let nix_producer = jetpack::Store::ProducerRecord::decode(&nix.producer_record).unwrap();
+    assert_eq!(nix_producer.provider, "nix");
+    assert_eq!(
+        nix_producer.facts.get("nix.index.tier").map(String::as_str),
+        Some("local-unofficial")
+    );
+
+    let lock = fs::read_to_string(project.join(".jet/lock")).unwrap();
+    assert!(lock.contains("catalog-tier = \"local-unofficial\""), "lock: {lock}");
+    assert!(lock.contains("catalog-trust = \"unverified\""), "lock: {lock}");
+    let receipt = fs::read_to_string(root.join("hangar/receipts").join(&native.receipt)).unwrap();
+    assert!(receipt.contains("756e7665726966696564"), "receipt: {receipt}");
+
+    let audit = jetpack()
+        .args(["audit", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    let audit_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&audit.stdout),
+        String::from_utf8_lossy(&audit.stderr)
+    );
+    assert!(audit.status.success(), "audit output: {audit_text}");
+    assert!(audit_text.contains(&native.id), "audit output: {audit_text}");
+    assert!(audit_text.contains("signature-chain: none"), "audit output: {audit_text}");
+}
+
+#[test]
 fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
     const TEST_NAME: &str = "indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object";
     const PHASE_ENV: &str = "JETPACK_INDEXED_NIX_PHASE";

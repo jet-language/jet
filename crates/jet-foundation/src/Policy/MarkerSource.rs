@@ -1,7 +1,7 @@
 //! D-META-ONE1=A: the marker registry is read from Prelude Jet source.
 //!
 //! `Prelude/Markers.jet` holds one `marker Name(params…)` declaration per rule
-//! in the ratified D-META-FORM1=A form. This module turns that text into the
+//! in the ratified D-META-FORM1=A / D-MARKER-SITES1=B form. This module turns that text into the
 //! rows the parser, sema, formatter, LSP, highlighter, and explain tools read,
 //! so no Rust file keeps a second copy of the vocabulary.
 //!
@@ -331,12 +331,12 @@ mod tests {
         assert_eq!(unsafe_row.signature.params[1].default, Some(".None"));
         assert!(unsafe_row.sites.contains(&RuleSite::Operation));
 
-        let caps = rows
+        let fx = rows
             .iter()
-            .find(|row| row.name == Syntax::KW_CAPS)
-            .expect("#Abilities");
-        assert_eq!(caps.signature.variadic, Some(RuleArgType::Ident));
-        assert_eq!(caps.signature.variadic_source_type, Some("Ability"));
+            .find(|row| row.name == Syntax::KW_FX)
+            .expect("#FX");
+        assert_eq!(fx.signature.variadic, Some(RuleArgType::Ident));
+        assert_eq!(fx.signature.variadic_source_type, Some("Effect"));
 
         let pre = rows.iter().find(|row| row.name == "Pre").expect("#Pre");
         assert!(pre.repeatable);

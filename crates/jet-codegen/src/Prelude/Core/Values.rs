@@ -122,6 +122,8 @@ struct JetStateRef {
 struct JetStateInfo {
     name: String,
     path: JetStateRef,
+    terminal: bool,
+    reachable: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -130,9 +132,12 @@ struct JetEffectInfo {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct JetTrackOriginInfo {
+struct JetOriginInfo {
     tracked: bool,
     source: Option<String>,
+    line: Option<i64>,
+    column: Option<i64>,
+    ambiguity: bool,
 }
 
 macro_rules! impl_fact_value_traits {
@@ -170,7 +175,7 @@ impl_fact_value_traits!(JetDimensionInfo);
 impl_fact_value_traits!(JetStateRef);
 impl_fact_value_traits!(JetStateInfo);
 impl_fact_value_traits!(JetEffectInfo);
-impl_fact_value_traits!(JetTrackOriginInfo);
+impl_fact_value_traits!(JetOriginInfo);
 
 // D-SHAPE-RESOURCE2=A: scope-owned deferred close. `FnOnce` lives in Option so
 // Drop consumes it exactly once; declaration order gives reverse cleanup order.

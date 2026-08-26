@@ -196,7 +196,6 @@ const PRELUDE_PARTS: &[&str] = &[
     // interpreter ambient include the same store source.
     include_str!("../Prelude/Core/Columns.rs"),
     include_str!("../Prelude/Core/ColumnList.rs"),
-    include_str!("../Prelude/Core/FloatProvenance.rs"),
     include_str!("../Prelude/Core/UnicodeString.rs"),
     // D-STR-CONCAT1: the owned String `+`/`+=` result is one kernel for every
     // execution tier; the evaluator and JIT include this same source.
@@ -2517,7 +2516,7 @@ fn collect_allocator_constructors(
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
-            | Stmt::Caps { body, .. }
+            | Stmt::AuthorityScope { body, .. }
             | Stmt::ComptimeBlock { body, .. }
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
@@ -3270,8 +3269,6 @@ mod tests {
         let columns = std::fs::read_to_string(root.join("src/Prelude/Core/Columns.rs")).unwrap();
         let column_list =
             std::fs::read_to_string(root.join("src/Prelude/Core/ColumnList.rs")).unwrap();
-        let float_provenance =
-            std::fs::read_to_string(root.join("src/Prelude/Core/FloatProvenance.rs")).unwrap();
         let unicode =
             std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
         let string_concat =
@@ -3343,10 +3340,6 @@ mod tests {
             ("src/Prelude/Core/FixedList.rs", fixed_list.as_str()),
             ("src/Prelude/Core/Columns.rs", columns.as_str()),
             ("src/Prelude/Core/ColumnList.rs", column_list.as_str()),
-            (
-                "src/Prelude/Core/FloatProvenance.rs",
-                float_provenance.as_str(),
-            ),
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
             ("src/Prelude/Core/StringConcat.rs", string_concat.as_str()),
             ("src/Prelude/Core/ViewCopy.rs", view_copy.as_str()),
@@ -3435,9 +3428,6 @@ mod tests {
             .unwrap();
         let column_list_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/ColumnList.rs\")")
-            .unwrap();
-        let float_provenance_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/FloatProvenance.rs\")")
             .unwrap();
         let unicode_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/UnicodeString.rs\")")
@@ -3542,8 +3532,7 @@ mod tests {
                 && option_pos < fixed_list_pos
                 && fixed_list_pos < columns_pos
                 && columns_pos < column_list_pos
-                && column_list_pos < float_provenance_pos
-                && float_provenance_pos < unicode_pos
+                && column_list_pos < unicode_pos
                 && unicode_pos < loadable_pos
                 && unicode_pos < string_concat_pos
                 && string_concat_pos < view_copy_pos
@@ -3612,7 +3601,6 @@ mod tests {
                 fixed_list.as_str(),
                 columns.as_str(),
                 column_list.as_str(),
-                float_provenance.as_str(),
                 unicode.as_str(),
                 string_concat.as_str(),
                 view_copy.as_str(),
@@ -3669,7 +3657,6 @@ mod tests {
                     fixed_list.as_str(),
                     columns.as_str(),
                     column_list.as_str(),
-                    float_provenance.as_str(),
                     unicode.as_str(),
                     string_concat.as_str(),
                     view_copy.as_str(),

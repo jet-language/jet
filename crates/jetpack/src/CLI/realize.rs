@@ -83,6 +83,7 @@ pub(super) fn plan_downloads(
             continue;
         }
         if uses_nix
+            && flags.local_nix_catalog.is_none()
             && Provider::needs_nix_bridge(
                 spec,
                 table,
@@ -384,14 +385,15 @@ pub(super) fn realize_ref_outcome(
     let indexed_nix = flags.offline
         && uses_nix
         && fixtures_for(flags).is_none()
-        && Provider::needs_nix_bridge(
-            spec,
-            table,
-            flags.offline,
-            &store_dir,
-            project_dir.as_deref(),
-        )
-        .is_none();
+        && (flags.local_nix_catalog.is_some()
+            || Provider::needs_nix_bridge(
+                spec,
+                table,
+                flags.offline,
+                &store_dir,
+                project_dir.as_deref(),
+            )
+            .is_none());
     // A reference the project lock already pins was realized here before, so a
     // failure now is a damaged or incomplete closure, not an unknown package.
     // Let it reach the indexed provider, which names the exact missing logical
@@ -419,14 +421,16 @@ pub(super) fn realize_ref_outcome(
         return RefOutcome::Failed;
     }
     if uses_nix && !package_fixture_available(flags, spec) && !cache_candidate_ok {
-        if let Some(need) = Provider::needs_nix_bridge(
-            spec,
-            table,
-            flags.offline,
-            &store_dir,
-            project_dir.as_deref(),
-        ) {
-            return RefOutcome::NeedsNix(need);
+        if flags.local_nix_catalog.is_none() {
+            if let Some(need) = Provider::needs_nix_bridge(
+                spec,
+                table,
+                flags.offline,
+                &store_dir,
+                project_dir.as_deref(),
+            ) {
+                return RefOutcome::NeedsNix(need);
+            }
         }
     }
     // Fixtures are a testing/offline mechanism only. They never override real
@@ -625,8 +629,19 @@ fn nix_catalog_cache_entry_matches(entry: &Store::StoreEntry, local: bool) -> bo
     };
     Store::ProducerRecord::decode(&entry.producer_record)
         .ok()
-        .filter(|producer| producer.provider == "nix")
-        .and_then(|producer| producer.facts.get("nix.index.tier").cloned())
+        .and_then(|producer| {
+            let local_native = local
+                && producer.provider == "jetpackage"
+                && producer
+                    .facts
+                    .get("source.kind")
+                    .is_some_and(|kind| kind == "local-unofficial-catalog");
+            if producer.provider == "nix" || local_native {
+                producer.facts.get("nix.index.tier").cloned()
+            } else {
+                None
+            }
+        })
         .is_some_and(|tier| tier == expected)
 }
 
@@ -637,9 +652,6 @@ fn nix_catalog_cache_matches(roots: &Roots, reference: &str, local: bool) -> boo
 
 fn nix_catalog_status(entry: &Store::StoreEntry) -> Option<String> {
     let producer = Store::ProducerRecord::decode(&entry.producer_record).ok()?;
-    if producer.provider != "nix" {
-        return None;
-    }
     let tier = producer.facts.get("nix.index.tier")?;
     let trust = producer
         .facts
@@ -652,9 +664,20 @@ fn nix_catalog_status(entry: &Store::StoreEntry) -> Option<String> {
         .map(String::as_str)
         .unwrap_or("unknown");
     Some(if tier == "local-unofficial" {
-        format!(
-            "catalog: {tier} ({trust}; signature chain {chain}; name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified)"
-        )
+        if producer.provider == "jetpackage"
+            && producer
+                .facts
+                .get("source.kind")
+                .is_some_and(|kind| kind == "local-unofficial-catalog")
+        {
+            format!(
+                "catalog: {tier} ({trust}; signature chain {chain}; native recipe mapping is unverified; artifact bytes remain SHA-256-verified)"
+            )
+        } else {
+            format!(
+                "catalog: {tier} ({trust}; signature chain {chain}; name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified)"
+            )
+        }
     } else {
         format!("catalog: {tier} ({trust}; signature chain {chain})")
     })
@@ -855,7 +878,7 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
         ProviderError::BuildFailed(reason) => theme.error(
             "the provider failed to build that package",
             reason,
-            "check the package name, e.g. `fastfetch@nixpkgs`.",
+            "check the package name, e.g. `fastfetch@jetpack`.",
         ),
         ProviderError::BadOutput(reason) => theme.error(
             "couldn't understand the provider's output",
@@ -871,7 +894,7 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
         ProviderError::FixtureMissing(path) => theme.error(
             "no offline fixture for that ref",
             &format!("expected a fixture at {}", path.display()),
-            "provide a pinned compatibility fixture or verified Hangar output; Jetpack has no installed-Nix fallback.",
+            "provide a pinned compatibility fixture or verified Hangar output; an exact-lock local Nix fallback is available only outside offline mode and with its policy enabled.",
         ),
         ProviderError::Unsupported(reason) => theme.error(
             "that source can't be realized yet",
@@ -1024,7 +1047,7 @@ pub(super) fn load_project_plan_with_selections(
                 "no ref was given and there is no {} here.",
                 Syntax::ENV_FILE
             ),
-            "try `jet run fastfetch@nixpkgs`, or `jet add <ref>` first.",
+            "try `jet run fastfetch@jetpack`, or `jet add <ref>` first.",
         );
         return Err(2);
     };

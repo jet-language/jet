@@ -1789,6 +1789,36 @@ pub(crate) fn emit_tir_core_call(
             arg(2),
             arg(3)
         ),
+        ("core.services", "delivery_wait") => format!(
+            "{}(&({}))",
+            helper("jet_services_delivery_wait"),
+            arg(0)
+        ),
+        ("core.services", "delivery_status") => format!(
+            "{}(&({}))",
+            helper("jet_services_delivery_status"),
+            arg(0)
+        ),
+        ("core.services", "delivery_retry") => format!(
+            "{}(&({}))",
+            helper("jet_services_delivery_retry"),
+            arg(0)
+        ),
+        ("core.services", "delivery_cancel") => format!(
+            "{}(&({}))",
+            helper("jet_services_delivery_cancel"),
+            arg(0)
+        ),
+        ("core.services", "delivery_receipt") => format!(
+            "{}(&({}))",
+            helper("jet_services_delivery_receipt"),
+            arg(0)
+        ),
+        ("core.services", "delivery_events") => format!(
+            "{}(&({}))",
+            helper("jet_services_delivery_events"),
+            arg(0)
+        ),
         ("core.services", "receive") => format!(
             "{}(&mut ({}), &({}))",
             helper("jet_services_receive"),

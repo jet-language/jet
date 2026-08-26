@@ -613,15 +613,6 @@ pub fn local_place(name: &str) -> String {
     super::mangle(name)
 }
 
-/// Source identity for a tracked Float binding. Keep the sema binding facts
-/// intact until the `.origin()` operation is lowered; the operation is the
-/// single place that formats the user-facing note.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TBindingOrigin {
-    pub name: String,
-    pub span: crate::Diagnostics::Span,
-}
-
 /// One local or parameter slot, carried as structure instead of a Rust place
 /// string. Every engine resolves a slot from these facts alone.
 ///
@@ -639,9 +630,6 @@ pub struct TLocal {
     /// binding. Persistent slots do not enter the ordinary local variable map.
     pub persist_key: Option<String>,
     pub persist_ty: Option<Type>,
-    /// D-PROVENANCE1=B: source identity for the exact `#Track` Float binding.
-    /// The metadata travels with the slot until TIR lowers `.origin()`.
-    pub origin: Option<TBindingOrigin>,
     /// The Rust binding is mutable. This is a TIR ownership fact, not an
     /// emitter-side repair for a generated spelling.
     pub mutable: bool,
@@ -660,7 +648,6 @@ impl TLocal {
             deref: false,
             persist_key: None,
             persist_ty: None,
-            origin: None,
             mutable: false,
             uninit_scalar: false,
             uninit_fixed: false,
@@ -681,17 +668,10 @@ impl TLocal {
             deref: false,
             persist_key: None,
             persist_ty: None,
-            origin: None,
             mutable: false,
             uninit_scalar: false,
             uninit_fixed: false,
         }
-    }
-
-    /// Preserve the source identity when a lowering path rebinds this slot.
-    pub fn with_origin(mut self, origin: TBindingOrigin) -> TLocal {
-        self.origin = Some(origin);
-        self
     }
 
     /// The compiler-owned STM handle used by `#Transact` Shared edits.
@@ -708,7 +688,6 @@ impl TLocal {
             deref: false,
             persist_key: Some(format!("{module}::{name}")),
             persist_ty: Some(ty),
-            origin: None,
             mutable: true,
             uninit_scalar: false,
             uninit_fixed: false,
@@ -2658,13 +2637,14 @@ pub enum TFuncKind {
     /// caller `emit_trait_impl`/`emit_external_trait_impl` opened the block). Distinct
     /// from an inherent `Method`: the method name is BARE (the trait owns it — no
     /// `__jet_` mangle) and there is NO `pub`. `self_conv` is the receiver convention
-    /// (`Read`→`&self`, `Mutate`→`&mut self`, `Move`→`self`) — D-MUTSELF1: a `mut self`
-    /// trait method gets `&mut self` and may mutate the receiver in place. `is_unsafe`
-    /// reproduces the `unsafe fn` prefix for an `#Unsafe fn` trait method (S58/D-LL1 —
-    /// the body may use gated ops; calling it is already gated to an `#Unsafe` block).
+    /// (`Read`→`&self`, `Mutate`→`&mut self`, `Move`→`self`), or `None` for a static
+    /// trait method. D-MUTSELF1: a `mut self` trait method gets `&mut self` and may
+    /// mutate the receiver in place. `is_unsafe` reproduces the `unsafe fn` prefix
+    /// for an `#Unsafe fn` trait method (S58/D-LL1 — the body may use gated ops;
+    /// calling it is already gated to an `#Unsafe` block).
     TraitMethod {
         is_unsafe: bool,
-        self_conv: AccessConvention,
+        self_conv: Option<AccessConvention>,
         /// D-SERDE2 (card #131 S1-bridge): a hand-written `impl T.Encode` /
         /// `impl T.Decode` method. The user writes the verbs `encode`/`decode`
         /// with Jet-facing signatures, but the Rust `__jet_Encode`/`__jet_Decode`
@@ -3633,15 +3613,6 @@ pub struct TExpr {
 }
 
 impl TExpr {
-    /// The binding-level provenance carried by a local read or a value copy.
-    pub fn binding_origin(&self) -> Option<&TBindingOrigin> {
-        match &self.kind {
-            TExprKind::Local(local) => local.origin.as_ref(),
-            TExprKind::Clone(inner) => inner.binding_origin(),
-            TExprKind::Borrow { place, .. } => place.binding_origin(),
-            _ => None,
-        }
-    }
 }
 
 /// D-MEM-COPYSEM1=A: the ONE mapping from a `MaterializeView` source type to
@@ -4339,11 +4310,17 @@ pub enum TExprKind {
     /// `checked(e)` (D-NUMOPS1). The single integer `Expr::Binary` argument lowers to
     /// Rust's matching
     /// method: `(lhs).{prefix}_{op}(rhs)` where `prefix ∈ {wrapping, saturating,
-    /// checked}` and `op ∈ {add, sub, mul, div, rem}`. PLAIN operands (no overflow trap).
+    /// checked}` and `op ∈ {add, sub, mul, div, rem}`, or a standard fixed-width
+    /// rotation with `prefix ∈ {rotate_left, rotate_right}`. PLAIN operands (no
+    /// overflow trap).
     /// `prefix` + `op` are resolved at lowering (total facts), emit only assembles.
     OverflowOpt {
         prefix: String,
         op: &'static str,
+        line: u32,
+        /// D-WRAP-SCOPE1=A: the lexical policy fact that caused this node.
+        /// Explicit receiver methods have no policy fact.
+        policy: Option<crate::AST::ArithmeticPolicyFact>,
         lhs: Box<TExpr>,
         rhs: Box<TExpr>,
     },
@@ -4590,9 +4567,6 @@ pub enum TNumericOp {
     /// `width` is the receiver's bit width (baked at lowering — TirBridge may
     /// evaluate before locals carry `IntN` types).
     BitCount { method: String, width: u32 },
-    /// `origin` on a Float receiver. TIR resolves the final user-facing note
-    /// once; every engine consumes this payload without receiver policy.
-    Origin { origin: String },
     /// A widening / float-targeted / float-sourced conversion → `(({recv}) as {dst})`.
     CastAs { dst_rust: String },
     /// D-NUMWIDEN-CROSS1=E: an implicit integer-to-float crossing whose source

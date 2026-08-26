@@ -30,7 +30,6 @@ use crate::Codegen::TIR::static_call_type_name_unchecked;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::BranchClass;
 use crate::Codegen::TIR::LowerEnv;
-use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TForInMethod;
@@ -46,6 +45,31 @@ use crate::Syntax;
 use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, StructPatField, SwitchArm, Type};
 use std::cell::RefCell;
 use std::rc::Rc;
+
+/// D-TAIL-RETURN1=A: lower the sole unadorned final expression through the
+/// existing return lowering path. Sema has already proved that this block is
+/// value-expected; this small AST normalization keeps all ownership,
+/// widening, and fallible return handling in one TIR mechanism.
+pub(crate) fn lower_value_block(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
+    let Some(Stmt::Expr(expr)) = stmts.last() else {
+        return crate::Codegen::TIR::lower_stmts(stmts, cx, env);
+    };
+    let mut value_body = stmts.to_vec();
+    let span = expr.span();
+    value_body.pop();
+    value_body.push(Stmt::Return(Some(expr.clone()), span));
+    crate::Codegen::TIR::lower_stmts(&value_body, cx, env)
+}
+
+pub(crate) fn return_type_has_value(ty: &Type) -> bool {
+    !matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+        && !matches!(
+            ty,
+            Type::Result { ok, .. }
+                if matches!(ok.as_ref(), Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+        )
+        && !matches!(ty, Type::Apply { name, .. } if name == "Stream")
+}
 
 pub(crate) fn encoding_reader_item_type(name: &str) -> Option<Type> {
     match name {
@@ -65,37 +89,6 @@ fn encoding_reader_method(ty: &Type) -> Option<TForInMethod> {
         }
         _ => None,
     }
-}
-
-pub(super) fn tracked_float_origin(b: &crate::AST::Binding, ty: &Type) -> Option<TBindingOrigin> {
-    if !b.track() || !matches!(ty, Type::Float) {
-        return None;
-    }
-    Some(TBindingOrigin {
-        name: b.name.clone(),
-        span: b.name_span,
-    })
-}
-
-pub(super) fn tracked_float_slot(b: &crate::AST::Binding, ty: &Type, slot: TLocal) -> TLocal {
-    match tracked_float_origin(b, ty) {
-        Some(origin) => slot.with_origin(origin),
-        None => slot,
-    }
-}
-
-pub(super) fn render_tracked_float_origin(origin: &TBindingOrigin, cx: &Cx) -> String {
-    let (line, col) = crate::Diagnostics::span_line_col(&cx.src, origin.span.start);
-    let snippet = cx
-        .src
-        .lines()
-        .nth(line.saturating_sub(1))
-        .unwrap_or("")
-        .trim();
-    format!(
-        "tracked `{}` at {}:{}:{}: {}",
-        origin.name, cx.file, line, col, snippet
-    )
 }
 
 pub(super) fn static_call_type_name_lower(receiver: &Expr, env: &LowerEnv) -> Option<String> {

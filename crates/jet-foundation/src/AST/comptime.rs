@@ -31,6 +31,85 @@ pub struct ViewSourcePath {
     pub projections: Vec<ViewSourceProjection>,
 }
 
+/// D-FAILURE-FOUNDATION1=A: the effective failure contract carried by a
+/// callable signature. The source spelling is intentionally projected into
+/// this fact instead of being rediscovered by each consumer.
+#[derive(Debug, Clone)]
+pub enum FailureContract {
+    /// No error domain was written. The callable still has the shared default
+    /// route, with `success` describing the value side of the carrier.
+    Default { success: Type, error: Type },
+    /// The declaration named its error domain with a `!E` contract.
+    Explicit { success: Type, error: Type },
+    /// A declared conversion crosses from `source` into `target`.
+    Converted {
+        success: Type,
+        source: Type,
+        target: Type,
+    },
+    /// The declaration proves that no reachable failure remains (`!Never`).
+    ProvenUnreachable { success: Type },
+}
+
+impl FailureContract {
+    pub fn from_return_type(return_type: Option<&Type>) -> Self {
+        match return_type {
+            Some(Type::Result { ok, err }) if matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_NEVER) => {
+                Self::ProvenUnreachable {
+                    success: ok.as_ref().clone(),
+                }
+            }
+            Some(Type::Result { ok, err }) => Self::Explicit {
+                success: ok.as_ref().clone(),
+                error: err.as_ref().clone(),
+            },
+            Some(success) => Self::Default {
+                success: success.clone(),
+                error: Type::Named(crate::Syntax::TYPE_ERR.to_string()),
+            },
+            None => Self::Default {
+                success: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+                error: Type::Named(crate::Syntax::TYPE_ERR.to_string()),
+            },
+        }
+    }
+
+    pub fn effective_type(&self) -> Type {
+        match self {
+            Self::Default { success, error } | Self::Explicit { success, error } => Type::Result {
+                ok: Box::new(success.clone()),
+                err: Box::new(error.clone()),
+            },
+            Self::Converted {
+                success, target, ..
+            } => Type::Result {
+                ok: Box::new(success.clone()),
+                err: Box::new(target.clone()),
+            },
+            Self::ProvenUnreachable { success } => Type::Result {
+                ok: Box::new(success.clone()),
+                err: Box::new(Type::Named(crate::Syntax::TYPE_NEVER.to_string())),
+            },
+        }
+    }
+
+    pub fn is_default(&self) -> bool {
+        matches!(self, Self::Default { .. })
+    }
+
+    pub fn is_explicit(&self) -> bool {
+        matches!(self, Self::Explicit { .. })
+    }
+
+    pub fn is_converted(&self) -> bool {
+        matches!(self, Self::Converted { .. })
+    }
+
+    pub fn is_proven_unreachable(&self) -> bool {
+        matches!(self, Self::ProvenUnreachable { .. })
+    }
+}
+
 /// D-MEMPROVENANCE2=A: one returned-view slot may come from any source path
 /// in this bounded, deterministic set. Access stays a property of the slot:
 /// every path must provide the same read or write capability.
@@ -208,6 +287,20 @@ pub struct FuncSig {
     /// D-CALLPOLICY1=E: declaration default policy chain. `apply` replaces
     /// this value exactly, including the empty bare-function chain.
     pub callable_policies: crate::AST::CallablePolicyChain,
+}
+
+impl FuncSig {
+    /// Project the one failure fact consumed by sema, tooling, and codegen.
+    pub fn failure_contract(&self) -> FailureContract {
+        FailureContract::from_return_type(self.return_type.as_ref())
+    }
+
+    /// Return the single Result-shaped carrier even when the source omitted a
+    /// return contract. Engines must consume the projected type, not recreate
+    /// the default in an adapter.
+    pub fn effective_return_type(&self) -> Type {
+        self.failure_contract().effective_type()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1598,7 +1691,7 @@ fn ct_mangle(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CtFloat, CtValue};
+    use super::{CtFloat, CtValue, FailureContract, FuncSig};
     use crate::AST::{BinOp, Type};
 
     #[test]
@@ -1695,5 +1788,63 @@ mod tests {
             "Error [CFG404]: config failed\n  cause: bad input"
         );
         assert_eq!(CtValue::from_jet_err(&error), value);
+    }
+
+    #[test]
+    fn callable_failure_contract_projects_one_carrier() {
+        let default = FailureContract::from_return_type(None);
+        assert!(default.is_default());
+        assert!(matches!(
+            default.effective_type(),
+            Type::Result { ref ok, ref err }
+                if matches!(ok.as_ref(), Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE)
+                    && matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_ERR)
+        ));
+
+        let explicit = FailureContract::from_return_type(Some(&Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(Type::Named("IOError".to_string())),
+        }));
+        assert!(explicit.is_explicit());
+        assert!(matches!(
+            explicit.effective_type(),
+            Type::Result { ref ok, ref err }
+                if matches!(ok.as_ref(), Type::Int)
+                    && matches!(err.as_ref(), Type::Named(name) if name == "IOError")
+        ));
+
+        let never = FailureContract::from_return_type(Some(&Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(Type::Named(crate::Syntax::TYPE_NEVER.to_string())),
+        }));
+        assert!(never.is_proven_unreachable());
+
+        let sig = FuncSig {
+            params: Vec::new(),
+            root_param: false,
+            return_type: None,
+            deprecation: None,
+            return_view_provenance: super::ViewProvenanceCell::new(),
+            is_extern: false,
+            is_unsafe: false,
+            is_pure: false,
+            memo_bound: None,
+            is_foreign_thread_safe: false,
+            is_sanitizer: false,
+            is_must_use: false,
+            is_c_abi: false,
+            c_abi_name: None,
+            foreign_effect_root: None,
+            undo: None,
+            param_info: Vec::new(),
+            param_call: Vec::new(),
+            defaults: Vec::new(),
+            param_variadic: Vec::new(),
+            variadic_bounds: None,
+            param_view_from_names: Vec::new(),
+            callable_policies: Default::default(),
+        };
+        assert!(sig.failure_contract().is_default());
+        assert!(sig.effective_return_type().is_fallible());
     }
 }

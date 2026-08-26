@@ -1864,7 +1864,7 @@ fn run() {
         else -> {}
     }
 
-    policy :: Abilities.from_rights(["Net:example.com"])
+    policy :: Authority.from_rights(["Net:example.com"])
     planned :: process.cmd(["printf", "authority"]).under(policy).plan()
     if planned == {
         .Ok(_) -> print("authority=planned")

@@ -27,6 +27,9 @@ impl<'a> Parser<'a> {
                 self.bump();
                 continue;
             }
+            if self.at_state_section() {
+                return Err(self.reject_state_section("enum"));
+            }
             if self.method_starts_here() {
                 methods.push(self.method_in_type()?);
                 continue;
@@ -351,6 +354,9 @@ impl<'a> Parser<'a> {
                 self.bump();
                 continue;
             }
+            if self.at_state_section() {
+                return Err(self.reject_state_section("impl"));
+            }
             if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
                 if kw == "type" {
                     let kw_span = self.bump().span;
@@ -436,6 +442,9 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
                 continue;
+            }
+            if self.at_state_section() {
+                return Err(self.reject_state_section("impl"));
             }
             // D-LIB2: `type Name = ConcreteType;`
             if let TokKind::Ident(ref kw) = self.peek().kind.clone() {

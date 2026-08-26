@@ -1,7 +1,7 @@
 // D-META-ONE1=A: the marker vocabulary is written here, not in Rust.
 //
 // This is ordinary Jet source in the ratified `marker Name(params…)` form
-// (D-META-NAME1=A / D-META-FORM1=A). One row per marker. The compiler reads
+// (D-META-NAME1=A / D-META-FORM1=A / D-MARKER-SITES1=B). One row per marker. The compiler reads
 // this file to build its registry, so a marker exists exactly when it is
 // written here (D-VERDICT-1455-1, law zero).
 //
@@ -18,7 +18,11 @@
 //   @companion    `[Rule, .Site]` — one extra site a companion rule opens
 //   @retired      the replacement text for a name that no longer works
 //
+// `@sites` is the only public legal-site declaration form. Ordinary names
+// are typed use-site arguments; every `@` name is fixed declaration metadata.
+//
 marker Policy(settings: ...PolicySetting, @sites: [.Package, .Module, .Function, .Method, .Block], @inherits: true, @resolution: .Tighten, @scopes: [.Package, .Module, .Function, .Block])
+marker Arithmetic(mode: ArithmeticMode, @sites: [.Function, .Method, .Block])
 marker Unsafe(reason: String, obligations: ObligationMode{.None}, @sites: [.Function, .Method, .Block, .Operation])
 marker Scrub(tag: Ident, @sites: [.Function, .Method])
 marker Pure(@sites: [.Function, .Method], @retired: "-[]>")
@@ -38,6 +42,7 @@ marker Undo(inverse: Ident, @sites: [.Function])
 marker Close(close: Ident, @sites: [.Function])
 marker ABI(name: ABI, @sites: [.Function])
 marker MustUse(@sites: [.Function, .Method, .Type])
+marker Error(@sites: [.Type])
 // D-STRUCT-LIFE1=A: the one retiring lifecycle rung. `removed_in` is
 // optional until package editions own removal; before then it remains warn-only.
 marker Deprecated(since: String, use: String, removed_in: String{none}, @sites: [.Function, .Method, .Type])
@@ -79,7 +84,9 @@ marker Meta(category: String{""}, tunable: Bool{false}, maturity: Maturity{.Test
 marker Todo(@sites: [.Expression])
 marker Shield(@sites: [.Block])
 marker Impure(reason: String{none}, @sites: [.Block])
-marker Abilities(abilities: ...Ability, @sites: [.Block])
+marker FX(grant: ...Effect, @sites: [.Block])
+marker Abilities(grant: ...Effect, @sites: [.Block], @retired: "#FX")
+marker Caps(grant: ...Effect, @sites: [.Block], @retired: "#FX")
 marker Transact(name: Ident, @sites: [.Block])
 marker Region(name: Ident, @sites: [.Block])
 marker Live(@sites: [.Block])

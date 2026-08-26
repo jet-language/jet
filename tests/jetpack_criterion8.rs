@@ -9,7 +9,9 @@ mod common;
 
 #[path = "support/jetpack_fixtures.rs"]
 mod jetpack_fixtures;
-use jetpack_fixtures::{jetpack, write_executable, Scratch};
+#[path = "support/nix_index_cache_server.rs"]
+mod nix_index_cache_server;
+use jetpack_fixtures::{Scratch, jetpack, write_executable};
 
 #[test]
 fn imported_locked_package_runs_builds_and_restores_without_nix() {
@@ -182,4 +184,112 @@ fn imported_locked_package_runs_builds_and_restores_without_nix() {
         "hello from imported jetpack"
     );
     assert!(!marker.exists(), "restored package execution invoked Nix");
+}
+
+#[test]
+fn local_nix_fallback_imports_exact_lock_once_then_uses_jetpack() {
+    let base = Scratch::new("criterion8-local-nix-fallback");
+    let project = base.join("project");
+    let root = base.join("root");
+    let staging = base.join("staging");
+    let nix = base.join("nix");
+    let invocations = base.join("nix-invocations");
+    let server = nix_index_cache_server::NixIndexCacheServer::start_unindexed(&project);
+    fs::create_dir_all(project.join(".jet")).unwrap();
+    fs::create_dir_all(staging.join("bin")).unwrap();
+    write_executable(
+        &staging.join("bin/postgres"),
+        "#!/bin/sh\nprintf '%s\\n' 'local fallback package'\n",
+    );
+    fs::write(
+        project.join(".jet/lock"),
+        format!(
+            "version = 1\n\n[[source_channel]]\nname = \"jetpack\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
+            nix_index_cache_server::REVISION
+        ),
+    )
+    .unwrap();
+    let output = format!(
+        "[{{\"drvPath\":\"/nix/store/fallback-postgres.drv\",\"outputs\":{{\"out\":{:?}}},\"jetpackImport\":{{\"closedGraph\":{{\"root\":{{\"dependencies\":[]}}}},\"selectedOutputs\":{{\"out\":{:?}}},\"dependencies\":[],\"sources\":[],\"hashes\":{{\"out\":\"output-hash\"}},\"losses\":[],\"proof\":{{\"source\":\"local-nix-test\"}},\"recipe\":{{\"kind\":\"compatibility\"}},\"lock\":{{\"system\":\"x86_64-linux\"}}}}}}]",
+        staging.to_string_lossy(),
+        staging.to_string_lossy(),
+    );
+    write_executable(
+        &nix,
+        &format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'nix (Nix) 2.24'; exit 0; fi\nif [ \"$1\" = \"build\" ]; then printf '%s\\n' invoked >> {:?}; printf '%s\\n' {:?}; exit 0; fi\nexit 1\n",
+            invocations.to_string_lossy(),
+            output
+        ),
+    );
+
+    let imported = jetpack()
+        .args(["build", "postgres@jetpack", "--no-color"])
+        .current_dir(&project)
+        .env("JETPACK_ROOT", &root)
+        .env("JETPACK_NIX_FALLBACK_POLICY", "allow")
+        .env("JETPACK_NIX_FALLBACK_BIN", &nix)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        imported.status.success(),
+        "local fallback stderr: {}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    assert_eq!(fs::read_to_string(&invocations).unwrap().lines().count(), 1);
+
+    let roots = jetpack::Store::Roots::at(root.clone());
+    let entry = jetpack::Store::find_by_reference(&roots, "postgres@jetpack")
+        .expect("local fallback must publish a Jetpack entry");
+    assert!(Path::new(&entry.out).starts_with(root.join("hangar/objects")));
+    let producer = jetpack::Store::ProducerRecord::decode(&entry.producer_record).unwrap();
+    assert_eq!(
+        producer
+            .facts
+            .get("nix.fallback.invocation")
+            .map(String::as_str),
+        Some("one-shot")
+    );
+    assert!(producer.facts.contains_key("nix.fallback.graph"));
+    assert!(producer.facts.contains_key("nix.fallback.proof"));
+    let lock = fs::read_to_string(project.join(".jet/lock")).unwrap();
+    assert!(lock.contains("postgres@jetpack"));
+    assert!(lock.contains("local-nix:"));
+    assert!(lock.contains("github:NixOS/nixpkgs#"));
+
+    let cached = jetpack()
+        .args(["build", "postgres", "--no-color"])
+        .current_dir(&project)
+        .env("JETPACK_ROOT", &root)
+        .env("JETPACK_NIX_FALLBACK_POLICY", "allow")
+        .env("JETPACK_NIX_FALLBACK_BIN", &nix)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        cached.status.success(),
+        "cached build stderr: {}",
+        String::from_utf8_lossy(&cached.stderr)
+    );
+    let run = jetpack()
+        .args(["run", "postgres@jetpack", "--no-color"])
+        .current_dir(&project)
+        .env("JETPACK_ROOT", &root)
+        .env("JETPACK_NIX_FALLBACK_POLICY", "allow")
+        .env("JETPACK_NIX_FALLBACK_BIN", &nix)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "cached run stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "local fallback package"
+    );
+    assert_eq!(fs::read_to_string(invocations).unwrap().lines().count(), 1);
+    drop(server);
 }

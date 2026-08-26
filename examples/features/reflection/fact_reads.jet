@@ -12,9 +12,8 @@ struct PlaneFacts {
     callable: fn(value: Int) Int
 }
 
-state Order { Draft, Confirmed }
-
 struct Order {
+    state { Draft, Confirmed }
     id: Int
 }
 
@@ -55,7 +54,7 @@ fn sendability_for(cell: Cell<Int>) Bool -> {
 
 @attribution :: report.@attribution
 
-@track_origin :: Severity.@track_origin
+@origin :: Severity.@origin
 
 @view_provenance :: send_report.@view_provenance
 
@@ -78,7 +77,7 @@ fn run() {
     print(@sendability.known)
     print(@movedness.known)
     print(@attribution.source)
-    print(@track_origin.tracked)
+    print(@origin.tracked)
     print(@view_provenance.mutable)
     cell :: Cell.new(1)
     print(sendability_for(cell))

@@ -1975,7 +1975,7 @@ pub(crate) fn builtin_type_from_ident(name: &str) -> Option<Type> {
         Syntax::TYPE_CHAR => Some(Type::Char),
         Syntax::DURATION_TYPE => Some(Type::Named(Syntax::DURATION_TYPE.to_string())),
         Syntax::CLOCK_TYPE => Some(Type::Named(Syntax::CLOCK_TYPE.to_string())),
-        Syntax::TYPE_ABILITIES => Some(Type::Named(Syntax::TYPE_ABILITIES.to_string())),
+        Syntax::TYPE_AUTHORITY => Some(Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
         "Date" => Some(Type::Named("Date".to_string())),
         "Instant" => Some(Type::Named("Instant".to_string())),
         "Path" => Some(Type::Named("Path".to_string())),

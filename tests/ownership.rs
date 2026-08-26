@@ -3099,7 +3099,7 @@ fn run() {
 fn string_view_as_owned_return_materializes_copy_once() {
     let src = r#"
 fn make() String -[]> {
-    email := "nate@jet.dev"
+    email := "nate@jet-lang.dev"
     d :: email.after("@")
     return d
 }
@@ -5854,7 +5854,7 @@ fn store(text: String) fn() String -[..E]> -[..E]> {
     return () -> domain
 }
 fn run() {
-    callback :: store("nate@jet.dev")
+    callback :: store("nate@jet-lang.dev")
     print(callback())
 }
 "#;
@@ -5868,7 +5868,7 @@ fn run() {
         let (code, stdout, stderr) =
             common::build_and_run("jet_stored_view_capture", "whole_root", src);
         assert_eq!(code, 0, "{stderr}");
-        assert_eq!(stdout, "jet.dev\n");
+        assert_eq!(stdout, "jet-lang.dev\n");
     }
 }
 
@@ -5881,7 +5881,7 @@ fn collect(text: String) [String] -[]> {
     return values
 }
 fn run() {
-    print(collect("nate@jet.dev")[0])
+    print(collect("nate@jet-lang.dev")[0])
 }
 "#;
     let compiled = jet::compile(src).expect("an owning collection element must materialize");

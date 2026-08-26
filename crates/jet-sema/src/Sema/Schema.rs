@@ -344,6 +344,7 @@ mod tests {
                     default_ct: None,
                 },
             ],
+            state: None,
             methods: vec![],
             cli_bindings: vec![],
             trait_impls: vec![],

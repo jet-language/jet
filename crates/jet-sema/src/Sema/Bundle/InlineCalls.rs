@@ -116,7 +116,7 @@ pub(crate) fn rewrite_inline_calls_stmts(
             | Stmt::Policy { body: inner, .. }
             | Stmt::TaskGroup { body: inner, .. }
             | Stmt::Layout { body: inner, .. }
-            | Stmt::Caps { body: inner, .. }
+            | Stmt::AuthorityScope { body: inner, .. }
             | Stmt::Transact { body: inner, .. }
             | Stmt::AssumeDet { body: inner, .. } => {
                 rewrite_inline_calls_stmts(inner, siblings, modname);

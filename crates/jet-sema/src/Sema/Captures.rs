@@ -99,7 +99,7 @@ pub(crate) fn walk_stmts_for_const_refs(
             | Stmt::Policy { body: inner, .. }
             | Stmt::TaskGroup { body: inner, .. }
             | Stmt::Layout { body: inner, .. }
-            | Stmt::Caps { body: inner, .. }
+            | Stmt::AuthorityScope { body: inner, .. }
             | Stmt::Transact { body: inner, .. }
             | Stmt::AssumeDet { body: inner, .. } => {
                 walk_stmts_for_const_refs(inner, const_names, taken);
@@ -548,7 +548,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::AssumeDet { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
         Stmt::Break(_)
@@ -1094,7 +1094,7 @@ pub(crate) fn stmt_collect_captures(
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::AssumeDet { body, .. } => {
             let mut body_bound = bound.clone();

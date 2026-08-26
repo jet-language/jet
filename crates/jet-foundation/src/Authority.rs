@@ -1,6 +1,6 @@
 //! D-AUTHORITY-MODEL1=A: one rights tree, one holds relation, one gate record.
 //!
-//! Authority names and laws are compile-time facts. Named `#Abilities` scopes
+//! Authority names and laws are compile-time facts. Named `#FX` scopes
 //! also lower to the shared Prelude's ordinary runtime carrier; this module
 //! does not define a second value or policy representation.
 

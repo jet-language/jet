@@ -1655,7 +1655,7 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
         ));
         match Store::ProducerRecord::decode(&e.producer_record) {
             Ok(producer) => {
-                if producer.provider == "nix" {
+                if producer.facts.contains_key("nix.index.tier") {
                     let tier = producer
                         .facts
                         .get("nix.index.tier")
@@ -1676,9 +1676,16 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
                     theme.detail(&format!("  signature-chain: {chain}"));
                     if chain != "present" {
                         unverified_catalog.push(e.id.clone());
-                        theme.detail(
-                            "  trust-note: name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified",
-                        );
+                        let native_catalog = producer.provider == "jetpackage"
+                            && producer
+                                .facts
+                                .get("source.kind")
+                                .is_some_and(|kind| kind == "local-unofficial-catalog");
+                        theme.detail(if native_catalog {
+                            "  trust-note: native recipe mapping is unverified; artifact bytes remain SHA-256-verified"
+                        } else {
+                            "  trust-note: name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified"
+                        });
                     }
                 }
                 for (label, key) in [

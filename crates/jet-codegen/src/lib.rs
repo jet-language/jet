@@ -230,10 +230,6 @@ pub mod columns {
     #[allow(unused_imports)]
     pub use super::fixed_list::{jet_fixed_list_index, JetFixedListIndexError};
 }
-/// D-FLOAT-ORIGIN: tracked-float provenance rendering shared by all tiers.
-pub mod float_provenance {
-    include!("Prelude/Core/FloatProvenance.rs");
-}
 /// D-NUMWIDEN-CROSS1=E: one checked integer-to-float widening policy shared
 /// by AOT emission, TIR evaluation, and the resident JIT adapter.
 pub mod numeric_widen {

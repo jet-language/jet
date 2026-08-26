@@ -1196,6 +1196,22 @@ fn declare_item_names_scoped(
                     NameVisibility::from_flags(field.is_pub, field.is_package_pub),
                 );
             }
+            if let Some(state) = &definition.state {
+                for (name, span) in &state.states {
+                    declare_name(
+                        ledger,
+                        module,
+                        format!("{item_name}.State.{name}"),
+                        format!("{item_path}.State.{name}"),
+                        "state",
+                        *span,
+                        NameVisibility::from_flags(
+                            definition.is_pub,
+                            definition.is_package_pub,
+                        ),
+                    );
+                }
+            }
             declare_method_names(ledger, module, &item_name, &item_path, &definition.methods);
             for implementation in &definition.trait_impls {
                 declare_method_names(

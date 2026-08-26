@@ -35,14 +35,197 @@ pub fn remove_dep(raw: &str, name: &str) -> String {
     remove_from_block(raw, "deps", name)
 }
 
+/// Add one effect root to `authority.holds.allow`, preserving the manifest's
+/// comments and unrelated formatting. This is the editor used by an
+/// interactive project approval; callers must still reparse the returned
+/// source before writing it.
+pub fn add_authority_hold(raw: &str, effect: &str) -> String {
+    let effect = effect.trim();
+    if effect.is_empty() {
+        return raw.to_string();
+    }
+    let lines: Vec<String> = raw.lines().map(str::to_string).collect();
+    let Some(authority_line) = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with("authority:"))
+    else {
+        return append_authority_hold(raw, effect);
+    };
+    let Some((authority_start, authority_end)) = block_line_range(&lines, "authority") else {
+        return raw.to_string();
+    };
+    let authority_inline = inline_block_bounds(&lines[authority_line], "authority");
+    let holds_line = if authority_inline.is_some() {
+        Some(authority_line)
+    } else {
+        (authority_start..authority_end)
+            .find(|index| lines[*index].trim_start().starts_with("holds:"))
+    };
+
+    let Some(holds_line) = holds_line else {
+        let mut out = lines;
+        if let Some((open, close)) = authority_inline {
+            out[authority_line] = insert_inline_field(
+                &out[authority_line],
+                open,
+                close,
+                "holds: { allow: [",
+                effect,
+            );
+        } else {
+            out.insert(
+                authority_end,
+                format!(
+                    "{}holds: {{ allow: [{}] }},",
+                    body_indent(&out, authority_start, authority_end, &out[authority_line]),
+                    effect
+                ),
+            );
+        }
+        return restore_newline(raw, out);
+    };
+
+    let mut out = lines;
+    if let Some(updated) = add_to_inline_list(&out[holds_line], "allow", effect) {
+        out[holds_line] = updated;
+        return restore_newline(raw, out);
+    }
+    if let Some((open, close)) = inline_block_bounds(&out[holds_line], "holds") {
+        out[holds_line] = insert_inline_field(
+            &out[holds_line],
+            open,
+            close,
+            "allow: [",
+            effect,
+        );
+        return restore_newline(raw, out);
+    }
+    let Some((holds_start, holds_end)) = block_line_range_between(
+        &out,
+        "holds",
+        authority_start,
+        authority_end,
+    ) else {
+        return raw.to_string();
+    };
+    out.insert(
+        holds_end,
+        format!(
+            "{}allow: [{}],",
+            body_indent(&out, holds_start, holds_end, &out[holds_line]),
+            effect
+        ),
+    );
+    restore_newline(raw, out)
+}
+
+fn append_authority_hold(raw: &str, effect: &str) -> String {
+    let mut out: Vec<String> = raw.lines().map(str::to_string).collect();
+    if !raw.is_empty() && !raw.ends_with('\n') {
+        out.push(String::new());
+    }
+    out.extend([
+        "authority: .{".to_string(),
+        format!("    holds: {{ allow: [{}] }},", effect),
+        "}".to_string(),
+    ]);
+    restore_newline(raw, out)
+}
+
+fn restore_newline(raw: &str, out: Vec<String>) -> String {
+    let mut result = out.join("\n");
+    if raw.ends_with('\n') && !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
+fn body_indent(lines: &[String], start: usize, end: usize, header: &str) -> String {
+    lines
+        .get(start..end)
+        .and_then(|body| {
+            body.iter()
+                .find(|line| !line.trim().is_empty())
+                .map(|line| leading_whitespace(line).to_string())
+        })
+        .unwrap_or_else(|| format!("{}    ", leading_whitespace(header)))
+}
+
+fn inline_block_bounds(line: &str, key: &str) -> Option<(usize, usize)> {
+    let marker = format!("{key}:");
+    let field = line.find(&marker)?;
+    let open = line[field + marker.len()..]
+        .find('{')?
+        .saturating_add(field + marker.len());
+    let close = line[open + 1..].rfind('}')?.saturating_add(open + 1);
+    (close > open).then_some((open, close))
+}
+
+fn add_to_inline_list(line: &str, field: &str, effect: &str) -> Option<String> {
+    let marker = format!("{field}:");
+    let field_start = line.find(&marker)?;
+    let open = line[field_start + marker.len()..]
+        .find('[')?
+        .saturating_add(field_start + marker.len());
+    let close = line[open + 1..].find(']')?.saturating_add(open + 1);
+    let body = &line[open + 1..close];
+    if body.split(',').any(|entry| normalized_effect(entry) == effect) {
+        return Some(line.to_string());
+    }
+    let addition = if body.trim().is_empty() {
+        effect.to_string()
+    } else {
+        format!(", {effect}")
+    };
+    Some(format!("{}{}{}", &line[..close], addition, &line[close..]))
+}
+
+fn insert_inline_field(
+    line: &str,
+    open: usize,
+    close: usize,
+    field_prefix: &str,
+    effect: &str,
+) -> String {
+    let body = &line[open + 1..close];
+    let separator = if body.trim().is_empty() || body.trim_end().ends_with(',') {
+        ""
+    } else {
+        ", "
+    };
+    format!(
+        "{}{}{}{}]{}",
+        &line[..close],
+        separator,
+        field_prefix,
+        effect,
+        &line[close..close],
+        &line[close..]
+    )
+}
+
+fn normalized_effect(value: &str) -> &str {
+    value.trim().trim_matches('"').trim_start_matches('.')
+}
+
 /// The `[start, end)` line range of `key: { … }`'s body (the lines strictly
 /// between the opening and matching closing brace), tracking brace depth so
 /// nested structs (e.g. an inline git dep) don't confuse the boundary.
 fn block_line_range(lines: &[String], key: &str) -> Option<(usize, usize)> {
+    block_line_range_between(lines, key, 0, lines.len())
+}
+
+fn block_line_range_between(
+    lines: &[String],
+    key: &str,
+    range_start: usize,
+    range_end: usize,
+) -> Option<(usize, usize)> {
     let header = format!("{key}:");
     let mut start: Option<usize> = None;
     let mut depth = 0i32;
-    for (i, line) in lines.iter().enumerate() {
+    for i in range_start..range_end {
+        let line = &lines[i];
         if start.is_none() {
             let trimmed = line.trim_start();
             let after_header = trimmed

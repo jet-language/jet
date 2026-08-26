@@ -30,7 +30,7 @@
 (generic_type base: (type_identifier) @type)
 (capability_sigil) @operator
 
-; Applied rules (#Test, #[Codable], #Abilities(...), ...)
+; Applied rules (#Test, #[Codable], #FX(...), ...)
 (marker_name) @attribute
 (attribute (marker_name) @attribute)
 (attribute_list (marker_name) @attribute)
@@ -134,7 +134,7 @@
   "check"
 ] @function.builtin
 
-; marker.rule: ABI Abilities Bindgen CLI Close Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten HTML Impure Inline Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
+; marker.rule: ABI Bindgen CLI Close Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten FX HTML Impure Inline Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # & ... :: := @ @[ ]@ ^ ~
 ; operator: ! != % %% %%= %= && &= * *= + ++ += - -- -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> == > >= >> >>= ? ?. ?? ^= { | |= || ~| ~|=
 ; END GENERATED JET SYNTAX HIGHLIGHTS

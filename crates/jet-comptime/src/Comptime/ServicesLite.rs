@@ -1294,41 +1294,97 @@ fn map_err(err: JetServiceError) -> CtValue {
     }
 }
 
-fn receipt_to_ct(receipt: JetServiceReceipt) -> CtValue {
-    match receipt {
-        JetServiceReceipt::Enqueued(id) => CtValue::Enum {
-            type_name: "ServiceReceipt".to_string(),
-            variant: "Enqueued".to_string(),
-            args: vec![(None, CtValue::Str(id))],
-        },
-        JetServiceReceipt::Executed(id) => CtValue::Enum {
-            type_name: "ServiceReceipt".to_string(),
-            variant: "Executed".to_string(),
-            args: vec![(None, CtValue::Str(id))],
-        },
-        JetServiceReceipt::Retained { id, until } => CtValue::Enum {
-            type_name: "ServiceReceipt".to_string(),
-            variant: "Retained".to_string(),
-            args: vec![
-                (Some("id".to_string()), CtValue::Str(id)),
-                (Some("until".to_string()), CtValue::Int(until)),
-            ],
-        },
-        JetServiceReceipt::DeadLettered(id) => CtValue::Enum {
-            type_name: "ServiceReceipt".to_string(),
-            variant: "DeadLettered".to_string(),
-            args: vec![(None, CtValue::Str(id))],
-        },
-        JetServiceReceipt::Rejected(reason) => CtValue::Enum {
-            type_name: "ServiceReceipt".to_string(),
-            variant: "Rejected".to_string(),
-            args: vec![(None, CtValue::Str(reason))],
-        },
-        JetServiceReceipt::Unavailable(reason) => CtValue::Enum {
-            type_name: "ServiceReceipt".to_string(),
-            variant: "Unavailable".to_string(),
-            args: vec![(None, CtValue::Str(reason))],
-        },
+fn delivery_state_to_ct(state: JetDeliveryState) -> CtValue {
+    CtValue::Enum {
+        type_name: "DeliveryState".to_string(),
+        variant: state.jet_show(),
+        args: Vec::new(),
+    }
+}
+
+fn delivery_record_to_ct(delivery: JetDelivery) -> CtValue {
+    CtValue::Struct {
+        type_name: "Delivery".to_string(),
+        fields: vec![
+            ("id".to_string(), CtValue::Str(delivery.id)),
+            ("store".to_string(), CtValue::Str(delivery.store)),
+            ("duplicate".to_string(), CtValue::Bool(delivery.duplicate)),
+            ("authority".to_string(), CtValue::Str(delivery.authority)),
+            ("generation".to_string(), CtValue::Int(delivery.generation)),
+        ],
+    }
+}
+
+fn ct_to_delivery_record(value: &CtValue, span: Span) -> Result<JetDelivery, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("Delivery", span));
+    };
+    if type_name != "Delivery" {
+        return Err(unsupported("Delivery", span));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find_map(|(field, value)| (field == name).then_some(value))
+            .ok_or_else(|| unsupported(&format!("Delivery.{name}"), span))
+    };
+    let id = match field("id")? {
+        CtValue::Str(value) => value.clone(),
+        _ => return Err(unsupported("Delivery.id", span)),
+    };
+    let store = match field("store")? {
+        CtValue::Str(value) => value.clone(),
+        _ => return Err(unsupported("Delivery.store", span)),
+    };
+    let duplicate = match field("duplicate")? {
+        CtValue::Bool(value) => *value,
+        _ => return Err(unsupported("Delivery.duplicate", span)),
+    };
+    let authority = match field("authority")? {
+        CtValue::Str(value) => value.clone(),
+        _ => return Err(unsupported("Delivery.authority", span)),
+    };
+    let generation = match field("generation")? {
+        CtValue::Int(value) => *value,
+        _ => return Err(unsupported("Delivery.generation", span)),
+    };
+    Ok(JetDelivery {
+        id,
+        store,
+        duplicate,
+        authority,
+        generation,
+    })
+}
+
+fn delivery_receipt_to_ct(receipt: JetDeliveryReceipt) -> CtValue {
+    CtValue::Struct {
+        type_name: "DeliveryReceipt".to_string(),
+        fields: vec![
+            ("id".to_string(), CtValue::Str(receipt.id)),
+            ("state".to_string(), delivery_state_to_ct(receipt.state)),
+            ("attempts".to_string(), CtValue::Int(receipt.attempts)),
+            ("retention_until".to_string(), CtValue::Int(receipt.retention_until)),
+            ("deadline".to_string(), CtValue::Int(receipt.deadline)),
+            ("idempotency_key".to_string(), CtValue::Str(receipt.idempotency_key)),
+            ("duplicate".to_string(), CtValue::Bool(receipt.duplicate)),
+            ("authority".to_string(), CtValue::Str(receipt.authority)),
+            ("generation".to_string(), CtValue::Int(receipt.generation)),
+            ("signature".to_string(), CtValue::Str(receipt.signature)),
+        ],
+    }
+}
+
+fn delivery_event_to_ct(event: JetDeliveryEvent) -> CtValue {
+    CtValue::Struct {
+        type_name: "DeliveryEvent".to_string(),
+        fields: vec![
+            ("sequence".to_string(), CtValue::Int(event.sequence)),
+            ("state".to_string(), delivery_state_to_ct(event.state)),
+            ("attempts".to_string(), CtValue::Int(event.attempts)),
+            ("timestamp".to_string(), CtValue::Int(event.timestamp)),
+            ("signature".to_string(), CtValue::Str(event.signature)),
+        ],
     }
 }
 
@@ -1401,37 +1457,27 @@ pub fn apply_runtime_method(
             )?;
             Ok(
                 match jet_services_runtime_send(&runtime, &endpoint, &message, &key) {
-                    Ok(receipt) => CtValue::Present(Box::new(receipt_to_ct(receipt))),
+                    Ok(delivery) => CtValue::Present(Box::new(delivery_record_to_ct(delivery))),
                     Err(error) => CtValue::failed(Box::new(map_err(error))),
                 },
             )
         }
         "retry" | "dead_letter" | "retain" => {
-            let id = ct_to_service_string(
-                one(0)?,
-                SERVICE_AUTH_MAX_KEY,
-                &format!("ServiceRuntime.{method} id"),
-                span,
-            )?;
+            let delivery = ct_to_delivery_record(one(0)?, span)?;
             let result = match method {
-                "retry" => jet_services_runtime_retry(&runtime, &id),
-                "dead_letter" => jet_services_runtime_dead_letter(&runtime, &id),
-                "retain" => jet_services_runtime_retain(&runtime, &id),
+                "retry" => jet_services_runtime_retry(&runtime, &delivery),
+                "dead_letter" => jet_services_runtime_dead_letter(&runtime, &delivery),
+                "retain" => jet_services_runtime_retain(&runtime, &delivery),
                 _ => unreachable!(),
             };
             Ok(match result {
-                Ok(receipt) => CtValue::Present(Box::new(receipt_to_ct(receipt))),
+                Ok(delivery) => CtValue::Present(Box::new(delivery_record_to_ct(delivery))),
                 Err(error) => CtValue::failed(Box::new(map_err(error))),
             })
         }
         "commit" => {
-            let id = ct_to_service_string(
-                one(0)?,
-                SERVICE_AUTH_MAX_KEY,
-                "ServiceRuntime.commit id",
-                span,
-            )?;
-            Ok(match jet_services_runtime_commit(&runtime, &id) {
+            let delivery = ct_to_delivery_record(one(0)?, span)?;
+            Ok(match jet_services_runtime_commit(&runtime, &delivery) {
                 Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
                 Err(error) => CtValue::failed(Box::new(map_err(error))),
             })
@@ -1736,11 +1782,39 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             Ok(
                 match jet_services_send_durable(&mut tree, &endpoint, message, key) {
                     Ok(receipt) => {
-                        CtValue::Present(Box::new(mutate_ok(tree, receipt_to_ct(receipt))))
+                        CtValue::Present(Box::new(mutate_ok(tree, delivery_record_to_ct(receipt))))
                     }
                     Err(e) => mutate_err(tree, map_err(e)),
                 },
             )
+        }
+        "delivery_wait"
+        | "delivery_status"
+        | "delivery_retry"
+        | "delivery_cancel"
+        | "delivery_receipt"
+        | "delivery_events" => {
+            let delivery = ct_to_delivery_record(one(0)?, span)?;
+            let result = match method {
+                "delivery_wait" => jet_services_delivery_wait(&delivery)
+                    .map(delivery_state_to_ct),
+                "delivery_status" => jet_services_delivery_status(&delivery)
+                    .map(delivery_state_to_ct),
+                "delivery_retry" => jet_services_delivery_retry(&delivery)
+                    .map(delivery_record_to_ct),
+                "delivery_cancel" => jet_services_delivery_cancel(&delivery)
+                    .map(delivery_record_to_ct),
+                "delivery_receipt" => jet_services_delivery_receipt(&delivery)
+                    .map(delivery_receipt_to_ct),
+                "delivery_events" => jet_services_delivery_events(&delivery).map(|events| {
+                    CtValue::List(events.into_iter().map(delivery_event_to_ct).collect())
+                }),
+                _ => unreachable!(),
+            };
+            Ok(match result {
+                Ok(value) => CtValue::Present(Box::new(value)),
+                Err(error) => CtValue::failed(Box::new(map_err(error))),
+            })
         }
         "dead_letter_count" => Ok(CtValue::Int(jet_services_dead_letter_count(&ct_to_tree(
             one(0)?,

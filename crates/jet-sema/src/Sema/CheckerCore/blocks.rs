@@ -1,10 +1,37 @@
 use crate::Sema::Captures::stmt_refs_name;
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Checker;
-use crate::AST::Stmt;
+use crate::Sema::Diagnostics::block_definitely_returns;
+use crate::Syntax;
+use crate::AST::{Expr, Stmt, Type};
 impl<'a> Checker<'a> {
     // --- statements -----------------------------------------------------
 
     pub(crate) fn check_block(&mut self, stmts: &mut [Stmt], new_scope: bool) {
+        self.check_block_inner(stmts, new_scope, None);
+    }
+
+    /// Check a block whose final unadorned expression is its value. The AST
+    /// keeps that expression as `Stmt::Expr`; the existing return checker is
+    /// invoked on a temporary return node so ownership, views, fallibility,
+    /// and expected-type conversions stay on one semantic path.
+    pub(crate) fn check_value_block(
+        &mut self,
+        stmts: &mut [Stmt],
+        expected: &Type,
+        new_scope: bool,
+        block_span: Span,
+    ) {
+        self.check_block_inner(stmts, new_scope, Some((expected, block_span)));
+    }
+
+    fn check_block_inner(
+        &mut self,
+        stmts: &mut [Stmt],
+        new_scope: bool,
+        value_tail: Option<(&Type, Span)>,
+    ) {
+        self.check_redundant_arm_table_return(stmts);
         if new_scope {
             self.push_scope();
         }
@@ -28,7 +55,20 @@ impl<'a> Checker<'a> {
             self.stmt_tail_len = tail.len();
             self.views_used_in_stmt.clear();
             self.scoped_loan_read_reported = false;
-            self.check_stmt(&mut stmts[i]);
+            if i + 1 == stmts.len() {
+                if let Some((expected, _block_span)) = value_tail {
+                    self.check_value_tail(&mut stmts[i], expected);
+                } else {
+                    self.check_stmt(&mut stmts[i]);
+                }
+            } else {
+                self.check_stmt(&mut stmts[i]);
+            }
+        }
+        if stmts.is_empty() {
+            if let Some((expected, block_span)) = value_tail {
+                self.report_missing_block_value(expected, block_span);
+            }
         }
         if pushed_frame {
             self.liveness_frames.pop();
@@ -38,6 +78,206 @@ impl<'a> Checker<'a> {
         if new_scope {
             self.pop_scope();
         }
+    }
+
+    fn check_value_tail(&mut self, stmt: &mut Stmt, expected: &Type) {
+        match stmt {
+            Stmt::Expr(expr)
+                if !self.tail_has_authored_semicolon(expr.span())
+                    && !Self::is_diverging_tail(expr) =>
+            {
+                let span = expr.span();
+                let mut checked = Stmt::Return(Some(expr.clone()), span);
+                self.check_stmt(&mut checked);
+                if let Stmt::Return(Some(value), _) = checked {
+                    *expr = value;
+                }
+            }
+            Stmt::Expr(expr) if Self::is_diverging_tail(expr) => {
+                // Diverging expressions such as `panic(...)` and `todo` do
+                // not need to produce the promised value.
+                self.check_stmt(stmt);
+            }
+            Stmt::Expr(expr) => {
+                let span = expr.span();
+                self.check_stmt(stmt);
+                self.report_missing_block_value(expected, span);
+            }
+            Stmt::Return(..) => {
+                // An explicit return is an early exit. Its existing checker
+                // owns both its value type and its divergence semantics.
+                self.check_stmt(stmt);
+            }
+            _ => {
+                let span = stmt.span();
+                self.check_stmt(stmt);
+                if self.flow.reachable && !block_definitely_returns(std::slice::from_ref(stmt)) {
+                    self.report_missing_block_value(expected, span);
+                }
+            }
+        }
+    }
+
+    fn report_missing_block_value(&mut self, expected: &Type, span: Span) {
+        self.diags.push(Diagnostic::error(
+            "E0114",
+            format!(
+                "this block promises to produce {}, but its final statement produces no value",
+                expected.show()
+            ),
+            "a value-expected block must end with one unadorned expression; statements and semicolon-terminated expressions yield unit".to_string(),
+            "move the expression to the final line without `;`, or add an explicit `return ...` for an early exit".to_string(),
+            Some(span),
+        ));
+    }
+
+    fn tail_has_authored_semicolon(&self, span: Span) -> bool {
+        let bytes = self.source.as_bytes();
+        let mut at = span.end.min(bytes.len());
+        loop {
+            while at < bytes.len() && bytes[at].is_ascii_whitespace() {
+                at += 1;
+            }
+            if bytes
+                .get(at..)
+                .is_some_and(|tail| tail.starts_with(b"//"))
+            {
+                at += 2;
+                while at < bytes.len() && bytes[at] != b'\n' {
+                    at += 1;
+                }
+                continue;
+            }
+            if bytes
+                .get(at..)
+                .is_some_and(|tail| tail.starts_with(b"/*"))
+            {
+                at += 2;
+                while at + 1 < bytes.len() && &bytes[at..at + 2] != b"*/" {
+                    at += 1;
+                }
+                at = (at + 2).min(bytes.len());
+                continue;
+            }
+            break;
+        }
+        bytes.get(at) == Some(&b';')
+    }
+
+    fn is_diverging_tail(expr: &Expr) -> bool {
+        matches!(expr, Expr::Todo { .. })
+            || matches!(expr, Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC)
+    }
+
+    /// L0513 / D-TAIL-RETURN1=A: a statement arm table immediately followed
+    /// by a default return is the old spelling of one value table. The probe
+    /// is deliberately strict: every arm must be a direct return, the table
+    /// must have no explicit fallback, and the default must be the block tail.
+    fn check_redundant_arm_table_return(&mut self, stmts: &[Stmt]) {
+        for (index, pair) in stmts.windows(2).enumerate() {
+            if index + 2 != stmts.len() {
+                continue;
+            }
+            let [Stmt::Switch {
+                arms,
+                else_body: None,
+                span,
+                ..
+            }, Stmt::Return(Some(default), default_return_span)] = pair
+            else {
+                continue;
+            };
+            if arms.is_empty()
+                || !arms.iter().all(|arm| {
+                    matches!(
+                        arm.body.as_slice(),
+                        [Stmt::Return(Some(_), _)]
+                    )
+                })
+            {
+                continue;
+            }
+            let Some(edit) = self.redundant_arm_table_edit(
+                arms,
+                *span,
+                default,
+                *default_return_span,
+            ) else {
+                continue;
+            };
+            let mut diagnostic = Diagnostic::from_row("L0513", &[], Some(*span));
+            diagnostic.set_structured_edit(edit);
+            self.diags.push(diagnostic);
+        }
+    }
+
+    fn redundant_arm_table_edit(
+        &self,
+        arms: &[crate::AST::SwitchArm],
+        switch_span: Span,
+        default: &Expr,
+        default_return_span: Span,
+    ) -> Option<TextEdit> {
+        let source = self.source;
+        let mut edits: Vec<(usize, usize, String)> = Vec::new();
+        for arm in arms {
+            let [Stmt::Return(Some(_value), return_span)] = arm.body.as_slice() else {
+                return None;
+            };
+            if return_span.start > return_span.end {
+                return None;
+            }
+            // Remove only the keyword. Any comment or spacing between
+            // `return` and the value remains in the source edit.
+            edits.push((return_span.start, return_span.end, String::new()));
+        }
+
+        let close = source
+            .get(switch_span.start..switch_span.end)?
+            .rfind('}')?
+            + switch_span.start;
+        let default_text = source.get(default.span().start..default.span().end)?;
+        let prefix = if close > switch_span.start
+            && !source.as_bytes()[close - 1].is_ascii_whitespace()
+        {
+            " "
+        } else {
+            ""
+        };
+        edits.push((
+            close,
+            close,
+            format!("{prefix}else -> {{ {default_text} }}"),
+        ));
+
+        edits.push((
+            default_return_span.start,
+            default_return_span.end,
+            String::new(),
+        ));
+        edits.push((default.span().start, default.span().end, String::new()));
+
+        let mut end = default.span().end;
+        let mut at = end;
+        while at < source.len() && source.as_bytes()[at].is_ascii_whitespace() {
+            at += 1;
+        }
+        if at < source.len() && source.as_bytes()[at] == b';' {
+            end = at + 1;
+        }
+        let start = switch_span.start;
+        let mut replacement = source.get(start..end)?.to_string();
+        edits.sort_by_key(|(edit_start, _, _)| *edit_start);
+        for (edit_start, edit_end, new_text) in edits.into_iter().rev() {
+            if edit_start < start || edit_end > end || edit_start > edit_end {
+                return None;
+            }
+            replacement.replace_range(edit_start - start..edit_end - start, &new_text);
+        }
+        Some(TextEdit {
+            span: Span::new(start, end),
+            new_text: replacement,
+        })
     }
 
     /// Check a body that may not run at all: a lambda or `task { … }` body,

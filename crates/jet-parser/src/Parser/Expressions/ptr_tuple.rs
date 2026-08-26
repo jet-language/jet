@@ -116,6 +116,15 @@ impl<'a> Parser<'a> {
         // a general user-member escape hatch.
         if matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n)) {
             let (member, member_span) = self.expect_ident("in a compiler fact")?;
+            if member == "@track_origin" {
+                return Err(Diagnostic::error(
+                    "E0302",
+                    "`@track_origin` is retired".to_string(),
+                    "`#Track` origin is read through the typed `@origin` fact".to_string(),
+                    "write `value.@origin`".to_string(),
+                    Some(member_span),
+                ));
+            }
             if Syntax::fact_read_kind(&member).is_none() {
                 return Err(Diagnostic::error(
                     "E0302",

@@ -386,14 +386,14 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
             }
         }
         // D-REGION1: a region body is real code — collect tuple shapes from it.
-        // D-EFF1: a `#Abilities` region body is likewise real code.
+        // D-EFF1: a `#FX` region body is likewise real code.
         Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::Shield { body, .. }
         | Stmt::Switched { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::AssumeDet { body, .. } => {
             for s in body {

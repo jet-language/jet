@@ -630,13 +630,15 @@ impl<'a> Checker<'a> {
                 let is_builtin =
                     Syntax::typed_head_kind(&type_name).is_some_and(|kind| kind.is_typed_text());
                 let declared = self.text_head_contract(&type_name);
-                let is_declared = declared.is_some();
-                if is_builtin || is_declared {
-                    let result = if let Some((canonical, _)) = declared {
-                        crate::Sema::checked_text_type(&canonical)
-                    } else {
-                        Type::Named(type_name.clone())
-                    };
+                let checked = self.checked_text_type_name(&type_name);
+                let is_checked = checked.is_some();
+                if is_builtin || declared.is_some() || is_checked {
+                    let result = checked
+                        .map(|(canonical, _)| Type::Named(canonical))
+                        .or_else(|| {
+                            declared.map(|(canonical, _)| crate::Sema::checked_text_type(&canonical))
+                        })
+                        .unwrap_or_else(|| Type::Named(type_name.clone()));
                     *resolved_ret_out = Some(result.clone());
                     if args.len() != 1 {
                         self.diags.push(Diagnostic::error(
@@ -652,6 +654,13 @@ impl<'a> Checker<'a> {
                     let arg_ty = self.infer(&mut args[0].expr);
                     if let Some(t) = arg_ty {
                         self.check_type_assignable(&Type::String, &t, args[0].expr.span());
+                    }
+                    if is_checked {
+                        self.require_knowledge_gate(
+                            crate::Sema::KnowledgePlane::Range,
+                            crate::Sema::KnowledgeGate::RawProjection,
+                            span,
+                        );
                     }
                     return Some(result);
                 }
@@ -3099,6 +3108,19 @@ impl<'a> Checker<'a> {
                     return ret;
                 }
             }
+            if handle_ty == "Delivery" {
+                if let Some(ret) = self.check_service_delivery_method(method, args, span) {
+                    // D-SERVICE-RECEIPT2=A: every observation/control method
+                    // consumes the bound handle and returns the next carrier
+                    // where applicable. Observation never cancels the work;
+                    // the move only discharges the local ownership duty.
+                    if let Expr::Ident(name, name_span) = &**receiver {
+                        self.mark_moved(name.clone(), *name_span);
+                    }
+                    *recv_type_out = Some(handle_ty.clone());
+                    return ret;
+                }
+            }
         }
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): method calls on a `Plugin` handle
         // — same bespoke-block shape as `DBConnection` above (`.call`/
@@ -4204,7 +4226,7 @@ impl<'a> Checker<'a> {
                             self.expect_core_arg(
                                 method,
                                 0,
-                                &Type::Named(Syntax::TYPE_ABILITIES.to_string()),
+                                &Type::Named(Syntax::TYPE_AUTHORITY.to_string()),
                                 &mut args[0],
                             );
                         }
@@ -4340,7 +4362,7 @@ impl<'a> Checker<'a> {
             // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the carried
             // Authority value is ordinary data. Its only instance family is
             // the Prelude `with`/`without` narrowing pair.
-            if handle_ty == crate::Syntax::TYPE_ABILITIES {
+            if handle_ty == crate::Syntax::TYPE_AUTHORITY {
                 if let Some(ret) =
                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
                 {
@@ -4973,6 +4995,19 @@ impl<'a> Checker<'a> {
                 let a_inner = (**a_inner).clone();
                 return self.finish_option_zip(a_inner, args, span, resolved_ret_out);
             }
+        }
+        if matches!(&recv_ty, Type::Float | Type::Float32) && method == "origin" {
+            self.diags.push(Diagnostic::error(
+                "E0311",
+                "`.origin()` is retired for tracked values".to_string(),
+                "`#Track` origin is a compile-time fact, not runtime metadata".to_string(),
+                "read `value.@origin` in comptime code".to_string(),
+                Some(span),
+            ));
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return None;
         }
         if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
             let nominal_recv = match &recv_ty {

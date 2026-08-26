@@ -320,8 +320,8 @@ pub fn block_marker(
             crate::Syntax::MARKER_POLICY,
             vec![MarkerArgument::Policy(declarations.clone())],
         ),
-        Stmt::Caps { caps, binding, .. } => (
-            crate::Syntax::KW_CAPS,
+        Stmt::AuthorityScope { caps, binding, .. } => (
+            crate::Syntax::KW_FX,
             vec![MarkerArgument::Idents {
                 label: binding.clone(),
                 values: caps.iter().map(|(name, _)| name.clone()).collect(),
@@ -475,6 +475,7 @@ pub enum StructuredFix {
     GeneratedMissingArms,
     GeneratedScriptRun,
     GeneratedCallValue,
+    GeneratedRedundantTailReturn,
 }
 
 impl StructuredFix {
@@ -489,6 +490,7 @@ impl StructuredFix {
             Self::GeneratedMissingArms => "generated:missing_arms".to_string(),
             Self::GeneratedScriptRun => "generated:script_run".to_string(),
             Self::GeneratedCallValue => "generated:call_value".to_string(),
+            Self::GeneratedRedundantTailReturn => "generated:redundant_tail_return".to_string(),
         }
     }
 
@@ -501,7 +503,8 @@ impl StructuredFix {
             | Self::Remove { .. }
             | Self::GeneratedMarkerGroup
             | Self::GeneratedScriptRun
-            | Self::GeneratedCallValue => Some(FixApplicability::Safe),
+            | Self::GeneratedCallValue
+            | Self::GeneratedRedundantTailReturn => Some(FixApplicability::Safe),
             Self::SuggestedSourceEdit | Self::GeneratedMissingArms => {
                 Some(FixApplicability::Suggested)
             }
@@ -591,7 +594,7 @@ pub enum FactRead {
     Sendability,
     Movedness,
     Attribution,
-    TrackOrigin,
+    Origin,
     ViewProvenance,
     UnitScaleProvenance,
     Maturity,
@@ -628,7 +631,7 @@ impl FactRead {
             Self::Sendability => Some("Sendability"),
             Self::Movedness => Some("Movedness"),
             Self::Attribution => Some("Attribution"),
-            Self::TrackOrigin => Some("TrackOrigin"),
+            Self::Origin => Some("Origin"),
             Self::ViewProvenance => Some("ViewProvenance"),
             Self::UnitScaleProvenance => Some("UnitScaleProvenance"),
             Self::Maturity => Some("Maturity"),
@@ -662,7 +665,7 @@ impl FactRead {
             Self::Sendability => Some(crate::Syntax::COMPILER_FACT_SENDABILITY),
             Self::Movedness => Some(crate::Syntax::COMPILER_FACT_MOVEDNESS),
             Self::Attribution => Some(crate::Syntax::COMPILER_FACT_ATTRIBUTION),
-            Self::TrackOrigin => Some(crate::Syntax::COMPILER_FACT_TRACK_ORIGIN),
+            Self::Origin => Some(crate::Syntax::COMPILER_FACT_ORIGIN),
             Self::ViewProvenance => Some(crate::Syntax::COMPILER_FACT_VIEW_PROVENANCE),
             Self::UnitScaleProvenance => Some(crate::Syntax::COMPILER_FACT_UNIT_SCALE_PROVENANCE),
             Self::Maturity => Some(crate::Syntax::COMPILER_FACT_MATURITY),
@@ -692,7 +695,7 @@ impl FactRead {
             Self::Sendability => Some("sendability"),
             Self::Movedness => Some("movedness"),
             Self::Attribution => Some("attribution"),
-            Self::TrackOrigin => Some("track_origin"),
+            Self::Origin => Some("origin"),
             Self::ViewProvenance => Some("view_provenance"),
             Self::UnitScaleProvenance => Some("unit_scale_provenance"),
             Self::Maturity => Some("maturity"),
@@ -745,7 +748,7 @@ const TYPED_FACT_READS: [FactRead; 18] = [
     FactRead::Sendability,
     FactRead::Movedness,
     FactRead::Attribution,
-    FactRead::TrackOrigin,
+    FactRead::Origin,
     FactRead::ViewProvenance,
     FactRead::UnitScaleProvenance,
     FactRead::Maturity,
@@ -1055,6 +1058,7 @@ fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix 
             "missing_arms" => StructuredFix::GeneratedMissingArms,
             "script_run" => StructuredFix::GeneratedScriptRun,
             "call_value" => StructuredFix::GeneratedCallValue,
+            "redundant_tail_return" => StructuredFix::GeneratedRedundantTailReturn,
             _ => crate::ice!(None, "unknown generated structured fix `{kind}` in {line}"),
         };
     }
@@ -1368,7 +1372,7 @@ const fn truth_row(
 /// what a writer may attach and where; it holds no fact that moves toward or
 /// away from safety, so it states `none` and names no gate. The moving facts a
 /// marker *writes* belong to the plane, right, or build row that holds them —
-/// `#Abilities` is a gate word on the `Rights` row, not a direction of
+/// `#FX` is a gate word on the `Rights` row, not a direction of
 /// their own. Stated once here for every marker row, so no row can drift.
 fn marker_row(rule: &'static AppliedRule) -> RegistryRow {
     RegistryRow {

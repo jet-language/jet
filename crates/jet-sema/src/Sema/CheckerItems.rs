@@ -342,6 +342,85 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
         let display_type_name = self.display_type_name(type_name, None);
+        // D-TEXTHEAD-TYPE1=A: checked text constructors are ordinary static
+        // calls backed by the CheckedText impl. `from` keeps the failure in
+        // the normal Result/Error route; `raw` is the explicit unsafe escape;
+        // `encode_hole` is the generic pure encoder used by typed literals.
+        if let Some((canonical, error)) = self.checked_text_type_name(type_name) {
+            let nominal = Type::Named(canonical);
+            match method {
+                "from" | "raw" => {
+                    if args.len() != 1 {
+                        self.diags.push(Diagnostic::error(
+                            "E0103",
+                            format!(
+                                "`{display_type_name}.{method}` takes exactly one String"
+                            ),
+                            "a checked text boundary receives one complete text value"
+                                .to_string(),
+                            format!("write `{display_type_name}.{method}(text)`"),
+                            Some(span),
+                        ));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                    } else {
+                        let old_expected = self.expected_type.replace(Type::String);
+                        let got = self.infer(&mut args[0].expr);
+                        self.expected_type = old_expected;
+                        if let Some(got) = got {
+                            self.check_type_assignable(&Type::String, &got, args[0].expr.span());
+                        }
+                    }
+                    if method == "raw" {
+                        self.require_knowledge_gate(
+                            crate::Sema::KnowledgePlane::Range,
+                            crate::Sema::KnowledgeGate::RawProjection,
+                            span,
+                        );
+                        return Some(nominal);
+                    }
+                    return Some(Type::Result {
+                        ok: Box::new(nominal),
+                        err: Box::new(error),
+                    });
+                }
+                "encode_hole" => {
+                    if !method_type_args.is_empty() && method_type_args.len() != 1 {
+                        self.diags.push(crate::Generics::e0904(
+                            span,
+                            "T",
+                        ));
+                    }
+                    if args.len() != 1 {
+                        self.diags.push(Diagnostic::error(
+                            "E0103",
+                            format!(
+                                "`{display_type_name}.encode_hole` takes exactly one value"
+                            ),
+                            "each interpolation hole passes through the declared generic encoder"
+                                .to_string(),
+                            format!("write `{display_type_name}.encode_hole(value)`"),
+                            Some(span),
+                        ));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                    } else if let Some(value_ty) = self.infer(&mut args[0].expr) {
+                        if !self.type_satisfies_bound(&value_ty, crate::Generics::PRINTABLE) {
+                            self.diags.push(crate::Generics::e0905(
+                                &value_ty.name(),
+                                crate::Generics::PRINTABLE,
+                                args[0].expr.span(),
+                                false,
+                            ));
+                        }
+                    }
+                    return Some(Type::String);
+                }
+                _ => {}
+            }
+        }
         if matches!(type_name, "Arena" | "Bump") && method == "new" {
             let bound = args.first().and_then(|arg| match &arg.expr {
                 Expr::Int(value, _, _, _) if *value >= 0 => Some(*value as u64),
@@ -438,12 +517,12 @@ impl<'a> Checker<'a> {
         // one named authority carrier. Check the list shape here so the
         // Prelude constructor receives the same `[String]` value on every
         // execution tier.
-        if type_name == Syntax::TYPE_ABILITIES && method == "from_rights" {
+        if type_name == Syntax::TYPE_AUTHORITY && method == "from_rights" {
             if args.len() != 1 {
                 self.diags.push(Diagnostic::error(
                     "E0101",
                     format!(
-                        "`Abilities.from_rights` takes 1 argument, got {}",
+                        "`Authority.from_rights` takes 1 argument, got {}",
                         args.len()
                     ),
                     "a grant set is one list of named rights".to_string(),
@@ -453,7 +532,7 @@ impl<'a> Checker<'a> {
                 for arg in args {
                     self.infer(&mut arg.expr);
                 }
-                return Some(Type::Named(Syntax::TYPE_ABILITIES.to_string()));
+                return Some(Type::Named(Syntax::TYPE_AUTHORITY.to_string()));
             }
             let expected = Type::List(Box::new(Type::String));
             let old_expected = self.expected_type.replace(expected.clone());
@@ -463,7 +542,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0101",
                     format!(
-                        "`Abilities.from_rights` expects `[String]`, got `{}`",
+                        "`Authority.from_rights` expects `[String]`, got `{}`",
                         got.map_or_else(|| "unknown".to_string(), |ty| ty.name())
                     ),
                     "rights are named strings carried by one authority value".to_string(),
@@ -471,7 +550,7 @@ impl<'a> Checker<'a> {
                     Some(args[0].expr.span()),
                 ));
             }
-            return Some(Type::Named(Syntax::TYPE_ABILITIES.to_string()));
+            return Some(Type::Named(Syntax::TYPE_AUTHORITY.to_string()));
         }
         let Some((owner_mod, mut msig)) = self.resolve_method_sig(type_name, method) else {
             let builtin = crate::Sema::Diagnostics::builtin_type_from_ident(type_name).is_some();
@@ -1691,7 +1770,7 @@ impl<'a> Checker<'a> {
         }
         if matches!(
             enum_name,
-            "ServiceReceipt" | "ServiceError" | "TaskOutcome" | "TaskStatus"
+            "DeliveryState" | "ServiceError" | "TaskOutcome" | "TaskStatus"
         ) {
             return true;
         }
@@ -1738,7 +1817,7 @@ impl<'a> Checker<'a> {
         if enum_name == "EnvError" {
             return Some(core_env_error_variants());
         }
-        if let Some(v) = core_service_receipt_variants(enum_name) {
+        if let Some(v) = core_delivery_state_variants(enum_name) {
             return Some(v);
         }
         if let Some(v) = core_service_error_variants(enum_name) {

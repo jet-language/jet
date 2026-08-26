@@ -1629,16 +1629,16 @@ fn covers_assert_builtins() {
 
 #[test]
 fn covers_caps_block() {
-    // c109 Phase 26: a `#Abilities(IO) { … }` effect-restriction region erases to a plain
+    // c109 Phase 26: a `#FX(IO) { … }` effect-restriction region erases to a plain
     // block (byte-for-byte `Stmt::Region`); its body is checked on the SAME locals, so
     // an out-of-subset body keeps the whole fn off the TIR path.
-    assert!(covers("fn f() { #Abilities(IO) { print(\"x\") } }", "f"));
+    assert!(covers("fn f() { #FX(IO) { print(\"x\") } }", "f"));
     // c109: a single-uppercase-letter DECLARED struct name (`P`) is a concrete
     // type, not a type variable — the `is_type_var_name` heuristic is now guarded
     // on non-declaration (`cx.struct_fields` lookup). So `P{x: 1}` and the
     // `P{x} :: p` struct-destructure are both covered; the fn routes through TIR.
     assert!(covers(
-        "struct P { x: Int }\nfn f() { p :: P.{x: 1}\n#Abilities(IO) { P.{x} :: p\nprint(x) } }",
+        "struct P { x: Int }\nfn f() { p :: P.{x: 1}\n#FX(IO) { P.{x} :: p\nprint(x) } }",
         "f"
     ));
 }

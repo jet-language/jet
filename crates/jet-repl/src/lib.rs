@@ -1232,7 +1232,7 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
     if session
         .turns
         .iter()
-        .any(|turn| turn.input.contains("#Abilities"))
+        .any(|turn| turn.input.contains("#FX"))
     {
         let _ = writeln!(
             out_sink,
@@ -1307,7 +1307,7 @@ fn cmd_run_transcript(session: &Session) -> String {
     if session
         .turns
         .iter()
-        .any(|turn| turn.input.contains("#Abilities"))
+        .any(|turn| turn.input.contains("#FX"))
     {
         return "Error [E1803]: `:run` will not replay effectful turns\n Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran\n Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`\n".to_string();
     }

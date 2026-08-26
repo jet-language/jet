@@ -106,14 +106,46 @@ pub struct JetServiceRuntime {
     pub retention_ms: i64,
 }
 
-#[derive(Clone, Debug)]
-pub enum JetServiceReceipt {
-    Enqueued(String),
-    Executed(String),
-    Retained { id: String, until: i64 },
-    DeadLettered(String),
-    Rejected(String),
-    Unavailable(String),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JetDeliveryState {
+    Pending,
+    Accepted,
+    Delivering,
+    Delivered,
+    DeadLettered,
+    Cancelled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetDelivery {
+    pub id: String,
+    pub store: String,
+    pub duplicate: bool,
+    pub authority: String,
+    pub generation: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetDeliveryReceipt {
+    pub id: String,
+    pub state: JetDeliveryState,
+    pub attempts: i64,
+    pub retention_until: i64,
+    pub deadline: i64,
+    pub idempotency_key: String,
+    pub duplicate: bool,
+    pub authority: String,
+    pub generation: i64,
+    pub signature: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetDeliveryEvent {
+    pub sequence: i64,
+    pub state: JetDeliveryState,
+    pub attempts: i64,
+    pub timestamp: i64,
+    pub signature: String,
 }
 
 impl Clone for JetServiceEndpoint {
@@ -190,8 +222,12 @@ struct ServiceAuthorityEntry {
     authority: String,
     generation: i64,
     message: String,
+    created: i64,
     expires: i64,
     retained_until: Option<i64>,
+    attempts: i64,
+    state: JetDeliveryState,
+    event_sequence: i64,
     delivered_to_worker: bool,
     delivered: bool,
     dead: bool,
@@ -399,7 +435,10 @@ fn service_authority_retention_deadline(now: i64, retention_ms: i64) -> i64 {
 }
 
 fn service_authority_entry_expired(entry: &ServiceAuthorityEntry, now: i64) -> bool {
-    !entry.dead
+    !matches!(
+        entry.state,
+        JetDeliveryState::DeadLettered | JetDeliveryState::Cancelled
+    )
         && match entry.retained_until {
             Some(until) => until <= now,
             None => entry.expires <= now,
@@ -1423,10 +1462,12 @@ fn service_authority_cleanup_expired(
     let mut cleaned = false;
     for entry in entries {
         if service_authority_entry_expired(entry, now) {
-            service_authority_append(
+            service_authority_append_event(
                 runtime,
-                'D',
-                &[entry.id.clone(), "retention expired".to_string()],
+                entry,
+                JetDeliveryState::DeadLettered,
+                entry.attempts,
+                now,
             )?;
             service_authority_remove_pending_entry(runtime, entry)?;
             cleaned = true;
@@ -1673,12 +1714,24 @@ pub fn jet_services_authority_mark_delivered(
             "cannot deliver a dead-lettered service receipt".to_string(),
         ));
     }
+    if entry.state == JetDeliveryState::Cancelled {
+        service_authority_remove_pending_entry(&runtime, entry)?;
+        return Err(JetServiceError::Unavailable(
+            "cannot deliver a cancelled delivery".to_string(),
+        ));
+    }
     if !entry.delivered_to_worker {
         // Remove the in-memory reservation before the durable marker. If the
         // marker append fails, the log remains the recovery source and the
         // caller can put the whole suffix back without losing this receipt.
         service_authority_remove_pending_entry(&runtime, entry)?;
-        service_authority_append(&runtime, 'V', &[id.to_string()])?;
+        service_authority_append_event(
+            &runtime,
+            entry,
+            JetDeliveryState::Delivering,
+            entry.attempts,
+            service_authority_now(),
+        )?;
     } else {
         service_authority_remove_pending_entry(&runtime, entry)?;
     }
@@ -1955,6 +2008,348 @@ fn service_authority_id(
     )
 }
 
+fn service_delivery_state_name(state: JetDeliveryState) -> &'static str {
+    match state {
+        JetDeliveryState::Pending => "Pending",
+        JetDeliveryState::Accepted => "Accepted",
+        JetDeliveryState::Delivering => "Delivering",
+        JetDeliveryState::Delivered => "Delivered",
+        JetDeliveryState::DeadLettered => "DeadLettered",
+        JetDeliveryState::Cancelled => "Cancelled",
+    }
+}
+
+fn service_delivery_state_parse(value: &str) -> Result<JetDeliveryState, JetServiceError> {
+    match value {
+        "Pending" => Ok(JetDeliveryState::Pending),
+        "Accepted" => Ok(JetDeliveryState::Accepted),
+        "Delivering" => Ok(JetDeliveryState::Delivering),
+        "Delivered" => Ok(JetDeliveryState::Delivered),
+        "DeadLettered" => Ok(JetDeliveryState::DeadLettered),
+        "Cancelled" => Ok(JetDeliveryState::Cancelled),
+        _ => Err(service_authority_error(
+            "service delivery lifecycle state is malformed",
+        )),
+    }
+}
+
+fn service_delivery_generation_key(
+    authority: &str,
+    generation: i64,
+) -> Result<[u8; 32], JetServiceError> {
+    let authority_key = service_authority_signing_key(authority)?;
+    let generation = generation.to_string();
+    let mut payload = Vec::new();
+    for field in ["jet-service-delivery-generation-v1".as_bytes(), generation.as_bytes()] {
+        payload.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        payload.extend_from_slice(field);
+    }
+    Ok(jet_hmac_sha256(&authority_key, &payload))
+}
+
+fn service_delivery_event_signature(
+    authority: &str,
+    generation: i64,
+    id: &str,
+    sequence: i64,
+    state: JetDeliveryState,
+    attempts: i64,
+    timestamp: i64,
+) -> Result<String, JetServiceError> {
+    let key = service_delivery_generation_key(authority, generation)?;
+    let sequence = sequence.to_string();
+    let attempts = attempts.to_string();
+    let timestamp = timestamp.to_string();
+    let state = service_delivery_state_name(state);
+    let mut payload = Vec::new();
+    for field in [
+        "jet-service-delivery-event-v1".as_bytes(),
+        id.as_bytes(),
+        sequence.as_bytes(),
+        state.as_bytes(),
+        attempts.as_bytes(),
+        timestamp.as_bytes(),
+    ] {
+        payload.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        payload.extend_from_slice(field);
+    }
+    Ok(service_authority_hex(&jet_hmac_sha256(&key, &payload)))
+}
+
+fn service_delivery_receipt_signature(
+    entry: &ServiceAuthorityEntry,
+) -> Result<String, JetServiceError> {
+    let key = service_delivery_generation_key(&entry.authority, entry.generation)?;
+    let state = service_delivery_state_name(entry.state);
+    let attempts = entry.attempts.to_string();
+    let expires = entry.expires.to_string();
+    let retained_until = entry.retained_until.unwrap_or(-1).to_string();
+    let generation = entry.generation.to_string();
+    let mut payload = Vec::new();
+    for field in [
+        "jet-service-delivery-receipt-v1".as_bytes(),
+        entry.id.as_bytes(),
+        entry.key.as_bytes(),
+        entry.tree.as_bytes(),
+        entry.worker.as_bytes(),
+        entry.message.as_bytes(),
+        state.as_bytes(),
+        attempts.as_bytes(),
+        expires.as_bytes(),
+        retained_until.as_bytes(),
+        generation.as_bytes(),
+    ] {
+        payload.extend_from_slice(&(field.len() as u64).to_be_bytes());
+        payload.extend_from_slice(field);
+    }
+    Ok(service_authority_hex(&jet_hmac_sha256(&key, &payload)))
+}
+
+fn service_authority_delivery_for_entry(
+    runtime: &JetServiceRuntime,
+    entry: &ServiceAuthorityEntry,
+    duplicate: bool,
+) -> JetDelivery {
+    JetDelivery {
+        id: entry.id.clone(),
+        store: service_authority_store_identity(&runtime.store),
+        duplicate,
+        authority: entry.authority.clone(),
+        generation: entry.generation,
+    }
+}
+
+fn service_authority_delivery_for_endpoint(
+    runtime: &JetServiceRuntime,
+    id: &str,
+    endpoint: &JetServiceEndpoint,
+    duplicate: bool,
+) -> JetDelivery {
+    JetDelivery {
+        id: id.to_string(),
+        store: service_authority_store_identity(&runtime.store),
+        duplicate,
+        authority: endpoint.authority.clone(),
+        generation: endpoint.generation,
+    }
+}
+
+fn service_authority_entry_state(entry: &ServiceAuthorityEntry) -> JetDeliveryState {
+    entry.state
+}
+
+fn service_authority_append_event(
+    runtime: &JetServiceRuntime,
+    entry: &ServiceAuthorityEntry,
+    state: JetDeliveryState,
+    attempts: i64,
+    timestamp: i64,
+) -> Result<(), JetServiceError> {
+    let sequence = entry.event_sequence.saturating_add(1);
+    let signature = service_delivery_event_signature(
+        &entry.authority,
+        entry.generation,
+        &entry.id,
+        sequence,
+        state,
+        attempts,
+        timestamp,
+    )?;
+    service_authority_append(
+        runtime,
+        'E',
+        &[
+            entry.id.clone(),
+            sequence.to_string(),
+            service_delivery_state_name(state).to_string(),
+            attempts.to_string(),
+            timestamp.to_string(),
+            signature,
+        ],
+    )
+}
+
+fn service_authority_delivery_entry(
+    delivery: &JetDelivery,
+) -> Result<(JetServiceRuntime, ServiceAuthorityEntry, Vec<(char, Vec<String>)>), JetServiceError> {
+    service_authority_validate_text(&delivery.id, "delivery id", SERVICE_AUTH_MAX_KEY, false)?;
+    let runtime = JetServiceRuntime {
+        store: delivery.store.clone(),
+        retention_ms: 0,
+    };
+    service_authority_validate_runtime(&runtime)?;
+    let records = service_authority_read(&runtime)?;
+    let entries = service_authority_entries(&runtime, &records)?;
+    let entry = entries
+        .into_iter()
+        .find(|entry| entry.id == delivery.id)
+        .ok_or_else(|| JetServiceError::Unknown(format!("delivery `{}` is unknown", delivery.id)))?;
+    if delivery.authority != entry.authority {
+        return Err(JetServiceError::Revoked(
+            "delivery handle authority does not match its receipt".to_string(),
+        ));
+    }
+    if delivery.generation != entry.generation {
+        return Err(JetServiceError::Stale(
+            "delivery handle generation does not match its receipt".to_string(),
+        ));
+    }
+    Ok((runtime, entry, records))
+}
+
+fn service_authority_validate_delivery_runtime(
+    runtime: &JetServiceRuntime,
+    delivery: &JetDelivery,
+) -> Result<(), JetServiceError> {
+    if service_authority_store_identity(&runtime.store) != delivery.store {
+        return Err(JetServiceError::Revoked(
+            "delivery handle belongs to another authority store".to_string(),
+        ));
+    }
+    service_authority_delivery_entry(delivery).map(|_| ())
+}
+
+pub fn jet_services_delivery_status(
+    delivery: &JetDelivery,
+) -> Result<JetDeliveryState, JetServiceError> {
+    let (_, entry, _) = service_authority_delivery_entry(delivery)?;
+    Ok(service_authority_entry_state(&entry))
+}
+
+pub fn jet_services_delivery_wait(
+    delivery: &JetDelivery,
+) -> Result<JetDeliveryState, JetServiceError> {
+    jet_services_delivery_status(delivery)
+}
+
+pub fn jet_services_delivery_receipt(
+    delivery: &JetDelivery,
+) -> Result<JetDeliveryReceipt, JetServiceError> {
+    let (_, entry, _) = service_authority_delivery_entry(delivery)?;
+    Ok(JetDeliveryReceipt {
+        id: entry.id.clone(),
+        state: service_authority_entry_state(&entry),
+        attempts: entry.attempts,
+        retention_until: entry.retained_until.unwrap_or(-1),
+        deadline: entry.expires,
+        idempotency_key: entry.key.clone(),
+        duplicate: delivery.duplicate,
+        authority: entry.authority.clone(),
+        generation: entry.generation,
+        signature: service_delivery_receipt_signature(&entry)?,
+    })
+}
+
+pub fn jet_services_delivery_events(
+    delivery: &JetDelivery,
+) -> Result<Vec<JetDeliveryEvent>, JetServiceError> {
+    let (_, _, records) = service_authority_delivery_entry(delivery)?;
+    let mut events = Vec::new();
+    for (op, fields) in records {
+        match (op, fields.as_slice()) {
+            ('S', [id, _key, authority, _tree, _worker, generation, _message, created, _expires, signature])
+                if id == &delivery.id =>
+            {
+                let generation = generation.parse::<i64>().map_err(|_| {
+                    service_authority_error("delivery event generation is malformed")
+                })?;
+                let timestamp = created.parse::<i64>().map_err(|_| {
+                    service_authority_error("delivery event timestamp is malformed")
+                })?;
+                events.push(JetDeliveryEvent {
+                    sequence: 1,
+                    state: JetDeliveryState::Accepted,
+                    attempts: 0,
+                    timestamp,
+                    signature: signature.clone(),
+                });
+                let expected = service_delivery_event_signature(
+                    authority,
+                    generation,
+                    id,
+                    1,
+                    JetDeliveryState::Accepted,
+                    0,
+                    timestamp,
+                )?;
+                if expected != *signature {
+                    return Err(service_authority_error(
+                        "delivery acceptance history signature does not validate",
+                    ));
+                }
+            }
+            ('E', [id, sequence, state, attempts, timestamp, signature]) if id == &delivery.id => {
+                let sequence = sequence.parse::<i64>().map_err(|_| {
+                    service_authority_error("delivery event sequence is malformed")
+                })?;
+                let state = service_delivery_state_parse(state)?;
+                let attempts = attempts.parse::<i64>().map_err(|_| {
+                    service_authority_error("delivery event attempts are malformed")
+                })?;
+                let timestamp = timestamp.parse::<i64>().map_err(|_| {
+                    service_authority_error("delivery event timestamp is malformed")
+                })?;
+                events.push(JetDeliveryEvent {
+                    sequence,
+                    state,
+                    attempts,
+                    timestamp,
+                    signature: signature.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(events)
+}
+
+pub fn jet_services_delivery_retry(
+    delivery: &JetDelivery,
+) -> Result<JetDelivery, JetServiceError> {
+    service_authority_delivery_entry(delivery)?;
+    let runtime = JetServiceRuntime {
+        store: delivery.store.clone(),
+        retention_ms: 0,
+    };
+    jet_services_runtime_retry(&runtime, delivery)
+}
+
+pub fn jet_services_delivery_cancel(
+    delivery: &JetDelivery,
+) -> Result<JetDelivery, JetServiceError> {
+    service_authority_delivery_entry(delivery)?;
+    let runtime = JetServiceRuntime {
+        store: delivery.store.clone(),
+        retention_ms: 0,
+    };
+    service_authority_validate_runtime(&runtime)?;
+    let _operation_lock = service_authority_operation_lock(&runtime, &delivery.id)?;
+    let _guard = service_authority_lock()
+        .lock()
+        .map_err(|_| service_authority_error("service authority lock is poisoned"))?;
+    let entries = service_authority_entries(&runtime, &service_authority_read(&runtime)?)?;
+    let entry = entries
+        .iter()
+        .find(|entry| entry.id == delivery.id)
+        .ok_or_else(|| JetServiceError::Unknown(format!("delivery `{}` is unknown", delivery.id)))?;
+    if entry.state == JetDeliveryState::Delivered {
+        return Err(JetServiceError::Policy(
+            "delivered work cannot be cancelled".to_string(),
+        ));
+    }
+    if entry.state != JetDeliveryState::Cancelled {
+        service_authority_append_event(
+            &runtime,
+            entry,
+            JetDeliveryState::Cancelled,
+            entry.attempts,
+            service_authority_now(),
+        )?;
+        service_authority_remove_pending_entry(&runtime, entry)?;
+    }
+    Ok(delivery.clone())
+}
+
 fn service_authority_entries(
     runtime: &JetServiceRuntime,
     records: &[(char, Vec<String>)],
@@ -1962,10 +2357,13 @@ fn service_authority_entries(
     let mut entries: Vec<ServiceAuthorityEntry> = Vec::new();
     for (op, fields) in records {
         match (*op, fields.as_slice()) {
-            ('S', [id, key, authority, tree, worker, generation, message, _created, expires]) => {
+            ('S', [id, key, authority, tree, worker, generation, message, created, expires, signature]) => {
                 let generation = generation.parse::<i64>().map_err(|_| {
                     service_authority_error("service send generation is malformed")
                 })?;
+                let created = created
+                    .parse::<i64>()
+                    .map_err(|_| service_authority_error("service send timestamp is malformed"))?;
                 let expires = expires
                     .parse::<i64>()
                     .map_err(|_| service_authority_error("service send expiry is malformed"))?;
@@ -1993,39 +2391,51 @@ fn service_authority_entries(
                         "service receipt identity does not match its authority fields",
                     ));
                 }
+                let expected_signature = service_delivery_event_signature(
+                    authority,
+                    generation,
+                    id,
+                    1,
+                    JetDeliveryState::Accepted,
+                    0,
+                    created,
+                )?;
+                let supplied_signature = service_authority_unhex(signature).ok_or_else(|| {
+                    service_authority_error("service acceptance signature is malformed")
+                })?;
+                let expected_bytes = service_authority_unhex(&expected_signature).ok_or_else(|| {
+                    service_authority_error("service acceptance signature is malformed")
+                })?;
+                if !jet_ct_eq(&expected_bytes, &supplied_signature) {
+                    return Err(service_authority_error(
+                        "service acceptance signature does not validate",
+                    ));
+                }
+                let entry = ServiceAuthorityEntry {
+                    id: id.clone(),
+                    key: key.clone(),
+                    tree: tree.clone(),
+                    worker: worker.clone(),
+                    authority: authority.clone(),
+                    generation,
+                    message: message.clone(),
+                    created,
+                    expires,
+                    retained_until: None,
+                    attempts: 0,
+                    state: JetDeliveryState::Accepted,
+                    event_sequence: 1,
+                    delivered_to_worker: false,
+                    delivered: false,
+                    dead: false,
+                };
                 if let Some(previous) = entries
                     .iter_mut()
                     .find(|entry| entry.id.as_str() == id.as_str())
                 {
-                    *previous = ServiceAuthorityEntry {
-                        id: id.clone(),
-                        key: key.clone(),
-                        tree: tree.clone(),
-                        worker: worker.clone(),
-                        authority: authority.clone(),
-                        generation,
-                        message: message.clone(),
-                        expires,
-                        retained_until: None,
-                        delivered_to_worker: false,
-                        delivered: false,
-                        dead: false,
-                    };
+                    *previous = entry;
                 } else {
-                    entries.push(ServiceAuthorityEntry {
-                        id: id.clone(),
-                        key: key.clone(),
-                        tree: tree.clone(),
-                        worker: worker.clone(),
-                        authority: authority.clone(),
-                        generation,
-                        message: message.clone(),
-                        expires,
-                        retained_until: None,
-                        delivered_to_worker: false,
-                        delivered: false,
-                        dead: false,
-                    });
+                    entries.push(entry);
                 }
             }
             ('K', [id, until]) => {
@@ -2037,54 +2447,55 @@ fn service_authority_entries(
                     .find(|entry| entry.id.as_str() == id.as_str())
                     .ok_or_else(|| service_authority_error("service retention references an unknown id"))?;
                 entry.retained_until = Some(until);
-                entry.delivered_to_worker = false;
-                entry.delivered = false;
-                entry.dead = false;
             }
-            ('D', [id, _reason]) => {
-                let entry = entries
-                    .iter_mut()
-                    .find(|entry| entry.id.as_str() == id.as_str())
-                    .ok_or_else(|| service_authority_error("dead letter references an unknown id"))?;
-                entry.dead = true;
-                entry.retained_until = None;
-            }
-            ('R', [id, created, expires]) => {
-                let created = created
+            ('E', [id, sequence, state, attempts, timestamp, signature]) => {
+                let sequence = sequence
                     .parse::<i64>()
-                    .map_err(|_| service_authority_error("service retry timestamp is malformed"))?;
-                let expires = expires
+                    .map_err(|_| service_authority_error("delivery event sequence is malformed"))?;
+                let attempts = attempts
                     .parse::<i64>()
-                    .map_err(|_| service_authority_error("service retry expiry is malformed"))?;
+                    .map_err(|_| service_authority_error("delivery event attempts are malformed"))?;
+                let timestamp = timestamp
+                    .parse::<i64>()
+                    .map_err(|_| service_authority_error("delivery event timestamp is malformed"))?;
+                let state = service_delivery_state_parse(state)?;
                 let entry = entries
                     .iter_mut()
                     .find(|entry| entry.id.as_str() == id.as_str())
-                    .ok_or_else(|| service_authority_error("retry references an unknown id"))?;
-                let _ = created;
-                entry.expires = expires;
-                entry.delivered_to_worker = false;
-                entry.delivered = false;
-                entry.dead = false;
-                entry.retained_until = None;
-            }
-            ('A', [id]) => {
-                let entry = entries
-                    .iter_mut()
-                    .find(|entry| entry.id.as_str() == id.as_str())
-                    .ok_or_else(|| service_authority_error("commit references an unknown id"))?;
-                if !entry.delivered_to_worker {
+                    .ok_or_else(|| service_authority_error("delivery event references an unknown id"))?;
+                if sequence != entry.event_sequence.saturating_add(1) {
                     return Err(service_authority_error(
-                        "commit precedes durable worker delivery",
+                        "delivery event sequence is not monotonic",
                     ));
                 }
-                entry.delivered = true;
-            }
-            ('V', [id]) => {
-                let entry = entries
-                    .iter_mut()
-                    .find(|entry| entry.id.as_str() == id.as_str())
-                    .ok_or_else(|| service_authority_error("delivery references an unknown id"))?;
-                entry.delivered_to_worker = true;
+                let expected = service_delivery_event_signature(
+                    &entry.authority,
+                    entry.generation,
+                    id,
+                    sequence,
+                    state,
+                    attempts,
+                    timestamp,
+                )?;
+                let expected = service_authority_unhex(&expected).ok_or_else(|| {
+                    service_authority_error("delivery event signature is malformed")
+                })?;
+                let supplied = service_authority_unhex(signature).ok_or_else(|| {
+                    service_authority_error("delivery event signature is malformed")
+                })?;
+                if !jet_ct_eq(&expected, &supplied) {
+                    return Err(service_authority_error(
+                        "delivery event signature does not validate",
+                    ));
+                }
+                let _ = timestamp;
+                entry.event_sequence = sequence;
+                entry.attempts = attempts;
+                entry.state = state;
+                entry.delivered_to_worker = state == JetDeliveryState::Delivering
+                    || state == JetDeliveryState::Delivered;
+                entry.delivered = state == JetDeliveryState::Delivered;
+                entry.dead = state == JetDeliveryState::DeadLettered;
             }
             _ => {
                 return Err(service_authority_error(
@@ -2108,7 +2519,7 @@ pub fn jet_services_runtime_send(
     endpoint: &JetServiceEndpoint,
     message: &String,
     key: &String,
-) -> Result<JetServiceReceipt, JetServiceError> {
+) -> Result<JetDelivery, JetServiceError> {
     service_authority_validate_runtime(runtime)?;
     service_authority_validate_endpoint(endpoint)?;
     jet_services_authority_validate(endpoint)?;
@@ -2134,35 +2545,36 @@ pub fn jet_services_runtime_send(
             || entry.worker != endpoint.worker
             || entry.message.as_str() != message.as_str()
         {
-            return Ok(JetServiceReceipt::Rejected(
+            return Err(JetServiceError::Policy(
                 "idempotency key was already used by another service authority or delivery"
                     .to_string(),
             ));
         }
+        let duplicate_delivery = || {
+            service_authority_delivery_for_entry(runtime, entry, true)
+        };
         if entry.dead {
-            return Ok(JetServiceReceipt::DeadLettered(entry.id.clone()));
-        }
-        if let Some(until) = entry.retained_until {
-            if until > now {
-                return Ok(JetServiceReceipt::Retained {
-                    id: entry.id.clone(),
-                    until,
-                });
-            }
+            return Ok(duplicate_delivery());
         }
         if entry.expires > now {
-            if !entry.delivered {
+            if !entry.delivered && entry.state != JetDeliveryState::Cancelled {
                 service_authority_enqueue_entry(runtime, entry)?;
             }
-            if entry.delivered {
-                return Ok(JetServiceReceipt::Executed(entry.id.clone()));
-            }
-            return Ok(JetServiceReceipt::Enqueued(entry.id.clone()));
+            return Ok(duplicate_delivery());
         }
-        return Ok(JetServiceReceipt::DeadLettered(entry.id.clone()));
+        return Ok(duplicate_delivery());
     }
     let id = service_authority_id(runtime, endpoint, message, key);
     let expires = service_authority_retention_deadline(now, runtime.retention_ms);
+    let signature = service_delivery_event_signature(
+        &endpoint.authority,
+        endpoint.generation,
+        &id,
+        1,
+        JetDeliveryState::Accepted,
+        0,
+        now,
+    )?;
     service_authority_append(
         runtime,
         'S',
@@ -2176,17 +2588,20 @@ pub fn jet_services_runtime_send(
             message.clone(),
             now.to_string(),
             expires.to_string(),
+            signature,
         ],
     )?;
     jet_services_authority_enqueue(runtime, endpoint, &id, message)?;
-    Ok(JetServiceReceipt::Enqueued(id))
+    Ok(service_authority_delivery_for_endpoint(runtime, &id, endpoint, false))
 }
 
 pub fn jet_services_runtime_retry(
     runtime: &JetServiceRuntime,
-    id: &String,
-) -> Result<JetServiceReceipt, JetServiceError> {
+    delivery: &JetDelivery,
+) -> Result<JetDelivery, JetServiceError> {
     service_authority_validate_runtime(runtime)?;
+    service_authority_validate_delivery_runtime(runtime, delivery)?;
+    let id = &delivery.id;
     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
     let _operation_lock = service_authority_operation_lock(runtime, id)?;
     let _guard = service_authority_lock()
@@ -2210,17 +2625,22 @@ pub fn jet_services_runtime_retry(
     if let Some(until) = entry.retained_until {
         if until > service_authority_now() {
             service_authority_enqueue_entry(runtime, entry)?;
-            return Ok(JetServiceReceipt::Retained {
-                id: entry.id.clone(),
-                until,
-            });
+            let _ = until;
+            return Ok(service_authority_delivery_for_entry(runtime, entry, false));
         }
     }
     if entry.dead {
-        return Ok(JetServiceReceipt::DeadLettered(entry.id.clone()));
+        return Err(JetServiceError::Unavailable(
+            "cannot retry a dead-lettered delivery".to_string(),
+        ));
+    }
+    if entry.state == JetDeliveryState::Cancelled {
+        return Err(JetServiceError::Policy(
+            "cancelled delivery cannot be retried".to_string(),
+        ));
     }
     if entry.delivered {
-        return Ok(JetServiceReceipt::Executed(id.clone()));
+        return Ok(service_authority_delivery_for_entry(runtime, entry, false));
     }
     // Retry is the one explicit operation that may reset a receipt already
     // handed to a worker but not committed. Without this R record, a retry
@@ -2228,20 +2648,26 @@ pub fn jet_services_runtime_retry(
     // `delivered_to_worker`, and the receive path could not distinguish it
     // from a silent duplicate.
     let expires = service_authority_retention_deadline(now, runtime.retention_ms);
-    service_authority_append(
+    let attempts = entry.attempts.saturating_add(1);
+    service_authority_append_event(
         runtime,
-        'R',
-        &[id.clone(), now.to_string(), expires.to_string()],
+        entry,
+        JetDeliveryState::Accepted,
+        attempts,
+        now,
     )?;
     service_authority_enqueue_entry(runtime, entry)?;
-    Ok(JetServiceReceipt::Enqueued(id.clone()))
+    let _ = expires;
+    Ok(service_authority_delivery_for_entry(runtime, entry, false))
 }
 
 pub fn jet_services_runtime_dead_letter(
     runtime: &JetServiceRuntime,
-    id: &String,
-) -> Result<JetServiceReceipt, JetServiceError> {
+    delivery: &JetDelivery,
+) -> Result<JetDelivery, JetServiceError> {
     service_authority_validate_runtime(runtime)?;
+    service_authority_validate_delivery_runtime(runtime, delivery)?;
+    let id = &delivery.id;
     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
     let _operation_lock = service_authority_operation_lock(runtime, id)?;
     let _guard = service_authority_lock()
@@ -2258,18 +2684,26 @@ pub fn jet_services_runtime_dead_letter(
         return Err(JetServiceError::Unknown(format!("service id `{id}` is unknown")));
     };
     if entry.dead {
-        return Ok(JetServiceReceipt::DeadLettered(id.clone()));
+        return Ok(service_authority_delivery_for_entry(runtime, entry, false));
     }
-    service_authority_append(runtime, 'D', &[id.clone(), "explicit dead letter".to_string()])?;
+    service_authority_append_event(
+        runtime,
+        entry,
+        JetDeliveryState::DeadLettered,
+        entry.attempts,
+        service_authority_now(),
+    )?;
     service_authority_remove_pending_entry(runtime, entry)?;
-    Ok(JetServiceReceipt::DeadLettered(id.clone()))
+    Ok(service_authority_delivery_for_entry(runtime, entry, false))
 }
 
 pub fn jet_services_runtime_retain(
     runtime: &JetServiceRuntime,
-    id: &String,
-) -> Result<JetServiceReceipt, JetServiceError> {
+    delivery: &JetDelivery,
+) -> Result<JetDelivery, JetServiceError> {
     service_authority_validate_runtime(runtime)?;
+    service_authority_validate_delivery_runtime(runtime, delivery)?;
+    let id = &delivery.id;
     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
     let _operation_lock = service_authority_operation_lock(runtime, id)?;
     let _guard = service_authority_lock()
@@ -2286,14 +2720,11 @@ pub fn jet_services_runtime_retain(
         return Err(JetServiceError::Unknown(format!("service id `{id}` is unknown")));
     };
     if entry.dead {
-        return Ok(JetServiceReceipt::DeadLettered(id.clone()));
+        return Ok(service_authority_delivery_for_entry(runtime, entry, false));
     }
     let until = service_authority_retention_deadline(service_authority_now(), runtime.retention_ms);
     service_authority_append(runtime, 'K', &[id.clone(), until.to_string()])?;
-    Ok(JetServiceReceipt::Retained {
-        id: id.clone(),
-        until,
-    })
+    Ok(service_authority_delivery_for_entry(runtime, entry, false))
 }
 
 /// Durably acknowledge that a delivered receipt has completed its service
@@ -2302,9 +2733,11 @@ pub fn jet_services_runtime_retain(
 /// `retry`; an already acknowledged receipt is idempotent.
 pub fn jet_services_runtime_commit(
     runtime: &JetServiceRuntime,
-    id: &String,
+    delivery: &JetDelivery,
 ) -> Result<(), JetServiceError> {
     service_authority_validate_runtime(runtime)?;
+    service_authority_validate_delivery_runtime(runtime, delivery)?;
+    let id = &delivery.id;
     service_authority_validate_text(id, "service id", SERVICE_AUTH_MAX_KEY, false)?;
     let _operation_lock = service_authority_operation_lock(runtime, id)?;
     let _guard = service_authority_lock()
@@ -2340,7 +2773,13 @@ pub fn jet_services_runtime_commit(
         ));
     }
     if !entry.delivered {
-        service_authority_append(runtime, 'A', &[id.clone()])?;
+        service_authority_append_event(
+            runtime,
+            entry,
+            JetDeliveryState::Delivered,
+            entry.attempts,
+            service_authority_now(),
+        )?;
     }
     service_authority_remove_pending_entry(runtime, entry)?;
     Ok(())

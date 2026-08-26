@@ -3841,7 +3841,7 @@ fn contains_impure_gate(stmts: &[crate::AST::Stmt]) -> bool {
         | crate::AST::Stmt::Policy { body, .. }
         | crate::AST::Stmt::TaskGroup { body, .. }
         | crate::AST::Stmt::Layout { body, .. }
-        | crate::AST::Stmt::Caps { body, .. }
+        | crate::AST::Stmt::AuthorityScope { body, .. }
         | crate::AST::Stmt::ComptimeBlock { body, .. }
         | crate::AST::Stmt::Live { body, .. }
         | crate::AST::Stmt::Transact { body, .. }

@@ -1210,6 +1210,29 @@ fn evaluate_lifecycle_value(
                 type_name: type_name.clone(),
                 fields,
             }),
+        Expr::EnumLit {
+            type_name,
+            variant,
+            args,
+            ..
+        } => args
+            .iter()
+            .map(|arg| {
+                let (name, value) = match arg {
+                    crate::AST::EnumLitArg::Positional(value) => (None, value),
+                    crate::AST::EnumLitArg::Named { label, expr } => (Some(label.clone()), expr),
+                };
+                Ok((
+                    name,
+                    evaluate_lifecycle_value(value, base_dir, funcs, globals)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()
+            .map(|args| crate::Comptime::CtValue::Enum {
+                type_name: type_name.clone(),
+                variant: variant.clone(),
+                args,
+            }),
         Expr::MapLit(entries, _) => entries
             .iter()
             .map(|(key, value)| {

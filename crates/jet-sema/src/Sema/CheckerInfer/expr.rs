@@ -194,11 +194,16 @@ impl<'a> Checker<'a> {
             return Some(None);
         }
         let target = self.layout_target();
-        let Some(value) = crate::Comptime::reflect_type_value_with_target(
+        let graph = self
+            .modules
+            .and_then(|modules| modules.get(self.module_idx))
+            .and_then(|module| module.state_graphs.get(type_name));
+        let Some(value) = crate::Comptime::reflect_type_value_with_target_and_graph(
             self.items,
             type_name,
             self.module_path,
             &target,
+            graph,
         ) else {
             return None;
         };
@@ -340,11 +345,16 @@ impl<'a> Checker<'a> {
                     return Some(None);
                 };
                 let target = self.layout_target();
-                crate::Comptime::reflect_type_value_with_target(
+                let graph = self
+                    .modules
+                    .and_then(|modules| modules.get(self.module_idx))
+                    .and_then(|module| module.state_graphs.get(type_name));
+                crate::Comptime::reflect_type_value_with_target_and_graph(
                     self.items,
                     type_name,
                     self.module_path,
                     &target,
+                    graph,
                 )
                 .and_then(|value| {
                     crate::Comptime::reflected_fact_field(&value, read)
@@ -407,9 +417,15 @@ impl<'a> Checker<'a> {
                         .and_then(|owner| self.modules.and_then(|modules| modules.get(owner)))
                         .and_then(|module| module.declared_states.get(type_name))
                         .map(|states| {
+                            let graph = self
+                                .struct_owner_module(type_name, None)
+                                .and_then(|owner| self.modules.and_then(|modules| modules.get(owner)))
+                                .and_then(|module| module.state_graphs.get(type_name));
                             (
                                 Type::List(Box::new(Type::Named("StateInfo".to_string()))),
-                                crate::Comptime::build_state_infos(type_name, states),
+                                crate::Comptime::build_state_infos_with_graph(
+                                    type_name, states, graph,
+                                ),
                             )
                         }),
                     _ => None,
@@ -466,14 +482,23 @@ impl<'a> Checker<'a> {
                     }
                     _ => None,
                 },
-                jet_foundation::Registry::FactRead::TrackOrigin => match &**inner {
+                jet_foundation::Registry::FactRead::Origin => match &**inner {
                     Expr::Ident(subject_name, _) if self.lookup(subject_name).is_some() => {
                         let origin = self
                             .flow
-                            .track_origins
+                            .origins
                             .get(subject_name)
-                            .map(String::as_str);
-                        let value = crate::Comptime::build_track_origin_info(origin);
+                            .filter(|_| !self.flow.moved.contains(subject_name))
+                            .map(|origin| {
+                                (
+                                    origin.tracked,
+                                    origin.source.as_deref(),
+                                    origin.line,
+                                    origin.column,
+                                    origin.ambiguity,
+                                )
+                            });
+                        let value = crate::Comptime::build_origin_option(origin);
                         Some((value.jet_type(), value))
                     }
                     Expr::Ident(subject_name, _) => {
@@ -1296,6 +1321,44 @@ impl<'a> Checker<'a> {
         } else {
             Some(ty)
         }
+    }
+
+    fn active_arithmetic_policy(
+        &self,
+        operation_span: Span,
+    ) -> Option<crate::AST::ArithmeticPolicyFact> {
+        self.arithmetic_policy_stack.last().copied().map(|mut fact| {
+            fact.operation_span = operation_span;
+            fact
+        })
+    }
+
+    fn policy_call(
+        &self,
+        mode: crate::AST::ArithmeticMode,
+        inner: Expr,
+        fact: crate::AST::ArithmeticPolicyFact,
+    ) -> Expr {
+        let span = fact.operation_span;
+        Expr::Call(Call {
+            name: mode.builtin().to_string(),
+            name_span: span,
+            type_args: Vec::new(),
+            args: vec![crate::AST::CallArg {
+                convention: AccessConvention::Read,
+                expr: inner,
+                span,
+                flags: CallArgFlags {
+                    arithmetic_policy: Some(fact),
+                    ..CallArgFlags::default()
+                },
+                label: None,
+                spread: false,
+            }],
+            resolved_ret: None,
+            range_checked: false,
+            widen_approx: false,
+        })
     }
 
     pub(crate) fn insert_implicit_copy(&mut self, e: &mut Expr, ty: &Type) -> Type {
@@ -2890,6 +2953,34 @@ impl<'a> Checker<'a> {
                     }
                 }
                 let t = self.infer(inner)?;
+                if matches!(op, UnOp::Neg) {
+                    if let Type::IntN {
+                        signed: true,
+                        bits,
+                    } = &t
+                    {
+                        if let Some(fact) = self.active_arithmetic_policy(*span) {
+                            let zero = Expr::Int(
+                                0,
+                                *span,
+                                Some((true, *bits)),
+                                Some("0".to_string()),
+                            );
+                            let operand = inner.as_ref().clone();
+                            *e = self.policy_call(
+                                fact.mode,
+                                Expr::Binary(
+                                    BinOp::Sub,
+                                    Box::new(zero),
+                                    Box::new(operand),
+                                    *span,
+                                ),
+                                fact,
+                            );
+                            return Some(t);
+                        }
+                    }
+                }
                 match op {
                     UnOp::Neg => {
                         if let Type::InlineRange { base, .. } = &t {
@@ -2963,6 +3054,18 @@ impl<'a> Checker<'a> {
                 let ty = self.infer_binary(op, lhs, rhs, span, &mut replacement);
                 if let Some(replacement) = replacement {
                     *e = replacement;
+                } else if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Pow)
+                    && ty.as_ref().is_some_and(|ty| matches!(ty, Type::IntN { .. }))
+                {
+                    if let Some(fact) = self.active_arithmetic_policy(span) {
+                        let inner = Expr::Binary(
+                            op,
+                            Box::new(lhs.as_ref().clone()),
+                            Box::new(rhs.as_ref().clone()),
+                            span,
+                        );
+                        *e = self.policy_call(fact.mode, inner, fact);
+                    }
                 }
                 ty
             }

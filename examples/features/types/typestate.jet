@@ -1,9 +1,9 @@
-// Typestate (D-STATE1 / D-STATE-DECL): order-of-events safety, checked at compile time.
+// Typestate (D-STATE1 / D-STATE-HOME1): order-of-events safety, checked at compile time.
 //
-// States are declared in a dedicated block (D-STATE-DECL, option B). An operation
+// States are declared in the owning struct body (D-STATE-HOME1=A). An operation
 // declares the state it needs and the state it advances the value into:
 //
-//   state Reservation { Pending, Confirmed, CheckedIn }
+//   struct Reservation { state { Pending, Confirmed, CheckedIn } ... }
 //
 //   #Transition(_, Pending)  fn book(...)      -- entry: value starts in `Pending`
 //   #Transition(Pending, Confirmed) fn pay(self) R -> …   -- advances the state
@@ -14,10 +14,47 @@
 // `Pending` reservation). The states are compile-time facts, threaded through the
 // function by the checker and **erased in codegen** — a typestate program generates
 // the exact same Rust as the untagged version, at zero runtime cost.
-state Reservation { Pending, Confirmed, CheckedIn }
-
 struct Reservation {
+    state { Pending, Confirmed, CheckedIn }
     guest: String
+}
+
+// Terminal outcomes are ordinary states. Success, failure, and cancellation
+// stop the workflow, and read-only reporting remains legal in each terminal state.
+struct Workflow {
+    state { Pending, Success, Failure, Cancelled, Orphan }
+}
+
+impl Workflow {
+    #Transition(_, Pending) fn begin() Workflow -> Workflow{}
+    #Transition(Pending, Success) fn succeed(self: ^Workflow) Workflow -> self
+    #Transition(Pending, Failure) fn fail(self: ^Workflow) Workflow -> self
+    #Transition(Pending, Cancelled) fn cancel(self: ^Workflow) Workflow -> self
+    #State(Success) fn success_report(self) String -> "success"
+    #State(Failure) fn failure_report(self) String -> "failure"
+    #State(Cancelled) fn cancel_report(self) String -> "cancelled"
+}
+
+// Self-loops and reopen edges keep their source state nonterminal.
+struct Session {
+    state { Open, Closed, Reopened }
+}
+
+impl Session {
+    #Transition(_, Open) fn open() Session -> Session{}
+    #Transition(Open, Open) fn heartbeat(self: ^Session) Session -> self
+    #Transition(Open, Closed) fn close(self: ^Session) Session -> self
+    #Transition(Closed, Reopened) fn reopen(self: ^Session) Session -> self
+    #State(Reopened) fn audit(self) String -> "reopened"
+}
+
+// No entry means no initial state and no reachability warning.
+struct Unseeded {
+    state { Raw, Done }
+}
+
+impl Unseeded {
+    #Transition(Raw, Done) fn finish(self: ^Unseeded) Unseeded -> self
 }
 
 impl Reservation {

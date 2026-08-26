@@ -4,7 +4,7 @@ use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COM
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::CheckerCoreLib::{
     core_type_known, data_renamed_to_datatree, layout_handle_renamed_to_layout,
-    phantom_fact_menu_diag, retired_acronym_spelling_diag,
+    phantom_fact_menu_diag, retired_acronym_spelling_diag, retired_authority_vocabulary_diag,
 };
 use crate::Sema::Diagnostics::{
     option_used_where_plain_expected, result_used_where_plain_expected, soft_public_use,
@@ -218,6 +218,10 @@ impl<'a> Checker<'a> {
                         .push(retired_acronym_spelling_diag(n, &canonical, span));
                     return;
                 }
+                if let Some(diag) = retired_authority_vocabulary_diag(n, span) {
+                    self.diags.push(diag);
+                    return;
+                }
                 if core_type_known(n) {
                     return;
                 }
@@ -290,7 +294,7 @@ impl<'a> Checker<'a> {
                         return;
                     }
                 }
-                // D-FACT-HOME1=A: a phantom fact-menu name (`Ability`,
+                // D-FACT-HOME1=A: a phantom fact-menu name (`Effect`,
                 // `InlineMode`, ...) is refused with a fix naming the real
                 // path, not the generic "no type called" message.
                 if let Some(diag) = phantom_fact_menu_diag(n, span) {

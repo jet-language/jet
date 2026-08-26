@@ -4,7 +4,9 @@ use crate::Codegen::rust_param_type;
 use crate::Codegen::rust_return_type;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::emit_tir_stmts;
+use crate::Codegen::TIR::lower::lower_value_block;
 use crate::Codegen::TIR::lower::prepare_interrupt_callback_locals;
+use crate::Codegen::TIR::lower::return_type_has_value;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::resolve_self_ty;
@@ -269,7 +271,16 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
     }
     let mut body = resource_param_guards;
     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
-    body.extend(lower_stmts(&f.body, cx, &mut env));
+    let lowered_body = if f
+        .return_type
+        .as_ref()
+        .is_some_and(return_type_has_value)
+    {
+        lower_value_block(&f.body, cx, &mut env)
+    } else {
+        lower_stmts(&f.body, cx, &mut env)
+    };
+    body.extend(lowered_body);
     let mut clone_types = env.cloned_types.borrow().clone();
     for param in &f.params {
         collect_signature_clone_types(&param.ty, cx, &mut clone_types);
@@ -770,7 +781,16 @@ fn lower_method_for_owner_inner(
     }
     let mut body = resource_param_guards;
     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
-    body.extend(lower_stmts(&f.body, cx, &mut env));
+    let lowered_body = if f
+        .return_type
+        .as_ref()
+        .is_some_and(return_type_has_value)
+    {
+        lower_value_block(&f.body, cx, &mut env)
+    } else {
+        lower_stmts(&f.body, cx, &mut env)
+    };
+    body.extend(lowered_body);
     let body = wrap_contract_scope(
         f,
         body,
@@ -882,10 +902,10 @@ fn lower_trait_method_inner(
     env.self_owner = Some(type_name.to_string());
     let mut params = Vec::new();
     let mut resource_param_guards = Vec::new();
-    let mut self_conv = AccessConvention::Read;
+    let mut self_conv = None;
     for p in &f.params {
         if p.name == Syntax::KW_SELF {
-            self_conv = p.convention;
+            self_conv = Some(p.convention);
             // The self slot, EXACTLY `emit_trait_method`'s: type `Some(Named(type_name))`
             // (NOT `None` like `emit_method`). D-MUTSELF1: a `mut self` receiver is
             // `&mut self`, so its place DEREFS (`(*self)`); `self`/`take self` do not.
@@ -923,7 +943,16 @@ fn lower_trait_method_inner(
     }
     let mut body = resource_param_guards;
     prepare_interrupt_callback_locals(&f.body, cx, &mut env);
-    body.extend(lower_stmts(&f.body, cx, &mut env));
+    let lowered_body = if f
+        .return_type
+        .as_ref()
+        .is_some_and(return_type_has_value)
+    {
+        lower_value_block(&f.body, cx, &mut env)
+    } else {
+        lower_stmts(&f.body, cx, &mut env)
+    };
+    body.extend(lowered_body);
     let body = wrap_contract_scope(
         f,
         body,

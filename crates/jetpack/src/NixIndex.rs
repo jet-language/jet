@@ -19,6 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) const MAX_COMPRESSED_BYTES: usize = 33_554_432;
 pub(crate) const MAX_DECODED_BYTES: usize = 268_435_456;
 pub(crate) const MAX_RECORDS: usize = 400_000;
+pub(crate) const MAX_NATIVE_RECIPE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES: u64 = 16 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 const INDEX_SCHEMA: u64 = 1;
@@ -26,14 +27,7 @@ const INDEX_DOMAIN: &[u8] = b"jet-nixpkgs-index-v1\n";
 const MANIFEST_DOMAIN: &[u8] = b"jet-nixpkgs-channel-manifest-v1\n";
 const INDEX_ROOT: &str = "hangar/nix-index/v1";
 const LOCAL_INDEX_ROOT: &str = "index-v1";
-const DEFAULT_ENDPOINT: &str = "https://index.jet.dev/nixpkgs";
-// RFC 8032 test public key.  The operational key is an owner gate; this
-// embedded value is deliberately not used as publication evidence.
-const DEFAULT_KEY_ID: &str = "jet-nixpkgs-index-v1-unratified";
-const DEFAULT_PUBLIC_KEY: [u8; 32] = [
-    0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
-    0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
-];
+const LOCAL_NATIVE_RECIPE_ROOT: &str = "recipes-v1.json";
 const CHANNELS: &[&str] = &["nixpkgs-unstable", "nixos-unstable"];
 const SYSTEMS: &[&str] = &[
     "x86_64-linux",
@@ -68,6 +62,33 @@ pub(crate) struct IndexRecord {
     pub version: String,
     pub drv_path: String,
     pub outputs: BTreeMap<String, String>,
+}
+
+/// A local, unsigned Jetpack-native recipe. The catalog is deliberately a
+/// separate document from the nixpkgs mapping: a user can mix both kinds in
+/// one local source without making the native artifact look Nix-backed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NativeRecipe {
+    pub(crate) name: String,
+    pub(crate) version: String,
+    pub(crate) kind: String,
+    pub(crate) url: String,
+    pub(crate) sha256: String,
+    pub(crate) bin: String,
+}
+
+impl NativeRecipe {
+    pub(crate) fn canonical_json(&self) -> String {
+        format!(
+            "{{\"name\":\"{}\",\"version\":\"{}\",\"kind\":\"{}\",\"url\":\"{}\",\"sha256\":\"{}\",\"bin\":\"{}\"}}",
+            json_escape(&self.name),
+            json_escape(&self.version),
+            json_escape(&self.kind),
+            json_escape(&self.url),
+            json_escape(&self.sha256),
+            json_escape(&self.bin),
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -377,7 +398,7 @@ pub struct NixIndexClient<'a> {
     endpoint: String,
     root: PathBuf,
     key_id: String,
-    public_key: VerifyingKey,
+    public_key: Option<VerifyingKey>,
     local_catalog: bool,
     offline: bool,
     clock: Box<dyn IndexClock + 'a>,
@@ -429,11 +450,11 @@ impl NixIndexClient<'static> {
                 )?;
                 (key_id, key_bytes, endpoint)
             }
-            (false, false) => (
-                DEFAULT_KEY_ID.to_string(),
-                DEFAULT_PUBLIC_KEY,
-                DEFAULT_ENDPOINT.to_string(),
-            ),
+            (false, false) => {
+                return Err(NixIndexError::invalid(
+                    "signed nixpkgs index endpoint and public key must be configured explicitly",
+                ));
+            }
             _ => {
                 return Err(NixIndexError::invalid(
                     "nix index endpoint and public-key overrides must be installed together",
@@ -446,7 +467,7 @@ impl NixIndexClient<'static> {
             endpoint,
             root: roots.root.clone(),
             key_id,
-            public_key,
+            public_key: Some(public_key),
             local_catalog: false,
             offline,
             clock: Box::new(SystemIndexClock),
@@ -465,13 +486,11 @@ impl NixIndexClient<'static> {
             )));
         }
         ensure_real_directory(catalog)?;
-        let public_key = VerifyingKey::from_bytes(&DEFAULT_PUBLIC_KEY)
-            .map_err(|_| NixIndexError::invalid("embedded nix index public key is invalid"))?;
         Ok(Self {
             endpoint: String::new(),
             root: catalog.to_path_buf(),
             key_id: String::new(),
-            public_key,
+            public_key: None,
             local_catalog: true,
             offline,
             clock: Box::new(SystemIndexClock),
@@ -495,8 +514,10 @@ impl<'a> NixIndexClient<'a> {
             endpoint: parse_endpoint(&endpoint)?,
             root,
             key_id,
-            public_key: VerifyingKey::from_bytes(&public_key)
-                .map_err(|_| NixIndexError::invalid("test index public key is invalid"))?,
+            public_key: Some(
+                VerifyingKey::from_bytes(&public_key)
+                    .map_err(|_| NixIndexError::invalid("test index public key is invalid"))?,
+            ),
             local_catalog: false,
             offline,
             clock: Box::new(clock),
@@ -581,7 +602,11 @@ impl<'a> NixIndexClient<'a> {
             ));
         }
         let signature = parse_signature_strict(&signature_bytes)?;
-        verify_index_signature(&self.public_key, &self.key_id, &signature, &decoded)?;
+        let public_key = self
+            .public_key
+            .as_ref()
+            .ok_or_else(|| NixIndexError::invalid("signed index has no verifier"))?;
+        verify_index_signature(public_key, &self.key_id, &signature, &decoded)?;
         let document = parse_index_strict(&decoded)?;
         validate_document(&document)?;
         if document.channel != key.channel
@@ -644,6 +669,56 @@ impl<'a> NixIndexClient<'a> {
             proof,
             trust: IndexTrustTier::OfficialSigned,
         })
+    }
+
+    /// Resolve a native recipe from the explicit local catalog. Official
+    /// signed sources never consult this document, so a bad or missing signed
+    /// index cannot silently become an unsigned native source.
+    pub(crate) fn resolve_native_recipe(
+        &self,
+        package: &str,
+    ) -> Result<Option<NativeRecipe>, NixIndexError> {
+        if !self.local_catalog {
+            return Ok(None);
+        }
+        let path = self.root.join(LOCAL_NATIVE_RECIPE_ROOT);
+        if !path_exists(&path)? {
+            return Ok(None);
+        }
+        let bytes = read_regular(&path, MAX_NATIVE_RECIPE_BYTES)?;
+        let recipes = parse_local_native_recipes(&bytes)?;
+        let (name, requested_version) = package
+            .split_once("#version=")
+            .map_or((package, None), |(name, version)| (name, Some(version)));
+        if valid_native_token(name, "native recipe name").is_err() {
+            return Ok(None);
+        }
+        if let Some(version) = requested_version {
+            if valid_native_token(version, "native recipe version").is_err() {
+                return Ok(None);
+            }
+        }
+        let matches = recipes
+            .into_iter()
+            .filter(|recipe| {
+                recipe.name == name
+                    && requested_version.is_none_or(|version| recipe.version == version)
+            })
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [] => Ok(None),
+            [recipe] => Ok(Some(recipe.clone())),
+            _ => Err(NixIndexError::invalid(format!(
+                "local unofficial native catalog has ambiguous recipes for `{package}`"
+            ))),
+        }
+    }
+
+    pub(crate) fn canonical_local_native_recipes(
+        bytes: &[u8],
+    ) -> Result<Vec<u8>, NixIndexError> {
+        let recipes = parse_local_native_recipes(bytes)?;
+        Ok(canonical_native_recipes_bytes(&recipes))
     }
 
     fn resolve_local_catalog(
@@ -795,7 +870,11 @@ impl<'a> NixIndexClient<'a> {
                 "cached nixpkgs channel manifest disagrees with requested channel",
             ));
         }
-        verify_manifest_signature(&self.public_key, &self.key_id, &signature_bytes, &bytes)?;
+        let public_key = self
+            .public_key
+            .as_ref()
+            .ok_or_else(|| NixIndexError::invalid("signed index has no verifier"))?;
+        verify_manifest_signature(public_key, &self.key_id, &signature_bytes, &bytes)?;
         self.check_generation(channel, &manifest, &bytes)?;
         Ok(Some(CachedManifest {
             manifest,
@@ -821,7 +900,11 @@ impl<'a> NixIndexClient<'a> {
                 "signed nixpkgs channel manifest disagrees with requested channel",
             ));
         }
-        verify_manifest_signature(&self.public_key, &self.key_id, &signature_bytes, &bytes)?;
+        let public_key = self
+            .public_key
+            .as_ref()
+            .ok_or_else(|| NixIndexError::invalid("signed index has no verifier"))?;
+        verify_manifest_signature(public_key, &self.key_id, &signature_bytes, &bytes)?;
         self.check_generation(channel, &manifest, &bytes)?;
         Ok(CachedManifest {
             manifest,
@@ -1517,6 +1600,166 @@ fn canonical_signature_bytes(signature: &IndexSignature) -> Vec<u8> {
         json_escape(&signature.signature)
     )
     .into_bytes()
+}
+
+fn parse_local_native_recipes(bytes: &[u8]) -> Result<Vec<NativeRecipe>, NixIndexError> {
+    if bytes.len() as u64 > MAX_NATIVE_RECIPE_BYTES {
+        return Err(NixIndexError::invalid(
+            "local unofficial native catalog exceeds its size bound",
+        ));
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| {
+        NixIndexError::invalid("local unofficial native catalog is not UTF-8")
+    })?;
+    let value = parse_json_exact_numbers(text, true).map_err(|error| {
+        NixIndexError::invalid(format!(
+            "parse local unofficial native catalog JSON at line {}: {}",
+            error.line, error.message
+        ))
+    })?;
+    let map = object(value, "local unofficial native catalog")?;
+    reject_unknown(&map, &["schema", "recipes"])?;
+    if u64_field(&map, "schema")? != 1 {
+        return Err(NixIndexError::invalid(
+            "local unofficial native catalog schema is unsupported",
+        ));
+    }
+    let values = array_field(&map, "recipes")?;
+    if values.len() > MAX_RECORDS {
+        return Err(NixIndexError::invalid(
+            "local unofficial native catalog has too many recipes",
+        ));
+    }
+    let mut recipes = values
+        .iter()
+        .map(parse_native_recipe)
+        .collect::<Result<Vec<_>, _>>()?;
+    recipes.sort_by(|left, right| {
+        left.name
+            .as_bytes()
+            .cmp(right.name.as_bytes())
+            .then_with(|| left.version.as_bytes().cmp(right.version.as_bytes()))
+    });
+    let mut identities = BTreeSet::new();
+    for recipe in &recipes {
+        if !identities.insert((recipe.name.clone(), recipe.version.clone())) {
+            return Err(NixIndexError::invalid(format!(
+                "local unofficial native catalog repeats `{}` version `{}`",
+                recipe.name, recipe.version
+            )));
+        }
+    }
+    if canonical_native_recipes_bytes(&recipes) != bytes {
+        return Err(NixIndexError::invalid(
+            "local unofficial native catalog bytes are not canonical",
+        ));
+    }
+    Ok(recipes)
+}
+
+fn parse_native_recipe(value: &Value) -> Result<NativeRecipe, NixIndexError> {
+    let map = object(value.clone(), "local unofficial native recipe")?;
+    reject_unknown(&map, &["name", "version", "kind", "url", "sha256", "bin"])?;
+    let recipe = NativeRecipe {
+        name: string_field(&map, "name")?.to_string(),
+        version: string_field(&map, "version")?.to_string(),
+        kind: string_field(&map, "kind")?.to_string(),
+        url: string_field(&map, "url")?.to_string(),
+        sha256: string_field(&map, "sha256")?.to_string(),
+        bin: string_field(&map, "bin")?.to_string(),
+    };
+    valid_native_token(&recipe.name, "native recipe name")?;
+    valid_native_token(&recipe.version, "native recipe version")?;
+    if recipe.kind != "prebuilt" {
+        return Err(NixIndexError::invalid(
+            "local unofficial native recipe kind must be `prebuilt`",
+        ));
+    }
+    validate_native_recipe_url(&recipe.url)?;
+    if recipe.sha256.len() != 64
+        || !recipe
+            .sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(NixIndexError::invalid(
+            "local unofficial native recipe sha256 is malformed",
+        ));
+    }
+    if recipe.bin.is_empty()
+        || recipe.bin == "."
+        || recipe.bin == ".."
+        || recipe.bin.contains('/')
+        || recipe.bin.contains('\\')
+        || recipe.bin.chars().any(|character| character.is_control())
+    {
+        return Err(NixIndexError::invalid(
+            "local unofficial native recipe bin is malformed",
+        ));
+    }
+    Ok(recipe)
+}
+
+fn valid_native_token(text: &str, label: &str) -> Result<(), NixIndexError> {
+    if text.is_empty()
+        || text.len() > 128
+        || !text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(NixIndexError::invalid(format!("{label} is malformed")));
+    }
+    Ok(())
+}
+
+fn validate_native_recipe_url(url: &str) -> Result<(), NixIndexError> {
+    if url.starts_with("file://") {
+        if url.strip_prefix("file://").is_some_and(|path| !path.is_empty())
+            && !url.chars().any(|character| character.is_control())
+        {
+            return Ok(());
+        }
+    }
+    if (url.starts_with("https://") || url.starts_with("http://"))
+        && !url
+            .chars()
+            .any(|character| character.is_control() || character == ' ')
+    {
+        if url.starts_with("http://") {
+            let authority = url
+                .strip_prefix("http://")
+                .and_then(|value| value.split('/').next())
+                .unwrap_or_default();
+            if !is_loopback_host(authority) {
+                return Err(NixIndexError::invalid(
+                    "plain HTTP native recipe URLs must use loopback",
+                ));
+            }
+        }
+        return Ok(());
+    }
+    Err(NixIndexError::invalid(
+        "local unofficial native recipe URL must be HTTPS, loopback HTTP, or file",
+    ))
+}
+
+fn canonical_native_recipes_bytes(recipes: &[NativeRecipe]) -> Vec<u8> {
+    let mut recipes = recipes.to_vec();
+    recipes.sort_by(|left, right| {
+        left.name
+            .as_bytes()
+            .cmp(right.name.as_bytes())
+            .then_with(|| left.version.as_bytes().cmp(right.version.as_bytes()))
+    });
+    let mut output = String::from("{\"schema\":1,\"recipes\":[");
+    for (index, recipe) in recipes.iter().enumerate() {
+        if index != 0 {
+            output.push(',');
+        }
+        output.push_str(&recipe.canonical_json());
+    }
+    output.push_str("]}");
+    output.into_bytes()
 }
 
 fn parse_index_strict(bytes: &[u8]) -> Result<IndexDocument, NixIndexError> {
@@ -2901,6 +3144,31 @@ mod tests {
     }
 
     #[test]
+    fn nix_index_requires_explicit_endpoint_and_key() {
+        let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "jet-nix-index-explicit-config-{}-{serial}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let roots = Roots {
+            root: root.clone(),
+            dev_mode: true,
+        };
+        let error = match NixIndexClient::from_roots_with_mode(&roots, false) {
+            Ok(_) => panic!("missing signed-index configuration must fail closed"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            NixIndexError::Invalid(detail)
+                if detail == "signed nixpkgs index endpoint and public key must be configured explicitly"
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn nix_index_resolves_exact_ripgrep_record() {
         let (root, transport, clock, key, index_key) = signed_fixture();
         let client = NixIndexClient::for_test(
@@ -3247,5 +3515,94 @@ mod tests {
         assert_eq!(error.code(), 1276);
         assert!(matches!(error, NixIndexError::Offline(_)));
         let _ = fs::remove_dir_all(root);
+    }
+
+    fn collect_text_files(path: &Path, files: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            let file_type = entry.file_type().unwrap();
+            if file_type.is_dir() {
+                collect_text_files(&entry.path(), files);
+            } else if file_type.is_file() {
+                files.push(entry.path());
+            }
+        }
+    }
+
+    fn branded_host(token: &str) -> Option<&str> {
+        let token = token.trim_matches(|character: char| {
+            matches!(
+                character,
+                '`' | '!'
+                    | '#'
+                    | '$'
+                    | '%'
+                    | '&'
+                    | '*'
+                    | '+'
+                    | ','
+                    | ';'
+                    | '<'
+                    | '>'
+                    | '?'
+                    | '\\'
+                    | ']'
+                    | '['
+                    | '}'
+                    | '{'
+                    | ')'
+                    | '('
+            )
+        });
+        let authority = token
+            .strip_prefix("https://")
+            .or_else(|| token.strip_prefix("http://"))
+            .unwrap_or(token)
+            .split(|character: char| matches!(character, '/' | '?' | '#'))
+            .next()?;
+        let host = authority
+            .rsplit('@')
+            .next()?
+            .split(':')
+            .next()?
+            .trim_end_matches('.');
+        let is_jet_domain = host
+            .split('.')
+            .any(|label| matches!(label, "jet" | "jet-lang"));
+        let is_owned = host == "jet-lang.dev" || host.ends_with(".jet-lang.dev");
+        if is_jet_domain && !is_owned {
+            Some(host)
+        } else {
+            None
+        }
+    }
+
+    #[test]
+    fn shipped_jet_domains_use_owned_domain() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut files = Vec::new();
+        for relative in ["crates", "Source", "docs"] {
+            collect_text_files(&repo.join(relative), &mut files);
+        }
+        let mut violations = Vec::new();
+        for path in files {
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            for (line_number, line) in text.lines().enumerate() {
+                for token in line.split(|character: char| {
+                    character.is_whitespace() || matches!(character, '"' | '\'' | '`' | '<' | '>')
+                }) {
+                    if let Some(host) = branded_host(token) {
+                        violations.push(format!("{}:{} ({host})", path.display(), line_number + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "unowned Jet-branded host(s) in shipped surfaces:\n{}",
+            violations.join("\n")
+        );
     }
 }

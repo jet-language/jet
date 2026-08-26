@@ -1,6 +1,6 @@
-//! Typestate tests (D-STATE1 / D-STATE-DECL / D-STATE-REQ / D-STATE-TRANS):
+//! Typestate tests (D-STATE1 / D-STATE-HOME1 / D-STATE-REQ / D-STATE-TRANS):
 //! `#State(S)` require-state guards and `#Transition(From, To)` transitions,
-//! declared in a `state TypeName { … }` block, with the wrong-state error E0150
+//! declared in a struct-owned `state { … }` section, with the wrong-state error E0150
 //! and the unknown-state error E0151. State is a compile-time fact threaded by the
 //! checker and erased in codegen (I3).
 
@@ -20,11 +20,10 @@ fn lint_codes(src: &str) -> Vec<String> {
     }
 }
 
-/// D-STATE-DECL: declaration block form — states are a bounded named set.
+/// D-STATE-HOME1=A: the owning struct carries one bounded named state set.
 const DECL: &str = r#"
-state Reservation { Pending, Confirmed, CheckedIn }
-
 struct Reservation {
+    state { Pending, Confirmed, CheckedIn }
     guest: String
 }
 
@@ -115,13 +114,14 @@ fn run() {
     );
 }
 
-/// D-STATE-DECL: a `#State(X)` marker referencing an undeclared state is E0151.
+/// D-STATE-HOME1=A: a `#State(X)` marker referencing an undeclared state is E0151.
 #[test]
 fn unknown_state_in_marker_is_e0151() {
     let src = r#"
-state Crate { Full, Empty }
-
-struct Crate { data: Int }
+struct Crate {
+    state { Full, Empty }
+    data: Int
+}
 
 impl Crate {
     #Transition(_, Full) fn fill(data: Int) Crate -[]> {
@@ -144,13 +144,50 @@ fn run() {
     );
 }
 
-/// D-STATE-DECL: a `#Transition(A, B)` marker referencing an undeclared to-state is E0151.
+/// D-STATE-HOME1=A: a `#Transition(A, B)` marker referencing an undeclared to-state is E0151.
 #[test]
 fn unknown_transition_to_state_is_e0151() {
     let src = r#"
-state Crate { Full, Empty }
+struct Crate {
+    state { Full, Empty }
+    data: Int
+}
 
-struct Crate { data: Int }
+#[test]
+fn retired_top_level_state_companion_teaches_nested_owner() {
+    let diagnostics = codes(
+        "state Door { Ready }\nstruct Door { opened: Bool }\nfn run() {}\n",
+    );
+    assert!(diagnostics.iter().any(|code| code == "E0157"), "{diagnostics:?}");
+}
+
+#[test]
+fn state_section_shape_diagnostics_are_distinct() {
+    let empty = codes("struct Empty { state {} }\nfn run() {}\n");
+    assert!(empty.iter().any(|code| code == "E0169"), "{empty:?}");
+
+    let duplicate_section = codes(
+        "struct Door { state { Ready } state { Open } }\nfn run() {}\n",
+    );
+    assert!(
+        duplicate_section.iter().any(|code| code == "E0168"),
+        "{duplicate_section:?}"
+    );
+
+    let duplicate_name = codes("struct Door { state { Ready, Ready } }\nfn run() {}\n");
+    assert!(duplicate_name.iter().any(|code| code == "E0166"), "{duplicate_name:?}");
+
+    let member_collision = codes("struct Door { state { open } open: Bool }\nfn run() {}\n");
+    assert!(
+        member_collision.iter().any(|code| code == "E0167"),
+        "{member_collision:?}"
+    );
+
+    let missing_owner = codes(
+        "struct Door { opened: Bool }\nimpl Door { #State(Ready) fn open(self) {} }\nfn run() {}\n",
+    );
+    assert!(missing_owner.iter().any(|code| code == "E0159"), "{missing_owner:?}");
+}
 
 impl Crate {
     #Transition(_, Stuffed) fn fill(data: Int) Crate -[]> {
@@ -167,35 +204,37 @@ fn run() { }
     );
 }
 
-/// D-STATE-DECL: a state declared with no outgoing transition is a dead-end (L0151 lint).
-/// `CheckedIn` is the terminal state of the Reservation machine — it has no outgoing
-/// `#Transition(CheckedIn, …)` so it is a dead-end. The machine compiles anyway.
+/// D-STATE-TERMINAL1: a state with no outgoing transition is a valid terminal fact.
 #[test]
-fn dead_end_state_is_l0151() {
-    // DECL declares `state Reservation { Pending, Confirmed, CheckedIn }`.
-    // `CheckedIn` has no outgoing transition → L0151.
+fn terminal_state_has_no_unreachable_lint() {
     let src = format!(
         "{DECL}\nfn run() {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
     );
     assert!(
-        lint_codes(&src).iter().any(|c| c == "L0151"),
-        "dead-end CheckedIn must be L0151: {:?}",
+        codes(&src).is_empty(),
+        "a terminal state must compile: {:?}",
+        codes(&src)
+    );
+    assert!(
+        !lint_codes(&src).iter().any(|c| c == "L0153"),
+        "reachable terminal state must have no reachability lint: {:?}",
         lint_codes(&src)
     );
 }
 
-/// D-STATE-DECL: when every declared state has an outgoing transition, no L0151 fires.
+/// D-STATE-TERMINAL1: a self-loop and a reopen transition are outgoing edges.
 #[test]
-fn no_dead_end_no_l0151() {
+fn self_loop_and_reopen_states_are_nonterminal() {
     let src = r#"
-state Gate { Open, Closed }
-
-struct Gate { w: Int }
+struct Gate {
+    state { Closed, Reopened }
+    w: Int
+}
 
 impl Gate {
     #Transition(_, Closed) fn new(w: Int) Gate -[]> { return Gate{ w: w } }
-    #Transition(Closed, Open) fn open(self: ^Gate) Gate -[]> { return self }
-    #Transition(Open, Closed) fn close(self: ^Gate) Gate -[]> { return self }
+    #Transition(Closed, Closed) fn hold(self: ^Gate) Gate -[]> { return self }
+    #Transition(Closed, Reopened) fn reopen(self: ^Gate) Gate -[]> { return self }
 }
 
 fn run() {
@@ -204,26 +243,62 @@ fn run() {
     g = g.close()
 }
 "#;
-    // Every state has an outgoing transition (Open→Closed, Closed→Open); no dead end.
+    // Closed has both a self-loop and a reopen edge. Reopened is terminal.
     assert!(
         codes(src).is_empty(),
         "no errors expected: {:?}",
         codes(src)
     );
+    let lints = lint_codes(src);
     assert!(
-        !lint_codes(src).iter().any(|c| c == "L0151"),
-        "no dead-end → no L0151: {:?}",
-        lint_codes(src)
+        lints.iter().all(|code| code != "L0153"),
+        "self-loop and reopen must not be unreachable: {:?}",
+        lints
     );
+}
+
+#[test]
+fn entry_graph_reports_only_unreachable_declared_states() {
+    let src = r#"
+struct Flow {
+    state { Start, Done, Cancelled, Orphan }
+}
+impl Flow {
+    #Transition(_, Start) fn start() Flow -[]> { return Flow{} }
+    #Transition(Start, Done) fn done(self: ^Flow) Flow -[]> { return self }
+    #Transition(Start, Cancelled) fn cancel(self: ^Flow) Flow -[]> { return self }
+}
+    fn run() {}
+"#;
+    let lints = lint_codes(src);
+    assert_eq!(
+        lints.iter().filter(|code| *code == "L0153").count(),
+        1,
+        "only the unreachable declared state should warn: {lints:?}"
+    );
+}
+
+#[test]
+fn no_entry_graph_does_not_invent_reachability() {
+    let src = r#"
+struct Flow { state { Start, Done } }
+impl Flow {
+    #Transition(Start, Done) fn done(self: ^Flow) Flow -[]> { return self }
+}
+fn run() {}
+    "#;
+    let lints = lint_codes(src);
+    assert!(!lints.iter().any(|code| code == "L0153"), "{lints:?}");
 }
 
 /// D-FACT-FLOW1 (card #1621): a branch that confirms an order on one path and
 /// cancels it on the other leaves the state unproved. The one join rule reports
 /// the divergence (L0152) instead of keeping whatever arm was walked last.
 const DIVERGENT: &str = r#"
-state Order { Draft, Confirmed, Cancelled, Closed }
-
-struct Order { id: Int }
+struct Order {
+    state { Draft, Confirmed, Cancelled, Closed }
+    id: Int
+}
 
 impl Order {
     #Transition(_, Draft) fn start(id: Int) Order -[]> { return Order{ id: id } }

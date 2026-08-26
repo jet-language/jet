@@ -105,5 +105,9 @@ pub const MARKER_ALLOW: &str = "allow"; // D-LINTPOLICY1
 /// as retiring with `#Deprecated(since: ..., use: ..., removed_in: ...)`.
 pub const MARKER_DEPRECATED: &str = "Deprecated";
 
+/// D-FAILURE-FOUNDATION1=A: marks a named type as an allowed explicit error
+/// domain for a `!Error` callable contract.
+pub const MARKER_ERROR: &str = "Error";
+
 // D-MARKSIG1=A: marker rows live in `Policy::APPLIED_RULES`. Keep marker
 // spelling constants here; do not add a second name/site/signature table.

@@ -8,15 +8,15 @@ mod tir_support;
 fn authority_is_a_named_prelude_rights_carrier() {
     let source = r#"
 struct Holder {
-    abilities: Abilities
+    abilities: Authority
 }
 
 fn run() {
-    abilities :: Abilities.workspace()
+    abilities :: Authority.workspace()
     print("abilities")
 }
 "#;
-    let output = jet::compile(source).expect("Abilities type should compile");
+    let output = jet::compile(source).expect("Authority type should compile");
     assert!(
         output.rust.contains("pub struct JetAuthority"),
         "{}",
@@ -56,7 +56,7 @@ fn host_executable(name: &str) -> String {
 
 const AUTHORITY_VALUE_SOURCE: &str = r#"
 fn run() {
-    #Abilities(abilities: FS.Read, IO) {
+    #FX(abilities: FS.Read, IO) {
         narrowed :: abilities.with("FS.Read")
         _released :: narrowed.without("FS.Read")
         print("abilities")
@@ -66,7 +66,7 @@ fn run() {
 
 #[test]
 fn authority_with_and_without_are_the_only_narrowing_family() {
-    let output = jet::compile(AUTHORITY_VALUE_SOURCE).expect("Abilities operations should compile");
+    let output = jet::compile(AUTHORITY_VALUE_SOURCE).expect("Authority operations should compile");
     assert!(
         output.rust.contains("jet_authority_with"),
         "{}",
@@ -84,7 +84,7 @@ fn authority_with_and_without_are_the_only_narrowing_family() {
 fn authority_with_outside_held_rights_is_e0712() {
     let source = r#"
 fn run() {
-    abilities :: Abilities.workspace()
+    abilities :: Authority.workspace()
     abilities.with("FS.Write")
 }
 "#;
@@ -99,19 +99,19 @@ use core.process as process
 use core.plugin as plugin
 
 struct SessionHolder {
-    abilities: Abilities
+    abilities: Authority
 }
 
 fn run() {
-    session :: SessionHolder{abilities: Abilities.workspace()}
-    #Abilities(abilities: Exec, IO) {
+    session :: SessionHolder{abilities: Authority.workspace()}
+    #FX(abilities: Exec, IO) {
         result :: process.run(["echo", "abilities"], abilities)
         plugin :: plugin.load("missing.wasm", session.abilities)
         print("boundary")
     }
 }
 "#;
-    let output = jet::compile(source).expect("boundary APIs should accept Abilities");
+    let output = jet::compile(source).expect("boundary APIs should accept Authority");
     assert!(
         output.rust.contains("jet_std_process_run_with_authority"),
         "{}",
@@ -133,7 +133,7 @@ fn authority_process_boundary_runs_on_all_hosted_tiers() {
 use core.process as process
 
 fn run() {
-    #Abilities(abilities: Exec, IO) {
+    #FX(abilities: Exec, IO) {
         result :: process.run(["echo", "boundary"], abilities)
         print("boundary")
     }
@@ -192,7 +192,7 @@ fn authority_process_binds_exact_resource_grants() {
 use core.process as process
 
 fn run() {
-    policy :: Abilities.from_rights([
+    policy :: Authority.from_rights([
         "FS.Read:repo",
         "FS.Write:.jet/build",
         "Exec:__CARGO__",
@@ -232,7 +232,7 @@ fn authority_process_refuses_unenforced_scoped_network() {
 use core.process as process
 
 fn run() {
-    policy :: Abilities.from_rights(["Net:example.com"])
+    policy :: Authority.from_rights(["Net:example.com"])
     spec :: process.cmd(["/usr/bin/true"]).under(policy)
     if spec.plan() == {
         .Ok(_) -> print("accepted")
@@ -279,7 +279,7 @@ fn authority_process_plan_and_receipt_share_the_policy_digest() {
 use core.process as process
 
 fn run() {
-    policy :: Abilities.from_rights([
+    policy :: Authority.from_rights([
         "FS.Read:repo",
         "FS.Write:.jet/build",
         "Exec:__PRINTF__",
@@ -493,13 +493,13 @@ fn authority_example_runs_on_all_hosted_tiers() {
 fn authority_is_not_a_type_selection_or_dispatch_input() {
     let source = r#"
 fn run() {
-        #Abilities(Abilities) {
-        print("Abilities must remain ordinary data")
+        #FX(Authority) {
+        print("Authority must remain ordinary data")
     }
 }
 "#;
     let diagnostics =
-        jet::compile(source).expect_err("Abilities must not act as an effect/type fact");
+        jet::compile(source).expect_err("Authority must not act as an effect/type fact");
     assert!(
         diagnostics
             .iter()
@@ -511,15 +511,15 @@ fn run() {
 #[test]
 fn authority_parser_accepts_the_named_value() {
     let (tokens, diagnostics) = jet::Lexer::lex(
-        "fn run() { #Abilities(abilities: FS.Read) { value :: abilities.with(\"FS.Read\") } }",
+        "fn run() { #FX(abilities: FS.Read) { value :: abilities.with(\"FS.Read\") } }",
     );
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
-    jet::Parser::parse(&tokens).expect("parser must accept Abilities");
+    jet::Parser::parse(&tokens).expect("parser must accept Authority");
 }
 
 #[test]
 fn authority_sema_keeps_the_named_type() {
-    let output = jet::compile(AUTHORITY_VALUE_SOURCE).expect("sema should accept Abilities");
+    let output = jet::compile(AUTHORITY_VALUE_SOURCE).expect("sema should accept Authority");
     assert!(output.rust.contains("JetAuthority"), "{}", output.rust);
 }
 
@@ -556,8 +556,8 @@ fn authority_dev_runs_the_same_value() {
 
 #[test]
 fn authority_comptime_uses_the_same_value() {
-    let source = "@abilities :: Abilities.from_rights([\"FS.Read\", \"IO\"])\n@narrowed :: abilities.with(\"FS.Read\")\n@released :: narrowed.without(\"FS.Read\")\n\nfn run() { print(\"abilities\") }\n";
-    let output = jet::compile(source).expect("comptime should construct Abilities");
+    let source = "@abilities :: Authority.from_rights([\"FS.Read\", \"IO\"])\n@narrowed :: abilities.with(\"FS.Read\")\n@released :: narrowed.without(\"FS.Read\")\n\nfn run() { print(\"abilities\") }\n";
+    let output = jet::compile(source).expect("comptime should construct Authority");
     assert!(output.rust.contains("JetAuthority"), "{}", output.rust);
 }
 
@@ -565,27 +565,27 @@ fn authority_comptime_uses_the_same_value() {
 fn authority_repl_accepts_the_same_value() {
     let transcript = jet::REPL::run_transcript(
         &[
-            "abilities :: Abilities.workspace()",
+            "abilities :: Authority.workspace()",
             "narrowed :: abilities.with(\"FS.Read\")",
             "released :: narrowed.without(\"FS.Read\")",
-            "#Abilities(scoped: FS.Read) { inside :: scoped.with(\"FS.Read\") }",
+            "#FX(scoped: FS.Read) { inside :: scoped.with(\"FS.Read\") }",
             "print(\"abilities\")",
         ],
         None,
     );
     assert!(
         transcript.contains("abilities"),
-        "REPL changed Abilities meaning: {transcript}"
+        "REPL changed Authority meaning: {transcript}"
     );
 }
 
 #[test]
 fn authority_web_accepts_the_same_value() {
-    let source = "#Target(Web)\nfn run() {\n    #Abilities(abilities: IO) {\n        narrowed :: abilities.with(\"IO\")\n        released :: narrowed.without(\"IO\")\n        value :: released\n    }\n}\n";
+    let source = "#Target(Web)\nfn run() {\n    #FX(abilities: IO) {\n        narrowed :: abilities.with(\"IO\")\n        released :: narrowed.without(\"IO\")\n        value :: released\n    }\n}\n";
     let web = jet::compile_web_with_path(source, "tests/fixtures/authority_web.jet")
-        .expect("web should accept Abilities")
+        .expect("web should accept Authority")
         .web
-        .expect("web tier dropped Abilities");
+        .expect("web tier dropped Authority");
     assert!(
         web.wasm_rust
             .contains("pub extern \"C\" fn jet_export_run() -> i32"),
@@ -593,14 +593,14 @@ fn authority_web_accepts_the_same_value() {
     );
     assert!(
         web.wasm_rust.contains("jet_authority_with"),
-        "web lost Abilities.with"
+        "web lost Authority.with"
     );
     assert!(
         web.wasm_rust.contains("jet_authority_without"),
-        "web lost Abilities.without"
+        "web lost Authority.without"
     );
     assert!(
-        !web.wasm_rust.contains("struct Abilities"),
+        !web.wasm_rust.contains("struct Authority"),
         "web handle leaked into emission"
     );
 }

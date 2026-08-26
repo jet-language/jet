@@ -2577,7 +2577,7 @@ mod tests {
     fn hybrid_publisher_identities_are_distinct_domains() {
         let now = 1_700_000_000;
         let (mut eng, _, _) = boot(now);
-        eng.bind_identity(BoundIdentity::registry("jet.dev"))
+        eng.bind_identity(BoundIdentity::registry("jet-lang.dev"))
             .unwrap();
         eng.bind_identity(BoundIdentity::cache_builder("ci-builder-1"))
             .unwrap();
@@ -2590,7 +2590,7 @@ mod tests {
         eng.bind_identity(BoundIdentity::publisher("alice", pub_id))
             .unwrap();
         let sigstore = PublisherIdentity::Sigstore {
-            identity: "alice@jet.dev".into(),
+            identity: "alice@jet-lang.dev".into(),
             issuer: "https://accounts.google.com".into(),
             checkpoint_digest: "aa".repeat(32),
             bundle_digest: "bb".repeat(32),
@@ -2610,7 +2610,7 @@ mod tests {
         eng2.bind_identity(BoundIdentity::publisher("alice", {
             // different proof same name — still same binding name; allowed as refresh
             PublisherIdentity::Sigstore {
-                identity: "alice@jet.dev".into(),
+                identity: "alice@jet-lang.dev".into(),
                 issuer: "https://accounts.google.com".into(),
                 checkpoint_digest: "aa".repeat(32),
                 bundle_digest: "bb".repeat(32),

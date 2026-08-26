@@ -54,6 +54,95 @@ function same(actual, expected, label) {
   }
 }
 
+function verifyNativeProjectionManifest() {
+  const manifest = oracle.native_projection;
+  if (!manifest || !Array.isArray(manifest.tools) || !Array.isArray(manifest.facts)) {
+    throw new Error("shell oracle must declare the native projection manifest");
+  }
+  const expectedHookReplacements = {
+    JET_ROOT: "project-root",
+    TZDIR: "output(tzdata)/share/zoneinfo",
+    JET_ENV_DISABLE: "constant:1",
+    LD_LIBRARY_PATH: "output(vulkan-loader)/lib then output(raylib)/lib on Linux",
+    JET_NIX_TMP_CLEANED: "native no-op marker",
+    "shellHook.banner": "Shell.enter presentation",
+  };
+  same(
+    Object.keys(oracle.hook_replacements || {}).sort(),
+    Object.keys(expectedHookReplacements).sort(),
+    "Nix hook replacement coverage",
+  );
+  for (const [name, expected] of Object.entries(expectedHookReplacements)) {
+    same(oracle.hook_replacements[name], expected, `Nix hook replacement ${name}`);
+  }
+  same(
+    manifest.tools,
+    [
+      {
+        definition: "jetDev",
+        command: "jet",
+        relative_binary: "target/debug/jet",
+        mode: "direct",
+      },
+      {
+        definition: "jetpackDev",
+        command: "jetpack",
+        relative_binary: "target/debug/jetpack",
+        mode: "direct",
+      },
+    ],
+    "native tool manifest",
+  );
+  same(
+    manifest.facts,
+    [
+      { variable: "JET_ROOT", kind: "project-root" },
+      {
+        variable: "TZDIR",
+        kind: "output-path",
+        package: "tzdata",
+        relative: "share/zoneinfo",
+        platform: "any",
+      },
+      {
+        variable: "JET_ENV_DISABLE",
+        kind: "constant",
+        value: "1",
+        decision: "D-ENVHOOK1",
+      },
+      {
+        variable: "LD_LIBRARY_PATH",
+        kind: "ordered-output-paths",
+        packages: ["vulkan-loader", "raylib"],
+        relative: "lib",
+        platform: "linux",
+        append: "inherited",
+      },
+      {
+        variable: "JET_NIX_TMP_CLEANED",
+        kind: "not-created-marker",
+        value: "1",
+        executes: false,
+      },
+    ],
+    "native environment fact manifest",
+  );
+  for (const tool of manifest.tools) {
+    const declaration = `${tool.definition} -> ${tool.relative_binary}`;
+    if (!source.includes(declaration)) {
+      throw new Error(`env.jet is missing native tool declaration: ${declaration}`);
+    }
+  }
+  for (const fact of manifest.facts) {
+    if (!source.includes(fact.variable)) {
+      throw new Error(`env.jet is missing native environment fact: ${fact.variable}`);
+    }
+  }
+  if (!source.includes("does not execute the flake shellHook")) {
+    throw new Error("env.jet must state that shellHook execution is not part of the native projection");
+  }
+}
+
 for (const environment of ["default", "full"]) {
   const selection = oracle.selections[environment];
   same(
@@ -65,6 +154,8 @@ for (const environment of ["default", "full"]) {
     throw new Error(`${environment} native tool projection must expose jet and jetpack`);
   }
 }
+
+verifyNativeProjectionManifest();
 
 if (source.includes("/nix/store")) {
   throw new Error("env.jet must not hand-pin a Nix store path");

@@ -691,7 +691,7 @@ catalog: .{
     tracing: "3.0.2"
 }
 sources: .{
-    public: registry@registry.jet.dev
+    public: registry@registry.jet-lang.dev
     company: registry@packages.example.test
 }
 policy: .{
@@ -812,7 +812,7 @@ PASS api.unit
 PASS billing.unit
 
 $ jet explain package:tracing
-Selected tracing#3.0.2 from registry.jet.dev
+Selected tracing#3.0.2 from registry.jet-lang.dev
 Requested by api at packages/api/package.jet:5 through catalog.tracing
 Rejected 3.1.0: maturity window has 11 hours remaining
 Policy source: package.jet:15

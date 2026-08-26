@@ -10,7 +10,8 @@ use crate::Codegen::TIR::lambda_body_ty;
 use crate::Codegen::TIR::lambda_body_ty_expecting;
 use crate::Codegen::TIR::lower::lambda_block_tail;
 use crate::Codegen::TIR::lower::{
-    prepare_interrupt_callback_local_expr, prepare_interrupt_callback_locals,
+    lower_value_block, prepare_interrupt_callback_local_expr, prepare_interrupt_callback_locals,
+    return_type_has_value,
 };
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_owned_expr;
@@ -226,10 +227,7 @@ fn lower_lambda_expecting_with_host_borrow(
         };
         prep.push_str(&format!("let mut {cap} = {init};\n    "));
         captures.push((name.clone(), cap.clone(), cap_ty.clone()));
-        let slot = match env.origin_of(name) {
-            Some(origin) => TLocal::generated(&cap).with_origin(origin),
-            None => TLocal::generated(&cap),
-        };
+        let slot = TLocal::generated(&cap);
         lam_env.bind(name, slot, Some(cap_ty));
         // D-MEM-COPYSEM1=A: the capture slot now OWNS its bytes. Inside the
         // body the name is no longer a window, so an owning read of it clones
@@ -364,7 +362,11 @@ fn lower_lambda_expecting_with_host_borrow(
                 )
             } else {
                 prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);
-                let lowered = lower_stmts(stmts, cx, &mut lam_env);
+                let lowered = if return_type_has_value(&body_ty) {
+                    lower_value_block(stmts, cx, &mut lam_env)
+                } else {
+                    lower_stmts(stmts, cx, &mut lam_env)
+                };
                 let mut inner = String::new();
                 emit_tir_lambda_block(&lowered, cx, &mut inner, 1);
                 (format!("{{ {} }}", inner), TLambdaBody::Block(lowered))
@@ -513,10 +515,7 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
     lam_env.txn_handle = None;
     lam_env.txn_undo_needed = None;
     for cap in &captures {
-        let slot = match env.origin_of(&cap.source) {
-            Some(origin) => TLocal::user(&cap.name).with_origin(origin),
-            None => TLocal::user(&cap.name),
-        };
+        let slot = TLocal::user(&cap.name);
         lam_env.bind(&cap.name, slot, Some(cap.ty.clone()));
     }
     for (i, p) in lam.params.iter().enumerate() {
@@ -656,10 +655,7 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
             cap,
             env.place_of(name)
         ));
-        let slot = match env.origin_of(name) {
-            Some(origin) => TLocal::generated(&cap).with_origin(origin),
-            None => TLocal::generated(&cap),
-        };
+        let slot = TLocal::generated(&cap);
         lam_env.bind(name, slot, env.ty_of(name));
     }
     for p in &lam.params {
@@ -739,10 +735,7 @@ fn reactive_capture_setup(stmts: &[Stmt], outer_env: &LowerEnv) -> (String, Lowe
             ),
         };
         prep.push_str(&format!("let mut {cap} = {init};\n    "));
-        let slot = match outer_env.origin_of(name) {
-            Some(origin) => TLocal::generated(&cap).with_origin(origin),
-            None => TLocal::generated(&cap),
-        };
+        let slot = TLocal::generated(&cap);
         lam_env.bind(name, slot, cap_ty);
         // Same owning-slot fact as the stored-lambda prelude above: once the
         // window has been copied out, the body's name is an owned value.

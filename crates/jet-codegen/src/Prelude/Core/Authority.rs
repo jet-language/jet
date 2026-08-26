@@ -1,5 +1,5 @@
-/// D-AUTHORITY-WORD2=E: the one named Abilities value that crosses boundaries.
-/// Abilities remains ordinary data; every engine calls
+/// D-ABILITY-NAME2=A: the one named Authority value that crosses boundaries.
+/// Authority remains ordinary data; every engine calls
 /// the helpers below instead of keeping a second policy implementation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JetAuthority {
@@ -7,7 +7,7 @@ pub struct JetAuthority {
 }
 
 impl JetAuthority {
-    /// Build the one runtime carrier for a checked named `#Abilities` scope.
+    /// Build the one runtime carrier for a checked named `#FX` scope.
     /// The caller has already resolved the names; this method only stores the
     /// rights set, so every execution tier shares the same relation.
     pub fn from_rights(rights: Vec<String>) -> Self {

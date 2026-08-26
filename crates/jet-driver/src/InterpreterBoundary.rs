@@ -227,7 +227,7 @@ fn process_leaf_feature(module: &str, item: &str) -> Option<&'static str> {
         // `process.run` is marshalled by the interpreter ambient through the
         // same Process Prelude as AOT and Cranelift. The authority argument
         // is ordinary data at this boundary; sema has already checked it is
-        // the named `Abilities` carrier.
+        // the named `Authority` carrier.
         ("core.process", "argv" | "cmd" | "exit" | "run" | "pipeline" | "workspace")
         | ("core.sys", "atexit" | "stop") => None,
         // #2003: the interpreter ambient marshals these three through the one

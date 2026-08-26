@@ -195,13 +195,21 @@ impl<'a> Parser<'a> {
                     }
                 }
                 TokKind::Question => {
+                    if self.result_handler_follows() {
+                        let qspan = self.bump().span;
+                        expr = self.parse_result_handler(expr, qspan)?;
+                        continue;
+                    }
                     let qspan = self.bump().span;
-                    // D-FAIL-CTX1: a same-line string immediately after `?`
-                    // is the hop note. The string expression stays in the AST
-                    // so interpolation is checked statically but evaluated only
-                    // by a failing propagation path.
-                    let note = if matches!(&self.peek().kind, TokKind::Str(_)) {
-                        Some(Box::new(self.expr_primary(false)?))
+                    // D-FAILURE-FOUNDATION1=A: `?(text)` adds one lazy,
+                    // source-linked context frame. The note remains an AST
+                    // expression so sema checks it, but codegen evaluates it
+                    // only when the propagated carrier is already failing.
+                    let note = if matches!(self.peek().kind, TokKind::LParen) {
+                        self.bump();
+                        let note = self.expr()?;
+                        self.expect(TokKind::RParen, "to finish the failure context")?;
+                        Some(Box::new(note))
                     } else {
                         None
                     };

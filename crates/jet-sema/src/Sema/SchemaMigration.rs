@@ -813,6 +813,7 @@ mod tests {
             name_span: zero(),
             type_params: vec![],
             fields,
+            state: None,
             methods: vec![],
             cli_bindings: vec![],
             trait_impls: vec![],

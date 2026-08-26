@@ -436,8 +436,8 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     // `examples/features/comptime/`, because those directories have no manifest and
     // a SIBLING (`tooling/compiler_api.jet`, `comptime/build_stamp.jet`) supplies
     // the discovered `fn build`. Examples that print their own source location then
-    // disagreed with their golden: `tooling/provenance_track` (`Float.origin()`,
-    // D-PROVENANCE1) and `tooling/panic_report` (E3001 `--> file:line`).
+    // disagreed with their golden: `tooling/provenance_track` (`@origin`,
+    // D-TRACK-ORIGIN1) and `tooling/panic_report` (E3001 `--> file:line`).
     let compiled_result = if has_package_build_entry(&entry.path, &src) {
         jet::compile_programmable_build(&entry.shown, &[])
     } else {

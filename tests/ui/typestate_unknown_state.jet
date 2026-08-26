@@ -1,10 +1,9 @@
-// D-STATE-DECL: a `#State(X)` or `#Transition(A, B)` marker that references a
-// state name not declared in `state TypeName { … }` is E0151. Here `#State(Stuffed)`
-// on `Crate::get` references `Stuffed`, but the `state Crate` block only declares
-// `Full` and `Empty`. Close enough to `Full` to get a typo suggestion.
-state Crate { Full, Empty }
-
+// D-STATE-HOME1=A: a `#State(X)` or `#Transition(A, B)` marker that references a
+// state name not declared in the owning `state { … }` section is E0151. Here
+// `#State(Stuffed)` on `Crate::get` references `Stuffed`, but the section only
+// declares `Full` and `Empty`. Close enough to `Full` to get a typo suggestion.
 struct Crate {
+    state { Full, Empty }
     data: Int
 }
 

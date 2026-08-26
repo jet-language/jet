@@ -1181,7 +1181,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         &[false],
     ),
     // D-AGENT-EXEC1: the workspace constructor returns the same ordinary
-    // Abilities carrier used by every authority boundary.
+    // Authority carrier used by every authority boundary.
     CoreCallRecord::new(
         "core.process",
         "workspace",

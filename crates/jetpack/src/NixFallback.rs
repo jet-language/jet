@@ -11,15 +11,11 @@ use crate::SHA256;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-#[path = "NixFallbackPolicy.rs"]
-mod policy;
-
-#[path = "NixIdentity.rs"]
-mod identity;
-// Re-exported for the import-on-miss consumer on card #2162; the fallback
-// entry point that uses it has not shipped yet.
+use crate::NixFallbackPolicy as policy;
+// Re-exported for the import-on-miss consumer. The policy seam verifies the
+// executable identity before this importer retains the result.
 #[allow(unused_imports)]
-pub(crate) use self::identity::NixFallbackIdentity;
+pub(crate) use crate::NixIdentity::NixFallbackIdentity;
 
 const IMPORT_SCHEMA: &str = "jetpack.nix-fallback.v1";
 
@@ -91,10 +87,7 @@ pub(crate) fn import_record(record: &JSONValue) -> Result<Option<ImportedNixStat
     }
     for (fact_name, source_name) in [("recipe", "recipe"), ("lock", "lock")] {
         if let Some(value) = import.get(source_name) {
-            facts.insert(
-                format!("nix.fallback.{fact_name}"),
-                canonical(value)?,
-            );
+            facts.insert(format!("nix.fallback.{fact_name}"), canonical(value)?);
         }
     }
     Ok(Some(ImportedNixState { facts }))
@@ -128,9 +121,7 @@ fn required<'a>(
             continue;
         };
         if found.is_some() {
-            return Err(format!(
-                "fallback document has more than one {label} field"
-            ));
+            return Err(format!("fallback document has more than one {label} field"));
         }
         found = Some(value);
     }

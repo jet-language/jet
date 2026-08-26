@@ -1904,7 +1904,7 @@ fn find_expression_selection_in_children(
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -2132,7 +2132,7 @@ fn find_exec_insertion_in_children(
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -2633,7 +2633,7 @@ fn find_switched_node_in_children(stmt: &Stmt, node_span: SourceSpan) -> Option<
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -2916,7 +2916,7 @@ fn find_pattern_target_in_children<'a>(
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -3022,7 +3022,7 @@ fn find_pattern_arm_remove_span_in_children(
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -3113,7 +3113,7 @@ fn find_pattern_span_in_children(
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -3246,7 +3246,7 @@ fn find_multi_input_in_stmt(
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -3711,7 +3711,7 @@ fn collect_child_statement_locs(
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::ComptimeBlock { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }

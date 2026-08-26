@@ -806,7 +806,7 @@ pub(crate) fn nested_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }
@@ -914,7 +914,7 @@ fn nested_bodies_mut(statement: &mut Stmt) -> Vec<&mut Vec<Stmt>> {
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
+        | Stmt::AuthorityScope { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::ContextBlock { body, .. }
         | Stmt::Live { body, .. }

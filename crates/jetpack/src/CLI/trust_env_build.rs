@@ -1,8 +1,8 @@
 use super::package_hangar_vendor::auto_clean_after_success;
 use super::parse::{Flags, Parsed};
 use super::realize::{
-    apply_locked_channels, classify_or_report, load_project_plan, realize_adapter, realize_ref,
-    plan_downloads, realize_ref_outcome, report_nix_bridge_required, RealizeScope, RefOutcome,
+    apply_locked_channels, classify_or_report, load_project_plan, plan_downloads, realize_adapter,
+    realize_ref, realize_ref_outcome, report_nix_bridge_required, RealizeScope, RefOutcome,
     RowStyle, RunPlan,
 };
 use super::services_secrets_config::find_jet_binary;
@@ -34,6 +34,55 @@ struct NativeDevTool {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeOutputPlatform {
+    Any,
+    Linux,
+}
+
+impl NativeOutputPlatform {
+    fn applies(self) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Linux => cfg!(target_os = "linux"),
+        }
+    }
+}
+
+/// A realized package output selected by the native shell contract. Keeping
+/// the package, relative output, environment variable, and target condition
+/// together prevents the projection from rebuilding Nix's `getBin`,
+/// `makeLibraryPath`, or `optionalString` decisions in an engine-specific
+/// string path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NativeOutputFact {
+    package: &'static str,
+    relative: &'static str,
+    variable: &'static str,
+    platform: NativeOutputPlatform,
+}
+
+const NATIVE_OUTPUT_FACTS: [NativeOutputFact; 3] = [
+    NativeOutputFact {
+        package: "tzdata",
+        relative: "share/zoneinfo",
+        variable: "TZDIR",
+        platform: NativeOutputPlatform::Any,
+    },
+    NativeOutputFact {
+        package: "vulkan-loader",
+        relative: "lib",
+        variable: "LD_LIBRARY_PATH",
+        platform: NativeOutputPlatform::Linux,
+    },
+    NativeOutputFact {
+        package: "raylib",
+        relative: "lib",
+        variable: "LD_LIBRARY_PATH",
+        platform: NativeOutputPlatform::Linux,
+    },
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NativeActivation {
     Disabled,
 }
@@ -42,6 +91,9 @@ enum NativeActivation {
 enum NixShellScratch {
     NotCreated,
 }
+
+const NATIVE_ACTIVATION: NativeActivation = NativeActivation::Disabled;
+const NIX_SHELL_SCRATCH: NixShellScratch = NixShellScratch::NotCreated;
 
 /// Typed host facts for the Jet-native shell projection. The final
 /// environment-variable map is only a child-process adapter; paths, markers,
@@ -71,25 +123,15 @@ impl NativeEnvironmentProjection {
                 }
                 dirs
             });
-        let mut tzdir = None;
-        let mut vulkan_loader = None;
-        let mut raylib = None;
-        for (name, output) in realized {
-            let output = std::path::Path::new(output);
-            match name.as_str() {
-                "tzdata" => tzdir = Some(output.join("share").join("zoneinfo")),
-                "vulkan-loader" => vulkan_loader = Some(output.join("lib")),
-                "raylib" => raylib = Some(output.join("lib")),
-                _ => {}
-            }
-        }
-        let mut loader_paths = Vec::new();
-        if let Some(path) = vulkan_loader {
-            loader_paths.push(path);
-        }
-        if let Some(path) = raylib {
-            loader_paths.push(path);
-        }
+        let tzdir = NATIVE_OUTPUT_FACTS
+            .iter()
+            .find(|fact| fact.variable == "TZDIR")
+            .and_then(|fact| native_output_path(realized, fact));
+        let mut loader_paths = NATIVE_OUTPUT_FACTS
+            .iter()
+            .filter(|fact| fact.variable == "LD_LIBRARY_PATH")
+            .filter_map(|fact| native_output_path(realized, fact))
+            .collect::<Vec<_>>();
         #[cfg(target_os = "linux")]
         if let Some(inherited) = inherited_loader_path.filter(|value| !value.is_empty()) {
             loader_paths.extend(
@@ -105,11 +147,11 @@ impl NativeEnvironmentProjection {
             native_bin_dirs,
             tzdir,
             loader_paths,
-            activation: NativeActivation::Disabled,
+            activation: NATIVE_ACTIVATION,
             // Jetpack never creates Nix shell scratch directories. The
             // compatibility marker records that the old one-time cleanup
             // boundary is already satisfied; no hook runs.
-            nix_shell_scratch: NixShellScratch::NotCreated,
+            nix_shell_scratch: NIX_SHELL_SCRATCH,
         }
     }
 
@@ -151,6 +193,19 @@ impl NativeEnvironmentProjection {
         }
         vars
     }
+}
+
+fn native_output_path(
+    realized: &[(String, String)],
+    fact: &NativeOutputFact,
+) -> Option<std::path::PathBuf> {
+    if !fact.platform.applies() {
+        return None;
+    }
+    realized
+        .iter()
+        .find(|(name, _)| name == fact.package)
+        .map(|(_, output)| std::path::Path::new(output).join(fact.relative))
 }
 
 /// The two repo-local dev tools are native projections, not realized Nix
@@ -716,12 +771,7 @@ fn reject_unprompted_acquisition(
         RealizeScope::Use => "use".to_string(),
         RealizeScope::UserProfile => "tool".to_string(),
     };
-    if theme.confirm_download(
-        &label,
-        download.packages,
-        download.bytes,
-        flags.assume_yes,
-    ) {
+    if theme.confirm_download(&label, download.packages, download.bytes, flags.assume_yes) {
         Ok(())
     } else {
         Err(2)
@@ -1630,8 +1680,8 @@ fn enforce_required_sandbox_policy(theme: &Theme, json: bool) -> Result<(), i32>
 #[cfg(test)]
 mod native_projection_tests {
     use super::{
-        native_dev_tool_paths, native_environment_projection, NativeActivation, NixShellScratch,
-        NATIVE_DEV_TOOLS,
+        native_dev_tool_paths, native_environment_projection, NativeActivation,
+        NativeOutputPlatform, NixShellScratch, NATIVE_DEV_TOOLS, NATIVE_OUTPUT_FACTS,
     };
     use std::path::Path;
 
@@ -1690,5 +1740,23 @@ mod native_projection_tests {
         );
         assert_eq!(projection.activation, NativeActivation::Disabled);
         assert_eq!(projection.nix_shell_scratch, NixShellScratch::NotCreated);
+    }
+
+    #[test]
+    fn native_output_manifest_keeps_output_selection_and_target_condition_typed() {
+        assert_eq!(
+            NATIVE_OUTPUT_FACTS
+                .iter()
+                .map(|fact| (fact.package, fact.relative, fact.variable))
+                .collect::<Vec<_>>(),
+            vec![
+                ("tzdata", "share/zoneinfo", "TZDIR"),
+                ("vulkan-loader", "lib", "LD_LIBRARY_PATH"),
+                ("raylib", "lib", "LD_LIBRARY_PATH"),
+            ]
+        );
+        assert_eq!(NATIVE_OUTPUT_FACTS[0].platform, NativeOutputPlatform::Any);
+        assert_eq!(NATIVE_OUTPUT_FACTS[1].platform, NativeOutputPlatform::Linux);
+        assert_eq!(NATIVE_OUTPUT_FACTS[2].platform, NativeOutputPlatform::Linux);
     }
 }

@@ -776,6 +776,72 @@ mod s61_tests {
     }
 
     #[test]
+    fn prefix_failure_contracts_cover_nested_type_positions() {
+        let parsed = program(
+            "struct Holder {\n\
+                 optional: ?Int\n\
+                 unit: !IOError\n\
+                 union: Int !(DbError | TimeoutError)\n\
+                 callback: fn(?Int !IOError) !IOError\n\
+                 impossible: !Never\n\
+             }\n\
+             alias Box<T> :: ?T !IOError;\n\
+             fn fetch(value: ?Int !IOError) ?Int !(DbError | TimeoutError) -> value\n\
+             fn save() !IOError {}\n\
+             fn run() {}\n",
+        );
+        let holder = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
+                _ => None,
+            })
+            .expect("Holder");
+        assert!(matches!(
+            &holder.fields[0].ty,
+            crate::AST::Type::Option(inner)
+                if matches!(inner.as_ref(), crate::AST::Type::Int)
+        ));
+        assert!(matches!(
+            &holder.fields[1].ty,
+            crate::AST::Type::Result { ok, err }
+                if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                    && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")
+        ));
+        assert!(matches!(
+            &holder.fields[2].ty,
+            crate::AST::Type::Result { ok, err }
+                if matches!(ok.as_ref(), crate::AST::Type::Int)
+                    && matches!(err.as_ref(), crate::AST::Type::Union(members) if members.len() == 2)
+        ));
+        assert!(matches!(
+            &holder.fields[3].ty,
+            crate::AST::Type::Fn { params, ret: Some(ret), .. }
+                if matches!(params.first(), Some(crate::AST::Type::Result { .. }))
+                    && matches!(ret.as_ref(), crate::AST::Type::Result { .. })
+        ));
+        assert!(matches!(
+            &holder.fields[4].ty,
+            crate::AST::Type::Result { err, .. }
+                if matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_NEVER)
+        ));
+        let formatted = crate::Formatter::format_source(
+            "fn save() !IOError {}\nfn load() Int !(DbError | TimeoutError) -> 1\n",
+        )
+        .expect("prefix formatter");
+        assert!(formatted.contains("fn save() !IOError"), "{formatted}");
+        assert!(
+            formatted.contains("fn load() Int !(DbError | TimeoutError)"),
+            "{formatted}"
+        );
+        let contextual =
+            crate::Formatter::format_source("fn load() !IOError -> read()?(\"loading config\")\n")
+                .expect("contextual propagation formatter");
+        assert!(contextual.contains("?(\"loading config\")"), "{contextual}");
+    }
+
+    #[test]
     fn dispatch_atom_boolean_group_has_safe_source_edit() {
         let source = "fn run() {\n    n :: 48\n    ready :: true\n    if n < {\n        48 | 45 && ready -> print(\"hit\")\n        else -> print(\"miss\")\n    }\n}\n";
         let (tokens, lex_diags) = lex(source);
@@ -1538,7 +1604,7 @@ fn notify(ready: Bool) -[Net]> {
     task.group group {
         task fetch()
     }
-    #Abilities(caps: FS, Net) {
+    #FX(caps: FS, Net) {
         use_caps(caps)
     }
 }
@@ -1555,7 +1621,7 @@ fn notify(ready: Bool) -[Net]> {
         assert!(once.contains("loop item in items -> audit(item)"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");
         assert!(once.contains("task fetch()"), "{once}");
-        assert!(once.contains("#Abilities(caps: FS, Net)"), "{once}");
+        assert!(once.contains("#FX(caps: FS, Net)"), "{once}");
         let twice = format_source(&once).expect("canonical arrow/control syntax reformats");
         assert_eq!(once, twice);
     }
@@ -1681,7 +1747,7 @@ fn notify(ready: Bool) -[Net]> {
                     .find(|diagnostic| diagnostic.code == code)
                     .expect("E0077");
                 assert!(diagnostic.what.contains("#Grant"), "{diagnostic:?}");
-                assert!(diagnostic.fix.contains("#Abilities"), "{diagnostic:?}");
+                assert!(diagnostic.fix.contains("#FX"), "{diagnostic:?}");
             }
         }
     }

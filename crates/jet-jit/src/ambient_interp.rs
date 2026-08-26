@@ -1082,7 +1082,7 @@ fn process_authority_wire(value: &CtValue, span: Span) -> Result<String, Diagnos
     let CtValue::Struct { type_name, fields } = value else {
         return Err(unsupported("ProcessSpec.under authority", span));
     };
-    if type_name != "Abilities" {
+    if type_name != "Authority" {
         return Err(unsupported("ProcessSpec.under authority", span));
     }
     let Some((_, CtValue::List(rights))) = fields.iter().find(|(name, _)| name == "rights") else {
@@ -2511,41 +2511,95 @@ fn service_endpoint_value(value: &CtValue) -> Option<service_prelude::JetService
     service_prelude::jet_services_authority_endpoint(tree, worker, generation, authority).ok()
 }
 
-fn service_receipt_value(receipt: service_prelude::JetServiceReceipt) -> CtValue {
-    match receipt {
-        service_prelude::JetServiceReceipt::Enqueued(id) => CtValue::Enum {
-            type_name: "ServiceReceipt".to_string(),
-            variant: "Enqueued".to_string(),
-            args: vec![(None, CtValue::Str(id))],
-        },
-        service_prelude::JetServiceReceipt::Executed(id) => CtValue::Enum {
-            type_name: "ServiceReceipt".to_string(),
-            variant: "Executed".to_string(),
-            args: vec![(None, CtValue::Str(id))],
-        },
-        service_prelude::JetServiceReceipt::Retained { id, until } => CtValue::Enum {
-            type_name: "ServiceReceipt".to_string(),
-            variant: "Retained".to_string(),
-            args: vec![
-                (Some("id".to_string()), CtValue::Str(id)),
-                (Some("until".to_string()), CtValue::Int(until)),
-            ],
-        },
-        service_prelude::JetServiceReceipt::DeadLettered(id) => CtValue::Enum {
-            type_name: "ServiceReceipt".to_string(),
-            variant: "DeadLettered".to_string(),
-            args: vec![(None, CtValue::Str(id))],
-        },
-        service_prelude::JetServiceReceipt::Rejected(reason) => CtValue::Enum {
-            type_name: "ServiceReceipt".to_string(),
-            variant: "Rejected".to_string(),
-            args: vec![(None, CtValue::Str(reason))],
-        },
-        service_prelude::JetServiceReceipt::Unavailable(reason) => CtValue::Enum {
-            type_name: "ServiceReceipt".to_string(),
-            variant: "Unavailable".to_string(),
-            args: vec![(None, CtValue::Str(reason))],
-        },
+fn service_delivery_state_value(state: service_prelude::JetDeliveryState) -> CtValue {
+    CtValue::Enum {
+        type_name: "DeliveryState".to_string(),
+        variant: match state {
+            service_prelude::JetDeliveryState::Pending => "Pending",
+            service_prelude::JetDeliveryState::Accepted => "Accepted",
+            service_prelude::JetDeliveryState::Delivering => "Delivering",
+            service_prelude::JetDeliveryState::Delivered => "Delivered",
+            service_prelude::JetDeliveryState::DeadLettered => "DeadLettered",
+            service_prelude::JetDeliveryState::Cancelled => "Cancelled",
+        }
+        .to_string(),
+        args: Vec::new(),
+    }
+}
+
+fn service_delivery_value(delivery: service_prelude::JetDelivery) -> CtValue {
+    CtValue::Struct {
+        type_name: "Delivery".to_string(),
+        fields: vec![
+            ("id".to_string(), CtValue::Str(delivery.id)),
+            ("store".to_string(), CtValue::Str(delivery.store)),
+            ("duplicate".to_string(), CtValue::Bool(delivery.duplicate)),
+            ("authority".to_string(), CtValue::Str(delivery.authority)),
+            ("generation".to_string(), CtValue::Int(delivery.generation)),
+        ],
+    }
+}
+
+fn service_delivery_from_value(value: &CtValue) -> Option<service_prelude::JetDelivery> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "Delivery" {
+        return None;
+    }
+    let string = |name: &str| {
+        fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+            (field, CtValue::Str(value)) if field == name => Some(value.clone()),
+            _ => None,
+        })
+    };
+    let int = |name: &str| {
+        fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+            (field, CtValue::Int(value)) if field == name => Some(*value),
+            _ => None,
+        })
+    };
+    let duplicate = fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+        ("duplicate", CtValue::Bool(value)) => Some(*value),
+        _ => None,
+    })?;
+    Some(service_prelude::JetDelivery {
+        id: string("id")?,
+        store: string("store")?,
+        duplicate,
+        authority: string("authority")?,
+        generation: int("generation")?,
+    })
+}
+
+fn service_delivery_receipt_value(receipt: service_prelude::JetDeliveryReceipt) -> CtValue {
+    CtValue::Struct {
+        type_name: "DeliveryReceipt".to_string(),
+        fields: vec![
+            ("id".to_string(), CtValue::Str(receipt.id)),
+            ("state".to_string(), service_delivery_state_value(receipt.state)),
+            ("attempts".to_string(), CtValue::Int(receipt.attempts)),
+            ("retention_until".to_string(), CtValue::Int(receipt.retention_until)),
+            ("deadline".to_string(), CtValue::Int(receipt.deadline)),
+            ("idempotency_key".to_string(), CtValue::Str(receipt.idempotency_key)),
+            ("duplicate".to_string(), CtValue::Bool(receipt.duplicate)),
+            ("authority".to_string(), CtValue::Str(receipt.authority)),
+            ("generation".to_string(), CtValue::Int(receipt.generation)),
+            ("signature".to_string(), CtValue::Str(receipt.signature)),
+        ],
+    }
+}
+
+fn service_delivery_event_value(event: service_prelude::JetDeliveryEvent) -> CtValue {
+    CtValue::Struct {
+        type_name: "DeliveryEvent".to_string(),
+        fields: vec![
+            ("sequence".to_string(), CtValue::Int(event.sequence)),
+            ("state".to_string(), service_delivery_state_value(event.state)),
+            ("attempts".to_string(), CtValue::Int(event.attempts)),
+            ("timestamp".to_string(), CtValue::Int(event.timestamp)),
+            ("signature".to_string(), CtValue::Str(event.signature)),
+        ],
     }
 }
 
@@ -4333,7 +4387,7 @@ pub fn ambient_core_call(
             Some(Ok(value))
         }
         ("core.process", "workspace") => Some(Ok(CtValue::Struct {
-            type_name: "Abilities".to_string(),
+            type_name: "Authority".to_string(),
             fields: vec![(
                 "rights".to_string(),
                 CtValue::List(
@@ -5414,11 +5468,11 @@ pub fn ambient_handle(
             return Some(Err(unsupported("ServiceRuntime receiver", span)));
         };
         if op == "ServiceRuntimeCommit" {
-            let Some(CtValue::Str(id)) = args.first() else {
-                return Some(Err(unsupported("ServiceRuntime.commit id", span)));
+            let Some(delivery) = args.first().and_then(service_delivery_from_value) else {
+                return Some(Err(unsupported("ServiceRuntime.commit delivery", span)));
             };
             return Some(Ok(
-                match service_prelude::jet_services_runtime_commit(&runtime, id) {
+                match service_prelude::jet_services_runtime_commit(&runtime, &delivery) {
                     Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
                     Err(error) => CtValue::failed(Box::new(service_error_value(error))),
                 },
@@ -5438,27 +5492,27 @@ pub fn ambient_handle(
                 service_prelude::jet_services_runtime_send(&runtime, &endpoint, message, key)
             }
             "ServiceRuntimeRetry" => {
-                let Some(CtValue::Str(id)) = args.first() else {
-                    return Some(Err(unsupported("ServiceRuntime.retry id", span)));
+                let Some(delivery) = args.first().and_then(service_delivery_from_value) else {
+                    return Some(Err(unsupported("ServiceRuntime.retry delivery", span)));
                 };
-                service_prelude::jet_services_runtime_retry(&runtime, id)
+                service_prelude::jet_services_runtime_retry(&runtime, &delivery)
             }
             "ServiceRuntimeDeadLetter" => {
-                let Some(CtValue::Str(id)) = args.first() else {
-                    return Some(Err(unsupported("ServiceRuntime.dead_letter id", span)));
+                let Some(delivery) = args.first().and_then(service_delivery_from_value) else {
+                    return Some(Err(unsupported("ServiceRuntime.dead_letter delivery", span)));
                 };
-                service_prelude::jet_services_runtime_dead_letter(&runtime, id)
+                service_prelude::jet_services_runtime_dead_letter(&runtime, &delivery)
             }
             "ServiceRuntimeRetain" => {
-                let Some(CtValue::Str(id)) = args.first() else {
-                    return Some(Err(unsupported("ServiceRuntime.retain id", span)));
+                let Some(delivery) = args.first().and_then(service_delivery_from_value) else {
+                    return Some(Err(unsupported("ServiceRuntime.retain delivery", span)));
                 };
-                service_prelude::jet_services_runtime_retain(&runtime, id)
+                service_prelude::jet_services_runtime_retain(&runtime, &delivery)
             }
             _ => unreachable!(),
         };
         return Some(Ok(match result {
-            Ok(receipt) => CtValue::Present(Box::new(service_receipt_value(receipt))),
+            Ok(delivery) => CtValue::Present(Box::new(service_delivery_value(delivery))),
             Err(error) => CtValue::failed(Box::new(service_error_value(error))),
         }));
     }

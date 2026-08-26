@@ -44,9 +44,9 @@ impl<'a> Parser<'a> {
             TokKind::KwModule if self.is_code_module_at(1) => {
                 self.code_module_with_pkg(is_pub, is_package_pub)
             }
-            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => self
-                .state_decl_with_pkg(is_pub, is_package_pub)
-                .map(Item::StateDecl),
+            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => {
+                self.reject_top_level_state_decl(is_pub, is_package_pub)
+            }
             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_PROTOCOL => self
                 .protocol_decl_with_pkg(is_pub, is_package_pub)
                 .map(Item::ProtocolDecl),

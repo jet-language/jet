@@ -59,13 +59,11 @@ impl<'a> Parser<'a> {
         }
         let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
             self.bump();
+            // D-TAIL-RETURN1=A: method default bodies use the same final
+            // expression admission as free functions; sema owns the type
+            // context and diagnostics.
             let previous_tail_depth = self.callable_tail_block_depth;
-            if return_type
-                .as_ref()
-                .is_some_and(|ty| Self::return_type_has_value(ty))
-            {
-                self.callable_tail_block_depth = Some(self.block_depth + 1);
-            }
+            self.callable_tail_block_depth = Some(self.block_depth + 1);
             let stmts = self.block_stmts();
             self.callable_tail_block_depth = previous_tail_depth;
             Some(stmts)

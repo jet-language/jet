@@ -1167,7 +1167,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::Policy { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::TaskGroup { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Layout { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
-        Stmt::Caps { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
+        Stmt::AuthorityScope { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::ComptimeBlock { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::ComptimeIf {
             else_body,
@@ -1675,7 +1675,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Policy { span, .. } => span.start,
         Stmt::TaskGroup { span, .. } => span.start,
         Stmt::Layout { span, .. } => span.start,
-        Stmt::Caps { span, .. } => span.start,
+        Stmt::AuthorityScope { span, .. } => span.start,
         Stmt::ComptimeBlock { span, .. } => span.start,
         Stmt::ComptimeIf { span, .. } => span.start,
         Stmt::ComptimeSwitch { span, .. } => span.start,

@@ -1979,6 +1979,7 @@ fn check_func_body_bundle_scoped(
         inline_reexport_core: &st.inline_reexport_core,
         inline_reexport_foreign: &st.inline_reexport_foreign,
         module_path: &st.module_path,
+        source: &st.source,
         package_scope: &st.package_scope,
         policy_declarations: &st.policy_declarations,
         callable_policy_declarations: &st.callable_policy_declarations,
@@ -2023,6 +2024,7 @@ fn check_func_body_bundle_scoped(
         fx_memory_events: Vec::new(),
         fx_memory_open: Vec::new(),
         memory_policy_stack: Vec::new(),
+        arithmetic_policy_stack: Vec::new(),
         fx_memory_regions: Vec::new(),
         fx_memory_unbounded_control: Vec::new(),
         fx_memory_calls: Vec::new(),
@@ -2376,7 +2378,7 @@ fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::Ha
                 | Stmt::Region { body, .. }
                 | Stmt::Policy { body, .. }
                 | Stmt::TaskGroup { body, .. }
-                | Stmt::Caps { body, .. }
+                | Stmt::AuthorityScope { body, .. }
                 | Stmt::ComptimeBlock { body, .. }
                 | Stmt::ContextBlock { body, .. }
                 | Stmt::Live { body, .. }

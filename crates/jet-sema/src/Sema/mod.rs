@@ -1379,6 +1379,7 @@ pub enum CompileMode {
 
 pub(crate) struct ModuleState {
     module_path: String,
+    source: String,
     package_scope: String,
     module_alias: String,
     /// Source items retained for compile-time reflection folds. The same AST
@@ -1410,6 +1411,9 @@ pub(crate) struct ModuleState {
     trait_reg: TraitRegistry,
     /// D-STATE-DECL: declared typestate labels by owning type.
     declared_states: HashMap<String, Vec<String>>,
+    /// D-STATE-TERMINAL1: checked typestate graph facts used by reflection.
+    /// These facts are erased before code generation.
+    state_graphs: HashMap<String, jet_foundation::Facts::StateGraph>,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// D-STRUCT-POLICY1=A: one bundle-local nominal setting table shared by
     /// marker and `apply` validation.
@@ -1526,6 +1530,7 @@ pub(crate) struct Checker<'a> {
     inline_reexport_core: &'a HashMap<(String, String), (String, String)>,
     inline_reexport_foreign: &'a HashMap<(String, String), usize>,
     module_path: &'a str,
+    source: &'a str,
     package_scope: &'a str,
     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
     callable_policy_declarations:
@@ -1585,11 +1590,11 @@ pub(crate) struct Checker<'a> {
     fx_maximal: bool,
     /// First source span that forced the row maximal.
     fx_maximal_span: Option<Span>,
-    /// D-EFF1: stack of active `#Abilities(…)` regions, innermost last. Every effect
+    /// D-EFF1: stack of active `#FX(…)` regions, innermost last. Every effect
     /// or edge recorded while one is open is also added to it (and all enclosing
     /// regions) so the region's own effect set can be checked against its caps.
     region_stack: Vec<RegionAccum>,
-    /// D-EFF1: completed `#Abilities(…)` regions in this body, rolled into the
+    /// D-EFF1: completed `#FX(…)` regions in this body, rolled into the
     /// `EffectSummary` for the post-pass E0712 check.
     fx_regions: Vec<RegionSummary>,
     /// D-EFF2: callback-bound obligations recorded at higher-order call sites
@@ -1616,6 +1621,10 @@ pub(crate) struct Checker<'a> {
     fx_memory_events: Vec<MemoryFacts::MemoryEvent>,
     fx_memory_open: Vec<MemoryFacts::OpenMemoryDispatch>,
     memory_policy_stack: Vec<MemoryFacts::MemoryPolicyRegion>,
+    /// D-WRAP-SCOPE1=A: active lexical fixed-width arithmetic modes. The last
+    /// entry is the innermost block; function markers seed the stack once per
+    /// body and never cross a call boundary.
+    arithmetic_policy_stack: Vec<crate::AST::ArithmeticPolicyFact>,
     fx_memory_regions: Vec<MemoryFacts::MemoryPolicyRegion>,
     fx_memory_unbounded_control: Vec<Span>,
     fx_memory_calls: Vec<MemoryFacts::MemoryCall>,
@@ -2452,7 +2461,7 @@ pub(crate) use Taint::check_func_taint;
 pub use TargetSurface::check_target_surface;
 pub(crate) use FFI::*;
 // D-STATE1: typestate pass — wrong-state operation (E0150).
-pub(crate) use State::{check_items_state, StateTable};
+pub(crate) use State::{checked_state_graphs, check_items_state, StateTable};
 // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
 pub use App::extract_app_graph;
 pub(crate) use WebPartition::check_web_partition;

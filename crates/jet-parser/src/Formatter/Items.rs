@@ -2,8 +2,8 @@ use super::*;
 use crate::AST::{
     AccessConvention, CModuleKind, CodeModule, ConstAttr, ConstDef, DeriveBodyItem, EnumDef,
     EnumGroup, ExternFn, ExternRustBlock, Field, Func, GenericModuleDef, GenericModuleParam,
-    ImplDef, ImportDecl, ImportKind, Item, Marker, MetaAttr, MetaField, Param, Pattern, StructDef,
-    TraitImplBlock, Type, TypeParam, Variant, VariantPayload,
+    ImplDef, ImportDecl, ImportKind, Item, Marker, MetaAttr, MetaField, Param, Pattern, StateDecl,
+    StructDef, TraitImplBlock, Type, TypeParam, Variant, VariantPayload,
 };
 
 enum EnumFmtEntry<'b> {
@@ -23,6 +23,7 @@ enum EnumFmtEntry<'b> {
 /// the vectors into one source-ordered list before printing.
 #[derive(Clone, Copy)]
 enum TypeBodyMember<'b> {
+    State(&'b StateDecl),
     Field(&'b Field),
     CLIBinding(&'b crate::AST::CLICommandBinding),
     TraitImpl(&'b TraitImplBlock),
@@ -42,6 +43,7 @@ impl TypeBodyMember<'_> {
     /// can share a start.
     fn start(&self) -> usize {
         match self {
+            Self::State(state) => state.span.start,
             Self::Field(field) => field.name_span.start,
             Self::CLIBinding(binding) => binding.name_span.start,
             Self::TraitImpl(block) => block.trait_span.start,
@@ -475,13 +477,6 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_marker_decl(&mut self, declaration: &crate::AST::MarkerDecl) {
-        if declaration.text.is_some() {
-            let text = self.src[declaration.span.start..declaration.span.end].to_string();
-            self.write(&text);
-            self.newline();
-            self.skip_verbatim_comments(declaration.span.end);
-            return;
-        }
         self.write("marker ");
         self.write(&declaration.name);
         self.write("(");
@@ -1658,6 +1653,21 @@ impl<'a> Fmt<'a> {
     /// fact a field's type spelling depends on.
     fn fmt_type_body_member(&mut self, member: TypeBodyMember<'_>, derives_decode: bool) {
         match member {
+            TypeBodyMember::State(state) => {
+                self.emit_leading(state.span.start);
+                self.write("state {");
+                if !state.states.is_empty() {
+                    self.write(" ");
+                    for (index, (name, _)) in state.states.iter().enumerate() {
+                        if index > 0 {
+                            self.write(", ");
+                        }
+                        self.write(name);
+                    }
+                    self.write(" ");
+                }
+                self.write("}");
+            }
             TypeBodyMember::Field(field) => {
                 self.emit_leading(field.name_span.start);
                 let decodes_field = derives_decode
@@ -1736,8 +1746,16 @@ impl<'a> Fmt<'a> {
             .any(|(name, _)| name == crate::Generics::DECODE);
         self.with_indent(|f| {
             let mut members: Vec<TypeBodyMember<'_>> = Vec::with_capacity(
-                s.fields.len() + s.cli_bindings.len() + s.trait_impls.len() + s.methods.len() + 1,
+                s.fields.len()
+                    + s.cli_bindings.len()
+                    + s.trait_impls.len()
+                    + s.methods.len()
+                    + usize::from(s.state.is_some())
+                    + 1,
             );
+            if let Some(state) = &s.state {
+                members.push(TypeBodyMember::State(state));
+            }
             members.extend(s.fields.iter().map(TypeBodyMember::Field));
             members.extend(s.cli_bindings.iter().map(TypeBodyMember::CLIBinding));
             members.extend(s.trait_impls.iter().map(TypeBodyMember::TraitImpl));

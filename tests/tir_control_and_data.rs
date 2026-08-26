@@ -8,6 +8,24 @@ mod tir_support;
 use jet::Interpreter::{dev_iteration, RunOutcome};
 use tir_support::{build_and_run, build_and_run_full, compile, have_rustc, jit_run};
 
+/// D-RESULT-DECON2=B / I9: the compact handler is only parser sugar for the
+/// existing Result pattern split, so every execution tier must agree without a
+/// handler-specific runtime path.
+#[test]
+fn result_handler_reuses_result_split_on_all_tiers() {
+    let src = r#"
+fn classify(ok: Bool) Int !String -> if ok -> Ok(7) else -> Err("bad")
+
+fn run() {
+    success :: classify(true)
+    success ? ok -> print("ok: {ok}") ! error -> print("error: {error}")
+    failure :: classify(false)
+    failure ? ok -> print("ok: {ok}") ! error -> print("error: {error}")
+}
+"#;
+    tir_support::assert_tiers_agree("result_handler_tiers", src, "ok: 7\nerror: bad\n");
+}
+
 /// D-FAIL-ERROR1=A: the labelled/string shape builds a default `Err` value;
 /// one positional typed value in a result arm still wraps that value.
 #[test]

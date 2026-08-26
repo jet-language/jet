@@ -112,7 +112,7 @@ impl<'a> Interp<'a> {
         // D-AUTHORITY-NAME1=A: comptime static construction uses the same
         // built-in seam as TIR interpretation.
         if let Expr::Ident(type_name, _) = receiver {
-            if type_name == crate::Syntax::TYPE_ABILITIES
+            if type_name == crate::Syntax::TYPE_AUTHORITY
                 && matches!(method, "workspace" | "from_rights")
             {
                 let mut argv = Vec::with_capacity(args.len());
@@ -125,7 +125,7 @@ impl<'a> Interp<'a> {
                     argv,
                     span,
                 )
-                .expect("Abilities authority constructor is registered");
+                .expect("Authority authority constructor is registered");
             }
         }
         // D-ENC-XML-SURFACE1=A: qualified safe whole-value XML constructors.

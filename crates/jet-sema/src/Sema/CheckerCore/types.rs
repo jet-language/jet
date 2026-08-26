@@ -3,6 +3,63 @@ use crate::Sema::Checker;
 use crate::AST::Type;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
+    /// D-TEXTHEAD-TYPE1=A: resolve a library-defined checked text through the
+    /// ordinary nominal and trait registries. The returned name is canonical
+    /// for imported types; the error comes from the ordinary trait impl.
+    pub(crate) fn checked_text_type_name(&self, name: &str) -> Option<(String, Type)> {
+        let (import_ns, leaf) = Self::split_type_name(name);
+        let owner = self.struct_owner_module(leaf, import_ns)?;
+        let (registry, trait_reg, items) = if owner == self.module_idx {
+            (self.registry, self.trait_reg, self.items)
+        } else {
+            let module = self.modules?.get(owner)?;
+            (&module.registry, &module.trait_reg, module.items.as_slice())
+        };
+        if registry.distinct_base(leaf) != Some(&Type::String)
+            || !trait_reg.implements_trait(leaf, crate::Generics::CHECKED_TEXT)
+        {
+            return None;
+        }
+        let error = items.iter().find_map(|item| {
+            let blocks = match item {
+                crate::AST::Item::Impl(implementation)
+                    if implementation.type_name == leaf
+                        && implementation.trait_name.as_deref()
+                            == Some(crate::Generics::CHECKED_TEXT) => {
+                    Some(implementation.assoc_type_impls.as_slice())
+                }
+                crate::AST::Item::Struct(definition) if definition.name == leaf => definition
+                    .trait_impls
+                    .iter()
+                    .find(|block| block.trait_name == crate::Generics::CHECKED_TEXT)
+                    .map(|block| block.assoc_type_impls.as_slice()),
+                crate::AST::Item::Enum(definition) if definition.name == leaf => definition
+                    .trait_impls
+                    .iter()
+                    .find(|block| block.trait_name == crate::Generics::CHECKED_TEXT)
+                    .map(|block| block.assoc_type_impls.as_slice()),
+                _ => None,
+            }?;
+            blocks
+                .iter()
+                .find(|(assoc, _, _)| assoc == "Error")
+                .map(|(_, _, ty)| ty.clone())
+        })?;
+        let canonical = if owner == self.module_idx {
+            leaf.to_string()
+        } else {
+            self.canonical_nominal_name(owner, leaf)
+        };
+        Some((canonical, error))
+    }
+
+    // Card #2185 owns the library-defined checked-text surface; this predicate
+    // is the producer half and its consumer has not shipped yet.
+    #[allow(dead_code)]
+    pub(crate) fn is_checked_text_type_name(&self, name: &str) -> bool {
+        self.checked_text_type_name(name).is_some()
+    }
+
     pub(crate) fn text_head_contract(
         &self,
         name: &str,

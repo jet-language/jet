@@ -1660,27 +1660,23 @@ fn run() {
 }
 
 #[test]
-fn tracked_float_origin_reports_binding_site_and_plain_float_is_untracked() {
+fn tracked_origin_is_a_folded_optional_fact() {
     let dir = std::env::temp_dir().join(format!(
         "jet_float_binding_origin_aot_{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let name = "float_binding_origin";
-    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print((speed).origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() Float {\n    print(\"evaluated\")\n    return 3.5\n}\n";
+    let name = "origin_fact";
+    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    @speed_origin :: speed.@origin\n    @plain_origin :: plain.@origin\n    @copied_origin :: copied.@origin\n    print(@speed_origin?.tracked ?? false)\n    print(@speed_origin?.source ?? \"missing\")\n    print(@speed_origin?.line ?? 0)\n    print(@speed_origin?.column ?? 0)\n    print(@plain_origin == None)\n    print(@copied_origin == None)\n}\n";
     let (code, stdout, stderr) = build_and_run(&dir, name, src, &[], None);
     let source_path = dir.join(name);
 
-    assert_eq!(code, 0, "tracked Float runtime failed: {stderr}");
+    assert_eq!(code, 0, "folded origin fact failed: {stderr}");
     assert_eq!(stderr, "");
     assert_eq!(
         stdout,
-        format!(
-            "tracked `speed` at {}:2:12: #Track speed :: 3.5\ntracked `speed` at {}:2:12: #Track speed :: 3.5\nuntracked\nuntracked\nevaluated\nuntracked\n",
-            source_path.display(),
-            source_path.display()
-        )
+        "true\nspeed\n2\n12\ntrue\ntrue\n"
     );
 
     fs::write(&source_path, src).unwrap();
@@ -1695,7 +1691,7 @@ fn tracked_float_origin_reports_binding_site_and_plain_float_is_untracked() {
             assert_eq!(interpreted_stdout, stdout, "forced interpreter output drifted");
         }
         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-            panic!("forced interpreter rejected tracked-float fixture: {diagnostics:?}");
+            panic!("forced interpreter rejected origin fact fixture: {diagnostics:?}");
         }
     }
     jet_jit::reset_jit_trace_for_test();
@@ -1710,60 +1706,21 @@ fn tracked_float_origin_reports_binding_site_and_plain_float_is_untracked() {
             assert_eq!(resident_stdout, stdout, "resident JIT output drifted");
             assert!(
                 jet_jit::jit_executed_for_test(),
-                "tracked-float fixture must execute resident JIT"
+                "origin fact fixture must execute resident JIT"
             );
             assert!(
                 !jet_jit::deopt_invoked_for_test(),
-                "tracked-float fixture must not deopt"
+                "origin fact fixture must not deopt"
             );
             assert!(
                 !jet_jit::fallback_invoked_for_test(),
-                "tracked-float fixture must not fall back"
+                "origin fact fixture must not fall back"
             );
         }
         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-            panic!("resident JIT rejected tracked-float fixture: {diagnostics:?}");
+                panic!("resident JIT rejected origin fact fixture: {diagnostics:?}");
         }
     }
 
-    let web_source = r#"
-#Target(Web)
-#Target(JS)
-fn run() {
-    #Track speed :: 3.5
-    plain :: 3.5
-    copied :: speed
-    print(speed.origin())
-    print(plain.origin())
-    print(copied.origin())
-    print(next().origin())
-}
-#Target(JS)
-fn next() Float {
-    print("evaluated")
-    return 3.5
-}
-"#;
-    if let Some(web_stdout) = run_web_js_source(&dir, "float_binding_origin_web", web_source) {
-        let mut lines = web_stdout.lines();
-        assert!(
-            lines
-                .next()
-                .is_some_and(|line| line.starts_with("tracked `speed` at ")),
-            "Web lost tracked origin: {web_stdout:?}"
-        );
-        assert_eq!(lines.next(), Some("untracked"), "Web plain origin drifted");
-        assert_eq!(lines.next(), Some("untracked"), "Web copied origin drifted");
-        assert_eq!(
-            lines.next(),
-            Some("evaluated"),
-            "Web origin receiver evaluated wrong"
-        );
-        assert_eq!(lines.next(), Some("untracked"), "Web call origin drifted");
-        assert!(
-            lines.next().is_none(),
-            "Web origin emitted extra output: {web_stdout:?}"
-        );
-    }
     let _ = fs::remove_dir_all(&dir);
 }

@@ -307,6 +307,9 @@ impl<'a> Parser<'a> {
             }
             _ => self.expect(TokKind::ColonColon, "in a type alias declaration")?,
         }
+        if self.at_state_section() {
+            return Err(self.reject_state_section("alias"));
+        }
         let (target, target_span) = self.type_()?;
         self.expect(TokKind::Semi, "after a type alias declaration")?;
         let end = self.toks[self.pos - 1].span.end;
@@ -1085,6 +1088,7 @@ impl<'a> Parser<'a> {
         let type_params = self.parse_opt_type_params()?;
         self.expect(TokKind::LBrace, "to open the struct body")?;
         let mut fields = Vec::new();
+        let mut state = None;
         let mut methods = Vec::new();
         let mut cli_bindings = Vec::new();
         let mut trait_impls = Vec::new();
@@ -1094,6 +1098,18 @@ impl<'a> Parser<'a> {
         while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
+                continue;
+            }
+            if self.at_state_section() {
+                let section = self.state_section(name.clone(), name_span)?;
+                if state.is_some() {
+                    return Err(Diagnostic::from_row(
+                        "E0168",
+                        &[("type", name.as_str())],
+                        Some(section.span),
+                    ));
+                }
+                state = Some(section);
                 continue;
             }
             if self.method_starts_here() {
@@ -1166,6 +1182,7 @@ impl<'a> Parser<'a> {
             name_span,
             type_params,
             fields,
+            state,
             methods,
             cli_bindings,
             trait_impls,

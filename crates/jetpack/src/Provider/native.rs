@@ -9,6 +9,7 @@ use super::{
     cache_identity, ensure_network_allowed, producer_record, Ctx, Provider, ProviderError,
     Realized, SourceState,
 };
+use crate::NixIndex::NativeRecipe;
 use crate::RefSpec::{RefSpec as PackageRef, Source, SourceTable};
 use crate::{Envelope, JSON, SHA256};
 use std::collections::BTreeMap;
@@ -74,6 +75,154 @@ pub(crate) fn download_size(
                 .map_err(|error| native_error(format!("could not stat fixture artifact: {error}")))
         })
         .transpose()
+}
+
+pub(crate) fn catalog_cache_expectation(
+    _spec: &PackageRef,
+    recipe: &NativeRecipe,
+    ctx: &Ctx,
+) -> crate::Store::CacheExpectation {
+    let source = recipe.canonical_json();
+    crate::Store::CacheExpectation {
+        identity: cache_identity(&source, CATALOG_RECIPE_ID, ctx),
+        owned_output: Some(catalog_output_path(ctx.store_dir, recipe)),
+        allow_unsigned_local: true,
+    }
+}
+
+pub(crate) fn catalog_download_size(
+    recipe: &NativeRecipe,
+) -> Result<Option<u64>, ProviderError> {
+    let Some(path) = recipe.url.strip_prefix("file://") else {
+        return Ok(None);
+    };
+    fs::symlink_metadata(path)
+        .map(|metadata| Some(metadata.len()))
+        .map_err(|error| {
+            native_catalog_error(format!(
+                "could not stat native recipe artifact `{path}`: {error}"
+            ))
+        })
+}
+
+pub(crate) fn realize_catalog_recipe(
+    spec: &PackageRef,
+    recipe: &NativeRecipe,
+    ctx: &Ctx,
+) -> Result<Realized, ProviderError> {
+    let identity = catalog_cache_expectation(spec, recipe, ctx).identity;
+    let out_dir = catalog_output_path(ctx.store_dir, recipe);
+    if fs::symlink_metadata(&out_dir).is_ok() {
+        return Err(native_catalog_error(format!(
+            "unverified existing output {}; run `jet clean` before rebuilding",
+            out_dir.display()
+        )));
+    }
+    let staging = ctx.store_dir.join(format!(
+        ".jetpack-native-{}-{}-{}.partial",
+        recipe.name,
+        recipe.version,
+        &recipe.sha256[..12]
+    ));
+    if fs::symlink_metadata(&staging).is_ok() {
+        return Err(native_catalog_error(format!(
+            "native package staging path already exists: {}",
+            staging.display()
+        )));
+    }
+    fs::create_dir_all(staging.join("bin")).map_err(|error| {
+        native_catalog_error(format!("could not create Hangar staging tree: {error}"))
+    })?;
+    let artifact = staging.join("bin").join(&recipe.bin);
+    let result = (|| {
+        fetch_declared_artifact(&recipe.url, &artifact)?;
+        let actual = SHA256::sha256_file_hex(&artifact).map_err(|error| {
+            native_catalog_error(format!("could not hash native recipe artifact: {error}"))
+        })?;
+        if actual != recipe.sha256 {
+            return Err(native_catalog_error(format!(
+                "native recipe artifact digest mismatch: expected {}, got {actual}",
+                recipe.sha256
+            )));
+        }
+        make_executable(&artifact)?;
+        crate::Store::seal_local_output(&staging).map_err(|error| {
+            native_catalog_error(format!("could not seal native package output: {error}"))
+        })?;
+        fs::rename(&staging, &out_dir).map_err(|error| {
+            native_catalog_error(format!("could not publish native package output: {error}"))
+        })?;
+
+        let out = out_dir.to_string_lossy().into_owned();
+        let bin = out_dir.join("bin").to_string_lossy().into_owned();
+        let envelope = Envelope::Envelope::for_output(&out, &spec.raw, CATALOG_RECIPE_ID);
+        let lock_digest = super::project_lock_digest(ctx.project_dir)?;
+        let plan_facts = BTreeMap::from([
+            ("action.kind".into(), "native-catalog-prebuilt".into()),
+            ("action.recipe".into(), CATALOG_RECIPE_ID.into()),
+            ("build.sandbox".into(), "non-executing".into()),
+            (
+                "build.sandbox_policy".into(),
+                "declared URL with pinned SHA-256".into(),
+            ),
+        ]);
+        let facts = BTreeMap::from([
+            ("source.kind".into(), "local-unofficial-catalog".into()),
+            ("source.url".into(), recipe.url.clone()),
+            ("source.sha256".into(), recipe.sha256.clone()),
+            ("artifact.binary".into(), recipe.bin.clone()),
+            ("artifact.verification".into(), "sha256".into()),
+            ("nix.index.tier".into(), "local-unofficial".into()),
+            ("nix.index.trust".into(), "unverified".into()),
+            ("nix.index.signature-chain".into(), "none".into()),
+            (
+                super::NIX_NATIVE_FORMAT.into(),
+                "jetpack-native-recipe-v1".into(),
+            ),
+            (super::NIX_NATIVE_DOCUMENT.into(), recipe.canonical_json()),
+            ("nix.lock.digest".into(), lock_digest),
+        ]);
+        let producer = producer_record(
+            "jetpackage",
+            &recipe.url,
+            &recipe.sha256,
+            plan_facts,
+            "jetpack-native-catalog-v1",
+            &identity,
+            facts,
+        )?;
+        let mut envelope = envelope;
+        envelope.provenance = format!("local-unofficial-catalog:{}", recipe.url);
+        Ok(Realized {
+            name: recipe.name.clone(),
+            version: recipe.version.clone(),
+            reference: spec.raw.clone(),
+            out: out.clone(),
+            bin,
+            rlib: String::new(),
+            envelope,
+            cache_identity: identity,
+            source_state: SourceState::Downloaded,
+            named_outputs: BTreeMap::from([("out".into(), out)]),
+            references: Vec::new(),
+            producer,
+        })
+    })();
+    if result.is_err() {
+        remove_staging(&staging);
+    }
+    result
+}
+
+const CATALOG_RECIPE_ID: &str = "jetpackage-native-catalog-prebuilt-v1";
+
+fn catalog_output_path(store_dir: &Path, recipe: &NativeRecipe) -> PathBuf {
+    store_dir.join(format!(
+        "{}-{}-{}",
+        recipe.name,
+        recipe.version,
+        &recipe.sha256[..12]
+    ))
 }
 
 pub(crate) struct NativeProvider;
@@ -444,61 +593,93 @@ fn fetch_artifact(facts: &ReleaseFacts, destination: &Path) -> Result<(), Provid
     if let Some(source) = facts.fixture_artifact.as_deref() {
         return copy_bounded_file(source, destination);
     } else {
-        ensure_network_allowed("native release artifact")?;
-        let response =
-            jet_net::get_stream_follow_redirects(&facts.url, Duration::from_secs(120), 5).map_err(
-                |error| native_error(format!("could not fetch release artifact: {error}")),
-            )?;
-        if !(200..300).contains(&response.status()) {
-            return Err(native_error(format!(
-                "release artifact URL returned HTTP {}",
-                response.status()
-            )));
+        fetch_remote_artifact(&facts.url, destination, "release artifact", |detail| {
+            native_error(detail)
+        })?;
+    }
+    validate_artifact_file(destination, |detail| native_error(detail), "release artifact")
+}
+
+fn fetch_declared_artifact(url: &str, destination: &Path) -> Result<(), ProviderError> {
+    if let Some(path) = url.strip_prefix("file://") {
+        copy_bounded_file(Path::new(path), destination)
+    } else {
+        fetch_remote_artifact(url, destination, "native recipe artifact", |detail| {
+            native_catalog_error(detail)
+        })
+    }
+}
+
+fn fetch_remote_artifact<F>(
+    url: &str,
+    destination: &Path,
+    label: &str,
+    error: F,
+) -> Result<(), ProviderError>
+where
+    F: Fn(String) -> ProviderError,
+{
+    ensure_network_allowed(label)?;
+    let response = jet_net::get_stream_follow_redirects(url, Duration::from_secs(120), 5)
+        .map_err(|fetch_error| error(format!("could not fetch {label}: {fetch_error}")))?;
+    if !(200..300).contains(&response.status()) {
+        return Err(error(format!(
+            "{label} URL returned HTTP {}",
+            response.status()
+        )));
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_ARTIFACT_BYTES)
+    {
+        return Err(error(format!("{label} exceeds its size bound")));
+    }
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+        .map_err(|create_error| error(format!("could not create {label} staging file: {create_error}")))?;
+    let mut limited = response.take(MAX_ARTIFACT_BYTES.saturating_add(1));
+    let mut buffer = [0u8; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        let count = limited
+            .read(&mut buffer)
+            .map_err(|read_error| error(format!("could not read {label}: {read_error}")))?;
+        if count == 0 {
+            break;
         }
-        if response
-            .content_length()
-            .is_some_and(|length| length > MAX_ARTIFACT_BYTES)
-        {
-            return Err(native_error("release artifact exceeds its size bound"));
-        }
-        let mut output = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(destination)
-            .map_err(|error| {
-                native_error(format!("could not create release staging file: {error}"))
-            })?;
-        let mut limited = response.take(MAX_ARTIFACT_BYTES.saturating_add(1));
-        let mut buffer = [0u8; 64 * 1024];
-        let mut total = 0u64;
-        loop {
-            let count = limited.read(&mut buffer).map_err(|error| {
-                native_error(format!("could not read release artifact: {error}"))
-            })?;
-            if count == 0 {
-                break;
-            }
-            total = total.saturating_add(count as u64);
-            if total > MAX_ARTIFACT_BYTES {
-                return Err(native_error("release artifact exceeds its size bound"));
-            }
-            output.write_all(&buffer[..count]).map_err(|error| {
-                native_error(format!("could not write release artifact: {error}"))
-            })?;
+        total = total.saturating_add(count as u64);
+        if total > MAX_ARTIFACT_BYTES {
+            return Err(error(format!("{label} exceeds its size bound")));
         }
         output
-            .sync_all()
-            .map_err(|error| native_error(format!("could not sync release artifact: {error}")))?;
+            .write_all(&buffer[..count])
+            .map_err(|write_error| error(format!("could not write {label}: {write_error}")))?;
     }
+    output
+        .sync_all()
+        .map_err(|sync_error| error(format!("could not sync {label}: {sync_error}")))?;
+    validate_artifact_file(destination, error, label)
+}
+
+fn validate_artifact_file<F>(
+    destination: &Path,
+    error: F,
+    label: &str,
+) -> Result<(), ProviderError>
+where
+    F: Fn(String) -> ProviderError,
+{
     let metadata = fs::symlink_metadata(destination)
-        .map_err(|error| native_error(format!("could not stat release artifact: {error}")))?;
+        .map_err(|stat_error| error(format!("could not stat {label}: {stat_error}")))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() == 0 {
-        return Err(native_error(
-            "release artifact is not a non-empty regular file",
-        ));
+        return Err(error(format!(
+            "{label} is not a non-empty regular file"
+        )));
     }
     if metadata.len() > MAX_ARTIFACT_BYTES {
-        return Err(native_error("release artifact exceeds its size bound"));
+        return Err(error(format!("{label} exceeds its size bound")));
     }
     Ok(())
 }
@@ -610,4 +791,11 @@ fn remove_staging(path: &Path) {
 
 fn native_error(reason: impl Into<String>) -> ProviderError {
     ProviderError::BuildFailed(format!("native jetpackage `{PACKAGE}`: {}", reason.into()))
+}
+
+fn native_catalog_error(reason: impl Into<String>) -> ProviderError {
+    ProviderError::BuildFailed(format!(
+        "local unofficial native catalog: {}",
+        reason.into()
+    ))
 }

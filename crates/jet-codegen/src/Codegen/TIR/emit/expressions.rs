@@ -276,11 +276,11 @@ fn emit_measurement_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> O
     ))
 }
 
-fn emit_track_origin_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> Option<String> {
+fn emit_origin_info_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> Option<String> {
     let crate::AST::CtValue::Struct { type_name, fields } = value else {
         return None;
     };
-    if type_name != "TrackOriginInfo"
+    if type_name != "OriginInfo"
         || !matches!(ty, Type::Named(name) if name == type_name)
         || cx.type_names.contains(type_name)
     {
@@ -290,7 +290,7 @@ fn emit_track_origin_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> 
         .iter()
         .map(|(name, value)| {
             let field = core_struct_field_rust_name(cx, ty, name)?;
-            let value = if name == "source" {
+            let value = if matches!(name.as_str(), "source" | "line" | "column") {
                 match value {
                     crate::AST::CtValue::Present(value) => {
                         format!("Some({})", value.serialize())
@@ -307,6 +307,16 @@ fn emit_track_origin_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> 
         })
         .collect::<Option<Vec<_>>>()?;
     Some(format!("{} {{ {} }}", cx.rust_type(ty), parts.join(", ")))
+}
+
+fn emit_origin_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> Option<String> {
+    if let (crate::AST::CtValue::Present(inner), Type::Option(inner_ty)) = (value, ty) {
+        return Some(format!(
+            "Ok({})",
+            emit_origin_info_ct_lit(inner, inner_ty, cx)?
+        ));
+    }
+    emit_origin_info_ct_lit(value, ty, cx)
 }
 
 fn shared_lock_receipt_id(recv: &TExpr, cx: &Cx) -> String {
@@ -899,10 +909,6 @@ fn emit_numeric_op(
             }
         }
         TNumericOp::ToShow => format!("({recv}).jet_show()"),
-        TNumericOp::Origin { origin } => format!(
-            "{{ let _ = ({recv}); jet_float_origin(Some({:?})) }}",
-            origin
-        ),
         TNumericOp::CastAs { dst_rust } => {
             if matches!(recv_ty, Some(Type::Int)) && matches!(dst_rust.as_str(), "f32" | "f64") {
                 let value = format!("{}jet_std::jet_int_to_f64({recv})", cx.root_prefix);
@@ -1251,7 +1257,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             // modules and has no codegen context, so its exact-Int constructor
             // is root-relative only. Add the module prefix at the emission
             // seam; runtime arithmetic still goes through Prelude `jet_int_*`.
-            let baked = if let Some(rooted) = emit_track_origin_ct_lit(value, &e.ty, cx) {
+            let baked = if let Some(rooted) = emit_origin_ct_lit(value, &e.ty, cx) {
                 rooted
             } else {
                 match value {
@@ -1553,7 +1559,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             // on the ordinary Authority value are Prelude calls. `with` is
             // fallible so the shared E0712 policy cannot be hidden in Rust
             // method dispatch or silently widened by an adapter.
-            if matches!(&recv.ty, Type::Named(name) if name == crate::Syntax::TYPE_ABILITIES)
+            if matches!(&recv.ty, Type::Named(name) if name == crate::Syntax::TYPE_AUTHORITY)
                 && args.len() == 1
                 && matches!(method_rust.as_str(), "with" | "without")
             {
@@ -2656,12 +2662,61 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::OverflowOpt {
             prefix,
             op,
+            line,
             lhs,
             rhs,
+            policy,
         } => {
             let ls = emit_tir_expr(lhs, cx);
             let rs = emit_tir_expr(rhs, cx);
-            let call = format!("({}).{}_{}({})", ls, prefix, op, rs);
+            let shared_policy_call = policy.is_some() || prefix == "checked_policy";
+            let call = if shared_policy_call {
+                match (prefix.as_str(), *op) {
+                    ("checked_policy", "add") => format!(
+                        "({}).jet_add({}, {:?}, {})",
+                        ls, rs, cx.file, line
+                    ),
+                    ("checked_policy", "sub") => format!(
+                        "({}).jet_sub({}, {:?}, {})",
+                        ls, rs, cx.file, line
+                    ),
+                    ("checked_policy", "mul") => format!(
+                        "({}).jet_mul({}, {:?}, {})",
+                        ls, rs, cx.file, line
+                    ),
+                    ("checked_policy", "pow") => format!(
+                        "({}).jet_pow(({}) as i128, {:?}, {})",
+                        ls, rs, cx.file, line
+                    ),
+                    ("wrapping", "add") => format!("({}).jet_wrapping_add({})", ls, rs),
+                    ("wrapping", "sub") => format!("({}).jet_wrapping_sub({})", ls, rs),
+                    ("wrapping", "mul") => format!("({}).jet_wrapping_mul({})", ls, rs),
+                    ("wrapping", "pow") => format!(
+                        "({}).jet_wrapping_pow(({}) as i128, {:?}, {})",
+                        ls, rs, cx.file, line
+                    ),
+                    ("saturating", "add") => format!("({}).jet_saturating_add({})", ls, rs),
+                    ("saturating", "sub") => format!("({}).jet_saturating_sub({})", ls, rs),
+                    ("saturating", "mul") => format!("({}).jet_saturating_mul({})", ls, rs),
+                    ("saturating", "pow") => format!(
+                        "({}).jet_saturating_pow(({}) as i128, {:?}, {})",
+                        ls, rs, cx.file, line
+                    ),
+                    _ => format!("({}).{}_{}({})", ls, prefix, op, rs),
+                }
+            } else {
+                match prefix.as_str() {
+                "rotate_left" => format!(
+                    "({}).jet_rotate_left(({}) as i128, {:?}, {})",
+                    ls, rs, cx.file, line
+                ),
+                "rotate_right" => format!(
+                    "({}).jet_rotate_right(({}) as i128, {:?}, {})",
+                    ls, rs, cx.file, line
+                ),
+                _ => format!("({}).{}_{}({})", ls, prefix, op, rs),
+                }
+            };
             // D-FAIL-CARRIER1=A: `checked_*` answers Rust's plumbing `Option`;
             // `wrapping_*`/`saturating_*` answer the value itself. Only the
             // first is a `T?`, so only the first becomes the carrier.

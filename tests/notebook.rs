@@ -386,7 +386,7 @@ fn headless_protocol_interrupt_stdin_debug_perf_and_clients() {
 fn notebook_first_hour_uses_shared_prelude_ambients_and_path() {
     let scratch = common::Scratch::new("notebook-first-hour");
     let document = scratch.join("journey.jetnb");
-    let source = r#"#Abilities(caps: IO, FS) {
+    let source = r#"#FX(caps: IO, FS) {
     eprint("ambient-eprint")
     name :: input("name: ") ?? "fallback"
     assert(name == "Ada")

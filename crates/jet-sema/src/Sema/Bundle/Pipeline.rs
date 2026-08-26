@@ -582,6 +582,7 @@ fn check_bundle_opts_for_output_inner(
         .enumerate()
         .map(|(module_idx, m)| ModuleState {
             module_path: m.display.clone(),
+            source: m.source.clone(),
             package_scope: jet_foundation::Names::package_scope_for(&m.path, &bundle.project_root),
             module_alias: m.alias.clone(),
             items: m.items.clone(),
@@ -601,6 +602,12 @@ fn check_bundle_opts_for_output_inner(
                 .items
                 .iter()
                 .filter_map(|item| match item {
+                    Item::Struct(structure) => structure.state.as_ref().map(|state| {
+                        (
+                            structure.name.clone(),
+                            state.states.iter().map(|(name, _)| name.clone()).collect(),
+                        )
+                    }),
                     Item::StateDecl(state) => Some((
                         state.type_name.clone(),
                         state.states.iter().map(|(name, _)| name.clone()).collect(),
@@ -608,6 +615,7 @@ fn check_bundle_opts_for_output_inner(
                     _ => None,
                 })
                 .collect(),
+            state_graphs: HashMap::new(),
             policy_declarations: m.policy_declarations.clone(),
             callable_policy_declarations: callable_policy_declarations.clone(),
             rule_facts: m.rule_facts.clone(),
@@ -1207,6 +1215,16 @@ fn check_bundle_opts_for_output_inner(
                             .items
                             .iter()
                             .find_map(|item| match item {
+                                Item::Struct(structure) if structure.name == s.name => structure
+                                    .state
+                                    .as_ref()
+                                    .map(|state| {
+                                        state
+                                            .states
+                                            .iter()
+                                            .map(|(name, _)| name.clone())
+                                            .collect::<Vec<_>>()
+                                    }),
                                 Item::StateDecl(state) if state.type_name == s.name => Some(
                                     state
                                         .states
@@ -1382,6 +1400,16 @@ fn check_bundle_opts_for_output_inner(
                     .items
                     .iter()
                     .find_map(|item| match item {
+                        Item::Struct(structure) if structure.name == target.name => structure
+                            .state
+                            .as_ref()
+                            .map(|state| {
+                                state
+                                    .states
+                                    .iter()
+                                    .map(|(name, _)| name.clone())
+                                    .collect::<Vec<_>>()
+                            }),
                         Item::StateDecl(state) if state.type_name == target.name => Some(
                             state
                                 .states
@@ -2343,6 +2371,13 @@ fn check_bundle_opts_for_output_inner(
     }
 
     resolve_inline_module_imports(bundle, &mut states, &mut name_ledger, &mut diags);
+
+    // D-STATE-TERMINAL1: freeze the checked graph snapshot before body
+    // reflection and every downstream semantic consumer read it.
+    for (state, module) in states.iter_mut().zip(&bundle.modules) {
+        state.items = module.items.clone();
+        state.state_graphs = super::super::checked_state_graphs(&module.items);
+    }
 
     complete_bundle_check(
         bundle,

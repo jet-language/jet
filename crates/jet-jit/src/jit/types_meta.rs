@@ -28,10 +28,6 @@ pub(crate) use prelude_enum_meta::{
 static HOOK_INT_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(|| vec![Type::Int]);
 static HOOK_STR_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(|| vec![Type::String]);
 static EMPTY_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(Vec::new);
-// D-SERVICE-AUTHORITY1=A: `ServiceReceipt.Retained(id, until)` — the one
-// two-field variant; every other variant carries a single String id.
-static SERVICE_RECEIPT_RETAINED_PAYLOAD: LazyLock<Vec<Type>> =
-    LazyLock::new(|| vec![Type::String, Type::Int]);
 static IO_CONTEXT_PAYLOAD: LazyLock<Vec<Type>> =
     LazyLock::new(|| vec![Type::Named("IOContext".into())]);
 static TLS_ROOT_CERTIFICATES_PAYLOAD: LazyLock<Vec<Type>> =
@@ -859,14 +855,8 @@ impl<'a> JitMeta<'a> {
                 _ => EMPTY_PAYLOAD.as_slice(),
             });
         }
-        if enum_name == "ServiceReceipt" {
-            return Some(match variant {
-                "Retained" => SERVICE_RECEIPT_RETAINED_PAYLOAD.as_slice(),
-                "Enqueued" | "Executed" | "DeadLettered" | "Rejected" | "Unavailable" => {
-                    HOOK_STR_PAYLOAD.as_slice()
-                }
-                _ => EMPTY_PAYLOAD.as_slice(),
-            });
+        if enum_name == "DeliveryState" {
+            return Some(EMPTY_PAYLOAD.as_slice());
         }
         if enum_name == "TaskOutcome" {
             return Some(match variant {
@@ -1137,7 +1127,7 @@ impl<'a> JitMeta<'a> {
                 | "FailurePolicy"
                 | "EventResult"
                 | "DispatchState"
-                | "ServiceReceipt"
+                | "DeliveryState"
                 | "TaskOutcome"
                 | "TaskStatus"
                 | "SMTPSecurity"

@@ -7,12 +7,16 @@
 //!
 //! Agents: do NOT add an entry here without a decision ID approved by the
 //! owner in docs/spec/syntax-decisions.md.
+// D-WRAP-SCOPE1=A (owner outcome, card #2171): MARKER_ARITHMETIC is the one
+// lexical fixed-width arithmetic policy; its menu is Checked, Wrapping, or
+// Saturating and its scope is function, method, or block.
 // D-CORE-USELIST1=A (ratified 2026-08-06, card #1575): grouped `use` imports
 // use one `.[…]` list with an optional `as` beside each member. Brace groups
 // and wildcard imports are retired.
 // D-TESTFAULT1=A: TEST_FAULTS_PARAM is the named configuration slot on the
 // existing KW_TEST marker; it introduces no token or new grammar category.
-// D-META-REG1=A / D-META-NAME1=A / D-META-FORM1=A: KW_MARKER is the one
+// D-META-REG1=A / D-META-NAME1=A / D-META-FORM1=A / D-MARKER-SITES1=B:
+// KW_MARKER is the one
 // declaring word, and `Registry::rows` is the one registration table behind it —
 // a marker rule, a knowledge plane, a right, and a build fact are rows of the
 // same table, separated only by what they attach to. Facts about a rule ride the
@@ -21,7 +25,7 @@
 // enter the grammar. Every row states its safe direction and its gate words
 // (D-FACT-LAW1=B); a prover may publish a read-only row (D-FACT-OWN1=A).
 // Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, MARKER_TARGET,
-// MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, Registry::rows, KW_CAPS (#Abilities),
+// MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, Registry::rows, KW_FX (#FX),
 // KW_COMPTIME, KW_DERIVE, MARKER_TRACK, MARKER_LOCAL, MARKER_SHARED. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
@@ -44,6 +48,11 @@
 // accepts ordinary statements followed by either one bare value or one real
 // diverging tail (`return`, `next`, `break`, or `panic(...)`). No new token or
 // binder is added; the old `return value` block-value reading is retired.
+// D-RESULT-DECON2=B (ratified 2026-08-25, card #2173): the existing `?`, `!`,
+// and `->` tokens also delimit one fixed exhaustive Result handler:
+// `result ? ok -> success ! error -> failure`. It is parser sugar for the
+// existing `.Ok`/`.Err` pattern tests; no new keyword, sigil, carrier, or
+// runtime handler enters the surface.
 // Card #1641, ratified 2026-08-07: D-RUN-LAW1=A names one run/one claim;
 // D-CLAIM-WORD1=B names `assert`/`assert_eq`; D-CLAIM-BENCH1=A and
 // D-CLAIM-CASES1=B add `.measure`/`.cases` to the D-DOTSCOPE1 member menu;
@@ -193,10 +202,11 @@
 // arrow selects dispatch/guard values, yields finite-loop items, and marks a
 // one-line effect `if`/`loop` body. D-LOOP-STMT-ARROW1=C (ratified
 // 2026-08-13, card #1453) gives every statement-position loop header this
-// body form. D-BODY-LAST1=B and D-SIG-SHAPE1=B make `->` the one-expression
-// function-body marker; braces hold statements and a trailing value. `::`
-// remains the name-binding sigil, and `=` remains for slot-filling declarations
-// such as extern bindings.
+// body form. D-TAIL-RETURN1=A amends D-BODY-LAST1: `->` remains the
+// one-expression function-body marker, braces hold statements, and the sole
+// unadorned final expression supplies a value when the block expects one.
+// `::` remains the name-binding sigil, and `=` remains for slot-filling
+// declarations such as extern bindings.
 // D-LOOP-COMMA1=A (ratified 2026-07-30, card #1336) uses `(key, value)` for a
 // two-name source binding. D-LOOP-IN1=A (card #2153) joins a source binding to
 // its source with reserved keyword `in`; commas remain for later clauses such
@@ -225,9 +235,9 @@
 // grantable root table at thirteen and serves foreign-language leaves through
 // BUILTIN_EFFECT_LEAVES (`FFI.Go`, `FFI.Py`, `FFI.Octave`, and the other
 // supported binders). `Panic` and `Mem` are deny-only rows, not roots.
-// D-AUTHORITY-WORD2=E (ratified 2026-08-17, card #1572) amends the retired
-// wording: the fact menu is `Ability`, the carried rights value is `Abilities`,
-// and the block marker is `#Abilities`. Browser `.abilities()` remains a
+// D-ABILITY-NAME2=A (ratified 2026-08-25, card #2187) retires the old
+// vocabulary: the fact menu is `Effect`, the carried rights value is
+// `Authority`, and the block marker is `#FX`. Browser `.abilities()` remains a
 // protocol value; build tooling reports the FX graph instead.
 // D-EACH1=C (ratified 2026-07-28, card #1239) mints SIGIL_FENCE_OPEN /
 // SIGIL_FENCE_CLOSE. D-FENCE-GLYPH1=A (card #1516) respells them
@@ -279,6 +289,13 @@
 // value/type facts, and `#Scrub(Name)` are the sole dataflow-tag surface.
 // D-STATE-NS1=A: state facts have the reserved `T.State.Name` qualified plane;
 // bare names are sugar only inside `#State` and `#Transition`.
+// D-STATE-HOME1=A (amends D-STATE-NS1): the one state set is written as
+// `state { Name, ... }` inside its named `struct` owner. The retired sibling
+// `state Type { ... }` spelling is recognized only for E0157 and never creates
+// a second runtime type.
+// D-STATE-TERMINAL1=A: a checked state with no outgoing transition is a
+// terminal reflection fact. Entry reachability is reported only when `_ -> State`
+// transitions exist; this outcome adds no user-facing syntax.
 // D-RULEARG-TYPES1=A + D-LANGNS-NAME1=A: compiler marker vocabularies are
 // generated enums in `core.compiler.lang`, derived from Policy::APPLIED_RULES.
 // D-MARKER-NAME-HYGIENE1=A: `#Discriminant("field")` owns serde internal

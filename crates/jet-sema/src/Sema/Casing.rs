@@ -151,6 +151,11 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
             for f in &s.fields {
                 snake(&f.name, f.name_span, "field", out);
             }
+            if let Some(state) = &s.state {
+                for (name, span) in &state.states {
+                    pascal(name, *span, "state", out);
+                }
+            }
             for m in &s.methods {
                 func_names(m, "method", out);
             }
@@ -504,7 +509,7 @@ fn stmt_names(stmts: &[Stmt], out: &mut Vec<Diagnostic>) {
             }
             // D-AUTHORITY-SCOPE1=A: the optional name-before-list head binds
             // the scoped Authority handle.
-            Stmt::Caps {
+            Stmt::AuthorityScope {
                 binding,
                 binding_span,
                 body,

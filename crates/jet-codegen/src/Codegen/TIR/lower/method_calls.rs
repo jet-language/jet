@@ -212,6 +212,12 @@ pub(crate) fn service_method_route(handle: &str, method: &str) -> Option<(&'stat
         ("ServiceWorkflow", "sleep") => ("workflow_sleep", true),
         ("ServiceWorkflow", "activity") => ("workflow_activity_wait", true),
         ("ServiceWorkflow", "all") => ("workflow_all", true),
+        ("Delivery", "wait") => ("delivery_wait", false),
+        ("Delivery", "status") => ("delivery_status", false),
+        ("Delivery", "retry") => ("delivery_retry", false),
+        ("Delivery", "cancel") => ("delivery_cancel", false),
+        ("Delivery", "receipt") => ("delivery_receipt", false),
+        ("Delivery", "events") => ("delivery_events", false),
         ("ServiceTree", "directory_register") => ("directory_register", true),
         ("ServiceTree", "directory_resolve") => ("directory_resolve", false),
         ("ServiceTree", "handoff_generation") => ("handoff_generation", true),
@@ -5057,11 +5063,15 @@ fn lower_method_call_impl(
                         let result_ty = resolved_ret.cloned().unwrap_or_else(|| {
                             builtin_result_ty(method, args.len(), Some(&recv_ty))
                         });
+                        let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0
+                            as u32;
                         return TExpr {
                             ty: result_ty,
                             kind: TExprKind::OverflowOpt {
                                 prefix: prefix.to_string(),
                                 op,
+                                line,
+                                policy: None,
                                 lhs: Box::new(lhs),
                                 rhs: Box::new(rhs),
                             },
@@ -5069,28 +5079,13 @@ fn lower_method_call_impl(
                     });
                 }
             }
-            // `origin` needs the lowered receiver's binding metadata, so complete
-            // that payload here instead of letting a tier rediscover it.
             let resolved_op = resolve_numeric_op(method, numeric_name);
-            if method == "origin" || resolved_op.is_some() {
+            if let Some(op) = resolved_op {
                 return in_own_frame(|| {
                     let mut recv_t = lower_expr(receiver, cx, env);
                     // Sema's width is authoritative — Call/OrFallback lowering can
                     // fall back to Unit/Int and would silently widen bit queries.
                     recv_t.ty = recv_ty.clone();
-                    let op = match resolved_op {
-                        Some(op) => op,
-                        None => TNumericOp::Origin {
-                            origin: recv_t
-                                .binding_origin()
-                                .map(|origin| {
-                                    crate::Codegen::TIR::lower::render_tracked_float_origin(
-                                        origin, cx,
-                                    )
-                                })
-                                .unwrap_or_else(|| "untracked".to_string()),
-                        },
-                    };
                     let result_ty = builtin_result_ty(method, args.len(), Some(&recv_ty));
                     return TExpr {
                         ty: result_ty,
@@ -5649,7 +5644,7 @@ fn lower_method_call_impl(
                 matches!(
                     cx.const_values.get(candidate),
                     Some(crate::Comptime::CtValue::Struct { type_name, .. })
-                        if type_name == Syntax::TYPE_ABILITIES
+                        if type_name == Syntax::TYPE_AUTHORITY
                 )
             };
             if is_authority(name) {
@@ -5662,7 +5657,7 @@ fn lower_method_call_impl(
         }
         _ => None,
     };
-    if (recv_type.as_deref() == Some(Syntax::TYPE_ABILITIES) || comptime_authority_name.is_some())
+    if (recv_type.as_deref() == Some(Syntax::TYPE_AUTHORITY) || comptime_authority_name.is_some())
         && matches!(method, "with" | "without")
         && args.len() == 1
     {
@@ -5684,7 +5679,7 @@ fn lower_method_call_impl(
             TExpr {
                 ty: resolved_ret
                     .cloned()
-                    .unwrap_or_else(|| Type::Named(Syntax::TYPE_ABILITIES.to_string())),
+                    .unwrap_or_else(|| Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
                 kind: TExprKind::MethodCall {
                     recv: Box::new(recv),
                     method: TMethodRef::bare(method),
@@ -5704,11 +5699,11 @@ fn lower_method_call_impl(
         return in_own_frame(|| {
             // D-AUTHORITY-NAME1=A: keep construction as a Prelude static call
             // so every engine receives the same named rights carrier.
-            if type_name == Syntax::TYPE_ABILITIES && method == "workspace" && args.is_empty() {
+            if type_name == Syntax::TYPE_AUTHORITY && method == "workspace" && args.is_empty() {
                 return TExpr {
                     ty: resolved_ret
                         .cloned()
-                        .unwrap_or_else(|| Type::Named(Syntax::TYPE_ABILITIES.to_string())),
+                        .unwrap_or_else(|| Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
                     kind: TExprKind::StaticCall {
                         owner: rooted_owner("JetAuthority"),
                         owner_type: None,

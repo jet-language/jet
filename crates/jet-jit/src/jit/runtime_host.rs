@@ -796,6 +796,8 @@ pub(crate) const INTN_OP_POW: i64 = 10;
 pub(crate) const INTN_OP_FLOOR_DIV: i64 = 11;
 /// D-MODSEM1=A: `%` on a fixed-width whole number.
 pub(crate) const INTN_OP_MOD: i64 = 12;
+pub(crate) const INTN_OP_ROTATE_LEFT: i64 = 13;
+pub(crate) const INTN_OP_ROTATE_RIGHT: i64 = 14;
 pub(crate) const INTN_MODE_TRAP: i64 = 0;
 pub(crate) const INTN_MODE_WRAPPING: i64 = 1;
 pub(crate) const INTN_MODE_SATURATING: i64 = 2;
@@ -1079,6 +1081,37 @@ fn jet_jit_intn_binop(
 ) -> i64 {
     use jet_codegen::Comptime::{CtReport, CtValue, MathLayout};
     use jet_codegen::AST::BinOp;
+    let signed = signed != 0;
+    let bits = bits as u8;
+    let right_signed = right_signed != 0;
+    if matches!(op, INTN_OP_ROTATE_LEFT | INTN_OP_ROTATE_RIGHT) {
+        let count = MathLayout::integer_widen(right, right_signed);
+        if count < 0 {
+            with_runtime_mut(|rt| {
+                rt.set_arithmetic_stop(
+                    line,
+                    contract_kernel::jet_arithmetic_message("rotate_negative"),
+                )
+            });
+            return 0;
+        }
+        let width = u32::from(bits);
+        let mask = if bits == 64 {
+            u128::from(u64::MAX)
+        } else {
+            (1_u128 << bits) - 1
+        };
+        let value = (MathLayout::integer_widen(left, signed) as u128) & mask;
+        let shift = (count as u128 % u128::from(width)) as u32;
+        let rotated = if shift == 0 {
+            value
+        } else if op == INTN_OP_ROTATE_LEFT {
+            ((value << shift) | (value >> (width - shift))) & mask
+        } else {
+            ((value >> shift) | (value << (width - shift))) & mask
+        };
+        return MathLayout::integer_narrow(rotated as i128, signed, bits);
+    }
     let op = match op {
         INTN_OP_ADD => BinOp::Add,
         INTN_OP_SUB => BinOp::Sub,
@@ -1101,9 +1134,6 @@ fn jet_jit_intn_binop(
             return 0;
         }
     };
-    let signed = signed != 0;
-    let bits = bits as u8;
-    let right_signed = right_signed != 0;
     let shift_count = MathLayout::integer_widen(right, right_signed);
     let shift_direction = match op {
         BinOp::Shl => Some("left"),
@@ -2302,6 +2332,7 @@ mod service_adapter {
         Slot,
         Restart,
         Delivery,
+        DeliveryHandle,
         TaskOutcome,
         DurationNs,
         WorkflowId,
@@ -2357,6 +2388,13 @@ mod service_adapter {
                 }
                 "send_durable" if index < 2 => Some(ArgKind::Slot),
                 "send_durable" if index < 4 => Some(ArgKind::String),
+                "delivery_wait"
+                | "delivery_status"
+                | "delivery_retry"
+                | "delivery_cancel"
+                | "delivery_receipt"
+                | "delivery_events"
+                    if index == 0 => Some(ArgKind::Slot),
                 "set_state_snapshot" | "set_state_event_log" if index == 0 => Some(ArgKind::Slot),
                 "set_state_snapshot" | "set_state_event_log" if index == 1 => Some(ArgKind::Slot),
                 "set_state_snapshot" | "set_state_event_log" if index == 2 => Some(ArgKind::String),
@@ -2409,11 +2447,11 @@ mod service_adapter {
                     if index == 0 {
                         Some(ArgKind::Slot)
                     } else {
-                        Some(ArgKind::String)
+                        Some(ArgKind::DeliveryHandle)
                     }
                 }
                 "commit" if index == 0 => Some(ArgKind::Slot),
-                "commit" if index == 1 => Some(ArgKind::String),
+                "commit" if index == 1 => Some(ArgKind::DeliveryHandle),
                 _ => None,
             },
             SYNC_MODULE => match method {
@@ -2525,6 +2563,12 @@ mod service_adapter {
                 .to_string(),
                 args: Vec::new(),
             }),
+            ArgKind::DeliveryHandle => service_value(rt, raw).filter(|value| {
+                matches!(
+                    value,
+                    CtValue::Struct { type_name, .. } if type_name == "Delivery"
+                )
+            }),
             ArgKind::TaskOutcome => {
                 let variant = match raw & 0xff {
                     0 => "Finished",
@@ -2632,13 +2676,13 @@ mod service_adapter {
 
     fn enum_discriminant(type_name: &str, variant: &str) -> Option<i64> {
         let variants: &[&str] = match type_name {
-            "ServiceReceipt" => &[
-                "Enqueued",
-                "Executed",
-                "Retained",
+            "DeliveryState" => &[
+                "Pending",
+                "Accepted",
+                "Delivering",
+                "Delivered",
                 "DeadLettered",
-                "Rejected",
-                "Unavailable",
+                "Cancelled",
             ],
             "ServiceError" => &[
                 "Full",

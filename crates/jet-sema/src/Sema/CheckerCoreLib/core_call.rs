@@ -5521,7 +5521,7 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg(
                     name,
                     1,
-                    &Type::Named(crate::Syntax::CAP_HANDLE_TYPE.to_string()),
+                    &Type::Named(crate::Syntax::AUTHORITY_HANDLE_TYPE.to_string()),
                     &mut args[1],
                 );
                 args[1].flags.authority_boundary = true;
@@ -5547,7 +5547,7 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg(
                     name,
                     1,
-                    &Type::Named(crate::Syntax::CAP_HANDLE_TYPE.to_string()),
+                    &Type::Named(crate::Syntax::AUTHORITY_HANDLE_TYPE.to_string()),
                     &mut args[1],
                 );
                 args[1].flags.authority_boundary = true;

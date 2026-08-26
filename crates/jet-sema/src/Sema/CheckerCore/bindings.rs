@@ -1216,13 +1216,22 @@ impl<'a> Checker<'a> {
             },
             binding_sendable,
         );
-        if b.track() && matches!(&final_ty, Type::Float) {
+        if b.track() && !b.name.is_empty() {
             let depth = self
                 .binding_fact_depth(&b.name)
                 .unwrap_or_else(|| self.scope_depth());
-            self.flow
-                .track_origins
-                .set_at(&b.name, depth, b.name.clone());
+            let (line, column) = crate::Diagnostics::span_line_col(&self.source, b.name_span.start);
+            self.flow.origins.set_at(
+                &b.name,
+                depth,
+                crate::Sema::FlowFacts::OriginFact {
+                    tracked: true,
+                    source: Some(b.name.clone()),
+                    line: Some(line),
+                    column: Some(column),
+                    ambiguity: false,
+                },
+            );
         }
         // D-CONC-FREEZE1=A: publish the freeze provenance in the shared
         // flow store after the declaration owns the new binding.

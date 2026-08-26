@@ -68,16 +68,17 @@ pub use lvalues::{
 #[path = "AST/expressions.rs"]
 mod expressions;
 pub use expressions::{
-    BinOp, Call, CallArg, CallArgFlags, Expr, IncDecOp, Lambda, LambdaBody, LambdaMeta,
-    LambdaParam, PlaceAccess, StrFormat, StrPart, TypedLitBody, UnOp, UnitFormat,
+    ArithmeticMode, ArithmeticPolicyFact, BinOp, Call, CallArg, CallArgFlags, Expr, IncDecOp,
+    Lambda, LambdaBody, LambdaMeta, LambdaParam, PlaceAccess, StrFormat, StrPart, TypedLitBody,
+    UnOp, UnitFormat,
 };
 
 #[path = "AST/comptime.rs"]
 mod comptime;
 pub use comptime::{
     canonical_view_provenance_map, ClosureData, CtFloat, CtKey, CtOpaque, CtReport, CtValue,
-    Deprecation, FuncSig, ViewProvenance, ViewProvenanceCell, ViewProvenanceMap, ViewSource,
-    ViewSourcePath, ViewSourceProjection,
+    Deprecation, FailureContract, FuncSig, ViewProvenance, ViewProvenanceCell, ViewProvenanceMap,
+    ViewSource, ViewSourcePath, ViewSourceProjection,
 };
 
 #[path = "AST/ffi.rs"]

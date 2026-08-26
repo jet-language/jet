@@ -231,7 +231,7 @@ impl<'a> InlineAlwaysScan<'a> {
             | Stmt::AssumeDet { body, .. }
             | Stmt::ScopeMember { body, .. }
             | Stmt::Transact { body, .. } => self.scan_stmts(body),
-            Stmt::Caps { body, .. } => self.scan_stmts(body),
+            Stmt::AuthorityScope { body, .. } => self.scan_stmts(body),
             Stmt::ComptimeIf {
                 cond,
                 then_body,
