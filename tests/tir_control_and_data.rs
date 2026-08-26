@@ -131,11 +131,16 @@ fn semicolon() Int -> {
 fn declaration() Int -> {
     value :: 1
 }
+
+fn assignment() Int -> {
+    value := 0
+    value = 1
+}
 "#;
     let diagnostics = jet::compile_with_path(invalid, "tail_value_errors.jet")
         .expect_err("unit-valued tails must be rejected in value blocks");
     let missing_values: Vec<_> = diagnostics.iter().filter(|d| d.code == "E0114").collect();
-    assert_eq!(missing_values.len(), 2, "diagnostics: {diagnostics:?}");
+    assert_eq!(missing_values.len(), 3, "diagnostics: {diagnostics:?}");
     assert!(missing_values
         .iter()
         .all(|diagnostic| diagnostic.span.is_some()));
@@ -181,6 +186,34 @@ fn label(value: Int) String -> {
         "fixed source:\n{fixed}"
     );
     assert!(!fixed.contains("return"), "fixed source:\n{fixed}");
+
+    let semicolon_lintable = r#"
+fn label(value: Int) String -> {
+    if value == {
+        1 -> return "one";
+    }
+    return "other";
+}
+"#;
+    let semicolon_output = jet::compile_with_path(
+        semicolon_lintable,
+        "redundant_tail_return_semicolons.jet",
+    )
+    .expect("semicolon-terminated direct returns should still be lintable");
+    let semicolon_lint = semicolon_output
+        .lints
+        .iter()
+        .find(|diagnostic| diagnostic.code == "L0513")
+        .expect("semicolon-shaped fallback must be linted");
+    let semicolon_fixed = jet::FixEngine::apply_edits(
+        semicolon_lintable,
+        std::slice::from_ref(semicolon_lint.edit.as_ref().unwrap()),
+    )
+    .expect("the semicolon-shaped L0513 edit must apply");
+    assert!(!semicolon_fixed.contains("return"), "fixed source:\n{semicolon_fixed}");
+    assert!(!semicolon_fixed.contains(';'), "fixed source:\n{semicolon_fixed}");
+    jet::compile_with_path(&semicolon_fixed, "redundant_tail_return_semicolons_fixed.jet")
+        .expect("the generated value table must compile after semicolon removal");
 
     let effectful = r#"
 fn label(value: Int) String -> {
@@ -253,6 +286,80 @@ fn run() {}
             .unwrap_or_else(|| panic!("{name} diagnostics: {diagnostics:?}"));
         assert!(diagnostic.span.is_some(), "{name}: {diagnostics:?}");
     }
+}
+
+/// D-TAIL-RETURN1=A: divergence, unreachable source, nested value branches,
+/// fallback blocks, and infinite loops do not invent a unit tail. A loop with
+/// a reachable break remains a statement tail and keeps E0114 focused there.
+#[test]
+fn value_tail_divergence_and_loop_flow_are_deterministic() {
+    let valid = r#"
+fn nested(flag: Bool) Int -> {
+    // Both nested branches leave without a value.
+    if flag {
+        panic("then")
+    } else {
+        panic("else")
+    }
+}
+
+fn infinite() Int -> {
+    loop {
+        panic("stop")
+    }
+}
+
+fn infinite_true() Int -> {
+    loop true {
+        next
+    }
+}
+
+fn unreachable() Int -> {
+    return 1
+    2;
+}
+
+fn fallback(value: Int?) Int -> {
+    value ?? {
+        if true {
+            panic("missing")
+        } else {
+            panic("missing")
+        }
+    }
+}
+
+fn unit_panic() () {
+    panic("unit")
+}
+
+fn unit_loop() () {
+    loop {
+        panic("unit")
+    }
+}
+
+fn run() {}
+"#;
+    jet::compile_with_path(valid, "tail_divergence_valid.jet")
+        .expect("diverging and unreachable tails should compile");
+
+    let finite = r#"
+fn finite() Int -> {
+    loop {
+        break
+    }
+}
+fn run() {}
+"#;
+    let diagnostics = jet::compile_with_path(finite, "tail_divergence_finite.jet")
+        .expect_err("a reachable loop break leaves a unit tail");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0114")
+        .expect("finite loop tail should report E0114");
+    assert!(diagnostic.span.is_some(), "{diagnostics:?}");
 }
 
 /// D-FAIL-ERROR1=A: the labelled/string shape builds a default `Err` value;

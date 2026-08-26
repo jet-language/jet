@@ -712,6 +712,129 @@ impl<'a> Checker<'a> {
         suggest_field(name, &candidates)
     }
 
+    /// Find a checked-text slot that would receive a plain `String`.
+    ///
+    /// Most callers add their own context-specific mismatch after this method
+    /// returns false. A few owning literal paths intentionally ignore that
+    /// boolean, so checked text needs one shared rejection before those paths
+    /// can manufacture a nominal outer value around an unchecked string.
+    fn checked_text_string_target(&self, want: &Type, got: &Type) -> bool {
+        match (want, got) {
+            (Type::Named(name), Type::String)
+                if self.is_checked_text_type_name(name)
+                    || self.type_param_has_bound(want, crate::Generics::CHECKED_TEXT) =>
+            {
+                true
+            }
+            (Type::List(want), Type::List(got))
+            | (Type::Shared(want), Type::Shared(got))
+            | (Type::Option(want), Type::Option(got)) => {
+                self.checked_text_string_target(want, got)
+            }
+            (
+                Type::List(want),
+                Type::FixedList {
+                    elem: got, ..
+                },
+            )
+            | (
+                Type::FixedList {
+                    elem: want, ..
+                },
+                Type::List(got),
+            ) => self.checked_text_string_target(want, got),
+            (
+                Type::Map {
+                    key: want_key,
+                    value: want_value,
+                    ..
+                },
+                Type::Map {
+                    key: got_key,
+                    value: got_value,
+                    ..
+                },
+            ) => self.checked_text_string_target(want_key, got_key)
+                || self.checked_text_string_target(want_value, got_value),
+            (
+                Type::Result {
+                    ok: want_ok,
+                    err: want_err,
+                },
+                Type::Result {
+                    ok: got_ok,
+                    err: got_err,
+                },
+            ) => self.checked_text_string_target(want_ok, got_ok)
+                || self.checked_text_string_target(want_err, got_err),
+            (
+                Type::Apply {
+                    args: want_args, ..
+                },
+                Type::Apply {
+                    args: got_args, ..
+                },
+            ) => want_args
+                .iter()
+                .zip(got_args)
+                .any(|(want, got)| self.checked_text_string_target(want, got)),
+            (
+                Type::Tuple(want_fields),
+                Type::Tuple(got_fields),
+            ) => want_fields
+                .iter()
+                .zip(got_fields)
+                .any(|((_, want), (_, got))| self.checked_text_string_target(want, got)),
+            (
+                Type::FixedList {
+                    elem: want, ..
+                },
+                Type::FixedList {
+                    elem: got, ..
+                },
+            ) => self.checked_text_string_target(want, got),
+            (
+                Type::Fn {
+                    params: want_params,
+                    ret: want_ret,
+                    ..
+                },
+                Type::Fn {
+                    params: got_params,
+                    ret: got_ret,
+                    ..
+                },
+            ) => want_params
+                .iter()
+                .zip(got_params)
+                .any(|(want, got)| self.checked_text_string_target(want, got))
+                || want_ret
+                    .as_deref()
+                    .zip(got_ret.as_deref())
+                    .is_some_and(|(want, got)| self.checked_text_string_target(want, got)),
+            (
+                Type::Tagged { inner: want, .. },
+                Type::Tagged { inner: got, .. },
+            )
+            | (
+                Type::InlineRange { base: want, .. },
+                Type::InlineRange { base: got, .. },
+            )
+            | (
+                Type::Quantity { base: want, .. },
+                Type::Quantity { base: got, .. },
+            ) => self.checked_text_string_target(want, got),
+            (Type::Union(want_members), Type::Union(got_members)) => want_members
+                .iter()
+                .any(|want| {
+                    got_members
+                        .iter()
+                        .any(|got| self.checked_text_string_target(want, got))
+                }),
+            _ => false,
+        }
+    }
+
     /// Returns true when a diagnostic was emitted or compatibility was
     /// handled; callers may add a context-specific error otherwise.
     ///
@@ -732,6 +855,20 @@ impl<'a> Checker<'a> {
                 return true;
             }
             return false;
+        }
+        if self.checked_text_string_target(want, got) {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!(
+                    "this needs {}, but the value is {}",
+                    want.show(),
+                    got.show()
+                ),
+                "a checked text type is nominal; a plain String needs validation before it crosses this boundary".to_string(),
+                "construct the checked text with its checked literal or `from(text)`".to_string(),
+                Some(span),
+            ));
+            return true;
         }
         // D-TYPE2-EXACT1: an inline range is proof attached to its carrier.
         // Reaching the carrier boundary erases that proof, so it is still

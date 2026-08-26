@@ -1,15 +1,11 @@
 
-/// D-TEXTHEAD-TYPE1=A: one shared validation-and-wrap route for every
-/// String-backed CheckedText. Engines only marshal into this Prelude function.
-pub fn jet_checked_text_from<T, E>(
-    text: String,
-    check: fn(String) -> Result<(), E>,
-    wrap: fn(String) -> T,
-) -> Result<T, E> {
-    match check(text.clone()) {
-        Ok(()) => Ok(wrap(text)),
-        Err(error) => Err(error),
-    }
+/// The ordinary library-defined contract for a checked String-backed type.
+/// Sema resolves implementations through the normal trait registry; every
+/// execution tier calls these same pure methods.
+pub trait CheckedText {
+    type Error;
+    fn check(text: &String) -> Result<(), Self::Error>;
+    fn encode_hole<T: JetShow>(value: &T) -> String;
 }
 
 /// D-PERSIST-DEVSTATE1=A: AOT's persistent slot is an interior-mutable

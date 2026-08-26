@@ -1664,9 +1664,16 @@ pub(crate) fn emit_program_items(
     let mut imported_traits = cx.imported_traits.iter().collect::<Vec<_>>();
     imported_traits.sort();
     for (module, trait_name) in imported_traits {
+        let path = if trait_name == crate::Generics::CHECKED_TEXT {
+            "crate::CheckedText".to_string()
+        } else {
+            format!(
+                "crate::{module}::{}",
+                crate::Codegen::rust_trait_name(trait_name)
+            )
+        };
         out.push_str(&format!(
-            "use crate::{module}::{} as _;\n",
-            crate::Codegen::mangle(trait_name)
+            "use {path} as _;\n"
         ));
     }
     if !cx.imported_traits.is_empty() {
@@ -1706,7 +1713,6 @@ pub(crate) fn emit_program_items(
     emit_tuple_structs(cx, &tuple_shapes, out);
     emit_anonymous_unions(cx, items, out);
     emit_synthetic_display_trait(out, include_runtime_owned_traits);
-    emit_synthetic_checked_text_trait(out, include_runtime_owned_traits);
     emit_synthetic_operator_traits(out, include_runtime_owned_traits);
     emit_synthetic_close_trait(out);
     emit_synthetic_foreign_close_impls(cx, items, out);

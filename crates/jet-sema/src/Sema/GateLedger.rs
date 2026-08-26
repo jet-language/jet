@@ -6,7 +6,8 @@
 
 use crate::Diagnostics::Span;
 use crate::Policy::GateSet;
-use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, StrPart};
+use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, StrPart, Type};
+use std::collections::HashSet;
 pub use jet_foundation::Authority::{GateDiagnostic, GateEntry, GateKind, GateOperation};
 
 #[derive(Debug, Clone, Default)]
@@ -20,6 +21,12 @@ impl GateLedger {
     /// facts with [`Self::push`].
     pub fn collect(bundle: &ProgramBundle, gates: GateSet) -> Self {
         let inspection = crate::Sema::UnsafeObligations::inspect_with_gates(bundle, gates);
+        let unsafe_gates = inspection.gates.clone();
+        let checked_text_types = checked_text_type_names(bundle);
+        let context = GateContext {
+            checked_text_types: &checked_text_types,
+            unsafe_gates: &unsafe_gates,
+        };
         let mut ledger = Self::default();
         for gate in inspection.gates {
             let discharged = gate.operations.iter().all(|operation| operation.discharged);
@@ -64,8 +71,8 @@ impl GateLedger {
         );
 
         for module in &bundle.modules {
-            visit_statements(&module.display, &module.script_body, &mut ledger);
-            visit_items(&module.display, &module.items, &mut ledger);
+            visit_statements(&module.display, &module.script_body, &mut ledger, &context);
+            visit_items(&module.display, &module.items, &mut ledger, &context);
         }
         append_fact_gates(&mut ledger, &bundle.build_facts);
         ledger.append_structure_facts(&bundle.name_ledger);
@@ -183,68 +190,88 @@ fn source_entry(
     }
 }
 
-fn visit_items(source: &str, items: &[Item], ledger: &mut GateLedger) {
+struct GateContext<'a> {
+    checked_text_types: &'a HashSet<String>,
+    unsafe_gates: &'a [crate::Sema::UnsafeObligations::UnsafeGateInspection],
+}
+
+fn checked_text_type_names(bundle: &ProgramBundle) -> HashSet<String> {
+    let registries = crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
+    let mut names = HashSet::new();
+    for registry in registries {
+        for (name, base) in &registry.distinct_bases {
+            if *base == Type::String
+                && registry.implements_trait(name, crate::Generics::CHECKED_TEXT)
+            {
+                names.insert(name.clone());
+            }
+        }
+    }
+    names
+}
+
+fn visit_items(source: &str, items: &[Item], ledger: &mut GateLedger, context: &GateContext<'_>) {
     for item in items {
         match item {
-            Item::Func(function) => visit_function(source, function, ledger),
-            Item::Const(constant) => visit_expression(source, &constant.value, ledger),
+            Item::Func(function) => visit_function(source, function, ledger, context),
+            Item::Const(constant) => visit_expression(source, &constant.value, ledger, context),
             Item::Struct(definition) => {
                 for function in &definition.methods {
-                    visit_function(source, function, ledger);
+                    visit_function(source, function, ledger, context);
                 }
                 for implementation in &definition.trait_impls {
                     for function in &implementation.methods {
-                        visit_function(source, function, ledger);
+                        visit_function(source, function, ledger, context);
                     }
                 }
-                visit_statements(source, &definition.validate_block, ledger);
+                visit_statements(source, &definition.validate_block, ledger, context);
                 for field in &definition.fields {
                     if let Some(expression) = &field.computed {
-                        visit_expression(source, expression, ledger);
+                        visit_expression(source, expression, ledger, context);
                     }
                     if let Some(expression) = &field.default {
-                        visit_expression(source, expression, ledger);
+                        visit_expression(source, expression, ledger, context);
                     }
                 }
             }
             Item::Enum(definition) => {
                 for function in &definition.methods {
-                    visit_function(source, function, ledger);
+                    visit_function(source, function, ledger, context);
                 }
                 for implementation in &definition.trait_impls {
                     for function in &implementation.methods {
-                        visit_function(source, function, ledger);
+                        visit_function(source, function, ledger, context);
                     }
                 }
             }
             Item::Impl(implementation) => {
                 for function in &implementation.methods {
-                    visit_function(source, function, ledger);
+                    visit_function(source, function, ledger, context);
                 }
             }
-            Item::Test(test) => visit_statements(source, &test.body, ledger),
+            Item::Test(test) => visit_statements(source, &test.body, ledger, context),
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
-                    visit_items(source, body, ledger);
+                    visit_items(source, body, ledger, context);
                 }
             }
-            Item::GenericModule(module) => visit_items(source, &module.body, ledger),
+            Item::GenericModule(module) => visit_items(source, &module.body, ledger, context),
             Item::Module(module) => {
                 for expression in &module.imports {
-                    visit_expression(source, expression, ledger);
+                    visit_expression(source, expression, ledger, context);
                 }
                 for expression in &module.members {
-                    visit_expression(source, expression, ledger);
+                    visit_expression(source, expression, ledger, context);
                 }
                 for contribution in &module.contributions {
                     if let crate::AST::ContribValue::Expr(expression) = &contribution.value {
-                        visit_expression(source, expression, ledger);
+                        visit_expression(source, expression, ledger, context);
                     }
                 }
             }
             Item::MarkerDecl(marker) => {
                 if let Some(body) = &marker.body {
-                    visit_template_body(source, body, ledger);
+                    visit_template_body(source, body, ledger, context);
                 }
             }
             _ => {}
@@ -256,28 +283,38 @@ fn visit_items(source: &str, items: &[Item], ledger: &mut GateLedger) {
 /// item templates until expansion. Walk both branches here so gate inspection
 /// sees expressions in generated items and compile-time control flow without
 /// inventing a source-string parser path.
-fn visit_template_body(source: &str, body: &[crate::AST::DeriveBodyItem], ledger: &mut GateLedger) {
+fn visit_template_body(
+    source: &str,
+    body: &[crate::AST::DeriveBodyItem],
+    ledger: &mut GateLedger,
+    context: &GateContext<'_>,
+) {
     for body_item in body {
         match body_item {
             crate::AST::DeriveBodyItem::Stmt(statement) => {
-                visit_statements(source, std::slice::from_ref(statement), ledger);
+                visit_statements(source, std::slice::from_ref(statement), ledger, context);
             }
             crate::AST::DeriveBodyItem::Item(item) => {
-                visit_items(source, std::slice::from_ref(item.as_ref()), ledger);
+                visit_items(source, std::slice::from_ref(item.as_ref()), ledger, context);
             }
             crate::AST::DeriveBodyItem::Loop {
                 source: expression,
                 body,
                 ..
             } => {
-                visit_expression(source, expression, ledger);
-                visit_template_body(source, body, ledger);
+                visit_expression(source, expression, ledger, context);
+                visit_template_body(source, body, ledger, context);
             }
         }
     }
 }
 
-fn visit_function(source: &str, function: &Func, ledger: &mut GateLedger) {
+fn visit_function(
+    source: &str,
+    function: &Func,
+    ledger: &mut GateLedger,
+    context: &GateContext<'_>,
+) {
     if let Some(transition) = &function.state_transition {
         let from = transition.from.as_deref().unwrap_or("_");
         let spelling = format!("#Transition({from}, {})", transition.to);
@@ -337,27 +374,42 @@ fn visit_function(source: &str, function: &Func, ledger: &mut GateLedger) {
             "recorded",
         ));
     }
-    visit_statements(source, &function.body, ledger);
+    visit_statements(source, &function.body, ledger, context);
 }
 
-fn visit_statements(source: &str, body: &[Stmt], ledger: &mut GateLedger) {
+fn visit_statements(source: &str, body: &[Stmt], ledger: &mut GateLedger, context: &GateContext<'_>) {
     for statement in body {
-        visit_statement_expressions(source, statement, ledger);
+        visit_statement_expressions(source, statement, ledger, context);
     }
     visit_statement_gates(source, body, ledger);
 }
 
-fn visit_statement_expressions(source: &str, statement: &Stmt, ledger: &mut GateLedger) {
+fn visit_statement_expressions(
+    source: &str,
+    statement: &Stmt,
+    ledger: &mut GateLedger,
+    context: &GateContext<'_>,
+) {
     let mut copy = statement.clone();
-    copy.for_each_expr_mut(|expression| visit_expression_value(source, expression, ledger));
+    copy.for_each_expr_mut(|expression| visit_expression_value(source, expression, ledger, context));
 }
 
-fn visit_expression(source: &str, expression: &Expr, ledger: &mut GateLedger) {
+fn visit_expression(
+    source: &str,
+    expression: &Expr,
+    ledger: &mut GateLedger,
+    context: &GateContext<'_>,
+) {
     let mut copy = expression.clone();
-    copy.for_each_expr_mut(|value| visit_expression_value(source, value, ledger));
+    copy.for_each_expr_mut(|value| visit_expression_value(source, value, ledger, context));
 }
 
-fn visit_expression_value(source: &str, expression: &Expr, ledger: &mut GateLedger) {
+fn visit_expression_value(
+    source: &str,
+    expression: &Expr,
+    ledger: &mut GateLedger,
+    context: &GateContext<'_>,
+) {
     match expression {
         Expr::Call(call) if call.widen_approx || call.name == crate::Syntax::BUILTIN_APPROX => {
             ledger.push(source_entry(
@@ -441,18 +493,10 @@ fn visit_expression_value(source: &str, expression: &Expr, ledger: &mut GateLedg
             method,
             method_span,
             ..
-        } if method == "raw" && is_static_type_receiver(receiver) => {
-            ledger.push(source_entry(
-                GateKind::Unsafe,
-                "security",
-                "expression",
-                source,
-                *method_span,
-                "Type.raw",
-                Some("#Unsafe(\"reason\")".to_string()),
-                "checked text raw construction requires an audited unsafe region",
-                "recorded",
-            ));
+        } if method == "raw"
+            && is_checked_text_static_receiver(receiver, context.checked_text_types) =>
+        {
+            ledger.push(checked_text_raw_entry(source, *method_span, context));
         }
         Expr::MethodCall {
             method,
@@ -505,13 +549,60 @@ fn visit_expression_value(source: &str, expression: &Expr, ledger: &mut GateLedg
     }
 }
 
-fn is_static_type_receiver(receiver: &Expr) -> bool {
+fn is_checked_text_static_receiver(receiver: &Expr, checked_text_types: &HashSet<String>) -> bool {
+    let Some(name) = static_type_receiver_name(receiver) else {
+        return false;
+    };
+    checked_text_types.contains(name)
+        || name
+            .rsplit_once("::")
+            .is_some_and(|(_, leaf)| checked_text_types.contains(leaf))
+}
+
+fn static_type_receiver_name(receiver: &Expr) -> Option<&str> {
     match receiver {
-        Expr::Ident(name, _) => name.chars().next().is_some_and(|c| c.is_ascii_uppercase()),
-        Expr::Field(base, _, _) => matches!(base.as_ref(), Expr::Ident(name, _)
-            if name.chars().next().is_some_and(|c| c.is_ascii_uppercase())),
-        _ => false,
+        Expr::Ident(name, _) => Some(name),
+        Expr::Field(base, name, _) if matches!(base.as_ref(), Expr::Ident(..)) => Some(name),
+        _ => None,
     }
+}
+
+fn checked_text_raw_entry(
+    source: &str,
+    span: Span,
+    context: &GateContext<'_>,
+) -> GateEntry {
+    let enclosing = context
+        .unsafe_gates
+        .iter()
+        .filter(|gate| {
+            gate.source == source
+                && gate.span.start <= span.start
+                && span.end <= gate.span.end
+        })
+        .min_by_key(|gate| (gate.span.end - gate.span.start, gate.span.start));
+    let mut entry = source_entry(
+        GateKind::Unsafe,
+        "security",
+        "expression",
+        source,
+        span,
+        "Type.raw",
+        enclosing.and_then(|gate| gate.reason.clone()),
+        "checked text raw construction requires an audited unsafe region",
+        if enclosing.is_some_and(|gate| gate.reason.is_some()) {
+            "recorded"
+        } else {
+            "missing"
+        },
+    );
+    if let Some(gate) = enclosing {
+        entry.provenance.push(format!(
+            "unsafe gate {}:{}..{}",
+            gate.source, gate.span.start, gate.span.end
+        ));
+    }
+    entry
 }
 
 fn is_rounded_conversion(method: &str, args: &[crate::AST::CallArg]) -> bool {

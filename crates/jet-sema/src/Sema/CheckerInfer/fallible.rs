@@ -1024,17 +1024,7 @@ pub(crate) fn value_loop_requires_route(expr: &Expr) -> bool {
 }
 
 fn fallback_block_diverges(body: &[Stmt]) -> bool {
-    match body.last() {
-        Some(
-            Stmt::Return(..)
-            | Stmt::Break(..)
-            | Stmt::Continue(..)
-            | Stmt::BreakLabel(..)
-            | Stmt::ContinueLabel(..),
-        ) => true,
-        Some(Stmt::Expr(Expr::Call(call))) => call.name == Syntax::BUILTIN_PANIC,
-        _ => false,
-    }
+    crate::Sema::Diagnostics::block_definitely_exits(body)
 }
 
 fn mark_value_loop_route_attached(expr: &mut Expr) {

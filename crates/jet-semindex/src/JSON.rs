@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use jet_foundation::Report::render_status_json;
-use jet_foundation::AST::ProgramBundle;
+use jet_foundation::AST::{Item, ProgramBundle};
 use jet_foundation::AST::{AccessConvention, ParamZone, Type};
 use jet_foundation::JSON::json_escape;
 use jet_pkg_model::Overlay::OverlayPolicy;
@@ -19,9 +19,10 @@ use crate::Symbols::canonical_symbol_name;
 use crate::Types::{
     ArithmeticOperationFact, BypassFact, BypassKind, CallEdge, CallableParameterFact,
     CallableSignatureFact, DefinitionFact,
-    EffectFact, ExpandProjection, ExpandValue, InstanceFact, MemberFact, MemberKind, MemberOrigin,
+    CompilerFact, EffectFact, ExpandProjection, ExpandValue, InstanceFact, MemberFact, MemberKind, MemberOrigin,
     OutputFact, SemIndex, SourceSpan, StateGraphFact, SymbolDef, SymbolKind, SymbolRef,
-    TypeDossier, ViewProjectionFact, ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
+    TraitContractFact, TypeDossier, ViewProjectionFact, ViewProvenanceFact, ViewSourceFact,
+    ViewSourcePathFact,
 };
 
 fn json_instance(value: &InstanceFact) -> String {
@@ -705,8 +706,18 @@ fn json_def(d: &SymbolDef) -> String {
         .map(|derive| json_str(derive))
         .collect::<Vec<_>>()
         .join(",");
+    let nominal_base = d
+        .nominal_base
+        .as_ref()
+        .map_or_else(|| "null".to_string(), |base| json_str(base));
+    let trait_contracts = d
+        .trait_contracts
+        .iter()
+        .map(json_trait_contract)
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"identity\":{},\"name\":{},\"leaf_name\":{},\"module\":{},\"span\":{},\"detail\":{},\"view_provenance\":{},\"callable_signature\":{},\"derives\":[{}]}}",
+        "{{\"identity\":{},\"name\":{},\"leaf_name\":{},\"module\":{},\"span\":{},\"detail\":{},\"view_provenance\":{},\"callable_signature\":{},\"derives\":[{}],\"nominal_base\":{},\"trait_contracts\":[{}]}}",
         json_str(&d.identity),
         json_str(&d.qualified_name),
         json_str(&d.name),
@@ -716,6 +727,36 @@ fn json_def(d: &SymbolDef) -> String {
         view_json,
         callable_json,
         derives,
+        nominal_base,
+        trait_contracts,
+    )
+}
+
+fn json_trait_contract(contract: &TraitContractFact) -> String {
+    let associated_types = contract
+        .associated_types
+        .iter()
+        .map(|(name, ty)| {
+            format!(
+                "{{\"name\":{},\"type\":{}}}",
+                json_str(name),
+                ty.as_ref()
+                    .map_or_else(|| "null".to_string(), |ty| json_str(ty))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let methods = contract
+        .methods
+        .iter()
+        .map(|method| json_str(method))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"trait\":{},\"associated_types\":[{}],\"methods\":[{}]}}",
+        json_str(&contract.trait_name),
+        associated_types,
+        methods,
     )
 }
 
@@ -737,13 +778,28 @@ fn json_ref(r: &SymbolRef) -> String {
         ),
         None => "null".to_string(),
     };
+    let fact_json = r
+        .fact
+        .as_ref()
+        .map(json_compiler_fact)
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"name\":{},\"module\":{},\"scope_identity\":{},\"target\":{},\"span\":{}}}",
+        "{{\"name\":{},\"module\":{},\"scope_identity\":{},\"target\":{},\"fact\":{},\"span\":{}}}",
         json_str(&r.name),
         json_str(&r.module_path),
         scope_json,
         target_json,
+        fact_json,
         json_span(r.span)
+    )
+}
+
+fn json_compiler_fact(fact: &CompilerFact) -> String {
+    format!(
+        "{{\"name\":{},\"kind\":{},\"type\":{}}}",
+        json_str(&fact.name),
+        json_str(&fact.kind),
+        json_str(&fact.type_name),
     )
 }
 
@@ -1048,6 +1104,24 @@ impl TypeDossier {
                     "summary\n  defined: {}:{}..{}\n",
                     def.module_path, def.def_span.start, def.def_span.end
                 ));
+                if let Some(base) = &def.nominal_base {
+                    out.push_str(&format!("nominal type\n  distinct {base}\n"));
+                }
+                if !def.trait_contracts.is_empty() {
+                    out.push_str("trait contracts\n");
+                    for contract in &def.trait_contracts {
+                        out.push_str(&format!("  implements {}\n", contract.trait_name));
+                        for (name, ty) in &contract.associated_types {
+                            match ty {
+                                Some(ty) => out.push_str(&format!("    type {name} = {ty}\n")),
+                                None => out.push_str(&format!("    type {name}\n")),
+                            }
+                        }
+                        for method in &contract.methods {
+                            out.push_str(&format!("    {method}\n"));
+                        }
+                    }
+                }
                 if let Some(signature) = &def.callable_signature {
                     out.push_str(&format!(
                         "failure contract\n  {} ({})\n",
@@ -1175,6 +1249,8 @@ pub(crate) fn convert_defs(
 ) -> Vec<SymbolDef> {
     defs.iter()
         .map(|d| {
+            let (nominal_base, trait_contracts) =
+                contract_metadata(d, bundle, members);
             let view_provenance = view_provenance
                 .get(&d.identity)
                 .map(|map| {
@@ -1214,9 +1290,195 @@ pub(crate) fn convert_defs(
                     _ => Vec::new(),
                 },
                 view_provenance,
+                nominal_base,
+                trait_contracts,
             }
         })
         .collect()
+}
+
+fn contract_metadata(
+    definition: &SymDef,
+    bundle: &ProgramBundle,
+    members: &[MemberFact],
+) -> (Option<String>, Vec<TraitContractFact>) {
+    let Some(module) = bundle.modules.iter().find(|module| {
+        module.display == definition.module_path || module.alias == definition.module_path
+    }) else {
+        return (None, Vec::new());
+    };
+    let Some(item) = find_declaration(&module.items, definition.def_span.into()) else {
+        return (None, Vec::new());
+    };
+    match item {
+        Item::Distinct(distinct) => (
+            Some(distinct.base.name()),
+            trait_contracts_for_owner(&module.items, &distinct.name, members),
+        ),
+        Item::Struct(structure) => (
+            None,
+            trait_contracts_for_owner(&module.items, &structure.name, members),
+        ),
+        Item::Enum(enumeration) => (
+            None,
+            trait_contracts_for_owner(&module.items, &enumeration.name, members),
+        ),
+        Item::Trait(trait_def) => (
+            None,
+            vec![TraitContractFact {
+                trait_name: trait_def.name.clone(),
+                associated_types: trait_def
+                    .assoc_types
+                    .iter()
+                    .map(|(name, _)| (name.clone(), None))
+                    .collect(),
+                methods: member_signatures(members, &trait_def.name, |origin| {
+                    matches!(
+                        origin,
+                        crate::Types::MemberOrigin::TraitRequirement { trait_name }
+                            if trait_name == &trait_def.name
+                    )
+                }),
+            }],
+        ),
+        _ => (None, Vec::new()),
+    }
+}
+
+fn find_declaration<'a>(items: &'a [Item], span: SourceSpan) -> Option<&'a Item> {
+    for item in items {
+        let declaration_span = match item {
+            Item::Distinct(definition) => Some(definition.name_span),
+            Item::Struct(definition) => Some(definition.name_span),
+            Item::Enum(definition) => Some(definition.name_span),
+            Item::Trait(definition) => Some(definition.name_span),
+            _ => None,
+        };
+        if declaration_span.is_some_and(|declaration_span| {
+            let declaration_span: SourceSpan = declaration_span.into();
+            declaration_span == span
+        }) {
+            return Some(item);
+        }
+        let nested = match item {
+            Item::CodeModule(module) => module.body.as_deref(),
+            Item::GenericModule(module) => Some(module.body.as_slice()),
+            _ => None,
+        };
+        if let Some(nested) = nested.and_then(|nested| find_declaration(nested, span)) {
+            return Some(nested);
+        }
+    }
+    None
+}
+
+fn trait_contracts_for_owner(
+    items: &[Item],
+    owner: &str,
+    members: &[MemberFact],
+) -> Vec<TraitContractFact> {
+    let mut contracts = Vec::new();
+    collect_trait_contracts(items, owner, members, &mut contracts);
+    contracts
+}
+
+fn collect_trait_contracts(
+    items: &[Item],
+    owner: &str,
+    members: &[MemberFact],
+    contracts: &mut Vec<TraitContractFact>,
+) {
+    for item in items {
+        match item {
+            Item::Impl(implementation)
+                if implementation
+                    .type_name
+                    .rsplit_once('.')
+                    .map_or(implementation.type_name.as_str(), |(_, leaf)| leaf)
+                    == owner =>
+            {
+                if let Some(trait_name) = &implementation.trait_name {
+                    contracts.push(TraitContractFact {
+                        trait_name: trait_name.clone(),
+                        associated_types: implementation
+                            .assoc_type_impls
+                            .iter()
+                            .map(|(name, _, ty)| (name.clone(), Some(ty.name())))
+                            .collect(),
+                        methods: member_signatures(members, owner, |origin| {
+                            matches!(
+                                origin,
+                                crate::Types::MemberOrigin::TraitImpl { trait_name: implemented }
+                                    if implemented == trait_name
+                            )
+                        }),
+                    });
+                }
+            }
+            Item::Struct(structure) if structure.name == owner => {
+                for implementation in &structure.trait_impls {
+                    contracts.push(TraitContractFact {
+                        trait_name: implementation.trait_name.clone(),
+                        associated_types: implementation
+                            .assoc_type_impls
+                            .iter()
+                            .map(|(name, _, ty)| (name.clone(), Some(ty.name())))
+                            .collect(),
+                        methods: member_signatures(members, owner, |origin| {
+                            matches!(
+                                origin,
+                                crate::Types::MemberOrigin::TraitImpl { trait_name: implemented }
+                                    if implemented == &implementation.trait_name
+                            )
+                        }),
+                    });
+                }
+            }
+            Item::Enum(enumeration) if enumeration.name == owner => {
+                for implementation in &enumeration.trait_impls {
+                    contracts.push(TraitContractFact {
+                        trait_name: implementation.trait_name.clone(),
+                        associated_types: implementation
+                            .assoc_type_impls
+                            .iter()
+                            .map(|(name, _, ty)| (name.clone(), Some(ty.name())))
+                            .collect(),
+                        methods: member_signatures(members, owner, |origin| {
+                            matches!(
+                                origin,
+                                crate::Types::MemberOrigin::TraitImpl { trait_name: implemented }
+                                    if implemented == &implementation.trait_name
+                            )
+                        }),
+                    });
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_trait_contracts(body, owner, members, contracts);
+                }
+            }
+            Item::GenericModule(module) => {
+                collect_trait_contracts(&module.body, owner, members, contracts);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn member_signatures(
+    members: &[MemberFact],
+    owner: &str,
+    matches_origin: impl Fn(&crate::Types::MemberOrigin) -> bool,
+) -> Vec<String> {
+    let mut methods = members
+        .iter()
+        .filter(|member| member.owner == owner && matches_origin(&member.origin))
+        .map(|member| member.signature.clone())
+        .collect::<Vec<_>>();
+    methods.sort();
+    methods.dedup();
+    methods
 }
 
 fn callable_signature(
@@ -1308,6 +1570,7 @@ pub(crate) fn convert_refs(refs: &[SymRef]) -> Vec<SymbolRef> {
             module_path: r.module_path.clone(),
             scope_identity: r.scope_identity.clone(),
             target: r.target.clone(),
+            fact: r.fact.clone(),
             span: r.span.into(),
         })
         .collect()

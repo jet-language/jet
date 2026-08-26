@@ -4,16 +4,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-// `tooling/declared_text_head` was the seventh stem until its example was
-// removed during the checked-text rework. Card #2185 owns restoring both the
-// example and this parity case; see its log.
-const TIER_PARITY_STEMS: [&str; 6] = [
+// The tooling example exercises the ordinary nominal type plus its
+// `CheckedText` implementation through the same AOT and `jet run` paths.
+const TIER_PARITY_STEMS: [&str; 7] = [
     "cli/subcommands",
     "concurrency/freeze_capture",
     "comptime/embed",
     "comptime/embed_bytes",
     "comptime/find",
     "comptime/find_empty",
+    "tooling/checked_text_type",
 ];
 
 fn copy_comptime_fixture(root: &Path, destination: &Path, stem: &str) -> String {

@@ -116,7 +116,7 @@ impl<'a> Parser<'a> {
             ));
         }
         let (mutable, sigil_span) = self.expect_bind_sigil()?;
-        // Bare `name := uninit` — type must ride a `Type{ uninit }` head.
+        // Bare `name := uninit` — an explicit type must precede the literal body.
         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_UNINIT)
             && matches!(
                 self.peek2().kind,
@@ -126,8 +126,8 @@ impl<'a> Parser<'a> {
             let uninit_span = self.peek().span;
             return Err(Diagnostic::error(
                 "E0421",
-                "`uninit` needs a typed-literal head".to_string(),
-                "an uninitialized binding has no value to infer its type from, so the type must head the literal".to_string(),
+                "`uninit` needs an explicit type".to_string(),
+                "an uninitialized binding has no value to infer its type from, so the type must appear before the literal body".to_string(),
                 format!(
                     "write `{name} {} <Type>{{ {} }}`, e.g. `buffer := [U8#4096]{{ {} }}`",
                     Syntax::SIGIL_BIND_MUT,

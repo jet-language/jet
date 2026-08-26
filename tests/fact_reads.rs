@@ -231,6 +231,24 @@ fn retired_origin_method_is_rejected_for_every_tracked_value_type() {
 }
 
 #[test]
+fn retired_origin_method_preempts_root_dispatch() {
+    let diags = diagnostics(
+        "fn origin(#Root value: Int) Int -> value\n\nfn run() {\n    #Track speed :: 3\n    print(speed.origin())\n}\n",
+    );
+    assert_eq!(
+        diags.iter().filter(|diagnostic| diagnostic.code == "E0311").count(),
+        1,
+        "tracked `.origin()` must be rejected before #Root compatibility dispatch: {diags:#?}"
+    );
+    assert!(!diags.iter().any(|diagnostic| diagnostic.code == "E0105"), "{diags:#?}");
+    assert!(diags.iter().any(|diagnostic| {
+        diagnostic.code == "E0311"
+            && diagnostic.what == "`.origin()` is retired for tracked values"
+            && diagnostic.fix == "read `value.@origin` in comptime code"
+    }));
+}
+
+#[test]
 fn parser_preserves_the_typed_fact_fixture() {
     let (tokens, lexer_diagnostics) = jet::Lexer::lex(FIXTURE);
     assert!(lexer_diagnostics.is_empty(), "lex: {lexer_diagnostics:?}");

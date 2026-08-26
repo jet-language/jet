@@ -4739,7 +4739,7 @@ fn run() {
     assert_eq!(aot, expected, "AOT fixed-width drift");
     let _ = fs::remove_dir_all(&dir);
 
-    for stem in ["lowlevel/sized_integers", "types/typed_literal_head"] {
+    for stem in ["lowlevel/sized_integers", "types/typed_literal_forms"] {
         let example = example_path(stem);
         assert_cranelift_three_way(&example, stem);
     }

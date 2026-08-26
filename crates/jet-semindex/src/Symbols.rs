@@ -10,7 +10,7 @@ use jet_foundation::AST::ProgramBundle;
 use jet_foundation::{Collections, AST};
 
 use crate::Build::{function_parameter_parts, SymKind, SymbolDB};
-use crate::Types::SourceSpan;
+use crate::Types::{CompilerFact, MemberOrigin, SourceSpan, TraitContractFact};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemanticSymbolKind {
@@ -475,6 +475,35 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
         if let Some(marker_signature) = marker_declaration_signature(bundle, def) {
             signature = marker_signature;
         }
+        if let Some(metadata) = db
+            .index
+            .definitions()
+            .iter()
+            .find(|definition| definition.identity == def.identity)
+        {
+            if let Some(base) = &metadata.nominal_base {
+                signature = format!("type {display_name} :: distinct {}", display_type(base));
+            }
+            if !metadata.trait_contracts.is_empty() {
+                signature.push('\n');
+                signature.push_str(&render_trait_contracts(
+                    &metadata.trait_contracts,
+                    matches!(def.kind, SymKind::Trait),
+                    &display_type,
+                ));
+            }
+        }
+        if let Some(member) = db.members.iter().find(|member| member.identity == def.identity) {
+            let trait_name = match &member.origin {
+                MemberOrigin::TraitImpl { trait_name }
+                | MemberOrigin::TraitRequirement { trait_name } => Some(trait_name),
+                _ => None,
+            };
+            if let Some(trait_name) = trait_name {
+                signature.push_str("\ntrait: ");
+                signature.push_str(trait_name);
+            }
+        }
         let mut docs = sources
             .get(def.module_path.as_str())
             .map(|source| source_docs(source, def.def_span.start))
@@ -540,6 +569,29 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
         );
     }
     SemanticSymbolIndex::new(symbols)
+}
+
+fn render_trait_contracts(
+    contracts: &[TraitContractFact],
+    declaration: bool,
+    display_type: &dyn Fn(&str) -> String,
+) -> String {
+    contracts
+        .iter()
+        .map(|contract| {
+            let prefix = if declaration { "contract" } else { "implements" };
+            let mut lines = vec![format!("{prefix} {}", display_type(&contract.trait_name))];
+            lines.extend(contract.associated_types.iter().map(|(name, ty)| {
+                ty.as_ref().map_or_else(
+                    || format!("  type {name}"),
+                    |ty| format!("  type {name} = {}", display_type(ty)),
+                )
+            }));
+            lines.extend(contract.methods.iter().map(|method| format!("  {method}")));
+            lines.join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn collect_import_symbols(
@@ -768,6 +820,7 @@ fn collect_distinct_conversion_symbols(
                 &def.name,
                 &def.base,
                 def.range.is_some(),
+                checked_text_error(items, &def.name),
                 module_path,
                 scope_identity,
                 def.name_span.into(),
@@ -779,6 +832,7 @@ fn collect_distinct_conversion_symbols(
                         &def.name,
                         &def.base,
                         false,
+                        None,
                         module_path,
                         scope_identity,
                         def.name_span.into(),
@@ -834,6 +888,7 @@ fn distinct_conversion_symbols(
     owner: &str,
     base: &AST::Type,
     ranged: bool,
+    checked_text_error: Option<String>,
     module_path: &str,
     scope_identity: &str,
     span: SourceSpan,
@@ -853,11 +908,28 @@ fn distinct_conversion_symbols(
     methods
         .into_iter()
         .map(|(method, source)| {
-            let fallible = ranged
+            let fallible = checked_text_error.is_some()
+                || ranged
                 || Collections::numeric_conversion_return(base, &method, 1)
                     .flatten()
                     .is_some_and(|ty| matches!(ty, AST::Type::Result { .. }));
             let qualified_name = format!("{owner}.{method}");
+            let (signature, summary) = if let Some(error) = &checked_text_error {
+                (
+                    format!(
+                        "{owner}.{method}(value: {source}) -> {owner}\nfailure: {error} (CheckedText)"
+                    ),
+                    format!("Validates {source} through {owner}.CheckedText."),
+                )
+            } else {
+                (
+                    format!(
+                        "{owner}.{method}(value: {source}) -> {owner}{}",
+                        if fallible { " !String" } else { "" }
+                    ),
+                    format!("Converts {source} to {owner}."),
+                )
+            };
             SemanticSymbol {
                 identity: format!("source:method:{scope_identity}:{qualified_name}"),
                 name: method.to_string(),
@@ -865,11 +937,8 @@ fn distinct_conversion_symbols(
                 owner: Some(owner.to_string()),
                 module_path: module_path.to_string(),
                 kind: SemanticSymbolKind::Member,
-                signature: format!(
-                    "{owner}.{method}(value: {source}) -> {owner}{}",
-                    if fallible { " !String" } else { "" }
-                ),
-                summary: format!("Converts {source} to {owner}."),
+                signature,
+                summary,
                 examples: Vec::new(),
                 provenance: SemanticProvenance::Source {
                     module_path: module_path.to_string(),
@@ -879,6 +948,44 @@ fn distinct_conversion_symbols(
             }
         })
         .collect()
+}
+
+fn checked_text_error(items: &[AST::Item], owner: &str) -> Option<String> {
+    for item in items {
+        match item {
+            AST::Item::Impl(implementation)
+                if type_leaf(&implementation.type_name) == owner
+                    && implementation.trait_name.as_deref()
+                        == Some(jet_foundation::Generics::CHECKED_TEXT) =>
+            {
+                if let Some((_, _, ty)) = implementation
+                    .assoc_type_impls
+                    .iter()
+                    .find(|(name, _, _)| name == "Error")
+                {
+                    return Some(ty.name());
+                }
+            }
+            AST::Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    if let Some(error) = checked_text_error(body, owner) {
+                        return Some(error);
+                    }
+                }
+            }
+            AST::Item::GenericModule(module) => {
+                if let Some(error) = checked_text_error(&module.body, owner) {
+                    return Some(error);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn type_leaf(name: &str) -> &str {
+    name.rsplit_once('.').map_or(name, |(_, leaf)| leaf)
 }
 
 fn lexical_scope_for_def(
@@ -1199,6 +1306,27 @@ fn language_symbols() -> Vec<SemanticSymbol> {
             examples: Vec::new(),
             provenance: SemanticProvenance::Builtin {
                 module: "core".to_string(),
+            },
+            span: None,
+            lexical_scope: None,
+        });
+    }
+    for member in Syntax::fact_read_members() {
+        let Some(fact) = CompilerFact::from_member(&member) else {
+            continue;
+        };
+        symbols.push(SemanticSymbol {
+            identity: format!("builtin:fact:{}", fact.name),
+            name: fact.name.clone(),
+            qualified_name: fact.name.clone(),
+            owner: None,
+            module_path: "compiler".to_string(),
+            kind: SemanticSymbolKind::Member,
+            signature: format!("{}: {}", fact.name, fact.type_name),
+            summary: "Compiler-owned typed fact.".to_string(),
+            examples: Vec::new(),
+            provenance: SemanticProvenance::Builtin {
+                module: "compiler".to_string(),
             },
             span: None,
             lexical_scope: None,

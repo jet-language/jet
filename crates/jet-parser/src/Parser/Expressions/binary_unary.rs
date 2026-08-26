@@ -4,18 +4,7 @@ use super::super::{
 };
 
 fn is_fallback_exit(stmt: &Stmt) -> bool {
-    match stmt {
-        Stmt::Return(..)
-        | Stmt::Break(..)
-        | Stmt::BreakValue(..)
-        | Stmt::Continue(..)
-        | Stmt::BreakLabel(..)
-        | Stmt::BreakLabelValue(..)
-        | Stmt::ContinueLabel(..) => true,
-        Stmt::Expr(Expr::Todo { .. }) => true,
-        Stmt::Expr(Expr::Call(call)) => call.name == Syntax::BUILTIN_PANIC,
-        _ => false,
-    }
+    crate::Parser::statement_definitely_exits_value_block(stmt)
 }
 
 fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
@@ -260,23 +249,33 @@ impl<'a> Parser<'a> {
                 {
                     let semi = self.peek().span;
                     if semi.start != semi.end {
-                        return Err(Diagnostic::error(
-                            "E0114",
-                            "this fallback ends with a semicolon-terminated expression"
-                                .to_string(),
-                            "a value-expected fallback block must end with one unadorned expression; a semicolon-terminated expression yields unit"
-                                .to_string(),
-                            "remove the semicolon, or use `return ...` for an early exit"
-                                .to_string(),
-                            Some(value.span()),
-                        ));
+                        let diverges = matches!(value.without_parens(), Expr::Todo { .. })
+                            || matches!(
+                                value.without_parens(),
+                                Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
+                            );
+                        if !diverges {
+                            return Err(Diagnostic::error(
+                                "E0114",
+                                "this fallback ends with a semicolon-terminated expression"
+                                    .to_string(),
+                                "a value-expected fallback block must end with one unadorned expression; a semicolon-terminated expression yields unit"
+                                    .to_string(),
+                                "remove the semicolon, or use `return ...` for an early exit"
+                                    .to_string(),
+                                Some(value.span()),
+                            ));
+                        }
                     }
                     self.bump();
                 }
                 if matches!(self.peek().kind, TokKind::RBrace) {
                     let end = self.bump().span.end;
-                    let is_exit = matches!(&value, Expr::Todo { .. })
-                        || matches!(&value, Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC);
+                    let is_exit = matches!(value.without_parens(), Expr::Todo { .. })
+                        || matches!(
+                            value.without_parens(),
+                            Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
+                        );
                     if is_exit {
                         let mut body = body;
                         body.push(Stmt::Expr(value));

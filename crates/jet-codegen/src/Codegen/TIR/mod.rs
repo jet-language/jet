@@ -1024,6 +1024,7 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
         let Some(params) = items.iter().find_map(|item| match item {
             Item::Struct(def) if def.name == name => Some(def.type_params.as_slice()),
             Item::Enum(def) if def.name == name => Some(def.type_params.as_slice()),
+            Item::Distinct(def) if def.name == name => Some(&[]),
             _ => None,
         }) else {
             continue;
@@ -1054,7 +1055,14 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                     };
                     match &imp.trait_name {
                         None => (method, None, false),
-                        Some(t) if t == crate::Generics::ENCODE || t == crate::Generics::DECODE => {
+                        Some(t)
+                            if matches!(
+                                t.as_str(),
+                                crate::Generics::ENCODE
+                                    | crate::Generics::DECODE
+                                    | crate::Generics::CHECKED_TEXT
+                            ) =>
+                        {
                             (method, Some(t.as_str()), imp.is_generated_serde)
                         }
                         Some(_) => continue,

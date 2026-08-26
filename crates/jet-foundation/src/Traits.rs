@@ -267,7 +267,7 @@ impl TraitRegistry {
     }
 
     pub fn register_items(&mut self, items: &[Item], diags: &mut Vec<Diagnostic>) {
-        self.register_synthetic_checked_text();
+        self.register_prelude_checked_text();
         // Register nominal names before consuming declarations. Error
         // conversions may appear before the type declarations they mention.
         for item in items {
@@ -283,6 +283,9 @@ impl TraitRegistry {
                 }
                 Item::Distinct(d) => {
                     self.local_types.insert(d.name.clone());
+                    self.distinct_bases
+                        .entry(d.name.clone())
+                        .or_insert_with(|| d.base.clone());
                 }
                 Item::UnitFamily(family) => {
                     for d in family.distinct_defs() {
@@ -489,24 +492,83 @@ impl TraitRegistry {
             diags.push(e0907(Generics::CHECKED_TEXT, "check", span));
             return;
         };
-        let error = assoc_type_impls
+        let error_impls: Vec<_> = assoc_type_impls
             .iter()
-            .find(|(name, _, _)| name == "Error")
-            .map(|(_, _, ty)| ty.clone());
-        if error.is_none() {
+            .filter(|(name, _, _)| name == "Error")
+            .collect();
+        let error = error_impls.first().map(|(_, _, ty)| (*ty).clone());
+        if error_impls.is_empty() {
             diags.push(e0913(Generics::CHECKED_TEXT, &["Error".to_string()], span));
         }
-        if assoc_type_impls.iter().any(|(name, _, _)| name != "Error") {
-            diags.push(e0907(Generics::CHECKED_TEXT, "check", span));
+        for (_, assoc_span, _) in error_impls.iter().skip(1) {
+            diags.push(e0907(
+                Generics::CHECKED_TEXT,
+                "type Error",
+                *assoc_span,
+            ));
         }
-        let check = methods.iter().find(|method| method.name == "check");
-        let hole = methods.iter().find(|method| method.name == "encode_hole");
+        for (name, assoc_span, _) in assoc_type_impls
+            .iter()
+            .filter(|(name, _, _)| name != "Error")
+        {
+            diags.push(e0907(
+                Generics::CHECKED_TEXT,
+                &format!("type {name}"),
+                *assoc_span,
+            ));
+        }
+        let check_methods: Vec<_> = methods
+            .iter()
+            .filter(|method| method.name == "check")
+            .collect();
+        let hole_methods: Vec<_> = methods
+            .iter()
+            .filter(|method| method.name == "encode_hole")
+            .collect();
+        if check_methods.is_empty() {
+            diags.push(e0906(
+                Generics::CHECKED_TEXT,
+                &["check".to_string()],
+                span,
+            ));
+        }
+        if hole_methods.is_empty() {
+            diags.push(e0906(
+                Generics::CHECKED_TEXT,
+                &["encode_hole".to_string()],
+                span,
+            ));
+        }
+        for method in check_methods.iter().skip(1) {
+            diags.push(e0907(
+                Generics::CHECKED_TEXT,
+                "check",
+                method.name_span,
+            ));
+        }
+        for method in hole_methods.iter().skip(1) {
+            diags.push(e0907(
+                Generics::CHECKED_TEXT,
+                "encode_hole",
+                method.name_span,
+            ));
+        }
+        let check = check_methods.first().copied();
+        let hole = hole_methods.first().copied();
         let check_ok = check.is_some_and(|method| {
-            method.params.len() == 1
+            method.type_params.is_empty()
+                && method.params.len() == 1
                 && method.params[0].name != Syntax::KW_SELF
                 && method.params[0].convention == AccessConvention::Read
+                && !method.params[0].variadic
+                && method.params[0].default.is_none()
+                && method.params[0].public_label.is_none()
                 && method.params[0].ty == Type::String
                 && method.is_pure
+                && method
+                    .declared_effects
+                    .as_ref()
+                    .is_some_and(Vec::is_empty)
                 && matches!(
                     &method.return_type,
                     Some(Type::Result { ok, err })
@@ -518,35 +580,45 @@ impl TraitRegistry {
             method.params.len() == 1
                 && method.params[0].name != Syntax::KW_SELF
                 && method.params[0].convention == AccessConvention::Read
+                && !method.params[0].variadic
+                && method.params[0].default.is_none()
+                && method.params[0].public_label.is_none()
                 && method.params[0].ty == Type::Named("T".to_string())
                 && method.return_type == Some(Type::String)
                 && method.is_pure
+                && method
+                    .declared_effects
+                    .as_ref()
+                    .is_some_and(Vec::is_empty)
                 && method.type_params.len() == 1
                 && method.type_params[0].name == "T"
                 && method.type_params[0]
                     .bounds
-                    .iter()
-                    .any(|bound| bound == PRINTABLE)
+                    == [PRINTABLE.to_string()]
         });
-        if !check_ok {
+        if check.is_some() && !check_ok {
             diags.push(e0907(
                 Generics::CHECKED_TEXT,
                 "check",
                 check.map_or(span, |method| method.name_span),
             ));
         }
-        if !hole_ok {
+        if hole.is_some() && !hole_ok {
             diags.push(e0907(
                 Generics::CHECKED_TEXT,
                 "encode_hole",
                 hole.map_or(span, |method| method.name_span),
             ));
         }
-        if methods
+        for method in methods
             .iter()
-            .any(|method| !matches!(method.name.as_str(), "check" | "encode_hole"))
+            .filter(|method| !matches!(method.name.as_str(), "check" | "encode_hole"))
         {
-            diags.push(e0907(Generics::CHECKED_TEXT, "check", span));
+            diags.push(e0907(
+                Generics::CHECKED_TEXT,
+                &method.name,
+                method.name_span,
+            ));
         }
     }
 
@@ -2759,8 +2831,9 @@ impl TraitRegistry {
     /// D-TEXTHEAD-TYPE1=A: the canonical Prelude contract is represented in
     /// the same trait table as every user trait. The source declaration is
     /// documented in `core/prelude.jet`; this metadata keeps all module
-    /// registries on one contract without injecting a hidden marker item.
-    fn register_synthetic_checked_text(&mut self) {
+    /// registries on one ordinary Prelude contract without injecting a hidden
+    /// marker item.
+    fn register_prelude_checked_text(&mut self) {
         if self.traits.contains_key(Generics::CHECKED_TEXT) {
             return;
         }

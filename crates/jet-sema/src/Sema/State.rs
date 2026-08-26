@@ -31,7 +31,7 @@ use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::FlowFacts::{FlowFacts, Plane};
 use crate::Sema::{KnowledgeGate, KnowledgePlane};
 use crate::Syntax::edit_distance;
-use crate::AST::{Call, Expr, Func, Item, LValue, Stmt};
+use crate::AST::{Call, Expr, Func, Item, LValue, Stmt, Type};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// D-STATE1: the state a value is in. One plane of the checker's flow facts —
@@ -211,6 +211,37 @@ impl StateTable {
         let plane = parts.next()?;
         let owner = parts.next()?;
         (plane == "State" && owner == type_name).then_some(leaf)
+    }
+
+    fn state_for_owner(owner: Option<&str>, state: &str) -> String {
+        owner
+            .and_then(|owner| Self::state_leaf(owner, state))
+            .map(str::to_string)
+            .unwrap_or_else(|| state.to_string())
+    }
+
+    fn nominal_type_name(ty: &Type) -> Option<&str> {
+        match ty {
+            Type::Named(name) | Type::Apply { name, .. } => Some(name),
+            Type::Tagged { inner, .. } => Self::nominal_type_name(inner),
+            _ => None,
+        }
+    }
+
+    fn free_fn_state_owner<'a>(f: &'a Func, entry: bool) -> Option<&'a str> {
+        let param_owner = f
+            .params
+            .first()
+            .and_then(|param| Self::nominal_type_name(&param.ty));
+        let return_owner = f
+            .return_type
+            .as_ref()
+            .and_then(|ty| Self::nominal_type_name(ty));
+        if entry {
+            return_owner.or(param_owner)
+        } else {
+            param_owner.or(return_owner)
+        }
     }
     /// Register every typestate marker in `items` into this table. Methods key as
     /// `Type::method`; entry transitions (`_ -> To`) also register under
@@ -459,11 +490,22 @@ impl StateTable {
 
     fn add_free_fn(&mut self, f: &Func) {
         if let Some((state, _)) = &f.state_requires {
-            self.fn_requires.insert(f.name.clone(), state.clone());
+            let owner = Self::free_fn_state_owner(f, false);
+            self.fn_requires
+                .insert(f.name.clone(), Self::state_for_owner(owner, state));
         }
         if let Some(tr) = &f.state_transition {
+            let owner = Self::free_fn_state_owner(f, tr.from.is_none());
             self.fn_transitions
-                .insert(f.name.clone(), (tr.from.clone(), tr.to.clone()));
+                .insert(
+                    f.name.clone(),
+                    (
+                        tr.from
+                            .as_deref()
+                            .map(|state| Self::state_for_owner(owner, state)),
+                        Self::state_for_owner(owner, &tr.to),
+                    ),
+                );
         }
     }
 
@@ -1125,6 +1167,7 @@ impl<'a> StateCtx<'a> {
 /// that itself transitions starts from the declared state.
 pub fn check_func_state(
     f: &Func,
+    owner: Option<&str>,
     tbl: &StateTable,
     existing_diags: &[Diagnostic],
 ) -> Vec<Diagnostic> {
@@ -1135,8 +1178,13 @@ pub fn check_func_state(
         let incoming = f
             .state_requires
             .as_ref()
-            .map(|(s, _)| s.clone())
-            .or_else(|| f.state_transition.as_ref().and_then(|t| t.from.clone()));
+            .map(|(s, _)| StateTable::state_for_owner(owner, s))
+            .or_else(|| {
+                f.state_transition
+                    .as_ref()
+                    .and_then(|t| t.from.as_deref())
+                    .map(|state| StateTable::state_for_owner(owner, state))
+            });
         if let Some(s) = incoming {
             ctx.flow.states.set(crate::Syntax::KW_SELF, s);
         }
@@ -1150,30 +1198,30 @@ pub fn check_items_state(items: &[Item], tbl: &StateTable, diags: &mut Vec<Diagn
     for item in items {
         match item {
             Item::Func(f) => {
-                let new = check_func_state(f, tbl, diags.as_slice());
+                let new = check_func_state(f, None, tbl, diags.as_slice());
                 diags.extend(new);
             }
             Item::Impl(i) => {
                 for m in &i.methods {
-                    let new = check_func_state(m, tbl, diags.as_slice());
+                    let new = check_func_state(m, Some(&i.type_name), tbl, diags.as_slice());
                     diags.extend(new);
                 }
             }
             Item::Struct(s) => {
                 for m in &s.methods {
-                    let new = check_func_state(m, tbl, diags.as_slice());
+                    let new = check_func_state(m, Some(&s.name), tbl, diags.as_slice());
                     diags.extend(new);
                 }
                 for block in &s.trait_impls {
                     for m in &block.methods {
-                        let new = check_func_state(m, tbl, diags.as_slice());
+                        let new = check_func_state(m, Some(&s.name), tbl, diags.as_slice());
                         diags.extend(new);
                     }
                 }
             }
             Item::Enum(e) => {
                 for m in &e.methods {
-                    let new = check_func_state(m, tbl, diags.as_slice());
+                    let new = check_func_state(m, Some(&e.name), tbl, diags.as_slice());
                     diags.extend(new);
                 }
             }

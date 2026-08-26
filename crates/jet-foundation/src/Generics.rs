@@ -79,7 +79,7 @@ pub fn rust_trait_bound(trait_name: &str) -> Option<&'static str> {
         SUB => Some("__jet_Sub"),
         MUL => Some("__jet_Mul"),
         DIV => Some("__jet_Div"),
-        CHECKED_TEXT => Some("__jet_CheckedText"),
+        CHECKED_TEXT => Some("CheckedText"),
         _ => None,
     }
 }

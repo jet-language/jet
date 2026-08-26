@@ -56,6 +56,14 @@ fn exits_current_block(stmt: &Stmt) -> bool {
             | Stmt::BreakLabelValue(..)
             | Stmt::Continue(..)
             | Stmt::ContinueLabel(..)
+    ) || matches!(
+        stmt,
+        Stmt::Expr(expr)
+            if matches!(expr.without_parens(), Expr::Todo { .. })
+                || matches!(
+                    expr.without_parens(),
+                    Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
+                )
     )
 }
 
@@ -164,6 +172,7 @@ impl<'a> Checker<'a> {
         &mut self,
         before_loop: &crate::Sema::FlowFacts::FlowFacts,
         after_body: &crate::Sema::FlowFacts::FlowFacts,
+        may_skip: bool,
     ) {
         let mut break_paths = self
             .loop_break_flows
@@ -175,11 +184,22 @@ impl<'a> Checker<'a> {
                 path.leave_scope();
             }
         }
-        self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop_with_breaks(
-            before_loop,
-            after_body,
-            &break_paths,
-        );
+        if may_skip {
+            self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop_with_breaks(
+                before_loop,
+                after_body,
+                &break_paths,
+            );
+        } else {
+            break_paths.retain(|path| path.reachable);
+            self.flow = if break_paths.is_empty() {
+                let mut exited = before_loop.clone();
+                exited.reachable = false;
+                exited
+            } else {
+                crate::Sema::FlowFacts::FlowFacts::merge_paths(before_loop, &break_paths)
+            };
+        }
     }
 
     fn check_break_value(
@@ -1962,7 +1982,11 @@ impl<'a> Checker<'a> {
                 self.check_block(body, true);
                 self.arrow_loop_body = previous_arrow_loop_body;
                 let after_body = self.flow.clone();
-                self.join_loop_flow(&before_loop, &after_body);
+                self.join_loop_flow(
+                    &before_loop,
+                    &after_body,
+                    !matches!(cond.without_parens(), Expr::Bool(true, _)),
+                );
                 self.loop_depth -= 1;
                 if after_body.reachable {
                     if let Some((name, span)) = drained_collection(cond, body) {
@@ -2436,7 +2460,7 @@ impl<'a> Checker<'a> {
                 }
                 self.pop_loop_value_frame();
                 let after_body = self.flow.clone();
-                self.join_loop_flow(&before_loop, &after_body);
+                self.join_loop_flow(&before_loop, &after_body, true);
                 if label.is_some() {
                     self.loop_labels.pop();
                 }
@@ -2512,7 +2536,11 @@ impl<'a> Checker<'a> {
                     self.check_stmt(step.as_mut());
                 }
                 let after_body = self.flow.clone();
-                self.join_loop_flow(&before_loop, &after_body);
+                self.join_loop_flow(
+                    &before_loop,
+                    &after_body,
+                    !matches!(cond.without_parens(), Expr::Bool(true, _)),
+                );
                 self.loop_depth -= 1;
                 self.pop_loop_value_frame();
                 self.pop_scope();
@@ -2541,7 +2569,7 @@ impl<'a> Checker<'a> {
                 self.check_block(inner, true);
                 self.arrow_loop_body = previous_arrow_loop_body;
                 let after_body = self.flow.clone();
-                self.join_loop_flow(&before_loop, &after_body);
+                self.join_loop_flow(&before_loop, &after_body, false);
                 self.loop_depth -= 1;
                 self.pop_loop_value_frame();
                 if label.is_some() {

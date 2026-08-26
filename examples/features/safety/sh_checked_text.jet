@@ -1,0 +1,11 @@
+// D-FFI-SH1: Sh is a library-defined nominal String-backed type with an
+// ordinary `CheckedText` implementation. Literal words are argv items;
+// each hole is exactly one argv item, regardless of spaces or shell metacharacters.
+use core.process as process
+
+fn run() ! {
+    value :: "two words;*.jet"
+    cmd :: Sh{"printf <%s> {value}"}
+    result :: process.run(cmd) ?? return Err("command failed")
+    print(result.output)
+}

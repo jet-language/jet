@@ -4,7 +4,7 @@
 //! checks a bundle, asks this module for a projection, and chooses an output
 //! format.  It does not walk the AST a second time.
 
-use crate::Types::SemIndex;
+use crate::Types::{SemIndex, TraitContractFact};
 use jet_foundation::AST::{Item, ProgramBundle};
 use jet_foundation::Diagnostics::Span;
 use std::collections::BTreeSet;
@@ -149,6 +149,7 @@ pub fn build_doc_graph(bundle: &ProgramBundle, index: &SemIndex) -> DocGraph {
     }
 
     enrich_callable_contracts(&mut graph.items, index);
+    enrich_type_contracts(&mut graph.items, index);
 
     graph.modules.sort_by(|left, right| {
         left.path
@@ -1103,6 +1104,34 @@ fn enrich_callable_contracts(items: &mut [DocItem], index: &SemIndex) {
         item.signature.push_str(&signature.failure_source);
         item.signature.push(')');
     }
+}
+
+fn enrich_type_contracts(items: &mut [DocItem], index: &SemIndex) {
+    for item in items.iter_mut().filter(|item| item.kind == "distinct") {
+        let Some(definition) = index.definitions().iter().find(|definition| {
+            definition.name == item.name
+                && definition.module_path == item.module
+                && definition.nominal_base.is_some()
+        }) else {
+            continue;
+        };
+        for contract in &definition.trait_contracts {
+            item.signature.push('\n');
+            item.signature.push_str(&render_trait_contract(contract));
+        }
+    }
+}
+
+fn render_trait_contract(contract: &TraitContractFact) -> String {
+    let mut lines = vec![format!("implements {}", contract.trait_name)];
+    lines.extend(contract.associated_types.iter().map(|(name, ty)| {
+        ty.as_ref().map_or_else(
+            || format!("  type {name}"),
+            |ty| format!("  type {name} = {ty}"),
+        )
+    }));
+    lines.extend(contract.methods.iter().map(|method| format!("  {method}")));
+    lines.join("\n")
 }
 
 fn discover_doctests(

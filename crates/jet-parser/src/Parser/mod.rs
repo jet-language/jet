@@ -26,6 +26,110 @@ mod Modules;
 mod Statements;
 mod Types;
 
+/// D-TAIL-RETURN1=A: value-block parsers accept a final control statement
+/// only when it cannot fall through to the closing brace. Keep this structural
+/// check beside the parser so value branches and fallback blocks use one rule.
+pub(crate) fn statement_definitely_exits_value_block(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Return(..)
+        | Stmt::Break(..)
+        | Stmt::BreakValue(..)
+        | Stmt::Continue(..)
+        | Stmt::BreakLabel(..)
+        | Stmt::BreakLabelValue(..)
+        | Stmt::ContinueLabel(..) => true,
+        Stmt::Expr(expr) => {
+            matches!(expr.without_parens(), Expr::Todo { .. })
+                || matches!(
+                    expr.without_parens(),
+                    Expr::Call(Call { name, .. }) if name == Syntax::BUILTIN_PANIC
+                )
+        }
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            span,
+        } => {
+            let fallback_exits = match else_body.as_deref() {
+                Some(body) => block_definitely_exits_value_block(body),
+                None => !crate::AST::is_subjectless_guard(subject, *span),
+            };
+            !arms.is_empty()
+                && arms
+                    .iter()
+                    .all(|arm| block_definitely_exits_value_block(&arm.body))
+                && fallback_exits
+        }
+        Stmt::Loop { body, .. } => {
+            !loop_body_can_break(body)
+        }
+        Stmt::While { cond, body, .. }
+            if matches!(cond.without_parens(), Expr::Bool(true, _)) =>
+        {
+            !loop_body_can_break(body)
+        }
+        Stmt::CountedLoop { cond, body, .. }
+            if matches!(cond.without_parens(), Expr::Bool(true, _)) =>
+        {
+            !loop_body_can_break(body)
+        }
+        _ => false,
+    }
+}
+
+fn block_definitely_exits_value_block(stmts: &[Stmt]) -> bool {
+    stmts
+        .iter()
+        .any(statement_definitely_exits_value_block)
+}
+
+fn loop_body_can_break(stmts: &[Stmt]) -> bool {
+    loop_body_can_break_inner(stmts, &[], true)
+}
+
+fn loop_body_can_break_inner(
+    stmts: &[Stmt],
+    nested_labels: &[&str],
+    allow_unlabelled: bool,
+) -> bool {
+    for stmt in stmts {
+        let can_break = match stmt {
+            Stmt::Break(..) | Stmt::BreakValue(..) => allow_unlabelled,
+            Stmt::BreakLabel(name, ..) | Stmt::BreakLabelValue(name, ..) => {
+                !nested_labels
+                    .iter()
+                    .any(|label| *label == name.as_str())
+            }
+            Stmt::Switch {
+                arms, else_body, ..
+            } => arms.iter().any(|arm| {
+                loop_body_can_break_inner(&arm.body, nested_labels, allow_unlabelled)
+            }) || else_body.as_deref().is_some_and(|body| {
+                loop_body_can_break_inner(body, nested_labels, allow_unlabelled)
+            }),
+            Stmt::Loop { body, label, .. }
+            | Stmt::While { body, label, .. }
+            | Stmt::For { body, label, .. }
+            | Stmt::CountedLoop { body, label, .. } => {
+                let mut nested = nested_labels.to_vec();
+                if let Some((label, _)) = label {
+                    nested.push(label.as_str());
+                }
+                loop_body_can_break_inner(body, &nested, false)
+            }
+            _ => false,
+        };
+        if can_break {
+            return true;
+        }
+        if statement_definitely_exits_value_block(stmt) {
+            return false;
+        }
+    }
+    false
+}
+
 pub fn parse(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
     parse_inner(toks, false, false, None)
 }

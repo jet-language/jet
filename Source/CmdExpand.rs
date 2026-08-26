@@ -998,11 +998,12 @@ fn render_origin(
         .map(|row| {
             let (line, column) = jet::Diagnostics::span_line_col(&row.source, row.span.start);
             format!(
-                "{}:{}:{}   {}.@origin   OriginInfo?={}",
+                "{}:{}:{}   {}.@origin   {}={}",
                 row.module,
                 line,
                 column,
                 row.receiver,
+                origin_fact_type(),
                 row.origin.jet_show()
             )
         })
@@ -1021,13 +1022,19 @@ fn render_origin_json(
             expand_object(vec![
                 ("receiver", expand_string(&row.receiver)),
                 ("fact", expand_string("@origin")),
-                ("type", expand_string("OriginInfo?")),
+                ("type", expand_string(origin_fact_type())),
                 ("source", expand_string(&row.module)),
                 ("span", expand_span(row.span, location)),
                 ("value", ct_to_expand(&row.origin)),
             ])
         })
         .collect()
+}
+
+fn origin_fact_type() -> &'static str {
+    jet_foundation::Syntax::fact_read_kind(jet_foundation::Syntax::COMPILER_FACT_ORIGIN)
+        .and_then(|read| read.public_read_type())
+        .expect("origin fact has a public read type")
 }
 
 fn render_inline_json(

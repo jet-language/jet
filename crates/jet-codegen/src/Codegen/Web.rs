@@ -4549,7 +4549,10 @@ fn wasm_emit_call_arg(
     // S48: same Rust slot rule as `emit_tir_call_args` — a concrete value
     // entering a trait value slot is boxed before any borrow wrapper.
     if let Some(trait_name) = &arg.box_as_trait {
-        value = format!("Box::new({value}) as Box<dyn {}>", mangle(trait_name));
+        value = format!(
+            "Box::new({value}) as Box<dyn {}>",
+            crate::Codegen::rust_trait_name(trait_name)
+        );
     }
     if arg.fn_coerce.is_some() {
         return Err(());
@@ -5695,7 +5698,10 @@ fn wasm_emit_call_arg_value(arg: &TIR::TCallArg, mut value: String) -> Result<St
         );
     }
     if let Some(trait_name) = &arg.box_as_trait {
-        value = format!("Box::new({value}) as Box<dyn {}>", mangle(trait_name));
+        value = format!(
+            "Box::new({value}) as Box<dyn {}>",
+            crate::Codegen::rust_trait_name(trait_name)
+        );
     }
     if arg.fn_coerce.is_some() {
         return Err(());

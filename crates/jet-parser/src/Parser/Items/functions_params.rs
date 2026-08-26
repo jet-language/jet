@@ -189,13 +189,12 @@ impl<'a> Parser<'a> {
             }
             _ => self.parse_optional_function_body_marker(),
         };
-        if let Some(marker_span) = body_marker_span {
+        if body_marker_span.is_some() {
             let value_body = !matches!(self.peek().kind, TokKind::LBrace)
                 || (!effect_body_marker
                     && self.brace_starts_record()
                     && !matches!(self.peek2().kind, TokKind::RBrace));
             if value_body {
-                let start = marker_span.start;
                 // A one-expression marker accepts a field-led brace as an
                 // inferred record literal. Statement-shaped braces are
                 // callable blocks, including `return` bodies.
@@ -207,8 +206,10 @@ impl<'a> Parser<'a> {
                 } else {
                     expr_end
                 };
-                let ret_span = Span::new(start, end);
-                let body = vec![crate::AST::Stmt::Return(Some(expr), ret_span)];
+                // Keep the authored expression as an expression statement. A
+                // value-expected callable body goes through the same sema and
+                // TIR tail-value path as a braced body.
+                let body = vec![crate::AST::Stmt::Expr(expr)];
                 return Ok(Func {
                     span: Span::new(declaration_start, end),
                     is_pub,

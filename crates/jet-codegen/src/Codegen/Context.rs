@@ -166,10 +166,6 @@ pub(crate) struct Cx {
     /// result type, and `is_numeric` is informational (the arithmetic operator is
     /// chosen by `ast_operand_is_integer`, which returns `None` for a distinct).
     pub(crate) distinct_types: HashMap<String, (Type, bool)>,
-    /// Nominals whose ordinary trait registry contains `CheckedText`. This is
-    /// the only codegen fact used to distinguish a checked-text constructor
-    /// from an unchecked distinct constructor.
-    pub(crate) checked_text_types: HashSet<String>,
     /// D-RANGETYPE1: range-constrained distinct type name -> inclusive bounds.
     pub(crate) distinct_ranges: HashMap<String, (i64, i64)>,
     /// D-SHAPE-QUANTITY1=A: the one backend registry for physical unit facts.
@@ -955,9 +951,19 @@ impl Cx {
             .filter(|identity| self.distinct_types.contains_key(identity))
     }
 
-    pub(crate) fn is_checked_text_type_name(&self, name: &str) -> bool {
-        self.distinct_type_identity(name)
-            .is_some_and(|identity| self.checked_text_types.contains(&identity))
+    /// Read the ordinary lowered trait-method facts for a String-backed
+    /// nominal. This keeps constructor lowering independent of any
+    /// compiler-owned type whitelist.
+    pub(crate) fn string_distinct_has_trait_method(&self, name: &str, method: &str) -> bool {
+        let Some(identity) = self.distinct_type_identity(name) else {
+            return false;
+        };
+        self.distinct_types
+            .get(&identity)
+            .is_some_and(|(base, _)| matches!(base, Type::String))
+            && self
+                .trait_methods
+                .contains(&(identity, method.to_string()))
     }
 
     pub(crate) fn quantity_dimension(&self, ty: &Type) -> Option<crate::AST::Dimension> {
@@ -2480,7 +2486,7 @@ impl Cx {
                 format!("{}jet_std::{}", self.root_prefix, resolved)
             }
             Type::Named(name) if self.trait_names.contains(name) => {
-                format!("Box<dyn {}>", crate::Codegen::mangle(name))
+                format!("Box<dyn {}>", crate::Codegen::rust_trait_name(name))
             }
             Type::Named(name) if self.foreign_types.contains_key(name.as_str()) => {
                 let rust_mod = &self.foreign_types[name.as_str()];
@@ -2850,7 +2856,7 @@ impl Cx {
             Type::TraitObject(t) => format!(
                 "Box<dyn {}>",
                 t.iter()
-                    .map(|n| crate::Codegen::mangle(n))
+                    .map(|n| crate::Codegen::rust_trait_name(n))
                     .collect::<Vec<_>>()
                     .join(" + ")
             ),
@@ -3590,9 +3596,6 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                 let key = (owner_identity.clone(), method.name.clone());
                 if let Some(trait_name) = trait_name {
                     cx.trait_methods.insert(key.clone());
-                    if trait_name == Generics::CHECKED_TEXT {
-                        cx.checked_text_types.insert(owner_identity.clone());
-                    }
                     if import_trait {
                         cx.imported_traits
                             .insert((rust_mod.clone(), trait_name.to_string()));
@@ -4153,7 +4156,6 @@ pub(crate) fn build_cx_items(
         type_names: HashSet::new(),
         local_type_names: HashSet::new(),
         distinct_types: HashMap::new(),
-        checked_text_types: HashSet::new(),
         distinct_ranges: HashMap::new(),
         unit_facts: HashMap::new(),
         unit_labels: HashMap::new(),
@@ -5198,36 +5200,6 @@ pub(crate) fn build_cx_items(
             Item::Impl(i) => {
                 for m in &i.methods {
                     register_method(&mut cx, &i.type_name, m, i.trait_name.is_some());
-                }
-            }
-            _ => {}
-        }
-    }
-
-    for item in items {
-        match item {
-            Item::Impl(implementation)
-                if implementation.trait_name.as_deref() == Some(Generics::CHECKED_TEXT) =>
-            {
-                cx.checked_text_types
-                    .insert(implementation.type_name.clone());
-            }
-            Item::Struct(definition) => {
-                if definition
-                    .trait_impls
-                    .iter()
-                    .any(|implementation| implementation.trait_name == Generics::CHECKED_TEXT)
-                {
-                    cx.checked_text_types.insert(definition.name.clone());
-                }
-            }
-            Item::Enum(definition) => {
-                if definition
-                    .trait_impls
-                    .iter()
-                    .any(|implementation| implementation.trait_name == Generics::CHECKED_TEXT)
-                {
-                    cx.checked_text_types.insert(definition.name.clone());
                 }
             }
             _ => {}

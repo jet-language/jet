@@ -497,19 +497,128 @@ pub(crate) fn block_definitely_returns(stmts: &[Stmt]) -> bool {
     stmts.iter().any(stmt_definitely_returns)
 }
 
-pub(crate) fn stmt_definitely_returns(stmt: &Stmt) -> bool {
+/// Does this block definitely leave its enclosing statement sequence?
+///
+/// Value branches and refutable fallbacks share this structural rule. Unlike
+/// `block_definitely_returns`, it includes loop control because `break` and
+/// `continue` are valid exits from those constructs.
+pub(crate) fn block_definitely_exits(stmts: &[Stmt]) -> bool {
+    stmts.iter().any(stmt_definitely_exits)
+}
+
+fn stmt_definitely_exits(stmt: &Stmt) -> bool {
     match stmt {
-        Stmt::Return(_, _) => true,
-        // D-TOOL2 (E2-M11): `todo` is diverging — a bare `todo;` satisfies
-        // the "every path must return" check just like `return`.
-        Stmt::Expr(Expr::Todo { .. }) => true,
+        Stmt::Return(..)
+        | Stmt::Break(..)
+        | Stmt::BreakValue(..)
+        | Stmt::Continue(..)
+        | Stmt::BreakLabel(..)
+        | Stmt::BreakLabelValue(..)
+        | Stmt::ContinueLabel(..) => true,
+        Stmt::Expr(expr) => {
+            matches!(expr.without_parens(), Expr::Todo { .. })
+                || matches!(
+                    expr.without_parens(),
+                    Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
+                )
+        }
         Stmt::Switch {
             subject,
             arms,
             else_body,
             span,
         } => {
-            arms.iter().all(|a| block_definitely_returns(&a.body))
+            let fallback_exits = match else_body.as_deref() {
+                Some(body) => block_definitely_exits(body),
+                None => !crate::AST::is_subjectless_guard(subject, *span),
+            };
+            !arms.is_empty()
+                && arms.iter().all(|arm| block_definitely_exits(&arm.body))
+                && fallback_exits
+        }
+        Stmt::Loop { body, .. } => !loop_body_can_break(body),
+        Stmt::While { cond, body, .. }
+        | Stmt::CountedLoop { cond, body, .. }
+            if matches!(cond.without_parens(), Expr::Bool(true, _)) =>
+        {
+            !loop_body_can_break(body)
+        }
+        _ => false,
+    }
+}
+
+fn loop_body_can_break(stmts: &[Stmt]) -> bool {
+    loop_body_can_break_inner(stmts, &[], true)
+}
+
+fn loop_body_can_break_inner(
+    stmts: &[Stmt],
+    nested_labels: &[&str],
+    allow_unlabelled: bool,
+) -> bool {
+    for stmt in stmts {
+        let can_break = match stmt {
+            Stmt::Break(..) | Stmt::BreakValue(..) => allow_unlabelled,
+            Stmt::BreakLabel(name, ..) | Stmt::BreakLabelValue(name, ..) => {
+                !nested_labels
+                    .iter()
+                    .any(|label| *label == name.as_str())
+            }
+            Stmt::Switch {
+                arms, else_body, ..
+            } => arms.iter().any(|arm| {
+                loop_body_can_break_inner(&arm.body, nested_labels, allow_unlabelled)
+            }) || else_body.as_deref().is_some_and(|body| {
+                loop_body_can_break_inner(body, nested_labels, allow_unlabelled)
+            }),
+            Stmt::Loop { body, label, .. }
+            | Stmt::While { body, label, .. }
+            | Stmt::For { body, label, .. }
+            | Stmt::CountedLoop { body, label, .. } => {
+                let mut nested = nested_labels.to_vec();
+                if let Some((label, _)) = label {
+                    nested.push(label.as_str());
+                }
+                loop_body_can_break_inner(body, &nested, false)
+            }
+            _ => false,
+        };
+        if can_break {
+            return true;
+        }
+        if stmt_definitely_exits(stmt) {
+            return false;
+        }
+    }
+    false
+}
+
+pub(crate) fn stmt_definitely_returns(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Return(_, _) => true,
+        // D-TOOL2 (E2-M11): `todo` is diverging — a bare `todo;` satisfies
+        // the "every path must return" check just like `return`.
+        Stmt::Expr(expr)
+            if matches!(expr.without_parens(), Expr::Todo { .. })
+                || matches!(
+                    expr.without_parens(),
+                    Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
+                ) => true,
+        Stmt::Loop { body, .. } => !loop_body_can_break(body),
+        Stmt::While { cond, body, .. }
+        | Stmt::CountedLoop { cond, body, .. }
+            if matches!(cond.without_parens(), Expr::Bool(true, _)) =>
+        {
+            !loop_body_can_break(body)
+        }
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            span,
+        } => {
+            !arms.is_empty()
+                && arms.iter().all(|a| block_definitely_returns(&a.body))
                 && else_body
                     .as_ref()
                     .map(|b| block_definitely_returns(b))

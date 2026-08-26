@@ -44,6 +44,10 @@ fn codes(src: &str) -> Vec<String> {
     }
 }
 
+fn diagnostics(src: &str) -> Vec<jet::Diagnostics::Diagnostic> {
+    jet::compile(src).expect_err("fixture must produce diagnostics")
+}
+
 fn lint_codes(src: &str) -> Vec<String> {
     match jet::compile(src) {
         Ok(out) => out.lints.iter().map(|d| d.code.clone()).collect(),
@@ -254,6 +258,57 @@ fn state_section_shape_diagnostics_are_distinct() {
         missing_owner.iter().any(|code| code == "E0159"),
         "{missing_owner:?}"
     );
+}
+
+#[test]
+fn state_section_sema_diagnostic_spans_cover_the_section() {
+    let empty = "struct Empty { state {} }\nfn run() {}\n";
+    let empty_start = empty.find("state {").unwrap();
+    let empty_end = empty_start + empty[empty_start..].find('}').unwrap() + 1;
+    let empty_diagnostic = diagnostics(empty)
+        .into_iter()
+        .find(|diagnostic| diagnostic.code == "E0169")
+        .expect("E0169");
+    assert_eq!(
+        empty_diagnostic.span,
+        Some(jet::Diagnostics::Span::new(empty_start, empty_end))
+    );
+
+    let repeated = "struct Door { state { Ready } state { Open } }\nfn run() {}\n";
+    let repeated_start = repeated.rfind("state {").unwrap();
+    let repeated_end = repeated_start + repeated[repeated_start..].find('}').unwrap() + 1;
+    let repeated_diagnostic = diagnostics(repeated)
+        .into_iter()
+        .find(|diagnostic| diagnostic.code == "E0168")
+        .expect("E0168");
+    assert_eq!(
+        repeated_diagnostic.span,
+        Some(jet::Diagnostics::Span::new(repeated_start, repeated_end))
+    );
+}
+
+#[test]
+fn qualified_state_markers_seed_leaf_states() {
+    let src = r#"
+struct Door {
+    state { Closed, Open }
+}
+
+impl Door {
+    #Transition(_, Door.State.Closed) fn new() Door -[]> { return Door{} }
+    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) Door -[]> {
+        return self
+    }
+    #State(Door.State.Closed) fn inspect(self: ^Door) String -[]> {
+        next := self.open()
+        return "closed"
+    }
+}
+
+fn run() {}
+"#;
+    let diagnostics = codes(src);
+    assert!(diagnostics.is_empty(), "qualified markers must resolve to leaves: {diagnostics:?}");
 }
 
 #[test]

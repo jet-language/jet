@@ -9276,8 +9276,8 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 owner,
                 owner_type,
                 method,
+                type_args,
                 args,
-                ..
             } => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
@@ -9423,6 +9423,19 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             format!("{type_name}::{}", method.name),
                             format!("{type_name}.{}", method.name),
                         ];
+                        if !type_args.is_empty() {
+                            let owner = owner_type
+                                .clone()
+                                .unwrap_or_else(|| Type::Named(type_name.clone()));
+                            candidates.insert(
+                                0,
+                                crate::Codegen::TIR::generic_method_instance_key(
+                                    &owner,
+                                    &method.name,
+                                    type_args,
+                                ),
+                            );
+                        }
                         if owner_type.is_none() {
                             candidates.push(method.name.clone());
                             candidates.push(mangle(&method.name));

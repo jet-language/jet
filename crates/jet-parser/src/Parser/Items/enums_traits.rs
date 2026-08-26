@@ -295,8 +295,11 @@ impl<'a> Parser<'a> {
                 ));
             }
             let brace_start = self.bump().span.start; // consume `{`
-                                                      // block_stmts consumes statements AND the closing `}`.
-                                                      // We need to track where the `}` ended — peek first to record pos.
+            if self.at_state_section() {
+                return Err(self.reject_state_section("impl"));
+            }
+            // block_stmts consumes statements AND the closing `}`.
+            // We need to track where the `}` ended — peek first to record pos.
             let body = self.block_stmts();
             // After block_stmts, the `}` is consumed; the last consumed token is at pos-1.
             let rbrace_end = self.toks[self.pos.saturating_sub(1)].span.end;

@@ -31,11 +31,12 @@ pub use Symbols::{
     SemanticSymbolKind, SemanticVisibilityAnchor,
 };
 pub use Types::{
-    ArithmeticOperationFact, CallEdge, CallableParameterFact, CallableSignatureFact, DefinitionAnchor, DefinitionFact,
+    ArithmeticOperationFact, CallEdge, CallableParameterFact, CallableSignatureFact, CompilerFact, DefinitionAnchor, DefinitionFact,
     EffectFact, EffectProvenance, ExpandLens, ExpandProjection, ExpandValue,
     InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact,
     OutputFact, SemIndex, SourceSpan, StructuralAudit, StructuralNode, StructuralSlotBoundary,
-    StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier, ViewProjectionFact,
+    StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TraitContractFact, TypeDossier,
+    ViewProjectionFact,
     ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact, StateGraphFact, StateNodeFact,
     StateTransitionFact, SCHEMA_VERSION,
 };

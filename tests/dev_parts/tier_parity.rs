@@ -534,8 +534,8 @@ fn lowlevel_and_safety_match_interpreter_jit_and_aot() {
         "lowlevel/swizzle",
         "lowlevel/target_machine_board",
         "lowlevel/unsafe_obligations",
-        "safety/sh_typed_text",
-        "safety/typed_sql",
+        "safety/sh_checked_text",
+        "safety/checked_text_sql",
     ];
     run_child_stem_battery(
         "lowlevel_and_safety_match_interpreter_jit_and_aot",

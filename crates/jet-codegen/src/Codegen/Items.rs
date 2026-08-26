@@ -2595,7 +2595,7 @@ pub(crate) fn emit_trait_impl(
     out.push_str(&format!(
         "impl{} {} for {}{} {{\n",
         tp_impl,
-        crate::Codegen::mangle(&block.trait_name),
+        crate::Codegen::rust_trait_name(&block.trait_name),
         mangle_path(type_name),
         tp_use
     ));
@@ -2625,7 +2625,7 @@ pub(crate) fn emit_trait_impl(
         emit_migration_step_fns(cx, s, migration_style.as_deref(), out);
     }
     if block.trait_name == crate::Generics::CHECKED_TEXT {
-        emit_checked_text_facade(type_name, out);
+        emit_checked_text_constructors(type_name, out);
     }
     emit_representation_bridges(cx, &block.trait_name, type_name, &tp_impl, &tp_use, out);
 }
@@ -2784,7 +2784,7 @@ pub(crate) fn emit_external_trait_impl(
     out.push_str(&format!(
         "impl{} {} for {}{} {{\n",
         tp_impl,
-        crate::Codegen::mangle(trait_name),
+        crate::Codegen::rust_trait_name(trait_name),
         mangle_path(&i.type_name),
         tp_use,
     ));
@@ -2850,7 +2850,7 @@ pub(crate) fn emit_external_trait_impl(
         emit_migration_step_fns(cx, s, migration_style.as_deref(), out);
     }
     if trait_name == crate::Generics::CHECKED_TEXT {
-        emit_checked_text_facade(&i.type_name, out);
+        emit_checked_text_constructors(&i.type_name, out);
     }
     emit_representation_bridges(cx, trait_name, &i.type_name, &tp_impl, &tp_use, out);
 }
@@ -2982,12 +2982,12 @@ fn emit_trait_method(
 }
 
 /// Expose the two canonical constructors owned by an ordinary CheckedText
-/// implementation. Validation and wrapping remain in the shared Prelude
-/// helper; this block only provides the nominal type's source-facing facade.
-fn emit_checked_text_facade(type_name: &str, out: &mut String) {
+/// implementation. The constructor calls the trait's pure checker directly;
+/// no compiler-owned wrapper or parallel checker is involved.
+fn emit_checked_text_constructors(type_name: &str, out: &mut String) {
     let rust_name = mangle_path(type_name);
     out.push_str(&format!(
-        "impl {rust_name} {{\n    pub fn from(text: String) -> Result<Self, <Self as __jet_CheckedText>::Error> {{ jet_checked_text_from(text, <Self as __jet_CheckedText>::check, {rust_name}) }}\n    pub fn encode_hole<T: JetShow>(value: T) -> String {{ <Self as __jet_CheckedText>::encode_hole(value) }}\n}}\n\n"
+        "impl {rust_name} {{\n    pub fn from(text: String) -> Result<Self, <Self as CheckedText>::Error> {{ match <Self as CheckedText>::check(&text) {{ Ok(()) => Ok(Self(text)), Err(error) => Err(error) }} }}\n    pub fn encode_hole<T: JetShow>(value: T) -> String {{ <Self as CheckedText>::encode_hole(&value) }}\n}}\n\n"
     ));
 }
 

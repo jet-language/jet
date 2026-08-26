@@ -6,7 +6,6 @@ use crate::Codegen::mangle_path;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::ambient_err_local;
 use crate::Codegen::TIR::bin_match_scan_closure_ex;
-use crate::Codegen::TIR::core_struct_field_rust_name;
 use crate::Codegen::TIR::emit::emit_field_rust;
 use crate::Codegen::TIR::emit::emit_http_bridge_error;
 use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
@@ -274,49 +273,6 @@ fn emit_measurement_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> O
         field("value")?,
         field("uncertainty")?
     ))
-}
-
-fn emit_origin_info_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> Option<String> {
-    let crate::AST::CtValue::Struct { type_name, fields } = value else {
-        return None;
-    };
-    if type_name != "OriginInfo"
-        || !matches!(ty, Type::Named(name) if name == type_name)
-        || cx.type_names.contains(type_name)
-    {
-        return None;
-    }
-    let parts = fields
-        .iter()
-        .map(|(name, value)| {
-            let field = core_struct_field_rust_name(cx, ty, name)?;
-            let value = if matches!(name.as_str(), "source" | "line" | "column") {
-                match value {
-                    crate::AST::CtValue::Present(value) => {
-                        format!("Some({})", value.serialize())
-                    }
-                    crate::AST::CtValue::Failed(crate::AST::CtReport::Clean(_)) => {
-                        "None".to_string()
-                    }
-                    _ => return None,
-                }
-            } else {
-                value.serialize()
-            };
-            Some(format!("{field}: {value}"))
-        })
-        .collect::<Option<Vec<_>>>()?;
-    Some(format!("{} {{ {} }}", cx.rust_type(ty), parts.join(", ")))
-}
-
-fn emit_origin_ct_lit(value: &crate::AST::CtValue, ty: &Type, cx: &Cx) -> Option<String> {
-    if let (crate::AST::CtValue::Present(inner), Type::Option(inner_ty)) = (value, ty) {
-        return Some(format!(
-            "Ok({})",
-            emit_origin_info_ct_lit(inner, inner_ty, cx)?
-        ));
-    }
-    emit_origin_info_ct_lit(value, ty, cx)
 }
 
 fn shared_lock_receipt_id(recv: &TExpr, cx: &Cx) -> String {
@@ -1334,17 +1290,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             // modules and has no codegen context, so its exact-Int constructor
             // is root-relative only. Add the module prefix at the emission
             // seam; runtime arithmetic still goes through Prelude `jet_int_*`.
-            let baked = if let Some(rooted) = emit_origin_ct_lit(value, &e.ty, cx) {
-                rooted
-            } else {
-                match value {
-                    crate::AST::CtValue::BigInt(big) => format!(
-                        "{}jet_std::jet_int_from_str({:?}).unwrap()",
-                        cx.root_prefix,
-                        big.to_string_rep()
-                    ),
-                    _ => value.clone().serialize(),
-                }
+            let baked = match value {
+                crate::AST::CtValue::BigInt(big) => format!(
+                    "{}jet_std::jet_int_from_str({:?}).unwrap()",
+                    cx.root_prefix,
+                    big.to_string_rep()
+                ),
+                _ => value.clone().serialize(),
             };
             // #1537 / I2: some folded values spell a generic constructor that
             // pins none of its parameters — the carrier's `Ok(6i64)` says
@@ -1661,7 +1613,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 };
                 return jet_name_format!(
                     "{}::{name_prefix}{method_rust}_at(&({}), {arg_str}, {:?}, {line})",
-                    crate::Codegen::mangle(trait_name),
+                    crate::Codegen::rust_trait_name(trait_name),
                     emit_tir_expr(recv, cx),
                     cx.file,
                 );
@@ -2965,7 +2917,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 };
                 return jet_name_format!(
                     "{}::{name_prefix}{method}_at(&({}), &({}), {:?}, {})",
-                    crate::Codegen::mangle(trait_name),
+                    crate::Codegen::rust_trait_name(trait_name),
                     ls,
                     rs,
                     cx.file,
@@ -3280,7 +3232,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let lit = format!("{rust_type} {{ {} }}", parts.join(", "));
             match as_trait {
                 Some((trait_name, _)) => {
-                    let trait_rust = crate::Codegen::mangle(trait_name);
+                    let trait_rust = crate::Codegen::rust_trait_name(trait_name);
                     format!("Box::new({lit}) as Box<dyn {trait_rust}>")
                 }
                 None => lit,
@@ -3618,7 +3570,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let trait_rust = match &e.ty {
                 Type::List(inner) => match inner.as_ref() {
                     Type::TraitObject(names) if names.len() == 1 => {
-                        Some(crate::Codegen::mangle(&names[0]))
+                        Some(crate::Codegen::rust_trait_name(&names[0]))
                     }
                     _ => None,
                 },

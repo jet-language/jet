@@ -318,6 +318,19 @@ pub struct TypeDossier {
     pub effect_projection: EffectProjection,
 }
 
+/// One ordinary trait contract attached to a semantic definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitContractFact {
+    /// The ordinary trait implemented by, or declared as, this symbol.
+    pub trait_name: String,
+    /// Associated type names and their concrete implementation, when this is
+    /// an implementation. `None` means the trait declaration leaves the type
+    /// to its implementer.
+    pub associated_types: Vec<(String, Option<String>)>,
+    /// The checked callable signatures owned by this contract.
+    pub methods: Vec<String>,
+}
+
 /// One named definition in the program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolDef {
@@ -337,6 +350,11 @@ pub struct SymbolDef {
     pub callable_signature: Option<CallableSignatureFact>,
     /// D-ONCE-DERIVE1: capabilities already attached to this type.
     pub derives: Vec<String>,
+    /// The storage type of a nominal distinct declaration.
+    pub nominal_base: Option<String>,
+    /// Ordinary trait declarations and implementations attached to this
+    /// nominal, including their associated types and method signatures.
+    pub trait_contracts: Vec<TraitContractFact>,
 }
 
 /// Compiler-owned definition facts for conservative structural tools.
@@ -369,6 +387,28 @@ pub struct DefinitionAnchor {
     pub semantic_identity: Option<String>,
 }
 
+/// One typed compiler fact selected by a member reference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompilerFact {
+    /// Canonical source spelling from the typed fact registry.
+    pub name: String,
+    /// Closed reflection kind from the same registry row.
+    pub kind: String,
+    /// Public type shown for the direct fact read.
+    pub type_name: String,
+}
+
+impl CompilerFact {
+    pub fn from_member(member: &str) -> Option<Self> {
+        let read = jet_foundation::Syntax::fact_read_kind(member)?;
+        Some(Self {
+            name: read.source_member()?.to_string(),
+            kind: read.reflection_kind()?.to_string(),
+            type_name: read.public_read_type()?.to_string(),
+        })
+    }
+}
+
 /// One use-site reference (identifier occurrence).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SymbolRef {
@@ -379,6 +419,8 @@ pub struct SymbolRef {
     /// `None` means unresolved or ambiguous; semantic refactors never fall
     /// back to spelling.
     pub target: Option<DefinitionAnchor>,
+    /// Typed compiler fact selected by this member reference, when present.
+    pub fact: Option<CompilerFact>,
     pub span: SourceSpan,
 }
 

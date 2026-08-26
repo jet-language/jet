@@ -59,6 +59,78 @@ fn arithmetic_policy_is_visible_in_function_reflection() {
     std::fs::remove_dir_all(root).ok();
 }
 
+#[test]
+fn checked_text_contract_is_reflected_on_the_nominal_type() {
+    let root = std::env::temp_dir().join(format!("jet_reflect_checked_text_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("main.jet");
+    std::fs::write(
+        &path,
+        r#"
+#Error
+enum PatternError { Bad }
+Pattern :: distinct String
+impl Pattern.CheckedText {
+    type Error = PatternError
+    fn check(text: String) () !PatternError -[]> {
+        return
+    }
+    fn encode_hole<T: Printable>(value: T) String -[]> {
+        return ""
+    }
+}
+fn run() {}
+"#,
+    )
+    .unwrap();
+    let (diagnostics, bundle, _) =
+        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let bundle = bundle.expect("checked bundle");
+    let info = jet::Comptime::reflect_type_value(
+        &bundle.modules[bundle.entry].items,
+        "Pattern",
+        "main",
+    )
+    .expect("Pattern reflection");
+    assert!(matches!(
+        struct_field(&info, "base"),
+        CtValue::Str(base) if base == "String"
+    ));
+    assert!(matches!(
+        struct_field(&info, "implements"),
+        CtValue::List(values)
+            if values.iter().any(|value| matches!(value, CtValue::Str(name) if name == "CheckedText"))
+    ));
+    let CtValue::List(contracts) = struct_field(&info, "trait_contracts") else {
+        panic!("trait contracts");
+    };
+    let contract = contracts
+        .iter()
+        .find(|value| matches!(struct_field(value, "name"), CtValue::Str(name) if name == "CheckedText"))
+        .expect("CheckedText reflection contract");
+    let CtValue::List(associated_types) = struct_field(contract, "associated_types") else {
+        panic!("associated types");
+    };
+    assert!(associated_types.iter().any(|value| {
+        matches!(
+            (struct_field(value, "name"), struct_field(value, "type")),
+            (CtValue::Str(name), CtValue::Str(ty)) if name == "Error" && ty == "PatternError"
+        )
+    }));
+    let CtValue::List(methods) = struct_field(contract, "methods") else {
+        panic!("contract methods");
+    };
+    assert!(methods.iter().any(|value| {
+        matches!(struct_field(value, "name"), CtValue::Str(name) if name == "check")
+    }));
+    assert!(methods.iter().any(|value| {
+        matches!(struct_field(value, "name"), CtValue::Str(name) if name == "encode_hole")
+    }));
+    std::fs::remove_dir_all(root).ok();
+}
+
 fn field(name: &str, ty: &str, is_pub: bool) -> Field {
     Field {
         is_pub,

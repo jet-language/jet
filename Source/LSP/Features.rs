@@ -78,10 +78,16 @@ pub(crate) fn compute_hover(
                 "Compiler fact {}: focused layout metadata with typed optional physical facts.",
                 Syntax::COMPILER_FACT_LAYOUT
             ),
-            Syntax::COMPILER_FACT_ORIGIN => format!(
-                "Compiler fact {}: optional OriginInfo provenance derived from sema flow.",
-                Syntax::COMPILER_FACT_ORIGIN
-            ),
+            Syntax::COMPILER_FACT_ORIGIN => {
+                let type_name = Syntax::fact_read_kind(fact)
+                    .and_then(|read| read.public_read_type())
+                    .expect("origin fact has a public read type");
+                format!(
+                    "Compiler fact {}: optional {} provenance derived from sema flow.",
+                    Syntax::COMPILER_FACT_ORIGIN,
+                    type_name.trim_end_matches('?')
+                )
+            }
             _ => {
                 let kind = Syntax::fact_read_kind(fact)
                     .and_then(|read| read.reflection_kind())

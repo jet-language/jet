@@ -1790,11 +1790,29 @@ impl CtValue {
                     .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
                     .map(|(n, v)| {
                         let field = match type_name.as_str() {
-                            "Range" | "DimensionInfo" | "DimensionAxis" | "StateRef"
-                            | "StateInfo" | "EffectInfo" => n.clone(),
+                            "Range"
+                            | "DimensionInfo"
+                            | "DimensionAxis"
+                            | "StateRef"
+                            | "StateInfo"
+                            | "EffectInfo"
+                            | "OriginInfo" => n.clone(),
                             _ => ct_mangle(n),
                         };
-                        format!("{field}: {}", v.serialize())
+                        let value = if type_name == "OriginInfo"
+                            && matches!(n.as_str(), "source" | "line" | "column")
+                        {
+                            match v {
+                                CtValue::Present(value) => {
+                                    format!("Some({})", value.serialize())
+                                }
+                                CtValue::Failed(CtReport::Clean(_)) => "None".to_string(),
+                                _ => v.serialize(),
+                            }
+                        } else {
+                            v.serialize()
+                        };
+                        format!("{field}: {value}")
                     })
                     .collect();
                 let rust_type = match type_name.as_str() {
@@ -1804,6 +1822,7 @@ impl CtValue {
                     "StateRef" => "JetStateRef".to_string(),
                     "StateInfo" => "JetStateInfo".to_string(),
                     "EffectInfo" => "JetEffectInfo".to_string(),
+                    "OriginInfo" => "crate::JetOriginInfo".to_string(),
                     _ => mangle_path(type_name),
                 };
                 if type_name == "Range" {

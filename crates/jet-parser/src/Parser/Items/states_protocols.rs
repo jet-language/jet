@@ -1148,6 +1148,10 @@ mod state_section_tests {
                 "fn run() { value :: { state { Open } } }\n",
                 "anonymous shape",
             ),
+            (
+                "impl Source -> Target { state { Open } }\nfn run() {}\n",
+                "impl",
+            ),
         ] {
             let (tokens, lex_diags) = Lexer::lex(source);
             assert!(lex_diags.is_empty(), "{owner}: {lex_diags:?}");
@@ -1163,5 +1167,20 @@ mod state_section_tests {
                 "{owner}: {diagnostics:?}"
             );
         }
+    }
+
+    #[test]
+    fn repeated_state_section_points_at_the_second_section() {
+        let source = "struct Door { state { Ready } state { Open } }\nfn run() {}\n";
+        let (tokens, lex_diags) = Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let diagnostics = Parser::parse(&tokens).expect_err("repeated state section");
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E0168")
+            .expect("E0168");
+        let start = source.rfind("state {").expect("second state section");
+        let end = start + source[start..].find('}').expect("second state close") + 1;
+        assert_eq!(diagnostic.span, Some(Span::new(start, end)));
     }
 }

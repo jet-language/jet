@@ -1624,7 +1624,7 @@ pub fn reflect_type_value_with_target_and_graph(
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
-                return Some(
+                let mut info =
                     build_struct_type_info_with_path_and_vocabulary_and_engine_and_graph(
                         def,
                         &states,
@@ -1632,25 +1632,48 @@ pub fn reflect_type_value_with_target_and_graph(
                         None,
                         &layout_engine,
                         graph,
-                    ),
+                    );
+                append_trait_contracts_from_items(
+                    &mut info,
+                    items,
+                    &def.name,
+                    module,
+                    &format!("{module}::{type_name}"),
                 );
+                return Some(info);
             }
             Item::Enum(def) if def.name == type_name => {
                 let path = format!("{module}.{type_name}");
-                return Some(build_enum_type_info_with_engine(
+                let mut info = build_enum_type_info_with_engine(
                     def,
                     module,
                     &format!("{module}::{type_name}"),
                     &path,
                     &layout_engine,
-                ));
+                );
+                append_trait_contracts_from_items(
+                    &mut info,
+                    items,
+                    &def.name,
+                    module,
+                    &format!("{module}::{type_name}"),
+                );
+                return Some(info);
             }
             Item::Distinct(def) if def.name == type_name => {
-                return Some(build_distinct_type_info_with_path(
+                let mut info = build_distinct_type_info_with_path(
                     def,
                     module,
                     &format!("{module}.{type_name}"),
-                ));
+                );
+                append_trait_contracts_from_items(
+                    &mut info,
+                    items,
+                    &def.name,
+                    module,
+                    &format!("{module}::{type_name}"),
+                );
+                return Some(info);
             }
             Item::UnitFamily(family) => {
                 let Some(member) = family
@@ -1689,6 +1712,13 @@ pub fn reflect_type_value_with_target_and_graph(
                             ));
                         }
                     }
+                    append_trait_contracts_from_items(
+                        &mut info,
+                        items,
+                        &def.name,
+                        module,
+                        &format!("{module}::{type_name}"),
+                    );
                     return Some(info);
                 }
             }
@@ -2062,7 +2092,7 @@ pub fn build_struct_type_info_with_path_and_vocabulary_and_engine_and_graph(
             ("transitions", ct_list(transition_info)),
             ("facts", ct_list(facts)),
             ("dimensions", ct_list(dimensions)),
-            (
+                (
                 "implements",
                 ct_list(
                     s.trait_impls
@@ -2071,6 +2101,7 @@ pub fn build_struct_type_info_with_path_and_vocabulary_and_engine_and_graph(
                         .collect(),
                 ),
             ),
+            ("trait_contracts", ct_list(Vec::new())),
         ],
     )
 }
@@ -2128,7 +2159,9 @@ pub fn build_distinct_type_info_with_path(d: &DistinctDef, module: &str, path: &
                 ("transitions", ct_list(Vec::new())),
                 ("facts", ct_list(distinct_fact_rows(d))),
                 ("dimensions", ct_list(dimensions)),
+                ("base", ct_str(d.base.name())),
                 ("implements", ct_list(Vec::new())),
+                ("trait_contracts", ct_list(Vec::new())),
             ],
         ),
         module,
@@ -2136,6 +2169,166 @@ pub fn build_distinct_type_info_with_path(d: &DistinctDef, module: &str, path: &
         "distinct",
         path,
     )
+}
+
+fn append_trait_contracts_from_items(
+    info: &mut CtValue,
+    items: &[Item],
+    owner: &str,
+    module: &str,
+    identity: &str,
+) {
+    let contracts = trait_contracts_from_items(items, owner, module, identity);
+    let CtValue::Struct { fields, .. } = info else {
+        return;
+    };
+    {
+        let Some((_, CtValue::List(contract_values))) = fields
+            .iter_mut()
+            .find(|(name, _)| name == "trait_contracts")
+        else {
+            return;
+        };
+        for contract in contracts {
+            let Some(CtValue::Str(trait_name)) = reflected_struct_field(&contract, "name") else {
+                continue;
+            };
+            let duplicate = contract_values.iter().any(|existing| {
+                matches!(
+                    reflected_struct_field(existing, "name"),
+                    Some(CtValue::Str(name)) if name == trait_name
+                )
+            });
+            if !duplicate {
+                contract_values.push(contract);
+            }
+        }
+    }
+    let contract_names = fields
+        .iter()
+        .find(|(name, _)| name == "trait_contracts")
+        .and_then(|(_, value)| match value {
+            CtValue::List(values) => Some(
+                values
+                    .iter()
+                    .filter_map(|value| match reflected_struct_field(value, "name") {
+                        Some(CtValue::Str(name)) => Some(name.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default();
+    if let Some((_, CtValue::List(implemented))) =
+        fields.iter_mut().find(|(name, _)| name == "implements")
+    {
+        for name in contract_names {
+            if !implemented
+                .iter()
+                .any(|value| matches!(value, CtValue::Str(existing) if existing == &name))
+            {
+                implemented.push(ct_str(name));
+            }
+        }
+    }
+}
+
+fn trait_contracts_from_items(
+    items: &[Item],
+    owner: &str,
+    module: &str,
+    identity: &str,
+) -> Vec<CtValue> {
+    let mut contracts = Vec::new();
+    for item in items {
+        match item {
+            Item::Impl(implementation)
+                if type_leaf(&implementation.type_name) == owner =>
+            {
+                if let Some(trait_name) = &implementation.trait_name {
+                    contracts.push(trait_contract_info(
+                        trait_name,
+                        &implementation.assoc_type_impls,
+                        &implementation.methods,
+                        module,
+                        identity,
+                    ));
+                }
+            }
+            Item::Struct(definition) if definition.name == owner => {
+                for implementation in &definition.trait_impls {
+                    contracts.push(trait_contract_info(
+                        &implementation.trait_name,
+                        &implementation.assoc_type_impls,
+                        &implementation.methods,
+                        module,
+                        identity,
+                    ));
+                }
+            }
+            Item::Enum(definition) if definition.name == owner => {
+                for implementation in &definition.trait_impls {
+                    contracts.push(trait_contract_info(
+                        &implementation.trait_name,
+                        &implementation.assoc_type_impls,
+                        &implementation.methods,
+                        module,
+                        identity,
+                    ));
+                }
+            }
+            Item::CodeModule(module_def) => {
+                if let Some(body) = &module_def.body {
+                    contracts.extend(trait_contracts_from_items(body, owner, module, identity));
+                }
+            }
+            Item::GenericModule(module_def) => {
+                contracts.extend(trait_contracts_from_items(
+                    &module_def.body,
+                    owner,
+                    module,
+                    identity,
+                ));
+            }
+            _ => {}
+        }
+    }
+    contracts
+}
+
+fn trait_contract_info(
+    trait_name: &str,
+    associated_types: &[(String, jet_foundation::Diagnostics::Span, Type)],
+    methods: &[Func],
+    module: &str,
+    identity: &str,
+) -> CtValue {
+    let associated_types = associated_types
+        .iter()
+        .map(|(name, _, ty)| {
+            ct_struct(
+                "AssociatedTypeInfo",
+                &[("name", ct_str(name.clone())), ("type", ct_str(ty.name()))],
+            )
+        })
+        .collect();
+    let methods = methods
+        .iter()
+        .map(|method| qualified_method_info(method, module, identity))
+        .collect();
+    ct_struct(
+        "TraitContractInfo",
+        &[
+            ("name", ct_str(trait_name)),
+            ("associated_types", ct_list(associated_types)),
+            ("methods", ct_list(methods)),
+        ],
+    )
+}
+
+fn type_leaf(name: &str) -> &str {
+    name.rsplit_once('.').map_or(name, |(_, leaf)| leaf)
 }
 
 fn qualify_info(
@@ -2320,9 +2513,10 @@ fn build_enum_type_info_with_engine(
                         def.trait_impls
                             .iter()
                             .map(|implementation| ct_str(implementation.trait_name.clone()))
-                            .collect(),
+                        .collect(),
                     ),
                 ),
+                ("trait_contracts", ct_list(Vec::new())),
             ],
         ),
         module,
@@ -2512,6 +2706,18 @@ pub fn build_program_info_with_index(
                             }
                         }
                     }
+                    append_trait_contracts_from_items(
+                        &mut info,
+                        &module.items,
+                        &def.name,
+                        &module_name,
+                        &program_reflection_identity(
+                            &facts.name_ledger,
+                            module_idx,
+                            &module_name,
+                            &def.name,
+                        ),
+                    );
                     types.push(info.clone());
                     package_types.push(info);
                 }
@@ -2556,6 +2762,18 @@ pub fn build_program_info_with_index(
                             }
                         }
                     }
+                    append_trait_contracts_from_items(
+                        &mut info,
+                        &module.items,
+                        &def.name,
+                        &module_name,
+                        &program_reflection_identity(
+                            &facts.name_ledger,
+                            module_idx,
+                            &module_name,
+                            &def.name,
+                        ),
+                    );
                     types.push(info.clone());
                     package_types.push(info);
                 }
@@ -2593,6 +2811,18 @@ pub fn build_program_info_with_index(
                             }
                         }
                     }
+                    append_trait_contracts_from_items(
+                        &mut info,
+                        &module.items,
+                        &def.name,
+                        &module_name,
+                        &program_reflection_identity(
+                            &facts.name_ledger,
+                            module_idx,
+                            &module_name,
+                            &def.name,
+                        ),
+                    );
                     types.push(info.clone());
                     package_types.push(info);
                 }

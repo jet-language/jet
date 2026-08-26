@@ -1,0 +1,46 @@
+// D-TEXTHEAD-TYPE1=A: checked text is ordinary nominal data plus one ordinary
+// CheckedText implementation. This example keeps the library types in a
+// module, then imports them through the normal type namespace.
+use types.[Pattern, Query, Selector, Identity]
+
+module types;
+
+fn keep<T>(value: T) T -> ~value
+
+fn run() {
+    pattern :: keep(Pattern{"literal {7}"})
+    print(pattern.raw())
+    pattern_source :: "dynamic pattern"
+    pattern_result :: Pattern.from(pattern_source)
+    if pattern_result == {
+        .Ok(value) -> print(value.raw())
+        .Err(error) -> print(types.explain(error))
+    }
+
+    query :: keep(Query{"select id where id = {7}"})
+    print(query.raw())
+    query_source :: "not a query"
+    query_result :: Query.from(query_source)
+    if query_result == {
+        .Ok(value) -> print(value.raw())
+        .Err(error) -> print(types.explain(error))
+    }
+
+    selector :: keep(Selector{".item[data-id={7}]"})
+    print(selector.raw())
+    selector_source :: "missing selector"
+    selector_result :: Selector.from(selector_source)
+    if selector_result == {
+        .Ok(value) -> print(value.raw())
+        .Err(error) -> print(types.explain(error))
+    }
+
+    identity :: keep(Identity{"user+{7}@example.test"})
+    print(identity.raw())
+    identity_source :: "missing-at-sign"
+    identity_result :: Identity.from(identity_source)
+    if identity_result == {
+        .Ok(value) -> print(value.raw())
+        .Err(error) -> print(types.explain(error))
+    }
+}

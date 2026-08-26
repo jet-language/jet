@@ -1,0 +1,11 @@
+// D-BOUND-RAW1=A: typed literal bodies own backslashes. Plain strings keep the
+// four-entry escape table; Regex still rejects interpolation. `Regex{"a\nb"}`
+// stays one line, so `\n` is not a lexer newline.
+fn run() {
+    digits :: Regex{"\d+"}
+    print(digits.is_match("7"))
+    slash_n :: Regex{"a\nb"}
+    print(slash_n.is_match("7"))
+    braces :: Regex{"x{{2}}"}
+    print(braces.is_match("xx"))
+}

@@ -2,25 +2,15 @@ use super::super::*;
 use crate::Diagnostics::TextEdit;
 
 fn value_block_stmt_diverges(stmt: &Stmt) -> bool {
-    matches!(
-        stmt,
-        Stmt::Return(..)
-            | Stmt::Break(..)
-            | Stmt::BreakValue(..)
-            | Stmt::Continue(..)
-            | Stmt::BreakLabel(..)
-            | Stmt::BreakLabelValue(..)
-            | Stmt::ContinueLabel(..)
-    ) || matches!(stmt, Stmt::Expr(Expr::Todo { .. }))
-        || matches!(
-            stmt,
-            Stmt::Expr(Expr::Call(Call { name, .. })) if name == Syntax::BUILTIN_PANIC
-        )
+    crate::Parser::statement_definitely_exits_value_block(stmt)
 }
 
 fn value_expr_diverges(expr: &Expr) -> bool {
-    matches!(expr, Expr::Todo { .. })
-        || matches!(expr, Expr::Call(Call { name, .. }) if name == Syntax::BUILTIN_PANIC)
+    matches!(expr.without_parens(), Expr::Todo { .. })
+        || matches!(
+            expr.without_parens(),
+            Expr::Call(Call { name, .. }) if name == Syntax::BUILTIN_PANIC
+        )
 }
 
 impl<'a> Parser<'a> {

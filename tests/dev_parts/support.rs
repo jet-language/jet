@@ -3951,7 +3951,7 @@ const AOT_BROKEN_HELD_OUT: &[(&str, &str, &str)] = &[
          so the oracle disagrees with the golden and cannot arbitrate the tiers",
     ),
     (
-        "types/typed_literal_head",
+        "types/typed_literal_forms",
         "AOT compile or run failed",
         "#2016: the optimized AOT build or run of the example fails, so the gate \
          has no oracle to compare the tiers against",

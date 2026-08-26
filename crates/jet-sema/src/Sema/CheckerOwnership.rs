@@ -3288,6 +3288,7 @@ impl<'a> Checker<'a> {
     ) {
         if let Some(root) = root {
             self.flow.moved.set(root, span);
+            self.clear_origin(root);
         }
     }
 
@@ -3303,6 +3304,7 @@ impl<'a> Checker<'a> {
             return false;
         }
         self.flow.moved.set(name, *span);
+        self.clear_origin(name);
         true
     }
 

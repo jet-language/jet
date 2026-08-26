@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::Symbols::{build_semantic_symbol_index, canonical_symbol_name, SemanticSymbolIndex};
 use crate::Types::{
-    ArithmeticOperationFact, BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact,
+    ArithmeticOperationFact, BypassFact, BypassKind, CallEdge, CompilerFact, DefinitionAnchor, DefinitionFact, InstanceApplicationFact,
     InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex,
     StateGraphFact, StateNodeFact, StateTransitionFact, StructuralNode, StructuralSlotBoundary,
     StructuralSlotKind, SymbolDef, SymbolKind,
@@ -91,6 +91,7 @@ pub struct SymRef {
     pub module_path: String,
     pub scope_identity: Option<String>,
     pub target: Option<DefinitionAnchor>,
+    pub fact: Option<CompilerFact>,
 }
 
 /// Hover entry: an expression/token span + text to show on hover.
@@ -141,6 +142,7 @@ struct CallerFrame {
 struct WalkCtx<'a> {
     db: &'a mut SymbolDB,
     module: &'a LoadedModule,
+    module_idx: usize,
     caller: Option<CallerFrame>,
     scope_identity: String,
     name_ledger: &'a jet_foundation::Names::NameLedger,
@@ -882,6 +884,7 @@ fn scoped_local_identity(ctx: &WalkCtx<'_>, kind: &str, name: &str) -> String {
 }
 
 fn scoped_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
+    let fact = CompilerFact::from_member(&name);
     let target = ctx
         .name_ledger
         .reference(mp, span.start, span.end)
@@ -897,6 +900,33 @@ fn scoped_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
         module_path: mp.to_string(),
         scope_identity: Some(active_scope(ctx).to_string()),
         target,
+        fact,
+    }
+}
+
+fn declaration_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
+    let target = ctx
+        .name_ledger
+        .declaration(ctx.module_idx, &name)
+        .map(|declaration| DefinitionAnchor {
+            module_path: ctx
+                .name_ledger
+                .module_path(declaration.module)
+                .unwrap_or(mp)
+                .to_string(),
+            kind: declaration.kind.clone(),
+            def_span: declaration.span.into(),
+            semantic_identity: ctx
+                .name_ledger
+                .semantic_identity(declaration.module, &name),
+        });
+    SymRef {
+        name,
+        span,
+        module_path: mp.to_string(),
+        scope_identity: Some(active_scope(ctx).to_string()),
+        target,
+        fact: None,
     }
 }
 
@@ -1186,6 +1216,7 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
         let mut ctx = WalkCtx {
             db: &mut db,
             module,
+            module_idx,
             caller: None,
             scope_identity: root_identity(module_alias),
             name_ledger: &facts.name_ledger,
@@ -1632,6 +1663,7 @@ pub fn structural_nodes_from_parsed(module: &LoadedModule) -> Vec<StructuralNode
     let mut ctx = WalkCtx {
         db: &mut db,
         module,
+        module_idx: 0,
         caller: None,
         scope_identity: root_identity(&mp),
         name_ledger: &name_ledger,
@@ -2038,6 +2070,12 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 );
             }
             for tb in &s.trait_impls {
+                ctx.db.refs.push(declaration_ref(
+                    tb.trait_name.clone(),
+                    tb.trait_span,
+                    mp,
+                    ctx,
+                ));
                 for meth in &tb.methods {
                     record_func_type_nodes(meth, mp, ctx);
                     let method_identity =
@@ -2203,6 +2241,12 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 );
             }
             for tb in &e.trait_impls {
+                ctx.db.refs.push(declaration_ref(
+                    tb.trait_name.clone(),
+                    tb.trait_span,
+                    mp,
+                    ctx,
+                ));
                 for meth in &tb.methods {
                     record_func_type_nodes(meth, mp, ctx);
                     let method_identity =
@@ -2373,6 +2417,20 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             });
         }
         Item::Impl(i) => {
+            ctx.db.refs.push(declaration_ref(
+                i.type_name.clone(),
+                i.type_span,
+                mp,
+                ctx,
+            ));
+            if let (Some(trait_name), Some(trait_span)) = (&i.trait_name, i.trait_span) {
+                ctx.db.refs.push(declaration_ref(
+                    trait_name.clone(),
+                    trait_span,
+                    mp,
+                    ctx,
+                ));
+            }
             for meth in &i.methods {
                 record_func_type_nodes(meth, mp, ctx);
                 let method_identity =
@@ -3431,6 +3489,26 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             });
             structural_slot(ctx, "else_value", StructuralSlotKind::Scalar, |ctx| collect_expr(else_value, mp, ctx));
         }
+        AST::Expr::ComptimeName { name, span, .. } => {
+            // Sema folds a checked fact read to an internal comptime literal.
+            // Preserve the source fact reference for tooling from that
+            // compiler-owned sentinel; an ordinary `@origin` binding is not a
+            // fact read and therefore must not be classified here.
+            if name.starts_with("\0jet.fact.")
+                && ctx
+                    .module
+                    .source
+                    .get(span.start..span.end)
+                    .is_some_and(|member| member == Syntax::COMPILER_FACT_ORIGIN)
+            {
+                ctx.db.refs.push(scoped_ref(
+                    Syntax::COMPILER_FACT_ORIGIN.to_string(),
+                    *span,
+                    mp,
+                    ctx,
+                ));
+            }
+        }
         AST::Expr::Int(_, _, _, _)
         | AST::Expr::Float(_, _, _, _)
         | AST::Expr::Bool(_, _)
@@ -3440,7 +3518,6 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         | AST::Expr::Todo { .. }
         | AST::Expr::NoElse(_)
         | AST::Expr::UnitLit { .. }
-        | AST::Expr::ComptimeName { .. }
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
         // literal, no nested `Expr` to recurse into.
         | AST::Expr::StrMatchLit(_, _)

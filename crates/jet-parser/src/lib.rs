@@ -142,15 +142,12 @@ mod generic_module_tests {
         let Item::Func(function) = &program.items[0] else {
             panic!("function")
         };
-        let Stmt::Return(
-            Some(Expr::If {
+        let Stmt::Expr(Expr::If {
                 cond: ok_cond,
                 then_value: ok_value,
                 else_value,
                 ..
-            }),
-            _,
-        ) = &function.body[0]
+            }) = &function.body[0]
         else {
             panic!("Result handler should lower as a value if")
         };
@@ -569,21 +566,21 @@ fn run() {
 }
 
 #[cfg(test)]
-mod raw_head_fmt_tests {
+mod raw_literal_fmt_tests {
     use super::Formatter;
 
     #[test]
-    fn typed_head_bodies_keep_raw_backslashes() {
+    fn typed_literal_bodies_keep_raw_backslashes() {
         let src = r#"fn run() {
-    digits :: Regex{"\d+"}
+    digits :: Pattern{"\d+"}
     text :: "a\nb"
-    loc :: URL.{"https://x/{name}"}
+    loc :: Pattern{"https://x/{name}"}
 }
 "#;
-        let once = Formatter::format_source(src).expect("typed head should format");
+        let once = Formatter::format_source(src).expect("typed literal should format");
         assert!(
-            once.contains(r#"Regex{"\d+"}"#),
-            "formatter decoded a typed-head slash:\n{once}"
+            once.contains(r#"Pattern{"\d+"}"#),
+            "formatter decoded a typed-literal slash:\n{once}"
         );
         assert!(
             once.contains(r#""a\nb""#),
@@ -591,9 +588,9 @@ mod raw_head_fmt_tests {
         );
         assert!(
             once.contains("{name}"),
-            "formatter dropped a typed-head hole:\n{once}"
+            "formatter dropped a typed-literal hole:\n{once}"
         );
-        let twice = Formatter::format_source(&once).expect("typed head should reformat");
-        assert_eq!(once, twice, "typed-head formatting must be idempotent");
+        let twice = Formatter::format_source(&once).expect("typed literal should reformat");
+        assert_eq!(once, twice, "typed-literal formatting must be idempotent");
     }
 }

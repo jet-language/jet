@@ -1,0 +1,77 @@
+pub enum TextError {
+    Empty
+    QueryShape
+    SelectorShape
+    IdentityShape
+}
+
+pub fn explain(error: TextError) String -> {
+    if error == .Empty -> return "rejected: empty"
+    if error == .QueryShape -> return "rejected: query shape"
+    if error == .SelectorShape -> return "rejected: selector shape"
+    if error == .IdentityShape -> return "rejected: identity shape"
+    return "rejected: unknown"
+}
+
+pub Pattern :: distinct String
+
+impl Pattern.CheckedText {
+    type Error = TextError
+
+    fn check(text: String) () ! -[]> {
+        if text == "" -> return Err(TextError.Empty)
+        return Ok()
+    }
+
+    fn encode_hole<T: Printable>(value: T) String -[]> {
+        return "[{value}]"
+    }
+}
+
+pub Query :: distinct String
+
+impl Query.CheckedText {
+    type Error = TextError
+
+    fn check(text: String) () ! -[]> {
+        if text == "" -> return Err(TextError.Empty)
+        if !text.contains("select") -> return Err(TextError.QueryShape)
+        return Ok()
+    }
+
+    fn encode_hole<T: Printable>(value: T) String -[]> {
+        return "?"
+    }
+}
+
+pub Selector :: distinct String
+
+impl Selector.CheckedText {
+    type Error = TextError
+
+    fn check(text: String) () ! -[]> {
+        if text == "" -> return Err(TextError.Empty)
+        if !text.contains(".") -> return Err(TextError.SelectorShape)
+        return Ok()
+    }
+
+    fn encode_hole<T: Printable>(value: T) String -[]> {
+        return "[{value}]"
+    }
+}
+
+pub Identity :: distinct String
+
+impl Identity.CheckedText {
+    type Error = TextError
+
+    fn check(text: String) () ! -[]> {
+        if text == "" -> return Err(TextError.Empty)
+        if !text.contains("@") -> return Err(TextError.IdentityShape)
+        return Ok()
+    }
+
+    fn encode_hole<T: Printable>(value: T) String -[]> {
+        return "{value}"
+    }
+}

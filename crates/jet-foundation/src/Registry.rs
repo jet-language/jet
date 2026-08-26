@@ -613,6 +613,16 @@ pub enum FactRead {
 }
 
 impl FactRead {
+    /// Canonical type shown for a direct public read of a typed compiler fact.
+    /// Reads whose type depends on the receiver stay `None`; the `#Track`
+    /// origin surface has one stable optional carrier.
+    pub const fn public_read_type(self) -> Option<&'static str> {
+        match self {
+            Self::Origin => Some("OriginInfo?"),
+            _ => None,
+        }
+    }
+
     /// The closed reflection kind carried by this read. Build rows have no
     /// reflected value kind because they are selected from the build snapshot.
     pub fn reflection_kind(self) -> Option<&'static str> {

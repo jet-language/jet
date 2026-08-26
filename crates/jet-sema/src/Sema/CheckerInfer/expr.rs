@@ -2308,6 +2308,11 @@ impl<'a> Checker<'a> {
                                     ),
                                     Some(span),
                                 ));
+                                // The branch mismatch is the root error. Do
+                                // not return one branch's type to the outer
+                                // value checker, or a declared block result
+                                // would add a second, less precise E0113.
+                                return None;
                             } else {
                                 self.diags.push(Diagnostic::error(
                                     "E0074",

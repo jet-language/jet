@@ -1862,7 +1862,9 @@ fn lower_method_call_impl(
             }
         }
         if let Some(type_name) = static_call_type_name_lower(receiver, env) {
-            if cx.is_checked_text_type_name(&type_name) {
+            if cx.string_distinct_has_trait_method(&type_name, "check")
+                && cx.string_distinct_has_trait_method(&type_name, "encode_hole")
+            {
                 return in_own_frame(|| TExpr {
                     ty: resolved_ret
                         .cloned()
@@ -5688,9 +5690,44 @@ fn lower_method_call_impl(
             // inherent facades over the ordinary CheckedText implementation.
             // Their Rust names stay bare; only actual Jet methods use the
             // `__jet_` mangle.
-            if cx.is_checked_text_type_name(&type_name)
+            if cx.string_distinct_has_trait_method(&type_name, "check")
+                && cx.string_distinct_has_trait_method(&type_name, "encode_hole")
                 && matches!(method, "from" | "encode_hole")
             {
+                let lowered_args: Vec<_> = args
+                    .iter()
+                    .map(|argument| lower_one_call_arg(argument, None, env, cx))
+                    .collect();
+                let resolved_type_args = if method == "encode_hole" {
+                    let sig = cx
+                        .method_sigs
+                        .get(&(type_name.clone(), method.to_string()))
+                        .cloned()
+                        .unwrap_or_default();
+                    resolved_method_type_args(
+                        cx,
+                        &type_name,
+                        method,
+                        &sig,
+                        &[],
+                        &lowered_args,
+                        type_args,
+                        resolved_ret,
+                    )
+                } else {
+                    type_args.to_vec()
+                };
+                if !resolved_type_args.is_empty() {
+                    let owner = Type::Named(type_name.clone());
+                    cx.jit_method_calls.borrow_mut().insert(
+                        crate::Codegen::TIR::generic_method_instance_key(
+                            &owner,
+                            method,
+                            &resolved_type_args,
+                        ),
+                        (owner, method.to_string(), resolved_type_args.clone()),
+                    );
+                }
                 return TExpr {
                     ty: resolved_ret.cloned().unwrap_or_else(|| {
                         if method == "from" {
@@ -5706,11 +5743,8 @@ fn lower_method_call_impl(
                         owner: TStaticOwner::User(type_name.clone()),
                         owner_type: Some(Type::Named(type_name)),
                         method: TMethodRef::bare(method),
-                        type_args: type_args.to_vec(),
-                        args: args
-                            .iter()
-                            .map(|argument| lower_one_call_arg(argument, None, env, cx))
-                            .collect(),
+                        type_args: resolved_type_args,
+                        args: lowered_args,
                     },
                 };
             }

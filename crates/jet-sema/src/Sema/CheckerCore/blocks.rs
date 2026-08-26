@@ -94,6 +94,12 @@ impl<'a> Checker<'a> {
     }
 
     fn check_value_tail(&mut self, stmt: &mut Stmt, expected: &Type) {
+        if !self.flow.reachable {
+            // Source after an earlier exit is still checked for its own
+            // diagnostics, but cannot be the block's reachable value tail.
+            self.check_stmt(stmt);
+            return;
+        }
         match stmt {
             Stmt::Expr(expr)
                 if !self.tail_has_authored_semicolon(expr.span())
@@ -145,35 +151,15 @@ impl<'a> Checker<'a> {
     }
 
     fn tail_has_authored_semicolon(&self, span: Span) -> bool {
-        let bytes = self.source.as_bytes();
-        let mut at = span.end.min(bytes.len());
-        loop {
-            while at < bytes.len() && bytes[at].is_ascii_whitespace() {
-                at += 1;
-            }
-            if bytes.get(at..).is_some_and(|tail| tail.starts_with(b"//")) {
-                at += 2;
-                while at < bytes.len() && bytes[at] != b'\n' {
-                    at += 1;
-                }
-                continue;
-            }
-            if bytes.get(at..).is_some_and(|tail| tail.starts_with(b"/*")) {
-                at += 2;
-                while at + 1 < bytes.len() && &bytes[at..at + 2] != b"*/" {
-                    at += 1;
-                }
-                at = (at + 2).min(bytes.len());
-                continue;
-            }
-            break;
-        }
-        bytes.get(at) == Some(&b';')
+        find_authored_semicolon(self.source, span.end).is_some()
     }
 
     fn is_diverging_tail(expr: &Expr) -> bool {
-        matches!(expr, Expr::Todo { .. })
-            || matches!(expr, Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC)
+        matches!(expr.without_parens(), Expr::Todo { .. })
+            || matches!(
+                expr.without_parens(),
+                Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
+            )
     }
 
     /// L0513 / D-TAIL-RETURN1=A: a statement arm table immediately followed
@@ -190,6 +176,7 @@ impl<'a> Checker<'a> {
         let [
             ..,
             Stmt::Switch {
+                subject,
                 arms,
                 else_body: None,
                 span,
@@ -200,6 +187,17 @@ impl<'a> Checker<'a> {
         else {
             return None;
         };
+        // Subjectless guards (including readiness tables) are effect/control
+        // tables, not value dispatch. Adding an `else` body would change the
+        // statement shape instead of merely moving the fallback value into
+        // the table, so the rewrite is not equivalent.
+        if crate::AST::is_subjectless_guard(subject, *span)
+            || arms
+                .iter()
+                .any(|arm| crate::AST::readiness_head(&arm.cond).is_some())
+        {
+            return None;
+        }
         if arms.is_empty()
             || !arms
                 .iter()
@@ -235,15 +233,18 @@ impl<'a> Checker<'a> {
         let source = self.source;
         let mut edits: Vec<(usize, usize, String)> = Vec::new();
         for arm in arms {
-            let [Stmt::Return(Some(_value), return_span)] = arm.body.as_slice() else {
+            let [Stmt::Return(Some(value), return_span)] = arm.body.as_slice() else {
                 return None;
             };
             if return_span.start > return_span.end {
                 return None;
             }
-            // Remove only the keyword. Any comment or spacing between
-            // `return` and the value remains in the source edit.
+            // Remove only the keyword and an authored terminator. Any comment
+            // or spacing around the value remains in the source edit.
             edits.push((return_span.start, return_span.end, String::new()));
+            if let Some(semicolon) = find_authored_semicolon(source, value.span().end) {
+                edits.push((semicolon, semicolon + 1, String::new()));
+            }
         }
 
         let close = find_switch_close(source, switch_span.start)?;
@@ -268,12 +269,12 @@ impl<'a> Checker<'a> {
         edits.push((default.span().start, default.span().end, String::new()));
 
         let mut end = default.span().end;
-        let mut at = end;
-        while at < source.len() && source.as_bytes()[at].is_ascii_whitespace() {
-            at += 1;
-        }
-        if at < source.len() && source.as_bytes()[at] == b';' {
-            end = at + 1;
+        if let Some(semicolon) = find_authored_semicolon(source, end) {
+            // The semicolon belongs to the removed fallback statement. Keep
+            // any whitespace/comments around it, but do not leave a stray
+            // statement terminator after the new value table.
+            end = semicolon + 1;
+            edits.push((semicolon, semicolon + 1, String::new()));
         }
         let start = switch_span.start;
         let mut replacement = source.get(start..end)?.to_string();
@@ -429,4 +430,30 @@ fn find_switch_close(source: &str, start: usize) -> Option<usize> {
         }
     }
     None
+}
+
+fn find_authored_semicolon(source: &str, mut at: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    at = at.min(bytes.len());
+    loop {
+        while at < bytes.len() && bytes[at].is_ascii_whitespace() {
+            at += 1;
+        }
+        if bytes.get(at..).is_some_and(|tail| tail.starts_with(b"//")) {
+            at += 2;
+            while at < bytes.len() && bytes[at] != b'\n' {
+                at += 1;
+            }
+            continue;
+        }
+        if bytes.get(at..).is_some_and(|tail| tail.starts_with(b"/*")) {
+            at += 2;
+            while at + 1 < bytes.len() && &bytes[at..at + 2] != b"*/" {
+                at += 1;
+            }
+            at = (at + 2).min(bytes.len());
+            continue;
+        }
+        return (bytes.get(at) == Some(&b';')).then_some(at);
+    }
 }

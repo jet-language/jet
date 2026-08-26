@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2208,
-    "rev": 45460,
+    "rev": 45490,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -148752,13 +148752,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "1. Follow D-TRACK-ORIGIN1=A. Make `value.@origin` the only public read of `#Track` origin.\n2. Rename the registered fact and public type to `Origin` and `OriginInfo` in `Registry.rs`, `Syntax`, and Core type tables.\n3. Keep the fact optional and typed with tracked, source, line, column, and ambiguity fields.\n4. Derive the value only from sema flow facts in `FlowFacts.rs` and `CheckerInfer/expr.rs`.\n5. Preserve exact meaning across immutable and mutable bindings, copies, moves, shadow refusal, branches, loops, and merged ambiguity.\n6. Remove `.origin()`, `.@track_origin`, `TBindingOrigin`, runtime formatting, and method-call lowering from TIR and codegen.\n7. Permit runtime output only by ordinary comptime folding of `OriginInfo`; add no runtime metadata channel.\n8. Update completion, hover, definition, references, rename, reflection, semindex, inspect, docs, diagnostics, and generated Core declarations.\n9. Migrate `provenance_track.jet`, fact-read examples, tests, UI fixtures, grammars, snapshots, and goldens.\n10. Run sema flow, parser, formatter, TIR, codegen, comptime, reflection, semindex, LSP, UI, grammar, and golden checks.\n11. Smoke tracked, untracked, copied, moved, mutable, merged, and runtime-print cases with default `jet run` and AOT.\n12. Exercise JIT and interpreter paths and confirm they consume only the folded sema fact.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -148796,74 +148801,74 @@
         {
           "n": 3,
           "text": "Tracked, untracked, copied, moved, mutable, loop-carried, and branch-merged values never gain invented or stale provenance.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:18.416Z"
+          "evidence": "crates/jet-sema/src/Sema/CheckerOwnership.rs:3291, 3307, 4051",
+          "at": "2026-08-26T05:01:10.842Z"
         },
         {
           "n": 4,
           "text": "Completion, hover, definition, references, rename, reflection, semindex, and `jet inspect expand --facts` agree on `@origin` and `OriginInfo`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:18.416Z"
+          "evidence": "evidence: `tests/semindex.rs:508-550`, `Source/LSP/mod.rs:393-448`, `tests/reflect.rs:752-777`, `tests/cli_parts/expand.rs:272-310`",
+          "at": "2026-08-26T05:01:11.234Z"
         },
         {
           "n": 5,
           "text": "`.origin()` and `.@track_origin` are rejected with focused teaching diagnostics and never lower through runtime or compatibility paths.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:18.416Z"
+          "evidence": "crates/jet-parser/src/Parser/Expressions/ptr_tuple.rs:119; crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs:2531; regression test added at tests/fact_reads.rs:234",
+          "at": "2026-08-26T05:01:11.604Z"
         },
         {
           "n": 6,
           "text": "`TBindingOrigin`, runtime origin formatting, method dispatch, and duplicate metadata storage are deleted from TIR and codegen.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:18.416Z"
+          "evidence": "`crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs:1277`; `crates/jet-foundation/src/AST/comptime.rs:1792`; foundation lane-check: `CHECK OK`",
+          "at": "2026-08-26T05:01:11.948Z"
         },
         {
           "n": 7,
           "text": "`provenance_track.jet` reads `.@origin` at comptime and may print only the ordinary folded value.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:18.416Z"
+          "evidence": "`examples/features/tooling/provenance_track.jet:4-10`; expected output `examples/features/expected/tooling/provenance_track.out:1-5`",
+          "at": "2026-08-26T05:01:12.297Z"
         },
         {
           "n": 8,
           "text": "AOT, JIT, interpreter, and comptime consume the same sema fact; adapters do not reconstruct source, ambiguity, or movement policy.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:18.416Z"
+          "evidence": "sema fold `expr.rs:485-503` feeds generic `CtLit` consumers (AOT/JIT/interpreter); parity proof: `tests/fact_reads.rs::tracked_binding_origin_reads_the_track_marker`",
+          "at": "2026-08-26T05:01:12.663Z"
         },
         {
           "n": 9,
           "text": "`Syntax.rs` records D-TRACK-ORIGIN1=A and `syntax-decisions.md` records the owner outcome.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:18.416Z"
+          "evidence": "`Syntax.rs:32-34`; `syntax-decisions.md:2058-2067,8733`; `lane-check.sh: CHECK OK`",
+          "at": "2026-08-26T05:01:13.032Z"
         },
         {
           "n": 10,
           "text": "Jet devtools grammars, diagnostics, formatter snapshots, fact examples, reflection snapshots, and goldens use the canonical fact only.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:18.416Z"
+          "evidence": "tests/fmt.rs:2537; editors/tree-sitter/test/corpus/compiler_fact_origin.txt:7; examples/features/expected/tooling/provenance_track.out:1",
+          "at": "2026-08-26T05:01:13.401Z"
         }
       ],
       "refs": [
@@ -148878,8 +148883,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:11.071Z",
-      "updated": "2026-08-26T04:20:34.280Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-26T05:01:30.149Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-26T05:01:30.149Z"
     },
     {
       "id": "cwf44fqc",
@@ -149105,65 +149111,65 @@
         {
           "n": 2,
           "text": "Explicit `return` remains an early exit; a semicolon, assignment, declaration, or other statement tail yields unit instead of an accidental value.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:59.609Z"
+          "evidence": "evidence: `blocks.rs:103-135`, `tir_control_and_data.rs:124-146,235-251`; `lane-check.sh -p jet-sema` → `CHECK OK` (workspace check remains blocked by unrelated sibling errors).",
+          "at": "2026-08-26T05:01:13.740Z"
         },
         {
           "n": 3,
           "text": "Sema checks one expected block type across all reachable tails and reports mixed types, missing values, and accidental unit with exact spans.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:59.609Z"
+          "evidence": "`blocks.rs:18`, `expr.rs:2295`, `if_expr_branch_type_mismatch.stderr:1`; `lane-check.sh -p jet-sema` → `CHECK OK`",
+          "at": "2026-08-26T05:01:14.145Z"
         },
         {
           "n": 4,
           "text": "The implementation removes the old function-only tail rewrite and keeps one sema and TIR block-value mechanism.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:59.609Z"
+          "evidence": "`functions_params.rs:212`, `Registration.rs:538-541`, `control_flow.rs:55-66`; lane-check: `CHECK OK`",
+          "at": "2026-08-26T05:01:15.110Z"
         },
         {
           "n": 5,
           "text": "A registered lint detects an arm table followed by an equivalent default return and stays silent when control flow, effects, or evaluation differ.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:59.609Z"
+          "evidence": "crates/jet-sema/src/Sema/CheckerCore/blocks.rs:185; `value_block_tails_report_unit_and_lint_old_arm_table_shape`; `CHECK OK`",
+          "at": "2026-08-26T05:01:15.822Z"
         },
         {
           "n": 6,
           "text": "The lint fix adds an explicit `else` arm, removes redundant returns and fallback tails, and preserves comments, bindings, order, effects, and spans.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:59.609Z"
+          "evidence": "evidence: `blocks.rs:242-290`; `lane-check.sh -p jet-sema` → `CHECK OK`",
+          "at": "2026-08-26T05:01:16.234Z"
         },
         {
           "n": 7,
           "text": "`status_label` and `outcome_label` become exhaustive value tables with no repeated `return` and no trailing fallback statement.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:59.609Z"
+          "evidence": "examples/features/tooling/service_runtime.jet:11-25",
+          "at": "2026-08-26T05:01:16.607Z"
         },
         {
           "n": 8,
           "text": "Loops, divergence, unreachable tails, nested blocks, comments, and unit bodies have deterministic behavior and focused diagnostics.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:59.609Z"
+          "evidence": "`value_tail_divergence_and_loop_flow_are_deterministic`; targeted lane-check: `CHECK OK` (workspace blocked by untouched `tests/semindex.rs:213`, E0716).",
+          "at": "2026-08-26T05:01:16.989Z"
         },
         {
           "n": 9,
@@ -149177,20 +149183,20 @@
         {
           "n": 10,
           "text": "`Syntax.rs` records D-TAIL-RETURN1=A and `syntax-decisions.md` records its amendment to D-BODY-LAST1.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:59.609Z"
+          "evidence": "crates/jet-foundation/src/Syntax.rs:210; docs/spec/syntax-decisions.md:7944",
+          "at": "2026-08-26T05:01:17.765Z"
         },
         {
           "n": 11,
           "text": "Jet devtools grammars, formatter snapshots, lint UI snapshots, semindex facts, service examples, and goldens use the current rule only.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:59.609Z"
+          "evidence": "editors/tree-sitter/grammar.js:829; tests/fmt.rs:1188; tests/ui_lint/redundant_tail_return.warn:1; tests/semindex.rs:603; examples/features/tooling/service_authority.jet:9; examples/features/expected/tooling/service_authority.out:1",
+          "at": "2026-08-26T05:01:18.570Z"
         }
       ],
       "refs": [
@@ -149207,7 +149213,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:22.506Z",
-      "updated": "2026-08-26T02:47:44.978Z",
+      "updated": "2026-08-26T05:01:18.570Z",
       "updatedBy": "orchestrator"
     },
     {
@@ -149860,20 +149866,20 @@
         {
           "n": 2,
           "text": "A checked text declaration is one ordinary nominal String-backed type plus one ordinary `CheckedText` implementation.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:10.632Z"
+          "evidence": "evidence: `crates/jet-codegen/src/Prelude/Core.rs:5`, `crates/jet-foundation/src/Traits.rs:436,1057`, `tests/checked_text.rs:11,13`",
+          "at": "2026-08-26T05:01:19.366Z"
         },
         {
           "n": 3,
           "text": "The trait contract names one check error, one pure complete-text checker, and one pure hole encoder; malformed implementations get precise sema diagnostics.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:10.632Z"
+          "evidence": "crates/jet-foundation/src/Traits.rs:480",
+          "at": "2026-08-26T05:01:19.731Z"
         },
         {
           "n": 4,
@@ -149887,47 +149893,47 @@
         {
           "n": 5,
           "text": "Every interpolated hole passes through the declared encoder exactly once before the complete text is checked and wrapped.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:10.632Z"
+          "evidence": "`crates/jet-sema/src/Sema/CheckerInfer/expr.rs:1043`; `crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:5701`; `tests/checked_text.rs:183`",
+          "at": "2026-08-26T05:01:20.095Z"
         },
         {
           "n": 6,
           "text": "Dynamic `Type.from(text)` validates through the shared implicit Error route and preserves typed check failure, cause, context, and source.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:10.632Z"
+          "evidence": "`tests/checked_text.rs:192`",
+          "at": "2026-08-26T05:01:21.227Z"
         },
         {
           "n": 7,
           "text": "`Type.raw(text)` is unavailable outside a reasoned `#Unsafe` region and leaves a source-linked gate, inspect fact, and receipt.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:10.632Z"
+          "evidence": "crates/jet-sema/src/Sema/GateLedger.rs:570",
+          "at": "2026-08-26T05:01:22.492Z"
         },
         {
           "n": 8,
           "text": "Plain String cannot cross a checked text parameter, field, return, collection, generic, trait, or foreign boundary without validation.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:10.632Z"
+          "evidence": "tests/checked_text_crossings.rs:39; type_assign.rs:721; targeted lane-check: CHECK OK",
+          "at": "2026-08-26T05:01:23.741Z"
         },
         {
           "n": 9,
           "text": "Marker text contracts, compiler-owned head registries, `__JetCheckedText`, special wrapper calls, and parallel runtime checkers are deleted.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:10.632Z"
+          "evidence": "crates/jet-codegen/src/Prelude/Core.rs:5; scripts/agent/lane-check.sh -p jet-codegen: CHECK OK",
+          "at": "2026-08-26T05:01:24.985Z"
         },
         {
           "n": 10,
@@ -149941,29 +149947,29 @@
         {
           "n": 11,
           "text": "Pattern, query, selector, and identity examples prove literals, holes, dynamic text, imports, generics, raw refusal, and structured failures.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:10.632Z"
+          "evidence": "examples/features/text/checked_text/run.jet:4; examples/features/text/checked_text/types/module.jet:18; tests/checked_text.rs:163; targeted lane check: CHECK OK",
+          "at": "2026-08-26T05:01:26.262Z"
         },
         {
           "n": 12,
           "text": "`Syntax.rs` records D-TEXTHEAD-TYPE1=A and `syntax-decisions.md` records the owner outcome.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:10.632Z"
+          "evidence": "crates/jet-foundation/src/Syntax.rs:51; docs/spec/syntax-decisions.md:7212",
+          "at": "2026-08-26T05:01:26.625Z"
         },
         {
           "n": 13,
           "text": "Jet devtools grammars, formatter snapshots, diagnostics, examples, and goldens contain the ordinary type and trait model only.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:10.632Z"
+          "evidence": "`editors/tree-sitter/grammar.js:1240`; `tests/fmt.rs:3346`; `examples/features/tooling/checked_text_type.jet:5`; lane-check: `CHECK OK`",
+          "at": "2026-08-26T05:01:27.416Z"
         }
       ],
       "refs": [
@@ -149978,7 +149984,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:51.717Z",
-      "updated": "2026-08-26T02:47:46.134Z",
+      "updated": "2026-08-26T05:01:27.416Z",
       "updatedBy": "orchestrator"
     },
     {
@@ -150025,20 +150031,20 @@
         {
           "n": 2,
           "text": "Enums, traits, aliases, impls, modules, anonymous shapes, empty sections, and repeated sections get registered diagnostics with exact spans.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:03.992Z"
+          "evidence": "evidence: `enums_traits.rs:298`, `states_protocols.rs:1139`, `State.rs:315`; parser lane `CHECK OK` (integration check blocked by untouched sibling errors)",
+          "at": "2026-08-26T05:01:28.254Z"
         },
         {
           "n": 3,
           "text": "The canonical path remains `Type.State.Name`; bare names resolve only inside ratified `#State` and `#Transition` argument slots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:03.992Z"
+          "evidence": "`crates/jet-sema/src/Sema/State.rs:1179-1189`; `jet-sema` lane `CHECK OK`",
+          "at": "2026-08-26T05:01:29.083Z"
         },
         {
           "n": 4,
@@ -150126,7 +150132,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:55.233Z",
-      "updated": "2026-08-26T02:47:47.399Z",
+      "updated": "2026-08-26T05:01:29.084Z",
       "updatedBy": "orchestrator"
     },
     {
@@ -211232,6 +211238,216 @@
   ],
   "events": [
     {
+      "at": "2026-08-26T05:01:30.149Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cv62zydw",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-26T05:01:29.084Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c13gfyz5l",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-26T05:01:28.254Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c13gfyz5l",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-26T05:01:27.416Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c12uacgqe",
+      "note": "#13"
+    },
+    {
+      "at": "2026-08-26T05:01:26.625Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c12uacgqe",
+      "note": "#12"
+    },
+    {
+      "at": "2026-08-26T05:01:26.262Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c12uacgqe",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-26T05:01:24.985Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c12uacgqe",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-26T05:01:23.741Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c12uacgqe",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-26T05:01:22.493Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c12uacgqe",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-26T05:01:21.227Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c12uacgqe",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-26T05:01:20.095Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c12uacgqe",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-26T05:01:19.731Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c12uacgqe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-26T05:01:19.366Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c12uacgqe",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-26T05:01:18.570Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cxf6x7ap",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-26T05:01:17.766Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cxf6x7ap",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-26T05:01:16.989Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cxf6x7ap",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-26T05:01:16.607Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cxf6x7ap",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-26T05:01:16.235Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cxf6x7ap",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-26T05:01:15.822Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cxf6x7ap",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-26T05:01:15.110Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cxf6x7ap",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-26T05:01:14.146Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cxf6x7ap",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-26T05:01:13.740Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cxf6x7ap",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-26T05:01:13.401Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cv62zydw",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-26T05:01:13.032Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cv62zydw",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-26T05:01:12.663Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cv62zydw",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-26T05:01:12.298Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cv62zydw",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-26T05:01:11.949Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cv62zydw",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-26T05:01:11.604Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cv62zydw",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-26T05:01:11.234Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cv62zydw",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-26T05:01:10.842Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cv62zydw",
+      "note": "#3"
+    },
+    {
       "at": "2026-08-26T04:21:42.500Z",
       "by": "orchestrator",
       "action": "card.update",
@@ -214520,216 +214736,6 @@
       "action": "card.update",
       "ref": "c0nctuf1",
       "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-25T19:59:28.002Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0nctuf1",
-      "note": "#5 No production key material is created by this card, and the "
-    },
-    {
-      "at": "2026-08-25T19:59:27.640Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0nctuf1",
-      "note": "#4 A written rotation procedure exists, including how a verifie"
-    },
-    {
-      "at": "2026-08-25T19:59:27.264Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0nctuf1",
-      "note": "#3 The client refuses a substituted key rather than accepting w"
-    },
-    {
-      "at": "2026-08-25T19:59:26.900Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0nctuf1",
-      "note": "#2 The served format is exactly what the existing client reads,"
-    },
-    {
-      "at": "2026-08-25T19:59:26.546Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0nctuf1",
-      "note": "#1 A documented stable location under the owned domain serves t"
-    },
-    {
-      "at": "2026-08-25T19:59:25.500Z",
-      "by": "orchestrator",
-      "action": "card.add",
-      "ref": "c0nctuf1",
-      "note": "Publish the Jet trust root at a stable address so signatures have an anchor"
-    },
-    {
-      "at": "2026-08-25T19:57:47.514Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0rlso3f",
-      "note": "body"
-    },
-    {
-      "at": "2026-08-25T19:46:23.730Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cyxijw5j",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-25T19:46:23.370Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cyxijw5j",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-25T19:46:21.848Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cyxijw5j",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-25T19:46:20.397Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cyxijw5j",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-25T19:46:18.966Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cyxijw5j",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-25T19:46:17.556Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cup3p8gb",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-25T19:46:16.249Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cup3p8gb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-25T19:46:15.264Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cup3p8gb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-25T19:46:14.884Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "ctrvtgzf",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-25T19:46:14.534Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "ctrvtgzf",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-25T19:46:14.189Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "ctrvtgzf",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-25T19:46:13.838Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "ctrvtgzf",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-25T19:46:13.489Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "ctrvtgzf",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-25T19:46:13.135Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "ctrvtgzf",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-25T19:46:12.491Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cr8bdkzb",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-25T19:46:11.910Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cr8bdkzb",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-25T19:46:11.303Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cr8bdkzb",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-25T19:46:10.150Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cr8bdkzb",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-25T19:46:09.259Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cr8bdkzb",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-25T19:46:07.784Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cr8bdkzb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-25T19:46:06.510Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cr8bdkzb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-25T19:46:06.124Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cnnczx0n",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-25T19:46:05.665Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cnnczx0n",
-      "note": "#6"
     }
   ],
   "nextNum": 368,

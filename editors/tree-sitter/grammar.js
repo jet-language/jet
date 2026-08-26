@@ -50,10 +50,10 @@ module.exports = grammar({
     [$.extern_fn, $.function_def],
     [$.extern_fn],
     [$.module_path, $.module_def],
-    // Typed-literal heads and ordinary strings share empty/simple bodies;
-    // the enclosing `Type.{ … }` head resolves the intended surface.
-    [$.string_literal, $.typed_head_string],
-    [$.multiline_string, $.typed_head_multiline],
+    // Typed-literal bodies and ordinary strings share empty/simple bodies;
+    // the enclosing nominal type resolves the intended surface.
+    [$.string_literal, $.typed_literal_string],
+    [$.multiline_string, $.typed_literal_multiline],
     [$._marker, $.marked_expr],
   ],
 
@@ -780,7 +780,7 @@ module.exports = grammar({
       ),
 
     // Binding sigils (D-BIND-BARE1): `name :: expr` immutable, `name := expr` mutable.
-    // Types never ride the binding name — they ride the value (`Type.{ … }`).
+    // Types never ride the binding name — they ride the value (`Type{ … }`).
     bind_stmt: ($) =>
       seq(
         field(
@@ -1061,15 +1061,15 @@ module.exports = grammar({
         '"',
       ),
 
-    // D-BOUND-RAW1=A: Type.{"…"} bodies hand every slash to the head grammar.
+    // D-BOUND-RAW1=A: Type{"…"} bodies hand every slash to the literal grammar.
     // A slashed quote still belongs to the body; doubled braces stay literal.
-    typed_head_string: ($) =>
+    typed_literal_string: ($) =>
       seq(
         '"',
         repeat(
           choice(
-            $.typed_head_brace,
-            $.typed_head_slash,
+            $.typed_literal_brace,
+            $.typed_literal_slash,
             $.string_interpolation,
             $._string_content,
           ),
@@ -1077,13 +1077,13 @@ module.exports = grammar({
         '"',
       ),
 
-    typed_head_multiline: ($) =>
+    typed_literal_multiline: ($) =>
       seq(
         '"""',
         repeat(
           choice(
-            $.typed_head_brace,
-            $.typed_head_slash,
+            $.typed_literal_brace,
+            $.typed_literal_slash,
             $.string_interpolation,
             $._ml_string_content,
           ),
@@ -1091,8 +1091,8 @@ module.exports = grammar({
         '"""',
       ),
 
-    typed_head_slash: (_) => token.immediate(/\\./),
-    typed_head_brace: (_) => token.immediate(/\{\{|\}\}/),
+    typed_literal_slash: (_) => token.immediate(/\\./),
+    typed_literal_brace: (_) => token.immediate(/\{\{|\}\}/),
 
     // Triple-quoted multiline string `"""…"""` (D-SG5); interpolation stays live.
     multiline_string: ($) =>
@@ -1238,21 +1238,20 @@ module.exports = grammar({
     record_literal: ($) => $.record_body,
 
     // D-DOTCTOR3 / D-BOUND-HEAD1: every named typed literal uses the universal
-    // `Type.{ … }` head. The body is intentionally permissive here; the Jet
+    // `Type{ … }` form. The body is intentionally permissive here; the Jet
     // parser and sema own the exact body shape and typed-hole law.
     typed_literal: ($) =>
       prec.right(
         6,
         seq(
           field("head", $._type),
-          token.immediate("."),
           "{",
           field(
             "body",
             optional(
               choice(
-                $.typed_head_string,
-                $.typed_head_multiline,
+                $.typed_literal_string,
+                $.typed_literal_multiline,
                 commaSep1(
                   choice(
                     seq(field("field", $.identifier), ":", field("value", $._expr)),

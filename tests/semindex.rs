@@ -166,6 +166,67 @@ fn run() {}
 }
 
 #[test]
+fn checked_text_contract_is_one_tooling_fact() {
+    let src = r#"
+#Error
+enum PatternError { Bad }
+
+Pattern :: distinct String
+
+impl Pattern.CheckedText {
+    type Error = PatternError
+
+    fn check(text: String) () !PatternError -[]> {
+        return
+    }
+
+    fn encode_hole<T: Printable>(value: T) String -[]> {
+        return ""
+    }
+}
+
+fn run() {}
+"#;
+    let path = temp_fixture("checked_text_contract.jet", src);
+    let index = open(&path).expect("checked text semantic index");
+    let definition = index
+        .definitions()
+        .iter()
+        .find(|definition| definition.name == "Pattern")
+        .expect("Pattern definition");
+    assert_eq!(definition.nominal_base.as_deref(), Some("String"));
+    let contract = definition
+        .trait_contracts
+        .iter()
+        .find(|contract| contract.trait_name == "CheckedText")
+        .expect("CheckedText contract");
+    assert_eq!(contract.associated_types, vec![(
+        "Error".to_string(),
+        Some("PatternError".to_string()),
+    )]);
+    assert!(contract.methods.iter().any(|method| method.contains("check")));
+    assert!(contract
+        .methods
+        .iter()
+        .any(|method| method.contains("encode_hole")));
+
+    let symbols = open_symbols(&path).expect("checked text semantic symbols");
+    let symbol = symbols
+        .lookup_qualified("Pattern")
+        .expect("Pattern semantic symbol");
+    assert!(symbol.signature.contains("type Pattern :: distinct String"));
+    assert!(symbol.signature.contains("implements CheckedText"));
+    assert!(symbol.signature.contains("type Error = PatternError"));
+    assert!(symbol.signature.contains("encode_hole"));
+
+    let json = index.to_json();
+    assert!(json.contains("\"nominal_base\":\"String\""));
+    assert!(json.contains("\"trait\":\"CheckedText\""));
+    assert!(json.contains("\"associated_types\":[{\"name\":\"Error\""));
+    assert!(index.dossier("Pattern").render_text().contains("trait contracts"));
+}
+
+#[test]
 fn affine_unit_point_and_delta_members_are_cataloged() {
     let src = r#"
 #UnitFamily(Temperature, base: kelvin) {
@@ -528,6 +589,25 @@ fn tracked_float_symbol_exposes_its_binding_site() {
         .find(|symbol| symbol.kind == SemanticSymbolKind::Local)
         .expect("origin fact binding");
     assert_eq!(origin.signature, "origin: OriginInfo?");
+
+    let index = open(&path).expect("tracked-value semindex");
+    let origin_read = index
+        .references_to("@origin")
+        .into_iter()
+        .find_map(|reference| reference.fact.as_ref())
+        .expect("typed @origin semindex reference");
+    assert_eq!(origin_read.name, "@origin");
+    assert_eq!(origin_read.kind, "Origin");
+    assert_eq!(origin_read.type_name, "OriginInfo?");
+    assert!(index.to_json().contains(
+        "\"fact\":{\"name\":\"@origin\",\"kind\":\"Origin\",\"type\":\"OriginInfo?\"}"
+    ));
+    let fact_symbol = symbols
+        .lookup("@origin")
+        .into_iter()
+        .find(|symbol| symbol.signature == "@origin: OriginInfo?")
+        .expect("typed @origin semantic symbol");
+    assert_eq!(fact_symbol.kind, SemanticSymbolKind::Member);
 }
 
 #[test]

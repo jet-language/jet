@@ -141,7 +141,7 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
             if let Some(trait_name) = &a.box_as_trait {
                 s = format!(
                     "Box::new({s}) as Box<dyn {}>",
-                    crate::Codegen::mangle(trait_name)
+                    crate::Codegen::rust_trait_name(trait_name)
                 );
             }
             // Fn-typed coercion: wrap to match `cx.rust_type` (Rc / Arc / Box for FnMut).

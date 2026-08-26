@@ -346,7 +346,7 @@ smallest offending source span:
 | E0146 | parse | retired `const` keyword — write `@` (D-VERDICT-1308-1, spelling amended by D-ONCE-AT1=D) |
 | E0147 | parse | two `{}` holes in a str-match pattern with no literal text between them (D-PARSESTR1/D-PARSESTR2) |
 | E0148 | sema  | a str-match pattern used in an `if == {}` table with no `else` arm (D-PARSESTR1) |
-| E0149 | sema  | a runtime `String` used where `SQL`/`HTML` is expected (D-TYPEDTEXT1) |
+| E0149 | sema  | a runtime `String` used where a checked text type is expected (D-TEXTHEAD-TYPE1=A) |
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
 | E0151 | sema  | typestate: `#State(X)` or `#Transition(A, B)` references a state not in the owning `state { … }` section (D-STATE-HOME1=A) |
 | E0157 | parse | top-level typestate companion declaration (D-STATE-HOME1=A) |
@@ -514,7 +514,7 @@ smallest offending source span:
 | E0418 | parse | teaching: `#PublicFile` → `#PubFile` (D-VISDEFAULT2) |
 | E0419 | sema  | `#MustUse` result ignored as a bare statement (D-MUSTUSE1) |
 | E0420 | sema  | `Type{ uninit }` binding read before it is given a value (D-UNINIT-SENTINEL2) |
-| E0421 | parse | bare `:= uninit` needs a typed-literal head `Type{ uninit }` (D-UNINIT-SENTINEL2) |
+| E0421 | parse | bare `:= uninit` needs an explicit type `Type{ uninit }` (D-UNINIT-SENTINEL2) |
 | E0422 | parse | *retired by D-UNINIT-SENTINEL1* (was: `#Uninit` binding cannot have an initializer — structurally inapplicable now that `uninit` is the initializer) |
 | E0423 | sema  | `Type{ uninit }` binding's type is not plain data (D-UNINIT1, reworded) |
 | E0424 | sema  | `Type{ uninit }` used without `use core.mem` (D-UNINIT1, reworded) |
@@ -1626,14 +1626,14 @@ all control-flow paths (E0420). Codegen lowers to
 
 D-BIND-BARE1 retired typed bindings, so the D-UNINIT-SENTINEL1 spelling
 `name: Type := uninit` is gone. D-UNINIT-SENTINEL2 puts `uninit` inside the
-value's typed-literal head. The old `#Uninit name: Type` marker remains a hard
+value's explicit type. The old `#Uninit name: Type` marker remains a hard
 parse error (E0426) pointing at the new spelling —
 `tests/ui/uninit_marker_retired.jet`.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0420 | `` `{name}` may be read before it is given a value ``. | `` `{name}` was declared with `Type{ uninit }`, so no value is available until you write to it — this read could see garbage ``. | Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`). |
-| E0421 | `` `uninit` needs a typed-literal head ``. | An uninitialized binding has no value to infer its type from, so the type must head the literal. | Write `` `{name} := <Type>{ uninit }` ``, e.g. `` `buffer := [U8#4096]{ uninit }` ``. |
+| E0421 | `` `uninit` needs an explicit type ``. | An uninitialized binding has no value to infer its type from, so the type must appear before the literal body. | Write `` `{name} := <Type>{ uninit }` ``, e.g. `` `buffer := [U8#4096]{ uninit }` ``. |
 | E0423 | `` `uninit` needs a plain-data type ``. | The named type may own heap memory or need cleanup, so leaving it uninitialized is unsafe. | Use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`). |
 | E0424 | `` `uninit` needs the low-level memory tier ``. | `` `uninit` skips the automatic zero-fill — an expert-tier operation ``. | Add `use core.mem` at the top of this file to opt in. |
 | E0426 | `` `#Uninit` is retired ``. | Uninitialized storage is a fact about the value — it now reads `` `name := Type{ uninit }` ``. | Write `` `{name} := <Type>{ uninit }` ``. |
@@ -1751,7 +1751,7 @@ signature.
 | E0383 | This source loop uses a retired comma between its binding and source. | A source loop uses `in` to mark the binding/source boundary; commas remain for later clauses such as a stride. | Replace the comma after the binding with `in`, for example `loop item in items { … }`. |
 | E0384 | Jet has no membership operator here; `in` only joins a source-loop binding to its source. | Expression `x in xs` has no operator meaning in Jet. Collection membership is a method call. | Write `xs.contains(x)` (the `.contains(x)` method) instead of `x in xs`. |
 | E0376 | C-style counter loop headers are retired. | A three-slot loop header is binding, source, and step rule — not init, condition, and assignment (D-LOOP-HEADER3=D). | Write `loop i in 0..<n { … }` or `loop i in 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state. |
-| E0381 | A marker declaration used a retired trailing `on` clause, second parameter list, or checked-text contract. | D-MARKER-SITES1=B gives every marker one named parameter list: ordinary names have types, and `@` names have fixed metadata values. | Write `marker Name(args..., @sites: [...], @repeatable: true, ...)`; checked-text marker declarations have no replacement form. |
+| E0381 | A marker declaration used a retired trailing `on` clause or second parameter list. | D-MARKER-SITES1=B gives every marker one named parameter list: ordinary names have types, and `@` names have fixed metadata values. | Write `marker Name(args..., @sites: [...], @repeatable: true, ...)`. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 
@@ -1910,7 +1910,7 @@ does not invent an initial state and does not emit that warning.
 | E0167 | `state {state}` collides with a member of `{type}`. | State facts and ordinary members share the owning type's namespace. | Rename the state or the member so `Type.State.{state}` is unique. |
 | E0168 | `{type}` may declare only one `state { … }` section. | The state set is one erased fact row owned by the struct. | Merge the state names into one `state { … }` section. |
 | E0169 | `{type}` has an empty `state { … }` section. | An empty state set cannot validate markers or provide a useful reflected fact. | Add at least one state name, or remove the section. |
-| E0155 | a typed URL, Path, or DateTime literal is invalid or contains unsupported interpolation. | Typed literal heads are checked before the program runs; URL and Path holes must stay inside components, and DateTime heads must be complete. | Write a valid typed literal with holes only in URL or Path components, or parse a runtime `String` explicitly. |
+| E0155 | a typed URL, Path, or DateTime literal is invalid or contains unsupported interpolation. | Typed literal types are checked before the program runs; URL and Path holes must stay inside components, and DateTime literals must be complete. | Write a valid typed literal with holes only in URL or Path components, or parse a runtime `String` explicitly. |
 | E0156 | this operation would loosen `{plane}`. | knowledge only tightens silently; loosening `{plane}` must be named with a written gate. | write `{gate}(value)` at this boundary. |
 | E0153 | protocol `{name}` failed to expand into handle types. | Protocol/session types (D-PROTO1): the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the `protocol` block — a generated fragment did not parse. | Check the protocol declaration for typos; if this persists, file a bug. |
 | E0160 | this value can't be incremented or decremented. | Only a mutable name or field like `count` or `self.hits` accepts `++`/`--` (D-INCR1). | Use a `:=` binding and write `name += 1` / `name -= 1`. |

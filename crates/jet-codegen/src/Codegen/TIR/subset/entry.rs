@@ -189,8 +189,9 @@ fn tir_covers_method_inner(f: &Func, type_name: &str, cx: &Cx) -> bool {
 /// Conservative exclusions beyond the inherent-method gate:
 ///  - `is_unsafe` (`#Unsafe fn`) is excluded — its body may use gated pointer ops the
 ///    subset does not lower, and the `unsafe fn` prefix is a separate emit concern.
-///  - a trait method ALWAYS has a `self` receiver (a trait method without `self` is a
-///    static trait method, rare; exclude it — the emit hook always renders a receiver).
+///  - a trait method normally has a `self` receiver (a trait method without `self` is a
+///    static trait method, rare; the ordinary `CheckedText` contract is the explicit
+///    exception because both methods are static).
 pub(crate) fn tir_covers_trait_method(
     f: &Func,
     type_name: &str,
@@ -202,11 +203,12 @@ pub(crate) fn tir_covers_trait_method(
         trait_name,
         crate::Generics::ENCODE | crate::Generics::DECODE
     ) && struct_is_generic(type_name, cx);
+    let is_checked_text = trait_name == crate::Generics::CHECKED_TEXT;
     // c109 Phase 18: an `#Unsafe fn` trait method IS
     // covered (`TFuncKind::TraitMethod.is_unsafe` already drives the `unsafe ` prefix
     // in `emit_tir_trait_method`).
     // c109 Phase 23: a `#Pure` trait method is covered (purity is sema-only; erased).
-    if !f.type_params.is_empty() && !serde_generic_owner {
+    if !f.type_params.is_empty() && !serde_generic_owner && !is_checked_text {
         refusal::note(refusal::TYPE_PARAMS, f.name_span);
         return false;
     }
@@ -228,10 +230,10 @@ pub(crate) fn tir_covers_trait_method(
     // `jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<FieldError>>` with no
     // receiver. Admit it (the general "static trait fn" exclusion below does not apply).
     let is_decode = trait_name == crate::Generics::DECODE;
-    if !is_decode {
+    if !is_decode && !is_checked_text {
         // A trait method must have `self` as its FIRST parameter (the receiver `&self`/
         // `&mut self`/`self` per convention). A trait method with no `self` (static trait
-        // fn) emits no receiver — exclude it (the emit hook always renders a receiver).
+        // fn) emits no receiver — exclude it except for the static CheckedText contract.
         let Some(first) = f.params.first() else {
             refusal::note(refusal::MISSING_SELF_PARAM, f.name_span);
             return false;

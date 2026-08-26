@@ -2528,6 +2528,24 @@ impl<'a> Checker<'a> {
             Type::Tagged { inner, .. } => *inner,
             other => other,
         };
+        // D-TRACK-ORIGIN1=A: reject the retired runtime projection before
+        // receiver-first `#Root` dispatch or any other compatibility path can
+        // reinterpret `.origin()` as an ordinary call.
+        let tracked_receiver = matches!(receiver.as_ref().without_parens(), Expr::Ident(name, _)
+            if self.flow.origins.get(name).is_some_and(|origin| origin.is_readable()));
+        if tracked_receiver && method == "origin" {
+            self.diags.push(Diagnostic::error(
+                "E0311",
+                "`.origin()` is retired for tracked values".to_string(),
+                "`#Track` origin is a compile-time fact, not runtime metadata".to_string(),
+                "read `value.@origin` in comptime code".to_string(),
+                Some(span),
+            ));
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return None;
+        }
         // D-CALLVALUE1=B: `.call(...)` is the builtin projection for a
         // function-typed receiver. Keep a member named `call` on the
         // ordinary lookup path below — a user struct field, a user `impl`
@@ -4989,26 +5007,6 @@ impl<'a> Checker<'a> {
                 let a_inner = (**a_inner).clone();
                 return self.finish_option_zip(a_inner, args, span, resolved_ret_out);
             }
-        }
-        // D-TRACK-ORIGIN1=A: the retired runtime projection is rejected at
-        // the shared method boundary for every directly tracked binding, not
-        // only the historical Float receiver. A copied value has no origin
-        // row of its own, and a normal user-defined `origin` method remains
-        // legal when its receiver is not tracked.
-        let tracked_receiver = matches!(receiver.as_ref().without_parens(), Expr::Ident(name, _)
-            if self.flow.origins.get(name).is_some_and(|origin| origin.is_readable()));
-        if tracked_receiver && method == "origin" {
-            self.diags.push(Diagnostic::error(
-                "E0311",
-                "`.origin()` is retired for tracked values".to_string(),
-                "`#Track` origin is a compile-time fact, not runtime metadata".to_string(),
-                "read `value.@origin` in comptime code".to_string(),
-                Some(span),
-            ));
-            for arg in args.iter_mut() {
-                self.infer(&mut arg.expr);
-            }
-            return None;
         }
         if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
             let nominal_recv = match &recv_ty {

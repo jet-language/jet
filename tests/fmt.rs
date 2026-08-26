@@ -107,17 +107,17 @@ fn package_formatter_fails_closed_on_comments() {
 }
 
 #[test]
-fn typed_head_bodies_keep_raw_backslashes() {
+fn checked_text_bodies_keep_raw_backslashes() {
     let src = r#"fn run() {
-    digits :: Regex{"\d+"}
+    pattern :: Pattern{"\d+"}
     text :: "a\nb"
-    page :: HTML{"<p>{name}</p>"}
+    page :: Pattern{"<p>{name}</p>"}
 }
 "#;
-    let once = jet::format_source(src).expect("typed head should format");
+    let once = jet::format_source(src).expect("checked text type should format");
     assert!(
-        once.contains(r#"Regex{"\d+"}"#),
-        "formatter decoded a typed-head slash:\n{once}"
+        once.contains(r#"Pattern{"\d+"}"#),
+        "formatter decoded a checked-text slash:\n{once}"
     );
     assert!(
         once.contains(r#""a\nb""#),
@@ -125,10 +125,10 @@ fn typed_head_bodies_keep_raw_backslashes() {
     );
     assert!(
         once.contains("{name}"),
-        "formatter dropped a typed-head hole:\n{once}"
+        "formatter dropped a checked-text hole:\n{once}"
     );
-    let twice = jet::format_source(&once).expect("typed head should reformat");
-    assert_eq!(once, twice, "typed-head formatting must be idempotent");
+    let twice = jet::format_source(&once).expect("checked text type should reformat");
+    assert_eq!(once, twice, "checked-text formatting must be idempotent");
 }
 
 #[test]
@@ -2534,6 +2534,15 @@ fn fmt_layout_compiler_fact_and_field_selector_stability() {
 }
 
 #[test]
+fn fmt_origin_compiler_fact_stability() {
+    let src = "fn run() {\n    #Track speed :: 3.5\n    @speed_origin :: speed.@origin\n}\n";
+    let once = jet::format_source(src).expect("origin compiler fact should parse");
+    assert!(once.contains("speed.@origin"), "fact spelling was lost:\n{once}");
+    let twice = jet::format_source(&once).expect("formatted origin fact should parse");
+    assert_eq!(once, twice, "origin fact formatting must be idempotent");
+}
+
+#[test]
 fn layout_compiler_fact_rejects_unknown_and_user_owned_at_members() {
     let unknown =
         jet::Compiler::parse_source("derive T.LayoutFacts { info :: T.@unknown }\nfn run() {}\n");
@@ -3334,36 +3343,40 @@ fn run() {
 }
 
 #[test]
-fn fmt_preserves_typed_text() {
-    // D-UNIFYLIT1=A: typed-literal heads and `.raw()` must survive byte-for-byte.
+fn fmt_preserves_checked_text_type() {
+    // D-TEXTHEAD-TYPE1=A: the ordinary checked-text type and its audited raw
+    // escape must survive byte-for-byte.
     let src = "\
-fn run_query(q: SQL) {
-    print(\"template: {q.template()}\")
+enum TextError { Empty }
+
+Pattern :: distinct String
+
+impl Pattern.CheckedText {
+    type Error = TextError
+
+    fn check(text: String) () ! -[]> {
+        if text == \"\" { return Err(TextError.Empty) }
+        return Ok(())
+    }
+
+    fn encode_hole<T: Printable>(value: T) String -[]> {
+        return \"[{value}]\"
+    }
 }
 
-fn render(h: HTML) {
-    print(\"html: {h.text()}\")
+fn render(value: Pattern) {
+    #Unsafe(\"formatter fixture\") {
+        print(value.raw())
+    }
 }
 
 fn run() {
     id :: 42
-    q :: SQL{\"select * from t where id = {id}\"}
-    run_query(q)
-    name :: \"Jet\"
-    page :: HTML{\"<p>{name}</p>\"}
-    render(page)
-    trusted :: HTML.raw(\"<b>audited</b>\")
-    render(trusted)
-    arg :: \"two words;*.jet\"
-    expected :: Sh{\"printf <%s> {arg}\"}
-    audited_cmd :: Sh.raw(\"printf raw\")
-    pattern :: Regex{\"(\\d+)-(\\d+)\"}
-    endpoint :: URL{\"https://api.example.com/v2/{name}\"}
-    log_path :: Path{\"/var/log/{name}.log\"}
-    stamp :: DateTime{\"2026-08-07T12:00:00Z\"}
+    value :: Pattern{\"value {id}\"}
+    render(value)
 }
 ";
-    assert_fmt_stable(src, "typed text");
+    assert_fmt_stable(src, "checked text type");
 }
 
 #[test]

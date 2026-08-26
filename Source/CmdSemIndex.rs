@@ -60,6 +60,25 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
                         signature.failure_source
                     );
                 }
+                println!("nominal type contracts:");
+                for definition in idx.definitions() {
+                    let Some(base) = &definition.nominal_base else {
+                        continue;
+                    };
+                    println!("  {}: distinct {}", definition.qualified_name, base);
+                    for contract in &definition.trait_contracts {
+                        println!("    implements {}", contract.trait_name);
+                        for (name, ty) in &contract.associated_types {
+                            match ty {
+                                Some(ty) => println!("      type {} = {}", name, ty),
+                                None => println!("      type {}", name),
+                            }
+                        }
+                        for method in &contract.methods {
+                            println!("      {}", method);
+                        }
+                    }
+                }
                 println!("note: pass --json for the full stable document");
             }
         }

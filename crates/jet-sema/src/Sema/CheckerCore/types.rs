@@ -54,8 +54,7 @@ impl<'a> Checker<'a> {
     }
 
     // Card #2185 owns the library-defined checked-text surface; this predicate
-    // is the producer half and its consumer has not shipped yet.
-    #[allow(dead_code)]
+    // is the shared consumer guard for every nominal assignment boundary.
     pub(crate) fn is_checked_text_type_name(&self, name: &str) -> bool {
         self.checked_text_type_name(name).is_some()
     }
