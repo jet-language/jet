@@ -47,6 +47,23 @@ fn semantic_hover(symbol: &jet_semindex::SemanticSymbol, requested_path: &str) -
     out
 }
 
+fn append_checked_signature(hover: &mut String, checked_signature: &str) {
+    // The consumer-neutral semantic symbol already carries the effective
+    // failure fact for references and completion. Keep the richer checked
+    // declaration detail for direct hovers, but do not print its identical
+    // failure line twice.
+    let checked_signature = checked_signature
+        .lines()
+        .filter(|line| !line.starts_with("failure: "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if checked_signature.is_empty() {
+        return;
+    }
+    hover.push_str("\n\n");
+    hover.push_str(&checked_signature);
+}
+
 pub(crate) fn compute_hover(
     db: &SymbolDB,
     tokens: &[Token],
@@ -78,8 +95,7 @@ pub(crate) fn compute_hover(
         if matches!(symbol.kind, jet_semindex::SemanticSymbolKind::Function) {
             if let Some(span) = symbol.span {
                 if let Some(checked_signature) = db.hover_at(path, span.start) {
-                    hover.push_str("\n\n");
-                    hover.push_str(checked_signature);
+                    append_checked_signature(&mut hover, checked_signature);
                 }
             }
         }
@@ -107,14 +123,15 @@ pub(crate) fn compute_hover(
             }
         }
     }
-    let name = find_ident_at(tokens, offset)?;
-    if let Some(symbol) = db.symbols.resolve_visible_in(name, Some(path)) {
-        let mut hover = semantic_hover(symbol, path);
-        if let Some(arithmetic) = arithmetic_hover.as_deref() {
-            hover.push_str("\n\n");
-            hover.push_str(arithmetic);
+    if let Some(name) = find_ident_at(tokens, offset) {
+        if let Some(symbol) = db.symbols.resolve_visible_in(name, Some(path)) {
+            let mut hover = semantic_hover(symbol, path);
+            if let Some(arithmetic) = arithmetic_hover.as_deref() {
+                hover.push_str("\n\n");
+                hover.push_str(arithmetic);
+            }
+            return Some(hover);
         }
-        return Some(hover);
     }
     arithmetic_hover.or_else(|| db.hover_at(path, offset).map(str::to_string))
 }

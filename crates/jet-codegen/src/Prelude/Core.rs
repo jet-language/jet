@@ -859,11 +859,27 @@ fn jet_entry_error_exit(error: String) -> ! {
     jet_runtime_explicit_exit(1)
 }
 
+/// The default `Err` reaches the edge as its structured Prelude value. Keep
+/// the report projection intact until this one edge so code, identity, cause,
+/// context, conversions, and the source journey cannot be recovered from
+/// `Display` text after the fact.
+fn jet_entry_error_exit_jet(error: JetErr) -> ! {
+    eprint!("{}", jet_error_report(&error).render());
+    jet_runtime_explicit_exit(1)
+}
+
 // D-FAIL-EDGE1: a selected Service has one native log record at its edge.
 // The report stays the same Jet text; only the service transport adds a
 // target field and JSON string framing.
 fn jet_service_edge_report(error: String) -> ! {
-    let report = jet_entry_report(error);
+    jet_service_edge_report_rendered(jet_entry_report(error))
+}
+
+fn jet_service_edge_report_jet(error: JetErr) -> ! {
+    jet_service_edge_report_rendered(jet_error_report(&error).render())
+}
+
+fn jet_service_edge_report_rendered(report: String) -> ! {
     let mut quoted = String::with_capacity(report.len() + 2);
     quoted.push('"');
     for ch in report.chars() {

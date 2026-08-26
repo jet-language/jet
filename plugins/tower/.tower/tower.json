@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2208,
-    "rev": 45439,
+    "rev": 45460,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -147452,13 +147452,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "1. Follow D-CANVAS-TARGET1=A. Keep the Canvas transport independent from the selected program output and target.\n2. Extract Canvas HTTP routes from `crates/jet-devserver/src/WebHost.rs` into one target-neutral control host under `crates/jet-devserver/src/`.\n3. Reuse the existing dev session and checked `ProgramBundle`. Do not add a compiler, watcher, or semantic model.\n4. Bind `127.0.0.1:0` by default. Generate one session secret and require it on every Canvas request.\n5. Enforce origin, method, path, body-size, and session checks before route dispatch. Fail closed for non-loopback exposure.\n6. Derive panel capabilities from checked output and target facts. Hide unsupported panels in `crates/jet-canvas/src/html.rs` and `js/**`.\n7. Register expert host, port, transport, authority, output, and target controls in `crates/jet-cli/src/CLI.rs`.\n8. Cover host and protocol behavior in `crates/jet-devserver`, `tests/canvas.rs`, and `tests/canvas_scenarios.rs`.\n9. Prove library tests with `scripts/agent/jet-env cargo test -p jet-devserver` and `cargo test --test canvas`.\n10. Prove the real browser matrix with `scripts/agent/jet-env full cargo test --test canvas_scenarios`.",
       "checkSteps": "Open the same source once as native and once as web. The Canvas graph stays the same while each program uses its own target.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean at 0 errors 0 warnings."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -147583,8 +147588,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:18.096Z",
-      "updated": "2026-08-26T03:34:59.774Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-26T03:37:28.963Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-26T03:37:28.963Z"
     },
     {
       "id": "cnnczx0n",
@@ -147710,11 +147716,11 @@
         {
           "n": 10,
           "text": "Browser scenarios cover CLI, service, web, native UI, game, custom server, multiple outputs, two clients, errors, reconnect, and shutdown.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:09:38.215Z"
+          "evidence": "`tests/canvas_scenarios.rs::canvas_workbench_e2e`, `::session_surface_matrix`; `scripts/canvas-test/scenario.mjs:1912-1918` native UI/game coverage; lane-check `CHECK OK`",
+          "at": "2026-08-26T04:20:20.396Z"
         },
         {
           "n": 11,
@@ -147741,7 +147747,7 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-24T22:55:24.226Z",
-      "updated": "2026-08-26T01:16:07.016Z",
+      "updated": "2026-08-26T04:20:20.396Z",
       "updatedBy": "orchestrator"
     },
     {
@@ -147753,13 +147759,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "1. Follow D-WRAP-SCOPE1=A. Keep exact `Int` and checked fixed-width arithmetic as the zero-annotation default.\n2. Register `#Arithmetic(.Checked|.Wrapping|.Saturating)` for functions, methods, and blocks in `Syntax.rs` and marker checking.\n3. Record the innermost lexical policy and its source span on each fixed-width add, subtract, multiply, negate, and power operation.\n4. Keep division, remainder, shifts, conversions, indexing, slicing, bounds, and exact `Int` outside the policy.\n5. Lower policy-tagged operations through existing shared functions in `crates/jet-codegen/src/Prelude/Core/**`. Delete no safety checks.\n6. Make AOT, JIT, interpreter, comptime, and web adapters call the same Prelude operations without policy branches.\n7. Reuse `Reader.read_u32_le` for endian loads. Add standard fixed-width `rotate_left` and `rotate_right` methods only if absent.\n8. Project active mode and provenance through hover, semantic tokens, reflection, semindex, inspect, and diagnostics.\n9. Rewrite `examples/features/ports/murmur3_x86_32/run.jet` with one visible wrapping region and the general Core helpers.\n10. Update syntax law, grammars, snapshots, numeric tests, Murmur provenance, and the expected golden.\n11. Run parser, sema, numeric Prelude, TIR, JIT, comptime, web, UI, and golden checks through `scripts/agent/jet-env`.\n12. Run the C oracle, every Jet vector, default `jet run`, and `jet run --release`; compare exact outputs.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -147820,11 +147831,11 @@
         {
           "n": 5,
           "text": "Hover, semantic tokens, reflection, semindex, and inspect output name each operation’s active policy and exact source scope.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:58.235Z"
+          "evidence": "Source/LSP/Features.rs:126; `scripts/agent/lane-check.sh -p jet-semindex` — CHECK OK",
+          "at": "2026-08-26T04:20:20.740Z"
         },
         {
           "n": 6,
@@ -147847,11 +147858,11 @@
         {
           "n": 8,
           "text": "All C reference vectors, tail lengths, unaligned input, zero and nonzero seeds, and boundary shift counts agree on default `jet run` and AOT.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:58.235Z"
+          "evidence": "`tests/tir_operators_and_runtime.rs:403,411`",
+          "at": "2026-08-26T04:20:21.074Z"
         },
         {
           "n": 9,
@@ -147901,8 +147912,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:31.706Z",
-      "updated": "2026-08-26T03:35:07.317Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-26T04:21:40.091Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-26T04:21:40.091Z"
     },
     {
       "id": "cp3zupnt",
@@ -148025,11 +148037,11 @@
         {
           "n": 10,
           "text": "The #2172 and #2182 patches land as one cutover; active code has no compatibility alias, accepted legacy AST, or second failure carrier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:52.668Z"
+          "evidence": "`crates/jet-parser/src/Parser/Types.rs:809`; `crates/jet-parser/src/Parser/Expressions/postfix.rs:204`; `crates/jet-foundation/src/Outcome.rs:19`",
+          "at": "2026-08-26T04:20:19.652Z"
         },
         {
           "n": 11,
@@ -148043,11 +148055,11 @@
         {
           "n": 12,
           "text": "Behavioral tests cover implicit, explicit, union, converted, contextual, optional-success, unit-success, callback, generic, and impossible-failure contracts.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:52.668Z"
+          "evidence": "tests/failure_foundation.rs:118, tests/failure_foundation.rs:127; lane-check: CHECK OK",
+          "at": "2026-08-26T04:20:20.030Z"
         }
       ],
       "refs": [
@@ -148061,7 +148073,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:42.647Z",
-      "updated": "2026-08-26T03:35:14.833Z",
+      "updated": "2026-08-26T04:20:20.031Z",
       "updatedBy": "orchestrator"
     },
     {
@@ -148110,47 +148122,47 @@
         {
           "n": 2,
           "text": "A fitting handler formats on one line; long, blocked, nested, or commented branches use one deterministic expanded layout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:55.441Z"
+          "evidence": "evidence: `fmt_result_handler_expands_blocked_nested_and_commented_branches`; `fmt_compact_result_handler_is_one_line_when_it_fits`; `Expressions.rs:248`",
+          "at": "2026-08-26T04:20:23.503Z"
         },
         {
           "n": 3,
           "text": "The form always has one success branch and one failure branch, binds each payload once, preserves source order, and cannot drop failure.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:55.441Z"
+          "evidence": "crates/jet-parser/src/lib.rs:137",
+          "at": "2026-08-26T04:20:24.596Z"
         },
         {
           "n": 4,
           "text": "The grammar is unambiguous beside prefix `?Success`, prefix `!Error`, `?(text)`, `?.`, unary `!`, and nested branch expressions.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:55.441Z"
+          "evidence": "`conditionals.rs:30`, `result_handler_grammar.rs:5`; CHECK OK",
+          "at": "2026-08-26T04:20:26.131Z"
         },
         {
           "n": 5,
           "text": "One-sided success or failure checks keep `subject == pattern -> body`; `??` remains the fallback and early-exit surface.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:55.441Z"
+          "evidence": "evidence: `crates/jet-parser/src/lib.rs:290`; `CHECK OK` from parser lane check",
+          "at": "2026-08-26T04:20:27.304Z"
         },
         {
           "n": 6,
           "text": "Parser desugaring uses the existing `.Ok` and `.Err` branch AST; sema, TIR, codegen, JIT, and interpreter add no second carrier or handler API.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:55.441Z"
+          "evidence": "crates/jet-parser/src/Parser/Statements/conditionals.rs:124; sema/TIR/JIT/interpreter existing paths; `scripts/agent/lane-check.sh` → `CHECK OK`",
+          "at": "2026-08-26T04:20:28.865Z"
         },
         {
           "n": 7,
@@ -148164,11 +148176,11 @@
         {
           "n": 8,
           "text": "Registered diagnostics identify a missing branch, duplicate role, bad payload binding, non-Result receiver, type mismatch, and malformed arrow with exact spans.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:55.441Z"
+          "evidence": "ui_snapshots; generic_module_tests::result_handler_reports_fixed_shape_errors_at_the_offending_token",
+          "at": "2026-08-26T04:20:30.199Z"
         },
         {
           "n": 9,
@@ -148182,20 +148194,20 @@
         {
           "n": 10,
           "text": "`Syntax.rs` records D-RESULT-DECON2=B and `syntax-decisions.md` records the owner outcome.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:55.441Z"
+          "evidence": "`crates/jet-foundation/src/Syntax.rs:56`; `docs/spec/syntax-decisions.md:7827`",
+          "at": "2026-08-26T04:20:31.973Z"
         },
         {
           "n": 11,
           "text": "Jet devtools grammars, syntax highlighting, formatter snapshots, and diagnostic snapshots contain the canonical form only.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:14:55.441Z"
+          "evidence": "tree-sitter test “Compact Result handler” 1/1; grammar/highlighter/snapshot evidence at `grammar.js:1419`, `jet.tmLanguage.json:123`, `highlights.scm:139`, `tests/fmt.rs:1852`, `result_handler_bad_binding.stderr:1`.",
+          "at": "2026-08-26T04:20:32.926Z"
         }
       ],
       "refs": [
@@ -148212,7 +148224,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:47.080Z",
-      "updated": "2026-08-26T02:47:43.813Z",
+      "updated": "2026-08-26T04:20:32.926Z",
       "updatedBy": "orchestrator"
     },
     {
@@ -148775,11 +148787,11 @@
         {
           "n": 2,
           "text": "`OriginInfo` contains tracked, source, line, column, and ambiguity fields with stable public names and types.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:18:18.416Z"
+          "evidence": "evidence: `crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1128`, `crates/jet-codegen/src/Prelude/Core/Values.rs:135`; lane check `CHECK OK`",
+          "at": "2026-08-26T04:20:34.280Z"
         },
         {
           "n": 3,
@@ -148866,7 +148878,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:11.071Z",
-      "updated": "2026-08-26T02:47:44.601Z",
+      "updated": "2026-08-26T04:20:34.280Z",
       "updatedBy": "orchestrator"
     },
     {
@@ -148878,7 +148890,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "1. Follow D-SERVICE-RECEIPT2=A after the Error and Authority cutovers in #2172, #2182, and #2187.\n2. Replace immediate durable-send result variants with one `Delivery` handle and one six-state lifecycle in Prelude service modules.\n3. Commit the durable acceptance record before a bare `send` statement continues. Rejection remains on the shared Error route.\n4. Lower a bare Delivery result to its default acceptance observation through one sema fact, not a backend special case.\n5. Extend must-use flow so each bound Delivery is observed, controlled, returned, stored, or transferred on every exit path.\n6. Keep Pending, Accepted, Delivering, Delivered, DeadLettered, and Cancelled as lifecycle states only.\n7. Keep attempts, retention, deadline, idempotency key, duplicate status, and authority generation as typed facts.\n8. Make duplicate keys return the same identity. Reject a key reused for different authority, endpoint, or message before creating work.\n9. Implement wait, retry, cancel, status, receipt, and events in `Prelude/CoreLib/Top/ServiceAuthority.rs` and `Services.rs`.\n10. Sign immutable snapshots with the existing Prelude HMAC-SHA-256 and authority generation key. Give events a monotonic sequence.\n11. Persist identity, state, facts, signatures, and events in the existing append-only service log and replay path.\n12. Update Core signatures, sema service methods, must-use analysis, TIR calls, JIT/comptime adapters, reports, JSON, examples, and docs.\n13. Test acceptance, duplicate, conflict, delivery, retry, retention, expiry, cancellation, dead letter, partition, revocation, crash windows, recovery, and replay.\n14. Run service Prelude, sema ownership, TIR, JIT, comptime, persistence, recovery, UI, JSON, services runtime, and golden checks.\n15. Smoke the durable lifecycle on default `jet run` and AOT, then restart from the persisted log and validate the signed history.",
       "checkSteps": null,
@@ -148889,6 +148901,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -149021,11 +149038,11 @@
         {
           "n": 13,
           "text": "Tests cover acceptance, duplicate, conflict, delivery, retry, retention, expiry, cancellation, dead letter, partition, revocation, crash windows, recovery, and replay.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:22:10.535Z"
+          "evidence": "evidence: `tests/services_runtime.rs:2333`, `tests/services_runtime.rs:2404`; `CHECK OK`",
+          "at": "2026-08-26T04:20:21.421Z"
         }
       ],
       "refs": [
@@ -149040,8 +149057,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:15.971Z",
-      "updated": "2026-08-26T03:35:03.183Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-26T04:21:42.500Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-26T04:21:42.500Z"
     },
     {
       "id": "cxf6x7ap",
@@ -149482,7 +149500,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "1. Follow the owner outcome D-MARKER-SITES1=B after #2185 removes the special checked-text marker declaration.\n2. Keep one grammar: `marker Name(args..., @sites: [...], @repeatable: ..., ...)` in `Parser/Items/states_protocols.rs`.\n3. Treat ordinary arguments as typed parameters and `@` names as fixed declaration metadata values in the same list.\n4. Remove every accepted trailing `on [...]` clause, second parameter list, and text-head-only marker branch.\n5. Keep applied `#Marker` placement under D-MARK-FORM1 unchanged.\n6. Update `Prelude/Markers.jet`, `Policy.rs`, `CheckerMarkers.rs`, ScopeMembers, reflection, completion, hover, docs, and the registry digest.\n7. Register one teaching diagnostic for each retired declaration shape with an exact safe rewrite when possible.\n8. Migrate user markers, Prelude rows, examples, tests, UI fixtures, docs, grammars, generated artifacts, and snapshots.\n9. Cover zero and many user arguments, zero and many metadata values, every site enum member, bodies, inheritance, and repeatability.\n10. Run parser, formatter, marker registry, sema, reflection, LSP, UI, grammar, generated digest, and golden checks through `scripts/agent/jet-env`.\n11. Run a repository ratchet that permits retired syntax only in diagnostic fixtures and ratified decision history.",
       "checkSteps": null,
@@ -149491,6 +149509,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean at 0 errors 0 warnings."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -149619,8 +149642,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:43.369Z",
-      "updated": "2026-08-26T03:35:00.651Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-26T03:37:30.673Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-26T03:37:30.673Z"
     },
     {
       "id": "c11y6itr6",
@@ -149631,7 +149655,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "1. Follow D-STATE-TERMINAL1=A after #2186 establishes the canonical nested state section.\n2. Remove the unconditional L0151 emission from `crates/jet-sema/src/Sema/State.rs` and retire its diagnostic registry row.\n3. Derive `terminal: true` when a checked state has no outgoing transition. Store it only in erased reflection facts.\n4. Keep `#State(Terminal)` read-only methods legal and keep outgoing self-loops or reopen transitions nonterminal.\n5. When entry transitions exist, compute reachability from every `_ -> State` entry and report unreachable declared states separately.\n6. Preserve unknown-state, wrong-state, duplicate-transition, invalid-source, divergent-merge, and transition-shape diagnostics.\n7. Project terminal and reachability facts through reflection, semindex, hover, inspect, and generated state diagrams.\n8. Migrate typestate tests and UI snapshots from dead-end warnings to terminal and unreachable-state assertions.\n9. Add success, failure, cancel, self-loop, reopen, no-entry, unreachable, and terminal read-method examples.\n10. Run sema state tests, diagnostics snapshots, reflection, semindex, LSP, diagrams, examples, and goldens through `scripts/agent/jet-env`.\n11. Smoke representative typestate programs on default `jet run` and AOT and confirm terminal facts add no runtime representation.\n12. Exercise JIT, interpreter, comptime, and web consumers of the same erased transition graph.",
       "checkSteps": null,
@@ -149640,6 +149664,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-26",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean at 0 errors 0 warnings."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -149770,8 +149799,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:47.598Z",
-      "updated": "2026-08-26T03:35:01.553Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-26T03:37:31.408Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-26T03:37:31.408Z"
     },
     {
       "id": "c12uacgqe",
@@ -150229,11 +150259,11 @@
         {
           "n": 11,
           "text": "A repository ratchet finds no retired vocabulary outside diagnostic fixtures, ratified history, and unrelated English uses.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:22:09.157Z"
+          "evidence": "tests/retirement_ratchet.rs:995",
+          "at": "2026-08-26T04:20:21.820Z"
         },
         {
           "n": 12,
@@ -150274,7 +150304,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:58.324Z",
-      "updated": "2026-08-26T03:35:10.617Z",
+      "updated": "2026-08-26T04:20:21.820Z",
       "updatedBy": "orchestrator"
     },
     {
@@ -211202,6 +211232,153 @@
   ],
   "events": [
     {
+      "at": "2026-08-26T04:21:42.500Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cwf44fqc",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-26T04:21:40.091Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "co323ahi",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-26T04:20:34.280Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cv62zydw",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-26T04:20:32.926Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cq5blslq",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-26T04:20:31.974Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cq5blslq",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-26T04:20:30.199Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cq5blslq",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-26T04:20:28.865Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cq5blslq",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-26T04:20:27.304Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cq5blslq",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-26T04:20:26.131Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cq5blslq",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-26T04:20:24.596Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cq5blslq",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-26T04:20:23.503Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cq5blslq",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-26T04:20:21.820Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c14vk3sif",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-26T04:20:21.421Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cwf44fqc",
+      "note": "#13"
+    },
+    {
+      "at": "2026-08-26T04:20:21.075Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "co323ahi",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-26T04:20:20.740Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "co323ahi",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-26T04:20:20.396Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cnnczx0n",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-26T04:20:20.031Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cp3zupnt",
+      "note": "#12"
+    },
+    {
+      "at": "2026-08-26T04:20:19.653Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cp3zupnt",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-26T03:37:31.408Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c11y6itr6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-26T03:37:30.673Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c10086k5d",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-26T03:37:28.963Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cmtyww5f",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-08-26T03:35:14.833Z",
       "by": "orchestrator",
       "action": "card.criteria-meet",
@@ -214553,153 +214730,6 @@
       "action": "card.criteria-meet",
       "ref": "cnnczx0n",
       "note": "#6"
-    },
-    {
-      "at": "2026-08-25T19:46:04.480Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cnnczx0n",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-25T19:46:03.527Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cnnczx0n",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-25T19:46:02.213Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cnnczx0n",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-25T19:46:00.876Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cnnczx0n",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-25T19:46:00.505Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cnnczx0n",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-25T19:46:00.117Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cmtyww5f",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-25T19:45:58.653Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cldqlgbu",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-25T19:45:57.760Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cldqlgbu",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-25T19:45:57.385Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cldqlgbu",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-25T19:45:56.211Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cldqlgbu",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-25T19:45:55.114Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cldqlgbu",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-25T19:45:54.747Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cldqlgbu",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-25T19:45:53.879Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "cldqlgbu",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-25T19:45:52.776Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0a3h9ta",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-25T19:45:51.726Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0a3h9ta",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-25T19:45:51.352Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0a3h9ta",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-25T19:45:50.979Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0a3h9ta",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-25T19:45:50.604Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0vprzqp",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-25T19:45:50.247Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0vprzqp",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-25T19:45:49.867Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0vprzqp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-25T19:45:49.490Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0o7ipzb",
-      "note": "#3"
     }
   ],
   "nextNum": 368,

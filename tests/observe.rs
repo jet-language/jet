@@ -605,6 +605,51 @@ fn run() ! {
 }
 
 #[test]
+fn default_report_keeps_conversion_identity_at_the_aot_edge() {
+    let have_rustc = common::have_rustc();
+    if !have_rustc {
+        return;
+    }
+
+    let src = r#"
+enum StoreErr { Missing }
+
+impl StoreErr -> Err {
+    return Err("store unavailable")
+}
+
+fn read_store() Int StoreErr! {
+    return Err(StoreErr.Missing)
+}
+
+fn get_user() Int ! {
+    value :: read_store()?
+    return Ok(value)
+}
+
+fn run() ! {
+    get_user()?
+}
+"#;
+    let generated = jet::compile(src).expect("the converted default report must compile");
+    assert!(
+        generated.rust.contains("jet_entry_error_exit_jet("),
+        "the default Err must reach the edge as JetErr, not Display text"
+    );
+    let (code, stdout, stderr) = build_and_run_debug("default_report_conversion", src);
+    assert_eq!(code, 1, "the converted failure must escape: {stderr}");
+    assert!(stdout.is_empty(), "the failure must not print to stdout: {stdout}");
+    assert!(
+        stderr.starts_with("Error: store unavailable (type: StoreErr)\n"),
+        "the default report must keep typed identity: {stderr}"
+    );
+    assert!(
+        stderr.contains("  conversion: StoreErr -> Err\n"),
+        "the default report must keep conversion history: {stderr}"
+    );
+}
+
+#[test]
 fn uncaught_err_prints_propagation_chain() {
     let have_rustc = common::have_rustc();
     if !have_rustc {

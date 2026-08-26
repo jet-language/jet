@@ -65,6 +65,9 @@ list typed environment reads in a config surface
 .B inspect semindex
 search the code index
 .TP
+.B inspect output
+inspect one selected Output
+.TP
 .B inspect expand
 show expanded meaning of Jet code (use --json for canonical facts)
 .TP
@@ -109,48 +112,6 @@ list every registered truth and its guard
 .TP
 .B inspect structure
 inspect liveness, lifecycle, and import-edge facts
-.TP
-.B hangar
-Inspect and maintain the package store
-.TP
-.B hangar path
-Show the resolved user Hangar path
-.TP
-.B hangar verify
-Check package-store integrity
-.TP
-.B hangar repair
-Repair a damaged Hangar object from a signed archive
-.TP
-.B hangar copy
-Copy a verified closure between local Hangars
-.TP
-.B hangar import
-Verify and import a signed Hangar archive
-.TP
-.B hangar export
-Export a signed Hangar closure
-.TP
-.B hangar dump
-Stream a signed Hangar archive
-.TP
-.B hangar restore
-Restore a signed Hangar archive from stdin
-.TP
-.B hangar sign
-Sign a Hangar object or archive
-.TP
-.B hangar recover
-Recover Hangar staging, build scratch, and leases
-.TP
-.B hangar rollback
-Restore an earlier package-store generation
-.TP
-.B hangar generations
-List package-store generations
-.TP
-.B hangar du
-Show Hangar disk use per root or across the machine
 .TP
 .B project
 inspect project files and modules
@@ -221,6 +182,9 @@ create a native executable
 .B dev
 watch and run a program; optionally open the Canvas IDE
 .TP
+.B learn
+run the offline first learning arc
+.TP
 .B try
 speculatively apply a plan and re-check its claims
 .TP
@@ -251,6 +215,9 @@ inspect implicit copies, exercised memory witnesses, or dependencies
 .B lint
 run optional code-quality checks
 .TP
+.B doc
+generate reference documentation
+.TP
 .B explain
 explain a diagnostic code, build fact, or generic-module value
 .TP
@@ -270,10 +237,10 @@ apply typed managed environment files
 show the typed environment plan
 .TP
 .B shared-store
-Manage the optional shared Hangar broker
+manage the optional shared package broker
 .TP
 .B shared-store install
-Install the optional shared Hangar broker
+install the optional shared package broker
 .TP
 .B shared-store enroll
 grant a user shared-store broker access
@@ -445,7 +412,7 @@ color: auto | always | never
 print compiler version
 .TP
 .B --check
-with fmt: exit 1 if any file would change (CI gate)
+with fmt/learn: check without changing files (CI gate)
 .TP
 .B --lang
 with fmt: delegate non-Jet files to the environment formatter for this language
@@ -522,12 +489,6 @@ with bind cpp: path to the clang binary used to parse the header
 .B --ar
 with bind cpp: path to the ar archiver used to build the static library
 .TP
-.B --from
-with hangar repair: signed archive to repair the entry from
-.TP
-.B --to
-with hangar copy/export/sign: destination Hangar root, archive, or signature path
-.TP
 .B --message
 with yank: human-readable reason for yanking the version
 .TP
@@ -586,7 +547,7 @@ with dev: always rerun from scratch after a save
 with dev: hot-swap compatible edits and restart after type changes
 .TP
 .B --watch
-with run/dev: re-run on dependency changes; --watch=off runs once
+with run/dev/learn: re-run on dependency changes; --watch=off runs once
 .TP
 .B --canvas
 with dev: open the full Canvas IDE over this dev session
@@ -718,7 +679,7 @@ with fuzz: corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)
 with prove: project the human report by an exact evidence facet
 .TP
 .B --facts
-with expand: project inline, memory, web, effects, layout, origin, derive, templates, or callable-signature facts --facts=<lens>
+with expand: project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>
 .TP
 .B --annotations
 with budget: CI annotations auto, none, or github

@@ -224,7 +224,7 @@ impl<'a> Parser<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0026",
                     format!("{} doesn't use `{}`", Syntax::LANG_NAME, foreign),
-                    "a function that can fail returns `T E!` and signals failure with `Err(...)`"
+                    "a function that can fail returns `T !E` and signals failure with `Err(...)`"
                         .to_string(),
                     format!("return `Err(...)` instead of `{}`", foreign),
                     Some(t.span),

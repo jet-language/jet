@@ -1408,9 +1408,11 @@ fn callable_signature_text(
         .map(jet_semindex::ViewProvenanceFact::canonical)
         .collect::<Vec<_>>();
     format!(
-        "{} [{}] ({parameters}) effects={effects} errors={errors} views=[{}] policies=[{}]",
+        "{} [{}] ({parameters}) effects={effects} errors={errors} failure={} ({}) views=[{}] policies=[{}]",
         definition.name,
         definition.identity,
+        signature.failure_contract,
+        signature.failure_source,
         views.join(" | "),
         signature.policies.join(", ")
     )
@@ -1536,6 +1538,11 @@ fn render_callable_signature_json(
                 ),
                 ("effects", expand_string_list(&signature.effects)),
                 ("errors", expand_string_list(&signature.errors)),
+                (
+                    "failure_contract",
+                    expand_string(&signature.failure_contract),
+                ),
+                ("failure_source", expand_string(&signature.failure_source)),
                 (
                     "returned_views",
                     ExpandValue::Array(

@@ -85,7 +85,7 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                             "E0045",
                             "Jet writes the fallback as `??`, not `or`".to_string(),
-                            "`??` supplies a value when a `T?` is absent or a `T E!` failed — `count ?? 0`, `read() ?? return`"
+                            "`??` supplies a value when a `?T` is absent or a `T !E` failed — `count ?? 0`, `read() ?? return`"
                                 .to_string(),
                             "replace `or` with `??`".to_string(),
                             Some(span),

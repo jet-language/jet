@@ -1065,13 +1065,6 @@ fn render_provenance_field(label: &str, field: &jet::Lock::ProvenanceField) {
 }
 
 fn render_effect_provenance_text(report: &jet::Lock::DependencyProvenanceReport) {
-    if report.required_effects.is_empty()
-        && report.granted_effects.is_empty()
-        && report.denied_effects.is_empty()
-        && report.authority == "not recorded"
-    {
-        return;
-    }
     println!("  effect roles");
     println!("    required effects: {}", effect_names(&report.required_effects));
     println!("    granted effects: {}", effect_names(&report.granted_effects));
@@ -1137,19 +1130,13 @@ fn render_provenance_json_package(report: &jet::Lock::DependencyProvenanceReport
         render_provenance_json_field("publisher", &report.publisher, None),
         render_provenance_json_field("build", &report.build, None),
     ];
-    if !report.required_effects.is_empty()
-        || !report.granted_effects.is_empty()
-        || !report.denied_effects.is_empty()
-        || report.authority != "not recorded"
-    {
-        fields.push(format!(
-            "\"required_effects\":{},\"granted_effects\":{},\"denied_effects\":{},\"authority\":\"{}\"",
-            json_strings(&report.required_effects),
-            json_strings(&report.granted_effects),
-            json_strings(&report.denied_effects),
-            json_escape(&report.authority),
-        ));
-    }
+    fields.push(format!(
+        "\"required_effects\":{},\"granted_effects\":{},\"denied_effects\":{},\"authority\":\"{}\"",
+        json_strings(&report.required_effects),
+        json_strings(&report.granted_effects),
+        json_strings(&report.denied_effects),
+        json_escape(&report.authority),
+    ));
     format!("{{{}}}", fields.join(","))
 }
 

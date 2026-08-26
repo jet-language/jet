@@ -1312,6 +1312,14 @@ fn build_method_info_with_vocabulary(
                     method.effective_return_type().name(),
                 ),
             ),
+            (
+                "failure_contract",
+                ct_str(method.failure_contract().effective_type().name()),
+            ),
+            (
+                "failure_source",
+                ct_str(method.failure_contract().source()),
+            ),
             ("params", ct_list(param_strs)),
             ("signature", ct_str(format_method_sig(method))),
             ("effects", build_effect_info(&effects)),
@@ -2659,6 +2667,14 @@ fn build_function_info(
             ("module", ct_str(module)),
             ("identity", ct_str(qualified.clone())),
             (
+                "failure_contract",
+                ct_str(func.failure_contract().effective_type().name()),
+            ),
+            (
+                "failure_source",
+                ct_str(func.failure_contract().source()),
+            ),
+            (
                 "params",
                 ct_list(
                     func.params
@@ -2879,6 +2895,33 @@ mod tests {
                     if fields.iter().any(|(name, value)| name == "start" && matches!(value, CtValue::Int(10)))
                         && fields.iter().any(|(name, value)| name == "end" && matches!(value, CtValue::Int(40))))
         }));
+    }
+
+    #[test]
+    fn reflection_exposes_effective_failure_contract_and_source() {
+        let function = method("load", true);
+        let expected_contract = function.failure_contract().effective_type().name();
+        let expected_source = function.failure_contract().source();
+
+        let method_info = build_method_info(&function);
+        assert!(matches!(
+            struct_field(&method_info, "failure_contract"),
+            CtValue::Str(contract) if contract == &expected_contract
+        ));
+        assert!(matches!(
+            struct_field(&method_info, "failure_source"),
+            CtValue::Str(source) if source == &expected_source
+        ));
+
+        let function_info = build_function_type_info(&function);
+        assert!(matches!(
+            struct_field(&function_info, "failure_contract"),
+            CtValue::Str(contract) if contract == &expected_contract
+        ));
+        assert!(matches!(
+            struct_field(&function_info, "failure_source"),
+            CtValue::Str(source) if source == &expected_source
+        ));
     }
 
     #[test]

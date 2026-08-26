@@ -127,6 +127,10 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) next_var: u32,
     /// Owning struct for inherent methods (`Point::dist_sq` → `Point`).
     pub(crate) method_struct: Option<String>,
+    /// Source and target of the declared conversion body being lowered.
+    /// Conversion construction uses the shared Prelude carrier so JIT keeps
+    /// typed identity and conversion history with AOT and Web.
+    pub(crate) error_conversion: Option<(String, String)>,
     /// CLIF return type of the function being lowered (`None` = returns void).
     /// Drives the dummy value `emit_trap_check` returns on the trap-unwind path.
     pub(crate) ret_clif: Option<types::Type>,
@@ -200,6 +204,15 @@ pub(crate) struct LowerCtx<'a, 'b> {
     /// Active postcondition lists. A return lowers its value first, binds the
     /// generated `result` slot, and checks these lists before cleanup/exit.
     pub(crate) contract_posts: Vec<Vec<usize>>,
+}
+
+/// Recover the canonical conversion pair from the generated conversion name.
+/// `Sema::error_conv_fn_name` and the AOT emitter use this same stable name;
+/// this is metadata lookup, not a second conversion policy.
+pub(crate) fn error_conversion_metadata(name: &str) -> Option<(String, String)> {
+    let stem = name.strip_prefix("__jet_errconv_")?;
+    let (source, target) = stem.split_once("_to_")?;
+    Some((source.to_string(), target.to_string()))
 }
 
 fn mixed_switch_int_literal(cond: &TExpr) -> Option<i64> {
@@ -2709,6 +2722,35 @@ impl LowerCtx<'_, '_> {
         fn_name: &str,
     ) -> Result<Value, String> {
         let handle = self.lower_expr(inner)?;
+        if matches!(convert, TIR::TTryConvert::Never) {
+            // The source carrier is statically `Result<_, Never>`. Keep the
+            // runtime check as an internal invariant guard, but do not trace
+            // or convert a failure path that sema proved unreachable.
+            let is_ok = self.call_host(self.host.result_is_ok, &[handle]);
+            let ok_block = self.b.create_block();
+            let bad_block = self.b.create_block();
+            self.b.ins().brif(is_ok, ok_block, &[], bad_block, &[]);
+
+            self.b.switch_to_block(bad_block);
+            self.b.seal_block(bad_block);
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.call_host(self.host.trap_panic, &[zero]);
+            self.emit_trap_check()?;
+            self.b.ins().jump(ok_block, &[]);
+
+            self.b.switch_to_block(ok_block);
+            self.b.seal_block(ok_block);
+            self.call_host(self.host.trace_reset, &[]);
+            let ok_ty = inner
+                .ty
+                .unwrap_result()
+                .map(|(ok, _)| ok.clone())
+                .or_else(|| Self::result_ok_ty_recover(inner))
+                .ok_or("jit !Never try operand is not Result")?;
+            let value = self.result_payload(handle, &ok_ty)?;
+            self.track_compute_value(value, &ok_ty)?;
+            return Ok(value);
+        }
         let is_ok = self.call_host(self.host.result_is_ok, &[handle]);
         let ok_block = self.b.create_block();
         let err_block = self.b.create_block();
@@ -2742,6 +2784,7 @@ impl LowerCtx<'_, '_> {
         }
         let return_handle = match convert {
             TIR::TTryConvert::None => handle,
+            TIR::TTryConvert::Never => unreachable!("Never try conversion handled above"),
             TIR::TTryConvert::DefaultErr => {
                 let message = self.result_payload(handle, &Type::String)?;
                 let absent = self.b.ins().iconst(types::I64, 0);
@@ -18619,7 +18662,19 @@ impl LowerCtx<'_, '_> {
                     let message = field("message")?;
                     let code = field("code")?;
                     let cause = field("cause")?;
-                    Ok(self.call_host(self.host.err_new, &[message, code, cause]))
+                    let conversion = self.error_conversion.clone();
+                    if let Some((source, target)) = conversion {
+                        let source_handle = self.runtime.heap.alloc_string(source);
+                        let target_handle = self.runtime.heap.alloc_string(target);
+                        let source = self.b.ins().iconst(types::I64, source_handle);
+                        let target = self.b.ins().iconst(types::I64, target_handle);
+                        Ok(self.call_host(
+                            self.host.err_from_conversion,
+                            &[message, code, cause, source, target],
+                        ))
+                    } else {
+                        Ok(self.call_host(self.host.err_new, &[message, code, cause]))
+                    }
                 } else {
                     let type_name: std::borrow::Cow<'_, str> = if let Some((_, concrete)) =
                         as_trait.as_ref()

@@ -144,8 +144,7 @@ impl<'a> Fmt<'a> {
 
     fn result_handler_branch_inlineable(&self, body: &[Stmt], value: &Expr) -> bool {
         if !body.is_empty()
-            || matches!(value, Expr::NoElse(_))
-            || self.is_result_handler_source(value)
+            || matches!(value, Expr::If { .. } | Expr::NoElse(_))
             || self.value_was_braced(value)
         {
             return false;
@@ -159,27 +158,131 @@ impl<'a> Fmt<'a> {
 
     fn result_handler_compact_source(&self, expr: &Expr) -> bool {
         let start = Self::expr_start(expr);
+        let end = self.result_handler_source_end(expr);
         self.src
-            .get(start..expr.span().end)
-            .is_some_and(|_| !self.span_has_comment(start, expr.span().end))
+            .get(start..end)
+            .is_some_and(|_| !self.span_has_comment(start, end))
     }
 
     fn is_result_handler_source(&self, expr: &Expr) -> bool {
         self.result_handler_parts(expr).is_some()
     }
 
-    fn fmt_result_handler_branch(&mut self, body: &[Stmt], value: &Expr, expanded: bool) {
+    fn result_handler_branch_start(&self, pattern_end: usize) -> usize {
+        self.source_toks
+            .iter()
+            .find(|token| {
+                token.span.start >= pattern_end
+                    && matches!(
+                        &token.kind,
+                        TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow
+                    )
+            })
+            .map_or(pattern_end, |token| token.span.end)
+    }
+
+    fn result_handler_branch_end(&self, branch_start: usize, fallback: usize) -> usize {
+        let Some((first, _)) = self.source_toks.iter().enumerate().find(|(_, token)| {
+            token.span.start >= branch_start
+                && !matches!(
+                    &token.kind,
+                    TokKind::LineComment(_) | TokKind::BlockComment(_)
+                )
+        }) else {
+            return self.result_handler_comments_end(fallback);
+        };
+        if !matches!(&self.source_toks[first].kind, TokKind::LBrace) {
+            return self.result_handler_comments_end(fallback);
+        }
+        let mut depth = 0usize;
+        for token in &self.source_toks[first..] {
+            match &token.kind {
+                TokKind::LBrace => depth += 1,
+                TokKind::RBrace if depth == 1 => {
+                    return self.result_handler_comments_end(token.span.end);
+                }
+                TokKind::RBrace => depth -= 1,
+                _ => {}
+            }
+        }
+        self.result_handler_comments_end(fallback)
+    }
+
+    fn result_handler_comments_end(&self, mut end: usize) -> usize {
+        loop {
+            let Some(comment) = self.comments.iter().find(|comment| {
+                comment.span.start >= end
+                    && line_of(self.src, comment.span.start) == line_of(self.src, end)
+            }) else {
+                return end;
+            };
+            end = comment.span.end;
+        }
+    }
+
+    fn result_handler_source_end(&self, expr: &Expr) -> usize {
+        let Expr::If { else_value, .. } = expr else {
+            return expr.span().end;
+        };
+        let Expr::If { cond, .. } = else_value.as_ref() else {
+            return expr.span().end;
+        };
+        let branch_start = self.result_handler_branch_start(cond.span().end);
+        self.result_handler_branch_end(branch_start, expr.span().end)
+    }
+
+    fn emit_result_handler_comments(&mut self, start: usize, end: usize) {
+        while self.comment_i < self.comments.len() {
+            let (text, span) = {
+                let comment = &self.comments[self.comment_i];
+                (comment.text.clone(), comment.span)
+            };
+            if span.start < start || span.start >= end {
+                break;
+            }
+            self.emit_comment_line(&text);
+            self.comment_i += 1;
+        }
+    }
+
+    fn fmt_result_handler_branch(
+        &mut self,
+        body: &[Stmt],
+        value: &Expr,
+        expanded: bool,
+        branch_start: usize,
+        branch_end: usize,
+    ) {
         if !expanded && self.result_handler_branch_inlineable(body, value) {
+            self.write(" ");
             self.fmt_expr(value, Prec::OrFallback);
             return;
         }
-        if matches!(value, Expr::NoElse(_)) {
-            self.write(" {");
-            self.newline();
-            self.with_indent(|f| f.fmt_block_stmts(body));
-            self.end_block();
+        self.write(" {");
+        self.newline();
+        self.with_indent(|f| {
+            f.with_trailing_comment_limit(branch_end, |f| {
+                f.fmt_block_stmts(body);
+                if !body.is_empty() {
+                    f.newline();
+                }
+                if matches!(value, Expr::NoElse(_)) {
+                    f.emit_result_handler_comments(branch_start, branch_end);
+                } else {
+                    let value_start = Self::expr_start(value);
+                    f.emit_result_handler_comments(branch_start, value_start);
+                    f.fmt_expr(value, Prec::OrFallback);
+                    // Keep same-line branch comments beside their value. Any
+                    // comments on following lines are emitted inside this arm.
+                    f.emit_trailing(value.span().end);
+                    f.emit_result_handler_comments(value.span().end, branch_end);
+                }
+            });
+        });
+        if self.at_line_start {
+            self.write("}");
         } else {
-            self.fmt_value_block(body, value, false);
+            self.end_block();
         }
     }
 
@@ -188,6 +291,33 @@ impl<'a> Fmt<'a> {
             self.result_handler_parts(expr)
         else {
             unreachable!("result handler formatter called for another if shape");
+        };
+        let (ok_pattern_end, err_pattern_end, err_branch_end) = match expr {
+            Expr::If {
+                cond,
+                else_value,
+                ..
+            } => match else_value.as_ref() {
+                Expr::If { cond: err_cond, .. } => (
+                    cond.span().end,
+                    err_cond.span().end,
+                    self.result_handler_branch_end(
+                        self.result_handler_branch_start(err_cond.span().end),
+                        expr.span().end,
+                    ),
+                ),
+                _ => unreachable!("result handler formatter called for another if shape"),
+            },
+            _ => unreachable!("result handler formatter called for another if shape"),
+        };
+        let ok_branch_start = self.result_handler_branch_start(ok_pattern_end);
+        let err_branch_start = self.result_handler_branch_start(err_pattern_end);
+        let ok_branch_end = match expr {
+            Expr::If { else_value, .. } => match else_value.as_ref() {
+                Expr::If { cond, .. } => cond.span().start,
+                _ => unreachable!("result handler formatter called for another if shape"),
+            },
+            _ => unreachable!("result handler formatter called for another if shape"),
         };
         let compact = self.result_handler_compact_source(expr)
             && self.result_handler_branch_inlineable(ok_body, ok_value)
@@ -203,14 +333,24 @@ impl<'a> Fmt<'a> {
             self.write(ok_binding);
             self.write(" ");
             self.write(Syntax::OP_UNIFIED_ARROW);
-            self.write(" ");
-            self.fmt_result_handler_branch(ok_body, ok_value, false);
+            self.fmt_result_handler_branch(
+                ok_body,
+                ok_value,
+                false,
+                ok_branch_start,
+                ok_branch_end,
+            );
             self.write(" ! ");
             self.write(err_binding);
             self.write(" ");
             self.write(Syntax::OP_UNIFIED_ARROW);
-            self.write(" ");
-            self.fmt_result_handler_branch(err_body, err_value, false);
+            self.fmt_result_handler_branch(
+                err_body,
+                err_value,
+                false,
+                err_branch_start,
+                err_branch_end,
+            );
             if self.col <= MAX_WIDTH && !self.out[saved_out..].contains('\n') {
                 return;
             }
@@ -225,13 +365,25 @@ impl<'a> Fmt<'a> {
         self.write(ok_binding);
         self.write(" ");
         self.write(Syntax::OP_UNIFIED_ARROW);
-        self.fmt_result_handler_branch(ok_body, ok_value, true);
+        self.fmt_result_handler_branch(
+            ok_body,
+            ok_value,
+            true,
+            ok_branch_start,
+            ok_branch_end,
+        );
         self.newline();
         self.write("! ");
         self.write(err_binding);
         self.write(" ");
         self.write(Syntax::OP_UNIFIED_ARROW);
-        self.fmt_result_handler_branch(err_body, err_value, true);
+        self.fmt_result_handler_branch(
+            err_body,
+            err_value,
+            true,
+            err_branch_start,
+            err_branch_end,
+        );
     }
 
     /// The offset of an expression's first source byte.
@@ -920,8 +1072,8 @@ impl<'a> Fmt<'a> {
     }
 
     pub(super) fn fmt_return_type(&mut self, ty: &Type) {
-        // D-ERRSUFFIX1: optional success and error types each carry their own
-        // suffix; a separated bare `!` remains the default-error shorthand.
+        // D-FAILURE-FOUNDATION1: optional success uses `?T`, and the error
+        // contract owns the `!` prefix; bare `!` remains the default domain.
         self.fmt_type(ty);
     }
 

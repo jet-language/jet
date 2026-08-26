@@ -86,6 +86,32 @@ pub struct JetErr {
     conversions: Vec<JetErrorConversion>,
 }
 
+/// One source-linked hop in the report's structured journey. This is the
+/// report view of the private journey accumulator below; callers never need
+/// to recover source facts from rendered text.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct JetErrorJourneyFrame {
+    pub fn_name: String,
+    pub file: String,
+    pub line: u32,
+    pub note: String,
+    pub hops: u32,
+}
+
+/// D-FAIL-REPORT1: the complete default error report before terminal or wire
+/// rendering. Keeping every part typed is what prevents a report edge from
+/// parsing `Display` output to recover identity, causes, or source history.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct JetErrorReport {
+    pub code: Option<String>,
+    pub message: String,
+    pub typed_identity: Option<String>,
+    pub causes: Vec<JetErrorReport>,
+    pub context_frames: Vec<JetErrorContextFrame>,
+    pub source_journey: Vec<JetErrorJourneyFrame>,
+    pub conversion_history: Vec<JetErrorConversion>,
+}
+
 pub fn jet_err(
     message: String,
     code: JetOutcome<String, JetAbsent>,
@@ -249,13 +275,232 @@ fn jet_journey_take_styled(style: JetReportStyle) -> String {
 ///
 /// The hop list never leaves this module. An engine can only move the opaque
 /// carrier and hand it back to [`jet_journey_adopt`], so collapse, order, and
-/// rendering stay owned here.
+/// rendering stay owned here. The structured default-error edge uses
+/// [`jet_error_report`] so the journey is projected beside the error facts;
+/// string-only edges use this renderer directly.
 pub struct JetJourneyHops(Vec<JourneyHop>);
 
 /// Move this thread's accumulated hops out, for a caller that is about to
 /// carry them across a thread boundary it created.
 pub fn jet_journey_take_hops() -> JetJourneyHops {
     JET_JOURNEY_HOPS.with(|hops| JetJourneyHops(std::mem::take(&mut *hops.borrow_mut())))
+}
+
+impl JetErrorReport {
+    fn from_error(error: &JetErr, source_journey: Vec<JetErrorJourneyFrame>) -> Self {
+        let causes = match &error.cause {
+            Ok(cause) => vec![Self::from_error(cause, Vec::new())],
+            Err(_) => Vec::new(),
+        };
+        Self {
+            code: match &error.code {
+                Ok(code) => Some(code.clone()),
+                Err(_) => None,
+            },
+            message: error.message.clone(),
+            typed_identity: error.typed_identity.clone(),
+            causes,
+            context_frames: error.context.clone(),
+            source_journey,
+            conversion_history: error.conversions.clone(),
+        }
+    }
+
+    fn render_root(&self) -> String {
+        fn render(report: &JetErrorReport, out: &mut String, depth: usize) {
+            if depth == 0 {
+                match &report.code {
+                    Some(code) => out.push_str(&format!("Error [{code}]: {}", report.message)),
+                    None => out.push_str(&format!("Error: {}", report.message)),
+                }
+            } else {
+                out.push_str(&"  ".repeat(depth));
+                out.push_str("cause: ");
+                out.push_str(&report.message);
+            }
+            if let Some(identity) = &report.typed_identity {
+                out.push_str(&format!(" (type: {identity})"));
+            }
+            for cause in &report.causes {
+                out.push('\n');
+                render(cause, out, depth + 1);
+            }
+            for frame in &report.context_frames {
+                out.push('\n');
+                out.push_str(&"  ".repeat(depth + 1));
+                out.push_str(&format!(
+                    "context ({}:{}): {}",
+                    frame.file, frame.line, frame.text
+                ));
+            }
+            for conversion in &report.conversion_history {
+                out.push('\n');
+                out.push_str(&"  ".repeat(depth + 1));
+                out.push_str(&format!(
+                    "conversion: {} -> {}",
+                    conversion.source, conversion.target
+                ));
+            }
+        }
+
+        let mut out = String::new();
+        render(self, &mut out, 0);
+        out
+    }
+
+    fn journey_hops(&self) -> Vec<JourneyHop> {
+        self
+            .source_journey
+            .iter()
+            .map(|frame| JourneyHop {
+                site: JourneyFrame {
+                    fn_name: frame.fn_name.clone(),
+                    file: frame.file.clone(),
+                    line: frame.line,
+                },
+                note: frame.note.clone(),
+                hops: frame.hops,
+            })
+            .collect()
+    }
+
+    /// Render only the structured source journey. The report edge uses this
+    /// beside the root report for terminal and wire adapters.
+    pub fn render_journey_with_style(&self, style: JetReportStyle) -> String {
+        jet_journey_trail(&self.journey_hops(), style)
+    }
+
+    /// Render this already-projected report with the one terminal policy.
+    /// The projection and the rendering are separate so a wire or inspector
+    /// can consume the same facts without first making a display string.
+    pub fn render_with_style(&self, style: JetReportStyle) -> String {
+        jet_journey_compose(
+            &self.render_root(),
+            &self.render_journey_with_style(style),
+        )
+    }
+
+    pub fn render(&self) -> String {
+        self.render_with_style(JetReportStyle::for_stderr())
+    }
+
+    /// Serialize the same report facts for a boundary wire. Optional fields
+    /// stay absent for the old empty shape, but when present they are copied
+    /// from the report object rather than parsed from its rendered text.
+    pub fn to_json(&self) -> String {
+        fn quote(value: &str) -> String {
+            let mut out = String::with_capacity(value.len() + 2);
+            out.push('"');
+            for ch in value.chars() {
+                match ch {
+                    '\\' => out.push_str("\\\\"),
+                    '"' => out.push_str("\\\""),
+                    '\n' => out.push_str("\\n"),
+                    '\r' => out.push_str("\\r"),
+                    '\t' => out.push_str("\\t"),
+                    ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
+                    ch => out.push(ch),
+                }
+            }
+            out.push('"');
+            out
+        }
+
+        let mut fields = vec![
+            "\"schema\":\"jet.err/v1\"".to_string(),
+            format!("\"message\":{}", quote(&self.message)),
+            format!(
+                "\"code\":{}",
+                self.code.as_deref().map_or_else(|| "null".to_string(), quote)
+            ),
+            format!(
+                "\"cause\":{}",
+                match self.causes.as_slice() {
+                    [] => "null".to_string(),
+                    [cause] => cause.to_json(),
+                    causes => format!(
+                        "[{}]",
+                        causes.iter().map(Self::to_json).collect::<Vec<_>>().join(",")
+                    ),
+                }
+            ),
+        ];
+        if let Some(identity) = &self.typed_identity {
+            fields.push(format!("\"typed_identity\":{}", quote(identity)));
+        }
+        if !self.context_frames.is_empty() {
+            fields.push(format!(
+                "\"context_frames\":[{}]",
+                self.context_frames
+                    .iter()
+                    .map(|frame| {
+                        format!(
+                            "{{\"text\":{},\"file\":{},\"line\":{}}}",
+                            quote(&frame.text),
+                            quote(&frame.file),
+                            frame.line
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+        if !self.source_journey.is_empty() {
+            fields.push(format!(
+                "\"source_journey\":[{}]",
+                self.source_journey
+                    .iter()
+                    .map(|frame| {
+                        format!(
+                            "{{\"fn_name\":{},\"file\":{},\"line\":{},\"note\":{},\"hops\":{}}}",
+                            quote(&frame.fn_name),
+                            quote(&frame.file),
+                            frame.line,
+                            quote(&frame.note),
+                            frame.hops
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+        if !self.conversion_history.is_empty() {
+            fields.push(format!(
+                "\"conversion_history\":[{}]",
+                self.conversion_history
+                    .iter()
+                    .map(|conversion| {
+                        format!(
+                            "{{\"source\":{},\"target\":{}}}",
+                            quote(&conversion.source),
+                            quote(&conversion.target)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+        format!("{{{}}}", fields.join(","))
+    }
+}
+
+/// Project one escaping default error and the journey it accumulated into the
+/// report consumed by every report edge. This drains the journey exactly once
+/// and never asks `Display` to reconstruct any field.
+pub fn jet_error_report(error: &JetErr) -> JetErrorReport {
+    let journey = jet_journey_take_hops();
+    let source_journey = journey
+        .0
+        .into_iter()
+        .map(|hop| JetErrorJourneyFrame {
+            fn_name: hop.site.fn_name,
+            file: hop.site.file,
+            line: hop.site.line,
+            note: hop.note,
+            hops: hop.hops,
+        })
+        .collect();
+    JetErrorReport::from_error(error, source_journey)
 }
 
 /// Adopt hops carried in from another thread, oldest first, applying the same
@@ -557,45 +802,7 @@ pub fn jet_journey_frame<F: FnOnce() -> String>(file: &str, line: u32, fn_name: 
 }
 
 pub fn jet_render_err(error: &JetErr) -> String {
-    fn render(error: &JetErr, out: &mut String, depth: usize) {
-        if depth == 0 {
-            match &error.code {
-                Ok(code) => out.push_str(&format!("Error [{code}]: {}", error.message)),
-                Err(JetAbsent) => out.push_str(&format!("Error: {}", error.message)),
-            }
-            if let Some(identity) = &error.typed_identity {
-                out.push_str(&format!(" (type: {identity})"));
-            }
-        } else {
-            out.push_str(&"  ".repeat(depth));
-            out.push_str("cause: ");
-            out.push_str(&error.message);
-        }
-        if let Ok(cause) = &error.cause {
-            out.push('\n');
-            render(cause, out, depth + 1);
-        }
-        for frame in &error.context {
-            out.push('\n');
-            out.push_str(&"  ".repeat(depth + 1));
-            out.push_str(&format!(
-                "context ({}:{}): {}",
-                frame.file, frame.line, frame.text
-            ));
-        }
-        for conversion in &error.conversions {
-            out.push('\n');
-            out.push_str(&"  ".repeat(depth + 1));
-            out.push_str(&format!(
-                "conversion: {} -> {}",
-                conversion.source, conversion.target
-            ));
-        }
-    }
-
-    let mut out = String::new();
-    render(error, &mut out, 0);
-    out
+    JetErrorReport::from_error(error, Vec::new()).render_root()
 }
 
 impl std::fmt::Display for JetErr {
@@ -626,6 +833,66 @@ mod err_tests {
         assert_eq!(
             jet_render_err(&error),
             "Error [CFG404]: parse failed\n  cause: unexpected token at line 3"
+        );
+    }
+
+    #[test]
+    fn default_report_keeps_structured_error_and_source_facts() {
+        jet_journey_reset();
+        let cause = jet_err_with_identity(
+            "disk offline".to_string(),
+            Ok("IO001".to_string()),
+            Err(JetAbsent),
+            "IoError".to_string(),
+        );
+        let mut error = jet_err_with_identity(
+            "loading config".to_string(),
+            Ok("CFG404".to_string()),
+            Ok(cause),
+            "ConfigError".to_string(),
+        );
+        jet_err_add_context(
+            &mut error,
+            "while loading app.toml".to_string(),
+            "config.jet".to_string(),
+            42,
+        );
+        jet_err_record_conversion(
+            &mut error,
+            "IoError".to_string(),
+            "ConfigError".to_string(),
+        );
+        jet_journey_frame("config.jet", 42, "run", String::new);
+
+        let report = jet_error_report(&error);
+        assert_eq!(report.code, Some("CFG404".to_string()));
+        assert_eq!(report.message, "loading config");
+        assert_eq!(report.typed_identity, Some("ConfigError".to_string()));
+        assert_eq!(report.causes.len(), 1);
+        assert_eq!(report.causes[0].message, "disk offline");
+        assert_eq!(report.causes[0].typed_identity, Some("IoError".to_string()));
+        assert_eq!(report.context_frames.len(), 1);
+        assert_eq!(report.context_frames[0].file, "config.jet");
+        assert_eq!(report.context_frames[0].line, 42);
+        assert_eq!(report.source_journey.len(), 1);
+        assert_eq!(report.source_journey[0].fn_name, "run");
+        assert_eq!(report.source_journey[0].file, "config.jet");
+        assert_eq!(report.source_journey[0].line, 42);
+        assert_eq!(report.conversion_history.len(), 1);
+        assert_eq!(report.conversion_history[0].source, "IoError");
+        assert_eq!(report.conversion_history[0].target, "ConfigError");
+        assert_eq!(
+            report.to_json(),
+            "{\"schema\":\"jet.err/v1\",\"message\":\"loading config\",\"code\":\"CFG404\",\"cause\":{\"schema\":\"jet.err/v1\",\"message\":\"disk offline\",\"code\":\"IO001\",\"cause\":null,\"typed_identity\":\"IoError\"},\"typed_identity\":\"ConfigError\",\"context_frames\":[{\"text\":\"while loading app.toml\",\"file\":\"config.jet\",\"line\":42}],\"source_journey\":[{\"fn_name\":\"run\",\"file\":\"config.jet\",\"line\":42,\"note\":\"\",\"hops\":1}],\"conversion_history\":[{\"source\":\"IoError\",\"target\":\"ConfigError\"}]}"
+        );
+        assert_eq!(
+            report.render_with_style(JetReportStyle::PLAIN),
+            "Error [CFG404]: loading config (type: ConfigError)\n\
+             \x20\x20cause: disk offline (type: IoError)\n\
+             \x20\x20context (config.jet:42): while loading app.toml\n\
+             \x20\x20conversion: IoError -> ConfigError\n\
+             \x20Trail [E3002] (1 hop via ?, origin first):\n\
+             \x20 1. run (config.jet:42)\n"
         );
     }
 }

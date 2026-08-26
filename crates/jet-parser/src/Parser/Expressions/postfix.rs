@@ -201,18 +201,23 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                     let qspan = self.bump().span;
+                    if !matches!(self.peek().kind, TokKind::LParen) {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            "bare `?` propagation is retired".to_string(),
+                            "fallible calls propagate automatically; `?` now adds explicit failure context".to_string(),
+                            "remove `?`, or write `?(\"context\")` to add one context frame".to_string(),
+                            Some(qspan),
+                        ));
+                    }
                     // D-FAILURE-FOUNDATION1=A: `?(text)` adds one lazy,
                     // source-linked context frame. The note remains an AST
                     // expression so sema checks it, but codegen evaluates it
                     // only when the propagated carrier is already failing.
-                    let note = if matches!(self.peek().kind, TokKind::LParen) {
-                        self.bump();
-                        let note = self.expr()?;
-                        self.expect(TokKind::RParen, "to finish the failure context")?;
-                        Some(Box::new(note))
-                    } else {
-                        None
-                    };
+                    self.bump();
+                    let note = self.expr()?;
+                    self.expect(TokKind::RParen, "to finish the failure context")?;
+                    let note = Some(Box::new(note));
                     let end = note.as_ref().map_or(qspan.end, |note| note.span().end);
                     let full = Span::new(expr.span().start, end);
                     expr = Expr::Try(Box::new(expr), full, TryConvert::None, note);
@@ -225,7 +230,7 @@ impl<'a> Parser<'a> {
                         return Err(Diagnostic::error(
                                 "E0046",
                                 "optional chaining `?.` only reaches fields, not methods".to_string(),
-                                "`a?.b` short-circuits a `T?` to absent; calling through `?.` isn't in yet"
+                                "`a?.b` short-circuits a `?T` to absent; calling through `?.` isn't in yet"
                                     .to_string(),
                                 "unwrap first, e.g. `(a ?? return).method()`, or test with `== present`"
                                     .to_string(),

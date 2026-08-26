@@ -14,7 +14,7 @@ pub mod Parser;
 mod generic_module_tests {
     use super::{
         Formatter, Lexer, Parser, Syntax, AST,
-        AST::{Expr, GenericModuleParam, Item, ModuleArg, Pattern, Stmt, Type},
+        AST::{BindPattern, Expr, GenericModuleParam, Item, ModuleArg, OrFallback, Pattern, Stmt, Type},
     };
 
     #[test]
@@ -144,30 +144,73 @@ mod generic_module_tests {
         };
         let Stmt::Return(
             Some(Expr::If {
-                cond, else_value, ..
+                cond: ok_cond,
+                then_value: ok_value,
+                else_value,
+                ..
             }),
             _,
         ) = &function.body[0]
         else {
             panic!("Result handler should lower as a value if")
         };
-        assert!(matches!(
-            cond.as_ref(),
-            Expr::PatternTest {
-                pattern: Pattern::Ok { binding, .. },
-                ..
-            } if binding == "ok"
-        ));
-        let Expr::If { cond: err_cond, .. } = else_value.as_ref() else {
-            panic!("Result handler must retain its failure branch")
+        let Expr::PatternTest {
+            subject: ok_subject,
+            pattern:
+                Pattern::Ok {
+                    binding: ok_binding,
+                    binding_span: ok_binding_span,
+                    ..
+                },
+            ..
+        } = ok_cond.as_ref()
+        else {
+            panic!("Result handler needs one success pattern")
         };
         assert!(matches!(
-            err_cond.as_ref(),
-            Expr::PatternTest {
-                pattern: Pattern::Err { binding, .. },
-                ..
-            } if binding == "error"
+            ok_subject.as_ref(),
+            Expr::Ident(name, _) if name == "value"
         ));
+        assert_eq!(ok_binding, "ok");
+        assert!(matches!(
+            ok_value.as_ref(),
+            Expr::Ident(name, _) if name == "ok"
+        ));
+
+        let Expr::If {
+            cond: err_cond,
+            then_value: err_value,
+            else_value: terminal,
+            ..
+        } = else_value.as_ref()
+        else {
+            panic!("Result handler must retain its failure branch")
+        };
+        let Expr::PatternTest {
+            subject: err_subject,
+            pattern:
+                Pattern::Err {
+                    binding: err_binding,
+                    binding_span: err_binding_span,
+                    ..
+                },
+            ..
+        } = err_cond.as_ref()
+        else {
+            panic!("Result handler needs one failure pattern")
+        };
+        assert!(matches!(
+            err_subject.as_ref(),
+            Expr::Ident(name, _) if name == "value"
+        ));
+        assert_eq!(err_binding, "error");
+        assert!(matches!(
+            err_value.as_ref(),
+            Expr::Ident(name, _) if name == "error"
+        ));
+        assert!(matches!(terminal.as_ref(), Expr::NoElse(_)));
+        assert!(ok_binding_span.end < err_binding_span.start);
+        assert!(ok_cond.span().end < err_cond.span().start);
     }
 
     #[test]
@@ -226,8 +269,8 @@ mod generic_module_tests {
 fn optional() ?Success -> None
 fn fallible() !Error -> Err("bad")
 fn result() ?Success !Error -> Ok(1)
-fn run(value: Int!, optional: String) {
-    propagated :: value?
+fn run(value: Int !, optional: String) {
+    propagated :: value
     noted :: value?("context")
     chained :: optional?.len
     negated :: !true
@@ -241,6 +284,71 @@ fn run(value: Int!, optional: String) {
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         Parser::parse(&tokens).expect("neighboring Result syntax should keep its meanings");
+    }
+
+    #[test]
+    fn result_handler_keeps_one_sided_pattern_checks_and_fallbacks() {
+        let source = r#"
+fn run(value: Int !, maybe: ?Int) {
+    if value == .Ok(ok) -> print(ok)
+    if value == .Err(error) -> print(error)
+    fallback :: maybe ?? 0
+    value == .Ok(other) ?? return
+}
+"#;
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let program = Parser::parse(&tokens).expect("one-sided Result checks should parse");
+        let Item::Func(function) = &program.items[0] else {
+            panic!("function")
+        };
+        assert!(matches!(
+            &function.body[0],
+            Stmt::Switch { arms, .. }
+                if matches!(
+                    arms.first().map(|arm| &arm.cond),
+                    Some(Expr::PatternTest {
+                        pattern: Pattern::Ok { binding, .. },
+                        ..
+                    }) if binding == "ok"
+                )
+        ));
+        assert!(matches!(
+            &function.body[1],
+            Stmt::Switch { arms, .. }
+                if matches!(
+                    arms.first().map(|arm| &arm.cond),
+                    Some(Expr::PatternTest {
+                        pattern: Pattern::Err { binding, .. },
+                        ..
+                    }) if binding == "error"
+                )
+        ));
+        assert!(matches!(
+            &function.body[2],
+            Stmt::Val(binding)
+                if matches!(
+                    &binding.init,
+                    Expr::OrFallback {
+                        value,
+                        fallback: OrFallback::Value(fallback),
+                        ..
+                    } if matches!(value.as_ref(), Expr::Ident(name, _) if name == "maybe")
+                        && matches!(fallback.as_ref(), Expr::Int(..))
+                )
+        ));
+        assert!(matches!(
+            &function.body[3],
+            Stmt::Val(binding)
+                if matches!(
+                    binding.pattern.as_ref(),
+                    Some(BindPattern::Refutable {
+                        pattern: Pattern::Ok { binding, .. },
+                        fallback: OrFallback::Return(None, _),
+                        ..
+                    }) if binding == "other"
+                )
+        ));
     }
 
     #[test]

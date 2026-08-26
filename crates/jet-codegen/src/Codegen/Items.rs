@@ -1543,32 +1543,43 @@ fn emit_entry_invocation(
         |arg| format!("{callable}({arg})"),
     );
     let error_text = |error: &str| match entry_error {
+        Some(EntryError::DefaultJet) => format!("jet_entry_error_text(&{error})"),
         Some(EntryError::Jet) => format!("jet_entry_error_text_jet(&{error})"),
         Some(EntryError::JetShow) => format!("jet_entry_error_text_show(&{error})"),
         Some(EntryError::Rust) => format!("jet_entry_error_text(&{error})"),
         None => unreachable!("entry error text requested for an infallible entry"),
+    };
+    let error_edge = |error: &str| match entry_error {
+        Some(EntryError::DefaultJet) => format!("jet_entry_error_exit_jet({error})"),
+        Some(_) => format!("jet_entry_error_exit({})", error_text(error)),
+        None => unreachable!("entry error edge requested for an infallible entry"),
+    };
+    let service_error_edge = |error: &str| match entry_error {
+        Some(EntryError::DefaultJet) => format!("jet_service_edge_report_jet({error})"),
+        Some(_) => format!("jet_service_edge_report({})", error_text(error)),
+        None => unreachable!("service error edge requested for an infallible entry"),
     };
     if service_target && entry_error.is_some() {
         let app = mangle_generated("service_app");
         let error = mangle_generated("service_error");
         if serve_app {
             return format!(
-                "{indent}jet_runtime_boundary(|| match {call} {{\n{indent}    Ok({app}) => {app}.serve(),\n{indent}    Err({error}) => jet_service_edge_report({text}),\n{indent}}});\n",
-                text = error_text(&error),
+                "{indent}jet_runtime_boundary(|| match {call} {{\n{indent}    Ok({app}) => {app}.serve(),\n{indent}    Err({error}) => {edge},\n{indent}}});\n",
+                edge = service_error_edge(&error),
             );
         }
         return format!(
-            "{indent}jet_runtime_boundary(|| {{\n{indent}    if let Err({error}) = {call} {{\n{indent}        jet_service_edge_report({text});\n{indent}    }}\n{indent}}});\n",
-            text = error_text(&error),
+            "{indent}jet_runtime_boundary(|| {{\n{indent}    if let Err({error}) = {call} {{\n{indent}        {edge};\n{indent}    }}\n{indent}}});\n",
+            edge = service_error_edge(&error),
         );
     }
     if serve_app {
         return match entry_error {
             Some(_) => format!(
-                "{indent}jet_runtime_boundary(|| match {call} {{\n{indent}    Ok({app}) => {app}.serve(),\n{indent}    Err({error}) => jet_entry_error_exit({text}),\n{indent}}});\n",
+                "{indent}jet_runtime_boundary(|| match {call} {{\n{indent}    Ok({app}) => {app}.serve(),\n{indent}    Err({error}) => {edge},\n{indent}}});\n",
                 app = mangle_generated("entry_app"),
                 error = mangle_generated("entry_error"),
-                text = error_text(&mangle_generated("entry_error")),
+                edge = error_edge(&mangle_generated("entry_error")),
             ),
             // `serve()` runs INSIDE the boundary, like the fallible arm above
             // and the service-target arm. Outside it, a stop raised while
@@ -1583,8 +1594,8 @@ fn emit_entry_invocation(
         Some(_) => {
             let error = mangle_generated("entry_error");
             format!(
-                "{indent}jet_runtime_boundary(|| {{\n{indent}    if let Err({error}) = {call} {{\n{indent}        jet_entry_error_exit({text});\n{indent}    }}\n{indent}}});\n",
-                text = error_text(&error),
+                "{indent}jet_runtime_boundary(|| {{\n{indent}    if let Err({error}) = {call} {{\n{indent}        {edge};\n{indent}    }}\n{indent}}});\n",
+                edge = error_edge(&error),
             )
         }
         None => format!("{indent}jet_runtime_boundary(|| {call});\n"),
@@ -1593,6 +1604,7 @@ fn emit_entry_invocation(
 
 #[derive(Clone, Copy)]
 enum EntryError {
+    DefaultJet,
     Jet,
     JetShow,
     Rust,
@@ -1690,6 +1702,12 @@ fn entry_error(cx: &Cx, ty: &Type) -> Option<EntryError> {
     let Type::Result { err, .. } = ty else {
         return None;
     };
+    if matches!(
+        err.as_ref(),
+        Type::Named(name) if name == crate::Syntax::TYPE_ERR
+    ) {
+        return Some(EntryError::DefaultJet);
+    }
     let uses_jet_display = match err.as_ref() {
         Type::Named(name) | Type::Apply { name, .. } => cx.has_display_type(name),
         _ => false,

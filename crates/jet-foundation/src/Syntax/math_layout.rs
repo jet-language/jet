@@ -630,12 +630,12 @@ pub const LIT_ERR: &str = "Err";
 
 /// S35 (ratified M4; spelling updated by S71/D-SG6; D-ERR-DECON1=A): the
 /// fallback operator supplies a value or route (`return`, `next`, `break`, or
-/// `panic`) when a `T?` is absent or a `T E!` failed. A block route may run
+/// `panic`) when a `?T` is absent or a `T !E` failed. A block route may run
 /// ordinary statements before its final value or diverging tail. Spelled `??`
 /// since the 2026-06-15 rename (was the word `or`).
 pub const OP_FALLBACK: &str = "??";
 
-/// S71 (ratified 2026-06-15, D-SG6): optional chaining — `a?.b` yields a `T?`
+/// S71 (ratified 2026-06-15, D-SG6): optional chaining — `a?.b` yields a `?T`
 /// and short-circuits to absent on the first missing link.
 pub const OP_OPTIONAL_CHAIN: &str = "?.";
 
@@ -647,7 +647,7 @@ pub const FOREIGN_OR_FALLBACK: &str = "or";
 pub const BUILTIN_PANIC: &str = "panic";
 /// D-INTBIG1/D-NUMOPS1: default `Int` is exact. Fixed-width per-op overflow
 /// opt-ins wrap one integer `+`/`-`/`*`/`/`: `wrapping(…)` wraps around,
-/// `saturating(…)` clamps to the type's range, and `checked(…) -> T?` returns
+/// `saturating(…)` clamps to the type's range, and `checked(…) -> ?T` returns
 /// `null` on overflow. Fixed-width receiver methods use the same policy.
 pub const BUILTIN_WRAPPING: &str = "wrapping";
 pub const BUILTIN_SATURATING: &str = "saturating";

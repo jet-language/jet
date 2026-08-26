@@ -494,15 +494,16 @@ fn fmt_keeps_transaction_comment_inside_transaction_block() {
 
 #[test]
 fn fmt_keeps_optional_return_sugar() {
-    // D-ERRSUFFIX1=B: `T?` is Optional; the error type owns the `!` suffix.
-    let src = r#"fn parse_count(raw: String) Int? {
+    // D-FAILURE-FOUNDATION1=A: `?T` is Optional; the error contract owns
+    // the `!` prefix.
+    let src = r#"fn parse_count(raw: String) ?Int {
     return Err("empty");
 }
 "#;
     let out = jet::format_source(src).expect("fmt should parse optional return");
     assert!(
-        out.contains("fn parse_count(raw: String) Int? -> {"),
-        "expected `Int?` optional return to stay `Int?`, got:\n{out}"
+        out.contains("fn parse_count(raw: String) ?Int -> {"),
+        "expected `?Int` optional return to stay `?Int`, got:\n{out}"
     );
     let fallible = r#"fn parse_count(raw: String) Int ! {
     return Err("empty");
@@ -517,21 +518,18 @@ fn fmt_keeps_optional_return_sugar() {
     let retired_unit = r#"fn save() ! IOError {
 }
 "#;
-    let retired_unit_out =
-        jet::format_source(retired_unit).expect("fmt should migrate the retired unit form");
     assert!(
-        retired_unit_out.contains("fn save() IOError! {"),
-        "expected retired `! IOError` to rewrite to `IOError!`, got:\n{retired_unit_out}"
+        jet::format_source(retired_unit).is_err(),
+        "retired infix unit failure form must not be accepted"
     );
 
     let retired = r#"fn parse_count(raw: String) Int ? String {
     return Err("empty");
 }
 "#;
-    let retired_out = jet::format_source(retired).expect("fmt should teach retired fallible type");
     assert!(
-        retired_out.contains("fn parse_count(raw: String) Int String! -> {"),
-        "expected retired `Int ? String` to rewrite to `Int String!`, got:\n{retired_out}"
+        jet::format_source(retired).is_err(),
+        "retired suffix failure form must not be accepted"
     );
 }
 
@@ -1875,6 +1873,14 @@ fn fmt_compact_result_handler_expands_long_branches_deterministically() {
         out.contains("\n! error ->"),
         "long handler should use the two-arm layout:\n{out}"
     );
+    assert!(
+        out.contains("-> {"),
+        "expanded handler arms need canonical arrow spacing:\n{out}"
+    );
+    assert!(
+        !out.contains("->{"),
+        "expanded handler arms must not join the arrow and brace:\n{out}"
+    );
     assert_eq!(
         out,
         jet::format_source(&out).expect("expanded handler should be idempotent")
@@ -1885,18 +1891,42 @@ fn fmt_compact_result_handler_expands_long_branches_deterministically() {
 fn fmt_result_handler_expands_blocked_nested_and_commented_branches() {
     let blocked = "fn pick(value: Int !String) String -> value ? ok -> { saved :: ok; saved } ! error -> { saved_error :: error; saved_error }\n";
     let nested = "fn pick(value: Int !String) Int -> value ? ok -> value ? inner -> inner ! inner_error -> inner_error ! error -> 0\n";
+    let nested_if = "fn pick(value: Int !String) Int -> value ? ok -> if ready -> 1 else -> 2 ! error -> 0\n";
     let commented = "fn pick(value: Int !String) String -> value ? ok -> ok /* keep this branch readable */ ! error -> error\n";
+    let commented_failure = "fn pick(value: Int !String) String -> value ? ok -> ok ! error -> error /* keep failure readable */\n";
 
     for (source, label) in [
         (blocked, "blocked"),
         (nested, "nested"),
+        (nested_if, "nested if"),
         (commented, "commented"),
+        (commented_failure, "commented failure"),
     ] {
         let out = jet::format_source(source).expect("Result handler should format");
         assert!(
             out.contains("\n! error ->"),
             "{label} handler should use the deterministic two-arm layout:\n{out}"
         );
+        assert!(
+            out.contains("-> {"),
+            "{label} handler arms need canonical arrow spacing:\n{out}"
+        );
+        assert!(
+            !out.contains("->{"),
+            "{label} handler arms must not join the arrow and brace:\n{out}"
+        );
+        if label == "commented" {
+            assert!(
+                out.contains("ok  /* keep this branch readable */"),
+                "comment must remain attached to its branch:\n{out}"
+            );
+        }
+        if label == "commented failure" {
+            assert!(
+                out.contains("error  /* keep failure readable */"),
+                "failure comment must remain attached to its branch:\n{out}"
+            );
+        }
         assert_eq!(
             out,
             jet::format_source(&out).expect("expanded handler should be idempotent"),

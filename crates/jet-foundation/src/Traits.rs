@@ -17,7 +17,7 @@ use crate::AST::{
     AccessConvention, DistinctDef, EnumDef, Func, ImplDef, Item, ProgramBundle, StructDef,
     TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone, Default)]
 pub struct TraitRegistry {
@@ -268,6 +268,30 @@ impl TraitRegistry {
 
     pub fn register_items(&mut self, items: &[Item], diags: &mut Vec<Diagnostic>) {
         self.register_synthetic_checked_text();
+        // Register nominal names before consuming declarations. Error
+        // conversions may appear before the type declarations they mention.
+        for item in items {
+            match item {
+                Item::Struct(s) => {
+                    self.local_types.insert(s.name.clone());
+                }
+                Item::Enum(e) => {
+                    self.local_types.insert(e.name.clone());
+                }
+                Item::TypeAlias(a) => {
+                    self.local_types.insert(a.name.clone());
+                }
+                Item::Distinct(d) => {
+                    self.local_types.insert(d.name.clone());
+                }
+                Item::UnitFamily(family) => {
+                    for d in family.distinct_defs() {
+                        self.local_types.insert(d.name.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
         for item in items {
             match item {
                 Item::Trait(t) => self.register_trait(t, diags),
@@ -1691,36 +1715,30 @@ impl TraitRegistry {
             return;
         }
         if from_ty == to_ty || self.error_conversion_path_exists(to_ty, from_ty) {
-            diags.push(Diagnostic::error(
+            diags.push(Diagnostic::from_row(
                 "E2418",
-                format!(
-                    "error conversion cycle: `impl {} -> {}` would make conversion loop",
-                    from_ty, to_ty
-                ),
-                "error conversions must form an acyclic route so a failure has one finite meaning"
-                    .to_string(),
-                "remove this edge or choose a target that is not already reachable back to the source"
-                    .to_string(),
+                &[("Source", from_ty), ("Target", to_ty)],
                 Some(span),
             ));
             return;
         }
         if self.error_conversion_path_exists(from_ty, to_ty) {
-            diags.push(Diagnostic::error(
+            diags.push(Diagnostic::from_row(
                 "E2419",
-                format!(
-                    "error conversion is ambiguous: `{}` already reaches `{}`",
-                    from_ty, to_ty
-                ),
-                "a source and target may have one unique declared conversion route"
-                    .to_string(),
-                "remove the direct edge or remove one of the intermediate conversion edges"
-                    .to_string(),
+                &[("Source", from_ty), ("Target", to_ty)],
                 Some(span),
             ));
             return;
         }
-        self.error_conversions.insert(key, span);
+        self.error_conversions.insert(key.clone(), span);
+        if let Some((source, target)) = self.ambiguous_error_conversion_pair() {
+            self.error_conversions.remove(&key);
+            diags.push(Diagnostic::from_row(
+                "E2419",
+                &[("Source", source.as_str()), ("Target", target.as_str())],
+                Some(span),
+            ));
+        }
     }
 
     fn error_conversion_path_exists(&self, from_ty: &str, to_ty: &str) -> bool {
@@ -1743,6 +1761,52 @@ impl TraitRegistry {
             }
         }
         false
+    }
+
+    fn ambiguous_error_conversion_pair(&self) -> Option<(String, String)> {
+        let nodes: BTreeSet<String> = self
+            .error_conversions
+            .keys()
+            .flat_map(|(source, target)| [source.clone(), target.clone()])
+            .collect();
+        for source in &nodes {
+            for target in &nodes {
+                if source == target {
+                    continue;
+                }
+                let mut visiting = HashSet::new();
+                if self.error_conversion_path_count(source, target, &mut visiting) > 1 {
+                    return Some((source.clone(), target.clone()));
+                }
+            }
+        }
+        None
+    }
+
+    fn error_conversion_path_count(
+        &self,
+        from_ty: &str,
+        to_ty: &str,
+        visiting: &mut HashSet<String>,
+    ) -> u8 {
+        if from_ty == to_ty {
+            return 1;
+        }
+        if !visiting.insert(from_ty.to_string()) {
+            return 0;
+        }
+        let mut paths = 0;
+        for (source, target) in self.error_conversions.keys() {
+            if source != from_ty {
+                continue;
+            }
+            paths = (paths + self.error_conversion_path_count(target, to_ty, visiting)).min(2);
+            if paths == 2 {
+                break;
+            }
+        }
+        visiting.remove(from_ty);
+        paths
     }
 
     /// D-ARROW-RESPELL1: returns true if a declared `impl from_ty -> to_ty` exists.

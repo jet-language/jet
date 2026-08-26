@@ -14,7 +14,7 @@ use tir_support::{build_and_run, build_and_run_full, compile, have_rustc, jit_ru
 #[test]
 fn result_handler_reuses_result_split_on_all_tiers() {
     let src = r#"
-fn classify(ok: Bool) Int! -> if ok -> Ok(7) else -> Err("bad")
+fn classify(ok: Bool) Int !Err -> if ok -> Ok(7) else -> Err("bad")
 
 fn run() {
     success :: classify(true)
@@ -31,7 +31,7 @@ fn run() {
 #[test]
 fn result_handler_preserves_diverging_arm_on_all_tiers() {
     let src = r#"
-fn choose(ok: Bool) Int! -> if ok -> Ok(7) else -> Err("bad")
+fn choose(ok: Bool) Int !Err -> if ok -> Ok(7) else -> Err("bad")
 
 fn run() {
     value :: choose(true)
@@ -40,6 +40,50 @@ fn run() {
 }
 "#;
     tir_support::assert_tiers_agree("result_handler_diverging", src, "8\n");
+}
+
+/// D-RESULT-DECON2=B / I9: handler branches keep ordinary ownership, generic,
+/// nested, and value semantics. The owned String payloads force the AOT path
+/// to consume the Result once, while the same source runs through JIT and
+/// interpreter deopt without a handler-specific carrier.
+#[test]
+fn result_handler_preserves_ownership_generic_and_nested_values_on_all_tiers() {
+    let src = r#"
+fn choose<T>(value: ^T, ok: Bool) T String! -> if ok -> Ok(value) else -> Err("bad")
+
+fn consume(value: ^String) String -> value
+
+fn owned(ok: Bool) String String! -> {
+    result :: choose("owned", ok)
+    return result ? success -> consume(^success) ! failure -> consume(^failure)
+}
+
+fn generic<T>(value: ^T, ok: Bool) T String! -> {
+    result :: choose(value, ok)
+    return result ? success -> success ! failure -> panic(failure)
+}
+
+fn nested(value: Int, ok: Bool) Int String! -> {
+    outer :: choose(value, ok)
+    return outer ? success -> {
+        inner :: choose(success, ok)
+        inner ? nested_success -> nested_success + 1 ! nested_failure -> 0
+    } ! failure -> 0
+}
+
+fn run() {
+    print(owned(true))
+    print(owned(false))
+    print(generic(4, true))
+    print(nested(4, true))
+    print(nested(4, false))
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "result_handler_ownership_generic_nested",
+        src,
+        "owned\nbad\n4\n5\n0\n",
+    );
 }
 
 #[test]

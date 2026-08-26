@@ -5489,6 +5489,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
                 let tconvert = match convert {
                     TryConvert::None => TTryConvert::None,
+                    TryConvert::Never => TTryConvert::Never,
                     TryConvert::DefaultErr => TTryConvert::DefaultErr,
                     TryConvert::Typed(fn_name) => TTryConvert::Typed(fn_name.clone()),
                     TryConvert::WidenUnion { enum_name, tag } => TTryConvert::WidenUnion {

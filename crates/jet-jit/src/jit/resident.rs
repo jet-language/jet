@@ -468,33 +468,36 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                     "jit fallible entry returned invalid Result handle".to_string()
                 })?;
                 if !result.ok {
-                    let message = if main_returns_default_err {
+                    if main_returns_default_err {
                         let error = runtime
                             .errors
                             .get((result.bits as i64).saturating_sub(1) as usize)
                             .ok_or_else(|| {
                                 "jit fallible entry returned invalid Err handle".to_string()
                             })?;
-                        jet_foundation::Outcome::jet_render_err(error)
-                    } else if main_error_is_packed {
-                        let Some(Type::Named(name)) = main_error_type.as_ref() else {
-                            return Err("jit packed entry error lost its type".to_string());
-                        };
-                        Collections::render_packed_enum(result.bits as i64, name, &runtime.heap)
+                        let report = jet_foundation::Outcome::jet_error_report(error).render();
+                        runtime.stderr.push_str(&report);
                     } else {
+                        let message = if main_error_is_packed {
+                            let Some(Type::Named(name)) = main_error_type.as_ref() else {
+                                return Err("jit packed entry error lost its type".to_string());
+                            };
+                            Collections::render_packed_enum(result.bits as i64, name, &runtime.heap)
+                        } else {
+                            runtime
+                                .heap
+                                .clone_string(result.bits as i64)
+                                .ok_or_else(|| {
+                                    "jit fallible entry returned non-string error".to_string()
+                                })?
+                        };
+                        // One report edge, shared with `jet_entry_report` in the
+                        // AOT Prelude: the rendered error leads and the accumulated
+                        // E3002 trail follows it, and only an escaping failure reports.
                         runtime
-                            .heap
-                            .clone_string(result.bits as i64)
-                            .ok_or_else(|| {
-                                "jit fallible entry returned non-string error".to_string()
-                            })?
-                    };
-                    // One report edge, shared with `jet_entry_report` in the
-                    // AOT Prelude: the rendered error leads and the accumulated
-                    // E3002 trail follows it, and only an escaping failure reports.
-                    runtime
-                        .stderr
-                        .push_str(&jet_foundation::Outcome::jet_journey_report(&message));
+                            .stderr
+                            .push_str(&jet_foundation::Outcome::jet_journey_report(&message));
+                    }
                     return Ok(RunOutcome::Ran {
                         stdout: runtime.stdout.clone(),
                         stderr: runtime.stderr.clone(),

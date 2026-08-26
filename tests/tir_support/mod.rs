@@ -238,7 +238,11 @@ where
             .arg(&source)
             .current_dir(&root)
             .env("JET_CACHE_DIR", cache.join("cache"))
-            .env("NO_COLOR", "1");
+            .env("NO_COLOR", "1")
+            // The test itself already runs inside scripts/agent/jet-env. Mark
+            // the child as active there so the project-env gate does not turn
+            // this tier-parity proof into an E1355 test.
+            .env("JETPACK_ENV", "1");
         let output = command.output().unwrap();
         let result = (
             output.status.code().unwrap_or(-1),

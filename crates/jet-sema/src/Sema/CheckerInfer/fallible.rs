@@ -161,6 +161,16 @@ impl<'a> Checker<'a> {
         match inner_ty {
             Type::Result { ok, err } => {
                 let ret = self.resolve_type(self.ret.clone().unwrap_or(Type::Int));
+                // D-FAILURE-FOUNDATION1: `Never` is an uninhabited error
+                // side, not a conversion into the caller's default domain.
+                // Record that proof on the existing semantic conversion fact
+                // so every lowering tier unwraps the one carrier identically.
+                if matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
+                    && matches!(&ret, Type::Result { .. })
+                {
+                    *convert = TryConvert::Never;
+                    return Some((*ok).clone());
+                }
                 match &ret {
                     // D-FAILURE-FOUNDATION1: `!Never` is a proof that the
                     // caller has no reachable failure route.  A reachable

@@ -43,6 +43,17 @@ pub struct ReverdictReceipt {
     pub query_recomputes: u64,
     pub item_hits: u64,
     pub item_recomputes: u64,
+    /// Effective callable failure contracts observed in the checked bundle.
+    /// This keeps the incremental proof tied to the same sema facts exposed
+    /// by hover, semindex, and inspect.
+    pub callable_contracts: Vec<CallableContractReceipt>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallableContractReceipt {
+    pub identity: String,
+    pub failure_contract: String,
+    pub failure_source: String,
 }
 
 impl ReverdictReceipt {
@@ -60,6 +71,28 @@ impl ReverdictReceipt {
                 .iter()
                 .cloned()
                 .map(CanonicalJson::String)
+                .collect(),
+        );
+        let callable_contracts = CanonicalJson::Array(
+            self.callable_contracts
+                .iter()
+                .map(|contract| {
+                    CanonicalJson::object([
+                        (
+                            "identity".into(),
+                            CanonicalJson::String(contract.identity.clone()),
+                        ),
+                        (
+                            "failure_contract".into(),
+                            CanonicalJson::String(contract.failure_contract.clone()),
+                        ),
+                        (
+                            "failure_source".into(),
+                            CanonicalJson::String(contract.failure_source.clone()),
+                        ),
+                    ])
+                    .expect("fixed receipt callable contract fields")
+                })
                 .collect(),
         );
         let content = CanonicalJson::object([
@@ -89,6 +122,7 @@ impl ReverdictReceipt {
                 CanonicalJson::Integer(self.program_items.to_string()),
             ),
             ("reverified_items".into(), items.clone()),
+            ("callable_contracts".into(), callable_contracts),
             (
                 "blast_radius".into(),
                 CanonicalJson::object([
@@ -122,10 +156,118 @@ impl ReverdictReceipt {
                 "schema".into(),
                 CanonicalJson::String("jet.reverdict-receipt".into()),
             ),
-            ("version".into(), CanonicalJson::Integer("1".into())),
+                ("version".into(), CanonicalJson::Integer("2".into())),
         ])
         .expect("fixed receipt envelope");
         String::from_utf8(receipt.bytes()).expect("canonical JSON is UTF-8")
+    }
+}
+
+fn callable_contracts(bundle: &crate::AST::ProgramBundle) -> Vec<CallableContractReceipt> {
+    let mut contracts = Vec::new();
+    for module in &bundle.modules {
+        collect_callable_contracts(&module.items, &module.display, "", &mut contracts);
+    }
+    contracts.sort_by(|left, right| left.identity.cmp(&right.identity));
+    contracts
+}
+
+fn collect_callable_contracts(
+    items: &[crate::AST::Item],
+    module: &str,
+    parent: &str,
+    output: &mut Vec<CallableContractReceipt>,
+) {
+    for item in items {
+        match item {
+            crate::AST::Item::Func(function) => {
+                push_callable_contract(function, join_identity(module, parent, &function.name), output);
+            }
+            crate::AST::Item::Struct(definition) => {
+                let owner = join_identity(module, parent, &definition.name);
+                for method in &definition.methods {
+                    push_callable_contract(method, format!("{owner}.{}", method.name), output);
+                }
+                for implementation in &definition.trait_impls {
+                    for method in &implementation.methods {
+                        push_callable_contract(method, format!("{owner}.{}", method.name), output);
+                    }
+                }
+            }
+            crate::AST::Item::Enum(definition) => {
+                let owner = join_identity(module, parent, &definition.name);
+                for method in &definition.methods {
+                    push_callable_contract(method, format!("{owner}.{}", method.name), output);
+                }
+                for implementation in &definition.trait_impls {
+                    for method in &implementation.methods {
+                        push_callable_contract(method, format!("{owner}.{}", method.name), output);
+                    }
+                }
+            }
+            crate::AST::Item::Impl(implementation) => {
+                let owner = join_identity(module, parent, &implementation.type_name);
+                for method in &implementation.methods {
+                    push_callable_contract(method, format!("{owner}.{}", method.name), output);
+                }
+            }
+            crate::AST::Item::Trait(definition) => {
+                let owner = join_identity(module, parent, &definition.name);
+                for method in &definition.methods {
+                    let failure = method.failure_contract();
+                    output.push(CallableContractReceipt {
+                        identity: format!("{owner}.{}", method.name),
+                        failure_contract: failure.effective_type().name(),
+                        failure_source: failure.source(),
+                    });
+                }
+            }
+            crate::AST::Item::CodeModule(definition) => {
+                if let Some(body) = &definition.body {
+                    collect_callable_contracts(
+                        body,
+                        module,
+                        &join_identity(parent, "", &definition.name),
+                        output,
+                    );
+                }
+            }
+            crate::AST::Item::GenericModule(definition) => {
+                collect_callable_contracts(
+                    &definition.body,
+                    module,
+                    &join_identity(parent, "", &definition.name),
+                    output,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn push_callable_contract(
+    function: &crate::AST::Func,
+    identity: String,
+    output: &mut Vec<CallableContractReceipt>,
+) {
+    let failure = function.failure_contract();
+    output.push(CallableContractReceipt {
+        identity,
+        failure_contract: failure.effective_type().name(),
+        failure_source: failure.source(),
+    });
+}
+
+fn join_identity(module: &str, parent: &str, name: &str) -> String {
+    let local = if parent.is_empty() {
+        name.to_string()
+    } else {
+        format!("{parent}::{name}")
+    };
+    if module.is_empty() {
+        local
+    } else {
+        format!("{module}::{local}")
     }
 }
 
@@ -243,6 +385,11 @@ impl CompilerQueries {
             query_recomputes: after.recomputes.saturating_sub(before.recomputes),
             item_hits: after.item_hits.saturating_sub(before.item_hits),
             item_recomputes: after.item_recomputes.saturating_sub(before.item_recomputes),
+            callable_contracts: checked
+                .bundle
+                .as_deref()
+                .map(callable_contracts)
+                .unwrap_or_default(),
         };
         (checked, receipt)
     }
@@ -1063,6 +1210,10 @@ fn run() {{}}
         assert_eq!(receipt.item_recomputes, 1);
         assert_eq!(receipt.blast_radius(), 1);
         assert!(receipt.reverified_items[0].contains("fn:target"));
+        assert!(receipt
+            .callable_contracts
+            .iter()
+            .any(|contract| contract.failure_source == "implicit default !Err"));
         assert_eq!(receipt.edit_bytes, 2);
 
         let json = receipt.to_json();
@@ -1079,6 +1230,10 @@ fn run() {{}}
         let CanonicalJson::Object(content) = &envelope["content"] else {
             panic!("re-verdict receipt content")
         };
+        assert!(matches!(
+            &content["callable_contracts"],
+            CanonicalJson::Array(values) if !values.is_empty()
+        ));
         let CanonicalJson::Object(blast_radius) = &content["blast_radius"] else {
             panic!("re-verdict blast radius")
         };

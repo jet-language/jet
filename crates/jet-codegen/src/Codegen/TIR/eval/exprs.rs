@@ -7589,6 +7589,14 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         jet_foundation::Outcome::jet_journey_reset();
                         Ok(*inner)
                     }
+                    CtValue::Failed(_)
+                        if matches!(convert, crate::Codegen::TIR::TTryConvert::Never) =>
+                    {
+                        Err(unsupported(
+                            "a `!Never` carrier produced a failure",
+                            self.span(),
+                        ))
+                    }
                     CtValue::Failed(CtReport::Told(e)) => {
                         // D-FAIL-CTX1: claim this `?` site through the shared
                         // journey state on a failed propagation path.
@@ -7651,7 +7659,48 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                 let mut child = HashMap::new();
                                 match self.run_func(func, vec![*e], &mut child)? {
                                     CtValue::Failed(report) => CtValue::Failed(report),
-                                    other => CtValue::failed(Box::new(other)),
+                                    other => {
+                                        let default_conversion = matches!(
+                                            func.ret.as_ref(),
+                                            Some(Type::Named(name))
+                                                if name == crate::Syntax::TYPE_ERR
+                                        )
+                                        .then(|| {
+                                            conv_fn
+                                                .strip_prefix("__jet_errconv_")
+                                                .and_then(|stem| stem.split_once("_to_"))
+                                                .map(|(source, target)| {
+                                                    (source.to_string(), target.to_string())
+                                                })
+                                        })
+                                        .flatten();
+                                        let other = if let Some((source, target)) =
+                                            default_conversion
+                                        {
+                                            if let Some(error) = other.to_jet_err() {
+                                                let converted =
+                                                    jet_foundation::Outcome::jet_err_from_conversion(
+                                                        jet_foundation::Outcome::jet_err_message(
+                                                            &error,
+                                                        ),
+                                                        jet_foundation::Outcome::jet_err_code(
+                                                            &error,
+                                                        ),
+                                                        jet_foundation::Outcome::jet_err_cause(
+                                                            &error,
+                                                        ),
+                                                        source,
+                                                        target,
+                                                    );
+                                                CtValue::from_jet_err(&converted)
+                                            } else {
+                                                other
+                                            }
+                                        } else {
+                                            other
+                                        };
+                                        CtValue::failed(Box::new(other))
+                                    }
                                 }
                             }
                             crate::Codegen::TIR::TTryConvert::WidenUnion { enum_name, tag } => {

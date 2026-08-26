@@ -1509,7 +1509,7 @@ fn cell_value_map_keys_are_string(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_result_payload_type(ty: &Type) -> bool {
-    matches!(ty, Type::Named(n) if n == "Unit" || n == jet_foundation::Syntax::TYPE_ERR || n == jet_foundation::Syntax::TYPE_TASK_FAILURE)
+    matches!(ty, Type::Named(n) if n == "Unit" || n == jet_foundation::Syntax::TYPE_ERR || n == jet_foundation::Syntax::TYPE_NEVER || n == jet_foundation::Syntax::TYPE_TASK_FAILURE)
         || jit_value_type(ty)
 }
 
@@ -1686,6 +1686,7 @@ fn resident_safe_expr_work_item<'a>(
             matches!(
                 convert,
                 TIR::TTryConvert::None
+                    | TIR::TTryConvert::Never
                     | TIR::TTryConvert::DefaultErr
                     | TIR::TTryConvert::Typed(_)
                     | TIR::TTryConvert::WidenUnion { .. }
@@ -2696,6 +2697,7 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             matches!(
                 convert,
                 TIR::TTryConvert::None
+                    | TIR::TTryConvert::Never
                     | TIR::TTryConvert::DefaultErr
                     | TIR::TTryConvert::Typed(_)
                     | TIR::TTryConvert::WidenUnion { .. }

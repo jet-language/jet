@@ -631,7 +631,7 @@ fn jet_data_json_fold_from_event(
     }
 }
 
-// D-FAIL-CARRIER1=A: the row is `T? DataError!` — end of stream is a clean
+// D-FAIL-CARRIER1=A: the row is `?T !DataError` — end of stream is a clean
 // absence, a broken row is a report.
 fn jet_data_stream_next<T: __jet_Decode>(
     stream: &mut jet_std::DataStream,

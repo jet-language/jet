@@ -4,24 +4,63 @@ function jet_web_error_wire(error) {
   const cause = error?.cause && error.cause.tag
     ? error.cause.tag === "Some" ? error.cause.values?.[0] : null
     : error?.cause;
-  return {
+  const contextFrames = Array.isArray(error?.context_frames)
+    ? error.context_frames.map((frame) => ({
+        text: String(frame.text ?? ""),
+        file: String(frame.file ?? ""),
+        line: Number(frame.line ?? 0),
+      }))
+    : [];
+  const sourceJourney = Array.isArray(error?.source_journey)
+    ? error.source_journey.map((frame) => ({
+        fn_name: String(frame.fn_name ?? frame.fnName ?? ""),
+        file: String(frame.file ?? ""),
+        line: Number(frame.line ?? 0),
+        note: String(frame.note ?? ""),
+        hops: Number(frame.hops ?? 1),
+      }))
+    : [];
+  const conversionHistory = Array.isArray(error?.conversion_history)
+    ? error.conversion_history.map((conversion) => ({
+        source: String(conversion.source ?? ""),
+        target: String(conversion.target ?? ""),
+      }))
+    : [];
+  const wire = {
     schema: "jet.err/v1",
     message: String(error?.message ?? error),
     code: typeof error?.code === "string" ? error.code : null,
     cause: cause && typeof cause === "object" ? jet_web_error_wire(cause) : null,
   };
+  if (typeof error?.typed_identity === "string") wire.typed_identity = error.typed_identity;
+  if (contextFrames.length) wire.context_frames = contextFrames;
+  if (sourceJourney.length) wire.source_journey = sourceJourney;
+  if (conversionHistory.length) wire.conversion_history = conversionHistory;
+  return wire;
 }
 
 function jet_web_base_frame(error) {
   let frame = error.code
     ? `Error [${error.code}]: ${error.message}`
     : `Error: ${error.message}`;
-  const appendCause = (nested, depth) => {
-    if (!nested) return;
-    frame += `\n${"  ".repeat(depth)}cause: ${nested.message}`;
-    appendCause(nested.cause, depth + 1);
+  const appendIdentity = (value) => {
+    if (typeof value?.typed_identity === "string") frame += ` (type: ${value.typed_identity})`;
   };
-  appendCause(error.cause, 1);
+  appendIdentity(error);
+  const appendDetails = (value, depth) => {
+    if (value.cause) {
+      frame += `\n${"  ".repeat(depth + 1)}cause: ${value.cause.message}`;
+      appendIdentity(value.cause);
+      appendDetails(value.cause, depth + 1);
+    }
+    for (const context of value.context_frames ?? []) {
+      frame += `\n${"  ".repeat(depth + 1)}context (${context.file}:${context.line}): ${context.text}`;
+    }
+    for (const conversion of value.conversion_history ?? []) {
+      frame += `\n${"  ".repeat(depth + 1)}conversion: ${conversion.source} -> ${conversion.target}`;
+    }
+  };
+  appendDetails(error, 0);
   return frame;
 }
 
@@ -34,7 +73,7 @@ function jet_web_journey_trail(hops) {
   const total = hops.reduce((sum, hop) => sum + hop.hops, 0);
   let trail = ` Trail [E3002] (${total} hop${total === 1 ? "" : "s"} via ?, origin first):\n`;
   hops.forEach((hop, index) => {
-    trail += `  ${index + 1}. ${hop.fnName} (${hop.file}:${hop.line})`;
+    trail += `  ${index + 1}. ${hop.fn_name ?? hop.fnName} (${hop.file}:${hop.line})`;
     if (hop.hops > 1) trail += ` ×${hop.hops}`;
     if (hop.note) trail += ` — ${hop.note}`;
     trail += "\n";
@@ -57,6 +96,10 @@ export class JetError extends Error {
     this.name = "JetError";
     this.code = wire.code;
     this.cause = cause;
+    this.typedIdentity = wire.typed_identity ?? null;
+    this.contextFrames = wire.context_frames ?? [];
+    this.sourceJourney = wire.source_journey ?? [];
+    this.conversionHistory = wire.conversion_history ?? [];
     this.journey = metadata.journey ?? "";
     this.frame = metadata.frame ?? jet_web_error_frame(wire, this.journey);
     this._wire = wire;
@@ -113,14 +156,16 @@ function jet_web_try(value, file, line, fnName, note = null) {
   if (value && value.tag === "Err") {
     const carrier = jet_web_result_value(value);
     const wire = jet_web_error_wire(carrier?.wire ?? carrier);
-    const hops = carrier?.wire && Array.isArray(carrier.hops) ? carrier.hops.slice() : [];
+    const hops = carrier?.wire && Array.isArray(carrier.wire.source_journey)
+      ? carrier.wire.source_journey.slice()
+      : [];
     const last = hops[hops.length - 1];
-    if (last && last.fnName === fnName && last.file === file && last.line === line) {
+    if (last && (last.fn_name ?? last.fnName) === fnName && last.file === file && last.line === line) {
       // Same site again: count the repeat instead of printing the line twice.
       hops[hops.length - 1] = { ...last, hops: last.hops + 1 };
     } else {
       hops.push({
-        fnName,
+        fn_name: fnName,
         file,
         line,
         note: typeof note === "function" ? String(note() ?? "") : "",
@@ -128,7 +173,8 @@ function jet_web_try(value, file, line, fnName, note = null) {
       });
     }
     const journey = jet_web_journey_trail(hops);
-    throw new JetWebPropagation(wire, journey, jet_web_error_frame(wire, journey), hops);
+    const nextWire = { ...wire, source_journey: hops };
+    throw new JetWebPropagation(nextWire, journey, jet_web_error_frame(nextWire, journey), hops);
   }
   return value;
 }

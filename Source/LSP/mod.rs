@@ -576,12 +576,16 @@ fn run() {}
             "arithmetic provenance used the wrong source module"
         );
         let operation = db.arithmetic.first().expect("arithmetic operation");
+        let operator_offset = src[operation.operation_span.start..operation.operation_span.end]
+            .find('+')
+            .map(|offset| operation.operation_span.start + offset)
+            .expect("arithmetic operator");
         let hover = compute_hover(
             &db,
             &tokens,
             src,
             project.entry(),
-            operation.operation_span.start,
+            operator_offset,
         )
         .expect("arithmetic operation hover");
         assert!(hover.contains("fixed-width add: .Wrapping"), "{hover}");

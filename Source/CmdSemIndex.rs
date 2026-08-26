@@ -48,6 +48,18 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
                         fact.operation_span.end,
                     );
                 }
+                println!("failure contracts:");
+                for definition in idx.definitions() {
+                    let Some(signature) = &definition.callable_signature else {
+                        continue;
+                    };
+                    println!(
+                        "  {}: {} ({})",
+                        definition.qualified_name,
+                        signature.failure_contract,
+                        signature.failure_source
+                    );
+                }
                 println!("note: pass --json for the full stable document");
             }
         }

@@ -1,0 +1,35 @@
+Error [E0070]: this uses a retired arrow spelling
+  --> tests/ui/result_handler_malformed_arrow.jet:3:16
+    |
+  3 |     value ? ok => ok ! error -> error
+    |                ^^
+ Why: callables, arms, and lambdas use one arrow: `->`
+ Fix: replace `:>` or `=>` with `->`
+More: jet-lang.dev/e/E0070
+
+Error [E0404]: `Ok(...)` only fits where a fallible result is expected
+  --> tests/ui/result_handler_malformed_arrow.jet:2:14
+    |
+  2 |     value :: Ok(1)
+    |              ^^^^
+ Why: `Ok` builds the success side of a `T !E` result
+ Fix: use it in a `T !E` return type, a `T !E` binding annotation, or a call that expects one
+More: jet-lang.dev/e/E0404
+
+Error [E0107]: nothing named `ok` exists here
+  --> tests/ui/result_handler_malformed_arrow.jet:3:19
+    |
+  3 |     value ? ok => ok ! error -> error
+    |                   ^^
+ Why: a name must be declared before it's used
+ Fix: declare it first: `ok :: ...`
+More: jet-lang.dev/e/E0107
+
+Error [E0107]: nothing named `error` exists here
+  --> tests/ui/result_handler_malformed_arrow.jet:3:33
+    |
+  3 |     value ? ok => ok ! error -> error
+    |                                 ^^^^^
+ Why: a name must be declared before it's used
+ Fix: declare it first: `error :: ...`
+More: jet-lang.dev/e/E0107

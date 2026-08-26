@@ -155,7 +155,10 @@ impl<'a> Parser<'a> {
         }
         let sigil = self.bump().span;
         let start = sigil.start;
-        let err = if self.type_starts_here() && !self.next_field_starts_here() {
+        let err = if self.type_starts_here()
+            && self.peek().span.start == sigil.end
+            && !self.next_field_starts_here()
+        {
             self.type_()?.0
         } else {
             Type::Named(Syntax::TYPE_ERR.to_string())
@@ -493,15 +496,15 @@ impl<'a> Parser<'a> {
     }
 
     fn type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
-        self.type_inner_with_failure_suffix(true)
+        self.type_inner_with_failure_contract(true)
     }
 
-    /// Parse one type. `allow_failure_suffix` is false only for the success
+    /// Parse one type. `allow_failure_contract_tail` is false only for the success
     /// half of a prefix contract (`?T !E` / `T !E`); otherwise the `!E` would
-    /// be consumed as the old suffix form before the prefix parser sees it.
-    fn type_inner_with_failure_suffix(
+    /// be consumed as the contract tail before the prefix parser sees it.
+    fn type_inner_with_failure_contract(
         &mut self,
-        allow_failure_suffix: bool,
+        allow_failure_contract_tail: bool,
     ) -> Result<(Type, Span), Diagnostic> {
         let start = self.peek().span;
         let base = match self.peek().kind.clone() {
@@ -514,7 +517,7 @@ impl<'a> Parser<'a> {
                     && self.peek().span.start == bang.end
                     && !self.next_field_starts_here()
                 {
-                    self.type_inner_with_failure_suffix(false)?.0
+                    self.type_inner_with_failure_contract(false)?.0
                 } else {
                     Type::Named(Syntax::TYPE_ERR.to_string())
                 };
@@ -528,14 +531,14 @@ impl<'a> Parser<'a> {
             // structured result carrier; without it this is ordinary Option.
             TokKind::Question => {
                 self.bump();
-                let success = self.type_inner_with_failure_suffix(false)?.0;
+                let success = self.type_inner_with_failure_contract(false)?.0;
                 if matches!(self.peek().kind, TokKind::Bang) {
                     let bang = self.bump().span;
                     let err = if self.type_starts_here()
                         && self.peek().span.start == bang.end
                         && !self.next_field_starts_here()
                     {
-                        self.type_inner_with_failure_suffix(false)?.0
+                        self.type_inner_with_failure_contract(false)?.0
                     } else {
                         Type::Named(Syntax::TYPE_ERR.to_string())
                     };
@@ -807,28 +810,25 @@ impl<'a> Parser<'a> {
                         }
                     }
                     Syntax::TYPE_RESULT => {
-                        self.diags.push(Diagnostic::error(
+                        let diagnostic = Diagnostic::error(
                             "E0406",
                             "`Result<T, E>` is old Jet error syntax".to_string(),
                             "fallible Jet types use a success type and a prefixed error contract".to_string(),
                             "write `?T !E`, `T !(E1 | E2)`, or `!` for the default Err type"
                                 .to_string(),
                             Some(start),
-                        ));
+                        );
                         self.expect_type_args_open("Result")?;
-                        let (ok_ty, _) = self.type_generic_arg("Result ok")?;
+                        let _ok_ty = self.type_generic_arg("Result ok")?;
                         self.expect(
                             TokKind::Comma,
                             "between the two types in old `Result<T, E>` syntax",
                         )?;
-                        let (err_ty, _) = self.type_generic_arg("Result err")?;
+                        let _err_ty = self.type_generic_arg("Result err")?;
                         self.maybe_close_type_args(
                             "after the error type in old `Result<T, E>` syntax",
                         )?;
-                        Type::Result {
-                            ok: Box::new(ok_ty),
-                            err: Box::new(err_ty),
-                        }
+                        return Err(diagnostic);
                     }
                     other => {
                         let mut name = other.to_string();
@@ -926,37 +926,29 @@ impl<'a> Parser<'a> {
             return Err(Diagnostic::error(
                 "E0309",
                 "`??` isn't allowed on a type".to_string(),
-                "an optional value is written `T?` once — there's no optional optional".to_string(),
-                "use a single `?`, like `Int?`".to_string(),
+                "an optional value is written `?T` once — there's no optional optional".to_string(),
+                "use a single `?`, like `?Int`".to_string(),
                 Some(qspan),
             ));
         }
-        if !allow_failure_suffix {
-            let member = if matches!(self.peek().kind, TokKind::Question)
-                && self.peek().span.start == self.toks[self.pos.saturating_sub(1)].span.end
-            {
-                self.bump();
-                Type::Option(Box::new(base))
-            } else {
-                base
-            };
+        if !allow_failure_contract_tail {
+            let member = base;
             if matches!(self.peek().kind, TokKind::Pipe) {
                 self.bump();
-                let (right, _) = self.type_inner_with_failure_suffix(false)?;
+                let (right, _) = self.type_inner_with_failure_contract(false)?;
                 return Ok((crate::AST::canonicalize_union(vec![member, right]), start));
             }
             return Ok((member, start));
         }
         // D-FAILURE-FOUNDATION1=A: an error contract owns the `!` prefix.
-        // The old `T? E!` / `T E!` suffix zone is not accepted here; #2182
-        // migrates its remaining callers to `?T !E` / `T !E`.
+        // Prefix contracts are the only accepted failure surface.
         let member = if matches!(self.peek().kind, TokKind::Bang) {
             let bang = self.bump().span;
             let err = if self.type_starts_here()
                 && self.peek().span.start == bang.end
                 && !self.next_field_starts_here()
             {
-                self.type_inner_with_failure_suffix(false)?.0
+                self.type_inner_with_failure_contract(false)?.0
             } else {
                 Type::Named(Syntax::TYPE_ERR.to_string())
             };
@@ -967,8 +959,8 @@ impl<'a> Parser<'a> {
         } else {
             base
         };
-        // D-UNIONTYPE1=A / D-ERRSUFFIX1=B: a suffix-owned error union is
-        // parenthesized, so the outer union parser never steals its members.
+        // D-UNIONTYPE1=A: a contract-owned error union is parenthesized, so
+        // the outer union parser never steals its members.
         if matches!(self.peek().kind, TokKind::Pipe) {
             self.bump();
             let (right, _) = self.type_()?;

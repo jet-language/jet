@@ -4775,6 +4775,10 @@ pub enum TLambdaBody {
 pub enum TTryConvert {
     /// Error types match — bare `jet_trace_err(x, …)?`.
     None,
+    /// The source error is `Never`; sema proved the failure route is
+    /// unreachable, so lowering unwraps the shared carrier without a
+    /// conversion or propagation branch.
+    Never,
     /// D-FAIL-ERROR1=A: construct the default `Err` value from a message.
     DefaultErr,
     /// Declared `impl Source -> Target` conversion — `.map_err(<fn>)` (D-ERR-CONV);

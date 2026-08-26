@@ -1418,7 +1418,7 @@ module.exports = grammar({
     // slots.
     result_handler_expr: ($) =>
       prec.left(
-        5,
+        6,
         seq(
           field("subject", $._expr),
           "?",

@@ -218,6 +218,8 @@ const RETIRED_AUTHORITY_WORDS: &[&str] = &[
 const RETIRED_AUTHORITY_MARKERS: &[&str] = &[
     concat!("#", "Abil", "ities"),
     concat!("#", "Cap", "s"),
+    concat!("#", "Grant"),
+    concat!("#", "grant"),
 ];
 
 const RETIRED_AUTHORITY_IDENTIFIERS: &[&str] = &[
@@ -254,6 +256,14 @@ fn is_authority_diagnostic_fixture(path: &str) -> bool {
         || path == "docs/spec/diagnostic-rows.md"
 }
 
+fn is_authority_generated_diagnostic_row(path: &str, line: &str) -> bool {
+    if path != "llms.text" {
+        return false;
+    }
+    let mut fields = line.split('\t');
+    fields.next() == Some("retired") || fields.next() == Some("retired")
+}
+
 fn is_authority_diagnostic_producer(path: &str, line: &str) -> bool {
     if path == "crates/jet-codegen/src/Prelude/Markers.jet" {
         return line.trim_start().starts_with("marker ")
@@ -261,10 +271,20 @@ fn is_authority_diagnostic_producer(path: &str, line: &str) -> bool {
                 || line.contains(concat!("marker ", "Cap", "s")));
     }
     if path == "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs" {
-        return line.contains(concat!("\"", "Abil", "ity", "\""))
-            || line.contains(concat!("\"", "Abil", "ities", "\""))
-            || line.contains(concat!("\"", "Capabil", "ity", "\""))
-            || line.contains(concat!("\"", "Cap", "s", "\""));
+        return line.trim_start().starts_with(concat!("\"", "Abil"))
+            || line.trim_start().starts_with(concat!("\"", "Cap"));
+    }
+    if path == "crates/jet-codegen/src/Prelude/Diagnostics.jet" {
+        return line.starts_with("diagnostic\tE0077\t") && line.contains(concat!("#", "Grant"));
+    }
+    if path == "crates/jet-parser/src/Parser/Statements/control.rs" {
+        return line.contains(concat!("the `#", "Grant` scope marker is retired"));
+    }
+    if path == "crates/jet-foundation/src/Syntax/retirements.rs" {
+        return line.contains(concat!("retired: \"#", "Grant\""));
+    }
+    if path == "crates/jet-parser/src/Parser/mod.rs" {
+        return line.contains(concat!("#", "Grant"));
     }
     false
 }
@@ -987,6 +1007,7 @@ fn retired_authority_vocabulary_stays_in_fixtures_history_or_unrelated_english()
             if hits.is_empty()
                 || is_authority_history(&relative)
                 || is_authority_diagnostic_fixture(&relative)
+                || is_authority_generated_diagnostic_row(&relative, line)
                 || is_authority_diagnostic_producer(&relative, line)
                 || is_unrelated_authority_word(&relative, line)
             {

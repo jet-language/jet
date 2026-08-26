@@ -565,6 +565,8 @@ fn fn_signature(
     param_contract: &[(String, String, AST::ParamZone)],
     param_variadic: &[bool],
     ret: &Option<AST::Type>,
+    failure_contract: &str,
+    failure_source: &str,
     effects: Option<&Vec<(String, Span)>>,
     effect_via: Option<&(String, Span)>,
     view_provenance: Option<&AST::ViewProvenanceMap>,
@@ -636,6 +638,11 @@ fn fn_signature(
         signature.push_str(&policies.join(", "));
         signature.push(']');
     }
+    signature.push_str("\nfailure: ");
+    signature.push_str(failure_contract);
+    signature.push_str(" (");
+    signature.push_str(failure_source);
+    signature.push(')');
     signature
 }
 
@@ -834,6 +841,7 @@ fn method_fact(
     let param_defaults = method_parameter_defaults(f, source);
     let policies = callable_policies(f);
     let return_type = Some(f.effective_return_type());
+    let failure = f.failure_contract();
     MemberFact {
         owner: owner.to_string(),
         name: f.name.clone(),
@@ -846,6 +854,8 @@ fn method_fact(
             &method_parameter_contract(f),
             &method_parameter_variadic(f),
             &return_type,
+            &failure.effective_type().name(),
+            &failure.source(),
             f.declared_effects.as_ref(),
             f.effect_via.as_ref(),
             f.return_view_provenance.as_ref(),
@@ -1357,6 +1367,8 @@ fn apply_inferred_effect_rows(
             param_contract,
             param_variadic,
             ret,
+            failure_contract,
+            failure_source,
             effects,
             effect_via,
             param_access,
@@ -1398,6 +1410,8 @@ fn apply_inferred_effect_rows(
             param_contract,
             param_variadic,
             ret,
+            failure_contract,
+            failure_source,
             effects.as_ref(),
             None,
             db.view_provenance.get(&def.identity),
@@ -1413,7 +1427,14 @@ fn apply_inferred_effect_rows(
             let tail = hover
                 .text
                 .split_once('\n')
-                .map(|(_, tail)| format!("\n{tail}"))
+                .and_then(|(_, tail)| {
+                    let tail = tail
+                        .lines()
+                        .filter(|line| !line.starts_with("failure: "))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    (!tail.is_empty()).then(|| format!("\n{tail}"))
+                })
                 .unwrap_or_default();
             hover.text = format!("{signature}{tail}");
         }
@@ -2249,6 +2270,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             });
             for sig in &t.methods {
                 let return_type = Some(sig.effective_return_type());
+                let failure = sig.failure_contract();
                 let params: Vec<(String, AST::Type)> = sig
                     .params
                     .iter()
@@ -2306,6 +2328,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         &parameter_contract(&sig.params),
                         &parameter_variadic(&sig.params),
                         &return_type,
+                        &failure.effective_type().name(),
+                        &failure.source(),
                         sig.declared_effects.as_ref(),
                         None,
                         None,

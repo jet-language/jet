@@ -1910,7 +1910,9 @@ export const scenarios = {
     if (!testResult.ok) throw new Error(`real CLI test failed: ${JSON.stringify(testResult)}`);
 
     for (const [output, marker] of [["cli", "cli"], ["service", "service"], ["ui", "ui"], ["game", "game"]]) {
-      const result = await runCli(["run", "run.jet", `--output=${output}`]);
+      const args = ["run", "run.jet", `--output=${output}`];
+      if (output === "ui" || output === "game") args.push("--target=x86_64-unknown-linux-gnu");
+      const result = await runCli(args);
       const outputText = `${result.stdout || ""}${result.stderr || ""}`;
       if (!result.ok || !outputText.includes(marker)) {
         throw new Error(`named ${output} output did not execute through the CLI: ${JSON.stringify(result)}`);

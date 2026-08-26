@@ -29,6 +29,9 @@
 // KW_COMPTIME, KW_DERIVE, MARKER_TRACK, MARKER_LOCAL, MARKER_SHARED. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
+// D-TRACK-ORIGIN1=A (owner outcome): #Track origin is the typed compiler fact
+// `value.@origin`, with no runtime projection; its canonical constant lives in
+// `Syntax::COMPILER_FACT_ORIGIN`.
 // D-BOUND-UNDO1=A: MARKER_UNDO owns the `#Undo(inverse)` binding contract.
 // D-FFI-CAP1=A: MARKER_CLOSE owns the `#Close(close)` foreign-handle contract.
 // D-MEMO1=A: MARKER_MEMO owns `#Memo` and TYPE_MEMO_STATS owns `name.cache()`.

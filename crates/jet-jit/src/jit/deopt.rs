@@ -419,14 +419,11 @@ fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
             Comptime::PurityStage::RunTime,
         ) {
             Ok(CtValue::Failed(CtReport::Told(error))) => {
-                let rendered = error
-                    .to_jet_err()
-                    .map(|error| jet_foundation::Outcome::jet_render_err(&error))
-                    .unwrap_or_else(|| error.jet_show());
-                // Same report edge as AOT, the resident tier, and the pure
-                // interpreter: drain the accumulated E3002 journey here.
-                sink.stderr
-                    .push_str(&jet_foundation::Outcome::jet_journey_report(&rendered));
+                let rendered = match error.to_jet_err() {
+                    Some(error) => jet_foundation::Outcome::jet_error_report(&error).render(),
+                    None => jet_foundation::Outcome::jet_journey_report(&error.jet_show()),
+                };
+                sink.stderr.push_str(&rendered);
                 RunOutcome::Ran {
                     stdout: sink.stdout,
                     stderr: sink.stderr,

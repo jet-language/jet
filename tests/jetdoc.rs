@@ -70,6 +70,8 @@ fn json_and_local_outputs_are_stable_and_complete() {
         "\"kind\":\"trait_impl\"",
         "\"doctests\"",
         "answer()",
+        "\"failure_contract\":\"Result<Int, Err>\"",
+        "\"failure_source\":\"implicit default !Err\"",
         "\"examples\":[\"`answer()`\"]",
         "\"expression\":\"1 + 1\",\"expected\":\"2\"",
         "\"link\":\"run.jet#L35\"",
@@ -103,6 +105,7 @@ fn json_and_local_outputs_are_stable_and_complete() {
     assert!(html.contains("../run.jet#L35"));
     assert!(html.contains("run.jet#L"));
     assert!(markdown.contains("Examples:\n\n- `answer()`"));
+    assert!(markdown.contains("failure: Result<Int, Err> (implicit default !Err)"));
     assert!(markdown.contains("## Doctests"));
     assert!(markdown.contains("1 + 1 // => 2"));
     assert!(markdown.contains("[Source](../run.jet#L35)"));

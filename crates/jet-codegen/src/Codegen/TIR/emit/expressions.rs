@@ -49,7 +49,7 @@ use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TStructExtra;
 use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::TTypedTextForm;
-use crate::AST::{AccessConvention, BinOp, CtFloat, Type, UnOp};
+use crate::AST::{AccessConvention, BinOp, CtFloat, Pattern, Type, UnOp};
 
 fn emit_tir_lambda_with_arc(lam: &TLambda, force_arc: bool) -> String {
     let move_kw = if lam.is_move { "move " } else { "" };
@@ -1016,6 +1016,74 @@ fn emit_tir_if_expr(cond: &TIfCond, then_block: &str, else_block: &str, cx: &Cx)
     let mut ids = Vec::new();
     collect_if_expr_branch_ids(cond, cx, &mut ids);
     emit_tir_if_expr_at(cond, then_block, else_block, &ids, 0, cx)
+}
+
+/// D-RESULT-DECON2=B / I2: the compact Result handler is parser sugar for two
+/// ordinary pattern tests. When the lowered shape is the fixed `.Ok` then
+/// `.Err` chain, emit the existing Result carrier as one match so an owned,
+/// non-copy receiver is consumed exactly once. This is still ordinary Rust
+/// control flow: no handler carrier or runtime operation is introduced.
+fn emit_tir_result_handler_expr(
+    cond: &TIfCond,
+    then_body: &[TStmt],
+    then_value: &TExpr,
+    else_body: &[TStmt],
+    else_value: &TExpr,
+    cx: &Cx,
+) -> Option<String> {
+    let TIfCond::IfLet {
+        pattern: ok_pattern,
+        subj: ok_subject,
+    } = cond
+    else {
+        return None;
+    };
+    if !matches!(&ok_pattern.pattern, Pattern::Ok { .. }) {
+        return None;
+    }
+    let TExprKind::IfExpr {
+        cond: err_cond,
+        then_body: err_body,
+        then_value: err_value,
+        else_body: err_else_body,
+        else_value: err_else_value,
+    } = &else_value.kind
+    else {
+        return None;
+    };
+    let TIfCond::IfLet {
+        pattern: err_pattern,
+        subj: err_subject,
+    } = err_cond.as_ref()
+    else {
+        return None;
+    };
+    if !matches!(&err_pattern.pattern, Pattern::Err { .. })
+        || !err_else_body.is_empty()
+        || !matches!(&err_else_value.kind, TExprKind::Unreachable { .. })
+        || emit_tir_expr(ok_subject, cx) != emit_tir_expr(err_subject, cx)
+    {
+        return None;
+    }
+
+    let ok_value = emit_tir_value_block(then_body, then_value, cx);
+    let err_value = emit_tir_value_block(err_body, err_value, cx);
+    let mut err_prefix = String::new();
+    crate::Codegen::TIR::emit::emit_tir_stmts(else_body, cx, &mut err_prefix, 1);
+    let err_value = format!("{{ {} {} }}", err_prefix, err_value);
+
+    let mut ids = Vec::new();
+    collect_if_expr_branch_ids(cond, cx, &mut ids);
+    let ok_value = coverage_if_value_block(&ok_value, ids.first().map(String::as_str), true, cx);
+    let err_value = coverage_if_value_block(&err_value, ids.first().map(String::as_str), false, cx);
+    Some(format!(
+        "match {} {{ {} => {}, {} => {} }}",
+        emit_tir_expr(ok_subject, cx),
+        emit_tir_pattern(ok_pattern, cx),
+        ok_value,
+        emit_tir_pattern(err_pattern, cx),
+        err_value,
+    ))
 }
 
 fn zip_integer_signed(ty: &Type) -> Option<bool> {
@@ -3480,6 +3548,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             else_body,
             else_value,
         } => {
+            if let Some(handler) = emit_tir_result_handler_expr(
+                cond,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                cx,
+            ) {
+                return handler;
+            }
             let then_block = emit_tir_value_block(then_body, then_value, cx);
             let else_block = emit_tir_value_block(else_body, else_value, cx);
             emit_tir_if_expr(cond, &then_block, &else_block, cx)
@@ -3880,6 +3958,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             fn_name,
         } => {
             let v = emit_tir_expr(inner, cx);
+            if matches!(convert, TTryConvert::Never) {
+                let traced = match note {
+                    Some(note) => format!(
+                        "jet_trace_err_note({}, {}, {}, {}, || {{ {} }})",
+                        v,
+                        file,
+                        line,
+                        fn_name,
+                        emit_tir_expr(note, cx)
+                    ),
+                    None => format!("jet_trace_err({}, {}, {}, {})", v, file, line, fn_name),
+                };
+                return format!(
+                    "match {traced} {{ Ok(value) => value, Err(never) => match never {{}} }}"
+                );
+            }
             let propagated = match convert {
                 TTryConvert::DefaultErr => format!("{}.map_err(jet_err_from_message)", v),
 
@@ -3891,6 +3985,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 // Error types match — bare propagate.
                 TTryConvert::None => v,
+                TTryConvert::Never => unreachable!("Never try conversion handled above"),
             };
             match note {
                 Some(note) => format!(

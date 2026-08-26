@@ -895,7 +895,7 @@ fn jet_iter_empty<T: 'static>() -> JetIter<T> {
     JetIter(Box::new(std::iter::empty()))
 }
 // D-FAIL-CARRIER1=A: padding a short side yields carrier values, so a zip
-// column reads as `T?` and nothing else.
+// column reads as `?T` and nothing else.
 fn jet_iter_some<T: 'static>(it: JetIter<T>) -> JetIter<JetOutcome<T, JetAbsent>> {
     JetIter(Box::new(it.0.map(Ok)))
 }
@@ -1252,12 +1252,12 @@ fn jet_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> {
     let e = end.clamp(0, len) as usize;
     if e <= s { Vec::new() } else { xs[s..e].to_vec() }
 }
-/// Sorted membership search. Returns the matching position as `Int?`; with
+/// Sorted membership search. Returns the matching position as `?Int`; with
 /// duplicates, the matching position is unspecified and is not a lower bound.
 fn jet_list_binary_search<T: Ord>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
     jet_outcome_of(xs.binary_search(needle).ok().map(|i| i as i64))
 }
-/// Comparator form of sorted membership search. Returns `Int?`, not an
+/// Comparator form of sorted membership search. Returns `?Int`, not an
 /// insertion point or a promise to select the first duplicate.
 fn jet_list_binary_search_by<T, F>(xs: &[T], mut f: F) -> JetOutcome<i64, JetAbsent>
 where F: FnMut(&T) -> std::cmp::Ordering {

@@ -31,6 +31,12 @@ pub struct DocItem {
     pub public: bool,
     pub package_public: bool,
     pub signature: String,
+    /// Effective failure carrier from the checked callable fact. `None` is
+    /// intentional for non-callable documentation items.
+    pub failure_contract: Option<String>,
+    /// Provenance of the effective failure carrier: implicit, explicit,
+    /// converted, or proven unreachable.
+    pub failure_source: Option<String>,
     pub summary: String,
     pub examples: Vec<String>,
     pub markers: Vec<String>,
@@ -86,7 +92,7 @@ pub struct DocGraph {
 /// semindex.  The index argument is deliberately part of the public seam: a
 /// future consumer can enrich this projection from semantic facts without
 /// making the CLI own a second graph walk.
-pub fn build_doc_graph(bundle: &ProgramBundle, _index: &SemIndex) -> DocGraph {
+pub fn build_doc_graph(bundle: &ProgramBundle, index: &SemIndex) -> DocGraph {
     let mut protocol_names = BTreeSet::new();
     for module in &bundle.modules {
         collect_protocol_names(&module.items, &mut protocol_names);
@@ -141,6 +147,8 @@ pub fn build_doc_graph(bundle: &ProgramBundle, _index: &SemIndex) -> DocGraph {
             &mut graph.impls,
         );
     }
+
+    enrich_callable_contracts(&mut graph.items, index);
 
     graph.modules.sort_by(|left, right| {
         left.path
@@ -412,7 +420,7 @@ impl DocModule {
 impl DocItem {
     fn to_json(&self) -> String {
         format!(
-            "{{\"kind\":{},\"name\":{},\"qualified_name\":{},\"module\":{},\"public\":{},\"package_public\":{},\"signature\":{},\"summary\":{},\"examples\":{},\"markers\":{},\"source\":{}}}",
+            "{{\"kind\":{},\"name\":{},\"qualified_name\":{},\"module\":{},\"public\":{},\"package_public\":{},\"signature\":{},\"failure_contract\":{},\"failure_source\":{},\"summary\":{},\"examples\":{},\"markers\":{},\"source\":{}}}",
             json_string(&self.kind),
             json_string(&self.name),
             json_string(&self.qualified_name),
@@ -420,6 +428,8 @@ impl DocItem {
             self.public,
             self.package_public,
             json_string(&self.signature),
+            optional_json_string(self.failure_contract.as_deref()),
+            optional_json_string(self.failure_source.as_deref()),
             json_string(&self.summary),
             json_array(&self.examples),
             json_array(&self.markers),
@@ -1061,11 +1071,38 @@ fn add_item(
         public,
         package_public,
         signature: declaration_text(source, span),
+        failure_contract: None,
+        failure_source: None,
         summary,
         examples,
         markers: markers.iter().map(|marker| marker.name.clone()).collect(),
         source: source_for(root, file_path, display_path, source, span),
     });
+}
+
+fn enrich_callable_contracts(items: &mut [DocItem], index: &SemIndex) {
+    for item in items.iter_mut().filter(|item| item.kind == "function") {
+        let Some(definition) = index.definitions().iter().find(|definition| {
+            matches!(
+                &definition.kind,
+                crate::Types::SymbolKind::Function { .. }
+            ) && definition.name == item.name
+                && item.source.start <= definition.def_span.start
+                && definition.def_span.end <= item.source.end
+        }) else {
+            continue;
+        };
+        let Some(signature) = &definition.callable_signature else {
+            continue;
+        };
+        item.failure_contract = Some(signature.failure_contract.clone());
+        item.failure_source = Some(signature.failure_source.clone());
+        item.signature.push_str("\nfailure: ");
+        item.signature.push_str(&signature.failure_contract);
+        item.signature.push_str(" (");
+        item.signature.push_str(&signature.failure_source);
+        item.signature.push(')');
+    }
 }
 
 fn discover_doctests(
@@ -1286,6 +1323,10 @@ fn line_offset(source: &str, line: usize) -> usize {
 
 fn json_string(value: &str) -> String {
     format!("\"{}\"", jet_foundation::JSON::json_escape(value))
+}
+
+fn optional_json_string(value: Option<&str>) -> String {
+    value.map_or_else(|| "null".to_string(), json_string)
 }
 
 fn json_array(values: &[String]) -> String {

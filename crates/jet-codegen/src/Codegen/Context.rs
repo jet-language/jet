@@ -1975,6 +1975,9 @@ impl Cx {
             Type::Named(name) if name == Syntax::TYPE_ERR => {
                 format!("{}JetErr", self.root_prefix)
             }
+            Type::Named(name) if name == Syntax::TYPE_NEVER => {
+                "std::convert::Infallible".to_string()
+            }
             Type::Named(name) if name == Syntax::TYPE_ALLOC_ERROR => {
                 format!("{}AllocError", self.root_prefix)
             }

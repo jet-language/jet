@@ -323,11 +323,11 @@ pub const KW_ENUM: &str = "enum";
 /// for generic type shortcuts only (not primitive newtypes).
 pub const KW_ALIAS: &str = "alias";
 
-/// S32 (ratified M3): optional type suffix — `Int?` is “maybe an Int”.
-pub const TYPE_OPTION_SUFFIX: &str = "?";
+/// D-FAILURE-FOUNDATION1=A: optional type prefix — `?Int` is “maybe an Int”.
+pub const TYPE_OPTION_PREFIX: &str = "?";
 
-/// D-ERRSUFFIX1=B (ratified 2026-08-21): fallible error suffix — `E!`.
-/// The bang is a type-position suffix; expression `!` keeps its prefix use.
+/// D-FAILURE-FOUNDATION1=A: fallible error contract prefix — `!E`.
+/// The bang is a type-position prefix; expression `!` keeps its value use.
 pub const TYPE_FALLIBLE_SEP: &str = "!";
 
 /// D-UNIONTYPE1=A: anonymous closed structural sum — `Int | String`.

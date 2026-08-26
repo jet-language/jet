@@ -867,7 +867,7 @@ fn distinct_conversion_symbols(
                 kind: SemanticSymbolKind::Member,
                 signature: format!(
                     "{owner}.{method}(value: {source}) -> {owner}{}",
-                    if fallible { " String!" } else { "" }
+                    if fallible { " !String" } else { "" }
                 ),
                 summary: format!("Converts {source} to {owner}."),
                 examples: Vec::new(),
@@ -963,6 +963,8 @@ fn semantic_shape(
             param_contract,
             param_variadic,
             ret,
+            failure_contract,
+            failure_source,
             effects,
             effect_via,
             ..
@@ -1013,7 +1015,9 @@ fn semantic_shape(
             };
             (
                 SemanticSymbolKind::Function,
-                format!("{prefix}({params}){result}{ceiling}"),
+                format!(
+                    "{prefix}({params}){result}{ceiling}\nfailure: {failure_contract} ({failure_source})"
+                ),
             )
         }
         SymKind::Struct { fields, .. } => (
@@ -1242,13 +1246,13 @@ fn language_symbols() -> Vec<SemanticSymbol> {
     for (owner, signature, summary, example) in [
         (
             "Int",
-            "Int.parse(text: String) -> Int ParseError!",
+            "Int.parse(text: String) -> Int !ParseError",
             "Parses text as an Int.",
             "Int.parse(text)?",
         ),
         (
             "Float",
-            "Float.parse(text: String) -> Float ParseError!",
+            "Float.parse(text: String) -> Float !ParseError",
             "Parses text as a Float.",
             "Float.parse(text)?",
         ),
@@ -1281,7 +1285,7 @@ fn language_symbols() -> Vec<SemanticSymbol> {
                 .flatten()
                 .expect("numeric conversion catalog entry has a return type");
             let result = match ret {
-                AST::Type::Result { .. } => format!("{target_name} String!"),
+                AST::Type::Result { .. } => format!("{target_name} !String"),
                 _ => target_name.to_string(),
             };
             let qualified_name = format!("{target_name}.{method}");
@@ -1309,19 +1313,19 @@ fn language_symbols() -> Vec<SemanticSymbol> {
 const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     (
         "Duration.milliseconds",
-        "Duration.milliseconds(value: Int | Float) -> Duration RangeError!",
+        "Duration.milliseconds(value: Int | Float) -> Duration !RangeError",
         "Checked runtime duration in milliseconds.",
         None,
     ),
     (
         "Duration.seconds",
-        "Duration.seconds(value: Int | Float) -> Duration RangeError!",
+        "Duration.seconds(value: Int | Float) -> Duration !RangeError",
         "Checked runtime duration in seconds.",
         None,
     ),
     (
         "Duration.minutes",
-        "Duration.minutes(value: Int | Float) -> Duration RangeError!",
+        "Duration.minutes(value: Int | Float) -> Duration !RangeError",
         "Checked runtime duration in minutes.",
         None,
     ),
@@ -1333,13 +1337,13 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "Duration.hours",
-        "Duration.hours(value: Int | Float) -> Duration RangeError!",
+        "Duration.hours(value: Int | Float) -> Duration !RangeError",
         "Checked runtime duration in hours.",
         None,
     ),
     (
         "Duration.in",
-        "Duration.in(unit: DurationUnit) -> Int RangeError!",
+        "Duration.in(unit: DurationUnit) -> Int !RangeError",
         "Reads a checked whole duration unit.",
         Some("duration.in(.Milliseconds)?"),
     ),
@@ -1363,25 +1367,25 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "List.pop",
-        "List.pop() -> T?",
+        "List.pop() -> ?T",
         "Removes and returns the last item, if any.",
         None,
     ),
     (
         "List.get",
-        "List.get(i: Int) -> T?",
+        "List.get(i: Int) -> ?T",
         "The item at index i, if in bounds.",
         None,
     ),
     (
         "List.first",
-        "List.first() -> T?",
+        "List.first() -> ?T",
         "The first item, if any.",
         None,
     ),
     (
         "List.last",
-        "List.last() -> T?",
+        "List.last() -> ?T",
         "The last item, if any.",
         None,
     ),
@@ -1393,7 +1397,7 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "List.index_of",
-        "List.index_of(item: T) -> Int?",
+        "List.index_of(item: T) -> ?Int",
         "Index of the first matching item, if any.",
         None,
     ),
@@ -1412,13 +1416,13 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "List.min",
-        "List.min() -> T?",
+        "List.min() -> ?T",
         "The smallest item, if any.",
         None,
     ),
     (
         "List.max",
-        "List.max() -> T?",
+        "List.max() -> ?T",
         "The largest item, if any.",
         None,
     ),
@@ -1436,7 +1440,7 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "List.filter_map",
-        "List.filter_map(f: fn(T) V?) -> [V]",
+        "List.filter_map(f: fn(T) ?V) -> [V]",
         "Maps then drops failures — keeps only successes.",
         None,
     ),
@@ -1448,7 +1452,7 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "List.find",
-        "List.find(f: fn(T) Bool) -> T?",
+        "List.find(f: fn(T) Bool) -> ?T",
         "The first item where f(item) is true, if any.",
         None,
     ),
@@ -1510,7 +1514,7 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "List.remove",
-        "List.remove(value: T, by: RemoveBy{.Val}) -> T?",
+        "List.remove(value: T, by: RemoveBy{.Val}) -> ?T",
         "Removes the first equal value; `.Slot` selects positional removal.",
         None,
     ),
@@ -1553,7 +1557,7 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "Map.get",
-        "Map.get(key: K) -> V?",
+        "Map.get(key: K) -> ?V",
         "Value for key, if present.",
         None,
     ),
@@ -1565,7 +1569,7 @@ const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
     ),
     (
         "Map.remove",
-        "Map.remove(key: K) -> V?",
+        "Map.remove(key: K) -> ?V",
         "Removes and returns the value for key, if present.",
         None,
     ),

@@ -4324,7 +4324,7 @@ fn canvas_and_semindex_share_composed_package_facts() {
     .unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"demo\"\nversion: \"0.1.0\"\nconfigs: [\"release.jet\"]\noutputs: .{ workstation: System{ target: linux.x64 }, prod: Fleet{ hosts: .{ edge: \"system.workstation\" } } }\n",
+        "name: \"demo\"\nversion: \"0.1.0\"\nauthority: .{ holds: .{ allow: [FS], deny: [Net] } }\nconfigs: [\"release.jet\"]\noutputs: .{ workstation: System{ target: linux.x64 }, prod: Fleet{ hosts: .{ edge: \"system.workstation\" } } }\n",
     )
     .unwrap();
     fs::write(
@@ -4352,7 +4352,18 @@ fn canvas_and_semindex_share_composed_package_facts() {
         assert!(json.contains("\"kind\":\"fleet\""), "{json}");
         assert!(json.contains("system.workstation"), "{json}");
         assert!(json.contains("\"target\":\"linux.x64\""), "{json}");
+        assert!(
+            json.contains("\"authority\":{\"holds\":{\"allow\":[\"FS\"],\"deny\":[\"Net\"]}"),
+            "Canvas package policy lost its authority source: {json}"
+        );
     }
+    assert!(
+        graph.contains("\"required_effects\":[]")
+            && graph.contains("\"granted_effects\":[\"FS\"]")
+            && graph.contains("\"denied_effects\":[\"Net\"]")
+            && graph.contains("\"authority\":\"package.jet authority.holds\""),
+        "Canvas effect projection lost a role: {graph}"
+    );
 }
 
 #[test]

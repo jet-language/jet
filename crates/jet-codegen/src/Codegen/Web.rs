@@ -4289,6 +4289,7 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
             wasm_storage_ty(value)?
         ),
         Type::Named(name) if name == Syntax::TYPE_ERR => "JetErr".to_string(),
+        Type::Named(name) if name == Syntax::TYPE_NEVER => "std::convert::Infallible".to_string(),
         Type::Named(name) => mangle_path(name.rsplit('.').next().unwrap_or(name)),
         Type::Union(members) => mangle_path(&crate::AST::union_enum_name(members)),
         _ => return None,
@@ -4341,6 +4342,7 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
         }
         Type::Union(members) => mangle_path(&crate::AST::union_enum_name(members)),
         Type::Named(name) if name == Syntax::TYPE_ERR => "JetErr".to_string(),
+        Type::Named(name) if name == Syntax::TYPE_NEVER => "std::convert::Infallible".to_string(),
         Type::Named(name) if bundle_has_named_web_type(bundle, name) => {
             mangle_path(name.rsplit('.').next().unwrap_or(name))
         }
@@ -6323,6 +6325,22 @@ fn wasm_emit_expr(
             fn_name,
         } => {
             let value = wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?;
+            if matches!(convert, TIR::TTryConvert::Never) {
+                let traced = match note {
+                    Some(note) => format!(
+                        "jet_trace_err_note({}, {}, {}, {}, || {{ {} }})",
+                        value,
+                        file,
+                        line,
+                        fn_name,
+                        wasm_emit_expr(note, funcs, file_prefix, reconstructions)?
+                    ),
+                    None => format!("jet_trace_err({}, {}, {}, {})", value, file, line, fn_name),
+                };
+                return Ok(format!(
+                    "match {traced} {{ Ok(value) => value, Err(never) => match never {{}} }}"
+                ));
+            }
             let propagated = match convert {
                 TIR::TTryConvert::DefaultErr => {
                     format!("({value}).map_err(jet_err_from_message)")
@@ -6332,6 +6350,7 @@ fn wasm_emit_expr(
                     format!("({value}).map_err(|e| {}::{tag}(e))", mangle_path(enum_name))
                 }
                 TIR::TTryConvert::None => format!("({value})"),
+                TIR::TTryConvert::Never => unreachable!("Never try conversion handled above"),
             };
             match note {
                 Some(note) => format!(
@@ -9849,11 +9868,7 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "fn jet_wasm_json_map_string_int(value: &std::collections::BTreeMap<String, JetWasmInt>) -> String { format!(\"{{{}}}\", value.iter().map(|(key, item)| format!(\"{}:{}\", jet_wasm_json(key), item)).collect::<Vec<_>>().join(\",\")) }\n\n",
     "fn jet_wasm_json_map_string_i64(value: &std::collections::BTreeMap<String, i64>) -> String { format!(\"{{{}}}\", value.iter().map(|(key, item)| format!(\"{}:{}\", jet_wasm_json(key), item)).collect::<Vec<_>>().join(\",\")) }\n\n",
     "fn jet_wasm_json_map_string_u64(value: &std::collections::BTreeMap<String, u64>) -> String { format!(\"{{{}}}\", value.iter().map(|(key, item)| format!(\"{}:{}\", jet_wasm_json(key), item)).collect::<Vec<_>>().join(\",\")) }\n\n",
-    "fn jet_wasm_err_wire(error: &JetErr) -> String {\n",
-    "    let code = match jet_err_code(error) { Ok(code) => jet_wasm_json(&code), Err(_) => \"null\".to_string() };\n",
-    "    let cause = match jet_err_cause(error) { Ok(cause) => jet_wasm_err_wire(&cause), Err(_) => \"null\".to_string() };\n",
-    "    format!(\"{{\\\"schema\\\":\\\"jet.err/v1\\\",\\\"message\\\":{},\\\"code\\\":{},\\\"cause\\\":{}}}\", jet_wasm_json(&jet_err_message(error)), code, cause)\n",
-    "}\n\n",
+    "fn jet_wasm_err_wire(report: &JetErrorReport) -> String { report.to_json() }\n\n",
     "fn jet_wasm_store(json: String, journey: String, frame: String, status: i32) {\n",
     "    JET_WASM_ERROR.with(|slot| *slot.borrow_mut() = Some(JetWasmHostError { json, journey, frame, status }));\n",
     "}\n\n",
@@ -9861,20 +9876,22 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "    jet_wasm_store(format!(\"{{\\\"tag\\\":\\\"Ok\\\",\\\"value\\\":{value}}}\"), String::new(), String::new(), 0);\n",
     "}\n\n",
     "fn jet_wasm_store_error(error: &JetErr) {\n",
-    "    let journey = jet_journey_take();\n",
-    "    let frame = jet_journey_compose(&jet_render_err(error), &journey).trim_end().to_string();\n",
+    "    let report = jet_error_report(error);\n",
+    "    let journey = report.render_journey_with_style(JetReportStyle::PLAIN);\n",
+    "    let frame = report.render_with_style(JetReportStyle::PLAIN).trim_end().to_string();\n",
     "    let journey = journey.trim_end().to_string();\n",
-    "    let json = format!(\"{{\\\"tag\\\":\\\"Err\\\",\\\"error\\\":{}}}\", jet_wasm_err_wire(error));\n",
+    "    let json = format!(\"{{\\\"tag\\\":\\\"Err\\\",\\\"error\\\":{}}}\", jet_wasm_err_wire(&report));\n",
     "    jet_wasm_store(json, journey, frame, 1);\n",
     "}\n\n",
     "fn jet_wasm_store_runtime_error(error: &JetErr, rendered: &str, status: i32) {\n",
-    "    let journey = jet_journey_take();\n",
+    "    let report = jet_error_report(error);\n",
+    "    let journey = report.render_journey_with_style(JetReportStyle::PLAIN);\n",
     "    let frame = jet_journey_compose(rendered, &journey).trim_end().to_string();\n",
     "    let journey = journey.trim_end().to_string();\n",
     "    let json = if status == 101 {\n",
-    "        format!(\"{{\\\"tag\\\":\\\"Host\\\",\\\"status\\\":101,\\\"error\\\":{},\\\"report\\\":{}}}\", jet_wasm_err_wire(error), jet_wasm_json(rendered))\n",
+    "        format!(\"{{\\\"tag\\\":\\\"Host\\\",\\\"status\\\":101,\\\"error\\\":{},\\\"report\\\":{}}}\", jet_wasm_err_wire(&report), jet_wasm_json(rendered))\n",
     "    } else {\n",
-    "        format!(\"{{\\\"tag\\\":\\\"Err\\\",\\\"error\\\":{}}}\", jet_wasm_err_wire(error))\n",
+    "        format!(\"{{\\\"tag\\\":\\\"Err\\\",\\\"error\\\":{}}}\", jet_wasm_err_wire(&report))\n",
     "    };\n",
     "    jet_wasm_store(json, journey, frame, status);\n",
     "}\n\n",

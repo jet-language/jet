@@ -741,9 +741,8 @@ pub enum Expr {
     Ok(Box<Expr>, Span),
     /// S34: `Err(expr)` — failure value for `T E!`.
     Err(Box<Expr>, Span),
-    /// S7: postfix `?` — propagate a fallible value.
-    /// S7/D-FAIL-CTX1: `expr?` — propagates failure and may carry a lazy
-    /// string note written immediately after the operator.
+    /// S7/D-FAIL-CTX1: sema's internal propagation node. Source-level
+    /// propagation is implicit; `?(text)` carries one lazy context note.
     /// `TryConvert` records how (if at all) the error type is converted.
     Try(Box<Expr>, Span, TryConvert, Option<Box<Expr>>),
     /// S35: `value or fallback`.

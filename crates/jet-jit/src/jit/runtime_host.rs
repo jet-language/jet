@@ -2051,6 +2051,42 @@ fn jet_jit_err_new(message: i64, code: i64, cause: i64) -> i64 {
     })
 }
 
+/// Marshal a declared error conversion through the shared Prelude carrier.
+/// The JIT owns only the handle decoding; identity and conversion history stay
+/// in `jet_err_from_conversion`, exactly as they do in generated AOT/Web Rust.
+fn jet_jit_err_from_conversion(
+    message: i64,
+    code: i64,
+    cause: i64,
+    source: i64,
+    target: i64,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        use jet_foundation::Outcome::{jet_err_from_conversion as make_error, JetAbsent};
+
+        let message = rt.heap.clone_string(message).unwrap_or_default();
+        let code = if code == 0 {
+            Err(JetAbsent)
+        } else {
+            rt.heap.clone_string(code - 1).ok_or(JetAbsent)
+        };
+        let cause = if cause == 0 {
+            Err(JetAbsent)
+        } else {
+            let handle = cause - 1;
+            rt.errors
+                .get(handle.saturating_sub(1) as usize)
+                .cloned()
+                .ok_or(JetAbsent)
+        };
+        let source = rt.heap.clone_string(source).unwrap_or_default();
+        let target = rt.heap.clone_string(target).unwrap_or_default();
+        rt.errors
+            .push(make_error(message, code, cause, source, target));
+        rt.errors.len() as i64
+    })
+}
+
 fn jet_jit_err_message(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(error) = rt.errors.get(handle.saturating_sub(1) as usize) else {
@@ -3854,6 +3890,13 @@ host_fns! {
         sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
         sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
         sig_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_err_from_conversion = Signature::new(cc);
+        sig_err_from_conversion
+            .params
+            .extend([AbiParam::new(types::I64); 5]);
+        sig_err_from_conversion
+            .returns
+            .push(AbiParam::new(types::I64));
         let mut sig_trace_err = Signature::new(cc);
         sig_trace_err.params.push(AbiParam::new(types::I64));
         sig_trace_err.params.push(AbiParam::new(types::I64));
@@ -4192,6 +4235,7 @@ host_fns! {
     memo_clear_slot: "jet_jit_memo_clear_slot" => jet_jit_memo_clear_slot: sig_i64_i64;
     memo_stats: "jet_jit_memo_stats" => jet_jit_memo_stats: sig_struct_get_i64;
     err_new: "jet_jit_err_new" => jet_jit_err_new: sig_i64_i64_i64_i64;
+    err_from_conversion: "jet_jit_err_from_conversion" => jet_jit_err_from_conversion: sig_err_from_conversion;
     err_message: "jet_jit_err_message" => jet_jit_err_message: sig_str_unary_i64;
     err_code: "jet_jit_err_code" => jet_jit_err_code: sig_str_unary_i64;
     err_cause: "jet_jit_err_cause" => jet_jit_err_cause: sig_str_unary_i64;

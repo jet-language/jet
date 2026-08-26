@@ -847,6 +847,18 @@ mod s61_tests {
     }
 
     #[test]
+    fn retired_failure_surface_never_builds_legacy_ast() {
+        for source in [
+            "struct Boxed { value: Result<Int, IOError> }\nfn run() {}\n",
+            "fn run() { value :: read()? }\n",
+        ] {
+            let (tokens, lexer_diagnostics) = lex(source);
+            assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+            parse(&tokens).expect_err("retired failure syntax must not produce an AST");
+        }
+    }
+
+    #[test]
     fn dispatch_atom_boolean_group_has_safe_source_edit() {
         let source = "fn run() {\n    n :: 48\n    ready :: true\n    if n < {\n        48 | 45 && ready -> print(\"hit\")\n        else -> print(\"miss\")\n    }\n}\n";
         let (tokens, lex_diags) = lex(source);
@@ -1666,7 +1678,7 @@ fn notify(ready: Bool) -[Net]> {
     fn lambda_callable_interface_parses_result_error_and_effects() {
         let p = program(
             "fn run() {\n\
-                f :: (n: Int) Int MyError! -[IO]> { return Ok(n) }\n\
+                f :: (n: Int) Int !MyError -[IO]> { return Ok(n) }\n\
             }\n",
         );
         let lambda = p
@@ -1850,17 +1862,18 @@ fn notify(ready: Bool) -[Net]> {
         }
     }
 
-    /// D-ERRSUFFIX1=B: `T?` is Optional; an error type owns the `!` suffix.
+    /// D-FAILURE-FOUNDATION1=A: `?T` is Optional; an error contract owns the
+    /// `!` prefix.
     #[test]
     fn return_type_question_spacing_disambiguates_option_vs_result() {
-        let opt = program("fn a() Int? -> None\nfn run() {}\n");
+        let opt = program("fn a() ?Int -> None\nfn run() {}\n");
         let a = opt.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "a" => Some(f),
             _ => None,
         });
         assert!(
             matches!(a.expect("a").return_type, Some(crate::AST::Type::Option(_))),
-            "tight `Int?` must be Optional"
+            "prefix `?Int` must be Optional"
         );
 
         let res = program("fn b() Int ! -> Ok(1)\nfn run() {}\n");
@@ -1876,14 +1889,14 @@ fn notify(ready: Bool) -[Net]> {
             "`Int !` must be Result"
         );
 
-        let paren = program("fn c() (Int?) -> None\nfn run() {}\n");
+        let paren = program("fn c() (?Int) -> None\nfn run() {}\n");
         let c = paren.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "c" => Some(f),
             _ => None,
         });
         assert!(
             matches!(c.expect("c").return_type, Some(crate::AST::Type::Option(_))),
-            "parenthesized `(Int?)` stays Optional"
+            "parenthesized `(?Int)` stays Optional"
         );
     }
 
@@ -1891,12 +1904,12 @@ fn notify(ready: Bool) -[Net]> {
     fn fallible_type_sigil_is_valid_in_all_type_positions() {
         let parsed = program(
             "struct Holder {\n\
-                 value: Int? IOError!\n\
-                 nested: [Int (DbError | TimeoutError)!]\n\
-                 callback: fn(Int? IOError!) Int (DbError | TimeoutError)!\n\
+                 value: ?Int !IOError\n\
+                 nested: [Int !(DbError | TimeoutError)]\n\
+                 callback: fn(?Int !IOError) Int !(DbError | TimeoutError)\n\
              }\n\
-             alias Box<T> :: T? IOError!;\n\
-             fn fetch(value: Int? IOError!) Box<Int? IOError!> -> value\n\
+             alias Box<T> :: ?T !IOError;\n\
+             fn fetch(value: ?Int !IOError) Box<?Int !IOError> -> value\n\
              fn run() {}\n",
         );
         assert!(parsed
@@ -1949,11 +1962,11 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
-    fn failure_suffixes_compose_optional_success_and_error_union() {
+    fn failure_contracts_compose_optional_success_and_error_union() {
         let parsed = program(
-            "struct Holder { value: Int? IOError! }\n\
-             fn fetch(value: Int? IOError!) Int (DbError | TimeoutError)! -> value\n\
-             fn invoke(callback: fn(Int? IOError!) Int (DbError | TimeoutError)!) Int? IOError! -> None\n\
+            "struct Holder { value: ?Int !IOError }\n\
+             fn fetch(value: ?Int !IOError) Int !(DbError | TimeoutError) -> value\n\
+             fn invoke(callback: fn(?Int !IOError) Int !(DbError | TimeoutError)) ?Int !IOError -> None\n\
              fn run() {}\n",
         );
         let holder = parsed
@@ -1987,12 +2000,12 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
-    fn unit_fallible_signatures_use_the_error_suffix() {
+    fn unit_fallible_signatures_use_the_error_prefix() {
         let parsed = program(
-            "fn save(path: String) IOError! {}\n\
+            "fn save(path: String) !IOError {}\n\
              fn sync() ! {}\n\
-             fn bounded() IOError! -[FS]> {}\n\
-             fn load() Config IOError! -> {}\n",
+             fn bounded() !IOError -[FS]> {}\n\
+             fn load() Config !IOError -> {}\n",
         );
         let find = |name| {
             parsed.items.iter().find_map(|item| match item {
@@ -2027,14 +2040,14 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
-    fn suffix_zone_supports_bare_default_error_in_general_types() {
+    fn prefix_contract_supports_bare_default_error_in_general_types() {
         let parsed = program(
             "struct Holder {\n\
-                 optional: Int? !,\n\
+                 optional: ?Int !,\n\
                  bare: !\n\
              }\n\
              alias DefaultFailure :: !;\n\
-             fn callback(cb: fn(Int? IOError!) Int (DbError | TimeoutError)!) Int? IOError! -> None\n\
+             fn callback(cb: fn(?Int !IOError) Int !(DbError | TimeoutError)) ?Int !IOError -> None\n\
              fn run() {}\n",
         );
         let holder = parsed
@@ -2060,14 +2073,14 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
-    fn suffix_zone_reaches_nested_general_type_positions() {
+    fn prefix_contract_reaches_nested_general_type_positions() {
         let parsed = program(
             "struct Holder {\n\
-                 map: [String: IOError!]\n\
-                 tuple: (entry: Entry? StoreError!, failure: !)\n\
-                 callback: fn(Int? StoreError!) IOError!\n\
+                 map: [String: !IOError]\n\
+                 tuple: (entry: ?Entry !StoreError, failure: !)\n\
+                 callback: fn(?Int !StoreError) !IOError\n\
              }\n\
-             alias Callback :: fn(Int? StoreError!) IOError!;\n\
+             alias Callback :: fn(?Int !StoreError) !IOError;\n\
              fn run() {}\n",
         );
         let holder = parsed
@@ -2152,32 +2165,22 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
-    fn optional_infix_failure_spelling_teaches_suffix_zone() {
+    fn retired_infix_failure_spelling_is_not_accepted() {
         let source = "alias Old :: Int? ! IOError\n";
         let (tokens, lex_diagnostics) = lex(source);
         assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
-        let diagnostics = parse(&tokens).expect_err("retired infix spelling");
-        let diagnostic = diagnostics
-            .iter()
-            .find(|diagnostic| diagnostic.code == "E-ERR-SIGIL")
-            .expect("E-ERR-SIGIL");
-        assert!(diagnostic.fix.contains("Entry? StoreError!"));
+        parse(&tokens).expect_err("retired infix spelling must not produce an AST");
     }
 
     #[test]
-    fn leading_unit_infix_failure_spelling_teaches_suffix_zone() {
+    fn retired_unit_infix_failure_spelling_is_not_accepted() {
         for source in [
             "fn save() ! IOError {}\n",
             "alias OldFn :: fn() ! IOError\n",
         ] {
             let (tokens, lex_diagnostics) = lex(source);
             assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
-            let diagnostics = parse(&tokens).expect_err("retired unit infix spelling");
-            let diagnostic = diagnostics
-                .iter()
-                .find(|diagnostic| diagnostic.code == "E-ERR-SIGIL")
-                .expect("E-ERR-SIGIL");
-            assert!(diagnostic.fix.contains("IOError!"));
+            parse(&tokens).expect_err("retired unit infix spelling must not produce an AST");
         }
     }
 
@@ -2186,11 +2189,11 @@ fn notify(ready: Bool) -[Net]> {
         use crate::Formatter::format_source;
 
         let source =
-            "fn save(path: String) IOError! {}\nfn sync() ! {}\nfn bounded() IOError! -[FS]> {}\n";
+            "fn save(path: String) !IOError {}\nfn sync() ! {}\nfn bounded() !IOError -[FS]> {}\n";
         let once = format_source(source).expect("unit-fallible signatures format");
-        assert!(once.contains("fn save(path: String) IOError!"), "{once}");
+        assert!(once.contains("fn save(path: String) !IOError"), "{once}");
         assert!(once.contains("fn sync() !"), "{once}");
-        assert!(once.contains("fn bounded() IOError! -[FS]>"), "{once}");
+        assert!(once.contains("fn bounded() !IOError -[FS]>"), "{once}");
         assert_eq!(
             once,
             format_source(&once).expect("formatted form is stable")
@@ -2210,7 +2213,7 @@ fn notify(ready: Bool) -[Net]> {
             .iter()
             .find(|diagnostic| diagnostic.code == "E0003")
             .expect("E0003");
-        assert!(diagnostic.fix.contains("fn save(path: String) IOError!"));
+        assert!(diagnostic.fix.contains("fn save(path: String) !IOError"));
     }
 
     /// D-SPREAD1=A: `prefix.[a, b]` parses as MemberSpread.

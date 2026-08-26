@@ -93,3 +93,50 @@ fn run() {
     assert!(web.wasm_rust.contains("store unavailable"));
     assert!(web.wasm_rust.contains("errconv_StoreErr_to_Err"));
 }
+
+#[test]
+fn conversion_registration_does_not_depend_on_type_order() {
+    let source = r#"
+impl SourceErr -> TargetErr { return TargetErr.One }
+
+enum SourceErr { One }
+enum TargetErr { One }
+
+fn run() {}
+"#;
+    jet::compile(source).expect("a local conversion may precede its type declarations");
+}
+
+#[test]
+fn cyclic_error_conversions_report_e2418() {
+    let source = r#"
+enum SourceErr { One }
+enum TargetErr { One }
+
+impl SourceErr -> TargetErr { return TargetErr.One }
+impl TargetErr -> SourceErr { return SourceErr.One }
+
+fn run() {}
+"#;
+    let diagnostics = jet::compile(source).expect_err("cyclic conversions must be rejected");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E2418"));
+}
+
+#[test]
+fn branched_error_conversions_report_e2419() {
+    let source = r#"
+enum RootErr { One }
+enum LeftErr { One }
+enum RightErr { One }
+enum TargetErr { One }
+
+impl RootErr -> LeftErr { return LeftErr.One }
+impl RootErr -> RightErr { return RightErr.One }
+impl LeftErr -> TargetErr { return TargetErr.One }
+impl RightErr -> TargetErr { return TargetErr.One }
+
+fn run() {}
+"#;
+    let diagnostics = jet::compile(source).expect_err("ambiguous conversions must be rejected");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E2419"));
+}

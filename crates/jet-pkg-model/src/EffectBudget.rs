@@ -165,6 +165,7 @@ pub fn application_policy_diagnostic(
     };
     let required_text = crate::Sema::show_set(&projection.required_effects);
     let granted_text = crate::Sema::show_set(&projection.granted_effects);
+    let denied_policy_text = crate::Sema::show_set(&projection.denied_effects);
     Diagnostic::error(
         "E1803",
         if denied.is_empty() {
@@ -173,8 +174,8 @@ pub fn application_policy_diagnostic(
             format!("application authority denies `{denied_text}`")
         },
         format!(
-            "required_effects={required_text}; granted_effects={granted_text}; denied_effects={denied_text}; undecided_effects={missing_text}; authority={}",
-            projection.authority
+            "required_effects={required_text}; granted_effects={granted_text}; denied_effects={denied_policy_text}; denied_required_effects={denied_text}; undecided_effects={missing_text}; authority={}",
+            projection.authority,
         ),
         "declare the effect in `authority.holds.allow`, deny it deliberately, or approve it once or for the project in an interactive terminal".to_string(),
         None,
@@ -874,5 +875,23 @@ mod tests {
         ] {
             assert!(json.contains(&format!("\"{field}\"")), "missing {field}: {json}");
         }
+    }
+
+    #[test]
+    fn application_policy_diagnostic_keeps_policy_denial_separate() {
+        let projection = EffectProjection {
+            required_effects: EffectSet::from(["FS".to_string(), "Net".to_string()]),
+            granted_effects: EffectSet::from(["FS".to_string()]),
+            denied_effects: EffectSet::from(["Net".to_string(), "Panic".to_string()]),
+            authority: "package.jet authority.holds".to_string(),
+        };
+
+        let diagnostic = application_policy_diagnostic(
+            &projection,
+            &EffectSet::from(["Net".to_string()]),
+        );
+        assert!(diagnostic.why.contains("denied_effects=Net, Panic"));
+        assert!(diagnostic.why.contains("denied_required_effects=Net"));
+        assert!(diagnostic.why.contains("authority=package.jet authority.holds"));
     }
 }

@@ -2070,12 +2070,12 @@ fn run() {
         let source = r#"enum LambdaError { Invalid }
 
 fn run() {
-    increment :: (n: Int) Int LambdaError! -[]> { return Ok(n + 1) }
+    increment :: (n: Int) Int !LambdaError -[]> { return Ok(n + 1) }
 }
 "#;
         let once = format_source(source).expect("lambda interface should format");
         assert!(
-            once.contains("(n: Int) Int LambdaError! -[]>") && !once.contains("(n: Int) ->"),
+            once.contains("(n: Int) Int !LambdaError -[]>") && !once.contains("(n: Int) ->"),
             "lambda interface was lost or respelled incorrectly:\n{once}"
         );
         assert_eq!(

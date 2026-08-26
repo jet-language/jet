@@ -1,8 +1,8 @@
 trait JetShow {
     fn jet_show(&self) -> String;
     /// D-FAIL-CARRIER1=A: is this the carrier's clean report? The optional view
-    /// answers yes, so `T?` prints its payload bare and its absence as `null`;
-    /// every failure report answers no, so `T E!` prints its verdict.
+    /// answers yes, so `?T` prints its payload bare and its absence as `null`;
+    /// every failure report answers no, so `T !E` prints its verdict.
     fn jet_report_is_clean() -> bool
     where
         Self: Sized,
@@ -512,6 +512,26 @@ impl JetDebug for JetAbsent {
     }
     fn jet_report_is_clean() -> bool {
         true
+    }
+}
+
+// D-FAILURE-FOUNDATION1: `!Never` lowers its uninhabited error side to
+// `std::convert::Infallible`. The carrier can never render one, but keeping
+// the three existing value traits total lets `T !Never` flow through generic
+// display/debug surfaces without inventing a second error representation.
+impl JetShow for std::convert::Infallible {
+    fn jet_show(&self) -> String {
+        match *self {}
+    }
+}
+impl JetDisplay for std::convert::Infallible {
+    fn jet_display(&self) -> String {
+        match *self {}
+    }
+}
+impl JetDebug for std::convert::Infallible {
+    fn jet_debug(&self) -> String {
+        match *self {}
     }
 }
 impl JetShow for JetTaskFailure {

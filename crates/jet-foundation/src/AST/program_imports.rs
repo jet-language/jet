@@ -798,6 +798,10 @@ pub fn walk_imports(module: &LoadedModule) -> Vec<(Option<&str>, &ImportDecl)> {
 pub enum TryConvert {
     /// Error types match exactly — no conversion needed.
     None,
+    /// The source carrier has `Never` as its error side. Sema proved that
+    /// this propagation site has no reachable failure route; lowering only
+    /// unwraps the shared carrier and never converts or reports an error.
+    Never,
     /// D-FAIL-ERROR1=A: a legacy string-shaped failure becomes the default
     /// `Err` value at the propagation seam.
     DefaultErr,

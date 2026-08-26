@@ -10,7 +10,8 @@ use jet_pkg_model::Overlay::OverlayPolicy;
 use jet_pkg_model::EffectBudget::{render_effect_projection_line, render_effect_projection_object};
 use jet_pkg_model::Package::{
     dep_display, ConfigFacts as PackageConfigFacts, EnvironmentFact, MemberRef,
-    OutputFact as PackageOutputFact, OutputPayload, PackageFacts, ServiceFact,
+    OutputFact as PackageOutputFact, OutputPayload, PackageAuthority, PackageFacts, ServiceFact,
+    TrustDecision,
 };
 
 use crate::Build::{SymDef, SymKind, SymRef};
@@ -141,6 +142,88 @@ fn json_output_payload(value: &OutputPayload) -> String {
 
 fn json_optional_str(value: Option<&str>) -> String {
     value.map(json_str).unwrap_or_else(|| "null".to_string())
+}
+
+fn json_strings(values: &[String]) -> String {
+    values
+        .iter()
+        .map(|value| json_str(value))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn json_optional_strings(values: Option<&Vec<String>>) -> String {
+    values
+        .map(|values| format!("[{}]", json_strings(values)))
+        .unwrap_or_else(|| "null".to_string())
+}
+
+fn json_trust_decision(decision: TrustDecision) -> &'static str {
+    match decision {
+        TrustDecision::Allow => "allow",
+        TrustDecision::Prompt => "prompt",
+        TrustDecision::Deny => "deny",
+    }
+}
+
+fn json_package_authority(authority: &PackageAuthority) -> String {
+    let grants = authority
+        .grants
+        .iter()
+        .map(|(package, effects)| format!("{}:[{}]", json_str(package), json_strings(effects)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let trust = authority.trust.as_ref().map_or_else(
+        || "null".to_string(),
+        |trust| {
+            let services = trust
+                .services
+                .iter()
+                .map(|(service, decision)| {
+                    format!(
+                        "{}:{}",
+                        json_str(service),
+                        json_str(json_trust_decision(*decision))
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            let require = trust
+                .require
+                .map(|require| json_str(require.label()))
+                .unwrap_or_else(|| "null".to_string());
+            format!(
+                "{{\"default\":{},\"ci\":{},\"services\":{{{services}}},\"require\":{require}}}",
+                trust
+                    .default
+                    .map(|decision| json_str(json_trust_decision(decision)))
+                    .unwrap_or_else(|| "null".to_string()),
+                trust
+                    .ci_prompt
+                    .map(|decision| json_str(json_trust_decision(decision)))
+                    .unwrap_or_else(|| "null".to_string()),
+            )
+        },
+    );
+    let providers = authority
+        .providers
+        .iter()
+        .map(|provider| {
+            format!(
+                "{}:{{\"registry\":{},\"allow\":[{}],\"deny\":[{}]}}",
+                json_str(&provider.provider),
+                json_str(&provider.registry),
+                json_strings(&provider.allow),
+                json_strings(&provider.deny),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"holds\":{{\"allow\":{},\"deny\":{}}},\"grants\":{{{grants}}},\"trust\":{trust},\"providers\":{{{providers}}}}}",
+        json_optional_strings(authority.holds.allow.as_ref()),
+        json_optional_strings(authority.holds.deny.as_ref()),
+    )
 }
 
 fn json_string_map(values: &BTreeMap<String, String>) -> String {
@@ -324,6 +407,7 @@ pub fn package_facts_json(facts: &PackageFacts) -> String {
     let environments = json_environments(&facts.environments);
     let defaults = json_string_map(&facts.defaults);
     let members = json_members(&facts.members);
+    let authority = json_package_authority(&facts.authority);
     let resolved_config_paths = facts
         .resolved_config_paths
         .iter()
@@ -331,7 +415,7 @@ pub fn package_facts_json(facts: &PackageFacts) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"name\":{},\"version\":{},\"jet\":{},\"source\":{},\"deps\":[{}],\"services\":{{{}}},\"outputs\":[{}],\"environments\":{{{}}},\"defaults\":{{{}}},\"configs\":[{}],\"resolved_config_paths\":[{}],\"inline_configs\":{{{}}},\"members\":[{}],\"provenance\":{{{}}},\"origin\":{},\"semantic_digest\":{}}}",
+        "{{\"name\":{},\"version\":{},\"jet\":{},\"source\":{},\"deps\":[{}],\"services\":{{{}}},\"outputs\":[{}],\"environments\":{{{}}},\"defaults\":{{{}}},\"configs\":[{}],\"resolved_config_paths\":[{}],\"inline_configs\":{{{}}},\"members\":[{}],\"provenance\":{{{}}},\"authority\":{},\"origin\":{},\"semantic_digest\":{}}}",
         json_str(&facts.name),
         json_optional_str(facts.version.as_deref()),
         json_optional_str(facts.jet.as_deref()),
@@ -346,6 +430,7 @@ pub fn package_facts_json(facts: &PackageFacts) -> String {
         json_inline_configs(&facts.inline_configs),
         members,
         provenance,
+        authority,
         json_str(&facts.origin),
         json_str(&facts.semantic_digest()),
     )
@@ -963,6 +1048,12 @@ impl TypeDossier {
                     "summary\n  defined: {}:{}..{}\n",
                     def.module_path, def.def_span.start, def.def_span.end
                 ));
+                if let Some(signature) = &def.callable_signature {
+                    out.push_str(&format!(
+                        "failure contract\n  {} ({})\n",
+                        signature.failure_contract, signature.failure_source
+                    ));
+                }
             }
             None => out.push_str("summary\n  defined: not found\n"),
         }

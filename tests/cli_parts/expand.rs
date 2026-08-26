@@ -235,6 +235,12 @@ fn expand_callable_signature_uses_one_checked_fact_document() {
         "{human_text}"
     );
 
+    assert!(
+        human_text.contains("failure=Result<")
+            && human_text.contains("implicit default !Err"),
+        "{human_text}"
+    );
+
     let json = Command::new(jet())
         .args([
             "inspect",
@@ -258,6 +264,8 @@ fn expand_callable_signature_uses_one_checked_fact_document() {
     assert!(json_text.contains("\"selection\":\"callable-signature\""));
     assert!(json_text.contains("\"policies\":[\"trace(\\\"users.load\\\")\"]"));
     assert!(json_text.contains("\"default\":\"\\\"user\\\"\""));
+    assert!(json_text.contains("\"failure_contract\""));
+    assert!(json_text.contains("\"failure_source\":\"implicit default !Err\""));
 }
 
 #[test]

@@ -878,7 +878,7 @@ pub enum InternalTag {
     /// already a raw C function pointer, not a boxed Jet closure.
     CppCallbackAbi,
     /// D-ALLOCFAIL1=A: the compiler-only mutable reference carrier returned by
-    /// `mem.*.try_alloc`. It stays transparent to Jet's `T AllocError!`
+    /// `mem.*.try_alloc`. It stays transparent to Jet's `T !AllocError`
     /// identity while preserving the allocator slot through every tier.
     AllocatorView,
 }
@@ -949,9 +949,11 @@ pub enum Type {
         value: Box<Type>,
     },
     Shared(Box<Type>),
-    /// S32: `T?` optional value.
+    /// S32: `?T` optional value.
     Option(Box<Type>),
-    /// S34 / D-ERRSUFFIX1: `[Success?] [ErrorUnion!]` fallible type zone.
+    /// D-FAILURE-FOUNDATION1: one result carrier for a success type and
+    /// prefixed error contract. `?T` is optional success; `!E` is the error
+    /// contract.
     /// Internally lowered through Rust `Result<T, E>`.
     Result {
         ok: Box<Type>,
@@ -1853,7 +1855,7 @@ impl Type {
                 value.carrier_identity_name()
             ),
             Type::Shared(inner) => format!("Shared<{}>", inner.carrier_identity_name()),
-            Type::Option(inner) => format!("{}?", inner.carrier_identity_name()),
+            Type::Option(inner) => format!("?{}", inner.carrier_identity_name()),
             Type::Result { ok, err } => {
                 format!(
                     "{} ! {}",
@@ -2133,7 +2135,7 @@ impl Type {
             Type::List(inner) => format!("[{}]", inner.name()),
             Type::Map { key, value, .. } => format!("[{}:{}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
-            Type::Option(inner) => format!("{}?", inner.name()),
+            Type::Option(inner) => format!("?{}", inner.name()),
             Type::Result { ok, err } => Self::result_surface_name(ok, err),
             Type::Fn {
                 params,
@@ -2232,7 +2234,7 @@ impl Type {
             Type::List(inner) => format!("[{}]", inner.name()),
             Type::Map { key, value, .. } => format!("[{}:{}]", key.name(), value.name()),
             Type::Shared(inner) => format!("Shared<{}>", inner.name()),
-            Type::Option(inner) => format!("{}?", inner.name()),
+            Type::Option(inner) => format!("?{}", inner.name()),
             Type::Result { ok, err } => Self::result_surface_name(ok, err),
             Type::Fn {
                 params,
@@ -2488,7 +2490,9 @@ impl Type {
     }
 
     pub fn is_fallible(&self) -> bool {
-        matches!(self, Type::Option(_) | Type::Result { .. })
+        matches!(self, Type::Option(_))
+            || matches!(self, Type::Result { err, .. }
+                if !matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_NEVER))
     }
 }
 
@@ -2580,8 +2584,8 @@ mod tests {
                 Type::Named("TimeoutError".to_string()),
             ])),
         };
-        assert_eq!(fallible.name(), "Int? !(DbError | TimeoutError)");
-        assert_eq!(fallible.show(), "Int? !(DbError | TimeoutError)");
+        assert_eq!(fallible.name(), "?Int !(DbError | TimeoutError)");
+        assert_eq!(fallible.show(), "?Int !(DbError | TimeoutError)");
 
         let unit_fallible = Type::Result {
             ok: Box::new(Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
@@ -2607,7 +2611,7 @@ mod tests {
         };
         assert_eq!(
             callback.name(),
-            "fn(Int? !(DbError | TimeoutError)) !IOError -[]>"
+            "fn(?Int !(DbError | TimeoutError)) !IOError -[]>"
         );
     }
 

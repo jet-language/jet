@@ -706,8 +706,8 @@ pub enum CtValue {
         variant: String,
         args: Vec<(Option<String>, CtValue)>,
     },
-    /// D-FAIL-CARRIER1=A — the payload side of the one outcome carrier. `T?`
-    /// and `T E!` are two views of this carrier, so a present payload has one
+    /// D-FAIL-CARRIER1=A — the payload side of the one outcome carrier. `?T`
+    /// and `T !E` are two views of this carrier, so a present payload has one
     /// spelling, not one per view. Mirrors the prelude's `Ok` on
     /// `JetOutcome<T, E>`.
     Present(Box<CtValue>),
@@ -777,7 +777,7 @@ impl PartialEq for CtValue {
 
 /// D-FAIL-CARRIER1=A — the report on the stop side of the one outcome carrier.
 ///
-/// `T?` and `T E!` stop the same way; they differ only in what the report has
+/// `?T` and `T !E` stop the same way; they differ only in what the report has
 /// to say. A clean report says nothing but the payload it lacks, and is the
 /// comptime twin of the prelude's zero-sized `JetAbsent`. A told report is the
 /// error value on `T E!`'s stop side.
@@ -789,14 +789,166 @@ pub enum CtReport {
     Told(Box<CtValue>),
 }
 
+const ERROR_METADATA_TYPE: &str = "__jet_ErrorMetadata";
+const ERROR_CONTEXT_TYPE: &str = "__jet_ErrorContextFrame";
+const ERROR_CONVERSION_TYPE: &str = "__jet_ErrorConversion";
+
+/// Compiler-only storage for the fields that the Prelude keeps beside the
+/// public `Err` fields. It uses the existing memo-storage lane so structural
+/// values, JSON, and generated web constants never expose this adapter data.
+fn error_metadata_storage_name() -> String {
+    crate::Syntax::memo_storage_name("error_metadata")
+}
+
+fn error_metadata_value(error: &crate::Outcome::JetErr) -> Option<CtValue> {
+    let typed_identity = crate::Outcome::jet_err_typed_identity(error);
+    let context = crate::Outcome::jet_err_context(error);
+    let conversions = crate::Outcome::jet_err_conversions(error);
+    if typed_identity.is_none() && context.is_empty() && conversions.is_empty() {
+        return None;
+    }
+
+    let typed_identity = match typed_identity {
+        Some(identity) => CtValue::Present(Box::new(CtValue::Str(identity))),
+        None => CtValue::absent(Type::String),
+    };
+    let context = CtValue::List(
+        context
+            .into_iter()
+            .map(|frame| CtValue::Struct {
+                type_name: ERROR_CONTEXT_TYPE.to_string(),
+                fields: vec![
+                    ("text".to_string(), CtValue::Str(frame.text)),
+                    ("file".to_string(), CtValue::Str(frame.file)),
+                    ("line".to_string(), CtValue::Int(i64::from(frame.line))),
+                ],
+            })
+            .collect(),
+    );
+    let conversions = CtValue::List(
+        conversions
+            .into_iter()
+            .map(|conversion| CtValue::Struct {
+                type_name: ERROR_CONVERSION_TYPE.to_string(),
+                fields: vec![
+                    ("source".to_string(), CtValue::Str(conversion.source)),
+                    ("target".to_string(), CtValue::Str(conversion.target)),
+                ],
+            })
+            .collect(),
+    );
+    Some(CtValue::Struct {
+        type_name: ERROR_METADATA_TYPE.to_string(),
+        fields: vec![
+            ("typed_identity".to_string(), typed_identity),
+            ("context_frames".to_string(), context),
+            ("conversion_history".to_string(), conversions),
+        ],
+    })
+}
+
+fn decode_error_metadata(
+    value: &CtValue,
+) -> Option<(
+    Option<String>,
+    Vec<crate::Outcome::JetErrorContextFrame>,
+    Vec<crate::Outcome::JetErrorConversion>,
+)> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != ERROR_METADATA_TYPE {
+        return None;
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value)
+    };
+    let typed_identity = match field("typed_identity")? {
+        CtValue::Present(value) => match value.as_ref() {
+            CtValue::Str(identity) => Some(identity.clone()),
+            _ => return None,
+        },
+        CtValue::Failed(CtReport::Clean(_)) => None,
+        _ => return None,
+    };
+    let context_frames = match field("context_frames")? {
+        CtValue::List(frames) => frames
+            .iter()
+            .map(|frame| {
+                let CtValue::Struct { type_name, fields } = frame else {
+                    return None;
+                };
+                if type_name != ERROR_CONTEXT_TYPE {
+                    return None;
+                }
+                let field = |name: &str| {
+                    fields
+                        .iter()
+                        .find(|(field, _)| field == name)
+                        .map(|(_, value)| value)
+                };
+                let CtValue::Str(text) = field("text")? else {
+                    return None;
+                };
+                let CtValue::Str(file) = field("file")? else {
+                    return None;
+                };
+                let CtValue::Int(line) = field("line")? else {
+                    return None;
+                };
+                Some(crate::Outcome::JetErrorContextFrame {
+                    text: text.clone(),
+                    file: file.clone(),
+                    line: u32::try_from(*line).ok()?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?,
+        _ => return None,
+    };
+    let conversion_history = match field("conversion_history")? {
+        CtValue::List(conversions) => conversions
+            .iter()
+            .map(|conversion| {
+                let CtValue::Struct { type_name, fields } = conversion else {
+                    return None;
+                };
+                if type_name != ERROR_CONVERSION_TYPE {
+                    return None;
+                }
+                let field = |name: &str| {
+                    fields
+                        .iter()
+                        .find(|(field, _)| field == name)
+                        .map(|(_, value)| value)
+                };
+                let CtValue::Str(source) = field("source")? else {
+                    return None;
+                };
+                let CtValue::Str(target) = field("target")? else {
+                    return None;
+                };
+                Some(crate::Outcome::JetErrorConversion {
+                    source: source.clone(),
+                    target: target.clone(),
+                })
+            })
+            .collect::<Option<Vec<_>>>()?,
+        _ => return None,
+    };
+    Some((typed_identity, context_frames, conversion_history))
+}
+
 impl CtValue {
-    /// Stop with a clean report: the `T?` view of the carrier, where the
+    /// Stop with a clean report: the `?T` view of the carrier, where the
     /// missing payload would have had type `ty`.
     pub fn absent(ty: impl Into<Box<Type>>) -> CtValue {
         CtValue::Failed(CtReport::Clean(ty.into()))
     }
 
-    /// Stop with a told report: the `T E!` view of the carrier.
+    /// Stop with a told report: the `T !E` view of the carrier.
     pub fn failed(report: Box<CtValue>) -> CtValue {
         CtValue::Failed(CtReport::Told(report))
     }
@@ -823,7 +975,7 @@ impl CtValue {
     /// checked TIR shape; construction, field meaning, and rendering stay in
     /// the shared Prelude's `JetErr` implementation.
     pub fn to_jet_err(&self) -> Option<crate::Outcome::JetErr> {
-        use crate::Outcome::{jet_err, JetAbsent};
+        use crate::Outcome::{jet_err, jet_err_add_context, jet_err_record_conversion, JetAbsent};
 
         let CtValue::Struct { type_name, fields } = self else {
             return None;
@@ -853,7 +1005,28 @@ impl CtValue {
             Some(CtValue::Failed(CtReport::Clean(_))) => Err(JetAbsent),
             _ => return None,
         };
-        Some(jet_err(message.clone(), code, cause))
+        let metadata = match field(&error_metadata_storage_name()) {
+            Some(value) => Some(decode_error_metadata(value)?),
+            None => None,
+        };
+        let mut error = match metadata.as_ref().and_then(|(identity, _, _)| identity.clone()) {
+            Some(identity) => crate::Outcome::jet_err_with_identity(
+                message.clone(),
+                code,
+                cause,
+                identity,
+            ),
+            None => jet_err(message.clone(), code, cause),
+        };
+        if let Some((_, context_frames, conversion_history)) = metadata {
+            for frame in context_frames {
+                jet_err_add_context(&mut error, frame.text, frame.file, frame.line);
+            }
+            for conversion in conversion_history {
+                jet_err_record_conversion(&mut error, conversion.source, conversion.target);
+            }
+        }
+        Some(error)
     }
 
     /// Interpreter/deopt adapter for the core crypto error shape. The native
@@ -884,16 +1057,20 @@ impl CtValue {
             Ok(cause) => CtValue::Present(Box::new(CtValue::from_jet_err(&cause))),
             Err(_) => CtValue::absent(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
         };
+        let mut fields = vec![
+            (
+                "message".to_string(),
+                CtValue::Str(crate::Outcome::jet_err_message(error)),
+            ),
+            ("code".to_string(), code),
+            ("cause".to_string(), cause),
+        ];
+        if let Some(metadata) = error_metadata_value(error) {
+            fields.push((error_metadata_storage_name(), metadata));
+        }
         CtValue::Struct {
             type_name: crate::Syntax::TYPE_ERR.to_string(),
-            fields: vec![
-                (
-                    "message".to_string(),
-                    CtValue::Str(crate::Outcome::jet_err_message(error)),
-                ),
-                ("code".to_string(), code),
-                ("cause".to_string(), cause),
-            ],
+            fields,
         }
     }
 }
@@ -1151,7 +1328,7 @@ impl CtValue {
         }
     }
 
-    /// Resolve the payload type for a `T?` carrier without inventing a type
+    /// Resolve the payload type for a `?T` carrier without inventing a type
     /// for an empty list. Sema's resolved return type is authoritative; an
     /// erased adapter must report a missing type instead of guessing.
     pub fn resolved_option_element_type(resolved_ret: Option<&Type>) -> Option<Type> {

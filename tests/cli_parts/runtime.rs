@@ -376,8 +376,8 @@ fn dry_run_flag_declared_once_for_rewriters() {
     assert!(!usage.contains("codemod dry-run"), "{usage}");
 }
 
-/// #1659 criterion 1 (round 2): `--ar`/`--clang`/`--facts`/`--from`/
-/// `--no-sign`/`--pkg`/`--registry`/`--to` used to exist only in
+/// #1659 criterion 1 (round 2): `--ar`/`--clang`/`--facts`/
+/// `--no-sign`/`--pkg`/`--registry` used to exist only in
 /// `NestedCommandSpec::usage` prose, invisible to the flag registry. Real
 /// `FlagSpec` rows make `is_known_flag` recognize them, `closest_flag`
 /// suggest them on a typo (E2102), and the man page and every shell's
@@ -388,11 +388,9 @@ fn formerly_prose_only_flags_are_real_flag_rows() {
         "--ar",
         "--clang",
         "--facts",
-        "--from",
         "--no-sign",
         "--pkg",
         "--registry",
-        "--to",
     ];
     let man = jet::CLI::man_page("0.0.0");
     let bash = jet::CLI::completions_bash();
