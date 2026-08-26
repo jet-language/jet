@@ -352,98 +352,98 @@ const REGISTRY_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec {
         name: "publish",
         usage: "publish [--force] [--no-sign]",
-        summary: "publish the current package",
+        summary: "Publish the current package",
         handler: HandlerKey::Publish,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "yank",
         usage: "yank <version> [--message <reason>]",
-        summary: "stop new installs of a published version",
+        summary: "Stop new installs of a published version",
         handler: HandlerKey::Yank,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "keygen",
         usage: "keygen [--registry <name>] [--force]",
-        summary: "create a package-signing key",
+        summary: "Create a package-signing key",
         handler: HandlerKey::Keygen,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "key",
         usage: "key backup [<dest>] [--registry <name>]",
-        summary: "manage the package-signing key",
+        summary: "Manage the package-signing key",
         handler: HandlerKey::Key,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "vendor",
         usage: "vendor [--vendor-dir <path>]",
-        summary: "copy dependencies into vendor/",
+        summary: "Copy dependencies into vendor/",
         handler: HandlerKey::Vendor,
         also_canonical_top_level: false,
     },
 ];
 const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "live", usage: "live <pid>", summary: "watch a running Jet process", handler: HandlerKey::Live, also_canonical_top_level: false },
-    NestedCommandSpec { name: "graph", usage: "graph <file.jet>", summary: "show the build graph", handler: HandlerKey::Graph, also_canonical_top_level: false },
-    NestedCommandSpec { name: "query", usage: "query build <file.jet>", summary: "search code and build information", handler: HandlerKey::Query, also_canonical_top_level: false },
-    NestedCommandSpec { name: "explain-build", usage: "explain-build <target|action|file> <file.jet>", summary: "explain why a target, action, or file is rebuilt", handler: HandlerKey::ExplainBuild, also_canonical_top_level: false },
-    NestedCommandSpec { name: "compiler", usage: "compiler <lex|parse|check|source-map> <file>", summary: "read compiler facts as versioned JSON", handler: HandlerKey::Compiler, also_canonical_top_level: false },
-    NestedCommandSpec { name: "impact", usage: "impact <file.jet> <symbol>", summary: "show code affected by a symbol", handler: HandlerKey::Impact, also_canonical_top_level: false },
+    NestedCommandSpec { name: "live", usage: "live <pid>", summary: "Watch a running Jet process", handler: HandlerKey::Live, also_canonical_top_level: false },
+    NestedCommandSpec { name: "graph", usage: "graph <file.jet>", summary: "Show the build graph", handler: HandlerKey::Graph, also_canonical_top_level: false },
+    NestedCommandSpec { name: "query", usage: "query build <file.jet>", summary: "Search code and build information", handler: HandlerKey::Query, also_canonical_top_level: false },
+    NestedCommandSpec { name: "explain-build", usage: "explain-build <target|action|file> <file.jet>", summary: "Explain why a target, action, or file is rebuilt", handler: HandlerKey::ExplainBuild, also_canonical_top_level: false },
+    NestedCommandSpec { name: "compiler", usage: "compiler <lex|parse|check|source-map> <file>", summary: "Read compiler facts as versioned JSON", handler: HandlerKey::Compiler, also_canonical_top_level: false },
+    NestedCommandSpec { name: "impact", usage: "impact <file.jet> <symbol>", summary: "Show code affected by a symbol", handler: HandlerKey::Impact, also_canonical_top_level: false },
     NestedCommandSpec { name: "dossier", usage: "dossier <file.jet> [symbol]", summary: "show everything known about a file or symbol", handler: HandlerKey::Dossier, also_canonical_top_level: false },
-    NestedCommandSpec { name: "guarantees", usage: "guarantees [--json] <file.jet>", summary: "show memory-safety guarantees by component", handler: HandlerKey::Guarantees, also_canonical_top_level: false },
+    NestedCommandSpec { name: "guarantees", usage: "guarantees [--json] <file.jet>", summary: "Show memory-safety guarantees by component", handler: HandlerKey::Guarantees, also_canonical_top_level: false },
     NestedCommandSpec { name: "provenance", usage: "provenance [--json] [<dependency>]", summary: "read dependency provenance", handler: HandlerKey::Provenance, also_canonical_top_level: false },
-    NestedCommandSpec { name: "digest", usage: "digest [--json] [--list-topics] [--topic <name>]", summary: "write the one-file LLM surface digest", handler: HandlerKey::Digest, also_canonical_top_level: false },
-    NestedCommandSpec { name: "env", usage: "env [--json] [<env.jet|config.jet>]", summary: "list typed environment reads in a config surface", handler: HandlerKey::InspectEnv, also_canonical_top_level: false },
+    NestedCommandSpec { name: "digest", usage: "digest [--json] [--list-topics] [--topic <name>]", summary: "Write the one-file LLM surface digest", handler: HandlerKey::Digest, also_canonical_top_level: false },
+    NestedCommandSpec { name: "env", usage: "env [--json] [<env.jet|config.jet>]", summary: "List typed environment reads in a config surface", handler: HandlerKey::InspectEnv, also_canonical_top_level: false },
     NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "search the code index", handler: HandlerKey::Semindex, also_canonical_top_level: false },
     NestedCommandSpec { name: "output", usage: "output <file.jet> [<address>]", summary: "inspect one selected Output", handler: HandlerKey::Output, also_canonical_top_level: false },
     NestedCommandSpec { name: "expand", usage: "expand [--facts <inline|memory|web|effects|layout|derive|templates|callable-signature>] [--json] <file.jet>", summary: "show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
-    NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "review unsafe code and its safeguards", handler: HandlerKey::Unsafe, also_canonical_top_level: false },
+    NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe, also_canonical_top_level: false },
     NestedCommandSpec { name: "gates", usage: "gates [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "read the complete compile-time gate ledger", handler: HandlerKey::Gates, also_canonical_top_level: false },
     NestedCommandSpec { name: "authority", usage: "authority [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "read rights-bearing gates from the ledger", handler: HandlerKey::Authority, also_canonical_top_level: false },
-    NestedCommandSpec { name: "schema", usage: "schema status\nschema squash --before <version>", summary: "inspect saved data schema versions", handler: HandlerKey::Schema, also_canonical_top_level: false },
-    NestedCommandSpec { name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "preview or apply code changes", handler: HandlerKey::Codemod, also_canonical_top_level: false },
-    NestedCommandSpec { name: "audit", usage: "audit copies [--json] [<entry.jet>]\naudit memory [--json]\naudit [--advisory-db <path>]", summary: "inspect implicit copies, exercised memory witnesses, or dependencies", handler: HandlerKey::Audit, also_canonical_top_level: true },
-    NestedCommandSpec { name: "sbom", usage: "sbom [--cyclonedx]", summary: "create a software bill of materials", handler: HandlerKey::Sbom, also_canonical_top_level: false },
-    NestedCommandSpec { name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "generate Jet bindings from a foreign header", handler: HandlerKey::Bind, also_canonical_top_level: false },
-    NestedCommandSpec { name: "logs", usage: "logs <pkg>", summary: "show recent package build logs", handler: HandlerKey::Logs, also_canonical_top_level: false },
-    NestedCommandSpec { name: "info", usage: "info <source>.<package>", summary: "show package details", handler: HandlerKey::Info, also_canonical_top_level: false },
-    NestedCommandSpec { name: "outdated", usage: "outdated", summary: "list dependencies with available updates", handler: HandlerKey::Outdated, also_canonical_top_level: false },
+    NestedCommandSpec { name: "schema", usage: "schema status\nschema squash --before <version>", summary: "Inspect saved data schema versions", handler: HandlerKey::Schema, also_canonical_top_level: false },
+    NestedCommandSpec { name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: HandlerKey::Codemod, also_canonical_top_level: false },
+    NestedCommandSpec { name: "audit", usage: "audit copies [--json] [<entry.jet>]\naudit memory [--json]\naudit [--advisory-db <path>]", summary: "Inspect implicit copies, exercised memory witnesses, or dependencies", handler: HandlerKey::Audit, also_canonical_top_level: true },
+    NestedCommandSpec { name: "sbom", usage: "sbom [--cyclonedx]", summary: "Create a software bill of materials", handler: HandlerKey::Sbom, also_canonical_top_level: false },
+    NestedCommandSpec { name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "Generate Jet bindings from a foreign header", handler: HandlerKey::Bind, also_canonical_top_level: false },
+    NestedCommandSpec { name: "logs", usage: "logs <pkg>", summary: "Show recent package build logs", handler: HandlerKey::Logs, also_canonical_top_level: false },
+    NestedCommandSpec { name: "info", usage: "info <source>.<package>", summary: "Show package details", handler: HandlerKey::Info, also_canonical_top_level: false },
+    NestedCommandSpec { name: "outdated", usage: "outdated", summary: "List dependencies with available updates", handler: HandlerKey::Outdated, also_canonical_top_level: false },
     // #1659 criterion 5: reserved words and sigils, including the five
     // teaching-reserved words (copy/mut/take/const/unsafe) that reject valid
     // identifiers with a redirect to their current spelling.
-    NestedCommandSpec { name: "reserved", usage: "reserved [--json]", summary: "list reserved words and sigils", handler: HandlerKey::Reserved, also_canonical_top_level: false },
+    NestedCommandSpec { name: "reserved", usage: "reserved [--json]", summary: "List reserved words and sigils", handler: HandlerKey::Reserved, also_canonical_top_level: false },
     // D-ONCE-LAW1=A (#1728): the one registration table, read out. Every
     // registered truth shows its home, its renderers, and the guard that
     // proves there is no second copy.
-    NestedCommandSpec { name: "facts", usage: "facts [--json]", summary: "list every registered truth and its guard", handler: HandlerKey::Facts, also_canonical_top_level: false },
-    NestedCommandSpec { name: "structure", usage: "structure [--json] <file.jet>", summary: "inspect liveness, lifecycle, and import-edge facts", handler: HandlerKey::Structure, also_canonical_top_level: false },
+    NestedCommandSpec { name: "facts", usage: "facts [--json]", summary: "List every registered truth and its guard", handler: HandlerKey::Facts, also_canonical_top_level: false },
+    NestedCommandSpec { name: "structure", usage: "structure [--json] <file.jet>", summary: "Inspect liveness, lifecycle, and import-edge facts", handler: HandlerKey::Structure, also_canonical_top_level: false },
 ];
 const GC_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
     name: "report",
     usage: "report",
-    summary: "show values moved into automatic memory management",
+    summary: "Show values moved into automatic memory management",
     handler: HandlerKey::GcReport,
     also_canonical_top_level: true,
 }];
 const PROJECT_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
     name: "parts",
     usage: "parts",
-    summary: "list loaded and skipped project modules",
+    summary: "List loaded and skipped project modules",
     handler: HandlerKey::ProjectParts,
     also_canonical_top_level: false,
 }];
 const SELF_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "toolchain", usage: "toolchain", summary: "show the Jet version selected for this project", handler: HandlerKey::Toolchain, also_canonical_top_level: false },
-    NestedCommandSpec { name: "upgrade", usage: "upgrade", summary: "show how to install a newer Jet release", handler: HandlerKey::Upgrade, also_canonical_top_level: false },
-    NestedCommandSpec { name: "doctor", usage: "doctor", summary: "find and fix toolchain problems", handler: HandlerKey::Doctor, also_canonical_top_level: false },
-    NestedCommandSpec { name: "completions", usage: "completions", summary: "print shell completions", handler: HandlerKey::Completions, also_canonical_top_level: false },
-    NestedCommandSpec { name: "man", usage: "man", summary: "print the Jet manual", handler: HandlerKey::Man, also_canonical_top_level: false },
-    NestedCommandSpec { name: "devtools", usage: "devtools", summary: "run Jet maintenance tools", handler: HandlerKey::Devtools, also_canonical_top_level: false },
-    NestedCommandSpec { name: "lsp", usage: "lsp", summary: "start the language server", handler: HandlerKey::Lsp, also_canonical_top_level: false },
-    NestedCommandSpec { name: "exec", usage: "exec --workspace <dir> [--exec <path>] [--read <path>] [--write <path>] -- <program> [args]", summary: "execute one command in an authority-bound workspace", handler: HandlerKey::Exec, also_canonical_top_level: false },
+    NestedCommandSpec { name: "toolchain", usage: "toolchain", summary: "Show the Jet version selected for this project", handler: HandlerKey::Toolchain, also_canonical_top_level: false },
+    NestedCommandSpec { name: "upgrade", usage: "upgrade", summary: "Show how to install a newer Jet release", handler: HandlerKey::Upgrade, also_canonical_top_level: false },
+    NestedCommandSpec { name: "doctor", usage: "doctor", summary: "Find and fix toolchain problems", handler: HandlerKey::Doctor, also_canonical_top_level: false },
+    NestedCommandSpec { name: "completions", usage: "completions", summary: "Print shell completions", handler: HandlerKey::Completions, also_canonical_top_level: false },
+    NestedCommandSpec { name: "man", usage: "man", summary: "Print the Jet manual", handler: HandlerKey::Man, also_canonical_top_level: false },
+    NestedCommandSpec { name: "devtools", usage: "devtools", summary: "Run Jet maintenance tools", handler: HandlerKey::Devtools, also_canonical_top_level: false },
+    NestedCommandSpec { name: "lsp", usage: "lsp", summary: "Start the language server", handler: HandlerKey::Lsp, also_canonical_top_level: false },
+    NestedCommandSpec { name: "exec", usage: "exec --workspace <dir> [--exec <path>] [--read <path>] [--write <path>] -- <program> [args]", summary: "Execute one command in an authority-bound workspace", handler: HandlerKey::Exec, also_canonical_top_level: false },
 ];
 // D-ENVHOOK1=A / D-ENV-FILES1=A / D-ENV-PROFILE1=C: these are the shipped
 // `jetpack env` subverbs exposed through Jet's environment front door. `env`
@@ -453,28 +453,28 @@ const ENV_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec {
         name: "test",
         usage: "test [-- command]",
-        summary: "run environment checks in a clean environment",
+        summary: "Run environment checks in a clean environment",
         handler: HandlerKey::Env,
         also_canonical_top_level: true,
     },
     NestedCommandSpec {
         name: "hook",
         usage: "hook <bash|zsh|fish>",
-        summary: "print the shell auto-activation hook",
+        summary: "Print the shell auto-activation hook",
         handler: HandlerKey::Env,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "sync",
         usage: "sync",
-        summary: "apply typed managed environment files",
+        summary: "Apply typed managed environment files",
         handler: HandlerKey::Env,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "info",
         usage: "info",
-        summary: "show the typed environment plan",
+        summary: "Show the typed environment plan",
         handler: HandlerKey::Env,
         also_canonical_top_level: false,
     },
@@ -483,28 +483,28 @@ const SHARED_STORE_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec {
         name: "install",
         usage: "install",
-        summary: "install the optional shared package broker",
+        summary: "Install the optional shared package broker",
         handler: HandlerKey::SharedStore,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "enroll",
         usage: "enroll <uid> [--read-only]",
-        summary: "grant a user shared-store broker access",
+        summary: "Grant a user shared-store broker access",
         handler: HandlerKey::SharedStore,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "status",
         usage: "status",
-        summary: "show shared-store broker configuration",
+        summary: "Show shared-store broker configuration",
         handler: HandlerKey::SharedStore,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "broker",
         usage: "broker [--fd <n>]",
-        summary: "serve one shared-store broker request",
+        summary: "Serve one shared-store broker request",
         handler: HandlerKey::SharedStore,
         also_canonical_top_level: false,
     },
@@ -517,28 +517,28 @@ const OS_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec {
         name: "push",
         usage: "push",
-        summary: "deploy one or more Jetos machines",
+        summary: "Deploy one or more Jetos machines",
         handler: HandlerKey::Push,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "bridge",
         usage: "bridge",
-        summary: "convert an existing system configuration to Jet",
+        summary: "Convert an existing system configuration to Jet",
         handler: HandlerKey::Bridge,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "services",
         usage: "services",
-        summary: "manage development services",
+        summary: "Manage development services",
         handler: HandlerKey::Services,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "config",
         usage: "config",
-        summary: "manage Jet settings and trust",
+        summary: "Manage Jet settings and trust",
         handler: HandlerKey::Config,
         also_canonical_top_level: false,
     },
@@ -552,42 +552,42 @@ const PERF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec {
         name: "run",
         usage: "run",
-        summary: "run a program and write a .jettrace",
+        summary: "Run a program and write a .jettrace",
         handler: HandlerKey::Perf,
         also_canonical_top_level: true,
     },
     NestedCommandSpec {
         name: "test",
         usage: "test",
-        summary: "run tests and write a .jettrace",
+        summary: "Run tests and write a .jettrace",
         handler: HandlerKey::Perf,
         also_canonical_top_level: true,
     },
     NestedCommandSpec {
         name: "attach",
         usage: "attach",
-        summary: "attach to a running process and write a .jettrace",
+        summary: "Attach to a running process and write a .jettrace",
         handler: HandlerKey::Perf,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "view",
         usage: "view",
-        summary: "show a .jettrace summary",
+        summary: "Show a .jettrace summary",
         handler: HandlerKey::Perf,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "compare",
         usage: "compare",
-        summary: "compare two .jettrace artifacts",
+        summary: "Compare two .jettrace artifacts",
         handler: HandlerKey::Perf,
         also_canonical_top_level: false,
     },
     NestedCommandSpec {
         name: "export",
         usage: "export",
-        summary: "export a loss-declared projection of a .jettrace",
+        summary: "Export a loss-declared projection of a .jettrace",
         handler: HandlerKey::Perf,
         also_canonical_top_level: false,
     },
@@ -624,25 +624,25 @@ pub fn command_group_label(name: &str) -> String {
 pub fn action_help_summary(group: &str, action: &NestedCommandSpec) -> &'static str {
     match (group, action.name) {
         ("inspect", "authority") => {
-            "read required, granted, denied effects, and their authority source"
+            "Read required, granted, denied effects, and their authority source"
         }
         ("inspect", "provenance") => {
-            "read dependency provenance with required, granted, denied effects, and authority"
+            "Read dependency provenance with required, granted, denied effects, and authority"
         }
         ("inspect", "dossier") => {
-            "show symbols plus required, granted, denied effects, and authority policy"
+            "Show symbols plus required, granted, denied effects, and authority policy"
         }
         ("inspect", "semindex") => {
-            "search code facts plus required, granted, denied effects, and authority"
+            "Search code facts plus required, granted, denied effects, and authority"
         }
         ("inspect", "output") => {
-            "inspect one Output with required, granted, denied effects, and authority"
+            "Inspect one Output with required, granted, denied effects, and authority"
         }
         ("inspect", "gates") => {
-            "read gates with required, granted, denied effects, and authority"
+            "Read gates with required, granted, denied effects, and authority"
         }
         ("inspect", "expand") => {
-            "show expanded meaning with required, granted, denied effects, and authority"
+            "Show expanded meaning with required, granted, denied effects, and authority"
         }
         _ => action.summary,
     }
@@ -727,7 +727,7 @@ pub fn moved_command_group(name: &str) -> Option<&'static str> {
 pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "registry",
-        summary: "publish and manage packages",
+        summary: "Publish and manage packages",
         headline: false,
         actions: REGISTRY_ACTIONS,
         exhaustive: true,
@@ -735,7 +735,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "inspect",
-        summary: "explore code, builds, packages, and bindings",
+        summary: "Explore code, builds, packages, and bindings",
         headline: false,
         actions: INSPECT_ACTIONS,
         exhaustive: true,
@@ -743,7 +743,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "project",
-        summary: "inspect project files and modules",
+        summary: "Inspect project files and modules",
         headline: false,
         actions: PROJECT_ACTIONS,
         exhaustive: true,
@@ -751,7 +751,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "self",
-        summary: "manage the Jet installation and editor tools",
+        summary: "Manage the Jet installation and editor tools",
         headline: false,
         actions: SELF_ACTIONS,
         exhaustive: true,
@@ -759,7 +759,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "diff",
-        summary: "compare two Jet programs by meaning",
+        summary: "Compare two Jet programs by meaning",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -767,7 +767,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "merge",
-        summary: "merge Jet programs without losing code structure",
+        summary: "Merge Jet programs without losing code structure",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -775,7 +775,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "review",
-        summary: "review meaning, authority, and proof changes",
+        summary: "Review meaning, authority, and proof changes",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -783,7 +783,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "run",
-        summary: "run a program or project",
+        summary: "Run a program or project",
         headline: true,
         actions: &[],
         exhaustive: false,
@@ -791,7 +791,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "jobs",
-        summary: "list project #Job functions (<file.jet> -- <job>)",
+        summary: "List project #Job functions (<file.jet> -- <job>)",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -807,7 +807,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fill",
-        summary: "propose checked code for typed goals",
+        summary: "Propose checked code for typed goals",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -815,7 +815,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "test",
-        summary: "run tests",
+        summary: "Run tests",
         headline: true,
         actions: &[],
         exhaustive: false,
@@ -823,7 +823,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "prove",
-        summary: "create a proof report for code and tests",
+        summary: "Create a proof report for code and tests",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -833,7 +833,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     // receipts and does not perform a check, test, build, or proof.
     CommandSpec {
         name: "status",
-        summary: "show what the project has proved",
+        summary: "Show what the project has proved",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -841,7 +841,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "build",
-        summary: "create a native executable",
+        summary: "Create a native executable",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -849,7 +849,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "dev",
-        summary: "watch and run a program; optionally open the Canvas IDE",
+        summary: "Watch and run a program; optionally open the Canvas IDE",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -857,7 +857,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "learn",
-        summary: "run the offline first learning arc",
+        summary: "Run the offline first learning arc",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -865,7 +865,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "try",
-        summary: "speculatively apply a plan and re-check its claims",
+        summary: "Speculatively apply a plan and re-check its claims",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -873,7 +873,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "debug",
-        summary: "debug a program from Jet source",
+        summary: "Debug a program from Jet source",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -881,7 +881,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "repl",
-        summary: "try Jet code interactively",
+        summary: "Try Jet code interactively",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -889,7 +889,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "notebook",
-        summary: "open a Jet notebook (.jetnb) or Jupyter adapter",
+        summary: "Open a Jet notebook (.jetnb) or Jupyter adapter",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -897,7 +897,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "import",
-        summary: "convert supported source code into editable Jet",
+        summary: "Convert supported source code into editable Jet",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -905,7 +905,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "new",
-        summary: "create a Jet project",
+        summary: "Create a Jet project",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -913,7 +913,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fmt",
-        summary: "format Jet and configured project files",
+        summary: "Format Jet and configured project files",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -921,7 +921,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fix",
-        summary: "apply safe automatic fixes, including `fix memory`",
+        summary: "Apply safe automatic fixes, including `fix memory`",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -929,7 +929,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "audit",
-        summary: "inspect implicit copies, exercised memory witnesses, or dependencies",
+        summary: "Inspect implicit copies, exercised memory witnesses, or dependencies",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -937,7 +937,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "lint",
-        summary: "run optional code-quality checks",
+        summary: "Run optional code-quality checks",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -945,7 +945,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "doc",
-        summary: "generate reference documentation",
+        summary: "Generate reference documentation",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -953,7 +953,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "explain",
-        summary: "explain a diagnostic code, build fact, or generic-module value",
+        summary: "Explain a diagnostic code, build fact, or generic-module value",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -961,7 +961,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "env",
-        summary: "open the project development shell",
+        summary: "Open the project development shell",
         headline: false,
         actions: ENV_ACTIONS,
         exhaustive: false,
@@ -969,7 +969,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "shared-store",
-        summary: "manage the optional shared package broker",
+        summary: "Manage the optional shared package broker",
         headline: false,
         actions: SHARED_STORE_ACTIONS,
         exhaustive: true,
@@ -977,7 +977,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "cache",
-        summary: "manage host-owned binary-cache bindings",
+        summary: "Manage host-owned binary-cache bindings",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -985,7 +985,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "remote",
-        summary: "manage host-owned remote builders",
+        summary: "Manage host-owned remote builders",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -995,7 +995,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     // actions (see OS_ACTIONS below) — declared once there, not here too.
     CommandSpec {
         name: "trust",
-        summary: "review or change trusted authority",
+        summary: "Review or change trusted authority",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1003,7 +1003,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "image",
-        summary: "build a declared container image",
+        summary: "Build a declared container image",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1011,7 +1011,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "os",
-        summary: "manage Jetos machines and images",
+        summary: "Manage Jetos machines and images",
         headline: false,
         actions: OS_ACTIONS,
         exhaustive: false,
@@ -1035,7 +1035,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fetch",
-        summary: "download locked dependencies",
+        summary: "Download locked dependencies",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1043,7 +1043,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "search",
-        summary: "search the local package catalog",
+        summary: "Search the local package catalog",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1051,7 +1051,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "find",
-        summary: "find code by type, effect, or example",
+        summary: "Find code by type, effect, or example",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1061,7 +1061,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "update",
-        summary: "update dependency or toolchain pins",
+        summary: "Update dependency or toolchain pins",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1069,7 +1069,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "init",
-        summary: "create package settings in this directory",
+        summary: "Create package settings in this directory",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1077,15 +1077,15 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "split",
-        summary: "extract closed Package facts into Configs or members",
+        summary: "Extract closed Package facts into Configs or members",
         headline: false,
         actions: &[],
         exhaustive: false,
         usage: None,
     },
     CommandSpec {
-        name: "fold",
-        summary: "reverse a recorded Package source transition",
+        name: "Fold",
+        summary: "Reverse a recorded Package source transition",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1094,7 +1094,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     // #1659 criterion 1: `config` is a `jet os` nested action (OS_ACTIONS).
     CommandSpec {
         name: "gc",
-        summary: "show values moved into automatic memory management",
+        summary: "Show values moved into automatic memory management",
         headline: false,
         actions: GC_ACTIONS,
         exhaustive: false,
@@ -1113,7 +1113,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     // inspect` nested actions (INSPECT_ACTIONS) — declared once there.
     CommandSpec {
         name: "emit",
-        summary: "print generated build output",
+        summary: "Print generated build output",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1121,7 +1121,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "eval",
-        summary: "evaluate pure Jet and print the value (`--json` for JSON)",
+        summary: "Evaluate pure Jet and print the value (`--json` for JSON)",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1137,7 +1137,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "perf",
-        summary: "collect and inspect performance traces",
+        summary: "Collect and inspect performance traces",
         headline: false,
         actions: PERF_ACTIONS,
         exhaustive: true,
@@ -1145,7 +1145,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "report",
-        summary: "write a private local report bundle",
+        summary: "Write a private local report bundle",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1153,7 +1153,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "fuzz",
-        summary: "find failing inputs for property tests",
+        summary: "Find failing inputs for property tests",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1161,7 +1161,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "version",
-        summary: "show the Jet version",
+        summary: "Show the Jet version",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1169,7 +1169,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "help",
-        summary: "show command help",
+        summary: "Show command help",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1367,14 +1367,14 @@ fn generated_effect_flags() -> Vec<FlagSpec> {
                 FlagSpec {
                     long: leaked_cli_text(format!("--allow-{}", effect.flag())),
                     help: leaked_cli_text(format!(
-                        "with build: allow {} access for this run",
+                        "With build: allow {} access for this run",
                         effect.name()
                     )),
                 },
                 FlagSpec {
                     long: leaked_cli_text(format!("--deny-{}", effect.flag())),
                     help: leaked_cli_text(format!(
-                        "with repl: deny {} access; overrides allow and prompts",
+                        "With repl: deny {} access; overrides allow and prompts",
                         effect.name()
                     )),
                 },
@@ -1386,148 +1386,148 @@ fn generated_effect_flags() -> Vec<FlagSpec> {
 /// Every global flag the driver understands. Used to flag-check and to suggest
 /// on a typo (E2102), and to complete after `--`.
 const BASE_FLAGS: &[FlagSpec] = &[
-    FlagSpec { long: "--attach", help: "with inspect live: process id to observe" },
-    FlagSpec { long: "--once", help: "with inspect live: print one snapshot and exit" },
-    FlagSpec { long: "--observe", help: "with run: expose bounded live runtime facts for attachment" },
-    FlagSpec { long: "--raw-frames", help: "with debug: show generated Rust frames and scopes (expert)" },
-    FlagSpec { long: "--dap", help: "with debug: speak the Debug Adapter Protocol over stdio" },
-    FlagSpec { long: "--gc-trace", help: "with run/dev: record bounded automatic GC-promotion evidence" },
-    FlagSpec { long: "--structural", help: "with diff/merge: compare checked definitions by semantic identity" },
-    FlagSpec { long: "--base-receipt", help: "with review: proof receipt for the base change-set side" },
-    FlagSpec { long: "--receipt", help: "with review: proof receipt for the reviewed change-set side" },
-    FlagSpec { long: "--out", help: "with structural merge: write the checked result to this path" },
-    FlagSpec { long: "--repo", help: "with merge install-driver: Git worktree to configure" },
-    FlagSpec { long: MACHINE_OUTPUT_FLAG, help: "emit machine-readable facts or diagnostics" },
-    FlagSpec { long: "--topic", help: "with inspect digest: emit one digest topic" },
-    FlagSpec { long: "--list-topics", help: "with inspect digest: list digest topics" },
-    FlagSpec { long: "--kind", help: "with inspect gates/authority: filter one gate kind" },
+    FlagSpec { long: "--attach", help: "With inspect live: process id to observe" },
+    FlagSpec { long: "--once", help: "With inspect live: print one snapshot and exit" },
+    FlagSpec { long: "--observe", help: "With run: expose bounded live runtime facts for attachment" },
+    FlagSpec { long: "--raw-frames", help: "With debug: show generated Rust frames and scopes (expert)" },
+    FlagSpec { long: "--dap", help: "With debug: speak the Debug Adapter Protocol over stdio" },
+    FlagSpec { long: "--gc-trace", help: "With run/dev: record bounded automatic GC-promotion evidence" },
+    FlagSpec { long: "--structural", help: "With diff/merge: compare checked definitions by semantic identity" },
+    FlagSpec { long: "--base-receipt", help: "With review: proof receipt for the base change-set side" },
+    FlagSpec { long: "--receipt", help: "With review: proof receipt for the reviewed change-set side" },
+    FlagSpec { long: "--out", help: "With structural merge: write the checked result to this path" },
+    FlagSpec { long: "--repo", help: "With merge install-driver: Git worktree to configure" },
+    FlagSpec { long: MACHINE_OUTPUT_FLAG, help: "Emit machine-readable facts or diagnostics" },
+    FlagSpec { long: "--topic", help: "With inspect digest: emit one digest topic" },
+    FlagSpec { long: "--list-topics", help: "With inspect digest: list digest topics" },
+    FlagSpec { long: "--kind", help: "With inspect gates/authority: filter one gate kind" },
     // #1659 criterion 3: one spelling, every command. Suppresses non-error
     // status/progress output (watch banners, hot-swap notices,
     // confirmations); never suppresses errors or requested data.
-    FlagSpec { long: "--quiet", help: "suppress non-error status output" },
-    FlagSpec { long: "--color", help: "color: auto | always | never" },
-    FlagSpec { long: "--version", help: "print compiler version" },
-    FlagSpec { long: "--check", help: "with fmt/learn: check without changing files (CI gate)" },
-    FlagSpec { long: "--lang", help: "with fmt: delegate non-Jet files to the environment formatter for this language" },
-    FlagSpec { long: "--restore-role-files", help: "with init: restore the exact pre-package.jet role files" },
-    FlagSpec { long: "--diff", help: "with fmt --check: also print unified diffs for each changed file" },
-    FlagSpec { long: "--simplify", help: "with fmt: rewrite to the simplest ratified spelling" },
-    FlagSpec { long: "--changed", help: "with fmt: format only VCS-changed .jet files (requires git)" },
-    FlagSpec { long: "--explicit-copies", help: "with fmt: materialize implicit read-view copies as `~`" },
-    FlagSpec { long: "--skipped", help: "with project parts: show modules omitted from automatic discovery" },
-    FlagSpec { long: "--stdin-path", help: "with fmt -: path label used in diagnostics when reading from stdin" },
-    FlagSpec { long: "--small", help: "with build/run: favor a smaller binary" },
-    FlagSpec { long: "--lib", help: "with build: emit the native Library and C header" },
-    FlagSpec { long: "--output", help: "with run/dev: select a named build output (Canvas uses it as the initial selection)" },
-    FlagSpec { long: "--locked", help: "with fetch: verify only, refuse network" },
-    FlagSpec { long: "--effect", help: "with find: require an effect such as FS.Read" },
-    FlagSpec { long: "--example", help: "with find: search by input/output example" },
+    FlagSpec { long: "--quiet", help: "Suppress non-error status output" },
+    FlagSpec { long: "--color", help: "Color: auto | always | never" },
+    FlagSpec { long: "--version", help: "Print compiler version" },
+    FlagSpec { long: "--check", help: "With fmt/learn: check without changing files (CI gate)" },
+    FlagSpec { long: "--lang", help: "With fmt: delegate non-Jet files to the environment formatter for this language" },
+    FlagSpec { long: "--restore-role-files", help: "With init: restore the exact pre-package.jet role files" },
+    FlagSpec { long: "--diff", help: "With fmt --check: also print unified diffs for each changed file" },
+    FlagSpec { long: "--simplify", help: "With fmt: rewrite to the simplest ratified spelling" },
+    FlagSpec { long: "--changed", help: "With fmt: format only VCS-changed .jet files (requires git)" },
+    FlagSpec { long: "--explicit-copies", help: "With fmt: materialize implicit read-view copies as `~`" },
+    FlagSpec { long: "--skipped", help: "With project parts: show modules omitted from automatic discovery" },
+    FlagSpec { long: "--stdin-path", help: "With fmt -: path label used in diagnostics when reading from stdin" },
+    FlagSpec { long: "--small", help: "With build/run: favor a smaller binary" },
+    FlagSpec { long: "--lib", help: "With build: emit the native Library and C header" },
+    FlagSpec { long: "--output", help: "With run/dev: select a named build output (Canvas uses it as the initial selection)" },
+    FlagSpec { long: "--locked", help: "With fetch: verify only, refuse network" },
+    FlagSpec { long: "--effect", help: "With find: require an effect such as FS.Read" },
+    FlagSpec { long: "--example", help: "With find: search by input/output example" },
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
-    FlagSpec { long: "--lock", help: "with fetch: lock a manifest-less script's inline deps instead of fetching a project" },
-    FlagSpec { long: "--read-only", help: "with shared-store enroll: grant read-only broker access" },
-    FlagSpec { long: "--fd", help: "with shared-store broker: inherited broker socket descriptor" },
+    FlagSpec { long: "--lock", help: "With fetch: lock a manifest-less script's inline deps instead of fetching a project" },
+    FlagSpec { long: "--read-only", help: "With shared-store enroll: grant read-only broker access" },
+    FlagSpec { long: "--fd", help: "With shared-store broker: inherited broker socket descriptor" },
     // D-CLI-BARE1=A / D-TASKS-LIST1=A: select one workspace member.
-    FlagSpec { long: "-p", help: "with run/dev/debug/check/build/jobs: pick a workspace member by name" },
-    FlagSpec { long: "--annotated", help: "with new: include commented example deps" },
-    FlagSpec { long: "--force", help: "with publish: bypass pre-publish gate (with warning)" },
+    FlagSpec { long: "-p", help: "With run/dev/debug/check/build/jobs: pick a workspace member by name" },
+    FlagSpec { long: "--annotated", help: "With new: include commented example deps" },
+    FlagSpec { long: "--force", help: "With publish: bypass pre-publish gate (with warning)" },
     // #1659 criterion 1 (round 2): these 8 flags previously lived only in
     // usage-string prose (`NestedCommandSpec::usage`), invisible to
     // `is_known_flag`/`closest_flag` (E2102 "did you mean"), the man page,
     // and shell completions. Real rows here fix all three renderers at once.
-    FlagSpec { long: "--no-sign", help: "with publish: skip the optional author signature (registry metadata is still signed)" },
-    FlagSpec { long: "--registry", help: "with keygen/key: registry name to generate or manage a signing key for" },
-    FlagSpec { long: "--pkg", help: "with bind: library name for the generated binding module" },
-    FlagSpec { long: "--clang", help: "with bind cpp: path to the clang binary used to parse the header" },
-    FlagSpec { long: "--ar", help: "with bind cpp: path to the ar archiver used to build the static library" },
-    FlagSpec { long: "--message", help: "with yank: human-readable reason for yanking the version" },
-    FlagSpec { long: "--before", help: "with schema squash: re-baseline migrations before this version" },
-    FlagSpec { long: "--spdx", help: "with sbom: emit SPDX tag-value format (default)" },
-    FlagSpec { long: "--cyclonedx", help: "with sbom: emit CycloneDX JSON format" },
-    FlagSpec { long: "--advisory-db", help: "with audit: path to advisory database file" },
-    FlagSpec { long: "--vendor-dir", help: "with vendor: directory to copy dependencies into (default vendor/)" },
-    FlagSpec { long: "--sbom", help: "with build: also write an SPDX SBOM next to the binary" },
-    FlagSpec { long: "--verbose", help: "with build: print the bridge steps" },
-    FlagSpec { long: "--online", help: "with doctor: allow network checks" },
-    FlagSpec { long: "--fix", help: "with doctor: apply auto-fixable problems" },
-    FlagSpec { long: DRY_RUN_FLAG, help: "with rewrite commands: preview changes without writing" },
-    FlagSpec { long: "--keep", help: "with try: keep a clean speculative edit" },
-    FlagSpec { long: "--edition", help: "with fix: apply edition migration rewrites --edition=<year>" },
-    FlagSpec { long: "--all", help: "with fix: apply safety classes beyond formatting and behavior-preserving" },
-    FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
-    FlagSpec { long: "--interpret", help: "with dev: force the tier-0 TIR interpreter" },
-    FlagSpec { long: "--trace-tiers", help: "with run/dev: print per-function Cranelift vs interpreter tier selection; with test: print AOT marker" },
-    FlagSpec { long: "--restart", help: "with dev: always rerun from scratch after a save" },
-    FlagSpec { long: "--swap", help: "with dev: hot-swap compatible edits and restart after type changes" },
-    FlagSpec { long: "--watch", help: "with run/dev/learn: re-run on dependency changes; --watch=off runs once" },
-    FlagSpec { long: CANVAS_FLAG, help: "with dev: open the full Canvas IDE over this dev session" },
-    FlagSpec { long: "--canvas-host", help: "with dev: with --canvas, bind host (loopback by default)" },
-    FlagSpec { long: "--canvas-port", help: "with dev: with --canvas, bind an explicit port" },
-    FlagSpec { long: "--canvas-transport", help: "with dev: with --canvas, select the named transport" },
-    FlagSpec { long: "--canvas-authority", help: "with dev: with --canvas, select loopback or remote authority" },
-    FlagSpec { long: "--canvas-audit", help: "with dev: with --canvas, enable request/rebuild audit output" },
+    FlagSpec { long: "--no-sign", help: "With publish: skip the optional author signature (registry metadata is still signed)" },
+    FlagSpec { long: "--registry", help: "With keygen/key: registry name to generate or manage a signing key for" },
+    FlagSpec { long: "--pkg", help: "With bind: library name for the generated binding module" },
+    FlagSpec { long: "--clang", help: "With bind cpp: path to the clang binary used to parse the header" },
+    FlagSpec { long: "--ar", help: "With bind cpp: path to the ar archiver used to build the static library" },
+    FlagSpec { long: "--message", help: "With yank: human-readable reason for yanking the version" },
+    FlagSpec { long: "--before", help: "With schema squash: re-baseline migrations before this version" },
+    FlagSpec { long: "--spdx", help: "With sbom: emit SPDX tag-value format (default)" },
+    FlagSpec { long: "--cyclonedx", help: "With sbom: emit CycloneDX JSON format" },
+    FlagSpec { long: "--advisory-db", help: "With audit: path to advisory database file" },
+    FlagSpec { long: "--vendor-dir", help: "With vendor: directory to copy dependencies into (default vendor/)" },
+    FlagSpec { long: "--sbom", help: "With build: also write an SPDX SBOM next to the binary" },
+    FlagSpec { long: "--verbose", help: "With build: print the bridge steps" },
+    FlagSpec { long: "--online", help: "With doctor: allow network checks" },
+    FlagSpec { long: "--fix", help: "With doctor: apply auto-fixable problems" },
+    FlagSpec { long: DRY_RUN_FLAG, help: "With rewrite commands: preview changes without writing" },
+    FlagSpec { long: "--keep", help: "With try: keep a clean speculative edit" },
+    FlagSpec { long: "--edition", help: "With fix: apply edition migration rewrites --edition=<year>" },
+    FlagSpec { long: "--all", help: "With fix: apply safety classes beyond formatting and behavior-preserving" },
+    FlagSpec { long: "--try-anyway", help: "With dev: interpret past unsupported features (no guarantees)" },
+    FlagSpec { long: "--interpret", help: "With dev: force the tier-0 TIR interpreter" },
+    FlagSpec { long: "--trace-tiers", help: "With run/dev: print per-function Cranelift vs interpreter tier selection; with test: print AOT marker" },
+    FlagSpec { long: "--restart", help: "With dev: always rerun from scratch after a save" },
+    FlagSpec { long: "--swap", help: "With dev: hot-swap compatible edits and restart after type changes" },
+    FlagSpec { long: "--watch", help: "With run/dev/learn: re-run on dependency changes; --watch=off runs once" },
+    FlagSpec { long: CANVAS_FLAG, help: "With dev: open the full Canvas IDE over this dev session" },
+    FlagSpec { long: "--canvas-host", help: "With dev: with --canvas, bind host (loopback by default)" },
+    FlagSpec { long: "--canvas-port", help: "With dev: with --canvas, bind an explicit port" },
+    FlagSpec { long: "--canvas-transport", help: "With dev: with --canvas, select the named transport" },
+    FlagSpec { long: "--canvas-authority", help: "With dev: with --canvas, select loopback or remote authority" },
+    FlagSpec { long: "--canvas-audit", help: "With dev: with --canvas, enable request/rebuild audit output" },
     // E2-M18 REPL flags.
-    FlagSpec { long: "--project", help: "with repl: load package settings and imports from this directory" },
+    FlagSpec { long: "--project", help: "With repl: load package settings and imports from this directory" },
     // E3 interactive scripting flags.
-    FlagSpec { long: "--protocol", help: "with notebook: use the bounded headless JSONL/script session" },
-    FlagSpec { long: "--headless", help: "with notebook: use the bounded headless session" },
-    FlagSpec { long: "--bind", help: "with notebook: bind the local HTTP client to this address" },
-    FlagSpec { long: "--token", help: "with notebook: require this bearer token for clients" },
+    FlagSpec { long: "--protocol", help: "With notebook: use the bounded headless JSONL/script session" },
+    FlagSpec { long: "--headless", help: "With notebook: use the bounded headless session" },
+    FlagSpec { long: "--bind", help: "With notebook: bind the local HTTP client to this address" },
+    FlagSpec { long: "--token", help: "With notebook: require this bearer token for clients" },
     // E2-M16 flags.
-    FlagSpec { long: "--pure", help: "with eval: reject code with side effects" },
-    FlagSpec { long: "--freestanding", help: "with build/run: target a system without an operating system" },
+    FlagSpec { long: "--pure", help: "With eval: reject code with side effects" },
+    FlagSpec { long: "--freestanding", help: "With build/run: target a system without an operating system" },
     // D-ONCE-GATE1=A: one invocation gate surface covers every audited escape.
-    FlagSpec { long: "--gate", help: "with build/run/dev: allow one audited gate as --gate name=allow" },
-    FlagSpec { long: "--target", help: "with build/run/dev: select a target: a rustc triple or board.<name>" },
+    FlagSpec { long: "--gate", help: "With build/run/dev: allow one audited gate as --gate name=allow" },
+    FlagSpec { long: "--target", help: "With build/run/dev: select a target: a rustc triple or board.<name>" },
     // D-ENVFLAG1=A: `--env` selects one environment module; it never names a
     // preset and has no retired-spelling alias.
-    FlagSpec { long: "--env", help: "with env/run/dev/test: select one declared env.<name> module" },
+    FlagSpec { long: "--env", help: "With env/run/dev/test: select one declared env.<name> module" },
     // D-CONF-WORD1=A: `--preset` selects a named environment composition.
-    FlagSpec { long: "--preset", help: "with env/run/dev/test: select one declared environment preset" },
+    FlagSpec { long: "--preset", help: "With env/run/dev/test: select one declared environment preset" },
     FlagSpec {
         long: "--explain-partition",
-        help: "with build --target=web: show which code becomes JavaScript or WebAssembly",
+        help: "With build --target=web: show which code becomes JavaScript or WebAssembly",
     },
-    FlagSpec { long: "--update-snapshots", help: "with test: replace expected snapshot output" },
-    FlagSpec { long: "--coverage", help: "with test: show function and branch coverage" },
-    FlagSpec { long: "--rust", help: "with emit: print generated Rust source" },
-    FlagSpec { long: "--emit-generated", help: "with build: copy generated Jet sources into build/generated/" },
-    FlagSpec { long: "-u", help: "short form of --update-snapshots" },
+    FlagSpec { long: "--update-snapshots", help: "With test: replace expected snapshot output" },
+    FlagSpec { long: "--coverage", help: "With test: show function and branch coverage" },
+    FlagSpec { long: "--rust", help: "With emit: print generated Rust source" },
+    FlagSpec { long: "--emit-generated", help: "With build: copy generated Jet sources into build/generated/" },
+    FlagSpec { long: "-u", help: "Short form of --update-snapshots" },
     // D-BUILDPROFILE1 (ratified 2026-06-25): named optimization bundles.
-    FlagSpec { long: "--release", help: "with build/run/test: optimize for release" },
-    FlagSpec { long: "--profile", help: "with build/run: how hard to optimize: release, debug, ci, or a named optimization bundle" },
+    FlagSpec { long: "--release", help: "With build/run/test: optimize for release" },
+    FlagSpec { long: "--profile", help: "With build/run: how hard to optimize: release, debug, ci, or a named optimization bundle" },
     // D-CONF-KEY1=A: command-line contribution to one typed package setting.
-    FlagSpec { long: "--set", help: "with build/run: set one declared package setting as key=value" },
-    FlagSpec { long: "--builder", help: "with build: select a previously bound remote builder" },
+    FlagSpec { long: "--set", help: "With build/run: set one declared package setting as key=value" },
+    FlagSpec { long: "--builder", help: "With build: select a previously bound remote builder" },
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
-    FlagSpec { long: "--a11y", help: "with lint: check roles, labels, and other accessibility basics" },
-    FlagSpec { long: "--complexity", help: "with lint: report per-function cognitive complexity" },
-    FlagSpec { long: "--max", help: "with lint --complexity: fail when a function exceeds this score" },
-    FlagSpec { long: "--scope", help: "with inspect gates/authority or trust grant: choose a ledger or trust scope" },
+    FlagSpec { long: "--a11y", help: "With lint: check roles, labels, and other accessibility basics" },
+    FlagSpec { long: "--complexity", help: "With lint: report per-function cognitive complexity" },
+    FlagSpec { long: "--max", help: "With lint --complexity: fail when a function exceeds this score" },
+    FlagSpec { long: "--scope", help: "With inspect gates/authority or trust grant: choose a ledger or trust scope" },
     // D-TESTKIT1=A: the shared test name-selection flag.
-    FlagSpec { long: "--filter", help: "with test: only run claims whose name contains --filter=<substr>" },
-    FlagSpec { long: "--shuffle", help: "with test: run tests in random (or --shuffle=<seed>) order" },
-    FlagSpec { long: "--serial", help: "with test: run tests one at a time instead of the parallel default" },
-    FlagSpec { long: "--show-default", help: "with run/build/dev/test: use and report the stock default" },
-    FlagSpec { long: "--measure", help: "with test: measure `.measure` claims" },
-    FlagSpec { long: "--record", help: "with run/dev/test: record a named replay as --record=<name>" },
-    FlagSpec { long: "--replay", help: "with debug: consume a named replay as --replay=<name>" },
+    FlagSpec { long: "--filter", help: "With test: only run claims whose name contains --filter=<substr>" },
+    FlagSpec { long: "--shuffle", help: "With test: run tests in random (or --shuffle=<seed>) order" },
+    FlagSpec { long: "--serial", help: "With test: run tests one at a time instead of the parallel default" },
+    FlagSpec { long: "--show-default", help: "With run/build/dev/test: use and report the stock default" },
+    FlagSpec { long: "--measure", help: "With test: measure `.measure` claims" },
+    FlagSpec { long: "--record", help: "With run/dev/test: record a named replay as --record=<name>" },
+    FlagSpec { long: "--replay", help: "With debug: consume a named replay as --replay=<name>" },
     // D-TESTKIT1=A: `jet fuzz` (its own bespoke flags below are validated by
     // `owns_flag_vocabulary`; these two are listed for completions/the man page).
-    FlagSpec { long: "--iterations", help: "with fuzz: case budget --iterations=<n> (default 1000)" },
-    FlagSpec { long: "--time", help: "with fuzz: wall-clock budget in seconds --time=<n>" },
-    FlagSpec { long: "--seed", help: "with fuzz: base PRNG seed --seed=<n> (default: fixed, reproducible)" },
-    FlagSpec { long: "--corpus", help: "with fuzz: corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)" },
-    FlagSpec { long: "--lens", help: "with prove: project the human report by an exact evidence facet" },
+    FlagSpec { long: "--iterations", help: "With fuzz: case budget --iterations=<n> (default 1000)" },
+    FlagSpec { long: "--time", help: "With fuzz: wall-clock budget in seconds --time=<n>" },
+    FlagSpec { long: "--seed", help: "With fuzz: base PRNG seed --seed=<n> (default: fixed, reproducible)" },
+    FlagSpec { long: "--corpus", help: "With fuzz: corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)" },
+    FlagSpec { long: "--lens", help: "With prove: project the human report by an exact evidence facet" },
     // #1659 criterion 1 (round 2): see the block above --message for the
     // other 7 formerly usage-string-only flags.
-    FlagSpec { long: "--facts", help: "with expand: project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>" },
-    FlagSpec { long: "--annotations", help: "with budget: CI annotations auto, none, or github" },
-    FlagSpec { long: "--baseline", help: "with budget update: selected baseline name" },
-    FlagSpec { long: "--bootstrap", help: "with budget update: create absent or stale baseline history" },
-    FlagSpec { long: "--accept-regression", help: "with budget update: explicitly accept a regression" },
-    FlagSpec { long: "--reason", help: "with exceptional budget update: checked-in reason" },
-    FlagSpec { long: "--yes", help: "with budget update: apply a valid non-interactive plan" },
-    FlagSpec { long: "-y", help: "short form of --yes" },
+    FlagSpec { long: "--facts", help: "With expand: project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>" },
+    FlagSpec { long: "--annotations", help: "With budget: CI annotations auto, none, or github" },
+    FlagSpec { long: "--baseline", help: "With budget update: selected baseline name" },
+    FlagSpec { long: "--bootstrap", help: "With budget update: create absent or stale baseline history" },
+    FlagSpec { long: "--accept-regression", help: "With budget update: explicitly accept a regression" },
+    FlagSpec { long: "--reason", help: "With exceptional budget update: checked-in reason" },
+    FlagSpec { long: "--yes", help: "With budget update: apply a valid non-interactive plan" },
+    FlagSpec { long: "-y", help: "Short form of --yes" },
 ];
 
 pub static FLAGS: LazyLock<Vec<FlagSpec>> = LazyLock::new(|| {

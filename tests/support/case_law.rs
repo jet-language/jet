@@ -200,7 +200,9 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
                 add(
                     format!("REPL {mode} discovery hint {text}"),
                     text,
-                    CaseLawKind::Sentence,
+                    // D-CASE-CHROME1=C: a one- or two-word hint in the key bar
+                    // is a label, not a description, so it takes Title Case.
+                    CaseLawKind::Title,
                 );
             }
         }
@@ -211,13 +213,19 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
         prompt.trim(),
         CaseLawKind::Excluded,
     );
+    // The fold marker and pin rail are composed lines: `⋯ 42 rows folded ·
+    // [Row] · unfold ⏎`. What these extract are mid-line fragments and the
+    // literal command names a user types (`unfold`, `unpin`), not standalone
+    // chrome. The case law governs whole lines and labels, so capitalising a
+    // fragment would read as `⋯ 42 Rows folded`, and capitalising a command
+    // name would misreport what the user must type.
     let fold = jet::REPL::Render::render_fold_marker(42, "Row", false);
     add(
         "REPL fold status".to_string(),
         fold.strip_prefix("⋯ 42 ")
             .and_then(|text| text.split(" · ").next())
             .unwrap_or_default(),
-        CaseLawKind::Sentence,
+        CaseLawKind::Excluded,
     );
     add(
         "REPL fold action".to_string(),
@@ -227,14 +235,14 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
             .split(' ')
             .next()
             .unwrap_or_default(),
-        CaseLawKind::Sentence,
+        CaseLawKind::Excluded,
     );
     let pin = jet::REPL::Render::render_pin_rail("total: Int :: 15", 3, 62, false);
     if let Some(hint) = pin.lines().next().and_then(|line| line.split("turn 3").nth(1)) {
         add(
             "REPL pin status".to_string(),
             "turn",
-            CaseLawKind::Sentence,
+            CaseLawKind::Excluded,
         );
         add(
             "REPL pin action".to_string(),
@@ -245,16 +253,20 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
                 .split(' ')
                 .next()
                 .unwrap_or_default(),
-            CaseLawKind::Sentence,
+            CaseLawKind::Excluded,
         );
     }
+    // The `:turns` listing prints a machine-readable status token, and the
+    // same spelling feeds the notebook kernel JSON and the wire protocol
+    // (`ReplTurnStatus::Ok => "ok"`). It is parseable state, not chrome, so
+    // the case law leaves it alone rather than break every consumer.
     for line in jet::REPL::run_transcript(&["1 + 2", ":turns"], None).lines() {
         if line.starts_with('#') {
             if let Some(status) = line.split_whitespace().nth(1) {
                 add(
                     format!("REPL status {status}"),
                     status,
-                    CaseLawKind::Title,
+                    CaseLawKind::Excluded,
                 );
             }
         }
@@ -263,19 +275,50 @@ pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
     sources
 }
 
-/// D-CASE-PROSE1=A: the problem line, the why and the fix capitalise their
-/// first word. A line that begins with an identifier, a flag or a quoted code
-/// fragment keeps that fragment's own case and is never force-capitalised,
-/// which is what `diagnostic_token_keeps_case` recognises.
-fn sentence_case_violation(value: &str) -> Option<String> {
-    let (start, end) = first_diagnostic_prose_token(value)?;
-    let token = &value[start..end];
-    (token.chars().next().is_some_and(|ch| ch.is_ascii_lowercase())
-        && !diagnostic_token_keeps_case(token))
-    .then(|| format!("sentence prose starts with lowercase `{token}` in {value:?}"))
+/// D-CASE-PROSE1=A governs the FIRST thing on the line and nothing after it.
+/// A line opening with a quoted fragment, a `{placeholder}`, a flag, or an
+/// identifier keeps that fragment's own case and is never force-capitalised —
+/// the ratified sample reads ``\`--offline\` forbids network access``, with
+/// `forbids` staying lowercase. So this deliberately does NOT reuse
+/// `first_diagnostic_prose_token`, which skips code-ish tokens and walks on:
+/// that would capitalise a word in the middle of the sentence.
+pub(crate) fn sentence_case_violation(value: &str) -> Option<String> {
+    let mut offset = 0;
+    let ch = loop {
+        let ch = value[offset..].chars().next()?;
+        if ch.is_whitespace() || matches!(ch, '*' | '~' | '_') {
+            offset += ch.len_utf8();
+            continue;
+        }
+        break ch;
+    };
+    // Opens with code or a substitution: the line keeps whatever case it has.
+    if matches!(ch, '`' | '"' | '\'' | '{') {
+        return None;
+    }
+    let rest = &value[offset..];
+    let end = rest
+        .find(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | ':' | '(' | ')' | '[' | ']' | '!'))
+        .unwrap_or(rest.len());
+    let token = &rest[..end];
+    if token.is_empty() || diagnostic_token_keeps_case(token) {
+        return None;
+    }
+    token
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase())
+        .then(|| {
+            format!("sentence prose starts with lowercase `{token}` at byte {offset} in {value:?}")
+        })
 }
 
 pub(crate) fn title_case_violation(value: &str) -> Option<String> {
+    // `<id>` is a metavariable telling the user what to substitute, not a
+    // label, so it keeps the spelling the user must type.
+    if value.starts_with('<') && value.ends_with('>') {
+        return None;
+    }
     let words: Vec<&str> = value
         .split(|ch: char| !ch.is_ascii_alphanumeric())
         .filter(|word| !word.is_empty())
@@ -311,6 +354,10 @@ fn title_case_minor_word(word: &str) -> bool {
     TITLE_CASE_MINOR_WORDS.contains(&word)
 }
 
+// This module is included by more than one test binary and each uses a
+// different subset; `diagnostics_format` calls this one, `diagnostic_snapshots`
+// does not.
+#[allow(dead_code)]
 pub(crate) fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {
     let mut offset = 0;
     while offset < input.len() {
@@ -382,7 +429,11 @@ pub(crate) fn diagnostic_token_keeps_case(token: &str) -> bool {
         || token == "C"
         || matches!(
             token,
+            // Proper nouns, then the binary names a user actually types. A
+            // Fix line may BE a command (`jetpack env -- jet build`), and
+            // capitalising its first word would misstate the command.
             "App" | "Hangar" | "Jet" | "Jetpack" | "Nix" | "Runtime" | "Store"
+                | "jet" | "jetpack" | "cargo" | "nix" | "git" | "rustc"
         )
     {
         return true;

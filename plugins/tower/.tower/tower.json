@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2208,
-    "rev": 45602,
+    "nextNum": 2209,
+    "rev": 45603,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -152342,6 +152342,34 @@
       "updated": "2026-08-26T08:19:46.119Z",
       "updatedBy": "orchestrator",
       "workOrder": 5
+    },
+    {
+      "id": "c0d9b4eu",
+      "num": 2208,
+      "title": "E0631 stops firing: an arena view escapes its region in silence",
+      "body": "An arena view escapes its region and the compiler says nothing. This is an I1 memory-safety hole: the returned view outlives the arena and points into freed memory.\n\nReproduce with the existing fixture tests/ui/arena_view_escape.jet:\n\n    fn make() Int -> {\n        arena :: mem.Arena.new()\n        x :: arena.alloc(42)\n        return x\n    }\n\n    JET_UI_FILTER=tests/ui/arena_view_escape.jet cargo test --test diagnostic_snapshots ui_snapshots\n\nActual: (no errors). Expected: E0631 `x` cannot be shared - it does not live long enough to be returned.\n\nThe reporter is intact. crates/jet-sema/src/Sema/CheckerOwnership.rs:301 report_view_escape returns early at line 302 when self.view_fact(name) is None, so the binding x :: arena.alloc(42) is no longer recorded as a view into arena. The defect is in registering the view fact, not in the diagnostic.\n\nFound while blessing the D-CASE-PROSE1 sentence-case sweep. The snapshot shrink guard refused the write because the fixture fell from 2 diagnostics to 0; that guard is the only reason this was caught, and a blanket UPDATE_EXPECT_SHRINK would have recorded the silence as the expected contract forever.\n\n106 fixtures drop diagnostic count after the arrow-respell migration. Most are legitimate (the migrated source no longer trips E0068/E0065/E0070). This card owns separating the legitimate ones from any further real regressions like this one before ANY of them are blessed.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "safety",
+        "regression"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-26T09:36:02.083Z",
+      "updated": "2026-08-26T09:36:02.083Z",
+      "updatedBy": "orchestrator"
     }
   ],
   "decisions": [
@@ -211362,6 +211390,13 @@
   ],
   "events": [
     {
+      "at": "2026-08-26T09:36:02.083Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0d9b4eu",
+      "note": "E0631 stops firing: an arena view escapes its region in silence"
+    },
+    {
       "at": "2026-08-26T08:54:12.887Z",
       "by": "orchestrator",
       "action": "card.criteria-meet",
@@ -214853,13 +214888,6 @@
       "action": "card.criteria-add",
       "ref": "c0vet6tl",
       "note": "#2 The check understands the exclusions and does not flag ident"
-    },
-    {
-      "at": "2026-08-25T23:12:18.390Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0vet6tl",
-      "note": "#1 A check reads every user-facing string from its source of tr"
     }
   ],
   "nextNum": 368,

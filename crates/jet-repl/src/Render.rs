@@ -21,13 +21,13 @@ pub const FOLD_LIST_THRESHOLD: usize = 20;
 /// when the caller doesn't know (or care about) the real terminal width.
 pub const DEFAULT_WORKSPACE_SPLIT: usize = 32;
 
-/// D-FE-REPL1=D banner: `Jet <ver> — interactive REPL  (:quit, :help, ^B bindings)`.
+/// D-FE-REPL1=D banner: `Jet <ver> — Interactive REPL  (:quit, :help, ^B bindings)`.
 /// Printed unconditionally (TTY and non-TTY) — only the wording changed from
 /// the pre-redesign banner, not whether it prints.
 pub fn render_banner(version: &str, color: bool) -> String {
     let theme = Theme::new(color);
     format!(
-        "{} {} — interactive REPL  ({}, {}, {} bindings)",
+        "{} {} — Interactive REPL  ({}, {}, {} bindings)",
         theme.accent("Jet"),
         version,
         bold(":quit", color),
@@ -41,7 +41,7 @@ pub fn render_banner(version: &str, color: bool) -> String {
 pub fn render_discovery_hint(raw_mode: bool, color: bool) -> String {
     if raw_mode {
         format!(
-            "Try: {} complete · {} cursor docs · {} docs · {} history · {} pin · {} fold · {} rerun · {} bindings",
+            "Try: {} Complete · {} Cursor Docs · {} Docs · {} History · {} Pin · {} Fold · {} Rerun · {} Bindings",
             bold("Tab", color),
             bold("F1", color),
             bold("?name", color),
@@ -53,7 +53,7 @@ pub fn render_discovery_hint(raw_mode: bool, color: bool) -> String {
         )
     } else {
         format!(
-            "Try: {} docs · {} · interactive keys require a TTY",
+            "Try: {} Docs · {} · Interactive Keys Require a TTY",
             bold("?name", color),
             bold(":pin/:fold/:rerun <id>", color),
         )

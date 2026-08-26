@@ -68,19 +68,16 @@ fn every_typed_diagnostic_line_uses_ratified_sentence_case() {
             continue;
         }
         rows += 1;
+        // One rule, one home: this used to re-implement the check inline and
+        // drifted into the inverse of D-CASE-PROSE1, so it now calls the same
+        // predicate the enforcement suite uses.
         for (name, value) in [("What", fields[7]), ("Why", fields[8]), ("Fix", fields[9])] {
-            if let Some((start, end)) = case_law::first_diagnostic_prose_token(value) {
-                let token = &value[start..end];
-                if token.chars().next().is_some_and(|ch| ch.is_ascii_uppercase())
-                    && !case_law::diagnostic_token_keeps_case(token)
-                {
-                    violations.push(format!(
-                        "Diagnostics.jet:{} {} {} starts with uppercase prose `{token}`",
-                        line_index + 1,
-                        fields[1],
-                        name
-                    ));
-                }
+            if let Some(detail) = case_law::sentence_case_violation(value) {
+                violations.push(format!(
+                    "Diagnostics.jet:{} {} {name}: {detail}",
+                    line_index + 1,
+                    fields[1],
+                ));
             }
         }
     }
