@@ -360,6 +360,23 @@ These dispositions trace all 10 candidates through the current source. Each row 
 | `canvas-project-revision-not-enforced` | `already-fixed` | `crates/jet-devserver/src/Canvas/schema_api.rs:527-545` parses `project_revision` and compares it with the current project revision before dispatch. |
 | `embedded-devserver-windows-absolute-static-path` | `confirmed` | `crates/jet-codegen/src/Prelude/DevServer.rs:460-475` rejects only `..` before `Path::join`, then reads the resulting path. |
 
+### Current dispositions
+
+These dispositions trace each candidate through the current source. `confirmed` means the reported source-to-sink path remains live. `already-fixed` means the current source removes the reported path. Full historical traces remain in `docs/audits/security-deep-scan-2026-08-03-full.md`.
+
+| Candidate ID | Disposition | HEAD evidence |
+|---|---|---|
+| `devserver-cross-origin-mutation` | `already-fixed` | `crates/jet-devserver/src/WebHost.rs:1241-1296` requires an allowed Host/Origin and session capability; `:1496-1499` rejects unauthorized Canvas requests before route dispatch. |
+| `s1-root-studio-remote-read` | `confirmed` | `crates/jetpack/src/CLI/studio_server.rs:53-94` binds the caller-supplied address and accepts peers; `:108-175` returns `context.config` from `/studio/source` without Host, Origin, or session validation. |
+| `s1-root-studio-remote-write` | `confirmed` | `crates/jetpack/src/CLI/studio_server.rs:128-136` exposes the transaction route; `crates/jetpack/src/CLI/studio_transactions.rs:104-145` self-issues sessions and `:323-443` atomically writes `config.jet`. |
+| `s1-root-studio-remote-run` | `confirmed` | `crates/jetpack/src/CLI/studio_server.rs:138-146` forwards `/studio/run`; `crates/jetpack/src/CLI/studio_transactions.rs:631-695,921-926,1107-1156` accepts allowlisted actions and invokes `jet os` without caller authentication. |
+| `s1-root-studio-loopback-csrf` | `confirmed` | `crates/jetpack/src/CLI/bridge_os_studio.rs:131-140` starts loopback Studio; `crates/jetpack/src/CLI/studio_server.rs:108-146` checks no Origin/Host/session before forwarding browser POSTs to the run handler. |
+| `s2-devserver-source-disclosure` | `already-fixed` | `crates/jet-devserver/src/WebHost.rs:1241-1296,1496-1499` enforces Host/Origin/session before the source route; `:1769-1786` is the now-protected `fs::read` sink. |
+| `s2-devserver-debug-trigger` | `already-fixed` | `crates/jet-devserver/src/WebHost.rs:1241-1296,1496-1499` enforces Host/Origin/session before debug dispatch; `:1898-1923` is reachable only after that gate. |
+| `devserver-windows-absolute-static-path` | `confirmed` | `crates/jet-devserver/src/lib.rs:215-223` rejects only `..` then joins the trimmed request path; `crates/jet-devserver/src/WebHost.rs:2154-2168` reads the result, so Windows absolute children can replace `build`. |
+| `canvas-project-revision-not-enforced` | `already-fixed` | `crates/jet-devserver/src/Canvas/schema_api.rs:527-557` compares required `project_revision` with `ctx.project_revision` before touched-file validation and mutation dispatch. |
+| `embedded-devserver-windows-absolute-static-path` | `confirmed` | `crates/jet-codegen/src/Prelude/DevServer.rs:396-457` passes the raw request target to static serving; `:460-475` rejects only `..`, joins onto `build`, and reads the joined path. |
+
 ## command-code-injection
 
 ### Command, shell, editor, and generated-code injection
@@ -404,6 +421,20 @@ These dispositions trace all 10 candidates through the current source. Each row 
 | `buildrecipe-exec-unsandboxed` | BuildRecipe run executes tools with ambient host authority | crates/jetpack/src/Recipe.rs | 1 |
 | `buildrecipe-logged-unsandboxed` | Logged BuildRecipe execution bypasses the promised sandbox | crates/jetpack/src/Provider.rs<br>crates/jetpack/src/Recipe.rs | 1 |
 | `transitive-path-dependency-escape` | Transitive path dependencies can escape their fetched dependency root |  | 1 |
+
+### Current dispositions
+
+These dispositions trace the seven owned candidates against the current source. `confirmed` means the reported path remains live. `already-fixed` means the current source removes the reported path.
+
+| Candidate ID | Disposition | HEAD evidence |
+|---|---|---|
+| `locked-dependency-integrity-bypass` | `confirmed` | `Source/Fetch.rs:54-82,1929-1947` — locked path and Git dependencies return project or cache directories without store content verification. |
+| `package-store-incomplete-content-hash` | `confirmed` | `crates/jet-foundation/src/SHA256.rs:203-238` hashes only `.jet` files, while `Source/Store.rs:131-150,223-237` verifies that partial hash after copying the wider non-hidden tree. |
+| `git-revision-utf8-slice-panic` | `confirmed` | `crates/jet-pkg-model/src/Package/Blocks.rs:451-487` accepts arbitrary revision text; `Source/Fetch.rs:822-828,2293-2303` slices it at a byte offset. A multibyte revision causes a deterministic crash/DoS, not code execution. |
+| `jetpack-typed-environment-trust-bypass` | `confirmed` | `crates/jetpack/src/Trust.rs:528-549,1006-1015` classifies service-only typed environments but returns before typed trust when refs, secrets, and lifecycle hooks are empty; `crates/jetpack/src/CLI/services_secrets_config.rs:571-581,630-655` then starts the service. |
+| `buildrecipe-exec-unsandboxed` | `already-fixed` | `crates/jetpack/src/Recipe.rs:968-992,1101-1124,1577-1595,1621-1670` routes recipe execution through the native sandbox and maps unavailable enforcement to an error; `crates/jet-comptime/src/Comptime/Build/execution_runtime.rs:315-317` has no unsandboxed fallback. |
+| `buildrecipe-logged-unsandboxed` | `already-fixed` | `crates/jetpack/src/Provider/adapter.rs:57-72` reaches `Recipe::run_logged`; `crates/jetpack/src/Recipe.rs:1027-1064,1599-1670` sends logged execution through the same native sandbox. |
+| `transitive-path-dependency-escape` | `confirmed` | `Source/Fetch.rs:722-731,756-785` accepts absolute or normalized `..` paths without containment, then loads, hashes, stores, and links the escaped directory. |
 
 ## policy-integrity
 

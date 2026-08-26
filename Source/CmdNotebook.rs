@@ -182,7 +182,7 @@ fn serve_loopback(
         let active_for_thread = Arc::clone(&active);
         let token = token.to_string();
         let result = std::thread::Builder::new().spawn(move || {
-            let mut stream = stream;
+            let stream = stream;
             let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
             let _ = handle_connection(stream, &shared, &token);
             active_for_thread.fetch_sub(1, Ordering::AcqRel);
