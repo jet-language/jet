@@ -2134,7 +2134,7 @@ pub fn compile_tests_with_path(
     src: &str,
     file: &str,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
-    compile_tests_with_path_cov(src, file, false)
+    compile_tests_with_path_cov_and_profile(src, file, false, "dev")
 }
 
 /// Compile for `jet test`, with optional `jet test --coverage`
@@ -2145,8 +2145,18 @@ pub fn compile_tests_with_path_cov(
     file: &str,
     coverage: bool,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
+    compile_tests_with_path_cov_and_profile(src, file, coverage, "dev")
+}
+
+/// Compile a test harness with the selected named profile.
+pub fn compile_tests_with_path_cov_and_profile(
+    src: &str,
+    file: &str,
+    coverage: bool,
+    profile: &str,
+) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
     let _ = src;
-    with_compiler_stack(|| Driver::compile_tests(file, coverage))
+    with_compiler_stack(|| Driver::compile_tests_with_profile(file, coverage, profile))
 }
 
 /// D-CMD-OVERRIDE1=C: compile the entry function override through the same
@@ -2156,8 +2166,18 @@ pub fn compile_test_override_with_path(
     file: &str,
     coverage: bool,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
+    compile_test_override_with_path_and_profile(src, file, coverage, "dev")
+}
+
+/// Compile a test command override with the selected named profile.
+pub fn compile_test_override_with_path_and_profile(
+    src: &str,
+    file: &str,
+    coverage: bool,
+    profile: &str,
+) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
     let _ = src;
-    with_compiler_stack(|| Driver::compile_test_override(file, coverage))
+    with_compiler_stack(|| Driver::compile_test_override_with_profile(file, coverage, profile))
 }
 
 /// D-TESTKIT1=A (gap #1): compile for `jet fuzz <file> [<name>]`.

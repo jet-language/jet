@@ -724,13 +724,17 @@ fn resolve_profile_name(named_profile: Option<&str>) -> Option<String> {
 }
 
 /// D-BUILDPROFILE1: resolve `--profile=<name>` (or `--release` → `"release"`)
-/// to a `BuildProfile`. Manifest entries override blessed defaults for
-/// `release`/`debug`/`ci`; unknown names emit E1219 and exit.
+/// to a `BuildProfile`. The built-in hardened profile is reserved so a
+/// package profile cannot silently remove its sentry guarantee. Manifest
+/// entries override the other blessed defaults; unknown names emit E1219.
 pub(crate) fn resolve_named_profile(
     name: &str,
     source_file: &str,
     mode: OutputMode,
 ) -> BuildProfile {
+    if name == jet::Syntax::BUILD_PROFILE_HARDENED {
+        return BuildProfile::Hardened;
+    }
     if let Some(profiles) = load_pkg_profiles(source_file) {
         if let Some(def) = profiles.iter().find(|p| p.name == name) {
             return BuildProfile::Named {
@@ -741,6 +745,7 @@ pub(crate) fn resolve_named_profile(
     }
     match name {
         n if n == jet::Syntax::BUILD_PROFILE_RELEASE => BuildProfile::Release,
+        n if n == jet::Syntax::BUILD_PROFILE_HARDENED => BuildProfile::Hardened,
         n if n == jet::Syntax::BUILD_PROFILE_DEBUG => BuildProfile::Debug,
         n if n == jet::Syntax::BUILD_PROFILE_CI => BuildProfile::Ci,
         _ => {
@@ -878,7 +883,7 @@ pub(crate) fn run_compile_cmd(
     } else {
         BuildProfile::default_for_command(cmd)
     };
-    let release_profile = matches!(&profile, BuildProfile::Release);
+    let release_profile = profile.is_release();
     let progress = BuildProgress::new(cmd, emit_rust, verbose, mode);
     progress.major("Reading", file);
     progress.minor("profile", profile.budget_name());
@@ -2798,6 +2803,8 @@ pub(crate) struct TestRunOpts {
     pub(crate) coverage: bool,
     /// `--release`: build the test harness with the release AOT profile.
     pub(crate) release: bool,
+    /// `--profile=<name>`: build the test harness with the selected profile.
+    pub(crate) profile: Option<String>,
     /// `--trace-tiers`: print the harness execution tier marker.
     pub(crate) trace_tiers: bool,
     /// `--filter=<substr>`: only run tests whose name contains it.
@@ -3010,13 +3017,15 @@ fn run_test_target(
 ) -> TestTargetOutcome {
     let update_snapshots = opts.update_snapshots;
     let coverage = opts.coverage;
-    let profile = if opts.release || opts.measure {
+    let shown = path.to_string_lossy();
+    let profile = if let Some(name) = opts.profile.as_deref() {
+        resolve_named_profile(name, &shown, mode)
+    } else if opts.release || opts.measure {
         BuildProfile::Release
     } else {
         BuildProfile::Default
     };
     let profile_tag = profile.cache_tag();
-    let shown = path.to_string_lossy();
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -3061,9 +3070,19 @@ fn run_test_target(
         if !mode.quiet {
             println!("jet test: using fn test override");
         }
-        jet::compile_test_override_with_path(&src, &shown, coverage)
+        jet::compile_test_override_with_path_and_profile(
+            &src,
+            &shown,
+            coverage,
+            profile.budget_name(),
+        )
     } else {
-        jet::compile_tests_with_path_cov(&src, &shown, coverage)
+        jet::compile_tests_with_path_cov_and_profile(
+            &src,
+            &shown,
+            coverage,
+            profile.budget_name(),
+        )
     } {
         Ok(r) => r,
         Err(diags) => {
@@ -3240,7 +3259,13 @@ fn run_doctests(
             continue;
         }
         let tmp_shown = tmp.to_string_lossy().into_owned();
-        let compiled = jet::compile_with_path(&program, &tmp_shown);
+        let compiled = jet::compile_with_target_and_gates_and_profile(
+            &program,
+            &tmp_shown,
+            jet::Policy::GateSet::default(),
+            None,
+            profile.budget_name(),
+        );
         let (rust_code, ffi_link) = match compiled {
             Ok(out) => (out.rust, out.ffi),
             Err(diags) => {
@@ -6105,7 +6130,7 @@ fn library_rustc(
         .arg("-o")
         .arg(output);
     let config = profile.config();
-    if matches!(profile, BuildProfile::Release) {
+    if profile.is_release() {
         command.arg("--cfg").arg("jet_release");
     }
     command.args(config.rustc_args(false));
@@ -6343,7 +6368,7 @@ pub(crate) fn build(
             );
             exit(ExitCodes::ICE);
         });
-        let emit_maps = !matches!(profile, BuildProfile::Release);
+        let emit_maps = !profile.is_release();
         let paths = match write_web_artifacts(file, web, verbose, Path::new("build"), emit_maps) {
             Ok(p) => p,
             Err(msg) => {
@@ -6475,7 +6500,7 @@ pub(crate) fn build(
     }
     let ffi_present = ffi.is_some();
     let config = profile.config();
-    if matches!(profile, BuildProfile::Release) {
+    if profile.is_release() {
         rustc_flags.push("--cfg".to_string());
         rustc_flags.push("jet_release".to_string());
     }

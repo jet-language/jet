@@ -576,11 +576,13 @@ pub const BUILD_CTOR: &str = "Build"; // D-BUILDPROFILE1
 /// the optimization level.
 pub const BUILD_FIELD_OPTIMIZE: &str = "optimize"; // D-BUILDPROFILE1
 
-/// D-BUILDPROFILE1: blessed profile names — `release`, `debug`, and `ci`
-/// carry built-in defaults and need no explicit declaration in `build { }`.
+/// D-BUILDPROFILE1: blessed profile names — `release`, `debug`, `ci`, and
+/// `hardened` carry built-in defaults and need no explicit declaration in
+/// `build { }`.
 pub const BUILD_PROFILE_RELEASE: &str = "release"; // D-BUILDPROFILE1
 pub const BUILD_PROFILE_DEBUG: &str = "debug"; // D-BUILDPROFILE1
 pub const BUILD_PROFILE_CI: &str = "ci"; // D-BUILDPROFILE1
+pub const BUILD_PROFILE_HARDENED: &str = "hardened"; // D-MEM-SENTRY1
 
 /// D-BUILDPROFILE1: optional fields inside `Build{ … }` profile values.
 pub const BUILD_FIELD_DEBUG_INFO: &str = "debug_info"; // D-BUILDPROFILE1

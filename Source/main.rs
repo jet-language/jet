@@ -417,6 +417,9 @@ pub(crate) enum BuildProfile {
     Fast,
     /// D-BUILDPROFILE1: `--release` / `--profile=release`. Full optimization.
     Release,
+    /// D-MEM-SENTRY1: release optimization with runtime sentries enabled at
+    /// every audited memory boundary.
+    Hardened,
     /// D-BUILDPROFILE1: `--profile=debug`. No optimization.
     Debug,
     /// D-BUILDPROFILE1: `--profile=ci`. Optimized with debug symbols for CI.
@@ -438,6 +441,10 @@ impl BuildProfile {
         }
     }
 
+    pub(crate) fn is_release(&self) -> bool {
+        matches!(self, BuildProfile::Release | BuildProfile::Hardened)
+    }
+
     /// Ratified performance-budget applicability name. Default builds retain
     /// the existing `dev` profile identity; named profiles use their declared
     /// name, never their cache-settings suffix.
@@ -446,6 +453,7 @@ impl BuildProfile {
             BuildProfile::Default => "dev",
             BuildProfile::Fast => "dev",
             BuildProfile::Release => "release",
+            BuildProfile::Hardened => "hardened",
             BuildProfile::Debug => "debug",
             BuildProfile::Ci => "ci",
             BuildProfile::Named { name, .. } => name,
@@ -459,6 +467,7 @@ impl BuildProfile {
             BuildProfile::Default => "default".to_string(),
             BuildProfile::Fast => "fast".to_string(),
             BuildProfile::Release => "release".to_string(),
+            BuildProfile::Hardened => "hardened".to_string(),
             BuildProfile::Debug => "debug".to_string(),
             BuildProfile::Ci => "ci".to_string(),
             BuildProfile::Named { name, config } => {
@@ -488,6 +497,7 @@ impl BuildProfile {
                 settings: BTreeMap::new(),
             },
             BuildProfile::Release => ProfileConfig::release(),
+            BuildProfile::Hardened => ProfileConfig::release(),
             BuildProfile::Debug => ProfileConfig::debug(),
             BuildProfile::Ci => ProfileConfig::ci(),
             BuildProfile::Named { config, .. } => config.clone(),
@@ -2838,6 +2848,7 @@ fn main() {
                                             .iter()
                                             .any(|a| a == "--show-default"),
                                         release: release_flag,
+                                        profile: named_profile.clone(),
                                         trace_tiers: jet_argv.iter().any(|a| a == "--trace-tiers"),
                                         measure: jet_argv.iter().any(|a| a == "--measure"),
                                         record: record_name.clone(),
@@ -3035,6 +3046,7 @@ fn main() {
                     update_snapshots,
                     coverage,
                     release,
+                    profile: named_profile.clone(),
                     trace_tiers,
                     filter,
                     shuffle_seed,

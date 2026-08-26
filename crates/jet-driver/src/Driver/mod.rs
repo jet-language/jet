@@ -62,10 +62,16 @@ pub fn guarantee_report(
     }
     dependencies.extend(loaded_dependencies);
 
-    let harden = package.is_some_and(|package| package.policy.harden);
-    let contained = package
-        .map(|package| package.policy.contained_dependencies(dependencies.iter()))
-        .unwrap_or_default();
+    let profile_hardened = profile == crate::Syntax::BUILD_PROFILE_HARDENED;
+    let manifest_hardened = package.is_some_and(|package| package.policy.harden);
+    let harden = profile_hardened || manifest_hardened;
+    let contained = if harden {
+        dependencies.iter().cloned().collect()
+    } else {
+        package
+            .map(|package| package.policy.contained_dependencies(dependencies.iter()))
+            .unwrap_or_default()
+    };
     let sentries_active = !freestanding && (profile != "release" || harden);
 
     let mut components = vec![GuaranteeComponent {
@@ -130,12 +136,21 @@ pub fn guarantee_report(
 
     let mut notes = Vec::new();
     if package.is_none() {
-        notes.push(
+        notes.push(if profile_hardened {
+            "single-file: hardened watches #Unsafe gates; no foreign dependencies are declared"
+                .to_string()
+        } else {
             "single-file: no package.jet; contain/harden unavailable; externs remain TRUSTED"
-                .to_string(),
-        );
+                .to_string()
+        });
     } else if harden && freestanding {
-        notes.push("harden: true requested, but freestanding has no runtime fence".to_string());
+        notes.push(if profile_hardened {
+            "hardened profile requested, but freestanding has no runtime fence".to_string()
+        } else {
+            "harden: true requested, but freestanding has no runtime fence".to_string()
+        });
+    } else if profile_hardened {
+        notes.push("hardened profile; every foreign dependency is fenced".to_string());
     } else if harden {
         notes.push("harden: true; every foreign dependency is fenced".to_string());
     } else if package.is_some_and(|package| !package.policy.contain.is_empty()) {
@@ -1394,6 +1409,15 @@ fn set_bundle_target(bundle: &mut crate::AST::ProgramBundle, cross_target: Optio
         .unwrap_or_else(jet_foundation::Layout::TargetLayout::host_triple);
 }
 
+/// D-MEM-SENTRY1: the named hardened profile is a command fact that tightens
+/// the same package guarantee consumed by AOT, JIT, and interpreter adapters.
+/// Engines never rediscover the profile or policy on their own.
+fn apply_profile_guarantees(bundle: &mut crate::AST::ProgramBundle, profile: &str) {
+    if profile == crate::Syntax::BUILD_PROFILE_HARDENED {
+        bundle.package_guarantees.harden = true;
+    }
+}
+
 fn seed_build_facts_from_stamp(
     bundle: &mut crate::AST::ProgramBundle,
     profile: &str,
@@ -1401,6 +1425,7 @@ fn seed_build_facts_from_stamp(
     computed_contributions: &[jet_foundation::Policy::FactContribution],
     stamp: &jet_foundation::Facts::BuildStamp,
 ) -> Result<(), Vec<Diagnostic>> {
+    apply_profile_guarantees(bundle, profile);
     let target_triple = if bundle.build_facts.target_triple.is_empty() {
         jet_foundation::Layout::TargetLayout::host_triple()
     } else {
@@ -6029,14 +6054,25 @@ pub fn compile_tests(
     file: &str,
     coverage: bool,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-    crate::run_compiler_work(|| compile_tests_on_compiler_stack(file, coverage))
+    compile_tests_with_profile(file, coverage, "dev")
+}
+
+/// Compile a test harness with the selected named profile.
+pub fn compile_tests_with_profile(
+    file: &str,
+    coverage: bool,
+    profile: &str,
+) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
+    crate::run_compiler_work(|| compile_tests_on_compiler_stack(file, coverage, profile))
 }
 
 fn compile_tests_on_compiler_stack(
     file: &str,
     coverage: bool,
+    profile: &str,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
+    apply_profile_guarantees(&mut bundle, profile);
     let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Test);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let _lints = classify_diagnostics(
@@ -6061,7 +6097,21 @@ pub fn compile_test_override(
     file: &str,
     coverage: bool,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-    compile_command_override(file, crate::Codegen::CommandOverrideKind::Test, coverage)
+    compile_test_override_with_profile(file, coverage, "dev")
+}
+
+/// Compile a command override with the selected named profile.
+pub fn compile_test_override_with_profile(
+    file: &str,
+    coverage: bool,
+    profile: &str,
+) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
+    compile_command_override(
+        file,
+        crate::Codegen::CommandOverrideKind::Test,
+        coverage,
+        profile,
+    )
 }
 
 /// D-TESTKIT1=A (c308 pass 2, gap #1): a CLI-level error selecting the `jet
@@ -6322,16 +6372,21 @@ fn compile_command_override(
     file: &str,
     kind: crate::Codegen::CommandOverrideKind,
     coverage: bool,
+    profile: &str,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-    crate::run_compiler_work(|| compile_command_override_on_compiler_stack(file, kind, coverage))
+    crate::run_compiler_work(|| {
+        compile_command_override_on_compiler_stack(file, kind, coverage, profile)
+    })
 }
 
 fn compile_command_override_on_compiler_stack(
     file: &str,
     kind: crate::Codegen::CommandOverrideKind,
     coverage: bool,
+    profile: &str,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
+    apply_profile_guarantees(&mut bundle, profile);
     swap_command_entry_point(&mut bundle, kind);
     let mode = match kind {
         crate::Codegen::CommandOverrideKind::Test => crate::Sema::CompileMode::TestOverride,
