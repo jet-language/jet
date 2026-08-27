@@ -165,7 +165,7 @@ Ballot titles or card ids only — do not create cards unless asked.
 ## Anti-goals
 
 - Not surface-audit (uniformity/outlier cosmetics without ontology)
-- Not field-audit (peer leave/stay competition)
+- Not gauntlet (measured peer competition)
 - Not mission-audit (philosophy scorecard alone)
 - Not “make everything look the same”
 - Not proposing a second mechanism for one semantic job

@@ -41,7 +41,8 @@ File id: `<skill>-YYYY-MM-DD`. Never overwrite another day's note.
 | Pragmatism Audit | `pragmatism-audit` | Finish real jobs across domains; default magic + reject/override |
 | Type-Unification Audit | `type-unification-audit` | Traits/tags/markers/keywords as types; phantom types, fact fragmentation, closed tables |
 | First-Principles Audit | `first-principles-audit` | Re-found one area: full-corpus + silhouette research → unifying model → exsum-led proposal + ballot slate |
-| Field Audit | `field-audit` | Leave/stay pressure + peer-strength gaps (one report) |
+| Gauntlet | `gauntlet` | Run the competitive corpus; measured win/parity/loss scoreboard + leave/stay peer gaps |
+| Gauntlet Architect | `gauntlet-architect` | Define or evolve the gauntlet corpus, matrix, and harness |
 | Surface Research | `surface-research` | Mine other languages for surface ideas |
 | Lessons Learned | `lessons-learned` | Peer failures Jet must not repeat |
 | Structure Cleanup | `structure-cleanup` | Structure-only cleanup, no behavior change |
@@ -64,7 +65,9 @@ are opt-in and outside this table.
 | Getting work done / domain friction / missing defaults / reject+override | **Pragmatism Audit** |
 | "Should X be a type?", marker/type disjointedness, phantom types, meta-type forward-compat | **Type-Unification Audit** |
 | "Rethink X from first principles", find the unifying idea, re-founding proposal + ballots | **First-Principles Audit** |
-| Leave language X / peer strengths Jet lacks | **Field Audit** |
+| Leave language X / peer strengths Jet lacks / are we winning / competitive scoreboard | **Gauntlet** |
+| Define, seed, or evolve the gauntlet corpus/matrix/harness | **Gauntlet Architect** |
+| Beginner-lens read of code, a diagnostic, or a doc | Global **rli5** skill via a Luna max subagent |
 | Mine languages for surface ideas | **Surface Research** |
 | Lineage / regrets / do-not-repeat | **Lessons Learned** |
 | Restructure files, no behavior change | **Structure Cleanup** |

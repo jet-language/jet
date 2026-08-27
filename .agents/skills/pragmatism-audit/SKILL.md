@@ -23,7 +23,7 @@ framework polish. Improve the skill when a run exposes a missing lens.
 | --- | --- |
 | “Can I finish the job without fighting the language?” | Mission/philosophy scorecard alone (`mission-audit`) |
 | Domain workloads: games, UI, science, CLI, net, embed, data, tooling | Surface uniformity cosmetics (`surface-audit`) |
-| Beginner magic **with** expert reject + override | Peer leave/stay competition (`field-audit`) |
+| Beginner magic **with** expert reject + override | Peer leave/stay competition (`gauntlet`) |
 | Defaults that match the most likely use case | Spec text vs code only (`spec-compliance-audit`) |
 
 Authority order: owner instruction → ratified Tower verdicts →
@@ -166,7 +166,7 @@ Ballot titles or card ids only — do not create cards unless asked.
 ## Anti-goals
 
 - Not “add every Rust derive marker”
-- Not peer popularity or trust (`field-audit`)
+- Not peer popularity or trust (`gauntlet`)
 - Not ontology unity for its own sake (`isomorphic-ontology-audit`)
 - Not inventing parallel mechanisms for one semantic job (I8)
 - Not lowering safety to look pragmatic (I1)
