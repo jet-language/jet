@@ -1,0 +1,21 @@
+{
+  "name": "sieve",
+  "tier": "micro",
+  "cells": ["numerics.int-kernel"],
+  "mode": "batch",
+  "perf": true,
+  "languages": ["jet", "rust", "python", "c", "zig"],
+  "spec": {
+    "behavior": "Given N, compute all primes strictly below N with a byte sieve of Eratosthenes, then print the number of primes and the largest such prime.",
+    "args": ["10000000"],
+    "fixtureGen": null,
+    "expected": "expected.out"
+  },
+  "authoring": {
+    "jet": {"author": "luna-max", "turns": 12, "retries": 16, "diagnosticsHit": ["E1803: application authority is undecided for `Exec, IO, Mem.Alloc`", "E1803: application authority is undecided for `IO, Mem.Alloc`", "E1803: application authority is undecided for `Exec`", "timeout after 90s with temporary authority-enabled package at N=10000000", "rustc E0308: generated SieveArgs equal/compare/encode returned Result where plain values were expected", "E2105: can't find the file `main.jet`", "E0107: nothing named `n` exists here"], "notes": "Replaced typed #CLI args with process.argv(). AOT built binary produced canonical output at N=10000000 and matched expected.out byte-for-byte. Default `jet run main.jet -- 1000` returned `count 0` / `largest 0`; temporary argv probe showed JIT/deopt received only `argc 1` (`jet`) while a same-package probe received argc 3."},
+    "rust": {"author": "luna-max", "turns": 2, "retries": 0, "diagnosticsHit": [], "notes": ""},
+    "python": {"author": "luna-max", "turns": 2, "retries": 0, "diagnosticsHit": [], "notes": ""},
+    "c": {"author": "luna-max", "turns": 2, "retries": 0, "diagnosticsHit": [], "notes": ""},
+    "zig": {"author": "luna-max", "turns": 4, "retries": 2, "diagnosticsHit": ["error: root source file struct 'process' has no member named 'argsAlloc'", "error: root source file struct 'fs' has no member named 'File'"], "notes": "Zig 0.16 uses Init.Minimal.args.toSlice and Io.File.Writer instead of legacy APIs."}
+  }
+}

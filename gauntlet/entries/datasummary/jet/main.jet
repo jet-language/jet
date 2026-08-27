@@ -1,0 +1,53 @@
+use core.files as files
+use core.process as process
+use core.sys as sys
+use core.text.fmt as fmt
+use core.math as math
+
+fn mean(values: [Float]) Float -> {
+    total := Float{0.0}
+    loop value in values -> total += value
+    return total / Float.from_int(values.len())
+}
+
+fn summary(values: [Float]) String -> {
+    sorted := values.copy()
+    sorted.sort_by((value: Float) -> math.round(value * Float{1000.0}))
+    n := sorted.len()
+    avg :: mean(values)
+    median :: sorted[(n - 1) /% 2]
+    p95 :: sorted[((19 * n + 19) /% 20) - 1]
+    squared := Float{0.0}
+    loop value in values {
+        delta :: value - avg
+        squared += delta * delta
+    }
+    sd :: math.sqrt(squared / Float.from_int(n))
+    return "n={n} mean={fmt.decimal(avg, 2)} median={fmt.decimal(median, 2)} p95={fmt.decimal(p95, 2)} sd={fmt.decimal(sd, 2)}"
+}
+
+fn run() {
+    args :: process.argv()
+    cwd :: sys.current_dir() ?? "."
+    path :: Path.from(cwd).join(args.get(1) ?? "measurements.csv").to_string()
+    text :: files.read(path) ?? panic("read failed")
+    groups := [String:[Float]]{}
+    loop line in text.lines() {
+        if line == "group,value" -> next
+        fields :: line.split(",").to_list()
+        group :: fields.get(0) ?? ""
+        value :: Float.parse(fields.get(1) ?? "") ?? 0.0
+        values := groups.get(group) ?? [Float]{}
+        values.push(value)
+        groups[group] = values
+    }
+    names := groups.keys().to_list()
+    names.sort()
+    all := [Float]{}
+    loop name in names {
+        values :: groups.get(name) ?? [Float]{}
+        loop value in values -> all.push(value)
+        print("{name} {summary(values)}")
+    }
+    print("overall n={all.len()} mean={fmt.decimal(mean(all), 2)}")
+}

@@ -1,0 +1,39 @@
+use core.files as fs
+use core.process as process
+use core.sys as env
+
+fn run() {
+    args :: process.argv()
+    dir :: args.get(1) ?? "photos"
+    cwd :: env.current_dir() ?? panic("cannot resolve directory")
+    root :: Path.from(cwd).join(dir).to_string()
+    entries :: fs.list_dir(root) ?? panic("cannot list directory")
+    photos := [String]{}
+    files := 0
+    loop entry in entries {
+        if !entry.is_dir {
+            files += 1
+            if entry.name.starts_with("IMG_") && entry.name.ends_with(".jpeg") {
+                raw :: entry.name.after("IMG_").before(".jpeg")
+                if raw.is_numeric() {
+                    number :: Int.parse(raw) ?? panic("bad image number")
+                    key :: "{number}".pad_start(5, "0")
+                    photos.push("{key}|{entry.name}|{entry.path}")
+                }
+            }
+        }
+    }
+    photos.sort()
+    index := 1
+    loop photo in photos {
+        fields :: photo.split("|").to_list()
+        name :: fields[1]
+        path :: fields[2]
+        index_text :: "{index}".pad_start(4, "0")
+        destination :: Path.from(root).join("photo-{index_text}.jpg")
+        fs.rename(path, destination.to_string()) ?? panic("cannot rename photo")
+        print("renamed {name} -> photo-{index_text}.jpg")
+        index += 1
+    }
+    print("renamed {photos.len()} skipped {files - photos.len()}")
+}

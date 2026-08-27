@@ -1,0 +1,19 @@
+{
+  "name": "tzreport",
+  "tier": "script",
+  "cells": ["time.script", "time.notebook"],
+  "mode": "batch",
+  "perf": false,
+  "languages": ["jet", "python", "rust"],
+  "spec": {
+    "behavior": "Read named meetings with RFC3339 timestamps carrying explicit numeric offsets, normalize them to UTC, sort by UTC instant, print each meeting's UTC RFC3339 form, UTC weekday, and minute gap from its predecessor, then print total span and meeting count.",
+    "args": ["meetings.txt"],
+    "fixtureGen": null,
+    "expected": "expected.out"
+  },
+  "authoring": {
+    "jet": {"author": "luna-max", "turns": 7, "retries": 6, "diagnosticsHit": ["E2105: can't find the file `jet/main.jet`", "E0124: this `if`'s branches produce different types: Int (a whole number) and `Fraction`", "L0507: prefer an ordered arm table for this branch", "E0956: `for-in method collection` isn't supported by the current evaluator yet", "E3001: `panic: read meetings`", "E1803: application authority is undecided for `Env`", "E0956: ``core.time.parse_rfc3339()`` isn't supported by the current evaluator yet"], "notes": "AOT build and run pass expected.out. Default `jet run` remains blocked by evaluator E0956 on core.time.parse_rfc3339 after whole-file FS fallback fixed the streaming evaluator gap; no manual duplicate timestamp parser was added. sys.current_dir required Env authority."},
+    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses datetime.fromisoformat and timezone conversion."},
+    "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Hand-parses RFC3339 and implements civil-date conversion and weekday arithmetic because Rust std has no datetime API."}
+  }
+}
