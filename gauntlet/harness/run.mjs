@@ -59,30 +59,47 @@ async function exists(file) {
   }
 }
 
-async function runProcess(cwd, args, { input = undefined, full = false } = {}) {
+const DEFAULT_TIMEOUT_MS = 300_000;
+
+async function runProcess(cwd, args, { input = undefined, full = false, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   return new Promise((resolve) => {
     const child = spawn(envRunner, [...(full ? ["full"] : []), "sh", "-c", args.map(shellQuote).join(" ")], {
       cwd,
       env: process.env,
       stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+      detached: true,
     });
     const stdout = [];
     const stderr = [];
+    let timedOut = false;
+    const killTree = () => {
+      timedOut = true;
+      try { process.kill(-child.pid, "SIGKILL"); } catch {}
+      try { child.kill("SIGKILL"); } catch {}
+    };
+    const deadline = timeoutMs > 0 ? setTimeout(killTree, timeoutMs) : null;
     child.stdout.on("data", (chunk) => stdout.push(chunk));
     child.stderr.on("data", (chunk) => stderr.push(chunk));
-    child.on("error", (error) => resolve({ code: 127, stdout: Buffer.concat(stdout), stderr: Buffer.from(String(error)) }));
-    child.on("close", (code, signal) => resolve({
-      code: code ?? 128,
-      signal,
-      stdout: Buffer.concat(stdout),
-      stderr: Buffer.concat(stderr),
-    }));
+    child.on("error", (error) => {
+      clearTimeout(deadline);
+      resolve({ code: 127, stdout: Buffer.concat(stdout), stderr: Buffer.from(String(error)), timedOut });
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(deadline);
+      resolve({
+        code: timedOut ? 124 : (code ?? 128),
+        signal,
+        stdout: Buffer.concat(stdout),
+        stderr: timedOut ? Buffer.from(`timeout after ${timeoutMs / 1000}s`) : Buffer.concat(stderr),
+        timedOut,
+      });
+    });
     if (input !== undefined) child.stdin.end(input);
   });
 }
 
-async function timedProcess(cwd, args, { full = false } = {}) {
-  const result = await runProcess(cwd, ["python3", timer, "--", ...args], { full });
+async function timedProcess(cwd, args, { full = false, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  const result = await runProcess(cwd, ["python3", timer, "--", ...args], { full, timeoutMs });
   let sample;
   try {
     sample = JSON.parse(result.stdout.toString("utf8").trim());
@@ -284,18 +301,18 @@ function runCommand(language, sourceDir, artifact, args) {
   return [artifact, ...args];
 }
 
-async function verify(cwd, command, expected, { full = false } = {}) {
-  const result = await runProcess(cwd, command, { full });
+async function verify(cwd, command, expected, { full = false, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  const result = await runProcess(cwd, command, { full, timeoutMs });
   const error = mismatch(expected, result.stdout);
   if (result.code !== 0) return `exit ${result.code}${result.stderr ? `: ${result.stderr.toString("utf8").trim().slice(0, 300)}` : ""}`;
   return error;
 }
 
-async function verifySequence(cwd, commands, expected, reset = null, { full = false } = {}) {
+async function verifySequence(cwd, commands, expected, reset = null, { full = false, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   if (reset) await reset();
   const output = [];
   for (const command of commands) {
-    const result = await runProcess(cwd, command, { full });
+    const result = await runProcess(cwd, command, { full, timeoutMs });
     output.push(result.stdout);
     if (result.code !== 0) return `exit ${result.code}${result.stderr ? `: ${result.stderr.toString("utf8").trim().slice(0, 300)}` : ""}`;
   }
@@ -737,12 +754,13 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
   const tiers = {};
   if (jetRow && jetRow.status === "ok") {
     const jetDir = path.join(entryStage, "jet");
+    const TIER_TIMEOUT_MS = 180_000;
     for (const tier of ["run", "dev"]) {
       if (tier === "dev" && !dev) continue;
       const tierArgs = entry.mode === "batch-steps" ? (entry.spec?.steps ?? []).map((args) => tier === "run" ? [jetBin, "run", "main.jet", "--", ...args] : [jetBin, "dev", "--watch=off", "main.jet", "--", ...args]) : null;
       const command = tierArgs ?? (tier === "run" ? [jetBin, "run", "main.jet", "--", ...(entry.spec?.args ?? [])] : [jetBin, "dev", "--watch=off", "main.jet", "--", ...(entry.spec?.args ?? [])]);
       const tierRow = { command };
-      const tierVerification = tierArgs ? await verifySequence(jetDir, tierArgs, expected, resets.jet) : await verify(jetDir, command, expected);
+      const tierVerification = tierArgs ? await verifySequence(jetDir, tierArgs, expected, resets.jet, { timeoutMs: TIER_TIMEOUT_MS }) : await verify(jetDir, command, expected, { timeoutMs: TIER_TIMEOUT_MS });
       if (tierVerification) {
         tierRow.status = "broken";
         tierRow.reason = tierVerification;
@@ -813,7 +831,9 @@ async function main() {
   const { loaded, skipped } = await loadEntries(entriesDir, options.entry);
   const results = [];
   for (const item of loaded) {
+    console.error(`gauntlet: entry ${item.entry.name} [${(item.entry.languages ?? []).join(",")}] ...`);
     results.push(await stageEntry(item.dir, item.entry, runDir, jetBin, options.runs, dev));
+    console.error(`gauntlet: entry ${item.entry.name} done`);
   }
   const covered = new Set(results.flatMap((result) => result.entry.cells ?? []));
   const uncovered = (matrix.cells ?? []).map((cell) => cell.id).filter((id) => !covered.has(id));
