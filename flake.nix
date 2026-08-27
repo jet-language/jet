@@ -120,6 +120,10 @@
             pkgs.nodejs_22
             # agent_workloads / verify-full adapters shell out to python3.
             pkgs.python3
+            # gauntlet competitive-corpus rails (owner-approved 2026-08-27):
+            # Zig on perf entries, Go as the services incumbent.
+            pkgs.zig
+            pkgs.go
             pkgs.nixfmt
             pkgs.ripgrep
             pkgs.jq

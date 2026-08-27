@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "approved": "owner chat 2026-08-27: seed matrix approved; net-services and long-lived web app mandatory coverage; systems-embedded may stay uncovered for now; zig+go rails added to flake; nbody expert pair in seed",
+  "personas": [
+    { "id": "novice", "name": "True novice", "description": "First programming language; no prior mental model." },
+    { "id": "student", "name": "Student", "description": "One semester of another language; knows variables and loops." },
+    { "id": "generalist", "name": "Working generalist", "description": "Product engineer shipping features across the stack." },
+    { "id": "switcher-py", "name": "Python switcher", "description": "Fluent Python; expects batteries and low ceremony." },
+    { "id": "switcher-sys", "name": "Systems switcher", "description": "Rust/C engineer; expects control, predictable performance, and auditability." },
+    { "id": "analyst", "name": "Data analyst", "description": "Code is a tool, not the job; exploration and one-shot answers." },
+    { "id": "agent", "name": "Unattended coding agent", "description": "Closed loop with a machine oracle: read, edit, check, repeat. Authoring cost and diagnostics-hit are its metrics." }
+  ],
+  "domains": [
+    { "id": "text", "name": "Text processing" },
+    { "id": "formats", "name": "Data formats (JSON, CSV, binary)" },
+    { "id": "numerics", "name": "Numerics and math" },
+    { "id": "files", "name": "Files and automation" },
+    { "id": "time", "name": "Time and calendars" },
+    { "id": "concurrency", "name": "Concurrency and parallelism" },
+    { "id": "cli", "name": "CLI tooling" },
+    { "id": "webfront", "name": "Web frontend" },
+    { "id": "netserv", "name": "Networked services" },
+    { "id": "embedded", "name": "Systems and embedded" }
+  ],
+  "taskKinds": [
+    "application",
+    "cli",
+    "service",
+    "web",
+    "embedded",
+    "data-numeric",
+    "scripting",
+    "notebook"
+  ],
+  "cells": [
+    { "id": "text.kernel", "domain": "text", "kind": "data-numeric", "personas": ["switcher-sys", "generalist", "agent"], "description": "String/hash-heavy kernels: frequency counts, scanning." },
+    { "id": "text.regex-kernel", "domain": "text", "kind": "data-numeric", "personas": ["switcher-sys", "agent"], "description": "Regex-driven scanning over large text." },
+    { "id": "text.report-cli", "domain": "text", "kind": "cli", "personas": ["generalist", "agent"], "description": "Stream a large log, aggregate, render a report." },
+    { "id": "text.script", "domain": "text", "kind": "scripting", "personas": ["student", "switcher-py"], "description": "One-shot text munging." },
+    { "id": "formats.binary-kernel", "domain": "formats", "kind": "data-numeric", "personas": ["switcher-sys", "agent"], "description": "Binary record parsing and checksums." },
+    { "id": "formats.csv-cli", "domain": "formats", "kind": "cli", "personas": ["generalist", "analyst", "agent"], "description": "CSV filter/aggregate/emit pipeline." },
+    { "id": "formats.json-app", "domain": "formats", "kind": "application", "personas": ["generalist", "agent"], "description": "JSON-backed persistent application state." },
+    { "id": "numerics.float-kernel", "domain": "numerics", "kind": "data-numeric", "personas": ["switcher-sys", "student", "agent"], "description": "Floating-point simulation kernels (n-body class)." },
+    { "id": "numerics.int-kernel", "domain": "numerics", "kind": "data-numeric", "personas": ["switcher-sys", "student", "agent"], "description": "Integer/array kernels (sieve class)." },
+    { "id": "numerics.script", "domain": "numerics", "kind": "scripting", "personas": ["analyst", "switcher-py"], "description": "Descriptive statistics as a one-shot script." },
+    { "id": "numerics.notebook", "domain": "numerics", "kind": "notebook", "personas": ["analyst"], "description": "Exploratory incremental analysis loop." },
+    { "id": "files.script", "domain": "files", "kind": "scripting", "personas": ["novice", "switcher-py", "agent"], "description": "Glob/walk/rename bulk file automation." },
+    { "id": "files.orchestration", "domain": "files", "kind": "application", "personas": ["generalist", "agent"], "description": "Process spawning, pipelines, timeouts." },
+    { "id": "time.script", "domain": "time", "kind": "scripting", "personas": ["generalist", "analyst"], "description": "Timezone/duration/calendar computation." },
+    { "id": "time.notebook", "domain": "time", "kind": "notebook", "personas": ["analyst"], "description": "Interactive calendar exploration." },
+    { "id": "concurrency.app", "domain": "concurrency", "kind": "application", "personas": ["switcher-sys", "generalist", "agent"], "description": "Structured task fan-out over real work." },
+    { "id": "concurrency.service", "domain": "concurrency", "kind": "service", "personas": ["switcher-sys", "agent"], "description": "Long-lived concurrent worker (queue/scheduler)." },
+    { "id": "cli.app", "domain": "cli", "kind": "cli", "personas": ["novice", "generalist", "agent"], "description": "Typed-args CRUD CLI application." },
+    { "id": "webfront.widget", "domain": "webfront", "kind": "web", "personas": ["student", "generalist"], "description": "Finite wasm widget with JS bridge." },
+    { "id": "webfront.app", "domain": "webfront", "kind": "application", "personas": ["generalist", "agent"], "description": "Long-lived interactive DOM application." },
+    { "id": "netserv.client", "domain": "netserv", "kind": "cli", "personas": ["generalist", "agent"], "description": "HTTP client: fetch, parse, report." },
+    { "id": "netserv.service", "domain": "netserv", "kind": "service", "personas": ["generalist", "switcher-sys", "agent"], "description": "Long-lived HTTP JSON service under load." },
+    { "id": "embedded.kernel", "domain": "embedded", "kind": "embedded", "personas": ["switcher-sys"], "description": "Resource-bounded systems target." },
+    { "id": "embedded.data", "domain": "embedded", "kind": "data-numeric", "personas": ["switcher-sys"], "description": "Fixed-memory data processing." }
+  ],
+  "rails": {
+    "always": ["rust", "python"],
+    "perf": ["c", "zig"],
+    "incumbents": { "webfront": "js", "netserv": "go" }
+  }
+}
