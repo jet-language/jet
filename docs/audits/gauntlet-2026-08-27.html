@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Jet Gauntlet — 2026-08-27</title>
+<style>
+  :root {
+    --bg:#141413; --panel:#1c1c1a; --panel-2:#242421; --line:#383832;
+    --ivory:#f2eee4; --soft:#c8c1b4; --muted:#999286;
+    --clay:#e08a64; --olive:#a4bc7d; --rust:#ef796b; --deep-rust:#6e2723;
+    --amber:#e6ad62; --sky:#7faabd;
+    --serif:ui-serif,Georgia,"Times New Roman",serif;
+    --sans:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  }
+  * { box-sizing:border-box; }
+  html { background:var(--bg); color-scheme:dark; }
+  body { margin:0; min-height:100vh; background:var(--bg); color:var(--ivory); font:15px/1.55 var(--sans); -webkit-font-smoothing:antialiased; }
+  .page { max-width:1420px; margin:auto; padding:54px 28px 90px; }
+  header { padding-bottom:38px; border-bottom:1px solid var(--line); }
+  .eyebrow,.kicker,.label,.legend,.note-label { font:600 11px/1.35 var(--mono); letter-spacing:.1em; text-transform:uppercase; }
+  .eyebrow { color:var(--clay); display:flex; align-items:center; gap:9px; }
+  .eyebrow::before { content:""; width:20px; height:2px; background:var(--clay); }
+  h1,h2,h3 { font-family:var(--serif); font-weight:400; margin:0; }
+  h1 { max-width:970px; margin-top:15px; font-size:clamp(38px,6vw,70px); line-height:.98; letter-spacing:-.035em; }
+  .headline { max-width:1130px; margin:24px 0 0; padding-left:18px; border-left:3px solid var(--rust); color:var(--soft); font-size:clamp(16px,2vw,21px); line-height:1.45; }
+  .headline strong { color:var(--ivory); }
+  .run-note { margin:18px 0 0; color:var(--muted); font:12px/1.6 var(--mono); }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:30px; }
+  .stat { min-height:142px; padding:21px 22px; border:1px solid var(--line); border-radius:14px; background:var(--panel); position:relative; overflow:hidden; }
+  .stat::before { content:""; position:absolute; inset:0 0 auto; height:3px; background:var(--line); }
+  .stat.warn::before { background:var(--amber); } .stat.fail::before { background:var(--rust); } .stat.info::before { background:var(--sky); }
+  .stat-value { margin-top:12px; font:400 44px/1 var(--serif); letter-spacing:-.025em; }
+  .stat-label { margin-top:12px; color:var(--muted); font:600 10px/1.35 var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+  .stat-detail { margin-top:6px; color:var(--soft); font:11px/1.35 var(--mono); }
+  section { scroll-margin-top:24px; margin-top:68px; }
+  .section-head { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:18px; }
+  h2 { font-size:clamp(29px,4vw,42px); line-height:1.05; letter-spacing:-.025em; }
+  .section-copy { max-width:660px; margin:8px 0 0; color:var(--soft); }
+  .section-count { color:var(--muted); white-space:nowrap; font:11px var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+  .panel { border:1px solid var(--line); border-radius:14px; background:var(--panel); overflow:hidden; }
+  .table-scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; }
+  caption { text-align:left; padding:14px 17px; color:var(--muted); font:11px/1.45 var(--mono); }
+  th { padding:12px 14px; text-align:left; color:var(--muted); background:var(--panel-2); border-bottom:1px solid var(--line); font:600 10px/1.35 var(--mono); letter-spacing:.075em; text-transform:uppercase; white-space:nowrap; }
+  td { padding:12px 14px; color:var(--soft); border-bottom:1px solid rgba(56,56,50,.68); vertical-align:top; }
+  tr:last-child td { border-bottom:0; }
+  tbody tr:hover td { background:rgba(255,255,255,.022); }
+  td:first-child { color:var(--ivory); }
+  code,.mono { font-family:var(--mono); font-size:.92em; }
+  .loss-id { font:700 12px var(--mono); }
+  .loss-table tr.compiler td:first-child { box-shadow:inset 4px 0 var(--rust); }
+  .loss-table tr.perf td:first-child { box-shadow:inset 4px 0 var(--amber); }
+  .loss-table tr.surface td:first-child { box-shadow:inset 4px 0 var(--muted); }
+  .loss-table .card { color:var(--clay); font-family:var(--mono); white-space:nowrap; }
+  .severity { display:inline-flex; margin-top:6px; padding:3px 7px; border-radius:5px; font:700 9px var(--mono); letter-spacing:.07em; text-transform:uppercase; }
+  .severity.compiler { color:#ffb0a8; background:rgba(239,121,107,.15); }
+  .severity.perf { color:#ffd092; background:rgba(230,173,98,.13); }
+  .severity.surface { color:#cbc5bb; background:rgba(153,146,134,.13); }
+  .cross-check { margin:14px 0 0; padding:14px 16px; border-left:3px solid var(--rust); background:rgba(239,121,107,.07); color:var(--soft); }
+  .legend { display:flex; flex-wrap:wrap; gap:14px; color:var(--muted); }
+  .key { display:inline-flex; align-items:center; gap:6px; }
+  .swatch { width:10px; height:10px; border-radius:3px; }
+  .scoreboard th:not(:first-child),.scoreboard td:not(:first-child) { text-align:right; }
+  .scoreboard td { white-space:nowrap; font-family:var(--mono); font-size:12px; }
+  .scoreboard td:first-child { position:sticky; left:0; z-index:1; background:var(--panel); font-family:var(--sans); white-space:nowrap; }
+  .scoreboard th:first-child { position:sticky; left:0; z-index:2; }
+  .scoreboard .best { color:#d9efb6; background:rgba(164,188,125,.16); font-weight:700; }
+  .scoreboard .parity { color:#d2cdc4; background:rgba(153,146,134,.15); }
+  .scoreboard .slow { color:#ffaaa0; background:rgba(239,121,107,.11); }
+  .scoreboard .broken { color:#ffd0ca; background:var(--deep-rust); font-weight:800; letter-spacing:.05em; }
+  .scoreboard .empty { color:#666057; }
+  .scoreboard .verdict { min-width:230px; text-align:left!important; white-space:normal; font-family:var(--sans); }
+  .expert td:first-child::after { content:"expert"; margin-left:7px; padding:2px 5px; color:var(--sky); border:1px solid rgba(127,170,189,.35); border-radius:4px; font:8px var(--mono); text-transform:uppercase; }
+  .tier-summary { display:grid; grid-template-columns:190px 1fr; gap:14px; margin-bottom:14px; }
+  .pass-card { display:grid; place-items:center; min-height:150px; padding:20px; text-align:center; background:linear-gradient(145deg,rgba(239,121,107,.13),rgba(28,28,26,.2)); border:1px solid rgba(239,121,107,.35); border-radius:14px; }
+  .pass-card strong { font:400 58px/1 var(--serif); color:var(--rust); }
+  .pass-card span { color:var(--soft); font:10px var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+  .tier-statement { display:flex; align-items:center; padding:24px; border:1px solid var(--line); border-radius:14px; background:var(--panel); color:var(--soft); font-size:18px; }
+  .status { display:inline-block; min-width:78px; padding:4px 8px; border-radius:5px; text-align:center; font:700 9px var(--mono); letter-spacing:.07em; text-transform:uppercase; }
+  .status.pass { color:#d9efb6; background:rgba(164,188,125,.17); }
+  .status.fail { color:#ffaaa0; background:rgba(239,121,107,.14); }
+  .status.broken { color:#ffd0ca; background:var(--deep-rust); }
+  .status.shipped { color:#d9efb6; background:rgba(164,188,125,.17); }
+  .status.measured { color:#ffe0b6; background:rgba(230,173,98,.15); }
+  .cell-id { color:var(--muted); font:11px var(--mono); }
+  .split { display:grid; grid-template-columns:minmax(350px,.78fr) minmax(680px,1.55fr); gap:14px; align-items:start; }
+  .subhead { display:flex; justify-content:space-between; align-items:baseline; padding:20px 20px 5px; }
+  h3 { font-size:23px; }
+  .callout { margin:0; padding:17px 20px; border-top:1px solid var(--line); color:var(--soft); }
+  .wins-table td:first-child { color:#d9efb6; }
+  .badge-group { display:flex; gap:6px; flex-wrap:wrap; }
+  .advisory-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(400px,1.1fr); gap:14px; }
+  .advisory-copy { padding:25px; }
+  .advisory-copy h3 { margin-bottom:14px; }
+  .advisory-copy p { color:var(--soft); margin:0 0 14px; }
+  .advisory-copy p:last-child { margin-bottom:0; }
+  .cost-chart { padding:25px; border-color:rgba(239,121,107,.45); background:linear-gradient(145deg,#251b19,var(--panel) 52%); }
+  .cost-chart .kicker { color:var(--rust); }
+  .cost-chart h3 { margin:6px 0 2px; font-size:31px; }
+  .damning { margin:0 0 23px; color:#ffb6ad; }
+  .bar-row { display:grid; grid-template-columns:72px 1fr 52px; align-items:center; gap:10px; margin:12px 0; }
+  .bar-label { color:var(--soft); font:11px var(--mono); text-transform:uppercase; }
+  .bar-track { height:25px; background:#11110f; border:1px solid var(--line); border-radius:5px; overflow:hidden; }
+  .bar-fill { height:100%; min-width:3px; background:var(--muted); }
+  .bar-row.jet .bar-fill { background:linear-gradient(90deg,var(--rust),var(--clay)); }
+  .bar-row.jet .bar-label,.bar-row.jet .bar-value { color:#ffb0a8; font-weight:800; }
+  .bar-value { text-align:right; font:12px var(--mono); color:var(--ivory); }
+  .cost-meta { margin-top:20px; padding-top:17px; border-top:1px solid var(--line); color:var(--muted); font:11px/1.7 var(--mono); }
+  .cost-meta strong { color:var(--soft); }
+  .territory { display:grid; grid-template-columns:minmax(260px,.7fr) minmax(520px,1.3fr); gap:14px; }
+  .territory-copy { padding:25px; }
+  .territory-list { display:flex; flex-wrap:wrap; gap:8px; margin:17px 0; }
+  .territory-list code { padding:7px 9px; color:var(--amber); border:1px solid rgba(230,173,98,.3); border-radius:6px; background:rgba(230,173,98,.07); }
+  .assumption { margin:24px 0 0; padding-top:20px; border-top:1px solid var(--line); color:var(--soft); }
+  footer { margin-top:60px; padding-top:20px; border-top:1px solid var(--line); display:flex; justify-content:space-between; gap:20px; color:var(--muted); font:10px/1.6 var(--mono); }
+  @media (max-width:1200px) { .split { grid-template-columns:1fr; } }
+  @media (max-width:900px) { .advisory-grid,.territory { grid-template-columns:1fr; } }
+  @media (max-width:768px) {
+    .page { padding:36px 16px 60px; }
+    .stats { grid-template-columns:repeat(2,1fr); }
+    .section-head { align-items:flex-start; flex-direction:column; gap:8px; }
+    .tier-summary { grid-template-columns:1fr; }
+    .pass-card { min-height:120px; }
+    .tier-statement { font-size:16px; }
+    td,th { padding:10px 11px; }
+    footer { flex-direction:column; }
+  }
+  @media (max-width:460px) { .stats { grid-template-columns:1fr; } .stat { min-height:120px; } .advisory-grid { display:block; } .advisory-grid > *+* { margin-top:14px; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <header id="overview">
+    <div class="eyebrow">JET GAUNTLET / 2026-08-27</div>
+    <h1>First full run of the competitive corpus</h1>
+    <p class="headline"><strong>Jet's AOT tier is competitive and its stdlib depth wins real LOC battles</strong> — but the default tier fails 13 of 15 probed entries, one derive bug poisoned five entries, and unmeasured hot paths lose by 6–460×. Sixteen cards minted (#2249–#2264).</p>
+    <p class="run-note">One machine · one binary · run id 20260827-1666061-class · 7 languages · shipped artifacts only · medians, same-run ratios</p>
+    <div class="stats" aria-label="Run summary">
+      <article class="stat"><div class="label">Corpus</div><div class="stat-value">17</div><div class="stat-label">entries</div></article>
+      <article class="stat info"><div class="label">Coverage</div><div class="stat-value">62</div><div class="stat-label">implementation cells</div></article>
+      <article class="stat warn"><div class="label">Action</div><div class="stat-value">16</div><div class="stat-label">losses carded</div><div class="stat-detail">#2249–#2264</div></article>
+      <article class="stat fail"><div class="label">Broken</div><div class="stat-value">2</div><div class="stat-label">Jet cells</div><div class="stat-detail">nbody · web-widget</div></article>
+    </div>
+  </header>
+
+  <section id="losses" aria-labelledby="losses-title">
+    <div class="section-head"><div><div class="kicker">Start here</div><h2 id="losses-title">Sixteen losses, already owned</h2><p class="section-copy">Compiler failures dominate the top of the queue. Performance losses follow; then bounded surface gaps.</p></div><div class="section-count">L1–L16 · #2249–#2264</div></div>
+    <div class="panel table-scroll">
+      <table class="loss-table">
+        <thead><tr><th>Finding</th><th>Loss</th><th>Measured evidence</th><th>Card</th></tr></thead>
+        <tbody>
+          <tr class="compiler"><td><span class="loss-id">L1</span><br><span class="severity compiler">compiler bug</span></td><td><code>#CLI</code>/<code>#Codable</code> derive codegen ICEs (rustc E0308 leak, I2)</td><td>nbody Jet cell unbuildable; 4 more entries forced dodges</td><td class="card">#2249</td></tr>
+          <tr class="compiler"><td><span class="loss-id">L2</span><br><span class="severity compiler">compiler bug</span></td><td>Run tiers drop program argv after <code>--</code></td><td>sieve computed <code>count 0</code>; taskfile blank; http-service lost its port</td><td class="card">#2250</td></tr>
+          <tr class="compiler"><td><span class="loss-id">L3</span><br><span class="severity compiler">compiler bug</span></td><td>Default tier silent false success (exit 0, empty stdout)</td><td>datasummary, web-app, taskfile</td><td class="card">#2251</td></tr>
+          <tr class="compiler"><td><span class="loss-id">L4</span><br><span class="severity compiler">compiler bug</span></td><td>Default tier fails 13/15 probed entries</td><td>6× timeout &gt;180s, 4× E0956, 2× wrong output, 2× warning-fatal</td><td class="card">#2250–#2252, #2264</td></tr>
+          <tr class="compiler"><td><span class="loss-id">L5</span><br><span class="severity compiler">compiler bug</span></td><td>Warnings are fatal on run tier</td><td>http-client exits 1 on L0103; http-service on L0202; AOT warns and proceeds</td><td class="card">#2264</td></tr>
+          <tr class="perf"><td><span class="loss-id">L6</span><br><span class="severity perf">performance</span></td><td>Byte-wise Reader hot path</td><td>binparse AOT <strong>20.66s vs C 45ms (460×)</strong>, Rust 5.5ms, Python 602ms</td><td class="card">#2253</td></tr>
+          <tr class="perf"><td><span class="loss-id">L7</span><br><span class="severity perf">performance</span></td><td>AOT hot-loop codegen</td><td>sieve 133ms vs Rust 8.2ms (<strong>16×</strong>); wordfreq 353ms vs Zig 25ms (<strong>14×</strong>)</td><td class="card">#2254</td></tr>
+          <tr class="perf"><td><span class="loss-id">L8</span><br><span class="severity perf">performance</span></td><td>HTTP service per-request latency</td><td>Jet 1.158ms median vs Go 0.073 (<strong>16×</strong>), Rust 0.136, Python 0.174</td><td class="card">#2255</td></tr>
+          <tr class="perf"><td><span class="loss-id">L9</span><br><span class="severity perf">performance</span></td><td>Regex scanning</td><td>180ms vs hand-rolled std-Rust 43ms (<strong>4.2×</strong>), Python <code>re</code> 141ms</td><td class="card">#2256</td></tr>
+          <tr class="surface"><td><span class="loss-id">L10</span><br><span class="severity surface">surface</span></td><td>Missing format specifiers</td><td>binparse 67 LOC vs 21–25 peers; hand-rolled <code>%.6f</code> and <code>%016x</code> in 3 entries</td><td class="card">#2257</td></tr>
+          <tr class="surface"><td><span class="loss-id">L11</span><br><span class="severity surface">surface</span></td><td>Bytes surface gaps (<code>read_f64_le</code>, bytes compare, wrapping u64)</td><td>+25 LOC in binparse alone</td><td class="card">#2258</td></tr>
+          <tr class="surface"><td><span class="loss-id">L12</span><br><span class="severity surface">surface</span></td><td>Authority ceremony for trivial programs</td><td>print+argv ⇒ <code>[IO, Mem.Alloc, Exec]</code>; E1803 one effect at a time; sieve burned 9 retries</td><td class="card">#2259</td></tr>
+          <tr class="compiler"><td><span class="loss-id">L13</span><br><span class="severity compiler">compiler bug</span></td><td><code>--target=web</code> build ICE (no wasm emitted)</td><td>web-widget Jet cell broken</td><td class="card">#2260</td></tr>
+          <tr class="perf"><td><span class="loss-id">L14</span><br><span class="severity perf">performance</span></td><td>No SIMD surface, scalar-only expert ceiling</td><td>jet-expert 3.05ms vs c-expert 1.55ms (<strong>2.0×</strong>)</td><td class="card">#2261</td></tr>
+          <tr class="compiler"><td><span class="loss-id">L15</span><br><span class="severity compiler">compiler bug</span></td><td>Compiled-but-wrong energies in one nbody source shape</td><td>wrong physics at 9 decimals; needs repro</td><td class="card">#2262</td></tr>
+          <tr class="perf"><td><span class="loss-id">L16</span><br><span class="severity perf">authoring cost</span></td><td>Agent authoring cost</td><td>Jet <strong>164 turns / 143 retries / 147 diagnostics</strong> across 17 entries vs Rust 22/4/4, Python 17/1/1</td><td class="card">#2249–#2259 (causes)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="cross-check"><strong>Cross-check:</strong> L4 contradicts the closed claim of #2237 (zero tier gaps) and extends #2231's single instance; evidence rows live on #2252.</p>
+  </section>
+
+  <section id="runtime" aria-labelledby="runtime-title">
+    <div class="section-head"><div><div class="kicker">AOT · median milliseconds</div><h2 id="runtime-title">Runtime scoreboard</h2><p class="section-copy">Fastest cell is olive; cells within 5% of fastest are muted; slower cells are rust. Broken Jet builds stay dark red.</p></div><div class="legend" aria-label="Score colors"><span class="key"><i class="swatch" style="background:var(--olive)"></i>win</span><span class="key"><i class="swatch" style="background:var(--muted)"></i>parity ≤1.05</span><span class="key"><i class="swatch" style="background:var(--rust)"></i>loss</span><span class="key"><i class="swatch" style="background:var(--deep-rust)"></i>broken</span></div></div>
+    <div class="panel table-scroll">
+      <table class="scoreboard">
+        <thead><tr><th>Entry</th><th>Jet</th><th>Rust</th><th>Python</th><th>C</th><th>Zig</th><th>Go</th><th>JS</th><th>Jet verdict vs best peer</th></tr></thead>
+        <tbody>
+          <tr><td>nbody</td><td class="broken">ICE</td><td class="best">2.37</td><td class="slow">301.6</td><td class="slow">2.98</td><td class="parity">2.48</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">broken (L1)</td></tr>
+          <tr class="expert"><td>nbody expert</td><td class="slow">3.05</td><td class="slow">1.66*</td><td class="empty">–</td><td class="best">1.55*</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">loss 2.0× (SIMD refs)</td></tr>
+          <tr><td>sieve</td><td class="slow">133.1</td><td class="best">8.2</td><td class="slow">576.9</td><td class="slow">10.5</td><td class="slow">10.2</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">loss 16×</td></tr>
+          <tr><td>wordfreq</td><td class="slow">352.7</td><td class="slow">56.5</td><td class="slow">195.9</td><td class="slow">50.1</td><td class="best">25.2</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">loss 14×</td></tr>
+          <tr><td>binparse</td><td class="slow">20 656</td><td class="best">5.5</td><td class="slow">602.1</td><td class="slow">45.5</td><td class="slow">5.8</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">loss 460× vs C</td></tr>
+          <tr><td>regex-logscan</td><td class="slow">180.3</td><td class="best">43.1</td><td class="slow">141.0</td><td class="slow">180.9</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">loss 4.2×; parity vs POSIX C</td></tr>
+          <tr><td>csvtransform</td><td class="slow">105.8</td><td class="slow">81.4</td><td class="slow">252.4</td><td class="empty">–</td><td class="empty">–</td><td class="best">36.1</td><td class="empty">–</td><td class="verdict">loss 2.9× vs Go</td></tr>
+          <tr><td>logreport</td><td class="slow">111.1</td><td class="best">27.3</td><td class="slow">271.2</td><td class="empty">–</td><td class="empty">–</td><td class="slow">39.8</td><td class="empty">–</td><td class="verdict">loss 4.1×</td></tr>
+          <tr><td>datasummary</td><td class="slow">109.1</td><td class="best">4.2</td><td class="slow">89.5</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">loss (also loses to Python)</td></tr>
+          <tr><td>parallel-grep</td><td class="slow">8.6</td><td class="best">7.4</td><td class="slow">125.1</td><td class="empty">–</td><td class="empty">–</td><td class="slow">14.8</td><td class="empty">–</td><td class="verdict"><strong>near-parity Rust, beats Go</strong></td></tr>
+          <tr><td>procpipe</td><td class="slow">367.3</td><td class="best">337.4</td><td class="slow">354.3</td><td class="empty">–</td><td class="empty">–</td><td class="parity">337.7</td><td class="empty">–</td><td class="verdict">loss 1.09× (child-process bound)</td></tr>
+          <tr><td>taskfile-cli</td><td class="slow">4.2</td><td class="best">3.8</td><td class="slow">87.2</td><td class="empty">–</td><td class="empty">–</td><td class="slow">8.9</td><td class="empty">–</td><td class="verdict"><strong>beats Go 2×, Python 21×</strong></td></tr>
+          <tr><td>tzreport</td><td class="slow">0.92</td><td class="best">0.62</td><td class="slow">11.4</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">loss 1.5×, beats Python 12×</td></tr>
+          <tr><td>bulkrename</td><td class="slow">5.9</td><td class="best">4.7</td><td class="slow">23.8</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">loss 1.26×, beats Python 4×</td></tr>
+          <tr><td>http-client</td><td class="slow">1.94</td><td class="best">1.50</td><td class="slow">45.0</td><td class="empty">–</td><td class="empty">–</td><td class="slow">2.77</td><td class="empty">–</td><td class="verdict"><strong>beats Go, Python</strong></td></tr>
+          <tr><td>http-service (lat.)</td><td class="slow">1.158</td><td class="slow">0.136</td><td class="slow">0.174</td><td class="empty">–</td><td class="empty">–</td><td class="best">0.073</td><td class="empty">–</td><td class="verdict">loss 8–16× (RSS best: see wins)</td></tr>
+          <tr><td>web-app (first result)</td><td class="slow">23.8</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="best">20.2</td><td class="verdict">loss 1.18×</td></tr>
+          <tr><td>web-widget</td><td class="broken">ICE</td><td class="parity">21.3 (wasm)</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="best">20.6</td><td class="verdict">broken (L13)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="run-note">* Sourced benchmarks-game expert references (AVX intrinsics).</p>
+  </section>
+
+  <section id="tiers" aria-labelledby="tiers-title">
+    <div class="section-head"><div><div class="kicker">Default run / dev</div><h2 id="tiers-title">The first command is the weakest tier</h2></div><div class="section-count">15 probed · canonical inputs</div></div>
+    <div class="tier-summary"><div class="pass-card"><strong>2/15</strong><span>entries pass</span></div><div class="tier-statement">Default <code>jet run</code> and <code>jet dev</code> fail 13 of 15 probed entries. Parallel-grep passes, but takes 14.7s — 1700× its own 8.6ms AOT.</div></div>
+    <div class="panel table-scroll">
+      <table class="tier-table">
+        <thead><tr><th>Entry</th><th>Matrix cell</th><th>Status</th><th>Measured result</th></tr></thead>
+        <tbody>
+          <tr><td>binparse</td><td class="cell-id">formats.binary-kernel</td><td><span class="status fail">fail</span></td><td>timeout &gt;180s</td></tr>
+          <tr><td>csvtransform</td><td class="cell-id">formats.csv-cli</td><td><span class="status fail">fail</span></td><td>timeout &gt;180s</td></tr>
+          <tr><td>datasummary</td><td class="cell-id">numerics.script</td><td><span class="status fail">fail</span></td><td>timeout &gt;180s; silent false success also observed</td></tr>
+          <tr><td>regex-logscan</td><td class="cell-id">text.regex-kernel</td><td><span class="status fail">fail</span></td><td>timeout &gt;180s</td></tr>
+          <tr><td>wordfreq</td><td class="cell-id">text.kernel</td><td><span class="status fail">fail</span></td><td>timeout &gt;180s</td></tr>
+          <tr><td>bulkrename</td><td class="cell-id">files.script</td><td><span class="status fail">fail</span></td><td>E0956 · <code>files.rename</code></td></tr>
+          <tr><td>logreport</td><td class="cell-id">text.report-cli</td><td><span class="status fail">fail</span></td><td>E0956 · for-in method collection</td></tr>
+          <tr><td>tzreport</td><td class="cell-id">time.script</td><td><span class="status fail">fail</span></td><td>E0956 · <code>parse_rfc3339</code></td></tr>
+          <tr><td>web-app</td><td class="cell-id">webfront.app</td><td><span class="status fail">fail</span></td><td>E0956 · HTTP callbacks; silent empty stdout</td></tr>
+          <tr><td>sieve</td><td class="cell-id">numerics.int-kernel</td><td><span class="status fail">fail</span></td><td>wrong output · <code>count 0</code> via argv loss</td></tr>
+          <tr><td>taskfile-cli</td><td class="cell-id">formats.json-app</td><td><span class="status fail">fail</span></td><td>wrong output · blank; silent false success</td></tr>
+          <tr><td>http-client</td><td class="cell-id">netserv.client</td><td><span class="status fail">fail</span></td><td>warning-fatal exit · L0103</td></tr>
+          <tr><td>http-service</td><td class="cell-id">netserv.service</td><td><span class="status fail">fail</span></td><td>warning-fatal exit · L0202; port lost</td></tr>
+          <tr><td>procpipe</td><td class="cell-id">files.orchestration</td><td><span class="status pass">pass</span></td><td>533ms</td></tr>
+          <tr><td>parallel-grep</td><td class="cell-id">concurrency.app</td><td><span class="status pass">pass</span></td><td>14.7s · 1700× its own 8.6ms AOT</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="build-loc" aria-labelledby="build-loc-title">
+    <div class="section-head"><div><div class="kicker">Cost to build · cost to express</div><h2 id="build-loc-title">Build time and source size</h2></div></div>
+    <div class="split">
+      <article class="panel"><div class="subhead"><h3>Build times</h3><span class="section-count">same run</span></div><div class="table-scroll"><table><thead><tr><th>Toolchain</th><th>Cold</th><th>Warm</th></tr></thead><tbody>
+        <tr><td>jet (uncached Core closure)</td><td>11.1–14.2 s</td><td><strong>0.33–0.44 s</strong></td></tr>
+        <tr><td>rustc -O (single file)</td><td>0.10–0.40 s</td><td>same</td></tr>
+        <tr><td>gcc -O2</td><td>0.10 s</td><td>same</td></tr>
+        <tr><td>zig ReleaseFast</td><td>10.1–11.1 s</td><td>~same (cache-dir local)</td></tr>
+        <tr><td>go build</td><td>1.5–3.5 s</td><td>~1.5 s</td></tr>
+      </tbody></table></div><p class="callout">Jet's warm loop beats Go and crushes Zig; the cold closure (~12 s) is the onboarding cost and already carded territory (#2210 latency work).</p></article>
+      <article class="panel"><div class="subhead"><h3>Source size</h3><span class="section-count">non-blank non-comment LOC</span></div><div class="table-scroll"><table><thead><tr><th>Entry</th><th>Jet</th><th>Rust</th><th>Python</th><th>C</th><th>Zig</th><th>Go</th></tr></thead><tbody>
+        <tr><td>procpipe</td><td><strong>17</strong></td><td>49</td><td>32</td><td>–</td><td>–</td><td>31</td></tr>
+        <tr><td>http-client</td><td>26</td><td>67</td><td>24</td><td>–</td><td>–</td><td>51</td></tr>
+        <tr><td>csvtransform</td><td>38</td><td>108</td><td>23</td><td>–</td><td>–</td><td>52</td></tr>
+        <tr><td>http-service</td><td>66</td><td>76</td><td>47</td><td>–</td><td>–</td><td>54</td></tr>
+        <tr><td>logreport</td><td>52</td><td>77</td><td>30</td><td>–</td><td>–</td><td>66</td></tr>
+        <tr><td>tzreport</td><td>54</td><td>71</td><td>18</td><td>–</td><td>–</td><td>–</td></tr>
+        <tr><td>sieve</td><td>39</td><td>40</td><td>29</td><td>41</td><td>40</td><td>–</td></tr>
+        <tr><td>regex-logscan</td><td>43</td><td>40</td><td>22</td><td>51</td><td>–</td><td>–</td></tr>
+        <tr><td>binparse</td><td><strong>67</strong></td><td>23</td><td>21</td><td>24</td><td>25</td><td>–</td></tr>
+        <tr><td>taskfile-cli</td><td><strong>98</strong></td><td>55</td><td>39</td><td>–</td><td>–</td><td>75</td></tr>
+        <tr><td>nbody</td><td><strong>102</strong></td><td>72</td><td>56</td><td>72</td><td>75</td><td>–</td></tr>
+        <tr><td>parallel-grep</td><td>57</td><td>36</td><td>19</td><td>–</td><td>–</td><td>67</td></tr>
+        <tr><td>wordfreq</td><td>23</td><td>15</td><td>7</td><td>67</td><td>31</td><td>–</td></tr>
+        <tr><td>datasummary</td><td>50</td><td>40</td><td>21</td><td>–</td><td>–</td><td>–</td></tr>
+      </tbody></table></div><p class="callout">Jet beats Rust and Go where the stdlib is deep. Formatting/bytes gaps (#2257, #2258) and ICE dodges (#2249) reverse the result in binparse, taskfile, and nbody. Python stays the LOC bar to beat.</p></article>
+    </div>
+  </section>
+
+  <section id="wins" aria-labelledby="wins-title">
+    <div class="section-head"><div><div class="kicker">Protect these</div><h2 id="wins-title">Where Jet categorically wins</h2><p class="section-copy">Shipped advantages that must not regress while loss cards close.</p></div><div class="section-count">7 wins</div></div>
+    <div class="panel table-scroll"><table class="wins-table"><thead><tr><th>Win</th><th>Status</th><th>What a peer must break to match</th></tr></thead><tbody>
+      <tr><td>Warm build 0.33–0.44s with full safety checks</td><td><div class="badge-group"><span class="status shipped">shipped</span><span class="status measured">measured</span></div></td><td>Go: give up its 1.5–3.5s builds; Zig: its 10s builds</td></tr>
+      <tr><td>Service RSS 2.9 MB</td><td><div class="badge-group"><span class="status shipped">shipped</span><span class="status measured">measured</span></div></td><td>Python 21.8 MB, Go 11.2 MB; only Rust (2.3 MB) competes</td></tr>
+      <tr><td>One-call deep stdlib: process builder, HTTP mux, CSV RFC-4180, RFC3339, typed regex literals</td><td><div class="badge-group"><span class="status shipped">shipped</span><span class="status measured">RLI5</span></div></td><td>Rust: adopt batteries; Go: adopt expressiveness</td></tr>
+      <tr><td>CLI startup 4.2 ms (taskfile)</td><td><div class="badge-group"><span class="status shipped">shipped</span><span class="status measured">measured</span></div></td><td>beats Go 2×, Python 21×</td></tr>
+      <tr><td>Structured concurrency with explicit limits in the source</td><td><div class="badge-group"><span class="status shipped">shipped</span><span class="status measured">RLI5</span></div></td><td>Go/Rust: their ports spawned unbounded workers</td></tr>
+      <tr><td>Named short-read errors on binary parsing</td><td><div class="badge-group"><span class="status shipped">shipped</span><span class="status measured">RLI5</span></div></td><td>Rust port panics through unchecked slices</td></tr>
+      <tr><td>Effect/authority audit surface</td><td><div class="badge-group"><span class="status shipped">shipped</span><span class="status measured">cost carded</span></div></td><td>no peer has an equivalent</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <section id="advisory" aria-labelledby="advisory-title">
+    <div class="section-head"><div><div class="kicker">Advisory · never gating</div><h2 id="advisory-title">Readable source, punishing feedback loop</h2></div></div>
+    <div class="advisory-grid">
+      <article class="panel advisory-copy"><h3>RLI5: four personas</h3><p><strong>Beginner, Python switcher, systems expert, unattended agent.</strong> All stumbled on un-taught core grammar (<code>::</code>, <code>??</code>, <code>~</code>, <code>&amp;</code>), silent <code>?? 0</code> / empty fallbacks at trust boundaries, a CLI contract not derivable from source, and execution-tier behavior unpredictable from the file.</p><p>Rare-path friction: <code>Float{...}</code> encoding tricks and packed <code>key|value</code> records.</p><p>Jet read <strong>better</strong> than peers on procpipe, HTTP routing, binparse field intent, and nbody's named physics fields. Datasummary's approximate sort key is a correctness-adjacent finding (#2263).</p></article>
+      <figure class="panel cost-chart" aria-labelledby="cost-title"><div class="kicker">Agent persona · turns to working entry</div><h3 id="cost-title">Jet costs 164 turns</h3><p class="damning">Rust costs 22. Python costs 17.</p>
+        <div class="bar-row jet"><span class="bar-label">Jet</span><div class="bar-track"><div class="bar-fill" style="width:calc(164 / 164 * 100%)"></div></div><span class="bar-value">164</span></div>
+        <div class="bar-row"><span class="bar-label">Rust</span><div class="bar-track"><div class="bar-fill" style="width:calc(22 / 164 * 100%)"></div></div><span class="bar-value">22</span></div>
+        <div class="bar-row"><span class="bar-label">Python</span><div class="bar-track"><div class="bar-fill" style="width:calc(17 / 164 * 100%)"></div></div><span class="bar-value">17</span></div>
+        <div class="bar-row"><span class="bar-label">Go</span><div class="bar-track"><div class="bar-fill" style="width:calc(9 / 164 * 100%)"></div></div><span class="bar-value">9</span></div>
+        <div class="bar-row"><span class="bar-label">Zig</span><div class="bar-track"><div class="bar-fill" style="width:calc(14 / 164 * 100%)"></div></div><span class="bar-value">14</span></div>
+        <figcaption class="cost-meta"><strong>Same author, same reasoning budget.</strong><br>Jet · 17 entries · 143 retries · 147 diagnostics<br>Rust · 16 entries · 4 retries · 4 diagnostics<br>Python · 15 entries · 1 retry · 1 diagnostic<br>Go · 7 entries · 2 retries · 1 diagnostic<br>Zig · 4 entries · 10 retries · 10 diagnostics<br><br>An unattended agent pays ~8–10× more edit-check cycles. Carded compiler/tier bugs are the cause, not syntax; diagnostics were specific enough that every retry converged.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="coverage" aria-labelledby="coverage-title">
+    <div class="section-head"><div><div class="kicker">Next run</div><h2 id="coverage-title">Uncovered territory and dispositions</h2></div><div class="section-count">17 dispositions</div></div>
+    <div class="territory">
+      <article class="panel territory-copy"><h3>Unmeasured is not winning</h3><div class="territory-list"><code>text.script</code><code>concurrency.service</code><code>embedded.kernel</code><code>embedded.data</code></div><p class="section-copy">Plus the matrix cells behind them. Embedded deferred by owner (2026-08-27). Corpus backlog on #2263.</p><p class="assumption"><span class="note-label">Strongest unverified assumption</span><br>L6 attributes binparse's 460× to per-byte outcome machinery based on Sol's expert-lane observation, not a profile. #2253 includes the profiling step; if the cost lives elsewhere, the card retargets.</p></article>
+      <div class="panel table-scroll"><table class="dispositions"><thead><tr><th>Finding</th><th>Disposition</th><th>Target or reason</th></tr></thead><tbody>
+        <tr><td>L1</td><td>card</td><td>#2249</td></tr>
+        <tr><td>L2</td><td>card</td><td>#2250</td></tr>
+        <tr><td>L3</td><td>card</td><td>#2251</td></tr>
+        <tr><td>L4</td><td>card</td><td>#2252</td></tr>
+        <tr><td>L5</td><td>card</td><td>#2264</td></tr>
+        <tr><td>L6</td><td>card</td><td>#2253</td></tr>
+        <tr><td>L7</td><td>card</td><td>#2254</td></tr>
+        <tr><td>L8</td><td>card</td><td>#2255</td></tr>
+        <tr><td>L9</td><td>card</td><td>#2256</td></tr>
+        <tr><td>L10</td><td>card</td><td>#2257</td></tr>
+        <tr><td>L11</td><td>card</td><td>#2258</td></tr>
+        <tr><td>L12</td><td>card</td><td>#2259</td></tr>
+        <tr><td>L13</td><td>card</td><td>#2260</td></tr>
+        <tr><td>L14</td><td>card</td><td>#2261</td></tr>
+        <tr><td>L15</td><td>card</td><td>#2262</td></tr>
+        <tr><td>L16</td><td>no-action</td><td>aggregate metric; causes carded as #2249-#2259; re-measure next run</td></tr>
+        <tr><td>RLI5 corpus-quality items + uncovered cells</td><td>card</td><td>#2263</td></tr>
+      </tbody></table></div>
+    </div>
+  </section>
+
+  <footer><span>Source: Gauntlet 2026-08-27 · first full competitive-corpus run</span><span>Uniform bar: win = strictly better · parity = ratio ≤ 1.05 · else loss</span></footer>
+</main>
+</body>
+</html>
