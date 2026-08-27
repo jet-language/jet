@@ -427,7 +427,7 @@ async function waitForReady(child, port, readyPath) {
 }
 
 async function runService(language, sourceDir, artifact, entry) {
-  const service = entry.spec.service;
+  const service = entry.spec?.service ?? entry.service ?? {};
   const probes = service.probe ?? [];
   if (!service.readyPath || !service.portArg || probes.length === 0) return { failure: "service requires portArg, readyPath, and probe" };
   const commandFor = (port) => runCommand(language, sourceDir, artifact, [String(port)]);
@@ -862,7 +862,12 @@ async function main() {
   const results = [];
   for (const item of loaded) {
     console.error(`gauntlet: entry ${item.entry.name} [${(item.entry.languages ?? []).join(",")}] ...`);
-    results.push(await stageEntry(item.dir, item.entry, runDir, jetBin, options.runs, dev));
+    try {
+      results.push(await stageEntry(item.dir, item.entry, runDir, jetBin, options.runs, dev));
+    } catch (error) {
+      console.error(`gauntlet: entry ${item.entry.name} CRASHED: ${error.message}`);
+      results.push({ entry: item.entry, status: "broken", reason: `harness error: ${error.message}`, languages: item.entry.languages ?? [], rows: {}, comparisons: {}, jet_tiers: {} });
+    }
     console.error(`gauntlet: entry ${item.entry.name} done`);
   }
   const covered = new Set(results.flatMap((result) => result.entry.cells ?? []));
