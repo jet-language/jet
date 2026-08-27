@@ -21,6 +21,10 @@ const LANGUAGE_FILES = {
   js: "main.mjs",
 };
 
+function baseLanguage(language) {
+  return language.endsWith("-expert") ? language.slice(0, -"-expert".length) : language;
+}
+
 function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
@@ -295,6 +299,7 @@ function buildCommand(language, jetBin, sourceDir) {
 }
 
 function runCommand(language, sourceDir, artifact, args) {
+  language = baseLanguage(language);
   if (language === "jet") return [artifact, ...args];
   if (language === "python") return ["python3", "main.py", ...args];
   if (language === "js") return ["node", "main.mjs", ...args];
@@ -338,14 +343,15 @@ async function measureSequenceRuns(cwd, commands, count, reset, { full = false }
   return summarizeSamples(samples);
 }
 
-async function buildAndMeasure(language, sourceDir, jetBin) {
-  const command = buildCommand(language, jetBin, sourceDir);
+async function buildAndMeasure(language, sourceDir, jetBin, overrideCommand = null) {
+  const base = baseLanguage(language);
+  const command = overrideCommand ?? buildCommand(base, jetBin, sourceDir);
   if (!command) return { supported: true, build: null, artifact: null };
   const cold = await timedProcess(sourceDir, command);
   const warm = cold.exit_code === 0 ? await timedProcess(sourceDir, command) : null;
-  const artifact = language === "jet" ? await discoverJetArtifact(sourceDir) : path.join(sourceDir, {
+  const artifact = base === "jet" ? await discoverJetArtifact(sourceDir) : path.join(sourceDir, {
     rust: "main-rust", c: "main-c", zig: "main", go: "main-go",
-  }[language]);
+  }[base]);
   const failure = cold.exit_code !== 0 ? `cold build exit ${cold.exit_code}` : warm?.exit_code !== 0 ? `warm build exit ${warm?.exit_code}` : !await exists(artifact) ? "build produced no executable" : null;
   return { supported: true, build: { cold, warm }, artifact, failure };
 }
@@ -505,9 +511,12 @@ async function startPeer(sourceDir, peer) {
   }
 }
 
-async function measureRuns(cwd, command, count, { full = false } = {}) {
+async function measureRuns(cwd, command, count, { full = false, reset = null } = {}) {
   const samples = [];
-  for (let i = 0; i < count; i += 1) samples.push(await timedProcess(cwd, command, { full }));
+  for (let i = 0; i < count; i += 1) {
+    if (reset) await reset();
+    samples.push(await timedProcess(cwd, command, { full }));
+  }
   return summarizeSamples(samples);
 }
 
@@ -549,11 +558,13 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     diagnostics: [],
   }]));
   await fs.mkdir(entryStage, { recursive: true });
+  const serviceMode = entry.mode === "service";
   const expectedPath = path.join(entryDir, entry.spec?.expected ?? "expected.out");
-  if (!(await exists(expectedPath))) return { entry, status: "broken", reason: "missing expected output", languages, rows: failedRows("missing expected output"), comparisons: {}, jet_tiers: {} };
-  const expected = await fs.readFile(expectedPath);
+  if (!serviceMode && !(await exists(expectedPath))) return { entry, status: "broken", reason: "missing expected output", languages, rows: failedRows("missing expected output"), comparisons: {}, jet_tiers: {} };
+  const expected = serviceMode ? Buffer.alloc(0) : await fs.readFile(expectedPath);
   const fixture = entry.spec?.fixtureGen;
   const commonFixtures = path.join(entryStage, "fixtures");
+  let generatedFixture = null;
   if (fixture) {
     const fixtureDir = path.join(entryDir, path.dirname(fixture.script));
     if (!(await exists(fixtureDir))) {
@@ -568,13 +579,14 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
       const reason = `fixture generator exit ${generated.code}: ${generated.stderr.toString("utf8").trim().slice(0, 300)}`;
       return { entry, status: "broken", reason, languages, rows: failedRows(reason), comparisons: {}, jet_tiers: {} };
     }
+    generatedFixture = path.join(entryStage, output);
   }
 
   const rows = {};
   const resets = {};
   for (const language of languages) {
     const sourceDir = path.join(entryDir, language);
-    const sourceFile = LANGUAGE_FILES[language];
+    const sourceFile = LANGUAGE_FILES[baseLanguage(language)];
     const row = { language, status: "broken", metrics: {}, diagnostics: [] };
     rows[language] = row;
     if (!sourceFile) {
@@ -590,15 +602,25 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     const stagedSource = path.join(entryStage, language);
     await fs.cp(sourceDir, stagedSource, { recursive: true });
     if (fixture) await fs.cp(commonFixtures, path.join(stagedSource, "fixtures"), { recursive: true });
+    let fixtureReset = null;
+    if (fixture && generatedFixture) {
+      const fixtureTarget = path.join(stagedSource, fixture.out);
+      fixtureReset = async () => {
+        await fs.rm(fixtureTarget, { recursive: true, force: true });
+        await fs.mkdir(path.dirname(fixtureTarget), { recursive: true });
+        await fs.cp(generatedFixture, fixtureTarget, { recursive: true });
+      };
+      await fixtureReset();
+    }
     if (entry.spec?.peer && !(await copyRelativeFile(entryDir, stagedSource, entry.spec.peer.script))) {
       row.reason = `missing peer script ${entry.spec.peer.script}`;
       row.disqualified = true;
       continue;
     }
-    const stagedExpected = path.join(stagedSource, path.basename(expectedPath));
-    await fs.copyFile(expectedPath, stagedExpected);
+    if (!serviceMode) await fs.copyFile(expectedPath, path.join(stagedSource, path.basename(expectedPath)));
     const webMode = entry.mode === "web" || entry.mode === "web-app";
-    const build = webMode ? await configuredBuildAndMeasure(language, stagedSource, jetBin, entry) : await buildAndMeasure(language, stagedSource, jetBin);
+    const buildOverride = webMode ? null : commandFromSpec(languageSpecValue(entry.spec?.build ?? null, language), language, jetBin, null);
+    const build = webMode ? await configuredBuildAndMeasure(language, stagedSource, jetBin, entry) : await buildAndMeasure(language, stagedSource, jetBin, buildOverride);
     row.build = build.build;
     row.metrics = await sourceMetrics(sourceDir, sourceFile);
     row.disqualified = false;
@@ -718,7 +740,9 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
         continue;
       }
     }
+    if (fixtureReset) resets[language] = fixtureReset;
     const command = runCommand(language, stagedSource, artifact, entry.spec?.args ?? []);
+    if (fixtureReset) await fixtureReset();
     const verification = await verify(stagedSource, command, expected);
     if (verification) {
       row.reason = verification;
@@ -729,7 +753,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     row.status = "ok";
     row.command = command;
     const runs = selectedRuns ?? (entry.perf ? 7 : 3);
-    row.runtime = await measureRuns(stagedSource, command, runs);
+    row.runtime = await measureRuns(stagedSource, command, runs, { reset: fixtureReset });
     if (row.runtime.samples.some((sample) => sample.exit_code !== 0)) {
       row.status = "broken";
       row.reason = "measured run exited nonzero";
@@ -754,19 +778,25 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
   const tiers = {};
   if (jetRow && jetRow.status === "ok") {
     const jetDir = path.join(entryStage, "jet");
+    const jetFixtureReset = generatedFixture ? async () => {
+      const target = path.join(jetDir, fixture.out);
+      await fs.rm(target, { recursive: true, force: true });
+      await fs.cp(generatedFixture, target, { recursive: true });
+    } : null;
     const TIER_TIMEOUT_MS = 180_000;
     for (const tier of ["run", "dev"]) {
       if (tier === "dev" && !dev) continue;
       const tierArgs = entry.mode === "batch-steps" ? (entry.spec?.steps ?? []).map((args) => tier === "run" ? [jetBin, "run", "main.jet", "--", ...args] : [jetBin, "dev", "--watch=off", "main.jet", "--", ...args]) : null;
       const command = tierArgs ?? (tier === "run" ? [jetBin, "run", "main.jet", "--", ...(entry.spec?.args ?? [])] : [jetBin, "dev", "--watch=off", "main.jet", "--", ...(entry.spec?.args ?? [])]);
       const tierRow = { command };
+      if (jetFixtureReset) await jetFixtureReset();
       const tierVerification = tierArgs ? await verifySequence(jetDir, tierArgs, expected, resets.jet, { timeoutMs: TIER_TIMEOUT_MS }) : await verify(jetDir, command, expected, { timeoutMs: TIER_TIMEOUT_MS });
       if (tierVerification) {
         tierRow.status = "broken";
         tierRow.reason = tierVerification;
       } else {
         tierRow.status = "ok";
-        tierRow.runtime = tierArgs ? await measureSequenceRuns(jetDir, tierArgs, selectedRuns ?? (entry.perf ? 7 : 3), resets.jet) : await measureRuns(jetDir, command, selectedRuns ?? (entry.perf ? 7 : 3));
+        tierRow.runtime = tierArgs ? await measureSequenceRuns(jetDir, tierArgs, selectedRuns ?? (entry.perf ? 7 : 3), resets.jet) : await measureRuns(jetDir, command, selectedRuns ?? (entry.perf ? 7 : 3), { reset: jetFixtureReset });
       }
       tiers[tier] = tierRow;
     }

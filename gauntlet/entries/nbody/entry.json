@@ -11,7 +11,10 @@
     "rust",
     "python",
     "c",
-    "zig"
+    "zig",
+    "jet-expert",
+    "c-expert",
+    "rust-expert"
   ],
   "spec": {
     "behavior": "Simulate the classic five-body solar system for N symplectic-Euler steps with dt 0.01, after offsetting the Sun's momentum, and print initial and final system energy with nine decimal places.",
@@ -19,7 +22,28 @@
       "50000"
     ],
     "fixtureGen": null,
-    "expected": "expected.out"
+    "expected": "expected.out",
+    "build": {
+      "c-expert": [
+        "gcc",
+        "-O3",
+        "-fomit-frame-pointer",
+        "-march=ivybridge",
+        "main.c",
+        "-o",
+        "main-c",
+        "-lm"
+      ],
+      "rust-expert": [
+        "rustc",
+        "-O",
+        "-C",
+        "target-cpu=ivybridge",
+        "main.rs",
+        "-o",
+        "main-rust"
+      ]
+    }
   },
   "authoring": {
     "jet": {
