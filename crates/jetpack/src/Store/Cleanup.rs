@@ -19,10 +19,10 @@ fn with_clean_locks<T>(
 }
 
 #[derive(Debug, Clone)]
-struct MalformedObject {
-    id: String,
-    path: PathBuf,
-    reason: &'static str,
+pub(crate) struct MalformedObject {
+    pub(crate) id: String,
+    pub(crate) path: PathBuf,
+    pub(crate) reason: &'static str,
 }
 
 pub(crate) fn malformed_object_reason(path: &Path) -> std::io::Result<Option<&'static str>> {
@@ -67,7 +67,7 @@ fn malformed_objects(hangar: &Path) -> std::io::Result<Vec<MalformedObject>> {
         .collect()
 }
 
-fn quarantine_malformed_objects(
+pub(crate) fn quarantine_malformed_objects(
     roots: &Roots,
     objects: &[MalformedObject],
 ) -> std::io::Result<usize> {
@@ -83,18 +83,15 @@ fn quarantine_malformed_objects(
         permissions.make_writable(&quarantine, &hangar)?;
         let mut moved = 0;
         for object in objects {
+            // Admitted objects are directory, regular file, or symlink roots;
+            // every shape is quarantinable by rename.
             match fs::symlink_metadata(&object.path) {
-                Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("Hangar object `{}` is not a real directory", object.id),
-                    ));
-                }
                 Ok(_) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error),
             }
             permissions.make_writable(&object.path, &hangar)?;
+            remove_seal(&object.path, &hangar)?;
             let sequence = GC_QUARANTINE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
             let destination = quarantine.join(format!(
                 "gc-{}-{}-{}-{}",
@@ -260,6 +257,15 @@ fn collect_orphaned_canonical_objects_with_graph(
 }
 
 pub(crate) fn remove_hangar_node(path: &Path) -> std::io::Result<()> {
+    if path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .is_some_and(|name| name == OBJECTS_DIR)
+    {
+        if let Some(hangar) = path.parent().and_then(Path::parent) {
+            remove_seal(path, hangar)?;
+        }
+    }
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         return Err(std::io::Error::new(
@@ -453,6 +459,7 @@ fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
         let bytes = dir_size(&path);
         retired.insert(id.clone());
         Closure::tombstone_closure_record_unlocked(roots, &id)?;
+        remove_seal(&path, &store)?;
         fs::remove_dir_all(&path)?;
         report.removed_objects += 1;
         report.removed_bytes += bytes;
@@ -932,8 +939,8 @@ pub(super) fn verify_hangar_object_unlocked(
                 "closure graph output `{name}` is missing `{expected}`"
             ))
         })?;
-        let digest = crate::Envelope::try_output_hash_of_in_hangar(&object.path, &hangar, allow)
-            .map_err(IngestError::Invalid)?;
+        let digest = Ingest::full_verified_output_hash(Path::new(&object.path), &hangar, allow)
+            .map_err(|error| IngestError::Invalid(error.to_string()))?;
         if &digest != expected {
             return Err(IngestError::Invalid(format!(
                 "output `{name}` records `{expected}`, re-hash produced `{digest}`"
@@ -965,6 +972,9 @@ pub struct HangarDoctorFinding {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HangarDoctorReport {
     pub objects: usize,
+    pub seal_reused: usize,
+    pub seal_resealed: usize,
+    pub seal_reseal_needed: usize,
     pub findings: Vec<HangarDoctorFinding>,
 }
 
@@ -1003,11 +1013,11 @@ pub fn hangar_doctor(
     offline: bool,
 ) -> std::io::Result<HangarDoctorReport> {
     if !repair {
-        return Ok(scan_hangar_doctor(roots)?.report);
+        return Ok(scan_hangar_doctor(roots, false)?.report);
     }
 
     crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        let mut scan = scan_hangar_doctor(roots)?;
+        let mut scan = scan_hangar_doctor(roots, true)?;
         let hangar = roots.hangar_dir();
         let mut requests = BTreeMap::new();
         let mut request_index = 0usize;
@@ -1039,6 +1049,9 @@ pub fn hangar_doctor(
             }
         }
 
+        let mut post_repair_reused = 0;
+        let mut post_repair_resealed = 0;
+        let mut post_repair_needed = 0;
         for finding in &mut scan.report.findings {
             let action = finding.repair.clone();
             match action {
@@ -1061,12 +1074,18 @@ pub fn hangar_doctor(
                         finding.detail = format!("cache repair failed: {error}");
                         continue;
                     }
-                    match doctor_object_digest(&path, &hangar) {
-                        Ok(actual) if actual == digest => {
+                    match doctor_object_digest(&path, &hangar, true) {
+                        Ok((actual, status)) if actual == digest => {
+                            post_repair_reused += usize::from(status.reused);
+                            post_repair_resealed += usize::from(status.resealed);
+                            post_repair_needed += usize::from(status.reseal_needed);
                             finding.fixed = true;
                             finding.detail = "repaired from native binary cache".to_string();
                         }
-                        Ok(actual) => {
+                        Ok((actual, status)) => {
+                            post_repair_reused += usize::from(status.reused);
+                            post_repair_resealed += usize::from(status.resealed);
+                            post_repair_needed += usize::from(status.reseal_needed);
                             finding.detail = format!("repair left digest {actual}");
                         }
                         Err(error) => {
@@ -1077,11 +1096,15 @@ pub fn hangar_doctor(
             }
         }
 
+        scan.report.seal_reused += post_repair_reused;
+        scan.report.seal_resealed += post_repair_resealed;
+        scan.report.seal_reseal_needed += post_repair_needed;
+
         Ok(scan.report)
     })
 }
 
-fn scan_hangar_doctor(roots: &Roots) -> std::io::Result<DoctorScan> {
+fn scan_hangar_doctor(roots: &Roots, write_seals: bool) -> std::io::Result<DoctorScan> {
     let hangar = roots.hangar_dir();
     let mut scan = DoctorScan {
         report: HangarDoctorReport::default(),
@@ -1102,7 +1125,7 @@ fn scan_hangar_doctor(roots: &Roots) -> std::io::Result<DoctorScan> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(scan),
         Err(error) => return Err(error),
     }
-    let cas_keys = scan_doctor_objects(&hangar, &mut scan.report)?;
+    let cas_keys = scan_doctor_objects(&hangar, &mut scan.report, write_seals)?;
     scan_doctor_staging(&hangar, &mut scan.report)?;
     scan_doctor_cas(&hangar, &cas_keys, &mut scan.report)?;
 
@@ -1135,13 +1158,12 @@ fn doctor_finding_sort_key(finding: &HangarDoctorFinding) -> (u8, &str) {
 fn scan_doctor_objects(
     hangar: &Path,
     report: &mut HangarDoctorReport,
+    write_seals: bool,
 ) -> std::io::Result<BTreeSet<String>> {
     let objects = hangar.join(OBJECTS_DIR);
     let metadata = match fs::symlink_metadata(&objects) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(BTreeSet::new())
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeSet::new()),
         Err(error) => return Err(error),
     };
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -1177,19 +1199,23 @@ fn scan_doctor_objects(
             });
             continue;
         }
-        if !metadata.file_type().is_symlink() && !metadata.is_dir() {
+        if !metadata.file_type().is_symlink() && !metadata.is_dir() && !metadata.is_file() {
             report.findings.push(HangarDoctorFinding {
                 kind: "drift".to_string(),
                 subject: doctor_subject(hangar, &path),
-                detail: "object is not a directory".to_string(),
+                detail: "object is not a directory, regular file, or symlink".to_string(),
                 fixed: false,
                 repair: DoctorRepair::None,
             });
             continue;
         }
-        match doctor_object_digest(&path, &canonical_hangar) {
-            Ok(actual) if actual == name => {}
-            Ok(_) => report.findings.push(HangarDoctorFinding {
+        match doctor_object_digest(&path, &canonical_hangar, write_seals) {
+            Ok((actual, status)) if actual == name => {
+                record_doctor_status(report, status);
+            }
+            Ok((_actual, status)) => {
+                record_doctor_status(report, status);
+                report.findings.push(HangarDoctorFinding {
                 kind: "drift".to_string(),
                 subject: doctor_subject(hangar, &path),
                 detail: "content digest differs from the object name".to_string(),
@@ -1198,7 +1224,8 @@ fn scan_doctor_objects(
                     path: path.clone(),
                     digest: name.clone(),
                 },
-            }),
+                })
+            }
             Err(error) => report.findings.push(HangarDoctorFinding {
                 kind: "drift".to_string(),
                 subject: doctor_subject(hangar, &path),
@@ -1298,8 +1325,7 @@ fn scan_doctor_stage_dir(
                 let is_native_stage = name
                     .to_str()
                     .is_some_and(|value| value.starts_with("nix-cache-"));
-                if is_native_stage
-                    && !NixCache::admission_stage_is_dead(&name, std::process::id())
+                if is_native_stage && !NixCache::admission_stage_is_dead(&name, std::process::id())
                 {
                     continue;
                 }
@@ -1388,7 +1414,9 @@ fn doctor_repair_paths(entries: Vec<StoreEntry>, paths: &mut BTreeMap<String, St
         let primary = entry.envelope.output_hash;
         if let Some(store_path) = producer.facts.get("nix.store-path") {
             if store_path.starts_with("/nix/store/") {
-                paths.entry(primary.clone()).or_insert_with(|| store_path.clone());
+                paths
+                    .entry(primary.clone())
+                    .or_insert_with(|| store_path.clone());
             }
         }
         for (key, store_path) in &producer.facts {
@@ -1409,8 +1437,31 @@ fn doctor_repair_paths(entries: Vec<StoreEntry>, paths: &mut BTreeMap<String, St
     }
 }
 
-fn doctor_object_digest(path: &Path, hangar: &Path) -> Result<String, String> {
-    crate::Envelope::try_output_hash_of_in_hangar(&path.to_string_lossy(), hangar, false)
+fn doctor_object_digest(
+    path: &Path,
+    hangar: &Path,
+    write_seal: bool,
+) -> Result<(String, Ingest::VerificationStatus), String> {
+    Ingest::verified_output_hash_with_options(
+        path,
+        Some(hangar),
+        false,
+        false,
+        write_seal,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn record_doctor_status(report: &mut HangarDoctorReport, status: Ingest::VerificationStatus) {
+    if status.reused {
+        report.seal_reused += 1;
+    }
+    if status.resealed {
+        report.seal_resealed += 1;
+    }
+    if status.reseal_needed {
+        report.seal_reseal_needed += 1;
+    }
 }
 
 fn doctor_subject(hangar: &Path, path: &Path) -> String {
@@ -1502,6 +1553,7 @@ pub(crate) fn object_dirs(hangar: &Path) -> std::io::Result<Vec<fs::DirEntry>> {
             || name == CAS_DIR
             || name == REFERRERS_DIR
             || name == "receipts"
+            || name == SEALS_DIR
             || name == "reproducibility-staging"
             || name == "lifecycle-db"
             || name == "closure-db"

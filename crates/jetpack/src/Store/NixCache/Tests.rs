@@ -201,10 +201,16 @@ fn native_nix_cache_recurses_and_admits_closure_atomically() {
     )
     .unwrap();
     let root_compressed = encode_zstd_deterministic(&root_nar).unwrap();
-    assert_eq!(plan.packages, 2);
+    assert_eq!(plan.new, 2);
+    assert_eq!(plan.cached, 0);
+    assert_eq!(plan.repaired, 0);
     assert_eq!(
-        plan.bytes,
+        plan.download_bytes,
         root_compressed.len() as u64 + leaf_nar.len() as u64
+    );
+    assert_eq!(
+        plan.disk_bytes,
+        root_nar.len() as u64 + leaf_nar.len() as u64
     );
     routes.retain(|path, _| path == "/nix-cache-info" || path.starts_with("/nar/"));
     server.replace_routes(routes);
@@ -439,6 +445,66 @@ fn nar_with_directory_entries(names: &[&[u8]]) -> Vec<u8> {
 }
 
 #[cfg(unix)]
+fn nar_with_regular_root(contents: &[u8]) -> Vec<u8> {
+    fn put(output: &mut Vec<u8>, value: &[u8]) {
+        output.extend_from_slice(&(value.len() as u64).to_le_bytes());
+        output.extend_from_slice(value);
+        let padding = (8 - value.len() % 8) % 8;
+        output.resize(output.len() + padding, 0);
+    }
+
+    let mut output = Vec::new();
+    put(&mut output, b"nix-archive-1");
+    put(&mut output, b"(");
+    put(&mut output, b"type");
+    put(&mut output, b"regular");
+    put(&mut output, b"contents");
+    put(&mut output, contents);
+    put(&mut output, b")");
+    output
+}
+
+#[cfg(unix)]
+fn nar_with_nested_symlink(target: &[u8]) -> Vec<u8> {
+    fn put(output: &mut Vec<u8>, value: &[u8]) {
+        output.extend_from_slice(&(value.len() as u64).to_le_bytes());
+        output.extend_from_slice(value);
+        let padding = (8 - value.len() % 8) % 8;
+        output.resize(output.len() + padding, 0);
+    }
+
+    let mut output = Vec::new();
+    put(&mut output, b"nix-archive-1");
+    put(&mut output, b"(");
+    put(&mut output, b"type");
+    put(&mut output, b"directory");
+    put(&mut output, b"entry");
+    put(&mut output, b"(");
+    put(&mut output, b"name");
+    put(&mut output, b"lib");
+    put(&mut output, b"node");
+    put(&mut output, b"(");
+    put(&mut output, b"type");
+    put(&mut output, b"directory");
+    put(&mut output, b"entry");
+    put(&mut output, b"(");
+    put(&mut output, b"name");
+    put(&mut output, b"link");
+    put(&mut output, b"node");
+    put(&mut output, b"(");
+    put(&mut output, b"type");
+    put(&mut output, b"symlink");
+    put(&mut output, b"target");
+    put(&mut output, target);
+    put(&mut output, b")");
+    put(&mut output, b")");
+    put(&mut output, b")");
+    put(&mut output, b")");
+    put(&mut output, b")");
+    output
+}
+
+#[cfg(unix)]
 fn nar_with_symlink_root(target: &str) -> Vec<u8> {
     fn put(output: &mut Vec<u8>, value: &[u8]) {
         output.extend_from_slice(&(value.len() as u64).to_le_bytes());
@@ -467,14 +533,7 @@ fn single_object_cache(
     signing_key: &SigningKey,
 ) -> (PathBuf, Roots, TestCacheServer) {
     let root = unique_dir(tag);
-    let info = signed_narinfo(
-        store_path,
-        nar_name,
-        nar,
-        &[],
-        "test-cache-1",
-        signing_key,
-    );
+    let info = signed_narinfo(store_path, nar_name, nar, &[], "test-cache-1", signing_key);
     let hash = store_path
         .rsplit('/')
         .next()
@@ -526,15 +585,280 @@ fn native_nix_cache_planning_skips_narinfo_for_a_fully_admitted_closure() {
     };
 
     admit_nix_closure(&roots, std::slice::from_ref(&request), false).unwrap();
+    server.replace_routes(BTreeMap::new());
+
+    let plan = plan_nix_downloads(&roots, &[store_path.into()], false, None).unwrap();
+    assert_eq!(plan.new, 0);
+    assert_eq!(plan.cached, 1);
+    assert_eq!(plan.repaired, 0);
+    assert_eq!(plan.download_bytes, 0);
+    assert!(plan.disk_bytes > 0);
+    assert_eq!(plan.items.len(), 1);
+    assert_eq!(plan.items[0].state, NixPlanState::Cached);
+    drop(server);
+    remove_dir(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn native_nix_cache_admits_case_colliding_posix_names_with_stable_digest() {
+    let store_path = "/nix/store/55555555555555555555555555555555-case-collisions";
+    let nar = nar_with_directory_entries(&[b"A", b"a"]);
+    let signing_key = SigningKey::from_bytes(&[14; 32]);
+    let (root, roots, server) = single_object_cache(
+        "case-collisions",
+        store_path,
+        "case-collisions.nar",
+        &nar,
+        &signing_key,
+    );
+    let request = NixOutputRequest {
+        name: "out".into(),
+        store_path: store_path.into(),
+    };
+
+    let first = admit_nix_closure(&roots, std::slice::from_ref(&request), false).unwrap();
+    let object = &first.objects[store_path];
+    assert!(object.hangar_path.join("A").is_file());
+    assert!(object.hangar_path.join("a").is_file());
     server.replace_routes(BTreeMap::from([(
         "/nix-cache-info".to_string(),
         b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
     )]));
-
+    let second = admit_nix_closure(&roots, &[request], false).unwrap();
     assert_eq!(
-        plan_nix_downloads(&roots, &[store_path.into()], false, None).unwrap(),
-        NixDownloadPlan::default()
+        second.objects[store_path].hangar_digest,
+        object.hangar_digest
     );
+    assert_eq!(crate::Store::list(&roots).len(), 1);
+    drop(server);
+    remove_dir(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn native_nix_cache_admits_backslash_component_names() {
+    let store_path = "/nix/store/aaaaaaaabbbbbbbbccccccccdddddddd-backslash-name";
+    let name = b"dev-disk-by\\x2duuid-test.device";
+    let nar = nar_with_directory_entries(&[name]);
+    let signing_key = SigningKey::from_bytes(&[17; 32]);
+    let (root, roots, server) = single_object_cache(
+        "backslash-name",
+        store_path,
+        "backslash-name.nar",
+        &nar,
+        &signing_key,
+    );
+    let request = NixOutputRequest {
+        name: "out".into(),
+        store_path: store_path.into(),
+    };
+
+    assert!(super::super::validate_nar(&nar).is_err());
+    let strict_destination = root.join("strict");
+    assert!(super::super::read_nar_stream(
+        Cursor::new(&nar),
+        &strict_destination,
+        nar.len() as u64,
+    )
+    .is_err());
+
+    let first = admit_nix_closure(&roots, std::slice::from_ref(&request), false).unwrap();
+    let object = &first.objects[store_path];
+    assert!(object
+        .hangar_path
+        .join("dev-disk-by\\x2duuid-test.device")
+        .is_file());
+    let digest = object.hangar_digest.clone();
+
+    server.replace_routes(BTreeMap::from([(
+        "/nix-cache-info".to_string(),
+        b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
+    )]));
+    let second = admit_nix_closure(&roots, &[request], false).unwrap();
+    assert_eq!(second.objects[store_path].hangar_digest, digest);
+    drop(server);
+    remove_dir(&root);
+
+    // Under the Nix name law only `/`, NUL, and `.`/`..` stay illegal;
+    // control bytes are legal Nix names.
+    for (tag, name) in [
+        ("slash", &b"bad/name"[..]),
+        ("nul", &b"bad\0name"[..]),
+        ("dotdot", &b".."[..]),
+    ] {
+        let nar = nar_with_directory_entries(&[name]);
+        let invalid_path = format!(
+            "/nix/store/aaaaaaaabbbbbbbbccccccccdddddddd-backslash-{tag}"
+        );
+        assert_single_nix_cache_failure(
+            &format!("backslash-{tag}"),
+            &invalid_path,
+            signed_narinfo(
+                &invalid_path,
+                &format!("backslash-{tag}.nar"),
+                &nar,
+                &[],
+                "test-cache-1",
+                &signing_key,
+            ),
+            nar,
+            &signing_key,
+            NixCacheErrorKind::PathTraversal,
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn native_nix_cache_admits_sibling_store_relative_symlink_and_host_escape() {
+    let store_path = "/nix/store/66666666666666666666666666666666-sibling-link";
+    let target = b"../../77777777777777777777777777777777-sibling/bin/tool";
+    let nar = nar_with_nested_symlink(target);
+    let signing_key = SigningKey::from_bytes(&[15; 32]);
+    let (root, roots, server) = single_object_cache(
+        "sibling-link",
+        store_path,
+        "sibling-link.nar",
+        &nar,
+        &signing_key,
+    );
+    let request = NixOutputRequest {
+        name: "out".into(),
+        store_path: store_path.into(),
+    };
+
+    let first = admit_nix_closure(&roots, std::slice::from_ref(&request), false).unwrap();
+    let object = &first.objects[store_path];
+    assert_eq!(
+        fs::read_link(object.hangar_path.join("lib/link")).unwrap(),
+        PathBuf::from(std::str::from_utf8(target).unwrap())
+    );
+    server.replace_routes(BTreeMap::from([(
+        "/nix-cache-info".to_string(),
+        b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
+    )]));
+    let second = admit_nix_closure(&roots, &[request], false).unwrap();
+    assert_eq!(
+        second.objects[store_path].hangar_digest,
+        object.hangar_digest
+    );
+    drop(server);
+    remove_dir(&root);
+
+    // Escaped relative targets are inert link data in Nix admission
+    // (systemd ships `../../../../../etc/environment`); digest stays stable.
+    let deep_store_path = "/nix/store/88888888888888888888888888888888-host-escape";
+    let deep_target = b"../../../../../etc/environment";
+    let deep_nar = nar_with_nested_symlink(deep_target);
+    let deep_key = SigningKey::from_bytes(&[15; 32]);
+    let (deep_root, deep_roots, deep_server) = single_object_cache(
+        "host-escape",
+        deep_store_path,
+        "host-escape.nar",
+        &deep_nar,
+        &deep_key,
+    );
+    let deep_request = NixOutputRequest {
+        name: "out".into(),
+        store_path: deep_store_path.into(),
+    };
+    let admitted = admit_nix_closure(&deep_roots, std::slice::from_ref(&deep_request), false).unwrap();
+    let deep_object = &admitted.objects[deep_store_path];
+    assert_eq!(
+        fs::read_link(deep_object.hangar_path.join("lib/link")).unwrap(),
+        PathBuf::from(std::str::from_utf8(deep_target).unwrap())
+    );
+    deep_server.replace_routes(BTreeMap::from([(
+        "/nix-cache-info".to_string(),
+        b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
+    )]));
+    let readmitted = admit_nix_closure(&deep_roots, &[deep_request], false).unwrap();
+    assert_eq!(
+        readmitted.objects[deep_store_path].hangar_digest,
+        deep_object.hangar_digest
+    );
+    drop(deep_server);
+    remove_dir(&deep_root);
+
+    // Absolute host targets are inert link data in Nix admission
+    // (nixpkgs links to `/bin/sh` and `/run/current-system`).
+    let abs_store_path = "/nix/store/98888888888888888888888888888888-abs-host";
+    let abs_nar = nar_with_nested_symlink(b"/etc/passwd");
+    let abs_key = SigningKey::from_bytes(&[15; 32]);
+    let (abs_root, abs_roots, abs_server) = single_object_cache(
+        "abs-host",
+        abs_store_path,
+        "abs-host.nar",
+        &abs_nar,
+        &abs_key,
+    );
+    let abs_request = NixOutputRequest {
+        name: "out".into(),
+        store_path: abs_store_path.into(),
+    };
+    let abs_admitted =
+        admit_nix_closure(&abs_roots, std::slice::from_ref(&abs_request), false).unwrap();
+    assert_eq!(
+        fs::read_link(abs_admitted.objects[abs_store_path].hangar_path.join("lib/link")).unwrap(),
+        PathBuf::from("/etc/passwd")
+    );
+    drop(abs_server);
+    remove_dir(&abs_root);
+
+    // A NUL byte in the target stays rejected in every mode.
+    let bad_store_path = "/nix/store/97888888888888888888888888888888-nul-target";
+    let bad_nar = nar_with_nested_symlink(b"/etc/pas\0swd");
+    assert_single_nix_cache_failure(
+        "nul-target",
+        bad_store_path,
+        signed_narinfo(
+            bad_store_path,
+            "nul-target.nar",
+            &bad_nar,
+            &[],
+            "test-cache-1",
+            &SigningKey::from_bytes(&[15; 32]),
+        ),
+        bad_nar,
+        &SigningKey::from_bytes(&[15; 32]),
+        NixCacheErrorKind::PathTraversal,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn native_nix_cache_admits_reregisters_and_reuses_file_root() {
+    let store_path = "/nix/store/99999999999999999999999999999999-file-root";
+    let nar = nar_with_regular_root(b"source archive bytes");
+    let signing_key = SigningKey::from_bytes(&[16; 32]);
+    let (root, roots, server) =
+        single_object_cache("file-root", store_path, "file-root.nar", &nar, &signing_key);
+    let request = NixOutputRequest {
+        name: "out".into(),
+        store_path: store_path.into(),
+    };
+
+    let first = admit_nix_closure(&roots, std::slice::from_ref(&request), false).unwrap();
+    let object = &first.objects[store_path];
+    assert!(fs::symlink_metadata(&object.hangar_path).unwrap().is_file());
+    assert!(
+        crate::Store::list_checked(&roots)
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "file-root")
+            .is_some_and(|entry| entry.bin.is_empty())
+    );
+    server.replace_routes(BTreeMap::from([(
+        "/nix-cache-info".to_string(),
+        b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
+    )]));
+    let second = admit_nix_closure(&roots, &[request], false).unwrap();
+    assert_eq!(
+        second.objects[store_path].hangar_digest,
+        object.hangar_digest
+    );
+    assert_eq!(crate::Store::list(&roots).len(), 1);
     drop(server);
     remove_dir(&root);
 }
@@ -551,8 +875,7 @@ fn native_nix_cache_memoizes_verified_digest_until_root_replacement() {
     super::super::read_nar_stream(Cursor::new(nar.clone()), &object, nar.len() as u64).unwrap();
 
     let first = super::super::Ingest::verified_output_hash(&object, Some(&hangar), false).unwrap();
-    let before =
-        super::super::Ingest::object_stamp(&fs::symlink_metadata(&object).unwrap());
+    let before = super::super::Ingest::object_stamp(&fs::symlink_metadata(&object).unwrap());
     super::super::make_tree_writable_for_removal(&object).unwrap();
     fs::write(object.join("payload"), b"corrupt").unwrap();
     assert_eq!(
@@ -693,7 +1016,7 @@ fn native_nix_cache_sweeps_dead_stages_but_keeps_current_pid_stages() {
     let unrelated = stage_parent.join("nix-cache-not-a-pid-1");
     fs::create_dir_all(&unrelated).unwrap();
 
-    let transaction = AdmissionTransaction::new(&roots).unwrap();
+    let transaction = NixAdmission::new(&roots).unwrap();
     assert!(!stage_parent.join("nix-cache-999999999-1").exists());
     assert!(current.exists());
     assert!(unrelated.exists());
@@ -1040,7 +1363,7 @@ fn native_nix_cache_negative_inputs_fail_closed() {
     assert!(nar_error.to_string().contains(store_path));
     assert!(nar_error.to_string().contains("invalid magic"));
 
-    let duplicate_nar = nar_with_directory_entries(&[b"A", b"a"]);
+    let duplicate_nar = nar_with_directory_entries(&[b"A", b"A"]);
     assert_single_nix_cache_failure(
         "duplicate-entry",
         store_path,

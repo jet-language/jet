@@ -931,22 +931,73 @@ impl Theme {
         apply
     }
 
+    pub(crate) fn render_download_summary(
+        label: &str,
+        plan: &crate::Provider::DownloadPlan,
+    ) -> String {
+        let download = match plan.download_bytes {
+            Some(0) => "no download".to_string(),
+            Some(bytes) => format!("download {}", human_size(bytes)),
+            None => "download unknown".to_string(),
+        };
+        let disk = plan
+            .disk_bytes
+            .map(human_size)
+            .unwrap_or_else(|| "unknown".to_string());
+        let estimate = plan
+            .estimated_seconds
+            .filter(|_| plan.download_bytes != Some(0))
+            .map(|seconds| {
+                format!(
+                    " · about {}",
+                    human_duration(std::time::Duration::from_secs(seconds))
+                )
+            })
+            .unwrap_or_default();
+        format!(
+            "{label}: {} new, {} cached, {} repaired · {download} · on disk {disk}{estimate}",
+            plan.new, plan.cached, plan.repaired
+        )
+    }
+
+    fn download_plan_table(&self, plan: &crate::Provider::DownloadPlan) {
+        self.detail("package                                  state     download   on disk");
+        for item in &plan.items {
+            let state = match item.state {
+                crate::Provider::PlanState::New => "new",
+                crate::Provider::PlanState::Cached => "cached",
+                crate::Provider::PlanState::Repaired => "repaired",
+            };
+            let download = item
+                .download_bytes
+                .map(human_size)
+                .unwrap_or_else(|| "unknown".to_string());
+            let disk = item
+                .disk_bytes
+                .map(human_size)
+                .unwrap_or_else(|| "unknown".to_string());
+            self.detail(&format!(
+                "{:<40} {:<9} {:<10} {disk}",
+                item.package, state, download
+            ));
+        }
+    }
+
     /// Confirm the first acquisition for an environment. The closure has
-    /// already been resolved, so this gate reports its package count and
-    /// trusted byte total before any payload is fetched.
-    pub fn confirm_download(
+    /// already been resolved, so this gate reports trusted plan facts before
+    /// any payload is fetched.
+    pub(crate) fn confirm_download(
         &self,
         label: &str,
-        packages: usize,
-        bytes: Option<u64>,
+        plan: &crate::Provider::DownloadPlan,
+        explain: bool,
         assume_yes: bool,
     ) -> bool {
-        let noun = if packages == 1 { "package" } else { "packages" };
-        let size = bytes
-            .map(human_size)
-            .unwrap_or_else(|| "size unknown".to_string());
-        let summary = format!("{label} needs {packages} {noun}, {size}");
-        if assume_yes {
+        let summary = Self::render_download_summary(label, plan);
+        if explain {
+            self.download_plan_table(plan);
+        }
+        if assume_yes || plan.new + plan.repaired == 0 {
             self.status(&summary);
             return true;
         }
@@ -1031,7 +1082,10 @@ impl Theme {
             );
             return None;
         }
-        write_output(format_args!("  {}  Local catalog directory: ", self.gutter()));
+        write_output(format_args!(
+            "  {}  Local catalog directory: ",
+            self.gutter()
+        ));
         let mut answer = String::new();
         if std::io::stdin().read_line(&mut answer).is_err() || answer.trim().is_empty() {
             self.status("catalog setup cancelled.");
@@ -1193,7 +1247,10 @@ impl Theme {
             fix.to_string(),
             None,
         );
-        write_output(format_args!("{}", diagnostic.render_colored("", "", self.color)));
+        write_output(format_args!(
+            "{}",
+            diagnostic.render_colored("", "", self.color)
+        ));
     }
 }
 
@@ -1340,7 +1397,7 @@ impl<'a> LiveRegion<'a> {
 /// `240 MB` / `1.3 GB` / `512 KB` — binary-ish decimal human size for the
 /// tier-3 `Download` line. Whole numbers below 1000 print without a
 /// fraction; everything else keeps one decimal place.
-fn human_size(bytes: u64) -> String {
+pub(crate) fn human_size(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
     let mut value = bytes as f64;
     let mut unit = 0usize;
@@ -1805,6 +1862,33 @@ mod tests {
         assert_eq!(
             Theme::render_download_line(1_300_000_000),
             "Download 1.3 GB"
+        );
+    }
+
+    #[test]
+    fn environment_plan_summary_reports_real_counts_sizes_and_cached_only() {
+        let plan = crate::Provider::DownloadPlan {
+            new: 2,
+            cached: 3,
+            repaired: 1,
+            download_bytes: Some(1_500_000),
+            disk_bytes: Some(4_200_000),
+            estimated_seconds: Some(3),
+            items: Vec::new(),
+        };
+        assert_eq!(
+            Theme::render_download_summary("env.dev", &plan),
+            "env.dev: 2 new, 3 cached, 1 repaired · download 1.5 MB · on disk 4.2 MB · about 3s"
+        );
+
+        let cached = crate::Provider::DownloadPlan {
+            cached: 4,
+            disk_bytes: Some(900_000),
+            ..crate::Provider::DownloadPlan::default()
+        };
+        assert_eq!(
+            Theme::render_download_summary("env.dev", &cached),
+            "env.dev: 0 new, 4 cached, 0 repaired · no download · on disk 900 KB"
         );
     }
 

@@ -79,8 +79,15 @@ pub(crate) fn refresh_nix_lock_digest(
         // digest that the registration commits, so the subsequent project
         // lock projection cannot retain the pre-refresh receipt.
         refreshed.receipt.clear();
-        Closure::prepare_entry_receipt(roots, &mut refreshed)?;
-        Closure::register_entry_unlocked(roots, &refreshed)?;
+        super::AdmissionTransaction::recover_unlocked(roots)?;
+        let mut transaction = super::AdmissionTransaction::new(roots)?;
+        transaction.commit(
+            std::slice::from_mut(&mut refreshed),
+            &[],
+            None,
+            Closure::RegistrationMode::AdmittedNix,
+            None,
+        )?;
         Ok(refreshed)
     })
 }

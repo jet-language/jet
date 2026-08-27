@@ -84,11 +84,8 @@ pub(crate) fn verify_cache_entry_with_graph(
     graph: Option<&Closure::ClosureGraph>,
 ) -> CacheVerification {
     let out = Path::new(&entry.out);
-    let output_exists = fs::symlink_metadata(out)
-        .map(|metadata| {
-            !metadata.file_type().is_symlink() && (metadata.is_file() || metadata.is_dir())
-        })
-        .unwrap_or(false);
+    // Admitted objects are directory, regular file, or symlink roots.
+    let output_exists = fs::symlink_metadata(out).is_ok();
     let output_digest = output_exists
         && !entry.envelope.output_hash.is_empty()
         && Ingest::try_entry_output_hash(roots, entry)
@@ -331,7 +328,10 @@ struct NixProjectionBinding {
     digest: String,
     primary: bool,
     source: PathBuf,
-    handle: fs::File,
+    /// `None` for symlink-root objects: a symlink cannot be opened
+    /// `O_NOFOLLOW`; its stability is proven by re-reading the target.
+    handle: Option<fs::File>,
+    symlink_target: Option<PathBuf>,
 }
 
 pub(crate) struct NixStoreProjection {
@@ -744,23 +744,58 @@ impl CacheLease {
         #[cfg(target_os = "linux")]
         for binding in &self.nix_projection_bindings {
             let path_metadata = fs::symlink_metadata(&binding.source)?;
-            if path_metadata.file_type().is_symlink()
-                || (!path_metadata.is_dir() && !path_metadata.is_file())
+            if !path_metadata.file_type().is_symlink()
+                && !path_metadata.is_dir()
+                && !path_metadata.is_file()
             {
                 return Err(std::io::Error::other(format!(
                     "Nix projection source `{}` is not a regular node",
                     binding.source.display()
                 )));
             }
-            let opened_metadata = binding.handle.metadata()?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::MetadataExt as _;
-                if path_metadata.dev() != opened_metadata.dev()
-                    || path_metadata.ino() != opened_metadata.ino()
-                {
+            match (&binding.handle, &binding.symlink_target) {
+                (Some(handle), _) => {
+                    if path_metadata.file_type().is_symlink() {
+                        return Err(std::io::Error::other(format!(
+                            "Nix projection source `{}` changed type",
+                            binding.source.display()
+                        )));
+                    }
+                    let opened_metadata = handle.metadata()?;
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::MetadataExt as _;
+                        if path_metadata.dev() != opened_metadata.dev()
+                            || path_metadata.ino() != opened_metadata.ino()
+                        {
+                            return Err(std::io::Error::other(format!(
+                                "Nix projection source `{}` changed while leased",
+                                binding.source.display()
+                            )));
+                        }
+                    }
+                    if path_metadata.is_dir() != opened_metadata.is_dir()
+                        || path_metadata.is_file() != opened_metadata.is_file()
+                    {
+                        return Err(std::io::Error::other(format!(
+                            "Nix projection source `{}` changed type",
+                            binding.source.display()
+                        )));
+                    }
+                }
+                (None, Some(expected_target)) => {
+                    if !path_metadata.file_type().is_symlink()
+                        || &fs::read_link(&binding.source)? != expected_target
+                    {
+                        return Err(std::io::Error::other(format!(
+                            "Nix projection source `{}` changed while leased",
+                            binding.source.display()
+                        )));
+                    }
+                }
+                (None, None) => {
                     return Err(std::io::Error::other(format!(
-                        "Nix projection source `{}` changed while leased",
+                        "Nix projection source `{}` has no stability witness",
                         binding.source.display()
                     )));
                 }
@@ -791,9 +826,9 @@ impl CacheLease {
                     )));
                 }
                 if !self.direct_cas {
-                    let actual = crate::Envelope::try_output_hash_of_in_hangar(
-                        &binding.source.to_string_lossy(),
-                        &self.store_root.join("hangar"),
+                    let actual = Ingest::verified_output_hash_persistent(
+                        &binding.source,
+                        Some(&self.store_root.join("hangar")),
                         false,
                     )
                     .map_err(std::io::Error::other)?;
@@ -804,14 +839,6 @@ impl CacheLease {
                         )));
                     }
                 }
-            }
-            if path_metadata.is_dir() != opened_metadata.is_dir()
-                || path_metadata.is_file() != opened_metadata.is_file()
-            {
-                return Err(std::io::Error::other(format!(
-                    "Nix projection source `{}` changed type",
-                    binding.source.display()
-                )));
             }
         }
         #[cfg(target_os = "linux")]
@@ -1281,7 +1308,15 @@ fn snapshot_lease_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result
                                     output_root.display()
                                 ))
                             })?;
-                        PathBuf::from(format!("/proc/self/fd/{}", binding.handle.as_raw_fd()))
+                        match &binding.handle {
+                            Some(handle) => {
+                                PathBuf::from(format!("/proc/self/fd/{}", handle.as_raw_fd()))
+                            }
+                            // Symlink-root objects have no fd; the canonical
+                            // source path is the lease root and its target is
+                            // witnessed at commit.
+                            None => source.clone(),
+                        }
                     }
                     #[cfg(not(target_os = "linux"))]
                     {
@@ -1394,13 +1429,29 @@ fn open_nix_projection_sources(
     let mut bindings = Vec::with_capacity(projections.len());
     for projection in projections {
         let path_metadata = fs::symlink_metadata(&projection.source)?;
-        if path_metadata.file_type().is_symlink()
-            || (!path_metadata.is_dir() && !path_metadata.is_file())
+        if !path_metadata.file_type().is_symlink()
+            && !path_metadata.is_dir()
+            && !path_metadata.is_file()
         {
             return Err(std::io::Error::other(format!(
                 "Nix projection source `{}` is not a regular node",
                 projection.source.display()
             )));
+        }
+        if path_metadata.file_type().is_symlink() {
+            // Symlink-root objects project as the symlink itself; there is no
+            // fd to pin, so the lease re-reads the target for stability.
+            let target = fs::read_link(&projection.source)?;
+            stable.push((projection.logical.clone(), projection.source.clone()));
+            bindings.push(NixProjectionBinding {
+                logical: projection.logical,
+                digest: projection.digest,
+                primary: projection.primary,
+                source: projection.source,
+                handle: None,
+                symlink_target: Some(target),
+            });
+            continue;
         }
         let mut options = fs::OpenOptions::new();
         options
@@ -1424,7 +1475,8 @@ fn open_nix_projection_sources(
             digest: projection.digest,
             primary: projection.primary,
             source: projection.source,
-            handle,
+            handle: Some(handle),
+            symlink_target: None,
         });
     }
     Ok((stable, bindings))
@@ -1508,8 +1560,11 @@ pub(crate) fn nix_store_projection_for_entry(
                     "Nix closure object `{digest}` is not a canonical Hangar object"
                 )));
             }
+            // Admitted Nix objects are directory, regular file, or symlink
+            // roots (gcc-wrapper-info and pkg-config-man are symlink roots);
+            // only other node kinds are corrupt here.
             let metadata = fs::symlink_metadata(&expected_path)?;
-            if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
+            if !metadata.file_type().is_symlink() && !metadata.is_dir() && !metadata.is_file() {
                 return Err(std::io::Error::other(format!(
                     "Nix closure object `{digest}` is not a regular Hangar node"
                 )));
@@ -1659,7 +1714,9 @@ fn hangar_projection_object(
             "Nix output `{logical}` Hangar object `{digest}` is unavailable: {error}"
         ))
     })?;
-    if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
+    // Admitted Nix objects are directory, regular file, or symlink roots
+    // (gcc-wrapper-info projects a symlink); only other kinds are corrupt.
+    if !metadata.file_type().is_symlink() && !metadata.is_dir() && !metadata.is_file() {
         return Err(std::io::Error::other(format!(
             "Nix output `{logical}` Hangar object `{digest}` is not a regular node"
         )));

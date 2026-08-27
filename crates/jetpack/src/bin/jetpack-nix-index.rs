@@ -176,7 +176,7 @@ fn generate(args: &[String], write_signature_request: bool) -> Result<(), String
         ));
     }
     write_immutable(
-        &target_dir.join(format!("{digest}.generation-report.json")),
+        &target_dir.join(format!("{digest}.json.zst.generation-report.json")),
         report.as_bytes(),
     )?;
     if let Some(native_recipes) = native_recipes {
@@ -365,7 +365,10 @@ fn manifest(args: &[String]) -> Result<(), String> {
                     NixIndex::producer_target_measurements(&compressed)
                         .map_err(|error| error.to_string())?;
                 let generation_report =
-                    PathBuf::from(format!("{}.generation-report.json", target.display()));
+                    PathBuf::from(format!(
+                        "{}.generation-report.json",
+                        target.display()
+                    ));
                 let released_unix = find_json_integer(
                     &read_file(&generation_report, 16 * 1024, "index generation report")?,
                     &["released_unix"],
@@ -778,7 +781,132 @@ fn escape(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::newest_discoverable_targets;
+    use super::{generate, manifest, newest_discoverable_targets};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "jetpack-nix-index-test-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn generate_then_manifest_round_trips_generation_report() {
+        let temp = TempDir::new();
+        let revision = "a".repeat(40);
+        let system = "x86_64-linux";
+        let channel = "nixpkgs-unstable";
+        let store_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-1.0";
+        let drv_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello-1.0.drv";
+        let revision_file = temp.0.join("git-revision");
+        let release_metadata = temp.0.join("release.json");
+        let packages = temp.0.join("packages.json");
+        let hydra_eval = temp.0.join("hydra-eval.json");
+        let hydra_build = temp.0.join("hydra-build");
+        let hydra_record = hydra_build.join("hello.json");
+        let oracle = temp.0.join("oracle.json");
+        let store_paths = temp.0.join("store-paths");
+        let output_root = temp.0.join("output");
+
+        fs::write(&revision_file, format!("{revision}\n")).unwrap();
+        fs::write(&release_metadata, r#"{"released_unix":123}"#).unwrap();
+        fs::write(&packages, r#"{"hello":"1.0"}"#).unwrap();
+        fs::write(&hydra_eval, format!(r#"{{"revision":"{revision}"}}"#)).unwrap();
+        fs::create_dir_all(&hydra_build).unwrap();
+        fs::write(
+            &hydra_record,
+            format!(r#"{{"system":"{system}","storePath":"{store_path}"}}"#),
+        )
+        .unwrap();
+        fs::write(
+            &oracle,
+            format!(
+                r#"{{"revision":"{revision}","system":"{system}","records":[{{"attrpath":["hello"],"version":"1.0","drvPath":"{drv_path}","outputs":[{{"name":"out","storePath":"{store_path}"}}],"cache":true}}]}}"#
+            ),
+        )
+        .unwrap();
+        fs::write(&store_paths, format!("{store_path}\n")).unwrap();
+
+        let generate_args = vec![
+            "--channel".into(),
+            channel.into(),
+            "--system".into(),
+            system.into(),
+            "--revision".into(),
+            revision.clone(),
+            "--git-revision".into(),
+            revision_file.to_string_lossy().into_owned(),
+            "--release-metadata".into(),
+            release_metadata.to_string_lossy().into_owned(),
+            "--packages-json".into(),
+            packages.to_string_lossy().into_owned(),
+            "--hydra-eval".into(),
+            hydra_eval.to_string_lossy().into_owned(),
+            "--hydra-build-dir".into(),
+            hydra_build.to_string_lossy().into_owned(),
+            "--oracle".into(),
+            oracle.to_string_lossy().into_owned(),
+            "--store-paths".into(),
+            store_paths.to_string_lossy().into_owned(),
+            "--output".into(),
+            output_root.to_string_lossy().into_owned(),
+        ];
+        generate(&generate_args, true).unwrap();
+
+        let target_dir = output_root.join("index-v1").join(&revision).join(system);
+        let target = fs::read_dir(&target_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("zst"))
+            .unwrap();
+        let digest = target
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".json"))
+            .unwrap();
+        let generation_report =
+            target_dir.join(format!("{digest}.json.zst.generation-report.json"));
+        assert!(generation_report.is_file());
+        assert!(!target_dir.join(format!("{digest}.generation-report.json")).exists());
+        fs::write(format!("{}.sig.json", target.display()), b"{}\n").unwrap();
+
+        let manifest_output = temp.0.join("manifest.json");
+        let manifest_args = vec![
+            "--channel".into(),
+            channel.into(),
+            "--endpoint".into(),
+            "https://index.example.test".into(),
+            "--generation".into(),
+            "1".into(),
+            "--issued-unix".into(),
+            "124".into(),
+            "--expires-unix".into(),
+            "125".into(),
+            "--target-root".into(),
+            output_root.to_string_lossy().into_owned(),
+            "--output".into(),
+            manifest_output.to_string_lossy().into_owned(),
+        ];
+        manifest(&manifest_args).unwrap();
+        assert!(manifest_output.is_file());
+    }
 
     #[test]
     fn manifest_retention_marks_newest_twelve_per_system() {

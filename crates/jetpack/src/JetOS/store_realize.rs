@@ -107,7 +107,7 @@ fn authorize_core_build(
     ctx: &Provider::Ctx<'_>,
     bypass: bool,
 ) -> Result<(), CoreBuildAuthorizationError> {
-    match Provider::core_build_identity(spec, table, ctx) {
+    match Provider::approval_facts(spec, table, ctx) {
         Ok(Some(identity)) => {
             crate::RuntimePolicy::warn_sandbox_fallback(theme);
             Trust::gate_build_identity(theme, trust_store, &identity, bypass)

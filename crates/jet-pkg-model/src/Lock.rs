@@ -11,7 +11,7 @@ use crate::Syntax;
 use crate::SHA256::sha256_hex;
 use jet_foundation::Facts::BuildStamp;
 use std::collections::BTreeSet;
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::Path;
 
 // ComptimeInput struct lives in AST for cross-seam sharing; re-export here.
@@ -231,6 +231,41 @@ impl LockedPackage {
                 .unwrap_or_else(|| "not recorded".to_string()),
         }
     }
+
+    /// The compact trust grade used by lock-change presentation. This is a
+    /// projection of facts already stored in the lock; it does not add a lock
+    /// field or perform a new verification step.
+    pub fn trust_grade(&self) -> &'static str {
+        let Some(envelope) = self.envelope.as_ref() else {
+            return "unverified-mapping";
+        };
+        if matches!(
+            envelope.catalog_tier.as_str(),
+            "local-unofficial" | "local-import"
+        ) || envelope.catalog_trust.contains("unverified")
+        {
+            return "unverified-mapping";
+        }
+        if !envelope.signature.is_empty()
+            || (envelope.catalog_tier == "official-signed"
+                && envelope.catalog_trust == "verified")
+        {
+            return "signed";
+        }
+        if envelope.provenance == "attested-v1"
+            || envelope
+                .provenance
+                .starts_with("independent-agreeing-v1:")
+            || self.provenance.as_ref().is_some_and(|provenance| {
+                provenance.build.as_deref().is_some_and(|build| {
+                    build == "attested-v1" || build.starts_with("independent-agreeing-v1:")
+                })
+            })
+        {
+            return "reproduced";
+        }
+        "unverified-mapping"
+    }
 }
 
 /// Enforce one manifest-selected provenance floor over all non-root lock
@@ -312,6 +347,168 @@ pub struct LockedSourceChannel {
     pub name: String,
     pub channel: String,
     pub exact: String,
+}
+
+/// A presentation-only package change. The lock schema remains the source of
+/// truth; these fields are copied only so a renderer can outlive its input
+/// lock values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LockPackageChangeKind {
+    Added,
+    Removed,
+    Updated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockPackageChange {
+    pub name: String,
+    pub kind: LockPackageChangeKind,
+    pub before_version: Option<String>,
+    pub after_version: Option<String>,
+    pub before_trust: Option<String>,
+    pub after_trust: Option<String>,
+    pub before_output: Option<String>,
+    pub after_output: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockChannelChange {
+    pub name: String,
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LockDiff {
+    pub packages: Vec<LockPackageChange>,
+    pub channels: Vec<LockChannelChange>,
+}
+
+impl LockDiff {
+    /// Compare two lock snapshots without changing or interpreting the lock
+    /// schema. `None` represents a missing snapshot and therefore an empty
+    /// side of the presentation diff.
+    pub fn between(before: Option<&LockFile>, after: Option<&LockFile>) -> Self {
+        let mut package_names = BTreeSet::new();
+        if let Some(lock) = before {
+            package_names.extend(lock.packages.iter().map(|package| package.name.clone()));
+        }
+        if let Some(lock) = after {
+            package_names.extend(lock.packages.iter().map(|package| package.name.clone()));
+        }
+
+        let packages = package_names
+            .into_iter()
+            .filter_map(|name| {
+                let old = before
+                    .and_then(|lock| lock.packages.iter().find(|package| package.name == name));
+                let new = after
+                    .and_then(|lock| lock.packages.iter().find(|package| package.name == name));
+                match (old, new) {
+                    (None, Some(package)) => Some(LockPackageChange {
+                        name,
+                        kind: LockPackageChangeKind::Added,
+                        before_version: None,
+                        after_version: Some(package.version.clone()),
+                        before_trust: None,
+                        after_trust: Some(package.trust_grade().to_string()),
+                        before_output: None,
+                        after_output: package_output(package),
+                    }),
+                    (Some(package), None) => Some(LockPackageChange {
+                        name,
+                        kind: LockPackageChangeKind::Removed,
+                        before_version: Some(package.version.clone()),
+                        after_version: None,
+                        before_trust: Some(package.trust_grade().to_string()),
+                        after_trust: None,
+                        before_output: package_output(package),
+                        after_output: None,
+                    }),
+                    (Some(old), Some(new)) if old != new => Some(LockPackageChange {
+                        name,
+                        kind: LockPackageChangeKind::Updated,
+                        before_version: Some(old.version.clone()),
+                        after_version: Some(new.version.clone()),
+                        before_trust: Some(old.trust_grade().to_string()),
+                        after_trust: Some(new.trust_grade().to_string()),
+                        before_output: package_output(old),
+                        after_output: package_output(new),
+                    }),
+                    _ => None,
+                }
+            })
+            .collect();
+
+        let mut channel_names = BTreeSet::new();
+        if let Some(lock) = before {
+            channel_names.extend(lock.source_channels.iter().map(|channel| channel.name.clone()));
+        }
+        if let Some(lock) = after {
+            channel_names.extend(lock.source_channels.iter().map(|channel| channel.name.clone()));
+        }
+        let channels = channel_names
+            .into_iter()
+            .filter_map(|name| {
+                let old = before.and_then(|lock| {
+                    lock.source_channels
+                        .iter()
+                        .find(|channel| channel.name == name)
+                        .map(|channel| channel.exact.clone())
+                });
+                let new = after.and_then(|lock| {
+                    lock.source_channels
+                        .iter()
+                        .find(|channel| channel.name == name)
+                        .map(|channel| channel.exact.clone())
+                });
+                (old != new).then_some(LockChannelChange {
+                    name,
+                    before: old,
+                    after: new,
+                })
+            })
+            .collect();
+
+        Self { packages, channels }
+    }
+
+    pub fn added_count(&self) -> usize {
+        self.packages
+            .iter()
+            .filter(|change| change.kind == LockPackageChangeKind::Added)
+            .count()
+    }
+
+    pub fn removed_count(&self) -> usize {
+        self.packages
+            .iter()
+            .filter(|change| change.kind == LockPackageChangeKind::Removed)
+            .count()
+    }
+
+    pub fn updated_count(&self) -> usize {
+        self.packages
+            .iter()
+            .filter(|change| change.kind == LockPackageChangeKind::Updated)
+            .count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.packages.is_empty() && self.channels.is_empty()
+    }
+}
+
+fn package_output(package: &LockedPackage) -> Option<String> {
+    let output = match &package.source {
+        LockSource::Nix { output, .. }
+        | LockSource::Cran { output, .. }
+        | LockSource::LuaRocks { output, .. }
+        | LockSource::Registry { output, .. }
+        | LockSource::Foreign { output, .. } => output,
+        LockSource::Root | LockSource::Path(_) | LockSource::Git { .. } => return None,
+    };
+    (!output.is_empty()).then(|| output.clone())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -978,6 +1175,12 @@ fn unescape_str(s: &str) -> String {
     out
 }
 
+const MAX_LOCK_VALUE_BYTES: usize = 1024 * 1024;
+
+fn oversized_lock_value_message(line: usize) -> String {
+    format!("lock value exceeds the 1 MiB safety limit at line {line}")
+}
+
 /// D-JPK-CACHE1=A (A4): serialize the envelope field set (shared by
 /// `[[package]]` and `[[toolchain]]` blocks). `output-hash`/`platform`/
 /// `provenance` are always emitted for a realized object (the frozen schema);
@@ -1044,8 +1247,13 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut in_root = false;
     let mut in_build_stamp = false;
 
-    for line in raw.lines() {
-        let line = line.trim();
+    for (line_number, raw_line) in raw.lines().enumerate() {
+        // Corruption handling, not the escaping fix: stop before one malformed
+        // lock value can allocate without a bound.
+        if raw_line.len() > MAX_LOCK_VALUE_BYTES {
+            return Err(oversized_lock_value_message(line_number + 1));
+        }
+        let line = raw_line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
@@ -1137,7 +1345,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         if in_build_stamp {
             let stamp = build_stamp.get_or_insert_with(BuildStamp::default);
             match key {
-                "git" => stamp.git = Some(val.trim_matches('"').to_string()),
+                "git" => stamp.git = Some(unescape_str(val)),
                 "dirty" => {
                     stamp.dirty = match val {
                         "true" => true,
@@ -1145,15 +1353,15 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                         _ => return Err(format!("invalid build stamp dirty value: {val}")),
                     }
                 }
-                "toolchain" => stamp.toolchain = val.trim_matches('"').to_string(),
-                "at" => stamp.at = val.trim_matches('"').to_string(),
+                "toolchain" => stamp.toolchain = unescape_str(val),
+                "at" => stamp.at = unescape_str(val),
                 _ => return Err(format!("unknown build stamp field `{key}`")),
             }
             continue;
         }
 
         if key == "workspace_source_digest" && current_pkg.is_none() && !in_root {
-            workspace_source_digest = Some(val.trim_matches('"').to_string());
+            workspace_source_digest = Some(unescape_str(val));
             continue;
         }
 
@@ -1186,7 +1394,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
 
         if let Some(ref mut ci) = current_ci {
             match key {
-                "path" => ci.path = Some(val.trim_matches('"').to_string()),
+                "path" => ci.path = Some(unescape_str(val)),
                 "hash" => ci.hash = Some(val.trim_matches('"').to_string()),
                 _ => {}
             }
@@ -1207,30 +1415,30 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         }
         if let Some(ref mut wm) = current_workspace_member {
             match key {
-                "name" => wm.name = Some(val.trim_matches('"').to_string()),
-                "path" => wm.path = Some(val.trim_matches('"').to_string()),
-                "source_digest" => wm.source_digest = Some(val.trim_matches('"').to_string()),
-                "canonical_path" => wm.canonical_path = Some(val.trim_matches('"').to_string()),
-                "package_digest" => wm.package_digest = Some(val.trim_matches('"').to_string()),
+                "name" => wm.name = Some(unescape_str(val)),
+                "path" => wm.path = Some(unescape_str(val)),
+                "source_digest" => wm.source_digest = Some(unescape_str(val)),
+                "canonical_path" => wm.canonical_path = Some(unescape_str(val)),
+                "package_digest" => wm.package_digest = Some(unescape_str(val)),
                 _ => {}
             }
             continue;
         }
         if let Some(ref mut overlay) = current_workspace_overlay {
             match key {
-                "name" => overlay.name = Some(val.trim_matches('"').to_string()),
-                "provider" => overlay.provider = Some(val.trim_matches('"').to_string()),
-                "channel" => overlay.channel = Some(val.trim_matches('"').to_string()),
+                "name" => overlay.name = Some(unescape_str(val)),
+                "provider" => overlay.provider = Some(unescape_str(val)),
+                "channel" => overlay.channel = Some(unescape_str(val)),
                 _ => return Err(format!("unknown workspace overlay field `{key}`")),
             }
             continue;
         }
         if let Some(ref mut package) = current_workspace_overlay_package {
             match key {
-                "overlay" => package.overlay = Some(val.trim_matches('"').to_string()),
-                "package" => package.package = Some(val.trim_matches('"').to_string()),
-                "source" => package.source = Some(val.trim_matches('"').to_string()),
-                "version" => package.version = Some(val.trim_matches('"').to_string()),
+                "overlay" => package.overlay = Some(unescape_str(val)),
+                "package" => package.package = Some(unescape_str(val)),
+                "source" => package.source = Some(unescape_str(val)),
+                "version" => package.version = Some(unescape_str(val)),
                 "flags" => package.flags = parse_string_array(val),
                 "priority" => {
                     package.priority = Some(
@@ -1258,7 +1466,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         }
         if let Some(ref mut grant) = current_workspace_build_grant {
             match key {
-                "package" => grant.package = Some(val.trim_matches('"').to_string()),
+                "package" => grant.package = Some(unescape_str(val)),
                 "effects" => grant.effects = parse_string_array(val),
                 _ => return Err(format!("unknown workspace build grant field `{key}`")),
             }
@@ -1266,29 +1474,25 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         }
         if let Some(ref mut tc) = current_toolchain {
             match key {
-                "id" => tc.id = Some(val.trim_matches('"').to_string()),
-                "channel" => tc.channel = Some(val.trim_matches('"').to_string()),
-                "version" => tc.version = Some(val.trim_matches('"').to_string()),
-                "output-hash" => tc.envelope.output_hash = val.trim_matches('"').to_string(),
-                "platform" => tc.envelope.platform = val.trim_matches('"').to_string(),
-                "signature" => tc.envelope.signature = val.trim_matches('"').to_string(),
-                "catalog-tier" => {
-                    tc.envelope.catalog_tier = val.trim_matches('"').to_string()
-                }
-                "catalog-trust" => {
-                    tc.envelope.catalog_trust = val.trim_matches('"').to_string()
-                }
-                "provenance" => tc.envelope.provenance = val.trim_matches('"').to_string(),
+                "id" => tc.id = Some(unescape_str(val)),
+                "channel" => tc.channel = Some(unescape_str(val)),
+                "version" => tc.version = Some(unescape_str(val)),
+                "output-hash" => tc.envelope.output_hash = unescape_str(val),
+                "platform" => tc.envelope.platform = unescape_str(val),
+                "signature" => tc.envelope.signature = unescape_str(val),
+                "catalog-tier" => tc.envelope.catalog_tier = unescape_str(val),
+                "catalog-trust" => tc.envelope.catalog_trust = unescape_str(val),
+                "provenance" => tc.envelope.provenance = unescape_str(val),
                 _ => {}
             }
             continue;
         }
         if let Some(ref mut browser) = current_browser {
             match key {
-                "engine" => browser.engine = Some(val.trim_matches('"').to_string()),
-                "version" => browser.version = Some(val.trim_matches('"').to_string()),
-                "binary" => browser.binary = Some(val.trim_matches('"').to_string()),
-                "protocol" => browser.protocol = Some(val.trim_matches('"').to_string()),
+                "engine" => browser.engine = Some(unescape_str(val)),
+                "version" => browser.version = Some(unescape_str(val)),
+                "binary" => browser.binary = Some(unescape_str(val)),
+                "protocol" => browser.protocol = Some(unescape_str(val)),
                 "size" => {
                     browser.size = Some(
                         val.trim_matches('"')
@@ -1296,25 +1500,21 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                             .map_err(|_| format!("invalid browser size: {val}"))?,
                     );
                 }
-                "output-hash" => browser.envelope.output_hash = val.trim_matches('"').to_string(),
-                "platform" => browser.envelope.platform = val.trim_matches('"').to_string(),
-                "signature" => browser.envelope.signature = val.trim_matches('"').to_string(),
-                "catalog-tier" => {
-                    browser.envelope.catalog_tier = val.trim_matches('"').to_string()
-                }
-                "catalog-trust" => {
-                    browser.envelope.catalog_trust = val.trim_matches('"').to_string()
-                }
-                "provenance" => browser.envelope.provenance = val.trim_matches('"').to_string(),
+                "output-hash" => browser.envelope.output_hash = unescape_str(val),
+                "platform" => browser.envelope.platform = unescape_str(val),
+                "signature" => browser.envelope.signature = unescape_str(val),
+                "catalog-tier" => browser.envelope.catalog_tier = unescape_str(val),
+                "catalog-trust" => browser.envelope.catalog_trust = unescape_str(val),
+                "provenance" => browser.envelope.provenance = unescape_str(val),
                 _ => {}
             }
             continue;
         }
         if let Some(ref mut sc) = current_source_channel {
             match key {
-                "name" => sc.name = Some(val.trim_matches('"').to_string()),
-                "channel" => sc.channel = Some(val.trim_matches('"').to_string()),
-                "exact" => sc.exact = Some(val.trim_matches('"').to_string()),
+                "name" => sc.name = Some(unescape_str(val)),
+                "channel" => sc.channel = Some(unescape_str(val)),
+                "exact" => sc.exact = Some(unescape_str(val)),
                 _ => {}
             }
             continue;
@@ -1346,16 +1546,12 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 }
                 // D-JPK-CACHE1=A (A4): realized-output envelope. Seeing any of
                 // these marks the package as realized (envelope becomes Some).
-                "output-hash" => pkg.envelope_mut().output_hash = val.trim_matches('"').to_string(),
-                "platform" => pkg.envelope_mut().platform = val.trim_matches('"').to_string(),
-                "signature" => pkg.envelope_mut().signature = val.trim_matches('"').to_string(),
-                "catalog-tier" => {
-                    pkg.envelope_mut().catalog_tier = val.trim_matches('"').to_string()
-                }
-                "catalog-trust" => {
-                    pkg.envelope_mut().catalog_trust = val.trim_matches('"').to_string()
-                }
-                "provenance" => pkg.envelope_mut().provenance = val.trim_matches('"').to_string(),
+                "output-hash" => pkg.envelope_mut().output_hash = unescape_str(val),
+                "platform" => pkg.envelope_mut().platform = unescape_str(val),
+                "signature" => pkg.envelope_mut().signature = unescape_str(val),
+                "catalog-tier" => pkg.envelope_mut().catalog_tier = unescape_str(val),
+                "catalog-trust" => pkg.envelope_mut().catalog_trust = unescape_str(val),
+                "provenance" => pkg.envelope_mut().provenance = unescape_str(val),
                 "receipt" => {
                     let receipt = unescape_str(val);
                     pkg.receipt = (!receipt.is_empty()).then_some(receipt);
@@ -1428,6 +1624,12 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         build_stamp,
         build_contributions,
     })
+}
+
+/// Parse a lock for a user-facing path. A malformed or oversized lock is
+/// recoverable corruption because `.jet/lock` is regenerated by Jetpack.
+pub fn parse_with_path(raw: &str, lock_path: &Path) -> Result<LockFile, Diagnostic> {
+    parse(raw).map_err(|_| e1205_lock_corrupt(&lock_path.display().to_string()))
 }
 
 /// Identify a lock that claims workspace authority even when its typed parse
@@ -2006,7 +2208,7 @@ fn kv_field(inline: &str, key: &str) -> Option<String> {
         if let Some(rest) = part.strip_prefix(key) {
             let rest = rest.trim().strip_prefix('=')?.trim();
             let val = if rest.starts_with('"') {
-                rest.trim_matches('"').to_string()
+                unescape_str(rest)
             } else {
                 rest.to_string()
             };
@@ -2016,13 +2218,52 @@ fn kv_field(inline: &str, key: &str) -> Option<String> {
     None
 }
 
+/// Read one lock without letting a corrupt line grow the input buffer forever.
+fn read_lock_text(path: &Path) -> std::io::Result<String> {
+    let file = std::fs::File::open(path)?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut raw = Vec::new();
+    let mut line_length = 0;
+    let mut line_number = 1;
+
+    loop {
+        let (take, content_length, has_newline) = {
+            let chunk = reader.fill_buf()?;
+            if chunk.is_empty() {
+                break;
+            }
+            let newline = chunk.iter().position(|byte| *byte == b'\n');
+            let take = newline.map_or(chunk.len(), |index| index + 1);
+            let content_length = newline.unwrap_or(take);
+            if line_length + content_length > MAX_LOCK_VALUE_BYTES {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    oversized_lock_value_message(line_number),
+                ));
+            }
+            raw.extend_from_slice(&chunk[..take]);
+            (take, content_length, newline.is_some())
+        };
+        reader.consume(take);
+        if has_newline {
+            line_length = 0;
+            line_number += 1;
+        } else {
+            line_length += content_length;
+        }
+    }
+
+    String::from_utf8(raw)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
 // ──────────────────────────────────────────────
 // Load and verify
 // ──────────────────────────────────────────────
 
 pub fn load(project_root: &Path) -> Option<LockFile> {
     let path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let raw = std::fs::read_to_string(&path).ok()?;
+    let raw = read_lock_text(&path).ok()?;
     parse(&raw).ok()
 }
 
@@ -2122,7 +2363,7 @@ pub fn record_inferred_layer(
     layer: crate::Syntax::RuntimeLayer,
 ) {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let Ok(raw) = std::fs::read_to_string(&lock_path) else {
+    let Ok(raw) = read_lock_text(&lock_path) else {
         return;
     };
     let Ok(mut lock) = parse(&raw) else {
@@ -2143,7 +2384,7 @@ pub fn record_inferred_layer(
 /// [`record_inferred_layer`].
 pub fn record_envelope(project_root: &Path, package_name: &str, envelope: LockEnvelope) {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let Ok(raw) = std::fs::read_to_string(&lock_path) else {
+    let Ok(raw) = read_lock_text(&lock_path) else {
         return;
     };
     let Ok(mut lock) = parse(&raw) else {
@@ -2175,7 +2416,7 @@ pub fn record_nix_realization(
 ) -> Result<(), String> {
     let reference = crate::RefSpec::canonical_locked_ref(reference);
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let mut lock = match std::fs::read_to_string(&lock_path) {
+    let mut lock = match read_lock_text(&lock_path) {
         Ok(raw) => parse(&raw).map_err(|error| {
             format!(
                 "could not parse project lock `{}`: {error}",
@@ -2292,7 +2533,7 @@ pub fn record_foreign_realization(
     envelope: LockEnvelope,
 ) -> Result<(), String> {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let mut lock = match std::fs::read_to_string(&lock_path) {
+    let mut lock = match read_lock_text(&lock_path) {
         Ok(raw) => parse(&raw).map_err(|error| {
             format!(
                 "could not parse project lock `{}`: {error}",
@@ -2473,7 +2714,7 @@ pub fn record_cran_realization(
     envelope: LockEnvelope,
 ) {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let mut lock = std::fs::read_to_string(&lock_path)
+    let mut lock = read_lock_text(&lock_path)
         .ok()
         .and_then(|raw| parse(&raw).ok())
         .unwrap_or_else(|| LockFile {
@@ -2606,7 +2847,7 @@ pub fn record_luarocks_realization(
     envelope: LockEnvelope,
 ) {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let mut lock = std::fs::read_to_string(&lock_path)
+    let mut lock = read_lock_text(&lock_path)
         .ok()
         .and_then(|raw| parse(&raw).ok())
         .unwrap_or_else(|| LockFile {
@@ -2740,7 +2981,7 @@ pub fn record_registry_realization(
     envelope: LockEnvelope,
 ) {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let mut lock = std::fs::read_to_string(&lock_path)
+    let mut lock = read_lock_text(&lock_path)
         .ok()
         .and_then(|raw| parse(&raw).ok())
         .unwrap_or_else(|| LockFile {
@@ -2881,7 +3122,7 @@ pub fn registry_realization(
 /// the same series in place rather than accumulating stale entries.
 pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let mut lock = std::fs::read_to_string(&lock_path)
+    let mut lock = read_lock_text(&lock_path)
         .ok()
         .and_then(|raw| parse(&raw).ok())
         .unwrap_or_else(|| LockFile {
@@ -2922,7 +3163,7 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
 /// D-BROWSER-AUTO1=A (#1187): upsert a project-locked browser binary by engine.
 pub fn record_browser(project_root: &Path, browser: LockedBrowser) {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let mut lock = std::fs::read_to_string(&lock_path)
+    let mut lock = read_lock_text(&lock_path)
         .ok()
         .and_then(|raw| parse(&raw).ok())
         .unwrap_or_else(|| LockFile {
@@ -3001,7 +3242,7 @@ pub fn record_generated_inputs(
 ) -> Result<(), Diagnostic> {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
     let lock_was_present = lock_path.exists();
-    let mut lock = std::fs::read_to_string(&lock_path)
+    let mut lock = read_lock_text(&lock_path)
         .ok()
         .and_then(|raw| parse(&raw).ok())
         .unwrap_or_else(|| LockFile {
@@ -3194,7 +3435,7 @@ pub fn record_build_contributions(
         return verify_locked_build_contributions(project_root, package, contributions);
     }
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let mut lock = std::fs::read_to_string(&lock_path)
+    let mut lock = read_lock_text(&lock_path)
         .ok()
         .and_then(|raw| parse(&raw).ok())
         .unwrap_or_else(|| LockFile {
@@ -3269,7 +3510,7 @@ pub fn locked_source_channel(project_root: &Path, name: &str) -> Option<LockedSo
 /// so moving a channel replaces the prior exact identity.
 pub fn record_source_channel(project_root: &Path, source: LockedSourceChannel) {
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let mut lock = std::fs::read_to_string(&lock_path)
+    let mut lock = read_lock_text(&lock_path)
         .ok()
         .and_then(|raw| parse(&raw).ok())
         .unwrap_or_else(|| LockFile {
@@ -3463,6 +3704,11 @@ pub fn e1202(_lock_path: &str) -> Diagnostic {
     )
 }
 
+/// E1205 — lock data is corrupt or exceeds the reader safety bound.
+pub fn e1205_lock_corrupt(lock_path: &str) -> Diagnostic {
+    Diagnostic::from_row("E1205", &[("path", lock_path)], None)
+}
+
 /// E1202 for a workspace lock whose source/index identity cannot be trusted.
 pub fn e1202_workspace(lock_path: &str) -> Diagnostic {
     Diagnostic::error(
@@ -3606,6 +3852,165 @@ mod a4_envelope_tests {
         );
         let back = parse(&text).expect("parse");
         assert_eq!(back.packages[0].envelope, Some(e));
+    }
+
+    #[test]
+    fn lock_roundtrip_escaping_is_idempotent() {
+        fn tricky(label: &str) -> String {
+            format!(r#"{label} "quoted" \ slash"#)
+        }
+
+        let local_nix = [
+            "local-nix:{\"json\":\"value with ",
+            "\\\\",
+            " and ",
+            "\\\"",
+            "\"}",
+        ]
+        .concat();
+        let mut envelope = env(
+            &tricky("output-hash"),
+            &tricky("platform"),
+            &tricky("signature"),
+            &local_nix,
+        );
+        envelope.catalog_tier = tricky("catalog-tier");
+        envelope.catalog_trust = tricky("catalog-trust");
+
+        let mut package = pkg_with("package", Some(envelope.clone()));
+        package.source = LockSource::Nix {
+            reference: local_nix.clone(),
+            output: tricky("output"),
+        };
+        package.effect_authority = Some(tricky("effect-authority"));
+        package.receipt = Some(tricky("receipt"));
+        package.provenance = Some(DependencyProvenance {
+            transparency: Some(tricky("transparency")),
+            publisher: Some(tricky("publisher")),
+            build: Some(tricky("build")),
+        });
+
+        let mut lock = base_lock(vec![package], Vec::new());
+        lock.workspace_source_digest = Some(tricky("workspace-digest"));
+        lock.build_stamp = Some(BuildStamp {
+            git: Some(tricky("git")),
+            dirty: true,
+            toolchain: tricky("toolchain"),
+            at: tricky("timestamp"),
+        });
+        lock.build_contributions = vec![LockedBuildContribution {
+            package: tricky("contribution-package"),
+            key: tricky("contribution-key"),
+            value: tricky("contribution-value"),
+            scope: tricky("contribution-scope"),
+            layer: tricky("contribution-layer"),
+            source: tricky("contribution-source"),
+            reason: tricky("contribution-reason"),
+        }];
+        lock.workspace_members = vec![LockedWorkspaceMember {
+            name: tricky("member-name"),
+            path: tricky("member-path"),
+            source_digest: tricky("member-source"),
+            canonical_path: tricky("member-canonical"),
+            package_digest: tricky("member-package"),
+        }];
+        lock.workspace_overlay_policy = OverlayPolicy {
+            overlays: vec![OverlaySet {
+                name: tricky("overlay"),
+                provider: Some(ProviderOverride {
+                    provider: tricky("provider"),
+                    channel: Some(tricky("channel")),
+                }),
+                packages: vec![PackageOverride {
+                    package: tricky("overlay-package"),
+                    source: Some(tricky("overlay-source")),
+                    version: Some(tricky("overlay-version")),
+                    flags: vec![tricky("flag")],
+                    priority: 7,
+                    field_priorities: std::collections::BTreeMap::from([("version".into(), 7)]),
+                    env: vec![("RUST_SRC".into(), tricky("environment"))],
+                    patches: vec![tricky("patch")],
+                    allow_unfree: true,
+                }],
+            }],
+            allow_unfree: vec![tricky("allow-unfree")],
+            build_deny: vec![tricky("build-deny")],
+            build_grants: vec![(tricky("build-grant"), vec![tricky("grant")])],
+        };
+        lock.comptime_inputs = vec![ComptimeInput {
+            path: tricky("comptime-path"),
+            hash: "sha256-input".into(),
+        }];
+        lock.toolchains = vec![LockedToolchain {
+            id: tricky("toolchain-id"),
+            channel: tricky("toolchain-channel"),
+            version: tricky("toolchain-version"),
+            envelope: envelope.clone(),
+        }];
+        lock.browsers = vec![LockedBrowser {
+            engine: tricky("browser-engine"),
+            version: tricky("browser-version"),
+            binary: tricky("browser-binary"),
+            protocol: tricky("browser-protocol"),
+            size: 42,
+            envelope,
+        }];
+        lock.source_channels = vec![LockedSourceChannel {
+            name: tricky("source-name"),
+            channel: tricky("source-channel"),
+            exact: tricky("source-exact"),
+        }];
+
+        let first = write(&lock);
+        let mut current = first.clone();
+        for cycle in 1..=3 {
+            let loaded = parse(&current)
+                .unwrap_or_else(|error| panic!("lock must parse on cycle {cycle}: {error}"));
+            current = write(&loaded);
+            assert_eq!(current, first, "lock changed on cycle {cycle}");
+        }
+    }
+
+    #[test]
+    fn oversized_lock_value_returns_corrupt_lock_diagnostic() {
+        let raw = format!(
+            "version = 1\nprovenance = \"{}\"\n",
+            "x".repeat(MAX_LOCK_VALUE_BYTES)
+        );
+        let lock_path = Path::new(".jet/lock");
+        let diagnostic = parse_with_path(&raw, lock_path)
+            .expect_err("an oversized lock value must stop parsing");
+        assert_eq!(diagnostic.code, "E1205");
+        let rendered =
+            crate::Diagnostics::render_all(&lock_path.display().to_string(), "", &[diagnostic]);
+        assert_eq!(
+            rendered,
+            include_str!("../../../tests/fixtures/jetpack-diagnostics/E1205.stderr")
+        );
+    }
+
+    #[test]
+    fn bounded_lock_reader_rejects_oversized_line() {
+        let dir = std::env::temp_dir().join(format!(
+            "lock-reader-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join(".jet")).unwrap();
+        let path = dir.join(Syntax::UNIFIED_LOCK_FILE);
+        std::fs::write(
+            &path,
+            format!("version = 1\n{}\n", "x".repeat(MAX_LOCK_VALUE_BYTES + 1)),
+        )
+        .unwrap();
+
+        let error = read_lock_text(&path).expect_err("oversized line must be rejected");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("1 MiB safety limit"));
+        assert!(load(&dir).is_none());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

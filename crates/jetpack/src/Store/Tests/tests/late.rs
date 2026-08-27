@@ -55,15 +55,14 @@ fn cas_pool_hardlink_preserves_cache_verification_and_rejects_outside_peers() {
         fourth.entry.envelope.output_hash
     );
 
-    let planned = clean_plan(&roots).unwrap();
-    assert!(planned.optimized_files >= 2, "{planned:?}");
-
     // Registration shares payload bytes with the machine CAS pool.
     let pay_c = Path::new(&third.entry.out).join("payload");
     assert!(fs::metadata(&pay_c).unwrap().nlink() >= 2);
 
+    // Registration already populated the root-local pool; cleanup is
+    // idempotent and must not create a second sharing mechanism.
     let report = optimize_cas_pool(&roots).unwrap();
-    assert!(report.optimized_files >= 2, "{report:?}");
+    assert_eq!(report.optimized_files, 0, "{report:?}");
     assert!(roots.hangar_dir().join("cas").is_dir());
     assert!(fs::metadata(&pay_c).unwrap().nlink() >= 2);
 
@@ -81,21 +80,43 @@ fn cas_pool_hardlink_preserves_cache_verification_and_rejects_outside_peers() {
         .validate()
         .unwrap();
 
-    // Outside-hangar peer still rejected.
+    // A pool-backed inode remains trusted even with a foreign peer.
     let outside = roots.root.join("outside-peer");
     fs::hard_link(&pay_c, &outside).unwrap();
-    let bare = super::super::super::super::Envelope::try_output_hash_of(&third.entry.out);
-    assert!(bare.is_err(), "{bare:?}");
     let in_hangar = super::super::super::super::Envelope::try_output_hash_of_in_hangar(
         &third.entry.out,
         &roots.hangar_dir(),
         false,
     );
-    assert!(in_hangar.is_err(), "{in_hangar:?}");
+    assert_eq!(in_hangar.unwrap(), third.entry.envelope.output_hash);
     let proof = verify_cache_entry(&roots, &third.entry, &third.entry.reference, &expectation);
-    assert!(!proof.output_digest, "{proof:?}");
-    assert!(!proof.trusted(), "{proof:?}");
+    assert!(proof.output_digest, "{proof:?}");
+    assert!(proof.trusted(), "{proof:?}");
+    find_verified_by_reference(&roots, &third.entry.reference, &expectation)
+        .unwrap()
+        .unwrap()
+        .lease
+        .validate()
+        .unwrap();
     fs::remove_file(outside).ok();
+
+    // A foreign peer without the object's exact Hangar CAS backing remains
+    // untrusted.
+    let non_pool = roots.hangar_dir().join("non-pool-output");
+    fs::create_dir_all(&non_pool).unwrap();
+    let non_pool_payload = non_pool.join("payload");
+    fs::write(&non_pool_payload, "unpooled").unwrap();
+    let non_pool_peer = roots.root.join("outside-non-pool-peer");
+    fs::hard_link(&non_pool_payload, &non_pool_peer).unwrap();
+    let non_pool_result =
+        super::super::super::super::Envelope::try_output_hash_of_in_hangar(
+            &non_pool.to_string_lossy(),
+            &roots.hangar_dir(),
+            false,
+        );
+    assert!(non_pool_result.is_err(), "{non_pool_result:?}");
+    fs::remove_file(non_pool_peer).ok();
+    fs::remove_dir_all(non_pool).ok();
 }
 
 #[cfg(unix)]

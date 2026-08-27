@@ -12,8 +12,10 @@ pub mod ProfileDispatch;
 mod add_remove_push_image;
 mod bridge_os_studio;
 mod browser;
+mod dashboard;
 #[allow(dead_code)]
 mod format;
+mod lock;
 mod package_hangar_vendor;
 mod parse;
 mod profile;

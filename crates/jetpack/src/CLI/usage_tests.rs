@@ -18,6 +18,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} env -- cmd                     run a command in the project shell, then exit
   {bin} env -p <pkg>...                add ad-hoc nixpkgs packages, undeclared
   {bin} env --prep                     materialize the project environment, do not enter
+  {bin} env --explain                  show the full package acquisition plan
   {bin} env --flake                    force a foreign flake.nix/devenv.nix shell
   {bin} use <package>...               enter a shell with exactly these packages
   {bin} use <package>... -- cmd        run a command in that environment, then exit
@@ -44,6 +45,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} update [<source>|tools]        refresh project or user-tools channel pins
   {bin} update --deps                   refresh project dependency pins only
   {bin} update --tools                  refresh user-tools pins only
+  {bin} lock diff [--against <rev>]     show unified lock changes since a git revision
   {bin} bridge flake                   print an env.* shim translated from ./flake.nix
   {bin} import [<flake.nix|shell.nix|default.nix>]
                                       migrate a Nix devShell into env.jet + lock
@@ -155,6 +157,8 @@ pub(super) fn usage_with_color(color: bool) -> String {
   --flake                              (env) force the foreign flake.nix/devenv.nix fallback
   --pure                               (env) isolate the shell from the host environment
   --prep                               (env/use) materialize without entering
+  --explain                            (env/use) show per-package acquisition facts
+  --against <rev>                      (lock diff) compare the current lock with a git revision
   --env <name>                         select one env.<name> module
   --preset <name>                      select one declared environment preset
   --push <ref>                         (image) copy locally or publish through OCI Distribution
@@ -212,6 +216,21 @@ mod tests {
     }
 
     #[test]
+    fn lock_diff_accepts_an_optional_git_revision() {
+        let parsed = parse_args_for(
+            Syntax::JETPACK_LOCK_VERB,
+            &[
+                Syntax::LOCK_DIFF_VERB.to_string(),
+                Syntax::LOCK_DIFF_FLAG_AGAINST.to_string(),
+                "HEAD~1".to_string(),
+            ],
+        );
+        assert_eq!(parsed.positional, vec![Syntax::LOCK_DIFF_VERB]);
+        assert_eq!(parsed.flags.lock_against.as_deref(), Some("HEAD~1"));
+        assert!(usage_with_color(false).contains("jetpack lock diff [--against <rev>]"));
+    }
+
+    #[test]
     fn jetpack_verbs_keep_the_ratified_non_jetos_count() {
         let jetos_verbs = [
             Syntax::OS_SUBCOMMAND,
@@ -225,12 +244,13 @@ mod tests {
             .iter()
             .filter(|verb| !jetos_verbs.contains(verb))
             .count();
-        assert_eq!(non_jetos, 22);
-        assert_eq!(Syntax::JETPACK_VERBS.len(), 28);
+        assert_eq!(non_jetos, 23);
+        assert_eq!(Syntax::JETPACK_VERBS.len(), 29);
         assert!(Syntax::JETPACK_VERBS.contains(&"env"));
         assert!(Syntax::JETPACK_VERBS.contains(&"use"));
         assert!(Syntax::JETPACK_VERBS.contains(&Syntax::JETPACK_WHY));
         assert!(Syntax::JETPACK_VERBS.contains(&Syntax::JETPACK_IMPORT_VERB));
+        assert!(Syntax::JETPACK_VERBS.contains(&Syntax::JETPACK_LOCK_VERB));
         for retired in ["dev", "test", "fmt", "build", "run", "enter"] {
             assert!(!Syntax::JETPACK_VERBS.contains(&retired));
         }
@@ -383,8 +403,15 @@ mod tests {
 
     #[test]
     fn parses_prep_flag() {
-        let parsed = parse_args_for("env", &[Syntax::ENV_FLAG_PREP.to_string()]);
+        let parsed = parse_args_for(
+            "env",
+            &[
+                Syntax::ENV_FLAG_PREP.to_string(),
+                Syntax::ENV_FLAG_EXPLAIN.to_string(),
+            ],
+        );
         assert!(parsed.flags.prep);
+        assert!(parsed.flags.explain_plan);
         assert!(parsed.positional.is_empty());
     }
 
@@ -440,20 +467,26 @@ mod tests {
                 .lines()
                 .find(|line| line.contains(phrase))
                 .unwrap_or_else(|| panic!("missing help description: {phrase}"));
-            line[line.find(phrase).unwrap()..]
-                .chars()
-                .next()
-                .unwrap()
+            line[line.find(phrase).unwrap()..].chars().next().unwrap()
         };
         for (jetpack_description, jet_description) in [
-            ("enter the default project environment", "run a program or project"),
+            (
+                "enter the default project environment",
+                "run a program or project",
+            ),
             ("list globally installed tools", "run tests"),
             (
                 "plan a source-backed package generation",
                 "create a proof report",
             ),
-            ("show realized packages", "manage the Jet installation and editor tools"),
-            ("choose terminal color policy", "with test: run tests in random"),
+            (
+                "show realized packages",
+                "manage the Jet installation and editor tools",
+            ),
+            (
+                "choose terminal color policy",
+                "with test: run tests in random",
+            ),
         ] {
             let jetpack_initial = description_initial(&jetpack, jetpack_description);
             let jet_initial = description_initial(&jet, jet_description);

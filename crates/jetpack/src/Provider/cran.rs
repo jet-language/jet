@@ -1,7 +1,8 @@
 //! Native CRAN provider (D-FFI-R1, D-JPK-PROVIDERS2).
 
 use super::{
-    producer_record, provider_cache_identity, Ctx, Provider, ProviderError, Realized, SourceState,
+    producer_record, provider_cache_identity, Ctx, DownloadPlan, PlanItem, PlanState, Provider,
+    ProviderError, Realized, SourceState,
 };
 use crate::RefSpec::{RefSpec, SourceTable};
 use crate::SHA256;
@@ -60,6 +61,71 @@ fn dependency_objects(
 pub(super) struct CranProvider;
 
 impl Provider for CranProvider {
+    fn validate_cache_authority(
+        &self,
+        spec: &RefSpec,
+        _table: &SourceTable,
+        ctx: &Ctx,
+    ) -> Result<(), ProviderError> {
+        let Some(project) = ctx.project_dir else {
+            return Ok(());
+        };
+        let Some((_, _, repository, locked, _)) =
+            crate::Lock::cran_realization(project, &spec.raw)
+        else {
+            return Ok(());
+        };
+        let current = cache_authority(ctx)?;
+        super::ensure_locked_authority("CRAN", &repository, &locked, &current)
+    }
+
+    fn cache_expectation(
+        &self,
+        spec: &RefSpec,
+        _table: &SourceTable,
+        ctx: &Ctx,
+    ) -> Option<crate::Store::CacheExpectation> {
+        let project = ctx.project_dir?;
+        let (output, source_hash, _repository, _locked_authority, env) =
+            crate::Lock::cran_realization(project, &spec.raw)?;
+        let authority = cache_authority(ctx).ok()?;
+        Some(crate::Store::CacheExpectation {
+            identity: crate::Store::CacheIdentity {
+                platform: if env.platform.is_empty() {
+                    crate::Envelope::host_platform()
+                } else {
+                    env.platform.clone()
+                },
+                ..provider_cache_identity(
+                    &source_hash,
+                    RECIPE_ID,
+                    ctx,
+                    &authority.provenance(),
+                )
+            },
+            owned_output: Some(PathBuf::from(output)),
+            allow_unsigned_local: true,
+        })
+    }
+
+    fn plan_downloads(
+        &self,
+        specs: &[RefSpec],
+        _table: &SourceTable,
+        _ctx: &Ctx,
+    ) -> Result<DownloadPlan, ProviderError> {
+        let mut plan = DownloadPlan::default();
+        for spec in specs {
+            plan.add_item(PlanItem {
+                package: spec.raw.clone(),
+                state: PlanState::New,
+                download_bytes: None,
+                disk_bytes: None,
+            });
+        }
+        Ok(plan)
+    }
+
     fn realize(
         &self,
         spec: &RefSpec,

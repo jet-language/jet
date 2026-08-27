@@ -486,17 +486,6 @@ fn entry_from_realized(
     })
 }
 
-/// Check a candidate before the closure transaction can publish it.
-/// `additional` contains entries in the same not-yet-committed batch.
-pub(crate) fn certify_registration_unlocked(
-    roots: &Roots,
-    entry: &StoreEntry,
-    additional: &[StoreEntry],
-) -> io::Result<()> {
-    let existing = list_unlocked(roots)?;
-    certify_registration_unlocked_mode(roots, entry, additional, None, &existing)
-}
-
 /// Certify one closure batch against one snapshot of the existing projection.
 /// The per-entry form remains for single registrations; batch registration must
 /// not re-read every existing metadata record for every candidate.

@@ -17,8 +17,10 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const NAR_MAGIC: &str = "nix-archive-1";
-pub const MAX_NAR_BYTES: usize = 1024 * 1024 * 1024;
-const MAX_NODE_BYTES: u64 = 512 * 1024 * 1024;
+// Sanity bounds only: the transfer itself is capped by the signed narinfo
+// size. Real nixpkgs NARs exceed 1 GiB (rustc-1.97.1 is 1.09 GiB decoded).
+pub const MAX_NAR_BYTES: usize = 16 * 1024 * 1024 * 1024;
+const MAX_NODE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_NODES: usize = 1_000_000;
 const MAX_DEPTH: usize = 256;
 const MAX_NAME_BYTES: usize = 4096;
@@ -333,10 +335,17 @@ pub fn validate_nar(bytes: &[u8]) -> io::Result<NarStats> {
 }
 
 fn decode_nar(bytes: &[u8]) -> io::Result<(NarNode, NarStats)> {
+    decode_nar_with_mode(bytes, false)
+}
+
+fn decode_nar_with_mode(
+    bytes: &[u8],
+    allow_nix_store_symlinks: bool,
+) -> io::Result<(NarNode, NarStats)> {
     if bytes.len() > MAX_NAR_BYTES {
         return Err(invalid("NAR exceeds the 1 GiB limit"));
     }
-    let mut reader = NarReader::new(bytes);
+    let mut reader = NarReader::with_mode(bytes, allow_nix_store_symlinks);
     if reader.string()? != NAR_MAGIC {
         return Err(invalid("NAR has an unknown magic"));
     }
@@ -367,6 +376,17 @@ pub fn read_nar_stream<R: Read>(
     destination: &Path,
     expected_nar_size: u64,
 ) -> io::Result<NarStats> {
+    read_nar_stream_with_mode(reader, destination, expected_nar_size, false)
+}
+
+/// Read a NAR with the POSIX-only allowances used by standard Nix cache
+/// admission. Native ingest keeps the strict wrapper above.
+pub(crate) fn read_nar_stream_with_mode<R: Read>(
+    reader: R,
+    destination: &Path,
+    expected_nar_size: u64,
+    allow_nix_store_symlinks: bool,
+) -> io::Result<NarStats> {
     if expected_nar_size == 0 {
         return Err(invalid("NAR stream size must be nonzero"));
     }
@@ -384,7 +404,10 @@ pub fn read_nar_stream<R: Read>(
         if reader.string()? != NAR_MAGIC {
             return Err(invalid("NAR stream has an invalid magic"));
         }
-        let mut state = StreamDecodeState::default();
+        let mut state = StreamDecodeState {
+            allow_nix_store_symlinks,
+            ..StreamDecodeState::default()
+        };
         reader.node(destination, destination, &mut state, 0, 0)?;
         let mut trailing = [0u8; 1];
         if reader.read(&mut trailing)? != 0 || reader.bytes != expected_nar_size {
@@ -405,7 +428,6 @@ pub fn read_nar_stream<R: Read>(
 struct StreamNarReader<R> {
     reader: io::Take<R>,
     bytes: u64,
-    metadata_bytes: u64,
     hasher: SHA256::StreamingSha256,
 }
 
@@ -417,7 +439,6 @@ impl<R: Read> StreamNarReader<R> {
         Ok(Self {
             reader: reader.take(limit),
             bytes: 0,
-            metadata_bytes: 0,
             hasher: SHA256::StreamingSha256::new(),
         })
     }
@@ -427,17 +448,11 @@ impl<R: Read> StreamNarReader<R> {
         if length > MAX_NODE_BYTES {
             return Err(invalid("NAR stream field exceeds the 512 MiB limit"));
         }
+        // Per-field cap only: names and targets stay small, while the archive
+        // total is already bounded by MAX_NAR_BYTES and MAX_NODES (real NARs
+        // such as rustc-doc carry far more than 1 MiB of entry names).
         if metadata && length > MAX_INFO_BYTES as u64 {
             return Err(invalid("NAR stream metadata exceeds its 1 MiB limit"));
-        }
-        if metadata {
-            self.metadata_bytes = self
-                .metadata_bytes
-                .checked_add(length)
-                .ok_or_else(|| invalid("NAR stream metadata size overflows"))?;
-            if self.metadata_bytes > MAX_INFO_BYTES as u64 {
-                return Err(invalid("NAR stream metadata exceeds its 1 MiB limit"));
-            }
         }
         let length =
             usize::try_from(length).map_err(|_| invalid("NAR stream field is too large"))?;
@@ -507,6 +522,7 @@ impl<R: Read> StreamNarReader<R> {
             "directory" => {
                 fs::create_dir(path)?;
                 let mut previous = None;
+                let mut names = BTreeSet::new();
                 let mut folded = BTreeSet::new();
                 loop {
                     match self.string()?.as_str() {
@@ -516,7 +532,12 @@ impl<R: Read> StreamNarReader<R> {
                                 return Err(invalid("NAR stream directory entry is malformed"));
                             }
                             let name = self.raw_bytes(true)?;
-                            validate_name(&name)?;
+                            validate_name(&name, state.allow_nix_store_symlinks)?;
+                            if !names.insert(name.clone()) {
+                                return Err(invalid(
+                                    "NAR stream directory contains duplicate names",
+                                ));
+                            }
                             if previous
                                 .as_deref()
                                 .is_some_and(|previous| previous >= name.as_slice())
@@ -525,12 +546,18 @@ impl<R: Read> StreamNarReader<R> {
                                     "NAR stream directory entries are not in canonical name order",
                                 ));
                             }
-                            let folded_name: Vec<u8> =
-                                name.iter().map(u8::to_ascii_lowercase).collect();
-                            if !folded.insert(folded_name) {
-                                return Err(invalid(
-                                    "NAR stream directory contains duplicate names",
-                                ));
+                            // Nix archives are POSIX-only content. Native
+                            // ingest owns Windows representability laws;
+                            // Nix admission skips only the case-fold and
+                            // backslash checks while exact names stay distinct.
+                            if !state.allow_nix_store_symlinks {
+                                let folded_name: Vec<u8> =
+                                    name.iter().map(u8::to_ascii_lowercase).collect();
+                                if !folded.insert(folded_name) {
+                                    return Err(invalid(
+                                        "NAR stream directory contains duplicate names",
+                                    ));
+                                }
                             }
                             previous = Some(name.clone());
                             if self.string()? != "node" {
@@ -578,18 +605,22 @@ impl<R: Read> StreamNarReader<R> {
                     return Err(invalid("NAR stream symlink has no target"));
                 }
                 let target = self.raw_bytes(true)?;
-                validate_symlink_target(&target)?;
+                validate_symlink_target(&target, state.allow_nix_store_symlinks)?;
                 if target.starts_with(b"/") {
-                    validate_absolute_symlink_target(&target)?;
+                    validate_absolute_symlink_target(&target, state.allow_nix_store_symlinks)?;
                 } else {
                     if relative_depth == 0 {
                         return Err(invalid(
                             "NAR stream root relative symlink has no safe parent",
                         ));
                     }
-                    validate_relative_symlink_depth(&target, relative_depth - 1)?;
+                    validate_relative_symlink_depth(
+                        &target,
+                        relative_depth - 1,
+                        state.allow_nix_store_symlinks,
+                    )?;
                 }
-                create_symlink(&target, path, root)?;
+                create_symlink(&target, path, root, state.allow_nix_store_symlinks)?;
                 if self.string()? != ")" {
                     return Err(invalid("NAR stream symlink is unbalanced"));
                 }
@@ -617,6 +648,7 @@ impl<R: Read> Read for StreamNarReader<R> {
 #[derive(Default)]
 struct StreamDecodeState {
     nodes: usize,
+    allow_nix_store_symlinks: bool,
 }
 
 /// Compute the canonical digest of a NAR byte stream.
@@ -901,9 +933,9 @@ fn encode_node(
         put_string(out, "symlink")?;
         let target = fs::read_link(path)?;
         let target = os_bytes(target.as_os_str());
-        validate_symlink_target(&target)?;
+        validate_symlink_target(&target, false)?;
         if target.starts_with(b"/") {
-            validate_absolute_symlink_target(&target)?;
+            validate_absolute_symlink_target(&target, false)?;
         } else {
             validate_relative_symlink_target(path, root, &target)?;
         }
@@ -919,7 +951,7 @@ fn encode_node(
             .into_iter()
             .map(|child| {
                 let name = os_bytes(&child.file_name());
-                validate_name(&name)?;
+                validate_name(&name, false)?;
                 Ok((name, child))
             })
             .collect::<io::Result<Vec<_>>>()?;
@@ -929,6 +961,7 @@ fn encode_node(
                 .iter()
                 .map(|(name, _)| name.clone())
                 .collect::<Vec<_>>(),
+            false,
         )?;
         let mut names = BTreeSet::new();
         for (name, child) in children {
@@ -1004,7 +1037,10 @@ fn decode_node(
             loop {
                 match reader.string()?.as_str() {
                     ")" => {
-                        validate_sibling_names(&sibling_names)?;
+                        validate_sibling_names(
+                            &sibling_names,
+                            reader.allow_nix_store_symlinks,
+                        )?;
                         break NarNode::Directory(entries);
                     }
                     "entry" => {
@@ -1012,7 +1048,7 @@ fn decode_node(
                             return Err(invalid("NAR directory entry is malformed"));
                         }
                         let name = reader.bytes()?;
-                        validate_name(&name)?;
+                        validate_name(&name, reader.allow_nix_store_symlinks)?;
                         if !names.insert(name.clone()) {
                             return Err(invalid("NAR directory contains duplicate names"));
                         }
@@ -1071,14 +1107,18 @@ fn decode_node(
                 return Err(invalid("NAR symlink has no target"));
             }
             let target = reader.bytes()?;
-            validate_symlink_target(&target)?;
+            validate_symlink_target(&target, reader.allow_nix_store_symlinks)?;
             if target.starts_with(b"/") {
-                validate_absolute_symlink_target(&target)?;
+                validate_absolute_symlink_target(&target, reader.allow_nix_store_symlinks)?;
             } else {
                 if relative_depth == 0 {
                     return Err(invalid("NAR root relative symlink has no safe parent"));
                 }
-                validate_relative_symlink_depth(&target, relative_depth - 1)?;
+                validate_relative_symlink_depth(
+                    &target,
+                    relative_depth - 1,
+                    reader.allow_nix_store_symlinks,
+                )?;
             }
             if reader.string()? != ")" {
                 return Err(invalid("NAR symlink is unbalanced"));
@@ -1129,36 +1169,34 @@ fn write_decoded_node(node: &NarNode, path: &Path, root: &Path) -> io::Result<()
             write_atomic(path, bytes)?;
             set_mode(path, if *executable { 0o755 } else { 0o644 })?;
         }
-        NarNode::Symlink(target) => create_symlink(target, path, root)?,
+        NarNode::Symlink(target) => create_symlink(target, path, root, false)?,
     }
     Ok(())
 }
 
-fn create_symlink(target: &[u8], path: &Path, root: &Path) -> io::Result<()> {
+fn create_symlink(
+    target: &[u8],
+    path: &Path,
+    root: &Path,
+    allow_nix_store_symlinks: bool,
+) -> io::Result<()> {
+    #[cfg(any(windows, not(any(unix, windows))))]
     let target_path = path_from_bytes(target)?;
+    validate_symlink_target(target, allow_nix_store_symlinks)?;
     if target.starts_with(b"/") {
-        validate_absolute_symlink_target(target)?;
+        validate_absolute_symlink_target(target, allow_nix_store_symlinks)?;
     } else {
-        let parent = path.parent().unwrap_or(root);
-        let candidate = parent.join(&target_path);
-        let relative = candidate
+        let parent = path
+            .parent()
+            .ok_or_else(|| invalid("NAR symlink has no parent"))?;
+        let relative_parent = parent
             .strip_prefix(root)
-            .map_err(|_| invalid("NAR relative symlink escapes its output root"))?;
-        let mut normalized = PathBuf::new();
-        for component in relative.components() {
-            match component {
-                Component::CurDir => {}
-                Component::Normal(value) => normalized.push(value),
-                Component::ParentDir => {
-                    if !normalized.pop() {
-                        return Err(invalid("NAR relative symlink escapes its output root"));
-                    }
-                }
-                Component::RootDir | Component::Prefix(_) => {
-                    return Err(invalid("NAR relative symlink is not relative"));
-                }
-            }
-        }
+            .map_err(|_| invalid("NAR symlink is outside its output root"))?;
+        let depth = relative_parent
+            .components()
+            .filter(|component| matches!(component, Component::Normal(_)))
+            .count();
+        validate_relative_symlink_depth(target, depth, allow_nix_store_symlinks)?;
     }
     #[cfg(unix)]
     {
@@ -1210,7 +1248,13 @@ fn path_from_bytes(value: &[u8]) -> io::Result<PathBuf> {
     Ok(PathBuf::from(os_string(value)?))
 }
 
-fn validate_sibling_names(names: &[Vec<u8>]) -> io::Result<()> {
+fn validate_sibling_names(
+    names: &[Vec<u8>],
+    allow_nix_store_symlinks: bool,
+) -> io::Result<()> {
+    if allow_nix_store_symlinks {
+        return Ok(());
+    }
     crate::Envelope::reject_casefold_collisions(names)
         .map_err(|error| invalid(&format!("NAR path law rejected: {}", error.detail)))
 }
@@ -1257,11 +1301,16 @@ fn put_bytes(out: &mut Vec<u8>, bytes: &[u8]) -> io::Result<()> {
 struct NarReader<'a> {
     bytes: &'a [u8],
     at: usize,
+    allow_nix_store_symlinks: bool,
 }
 
 impl<'a> NarReader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, at: 0 }
+    fn with_mode(bytes: &'a [u8], allow_nix_store_symlinks: bool) -> Self {
+        Self {
+            bytes,
+            at: 0,
+            allow_nix_store_symlinks,
+        }
     }
 
     fn take(&mut self, length: usize) -> io::Result<&'a [u8]> {
@@ -1304,35 +1353,50 @@ impl<'a> NarReader<'a> {
     }
 }
 
-fn validate_name(value: &[u8]) -> io::Result<()> {
+fn validate_name(value: &[u8], allow_nix_store_symlinks: bool) -> io::Result<()> {
+    // Nix admission accepts exactly Nix's own name law (any byte except `/`
+    // and NUL; not `.`/`..`). Native ingest keeps the portable-name law:
+    // no backslash, no control bytes.
     if value.is_empty()
         || value.len() > MAX_NAME_BYTES
         || value == b"."
         || value == b".."
         || value.contains(&b'/')
-        || value.contains(&b'\\')
-        || value.iter().any(|byte| byte.is_ascii_control())
+        || value.contains(&0)
+        || (!allow_nix_store_symlinks
+            && (value.contains(&b'\\') || value.iter().any(|byte| byte.is_ascii_control())))
     {
         return Err(invalid("NAR name is not one safe path component"));
     }
-    crate::Envelope::validate_path_component(value)
+    crate::Envelope::validate_path_component_with_mode(value, allow_nix_store_symlinks)
         .map_err(|error| invalid(&format!("NAR path law rejected: {}", error.detail)))?;
     Ok(())
 }
 
-fn validate_symlink_target(value: &[u8]) -> io::Result<()> {
+fn validate_symlink_target(value: &[u8], allow_nix_store_symlinks: bool) -> io::Result<()> {
     if value.is_empty()
         || value.len() > MAX_NAME_BYTES * 4
-        || value
-            .iter()
-            .any(|byte| *byte == 0 || *byte == b'\\' || byte.is_ascii_control())
+        || value.contains(&0)
+        || (!allow_nix_store_symlinks
+            && value
+                .iter()
+                .any(|byte| *byte == b'\\' || byte.is_ascii_control()))
     {
         return Err(invalid("NAR symlink target is invalid"));
     }
     Ok(())
 }
 
-fn validate_absolute_symlink_target(value: &[u8]) -> io::Result<()> {
+fn validate_absolute_symlink_target(
+    value: &[u8],
+    allow_nix_store_symlinks: bool,
+) -> io::Result<()> {
+    // Nix admission accepts any absolute target as inert link data (nixpkgs
+    // legally links to host paths such as `/bin/sh`); byte hygiene is already
+    // enforced by `validate_symlink_target`.
+    if allow_nix_store_symlinks {
+        return Ok(());
+    }
     if !value.starts_with(b"/nix/store/") {
         return Err(invalid("NAR absolute symlink must point into /nix/store"));
     }
@@ -1350,16 +1414,45 @@ fn validate_relative_symlink_target(path: &Path, root: &Path, target: &[u8]) -> 
         .components()
         .filter(|component| matches!(component, Component::Normal(_)))
         .count();
-    validate_relative_symlink_depth(target, depth)
+    validate_relative_symlink_depth(target, depth, false)
 }
 
-fn validate_relative_symlink_depth(target: &[u8], mut depth: usize) -> io::Result<()> {
+fn validate_relative_symlink_depth(
+    target: &[u8],
+    mut depth: usize,
+    allow_nix_store_symlinks: bool,
+) -> io::Result<()> {
     let target = path_from_bytes(target)?;
+    // Native NAR decoding stays inside the output. Nix admission accepts a
+    // relative target that escapes the output root as inert link data (Nix
+    // NARs legally reference sibling store objects and host config such as
+    // systemd's `../../../../../etc/environment`); admission never follows
+    // the link, and every named component still passes the Nix path law.
+    let mut crossed_root = false;
     for component in target.components() {
+        if crossed_root {
+            match component {
+                Component::CurDir | Component::ParentDir => {}
+                Component::Normal(value) => {
+                    crate::Envelope::validate_path_component_with_mode(&os_bytes(value), true)
+                        .map_err(|error| {
+                            invalid(&format!(
+                                "NAR Nix relative symlink has an unsafe component: {}",
+                                error.detail
+                            ))
+                        })?;
+                }
+                Component::RootDir | Component::Prefix(_) => {
+                    return Err(invalid("NAR relative symlink is not relative"));
+                }
+            }
+            continue;
+        }
         match component {
             Component::CurDir => {}
             Component::Normal(_) => depth = depth.saturating_add(1),
             Component::ParentDir if depth > 0 => depth -= 1,
+            Component::ParentDir if allow_nix_store_symlinks => crossed_root = true,
             Component::ParentDir => {
                 return Err(invalid("NAR relative symlink escapes its output root"));
             }
@@ -1526,7 +1619,7 @@ fn validate_nix_store_dir(value: &str) -> io::Result<()> {
     }
     for component in path.components() {
         if let Component::Normal(component) = component {
-            validate_name(component.to_string_lossy().as_bytes())?;
+            validate_name(component.to_string_lossy().as_bytes(), false)?;
         }
     }
     Ok(())
@@ -1548,7 +1641,7 @@ fn validate_nix_store_basename(value: &str) -> io::Result<()> {
             "Nix store reference is not one safe store basename",
         ));
     }
-    validate_name(value.as_bytes())
+    validate_name(value.as_bytes(), false)
 }
 
 fn validate_nix_store_path(value: &str) -> io::Result<()> {
@@ -1570,7 +1663,7 @@ fn validate_nix_store_path(value: &str) -> io::Result<()> {
         return Err(invalid("Nix StorePath contains a traversal component"));
     }
     for component in value.split('/').filter(|component| !component.is_empty()) {
-        validate_name(component.as_bytes())?;
+        validate_name(component.as_bytes(), false)?;
     }
     validate_nix_store_basename(basename)
 }
@@ -1604,7 +1697,7 @@ fn validate_nix_url(value: &str) -> io::Result<()> {
     }
     for component in Path::new(path).components() {
         if let Component::Normal(component) = component {
-            validate_name(component.to_string_lossy().as_bytes())?;
+            validate_name(component.to_string_lossy().as_bytes(), false)?;
         }
     }
     Ok(())
@@ -1773,7 +1866,7 @@ fn narinfo_name(store_path: &str) -> io::Result<String> {
         .rsplit('/')
         .next()
         .ok_or_else(|| invalid("narinfo store path has no name"))?;
-    validate_name(name.as_bytes())?;
+    validate_name(name.as_bytes(), false)?;
     Ok(format!("{name}.narinfo"))
 }
 

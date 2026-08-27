@@ -52,6 +52,15 @@ impl PathLawError {
 /// Reject a single path component under Hangar path law (POSIX bytes; Windows
 /// reserved/trailing rules applied so the same tree is representable both ways).
 pub fn validate_path_component(name: &[u8]) -> Result<(), PathLawError> {
+    validate_path_component_with_mode(name, false)
+}
+
+/// Validate a path component with the POSIX-only allowances used by Nix
+/// admission. Native ingest keeps the strict wrapper above.
+pub fn validate_path_component_with_mode(
+    name: &[u8],
+    allow_nix_store_symlinks: bool,
+) -> Result<(), PathLawError> {
     if name.is_empty() {
         return Err(PathLawError {
             code: "empty",
@@ -71,6 +80,20 @@ pub fn validate_path_component(name: &[u8]) -> Result<(), PathLawError> {
             code: "dot",
             path: lossy(name),
             detail: "`.` and `..` are not store path components".into(),
+        });
+    }
+    // Nix admission accepts exactly Nix's own component law (any byte except
+    // `/` and NUL; not `.`/`..`) — real nixpkgs closures ship backslashes,
+    // trailing dots, and Windows-reserved spellings. The Windows
+    // representability rules below are native-ingest law only.
+    if allow_nix_store_symlinks {
+        return Ok(());
+    }
+    if name.contains(&b'\\') {
+        return Err(PathLawError {
+            code: "backslash",
+            path: lossy(name),
+            detail: "backslash is not a portable path component outside Nix admission".into(),
         });
     }
     if name.ends_with(b".") || name.ends_with(b" ") {
@@ -96,6 +119,15 @@ pub fn validate_path_component(name: &[u8]) -> Result<(), PathLawError> {
 
 /// Validate every component of a relative store path (no absolute, no empty).
 pub fn validate_rel_path(rel: &Path) -> Result<(), PathLawError> {
+    validate_rel_path_with_mode(rel, false)
+}
+
+/// Validate a relative store path with the POSIX-only allowances used by Nix
+/// admission. Native ingest keeps the strict wrapper above.
+pub fn validate_rel_path_with_mode(
+    rel: &Path,
+    allow_nix_store_symlinks: bool,
+) -> Result<(), PathLawError> {
     if rel.is_absolute() {
         return Err(PathLawError {
             code: "absolute",
@@ -109,7 +141,10 @@ pub fn validate_rel_path(rel: &Path) -> Result<(), PathLawError> {
         match comp {
             Component::Normal(os) => {
                 saw = true;
-                validate_path_component(&path_component_bytes(os))?;
+                validate_path_component_with_mode(
+                    &path_component_bytes(os),
+                    allow_nix_store_symlinks,
+                )?;
             }
             Component::CurDir | Component::ParentDir => {
                 return Err(PathLawError {
@@ -283,7 +318,7 @@ pub fn check_xattrs(path: &Path, allow_semantic_xattrs: bool) -> Result<(), Stri
 
 fn encode_semantic_xattrs(
     path: &Path,
-    archive: &mut Vec<u8>,
+    archive: &mut SHA256::StreamingSha256,
     allow_semantic_xattrs: bool,
 ) -> Result<(), String> {
     let mut names = list_xattr_names(path)?
@@ -302,7 +337,7 @@ fn encode_semantic_xattrs(
         ));
     }
     for name in names {
-        archive.push(b'X');
+        archive.update(&[b'X']);
         push_bytes(archive, name.as_bytes());
         push_bytes(archive, &xattr_value(path, &name)?);
     }
@@ -579,9 +614,10 @@ pub fn host_platform() -> String {
 
 /// Content hash of a realized output root.
 ///
-/// For a real local directory this is the full-tree content hash (every file's
-/// relative path, length, and bytes) — not the compiler's `.jet`-only
-/// `tree_hash`, since a realized output is `bin/`, `.rlib`, and arbitrary files.
+/// For a real local directory or regular-file root this is the full content
+/// hash (every node's relative path, length, and bytes) — not the compiler's
+/// `.jet`-only `tree_hash`, since a realized output is `bin/`, `.rlib`, and
+/// arbitrary files.
 /// Existing files and symlinks are hashed from their bytes/target. Callers
 /// that can report failure should use [`try_output_hash_of`]; missing or
 /// unreadable outputs produce an empty compatibility digest here and Store
@@ -592,9 +628,10 @@ pub fn output_hash_of(out: &str) -> String {
 
 /// Canonical archive digest. The byte stream records every node's relative
 /// path, type, mode, and type-specific payload. Symlinks are never followed
-/// while encoding; relative targets must stay lexically inside the root and
-/// absolute Nix-store targets are allowed only in Hangar mode. Hardlink identity
-/// is explicit; unsupported special files fail closed.
+/// while encoding; native relative targets stay lexically inside the root,
+/// while Nix admission may name one sibling store object. Absolute Nix-store
+/// targets are allowed only in Hangar mode. Hardlink identity is explicit;
+/// unsupported special files fail closed.
 pub fn try_output_hash_of(out: &str) -> Result<String, String> {
     try_output_hash_of_with_policy(out, false, &mut |_, _| {})
 }
@@ -659,15 +696,15 @@ fn try_output_hash_of_with_hook(
             return Err("Nix symlink target must be absolute".into());
         }
         validate_nix_store_symlink_target(&target)?;
-        let mut archive = b"jet-hangar-archive-v1\0".to_vec();
+        let mut archive = new_archive_hasher();
         hook(p, "node");
         record_header(&mut archive, b'L', &[], mode_of(&output_meta));
         push_bytes(&mut archive, &path_bytes(&target));
         encode_semantic_xattrs(p, &mut archive, allow_semantic_xattrs)?;
-        return Ok(format!("sha256-{}", SHA256::sha256_hex(&archive)));
+        return Ok(format!("sha256-{}", digest_hex(archive.finalize())));
     }
     let root = fs::canonicalize(p).map_err(|e| format!("cannot resolve `{out}`: {e}"))?;
-    let mut archive = b"jet-hangar-archive-v1\0".to_vec();
+    let mut archive = new_archive_hasher();
     let mut hardlinks = BTreeMap::new();
     encode_node(
         &root,
@@ -750,7 +787,16 @@ fn try_output_hash_of_with_hook(
             link.seen
         ));
     }
-    Ok(format!("sha256-{}", SHA256::sha256_hex(&archive)))
+    Ok(format!("sha256-{}", digest_hex(archive.finalize())))
+}
+
+/// The streaming updates below are the former canonical archive `Vec<u8>` in
+/// the same byte order. Only storage changes; every successful tree keeps its
+/// prior digest.
+fn new_archive_hasher() -> SHA256::StreamingSha256 {
+    let mut archive = SHA256::StreamingSha256::new();
+    archive.update(b"jet-hangar-archive-v1\0");
+    archive
 }
 
 fn canonical_real_directory(path: &Path) -> Option<PathBuf> {
@@ -824,13 +870,13 @@ fn encode_node(
     root: &Path,
     path: &Path,
     rel: &Path,
-    archive: &mut Vec<u8>,
+    archive: &mut SHA256::StreamingSha256,
     hardlinks: &mut BTreeMap<(u64, u64), HardlinkState>,
     allow_semantic_xattrs: bool,
     allow_nix_store_symlinks: bool,
     hook: &mut dyn FnMut(&Path, &'static str),
 ) -> Result<(), String> {
-    if let Err(err) = validate_rel_path(rel) {
+    if let Err(err) = validate_rel_path_with_mode(rel, allow_nix_store_symlinks) {
         return Err(format!("{} — {}", err.what(), err.detail));
     }
     let meta = fs::symlink_metadata(path)
@@ -850,8 +896,13 @@ fn encode_node(
         let before = stable_file_identity(&meta);
         let before_entries = directory_snapshot(path)?;
         let sibling_names: Vec<Vec<u8>> = before_entries.iter().map(|e| e.name.clone()).collect();
-        if let Err(err) = reject_casefold_collisions(&sibling_names) {
-            return Err(format!("{} — {}", err.what(), err.detail));
+        // Nix archives are POSIX-only content. Native ingest owns Windows
+        // representability laws; Nix admission skips only this case-fold and
+        // backslash check while the exact name bytes remain in the digest.
+        if !allow_nix_store_symlinks {
+            if let Err(err) = reject_casefold_collisions(&sibling_names) {
+                return Err(format!("{} — {}", err.what(), err.detail));
+            }
         }
         let resolved = fs::canonicalize(path)
             .map_err(|e| format!("cannot resolve directory `{}`: {e}", path.display()))?;
@@ -906,36 +957,31 @@ fn encode_node(
             if !allow_nix_store_symlinks {
                 return Err(format!("symlink `{}` escapes output root", path.display()));
             }
-            validate_nix_store_symlink_target(&target)?;
+            // Nix admission accepts any absolute target as inert link data
+            // (nixpkgs legally links to host paths such as `/bin/sh` and
+            // `/run/current-system`); only NUL is impossible in link bytes.
+            if path_bytes(&target).contains(&0) {
+                return Err("Nix symlink target contains a NUL byte".into());
+            }
         } else {
-            let mut stack = Vec::new();
-            if let Some(parent) = rel.parent() {
-                for component in parent.components() {
-                    if let Component::Normal(value) = component {
-                        stack.push(value.to_os_string());
-                    }
+            let parent_depth = rel
+                .parent()
+                .into_iter()
+                .flat_map(Path::components)
+                .filter(|component| matches!(component, Component::Normal(_)))
+                .count();
+            validate_relative_nix_store_symlink_target(
+                &target,
+                parent_depth,
+                allow_nix_store_symlinks,
+            )
+            .map_err(|error| {
+                if error.contains("escapes output root") {
+                    format!("symlink `{}` escapes output root", path.display())
+                } else {
+                    error
                 }
-            }
-            for component in target.components() {
-                match component {
-                    Component::CurDir => {}
-                    Component::ParentDir => {
-                        if stack.pop().is_none() {
-                            return Err(format!(
-                                "symlink `{}` escapes output root",
-                                path.display()
-                            ));
-                        }
-                    }
-                    Component::Normal(value) => stack.push(value.to_os_string()),
-                    Component::RootDir | Component::Prefix(_) => {
-                        return Err(format!(
-                            "symlink `{}` escapes output root",
-                            path.display()
-                        ));
-                    }
-                }
-            }
+            })?;
         }
         record_header(archive, b'L', &rel_bytes, mode_of(&meta));
         push_bytes(archive, &path_bytes(&target));
@@ -950,7 +996,8 @@ fn encode_node(
         }
         record_header(archive, b'F', &rel_bytes, mode_of(&meta));
         encode_semantic_xattrs(path, archive, allow_semantic_xattrs)?;
-        let bytes = read_file_stable(path, &meta, allow_nix_store_symlinks, hook)?;
+        let content_digest =
+            read_file_stable(path, &meta, allow_nix_store_symlinks, archive, hook)?;
         if let Some(key) = key {
             hardlinks.insert(
                 key,
@@ -958,11 +1005,10 @@ fn encode_node(
                     first: rel.to_path_buf(),
                     seen: 1,
                     total: link_count(&meta),
-                    cas_key: Some(cas_key_for(&meta, &bytes)),
+                    cas_key: Some(cas_key_for_digest(&meta, content_digest)),
                 },
             );
         }
-        push_bytes(archive, &bytes);
     } else {
         return Err(format!(
             "unsupported special file in output: `{}`",
@@ -991,22 +1037,63 @@ fn validate_nix_store_symlink_target(target: &Path) -> Result<(), String> {
     let Some(Component::Normal(store_name)) = components.next() else {
         return Err("Nix symlink target has no store object".into());
     };
-    validate_path_component(&path_component_bytes(store_name)).map_err(|error| {
-        format!(
-            "Nix symlink target has an unsafe store object: {}",
-            error.detail
-        )
-    })?;
+    validate_nix_store_component(&path_component_bytes(store_name), "store object")?;
     for component in components {
         let Component::Normal(value) = component else {
             return Err("Nix symlink target contains a traversal component".into());
         };
-        validate_path_component(&path_component_bytes(value)).map_err(|error| {
-            format!(
-                "Nix symlink target has an unsafe component: {}",
-                error.detail
-            )
-        })?;
+        validate_nix_store_component(&path_component_bytes(value), "component")?;
+    }
+    Ok(())
+}
+
+fn validate_nix_store_component(value: &[u8], label: &str) -> Result<(), String> {
+    validate_path_component(value)
+        .map_err(|error| format!("Nix symlink target has an unsafe {label}: {}", error.detail))
+}
+
+fn validate_relative_nix_store_symlink_target(
+    target: &Path,
+    mut depth: usize,
+    allow_nix_store_symlinks: bool,
+) -> Result<(), String> {
+    // Native relative links stay inside the output. Nix admission accepts a
+    // relative target that escapes the output root as inert link data (Nix
+    // NARs legally reference sibling store objects and host config such as
+    // systemd's `../../../../../etc/environment`); hashing never follows the
+    // link, and every named component still passes the Nix path law.
+    let mut crossed_root = false;
+    for component in target.components() {
+        if crossed_root {
+            match component {
+                Component::CurDir | Component::ParentDir => {}
+                Component::Normal(value) => {
+                    validate_path_component_with_mode(&path_component_bytes(value), true)
+                        .map_err(|error| {
+                            format!(
+                                "Nix symlink target has an unsafe component: {}",
+                                error.detail
+                            )
+                        })?;
+                }
+                Component::RootDir | Component::Prefix(_) => {
+                    return Err("Nix relative symlink is not relative".into());
+                }
+            }
+            continue;
+        }
+        match component {
+            Component::CurDir => {}
+            Component::Normal(_) => depth = depth.saturating_add(1),
+            Component::ParentDir if depth > 0 => depth -= 1,
+            Component::ParentDir if allow_nix_store_symlinks => crossed_root = true,
+            Component::ParentDir => {
+                return Err("Nix relative symlink escapes output root".into());
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err("Nix relative symlink is not relative".into());
+            }
+        }
     }
     Ok(())
 }
@@ -1015,8 +1102,9 @@ fn read_file_stable(
     path: &Path,
     expected: &fs::Metadata,
     allow_hardlink_metadata_changes: bool,
+    archive: &mut SHA256::StreamingSha256,
     hook: &mut dyn FnMut(&Path, &'static str),
-) -> Result<Vec<u8>, String> {
+) -> Result<[u8; 32], String> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -1041,9 +1129,22 @@ fn read_file_stable(
         return Err(format!("file `{}` changed before hashing", path.display()));
     }
     hook(path, "file-opened");
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+    archive.update(&expected.len().to_be_bytes());
+    let mut content_hasher = SHA256::StreamingSha256::new();
+    // Fixed-size reads keep hashing O(64 KiB + metadata), independent of file
+    // or tree size.
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+        if count == 0 {
+            break;
+        }
+        let chunk = &buffer[..count];
+        archive.update(chunk);
+        content_hasher.update(chunk);
+    }
     let after = file
         .metadata()
         .map_err(|e| format!("cannot re-inspect `{}`: {e}", path.display()))?;
@@ -1054,7 +1155,7 @@ fn read_file_stable(
     ) {
         return Err(format!("file `{}` changed while hashing", path.display()));
     }
-    Ok(bytes)
+    Ok(content_hasher.finalize())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1110,15 +1211,26 @@ fn directory_snapshot_unchanged(
         })
 }
 
-fn record_header(out: &mut Vec<u8>, kind: u8, path: &[u8], mode: u32) {
-    out.push(kind);
+fn record_header(out: &mut SHA256::StreamingSha256, kind: u8, path: &[u8], mode: u32) {
+    out.update(&[kind]);
     push_bytes(out, path);
-    out.extend_from_slice(&mode.to_be_bytes());
+    out.update(&mode.to_be_bytes());
 }
 
-fn push_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
-    out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
-    out.extend_from_slice(bytes);
+fn push_bytes(out: &mut SHA256::StreamingSha256, bytes: &[u8]) {
+    out.update(&(bytes.len() as u64).to_be_bytes());
+    out.update(bytes);
+}
+
+fn digest_hex(bytes: [u8; 32]) -> String {
+    use std::fmt::Write as _;
+
+    bytes
+        .iter()
+        .fold(String::with_capacity(64), |mut text, byte| {
+            let _ = write!(text, "{byte:02x}");
+            text
+        })
 }
 
 #[cfg(unix)]
@@ -1143,12 +1255,13 @@ fn mode_of(meta: &fs::Metadata) -> u32 {
     u32::from(meta.permissions().readonly())
 }
 
+#[cfg(all(test, unix))]
 fn cas_key_for(meta: &fs::Metadata, bytes: &[u8]) -> String {
-    format!(
-        "{}-{:08x}",
-        SHA256::sha256_hex(bytes),
-        mode_of(meta) & 0o7777
-    )
+    cas_key_for_digest(meta, SHA256::sha256(bytes))
+}
+
+fn cas_key_for_digest(meta: &fs::Metadata, digest: [u8; 32]) -> String {
+    format!("{}-{:08x}", digest_hex(digest), mode_of(meta) & 0o7777)
 }
 
 #[cfg(unix)]
@@ -1274,6 +1387,70 @@ mod tests {
         let after = output_hash_of(&base.to_string_lossy());
         assert_ne!(before, after, "file bytes, not path text, are identity");
         std::fs::remove_file(&base).ok();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+    #[test]
+    fn canonical_archive_stream_matches_materialized_reference() {
+        use std::io::Write as _;
+        use std::os::unix::fs::symlink;
+
+        let dir = scratch("stream-reference");
+        let nested = dir.join("nested/deeper");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(dir.join("small.txt"), b"small file").unwrap();
+        let large = dir.join("large.bin");
+        let chunk: Vec<u8> = (0..4096).map(|index| (index % 251) as u8).collect();
+        let mut file = fs::File::create(&large).unwrap();
+        for _ in 0..768 {
+            file.write_all(&chunk).unwrap();
+        }
+        fs::write(nested.join("payload"), b"nested payload").unwrap();
+        symlink("nested/deeper/payload", dir.join("payload-link")).unwrap();
+        fs::hard_link(dir.join("small.txt"), dir.join("small-alias")).unwrap();
+
+        let has_xattr = set_test_xattr(&nested.join("payload"), b"stream-reference");
+        let root = fs::canonicalize(&dir).unwrap();
+        let got = try_output_hash_of_with_policy(&dir.to_string_lossy(), has_xattr, &mut |_, _| {})
+            .unwrap();
+        let reference = reference_archive(&root, has_xattr);
+        assert_eq!(
+            got,
+            format!("sha256-{}", SHA256::sha256_hex(&reference)),
+            "streamed archive bytes must match materialized reference"
+        );
+
+        let metadata = fs::metadata(dir.join("small.txt")).unwrap();
+        let expected_cas_key = format!(
+            "{}-{:08x}",
+            SHA256::sha256_hex(b"small file"),
+            mode_of(&metadata) & 0o7777
+        );
+        assert_eq!(
+            cas_key_for_digest(&metadata, SHA256::sha256(b"small file")),
+            expected_cas_key
+        );
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_hashes_large_sparse_file_incrementally() {
+        use std::io::{Seek as _, SeekFrom, Write as _};
+
+        let dir = scratch("large-sparse");
+        let path = dir.join("payload");
+        let size = 64 * 1024 * 1024;
+        let mut file = fs::File::create(&path).unwrap();
+        file.set_len(size).unwrap();
+        file.write_all(b"start").unwrap();
+        file.seek(SeekFrom::Start(size - 4)).unwrap();
+        file.write_all(b"tail").unwrap();
+        drop(file);
+
+        let digest = try_output_hash_of(&dir.to_string_lossy()).unwrap();
+        assert!(digest.starts_with("sha256-"));
+        fs::remove_dir_all(dir).ok();
     }
 
     #[test]
@@ -1467,10 +1644,14 @@ mod tests {
         .unwrap();
         assert!(try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).is_ok());
 
-        symlink("../../escape", output.join("up")).unwrap();
-        let error =
-            try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap_err();
-        assert!(error.contains("escapes output root"), "{error}");
+        // Nix admission accepts escaped relative targets as inert link data
+        // (systemd ships `../../../../../etc/environment`).
+        symlink("../../../../../etc/environment", output.join("up")).unwrap();
+        let first =
+            try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap();
+        let second =
+            try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap();
+        assert_eq!(first, second);
         fs::remove_file(output.join("up")).unwrap();
 
         symlink("missing/target", output.join("dangling")).unwrap();
@@ -1694,6 +1875,66 @@ mod tests {
         fs::remove_dir_all(dir).ok();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_accepts_casefold_siblings_only_in_nix_mode() {
+        let hangar = scratch("nix-casefold-sibs");
+        fs::write(hangar.join("Foo"), "a").unwrap();
+        fs::write(hangar.join("foo"), "b").unwrap();
+
+        assert!(try_output_hash_of(&hangar.to_string_lossy()).is_err());
+        let first =
+            try_output_hash_of_in_hangar(&hangar.to_string_lossy(), &hangar, false).unwrap();
+        let second =
+            try_output_hash_of_in_hangar(&hangar.to_string_lossy(), &hangar, false).unwrap();
+        assert_eq!(first, second);
+        fs::remove_dir_all(hangar).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_accepts_backslash_components_only_in_nix_mode() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let hangar = scratch("nix-backslash-name");
+        let name = b"dev-disk-by\\x2duuid-test.device";
+        let path = hangar.join(OsString::from_vec(name.to_vec()));
+        fs::write(path, b"device").unwrap();
+
+        assert_eq!(validate_path_component(name).unwrap_err().code, "backslash");
+        assert!(validate_path_component_with_mode(name, true).is_ok());
+        let error = try_output_hash_of(&hangar.to_string_lossy()).unwrap_err();
+        assert!(error.contains("backslash") || error.contains("path component"), "{error}");
+        let first =
+            try_output_hash_of_in_hangar(&hangar.to_string_lossy(), &hangar, false).unwrap();
+        let second =
+            try_output_hash_of_in_hangar(&hangar.to_string_lossy(), &hangar, false).unwrap();
+        assert_eq!(first, second);
+        fs::remove_dir_all(hangar).ok();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+    #[test]
+    fn canonical_archive_hashes_file_root_deterministically_in_hangar_mode() {
+        let hangar = scratch("nix-file-root");
+        let file = hangar.join("file-root");
+        fs::write(&file, b"file-root bytes").unwrap();
+
+        let first = try_output_hash_of_in_hangar(&file.to_string_lossy(), &hangar, false).unwrap();
+        let second =
+            try_output_hash_of_in_hangar(&file.to_string_lossy(), &hangar, false).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(
+            first,
+            format!(
+                "sha256-{}",
+                SHA256::sha256_hex(&reference_archive(&file, false))
+            )
+        );
+        fs::remove_dir_all(hangar).ok();
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn semantic_xattr_name_and_value_are_canonical_digest_bytes() {
@@ -1724,6 +1965,150 @@ mod tests {
             try_output_hash_of_with_policy(&dir.to_string_lossy(), true, &mut |_, _| {}).unwrap();
         assert_ne!(first, second);
         fs::remove_dir_all(dir).ok();
+    }
+
+    // Test-only old-style encoder. It materializes the canonical archive so
+    // the production streaming encoder remains pinned to the same bytes.
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+    fn reference_archive(root: &Path, allow_semantic_xattrs: bool) -> Vec<u8> {
+        let mut archive = b"jet-hangar-archive-v1\0".to_vec();
+        let mut hardlinks = std::collections::BTreeMap::new();
+        reference_encode_node(
+            root,
+            Path::new(""),
+            &mut archive,
+            &mut hardlinks,
+            allow_semantic_xattrs,
+        );
+        archive
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+    fn reference_encode_node(
+        path: &Path,
+        rel: &Path,
+        archive: &mut Vec<u8>,
+        hardlinks: &mut std::collections::BTreeMap<(u64, u64), PathBuf>,
+        allow_semantic_xattrs: bool,
+    ) {
+        let metadata = fs::symlink_metadata(path).unwrap();
+        let rel_bytes = path_bytes(rel);
+        if metadata.is_dir() {
+            reference_record_header(archive, b'D', &rel_bytes, mode_of(&metadata));
+            reference_encode_xattrs(path, archive, allow_semantic_xattrs);
+            let mut entries = fs::read_dir(path)
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>();
+            entries.sort_by_key(|entry| path_bytes(Path::new(&entry.file_name())));
+            for entry in entries {
+                reference_encode_node(
+                    &entry.path(),
+                    &rel.join(entry.file_name()),
+                    archive,
+                    hardlinks,
+                    allow_semantic_xattrs,
+                );
+            }
+        } else if metadata.file_type().is_symlink() {
+            let target = fs::read_link(path).unwrap();
+            reference_record_header(archive, b'L', &rel_bytes, mode_of(&metadata));
+            reference_push_bytes(archive, &path_bytes(&target));
+            reference_encode_xattrs(path, archive, allow_semantic_xattrs);
+        } else if metadata.is_file() {
+            if let Some(identity) = file_identity(&metadata) {
+                if let Some(first) = hardlinks.get(&identity) {
+                    reference_record_header(archive, b'H', &rel_bytes, mode_of(&metadata));
+                    reference_push_bytes(archive, &path_bytes(first));
+                    return;
+                }
+            }
+            reference_record_header(archive, b'F', &rel_bytes, mode_of(&metadata));
+            reference_encode_xattrs(path, archive, allow_semantic_xattrs);
+            let bytes = fs::read(path).unwrap();
+            reference_push_bytes(archive, &bytes);
+            if let Some(identity) = file_identity(&metadata) {
+                hardlinks.insert(identity, rel.to_path_buf());
+            }
+        } else {
+            panic!("fixture contains unsupported node `{}`", path.display());
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+    fn reference_encode_xattrs(path: &Path, archive: &mut Vec<u8>, allow: bool) {
+        let mut names = list_xattr_names(path)
+            .unwrap()
+            .into_iter()
+            .filter(|name| !is_excluded_xattr(name))
+            .collect::<Vec<_>>();
+        names.sort();
+        if names.is_empty() {
+            return;
+        }
+        assert!(allow, "fixture xattrs require explicit allowance");
+        for name in names {
+            archive.push(b'X');
+            reference_push_bytes(archive, name.as_bytes());
+            reference_push_bytes(archive, &xattr_value(path, &name).unwrap());
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+    fn reference_record_header(out: &mut Vec<u8>, kind: u8, path: &[u8], mode: u32) {
+        out.push(kind);
+        reference_push_bytes(out, path);
+        out.extend_from_slice(&mode.to_be_bytes());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))]
+    fn reference_push_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
+        out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        out.extend_from_slice(bytes);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn set_test_xattr(path: &Path, value: &[u8]) -> bool {
+        use std::os::unix::ffi::OsStrExt as _;
+        unsafe extern "C" {
+            fn lsetxattr(
+                path: *const i8,
+                name: *const i8,
+                value: *const u8,
+                size: usize,
+                flags: i32,
+            ) -> i32;
+        }
+        let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        let name = std::ffi::CString::new("user.jet.stream_reference").unwrap();
+        unsafe { lsetxattr(path.as_ptr(), name.as_ptr(), value.as_ptr(), value.len(), 0) == 0 }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    fn set_test_xattr(path: &Path, value: &[u8]) -> bool {
+        use std::os::unix::ffi::OsStrExt as _;
+        unsafe extern "C" {
+            fn setxattr(
+                path: *const i8,
+                name: *const i8,
+                value: *const u8,
+                size: usize,
+                position: u32,
+                options: i32,
+            ) -> i32;
+        }
+        let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        let name = std::ffi::CString::new("user.jet.stream_reference").unwrap();
+        unsafe {
+            setxattr(
+                path.as_ptr(),
+                name.as_ptr(),
+                value.as_ptr(),
+                value.len(),
+                0,
+                0x0001,
+            ) == 0
+        }
     }
 
     fn scratch(tag: &str) -> PathBuf {

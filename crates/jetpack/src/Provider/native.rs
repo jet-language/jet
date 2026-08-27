@@ -6,8 +6,8 @@
 //! boundary to Store. No Nix, curl, or wget participates in this path.
 
 use super::{
-    cache_identity, ensure_network_allowed, producer_record, Ctx, Provider, ProviderError,
-    Realized, SourceState,
+    cache_identity, ensure_network_allowed, producer_record, Ctx, DownloadPlan, PlanItem,
+    PlanState, Provider, ProviderError, Realized, SourceState,
 };
 use crate::NixIndex::NativeRecipe;
 use crate::RefSpec::{RefSpec as PackageRef, Source, SourceTable};
@@ -226,6 +226,33 @@ fn catalog_output_path(store_dir: &Path, recipe: &NativeRecipe) -> PathBuf {
 pub(crate) struct NativeProvider;
 
 impl Provider for NativeProvider {
+    fn cache_expectation(
+        &self,
+        spec: &PackageRef,
+        table: &SourceTable,
+        ctx: &Ctx,
+    ) -> Option<crate::Store::CacheExpectation> {
+        cache_expectation(spec, table, ctx)
+    }
+
+    fn plan_downloads(
+        &self,
+        specs: &[PackageRef],
+        table: &SourceTable,
+        ctx: &Ctx,
+    ) -> Result<DownloadPlan, ProviderError> {
+        let mut plan = DownloadPlan::default();
+        for spec in specs {
+            plan.add_item(PlanItem {
+                package: spec.raw.clone(),
+                state: PlanState::New,
+                download_bytes: download_size(spec, table, ctx)?,
+                disk_bytes: None,
+            });
+        }
+        Ok(plan)
+    }
+
     fn realize(
         &self,
         spec: &PackageRef,

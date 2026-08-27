@@ -659,14 +659,14 @@ mod tests {
         ));
         std::fs::write(&outside, "must not be read or copied").unwrap();
         symlink(&outside, root.join("escape.txt")).unwrap();
-        let copy = root.with_file_name(format!(
-            "jetpack-package-tree-copy-{}",
-            std::process::id()
-        ));
+        let copy = root.with_file_name(format!("jetpack-package-tree-copy-{}", std::process::id()));
 
         assert!(tree_fingerprint(&root).is_err());
         assert!(copy_tree(&root, &copy).is_err());
-        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "must not be read or copied");
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "must not be read or copied"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&copy);

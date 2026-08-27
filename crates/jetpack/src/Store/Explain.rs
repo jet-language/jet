@@ -568,9 +568,9 @@ fn matching_lock_block(
     qualified: &[String],
 ) -> Option<(usize, String)> {
     let name_line = block.iter().find(|(_, line)| {
-        names.iter().any(|name| {
-            !name.is_empty() && lock_name(line) == Some(name.as_str())
-        })
+        names
+            .iter()
+            .any(|name| !name.is_empty() && lock_name(line) == Some(name.as_str()))
     });
     if let Some((line, text)) = name_line {
         return Some((*line, text.trim().to_string()));
@@ -653,9 +653,7 @@ fn origin_projection(
                 .then(|| config_value(roots, "config/nix-cache-v1.endpoint"))
                 .flatten()
         })
-        .or_else(|| {
-            (provider == "nix").then(|| "https://cache.nixos.org".to_string())
-        })
+        .or_else(|| (provider == "nix").then(|| "https://cache.nixos.org".to_string()))
         .or_else(|| fact("source.url"))
         .unwrap_or_else(|| "not recorded".to_string());
     // A signed-index endpoint is the strongest catalog origin. If it was not
@@ -677,9 +675,8 @@ fn origin_projection(
         .unwrap_or_else(|| "not recorded".to_string());
     let signature_chain = fact("nix.index.signature-chain")
         .or_else(|| {
-            fact("artifact.verification").map(|verification| {
-                format!("not applicable ({verification})")
-            })
+            fact("artifact.verification")
+                .map(|verification| format!("not applicable ({verification})"))
         })
         .unwrap_or_else(|| "not recorded".to_string());
     WhyOrigin {
@@ -747,10 +744,7 @@ fn config_value(roots: &Roots, relative: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
-fn trust_projection(
-    provider: &str,
-    facts: Option<&BTreeMap<String, String>>,
-) -> WhyTrust {
+fn trust_projection(provider: &str, facts: Option<&BTreeMap<String, String>>) -> WhyTrust {
     let fact = |key: &str| facts.and_then(|facts| facts.get(key)).map(String::as_str);
     let tier = fact("nix.index.tier");
     let source_kind = fact("source.kind");
@@ -758,8 +752,8 @@ fn trust_projection(
         || source_kind == Some("local-unofficial-catalog")
         || (provider == "nix" && fact("nix.index.trust") == Some("unverified"));
     if local_mapping {
-        let native_recipe = provider == "jetpackage"
-            && source_kind == Some("local-unofficial-catalog");
+        let native_recipe =
+            provider == "jetpackage" && source_kind == Some("local-unofficial-catalog");
         return WhyTrust {
             grade: "unverified-mapping".to_string(),
             reason: if native_recipe {
@@ -2024,8 +2018,7 @@ fn rebuild_projection(
         if output_exists { "present" } else { "missing" }.to_string(),
     );
     let output_digest = if output_exists {
-        match crate::Envelope::try_output_hash_of_in_hangar(&entry.out, &roots.hangar_dir(), false)
-        {
+        match crate::Store::try_entry_output_hash(roots, entry) {
             Ok(actual) if actual == entry.envelope.output_hash => {
                 checks.insert("output_digest".to_string(), "matches".to_string());
                 Some(true)
@@ -2639,7 +2632,11 @@ mod why_projection_tests {
             &qualified
         ));
         assert!(!source_line_matches("// ripgrep,", &names, &qualified));
-        assert!(!source_line_matches("        ripgrep2,", &names, &qualified));
+        assert!(!source_line_matches(
+            "        ripgrep2,",
+            &names,
+            &qualified
+        ));
     }
 
     #[test]
@@ -2667,20 +2664,14 @@ mod why_projection_tests {
                 "source.kind".to_string(),
                 "local-unofficial-catalog".to_string(),
             ),
-            (
-                "nix.index.tier".to_string(),
-                "local-unofficial".to_string(),
-            ),
+            ("nix.index.tier".to_string(), "local-unofficial".to_string()),
         ]);
         let trust = trust_projection("jetpackage", Some(&native));
         assert_eq!(trust.grade, "unverified-mapping");
         assert!(trust.reason.contains("native recipe mapping"));
 
         let signed = BTreeMap::from([
-            (
-                "nix.index.tier".to_string(),
-                "official-signed".to_string(),
-            ),
+            ("nix.index.tier".to_string(), "official-signed".to_string()),
             (
                 "nix.index.signature-chain".to_string(),
                 "present".to_string(),

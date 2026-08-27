@@ -9,6 +9,50 @@ use super::*;
 pub(crate) struct CoreProvider;
 
 impl Provider for CoreProvider {
+    fn requires_acquisition(&self, spec: &RefSpec, table: &SourceTable) -> bool {
+        table
+            .upstream(spec.source.label())
+            .is_none_or(|upstream| !upstream.starts_with("path:"))
+    }
+
+    fn cache_expectation(
+        &self,
+        spec: &RefSpec,
+        table: &SourceTable,
+        ctx: &Ctx,
+    ) -> Option<crate::Store::CacheExpectation> {
+        core_cache_expectation(spec, table, ctx)
+    }
+
+    fn approval_facts(
+        &self,
+        spec: &RefSpec,
+        table: &SourceTable,
+        ctx: &Ctx,
+    ) -> Result<Option<String>, String> {
+        core_approval_facts(spec, table, ctx)
+    }
+
+    fn plan_downloads(
+        &self,
+        specs: &[RefSpec],
+        table: &SourceTable,
+        _ctx: &Ctx,
+    ) -> Result<DownloadPlan, ProviderError> {
+        let mut plan = DownloadPlan::default();
+        for spec in specs {
+            if self.requires_acquisition(spec, table) {
+                plan.add_item(PlanItem {
+                    package: spec.raw.clone(),
+                    state: PlanState::New,
+                    download_bytes: None,
+                    disk_bytes: None,
+                });
+            }
+        }
+        Ok(plan)
+    }
+
     fn realize(
         &self,
         spec: &RefSpec,
@@ -264,6 +308,139 @@ impl Provider for CoreProvider {
             producer,
         })
     }
+}
+
+fn core_cache_expectation(
+    spec: &RefSpec,
+    table: &SourceTable,
+    ctx: &Ctx,
+) -> Option<crate::Store::CacheExpectation> {
+    let upstream = table.upstream(spec.source.label())?;
+    let repo = source_repo(upstream, &spec.package, ctx).ok()?;
+    let canonical_package = match find_canonical_package(&repo, &spec.package) {
+        Ok(package) => package,
+        Err(_) => return None,
+    };
+    let canonical = canonical_package.as_ref().map(|(_, facts)| facts);
+    let src_dir = canonical_package
+        .as_ref()
+        .and_then(|(root, facts)| canonical_source_dir(root, facts))
+        .or_else(|| Package::discover_module_in(&repo, &spec.package).ok())?;
+    validate_core_source_tree(&src_dir).ok()?;
+    let toolchain = crate::Toolchain::Toolchain::resolve_for_core(ctx.offline);
+    if ctx.offline
+        && src_dir.join("Cargo.toml").is_file()
+        && !toolchain.as_ref().is_some_and(|toolchain| toolchain.pinned)
+    {
+        return None;
+    }
+    let source_fingerprint = core_tree_fingerprint(&src_dir).ok()?;
+    let (manifest, canonical) = if canonical.is_some() {
+        (None, canonical)
+    } else {
+        let manifest = match Package::PackageFacts::load(&repo) {
+            None => None,
+            Some(Ok(manifest)) => Some(manifest),
+            Some(Err(_)) => return None,
+        };
+        (manifest, None)
+    };
+    let kind = canonical
+        .and_then(|facts| canonical_package_kind(facts, &spec.package))
+        .or_else(|| {
+            manifest
+                .as_ref()
+                .and_then(|manifest| manifest.package_kind(&spec.package))
+        })
+        .unwrap_or_else(|| infer_package_kind(&src_dir));
+    let recipe = core_recipe_identity(
+        &src_dir,
+        &spec.package,
+        manifest.as_ref(),
+        kind,
+        canonical,
+        toolchain.as_ref(),
+    )
+    .ok()?;
+    Some(crate::Store::CacheExpectation {
+        identity: cache_identity(&source_fingerprint, &recipe, ctx),
+        owned_output: Some(ctx.store_dir.join(format!(
+            "{}-{}",
+            spec.package,
+            &source_fingerprint[..12]
+        ))),
+        allow_unsigned_local: true,
+    })
+}
+
+fn core_approval_facts(
+    spec: &RefSpec,
+    table: &SourceTable,
+    ctx: &Ctx,
+) -> Result<Option<String>, String> {
+    let upstream = table.upstream(spec.source.label()).ok_or_else(|| {
+        format!(
+            "Core source `{}` has no resolved upstream",
+            spec.source.label()
+        )
+    })?;
+    let repo = source_repo(upstream, &spec.package, ctx)
+        .map_err(|error| format!("could not resolve Core source: {error:?}"))?;
+    let canonical_package = find_canonical_package(&repo, &spec.package)?;
+    let canonical_facts = canonical_package.as_ref().map(|(_, facts)| facts);
+    let src_dir = if let Some(source) = canonical_package
+        .as_ref()
+        .and_then(|(root, facts)| canonical_source_dir(root, facts))
+    {
+        source
+    } else {
+        Package::discover_module_in(&repo, &spec.package)
+            .map_err(|error| format!("could not identify Core source: {error:?}"))?
+    };
+    validate_core_source_tree(&src_dir)?;
+    let source_digest = core_tree_fingerprint(&src_dir)?;
+    let (manifest, canonical) = if canonical_facts.is_some() {
+        (None, canonical_facts)
+    } else {
+        let manifest = match Package::PackageFacts::load(&repo) {
+            None => None,
+            Some(Ok(manifest)) => Some(manifest),
+            Some(Err(error)) => return Err(format!("Core package manifest is invalid: {error:?}")),
+        };
+        (manifest, None)
+    };
+    let kind = canonical
+        .and_then(|facts| canonical_package_kind(facts, &spec.package))
+        .or_else(|| {
+            manifest
+                .as_ref()
+                .and_then(|manifest| manifest.package_kind(&spec.package))
+        })
+        .unwrap_or_else(|| infer_package_kind(&src_dir));
+    if kind != Package::PackageKind::Library || !src_dir.join("Cargo.toml").is_file() {
+        return Ok(None);
+    }
+    let toolchain = crate::Toolchain::Toolchain::resolve_for_core(ctx.offline);
+    if ctx.offline && !toolchain.as_ref().is_some_and(|toolchain| toolchain.pinned) {
+        return Ok(None);
+    }
+    let recipe = core_recipe_identity(
+        &src_dir,
+        &spec.package,
+        manifest.as_ref(),
+        kind,
+        canonical,
+        toolchain.as_ref(),
+    )?;
+    let platform = crate::Envelope::host_platform();
+    let authority = format!(
+        "jet-core-build-hook.v1\npackage={}\nprovider={}\nsource={}\nsource_digest={}\nplatform={}\nrecipe={}\ncapabilities=exec:cargo\n",
+        spec.package, upstream, spec.raw, source_digest, platform, recipe
+    );
+    Ok(Some(format!(
+        "build-sha256:{}",
+        SHA256::sha256_hex(authority.as_bytes())
+    )))
 }
 
 /// The hangar-scoped subdir that holds transient build scratch (cargo target

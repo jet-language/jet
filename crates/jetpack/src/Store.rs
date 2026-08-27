@@ -51,6 +51,9 @@ pub(crate) use Producer::{
 };
 mod Cache;
 pub use Cache::*;
+mod Seal;
+pub(crate) use Seal::{check as check_seal, object_digest_for_path, remove as remove_seal,
+    recover_unlocked as recover_seals, write as write_seal, SEALS_DIR};
 mod Archive;
 pub use Archive::*;
 mod Nar;
@@ -61,14 +64,13 @@ pub(crate) use NixCache::admit_nix_closure;
 #[cfg(test)]
 pub(crate) use NixCache::encode_zstd_deterministic;
 pub(crate) use NixCache::{
-    admit_nix_closure_with_progress, plan_nix_downloads, AdmittedNixClosure, NixOutputRequest,
-    StoreError,
+    admit_nix_closure_with_progress, plan_nix_downloads, AdmittedNixClosure, NixDownloadPlan,
+    NixOutputRequest, NixPlanState, StoreError,
 };
 mod Broker;
 pub use Broker::*;
 mod Reproducibility;
 pub(crate) use Reproducibility::{
-    certify_registration_unlocked, certify_registration_unlocked_with_fresh_agreement,
     reproducibility_blocked,
 };
 
@@ -141,6 +143,7 @@ pub(crate) fn is_hangar_internal_directory(name: &str) -> bool {
             | "lifecycle-db"
             | "quarantine"
             | "receipts"
+            | "seals"
             | "stage"
             | ".archive-stage"
             | "reproducibility-staging"
@@ -261,7 +264,16 @@ pub(crate) fn audit_read_only(roots: &Roots) -> std::io::Result<AuditSnapshot> {
                 format!("Hangar object `{}` has no output digest", entry.id),
             ));
         }
-        let actual = Ingest::try_entry_output_hash(roots, entry).map_err(|error| {
+        let canonical_hangar = fs::canonicalize(&hangar).unwrap_or_else(|_| hangar.clone());
+        let out = Path::new(&entry.out);
+        let hangar_root = (out.starts_with(&hangar) || out.starts_with(&canonical_hangar))
+            .then_some(canonical_hangar.as_path());
+        let actual = Ingest::read_only_output_hash(
+            out,
+            hangar_root,
+            !entry.platform_artifact_kind.is_empty(),
+        )
+        .map_err(|error| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Hangar object `{}` could not be hashed: {error}", entry.id),
@@ -307,8 +319,55 @@ pub fn list_checked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
         // the same legacy closure migration used by verify, clean, and cache
         // reuse so every consumer observes one receipt-bearing projection.
         Closure::migrate_closure_graph_unlocked(roots)?;
-        list_unlocked(roots)
+        let entries = list_unlocked(roots)?;
+        let mut healthy = Vec::with_capacity(entries.len());
+        for entry in entries {
+            if entry.envelope.output_hash.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Hangar object `{}` has no output digest", entry.id),
+                ));
+            }
+            let actual = match Ingest::try_entry_output_hash(roots, &entry) {
+                Ok(actual) => actual,
+                Err(error) if error.contains("does not exist") => {
+                    // Deleted output: drop the dangling record so the provider
+                    // realizes the package again instead of failing every call.
+                    Closure::tombstone_closure_record_unlocked(roots, &entry.id)?;
+                    continue;
+                }
+                Err(error) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Hangar object `{}` could not be verified: {error}", entry.id),
+                    ))
+                }
+            };
+            if actual != entry.envelope.output_hash {
+                // Self-healing default: a drifted object is quarantined and
+                // dropped from the listing so its provider realizes it again;
+                // failing the whole operation would strand every other entry.
+                Cleanup::quarantine_malformed_objects(
+                    roots,
+                    &[Cleanup::MalformedObject {
+                        id: entry.id.clone(),
+                        path: PathBuf::from(&entry.out),
+                        reason: "digest-mismatch",
+                    }],
+                )?;
+                continue;
+            }
+            healthy.push(entry);
+        }
+        Ok(healthy)
     })
+}
+
+/// List committed records for an explicit full Hangar audit without verifying
+/// outputs; the audit loop must be the only content-hashing authority for
+/// `hangar verify`.
+pub(crate) fn list_for_full_audit(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
+    super::RuntimePolicy::with_lock(&roots.root, "hangar", || list_unlocked(roots))
 }
 
 /// Read package records after replaying committed closure projections.
@@ -410,7 +469,7 @@ pub(super) fn sync_store_directory(path: &Path) -> std::io::Result<()> {
 pub fn recover_hangar(roots: &Roots) -> std::io::Result<usize> {
     super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         Ingest::ensure_real_directory(&roots.hangar_dir(), "Hangar root")?;
-        let staging = Ingest::recover_hangar_staging_unlocked(roots)?;
+        let staging = AdmissionTransaction::recover_unlocked(roots)?;
         let reproducibility = Reproducibility::recover_certification_staging_unlocked(roots)?;
         let archive = Archive::recover_archive_staging_unlocked(roots)?;
         let repairs = Archive::recover_repair_quarantine_unlocked(roots)?;
@@ -755,19 +814,16 @@ fn record_verified_mode(
             realized_at,
             last_used_at: now,
         };
-        let created_dir = !dir.exists();
-        let gc_root = dir.join(NIX_GC_ROOT);
-        let had_gc_root = fs::symlink_metadata(&gc_root).is_ok();
-        fs::create_dir_all(&dir)?;
-        let registration = (|| {
-            pin_nix_gc_root(&dir, &out)?;
-            Closure::prepare_entry_receipt(roots, &mut entry)?;
-            register_entry_unlocked(roots, &entry)
-        })();
-        if let Err(error) = registration {
-            Closure::rollback_registration_dir(&dir, created_dir, had_gc_root)?;
-            return Err(error);
-        }
+        pin_nix_gc_root(&dir, &out)?;
+        AdmissionTransaction::recover_unlocked(roots)?;
+        let mut transaction = AdmissionTransaction::new(roots)?;
+        transaction.commit(
+            std::slice::from_mut(&mut entry),
+            &[],
+            None,
+            Closure::RegistrationMode::Native,
+            None,
+        )?;
         Ok(entry)
     })
 }
@@ -822,15 +878,18 @@ fn record_realized_mode_unlocked(
         }
         named_outputs.insert(name.clone(), digest);
     }
+    AdmissionTransaction::recover_unlocked(roots)?;
+    let mut transaction = AdmissionTransaction::new(roots)?;
     let (out, bin, rlib) = if realized.producer.provider == "nix" {
-        project_nix_outputs_unlocked(roots, realized, &graph)?
+        project_nix_outputs_unlocked(roots, realized, &graph, &mut transaction)?
     } else {
-        canonicalize_local_output_unlocked(
+        stage_local_output_unlocked(
             roots,
             &realized.out,
             &realized.bin,
             &realized.rlib,
             &realized.envelope.output_hash,
+            &mut transaction,
         )?
     };
     named_outputs.insert("out".into(), realized.envelope.output_hash.clone());
@@ -882,23 +941,19 @@ fn record_realized_mode_unlocked(
         realized_at,
         last_used_at: now,
     };
-    let created_dir = !dir.exists();
-    let gc_root = dir.join(NIX_GC_ROOT);
-    let had_gc_root = fs::symlink_metadata(&gc_root).is_ok();
-    fs::create_dir_all(&dir)?;
-    let registration = (|| {
-        pin_nix_gc_root(&dir, &out)?;
-        Closure::prepare_entry_receipt(roots, &mut entry)?;
-        if let Some(action_key) = fresh_action_key {
-            Closure::register_entry_unlocked_after_fresh_agreement(roots, &entry, action_key)
-        } else {
-            register_entry_unlocked(roots, &entry)
-        }
-    })();
-    if let Err(error) = registration {
-        Closure::rollback_registration_dir(&dir, created_dir, had_gc_root)?;
-        return Err(error);
-    }
+    pin_nix_gc_root(&dir, &out)?;
+    let registration_mode = if realized.producer.provider == "nix" {
+        Closure::RegistrationMode::AdmittedNix
+    } else {
+        Closure::RegistrationMode::Native
+    };
+    transaction.commit(
+        std::slice::from_mut(&mut entry),
+        &[],
+        None,
+        registration_mode,
+        fresh_action_key,
+    )?;
     Ok(entry)
 }
 
@@ -927,6 +982,7 @@ fn project_nix_outputs_unlocked(
     roots: &Roots,
     realized: &super::Provider::Realized,
     graph: &Closure::ClosureGraph,
+    transaction: &mut AdmissionTransaction<'_>,
 ) -> std::io::Result<(String, String, String)> {
     let mut projected = BTreeMap::new();
     let mut seen_sources: BTreeMap<String, String> = BTreeMap::new();
@@ -947,7 +1003,7 @@ fn project_nix_outputs_unlocked(
         } else if let Some(existing) = seen_sources.get(source) {
             existing.clone()
         } else {
-            let canonical = project_nix_output_unlocked(roots, source, &digest)?;
+            let canonical = project_nix_output_unlocked(roots, source, &digest, transaction)?;
             seen_sources.insert(source.clone(), canonical.clone());
             canonical
         };
@@ -988,115 +1044,62 @@ fn project_nix_output_unlocked(
     roots: &Roots,
     source: &str,
     digest: &str,
+    transaction: &mut AdmissionTransaction<'_>,
 ) -> std::io::Result<String> {
     let source_path = Path::new(source);
-    if source_path.starts_with(roots.hangar_dir()) {
-        let (out, _, _) = canonicalize_local_output_unlocked(roots, source, "", "", digest)?;
-        return Ok(out);
-    }
-    project_external_output_unlocked(roots, source_path, digest)
-}
-
-/// Copy an external Nix output into the Hangar CAS without mutating the host
-/// store. The no-follow ingest and content re-hash are the authority; a
-/// missing/unreadable output fails the realization instead of leaving a raw
-/// external path behind.
-fn project_external_output_unlocked(
-    roots: &Roots,
-    source: &Path,
-    digest: &str,
-) -> std::io::Result<String> {
     if digest.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "Nix output projection has an empty content digest",
         ));
     }
-    let hangar = roots.hangar_dir();
-    let objects = hangar.join(OBJECTS_DIR);
-    Ingest::ensure_real_directory(&objects, "Hangar object pool")?;
+    let objects = roots.hangar_dir().join(OBJECTS_DIR);
     let destination = objects.join(digest);
-    let verify = |path: &Path| -> std::io::Result<()> {
-        let metadata = fs::symlink_metadata(path)?;
-        if metadata.file_type().is_symlink() {
-            return Err(std::io::Error::other(format!(
-                "Nix output projection `{}` is a symlink",
-                path.display()
-            )));
-        }
-        seal_node(path)?;
-        let actual =
-            super::Envelope::try_output_hash_of_in_hangar(&path.to_string_lossy(), &hangar, false)
-                .map_err(std::io::Error::other)?;
-        if actual != digest {
-            return Err(std::io::Error::other(format!(
-                "Nix output `{}` re-hashed as `{actual}`, expected `{digest}`",
-                source.display()
-            )));
-        }
-        fsync_tree(path)?;
-        Ok(())
-    };
-
-    match fs::symlink_metadata(&destination) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            return Err(std::io::Error::other(format!(
-                "Hangar object `{digest}` is a symlink"
-            )))
-        }
-        Ok(_) => {
-            verify(&destination)?;
-            sync_store_directory(&objects)?;
-            return Ok(destination.to_string_lossy().into_owned());
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
+    if source_path.starts_with(&objects) && source_path != destination {
+        return Err(std::io::Error::other(format!(
+            "canonical object path `{}` disagrees with digest `{digest}`",
+            source_path.display()
+        )));
     }
-
-    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-    let stage = objects.join(format!(
-        ".nix-projection-{}-{}",
-        std::process::id(),
-        SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ));
-    let result = (|| {
-        Ingest::copy_nofollow_tree(source, &stage).map_err(|error| {
-            std::io::Error::other(format!(
-                "copying Nix output `{}` into Hangar failed: {}",
-                source.display(),
-                error.what()
-            ))
-        })?;
-        verify(&stage)?;
-        ensure_hangar_capacity(
-            roots,
-            admission_reservation(admission_size(&stage)?),
-            Some(&stage),
-        )?;
-        sync_store_directory(&objects)?;
-        fs::rename(&stage, &destination)?;
-        sync_store_directory(&objects)?;
-        Ok(destination.to_string_lossy().into_owned())
-    })();
-    if result.is_err() {
-        if let Ok(metadata) = fs::symlink_metadata(&stage) {
-            let _ = if metadata.is_dir() {
-                let _ = make_tree_writable_for_removal(&stage);
-                fs::remove_dir_all(&stage)
-            } else {
-                fs::remove_file(&stage)
-            };
-        }
-    }
-    result
+    let bytes = admission_size(source_path)?;
+    let projected = transaction.stage_object(AdmissionObject {
+        source: source_path.to_path_buf(),
+        digest: digest.to_string(),
+        bytes,
+        allow_semantic_xattrs: false,
+        repair_corrupt: false,
+    })?;
+    Ok(projected.to_string_lossy().into_owned())
 }
 
-fn canonicalize_local_output_unlocked(
+/// Test/support projection entry point. Durable publication is delegated to
+/// the same Hangar transaction used by realized registration.
+#[cfg(test)]
+fn project_external_output_unlocked(
+    roots: &Roots,
+    source: &Path,
+    digest: &str,
+) -> std::io::Result<String> {
+    AdmissionTransaction::recover_unlocked(roots)?;
+    let mut transaction = AdmissionTransaction::new(roots)?;
+    let destination = transaction.stage_object(AdmissionObject {
+        source: source.to_path_buf(),
+        digest: digest.to_string(),
+        bytes: admission_size(source)?,
+        allow_semantic_xattrs: false,
+        repair_corrupt: false,
+    })?;
+    transaction.commit_objects(None)?;
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+fn stage_local_output_unlocked(
     roots: &Roots,
     out: &str,
     bin: &str,
     rlib: &str,
     digest: &str,
+    transaction: &mut AdmissionTransaction<'_>,
 ) -> std::io::Result<(String, String, String)> {
     let source = Path::new(out);
     if digest.is_empty() || source.starts_with("/nix/store") {
@@ -1121,94 +1124,19 @@ fn canonicalize_local_output_unlocked(
             format!("creating canonical object directory: {error}"),
         )
     })?;
-    if source.starts_with(&objects) {
-        if source != destination {
-            return Err(std::io::Error::other(format!(
-                "canonical object path `{}` disagrees with digest `{digest}`",
-                source.display()
-            )));
-        }
-        seal_node(&destination)?;
-        let actual = super::Envelope::try_output_hash_of_in_hangar(
-            &destination.to_string_lossy(),
-            &roots.hangar_dir(),
-            false,
-        )
-        .map_err(std::io::Error::other)?;
-        if actual != digest {
-            return Err(std::io::Error::other(format!(
-                "canonical object `{digest}` re-hashed as `{actual}`"
-            )));
-        }
-        fsync_tree(&destination)?;
-        sync_store_directory(&objects)?;
-        return Ok((out.to_string(), bin.to_string(), rlib.to_string()));
+    if source.starts_with(&objects) && source != destination {
+        return Err(std::io::Error::other(format!(
+            "canonical object path `{}` disagrees with digest `{digest}`",
+            source.display()
+        )));
     }
-    if destination.exists() {
-        seal_node(&destination)?;
-        let actual = super::Envelope::try_output_hash_of_in_hangar(
-            &destination.to_string_lossy(),
-            &roots.hangar_dir(),
-            false,
-        )
-        .map_err(std::io::Error::other)?;
-        if actual != digest {
-            return Err(std::io::Error::other(format!(
-                "canonical object `{digest}` re-hashed as `{actual}`"
-            )));
-        }
-        fsync_tree(&destination)?;
-        sync_store_directory(&objects)?;
-        if source != destination && source.exists() {
-            make_tree_writable_for_removal(source)?;
-            fs::remove_dir_all(source).map_err(|error| {
-                std::io::Error::new(
-                    error.kind(),
-                    format!("removing duplicate provider output: {error}"),
-                )
-            })?;
-        }
-    } else {
-        // Provider outputs are sealed before this registration boundary. Some
-        // tier-1 filesystems deny renaming a read-only directory, so reopen it
-        // only while the Hangar transaction lock is held, publish, then seal
-        // the canonical path again before metadata becomes visible.
-        ensure_hangar_capacity(
-            roots,
-            admission_reservation(admission_size(source)?),
-            Some(source),
-        )?;
-        make_tree_writable_for_removal(source)?;
-        let source_parent = source.parent().map(Path::to_path_buf);
-        fs::rename(source, &destination).map_err(|error| {
-            std::io::Error::new(
-                error.kind(),
-                format!("publishing canonical provider output: {error}"),
-            )
-        })?;
-        if let Some(parent) = source_parent {
-            sync_store_directory(&parent)?;
-        }
-        seal_node(&destination)?;
-        let actual = super::Envelope::try_output_hash_of_in_hangar(
-            &destination.to_string_lossy(),
-            &roots.hangar_dir(),
-            false,
-        )
-        .map_err(std::io::Error::other)?;
-        if actual != digest {
-            return Err(std::io::Error::other(format!(
-                "canonical object `{digest}` re-hashed as `{actual}`"
-            )));
-        }
-        fsync_tree(&destination)?;
-        sync_store_directory(&objects).map_err(|error| {
-            std::io::Error::new(
-                error.kind(),
-                format!("syncing canonical object directory: {error}"),
-            )
-        })?;
-    }
+    transaction.stage_object(AdmissionObject {
+        source: source.to_path_buf(),
+        digest: digest.to_string(),
+        bytes: admission_size(source)?,
+        allow_semantic_xattrs: false,
+        repair_corrupt: false,
+    })?;
     let remap = |member: &str| {
         if member.is_empty() {
             return String::new();
@@ -1224,6 +1152,31 @@ fn canonicalize_local_output_unlocked(
         remap(bin),
         remap(rlib),
     ))
+}
+
+#[cfg(test)]
+fn canonicalize_local_output_unlocked(
+    roots: &Roots,
+    out: &str,
+    bin: &str,
+    rlib: &str,
+    digest: &str,
+) -> std::io::Result<(String, String, String)> {
+    if digest.is_empty() || out.starts_with("/nix/store") {
+        return Ok((out.to_string(), bin.to_string(), rlib.to_string()));
+    }
+    AdmissionTransaction::recover_unlocked(roots)?;
+    let mut transaction = AdmissionTransaction::new(roots)?;
+    let projected = stage_local_output_unlocked(
+        roots,
+        out,
+        bin,
+        rlib,
+        digest,
+        &mut transaction,
+    )?;
+    transaction.commit_objects(Some(Path::new(out)))?;
+    Ok(projected)
 }
 
 const NIX_GC_ROOT: &str = "nix-gc-root";
@@ -1831,44 +1784,28 @@ fn restore_substituted_candidate(
             if metadata.is_ok() {
                 return Ok(false);
             }
-            let parent = output
-                .parent()
-                .ok_or_else(|| std::io::Error::other("substituted output has no parent"))?;
-            Ingest::ensure_real_directory(parent, "Hangar object directory")?;
-            let mut permissions = Ingest::MovePathPermissions::default();
-            permissions.make_writable(parent, &roots.hangar_dir())?;
-            let operation = (|| {
-                fs::rename(stage, output)?;
-                sync_store_directory(parent)
-            })();
-            let restored = permissions.restore();
-            match (operation, restored) {
-                (Ok(()), Ok(())) => {}
-                (Err(error), Ok(())) => return Err(error),
-                (Ok(()), Err(error)) => return Err(error),
-                (Err(error), Err(restore)) => {
-                    return Err(std::io::Error::other(format!(
-                        "{error}; restoring Hangar permissions failed: {restore}"
-                    )))
-                }
-            }
         }
 
         let mut entry = candidate.clone();
         entry.last_used_at = now_secs();
         let dir = roots.hangar_dir().join(&entry.id);
-        let created_dir = !dir.exists();
-        let gc_root = dir.join(NIX_GC_ROOT);
-        let had_gc_root = fs::symlink_metadata(&gc_root).is_ok();
-        fs::create_dir_all(&dir)?;
-        let registration = (|| {
-            pin_nix_gc_root(&dir, &entry.out)?;
-            Closure::register_entry_unlocked(roots, &entry)
-        })();
-        if let Err(error) = registration {
-            Closure::rollback_registration_dir(&dir, created_dir, had_gc_root)?;
-            return Err(error);
-        }
+        pin_nix_gc_root(&dir, &entry.out)?;
+        AdmissionTransaction::recover_unlocked(roots)?;
+        let mut transaction = AdmissionTransaction::new(roots)?;
+        transaction.stage_object(AdmissionObject {
+            source: stage.to_path_buf(),
+            digest: entry.envelope.output_hash.clone(),
+            bytes: admission_size(stage)?,
+            allow_semantic_xattrs: false,
+            repair_corrupt: false,
+        })?;
+        transaction.commit(
+            std::slice::from_mut(&mut entry),
+            &[],
+            Some(stage),
+            Closure::RegistrationMode::Native,
+            None,
+        )?;
         Ok(true)
     })
 }
@@ -2365,10 +2302,12 @@ fn live_roots_from_graph(
     let lifecycle = Lifecycle::protected_targets_unlocked(roots)?;
     let mut targets = live.output_hashes.clone();
     for (receipt, package) in &live.receipt_packages {
+        let mut known = false;
         let mut matching = Vec::new();
         for record in graph.records.values().filter(|record| {
             parse_meta(&record.package_meta).is_some_and(|meta| meta.receipt == *receipt)
         }) {
+            known = true;
             let meta = parse_meta(&record.package_meta).ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -2385,6 +2324,12 @@ fn live_roots_from_graph(
             {
                 matching.push((record, meta));
             }
+        }
+        // A receipt this Hangar has never issued belongs to a project served
+        // by another root (multiple jetpack instances and hangars are the
+        // intended design); it protects nothing here and must not fail clean.
+        if !known {
+            continue;
         }
         if matching.is_empty() {
             return Err(std::io::Error::new(
@@ -2605,6 +2550,10 @@ mod Ingest;
 pub use Ingest::*;
 mod Closure;
 pub use Closure::*;
+mod Transaction;
+pub(crate) use Transaction::{AdmissionObject, AdmissionReceipt, AdmissionTransaction};
+#[cfg(test)]
+pub(crate) use Transaction::{with_admission_failure, AdmissionFailurePoint};
 mod Quota;
 pub(crate) use Quota::{admission_reservation, admission_size, ensure_hangar_capacity};
 mod Explain;
@@ -2618,3 +2567,5 @@ pub(crate) use Lifecycle::{
 };
 #[cfg(test)]
 mod Tests;
+#[cfg(test)]
+mod SealTests;

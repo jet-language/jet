@@ -478,13 +478,16 @@ fn measure_physical(
     Ok(None)
 }
 
-/// Total bytes on disk of a directory tree (0 if it isn't a local directory).
+/// Total bytes on disk of a local output tree or regular-file root.
 pub(crate) fn dir_size(path: &std::path::Path) -> u64 {
     let Ok(metadata) = fs::symlink_metadata(path) else {
         return 0;
     };
     if metadata.file_type().is_symlink() {
         return 0;
+    }
+    if metadata.is_file() {
+        return metadata.len();
     }
     if !metadata.is_dir() {
         return 0;
@@ -896,18 +899,29 @@ mod registration_tests {
     }
 
     #[test]
-    fn batch_registration_hashes_each_output_once() {
+    fn batch_registration_hashes_each_object_once() {
         let (roots, _guard) = roots();
-        let entries = (0..3)
+        let mut entries = (0..3)
             .map(|index| ingest(&roots, &format!("batch-{index}")))
             .map(|ingested| ingested.entry)
             .collect::<Vec<_>>();
 
-        for entry in &entries {
+        for entry in &mut entries {
             assert!(remove_closure_record(&roots, &entry.id).unwrap());
-            let path = Path::new(&entry.out);
-            super::super::Ingest::invalidate_verified_digest(path);
-            super::super::Ingest::reset_verified_digest_hash_count(path);
+            let output = Path::new(&entry.out);
+            super::super::Ingest::invalidate_verified_digest(output);
+            super::super::Ingest::reset_verified_digest_hash_count(output);
+
+            let dependency = output.join("payload");
+            let digest = format!("sha256-{}", SHA256::sha256_file_hex(&dependency).unwrap());
+            let mut producer = ProducerRecord::decode(&entry.producer_record).unwrap();
+            producer
+                .facts
+                .insert(format!("dependency.object.{digest}"), "payload".into());
+            entry.producer_record = producer.encode();
+            entry.references.push(digest);
+            super::super::Ingest::invalidate_verified_digest(&dependency);
+            super::super::Ingest::reset_verified_digest_hash_count(&dependency);
         }
 
         assert!(crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
@@ -916,10 +930,70 @@ mod registration_tests {
         .unwrap());
 
         for entry in &entries {
-            assert_eq!(
-                super::super::Ingest::verified_digest_hash_count(Path::new(&entry.out)),
-                1,
+            let output = Path::new(&entry.out);
+            // Sealed verification manifests allow zero content hashes when a
+            // valid seal is trusted; the batch contract is at most one.
+            assert!(
+                super::super::Ingest::verified_digest_hash_count(output) <= 1,
                 "output `{}` was hashed more than once",
+                entry.out
+            );
+            assert!(
+                super::super::Ingest::verified_digest_hash_count(&output.join("payload")) <= 1,
+                "dependency object for `{}` was hashed more than once",
+                entry.out
+            );
+        }
+    }
+
+    #[test]
+    fn admitted_nix_batch_verifies_each_shared_output_once() {
+        let (roots, _guard) = roots();
+        let mut entries = (0..3)
+            .map(|index| ingest(&roots, &format!("admitted-nix-{index}")))
+            .map(|ingested| ingested.entry)
+            .collect::<Vec<_>>();
+
+        for (index, entry) in entries.iter_mut().enumerate() {
+            assert!(remove_closure_record(&roots, &entry.id).unwrap());
+            let output = Path::new(&entry.out);
+            super::super::Ingest::invalidate_verified_digest(output);
+            super::super::Ingest::reset_verified_digest_hash_count(output);
+
+            let dependency = output.join("payload");
+            let digest = format!("sha256-{}", SHA256::sha256_file_hex(&dependency).unwrap());
+            let mut producer = ProducerRecord::decode(&entry.producer_record).unwrap();
+            producer.provider = "nix".into();
+            producer.immutable_source = format!("nix-source-{index}");
+            producer
+                .facts
+                .insert("nix.output.out".into(), entry.out.clone());
+            producer
+                .facts
+                .insert(format!("dependency.object.{digest}"), "payload".into());
+            entry.producer_record = producer.encode();
+            entry.references.push(digest);
+            super::super::Ingest::invalidate_verified_digest(&dependency);
+            super::super::Ingest::reset_verified_digest_hash_count(&dependency);
+        }
+
+        assert!(crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            register_admitted_nix_entries_unlocked(&roots, &entries)
+        })
+        .unwrap());
+
+        for entry in &entries {
+            let output = Path::new(&entry.out);
+            // Sealed verification manifests allow zero content hashes when a
+            // valid seal is trusted; the batch contract is at most one.
+            assert!(
+                super::super::Ingest::verified_digest_hash_count(output) <= 1,
+                "admitted output `{}` was hashed more than once",
+                entry.out
+            );
+            assert!(
+                super::super::Ingest::verified_digest_hash_count(&output.join("payload")) <= 1,
+                "admitted dependency object for `{}` was hashed more than once",
                 entry.out
             );
         }
@@ -1243,12 +1317,12 @@ fn closure_object_rehashes(roots: &Roots, graph: &ClosureGraph, digest: &str) ->
         return true;
     }
     let path = Path::new(&object.path);
-    if fs::symlink_metadata(path).is_ok_and(|metadata| {
-        metadata.is_file() && !metadata.file_type().is_symlink()
-    }) {
+    if fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+    {
         return Ingest::verified_file_hash(path).is_ok_and(|actual| actual == digest);
     }
-    Ingest::verified_output_hash(path, Some(&roots.hangar_dir()), false)
+    Ingest::verified_output_hash_persistent(path, Some(&roots.hangar_dir()), false)
         .is_ok_and(|actual| actual == digest)
 }
 
@@ -1453,16 +1527,12 @@ fn migrate_closure_graph_from_entries(
     Ok((migrated, graph))
 }
 
+/// Single-entry registration seam. Production registration goes through the
+/// batch transaction; this remains for tests and the `test-seam` backdater,
+/// which deliberately re-runs the full validation path for one entry.
+#[cfg(any(test, feature = "test-seam"))]
 pub(crate) fn register_entry_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result<bool> {
-    register_entry_unlocked_mode(roots, entry, None, None)
-}
-
-pub(crate) fn register_entry_unlocked_after_fresh_agreement(
-    roots: &Roots,
-    entry: &StoreEntry,
-    action_key: &str,
-) -> std::io::Result<bool> {
-    register_entry_unlocked_mode(roots, entry, None, Some(action_key))
+    register_entries_unlocked_with_mode(roots, std::slice::from_ref(entry), RegistrationMode::Native, None)
 }
 
 /// Register a batch of already-quarantined entries as one closure transaction.
@@ -1474,67 +1544,74 @@ pub(crate) fn register_entries_unlocked(
     roots: &Roots,
     entries: &[StoreEntry],
 ) -> std::io::Result<bool> {
-    register_entries_unlocked_mode(roots, entries, true)
+    register_entries_unlocked_with_mode(roots, entries, RegistrationMode::Native, None)
 }
 
+#[cfg(test)]
 pub(crate) fn register_admitted_nix_entries_unlocked(
     roots: &Roots,
     entries: &[StoreEntry],
 ) -> std::io::Result<bool> {
-    register_entries_unlocked_mode(roots, entries, false)
+    register_entries_unlocked_with_mode(roots, entries, RegistrationMode::AdmittedNix, None)
 }
 
-fn register_entries_unlocked_mode(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RegistrationMode {
+    Native,
+    AdmittedNix,
+}
+
+/// Shared closure-registration half of the Hangar admission transaction.
+/// Format adapters choose only the output-proof law; certification, conflict
+/// checks, journal append, and recoverable projection stay one mechanism.
+pub(crate) fn register_entries_unlocked_with_mode(
     roots: &Roots,
     entries: &[StoreEntry],
-    verify_outputs: bool,
+    mode: RegistrationMode,
+    fresh_action_key: Option<&str>,
 ) -> std::io::Result<bool> {
     if entries.is_empty() {
         return Ok(false);
     }
     for entry in entries {
-        if verify_outputs {
+        if matches!(mode, RegistrationMode::Native) {
             Ingest::share_tree_files(
                 roots,
                 Path::new(&entry.out),
                 !entry.platform_artifact_kind.is_empty(),
             )?;
-            verify_registration_output(roots, entry)?;
         } else {
-            let producer =
-                ProducerRecord::decode(&entry.producer_record).map_err(std::io::Error::other)?;
-            let expected = roots
-                .hangar_dir()
-                .join(OBJECTS_DIR)
-                .join(&entry.envelope.output_hash);
-            let metadata = fs::symlink_metadata(&expected).map_err(|error| {
-                std::io::Error::other(format!(
-                    "admitted Nix entry `{}` is not its verified canonical CAS object: canonical CAS path `{}` could not be inspected: {error}",
-                    entry.out,
-                    expected.display(),
-                ))
-            })?;
-            let reason = if producer.provider != "nix" {
-                Some("producer provider is not `nix`")
-            } else if Path::new(&entry.out) != expected {
-                Some("entry output path does not equal its output-hash CAS path")
-            } else if entry.envelope.output_hash.is_empty() {
-                Some("output hash is empty")
-            } else if !metadata.file_type().is_symlink() && !metadata.is_dir() {
-                Some("canonical CAS path is not a directory or symlink")
-            } else {
-                None
-            };
-            if let Some(reason) = reason {
-                return Err(std::io::Error::other(format!(
-                    "admitted Nix entry `{}` is not its verified canonical CAS object: {reason}",
-                    entry.out
-                )));
+            // Nix admission keeps objects root-local. Optional shared-CAS
+            // pooling is skipped, including for regular-file roots.
+            verify_admitted_nix_output(roots, entry)?;
+        }
+        // Native registration may replace payload files with shared-CAS
+        // hardlinks. Refresh only the stat manifest: the transaction already
+        // checked the canonical digest before publication.
+        if !entry.envelope.output_hash.is_empty() {
+            let digest = entry.envelope.output_hash.as_str();
+            if object_digest_for_path(Path::new(&entry.out), &roots.hangar_dir())
+                .as_deref()
+                == Some(digest)
+            {
+                write_seal(Path::new(&entry.out), &roots.hangar_dir(), digest)?;
             }
         }
+        verify_registration_output(roots, entry)?;
     }
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
-    super::Reproducibility::certify_registrations_unlocked(roots, entries)?;
+    if let Some(action_key) = fresh_action_key {
+        for entry in entries {
+            super::Reproducibility::certify_registration_unlocked_with_fresh_agreement(
+                roots,
+                entry,
+                entries,
+                action_key,
+            )?;
+        }
+    } else {
+        super::Reproducibility::certify_registrations_unlocked(roots, entries)?;
+    }
     let mut object_map = BTreeMap::new();
     let mut records = Vec::new();
     let mut seen_records = BTreeSet::new();
@@ -1598,6 +1675,42 @@ fn register_entries_unlocked_mode(
     Ok(true)
 }
 
+fn verify_admitted_nix_output(roots: &Roots, entry: &StoreEntry) -> std::io::Result<()> {
+    let producer =
+        ProducerRecord::decode(&entry.producer_record).map_err(std::io::Error::other)?;
+    let expected = roots
+        .hangar_dir()
+        .join(OBJECTS_DIR)
+        .join(&entry.envelope.output_hash);
+    let metadata = fs::symlink_metadata(&expected).map_err(|error| {
+        std::io::Error::other(format!(
+            "admitted Nix entry `{}` is not its verified canonical CAS object: canonical CAS path `{}` could not be inspected: {error}",
+            entry.out,
+            expected.display(),
+        ))
+    })?;
+    let reason = if producer.provider != "nix" {
+        Some("producer provider is not `nix`")
+    } else if Path::new(&entry.out) != expected {
+        Some("entry output path does not equal its output-hash CAS path")
+    } else if entry.envelope.output_hash.is_empty() {
+        Some("output hash is empty")
+    } else if !metadata.file_type().is_symlink() && !metadata.is_dir() && !metadata.is_file() {
+        // Admitted Nix NARs may have a regular file as their root. Native
+        // registration keeps its existing output-shape law elsewhere.
+        Some("canonical CAS path is not a directory, regular file, or symlink")
+    } else {
+        None
+    };
+    if let Some(reason) = reason {
+        return Err(std::io::Error::other(format!(
+            "admitted Nix entry `{}` is not its verified canonical CAS object: {reason}",
+            entry.out
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) fn register_entry_unlocked_with_hook(
     roots: &Roots,
@@ -1607,6 +1720,7 @@ pub(crate) fn register_entry_unlocked_with_hook(
     register_entry_unlocked_mode(roots, entry, Some(after_append), None)
 }
 
+#[cfg(test)]
 fn register_entry_unlocked_mode(
     roots: &Roots,
     entry: &StoreEntry,
@@ -1618,12 +1732,26 @@ fn register_entry_unlocked_mode(
         Path::new(&entry.out),
         !entry.platform_artifact_kind.is_empty(),
     )?;
+    if object_digest_for_path(Path::new(&entry.out), &roots.hangar_dir()).as_deref()
+        == Some(entry.envelope.output_hash.as_str())
+    {
+        write_seal(
+            Path::new(&entry.out),
+            &roots.hangar_dir(),
+            &entry.envelope.output_hash,
+        )?;
+    }
     verify_registration_output(roots, entry)?;
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
     if let Some(action_key) = fresh_action_key {
-        super::certify_registration_unlocked_with_fresh_agreement(roots, entry, &[], action_key)?;
+        super::Reproducibility::certify_registration_unlocked_with_fresh_agreement(
+            roots,
+            entry,
+            &[],
+            action_key,
+        )?;
     } else {
-        super::certify_registration_unlocked(roots, entry, &[])?;
+        super::Reproducibility::certify_registrations_unlocked(roots, std::slice::from_ref(entry))?;
     }
     let (objects, record) = descriptor_for_entry(roots, entry)?;
     if graph.records.get(&record.id) == Some(&record)
@@ -1689,6 +1817,7 @@ fn verify_registration_output(roots: &Roots, entry: &StoreEntry) -> std::io::Res
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn rollback_registration_dir(
     dir: &Path,
     created_dir: bool,
@@ -1845,6 +1974,18 @@ pub(super) fn prepare_entry_receipt(roots: &Roots, entry: &mut StoreEntry) -> st
     let (digest, _) = materialize_receipt(roots, entry)?;
     entry.receipt = digest;
     Ok(())
+}
+
+/// Prepare the package receipt and report whether this call published a new
+/// receipt file. The admission transaction uses the status for rollback;
+/// ordinary callers keep the simpler `prepare_entry_receipt` API.
+pub(super) fn prepare_entry_receipt_with_status(
+    roots: &Roots,
+    entry: &mut StoreEntry,
+) -> std::io::Result<bool> {
+    let (digest, wrote) = materialize_receipt(roots, entry)?;
+    entry.receipt = digest;
+    Ok(wrote)
 }
 
 /// Returns the receipt digest and whether this call actually wrote it. The
@@ -2124,13 +2265,12 @@ fn descriptor_for_entry(
                 )));
             }
             let path = Path::new(&entry.out).join(relative);
-            let bytes = fs::read(&path).map_err(|error| {
+            let actual = Ingest::verified_file_hash(&path).map_err(|error| {
                 std::io::Error::new(
                     error.kind(),
                     format!("reading dependency object `{}`: {error}", path.display()),
                 )
             })?;
-            let actual = format!("sha256-{}", SHA256::sha256_hex(&bytes));
             if &actual != digest {
                 return Err(std::io::Error::other(format!(
                     "dependency object `{}` records `{digest}`, re-hash produced `{actual}`",
@@ -2425,8 +2565,12 @@ fn apply_entry(graph: &mut ClosureGraph, entry: JournalEntry) -> Result<(), Stri
             graph.objects.insert(object.digest.clone(), object);
         }
     }
+    let mut actions = BTreeMap::new();
+    for record in graph.records.values() {
+        merge_action_record(&mut actions, record)?;
+    }
     for record in entry.records {
-        reject_action_conflict(graph, &record)?;
+        merge_action_record(&mut actions, &record)?;
         graph.deleted_records.remove(&record.id);
         graph.records.insert(record.id.clone(), record);
     }
@@ -2481,7 +2625,7 @@ fn validate_graph_structure_mode(
     {
         return Err(format!("invalid deleted closure record `{id}`"));
     }
-    let mut actions: BTreeMap<&str, CanonicalActionRecord> = BTreeMap::new();
+    let mut actions = BTreeMap::new();
     for (id, record) in &graph.records {
         if id.is_empty() || id != &record.id || record.action_key.is_empty() {
             return Err(format!("invalid closure record `{id}`"));
@@ -2536,12 +2680,7 @@ fn validate_graph_structure_mode(
                 ));
             }
         }
-        let projection = canonical_action_projection(record)?;
-        if let Some(action) = actions.get_mut(record.action_key.as_str()) {
-            merge_action_projection(action, &projection, &record.action_key)?;
-        } else {
-            actions.insert(record.action_key.as_str(), projection);
-        }
+        merge_action_record(&mut actions, record)?;
     }
     validate_universe_isolation(graph, allow_legacy)?;
     Ok(())
@@ -2750,15 +2889,15 @@ fn valid_output_name(name: &str) -> bool {
         && components.next().is_none()
 }
 
-fn reject_action_conflict(graph: &ClosureGraph, candidate: &ClosureRecord) -> Result<(), String> {
-    let candidate_projection = canonical_action_projection(candidate)?;
-    for existing in graph
-        .records
-        .values()
-        .filter(|record| record.action_key == candidate.action_key)
-    {
-        let mut action = canonical_action_projection(existing)?;
-        merge_action_projection(&mut action, &candidate_projection, &candidate.action_key)?;
+fn merge_action_record(
+    actions: &mut BTreeMap<String, CanonicalActionRecord>,
+    record: &ClosureRecord,
+) -> Result<(), String> {
+    let projection = canonical_action_projection(record)?;
+    if let Some(action) = actions.get_mut(&record.action_key) {
+        merge_action_projection(action, &projection, &record.action_key)?;
+    } else {
+        actions.insert(record.action_key.clone(), projection);
     }
     Ok(())
 }
@@ -3329,7 +3468,11 @@ mod integrity_tests {
             "sha256-other-dev",
             "other:pkg.dev",
         );
-        assert!(reject_action_conflict(&graph, &conflict)
+        let mut actions = BTreeMap::new();
+        for record in graph.records.values() {
+            merge_action_record(&mut actions, record).unwrap();
+        }
+        assert!(merge_action_record(&mut actions, &conflict)
             .unwrap_err()
             .contains("conflicting bytes"));
     }

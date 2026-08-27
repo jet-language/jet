@@ -17,8 +17,7 @@ use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
 use crate::NixIndex::{IndexKey, IndexTrustTier, NixIndexClient, NixIndexError};
 use crate::Store::{
-    admit_nix_closure_with_progress, current_progress, plan_nix_downloads, AdmittedNixClosure,
-    NixOutputRequest, Roots, StoreError,
+    current_progress, AdmittedNixClosure, Roots, StoreError,
 };
 use crate::Syntax;
 use crate::SHA256;
@@ -34,6 +33,7 @@ mod adapter;
 mod cran;
 mod fetch;
 mod luarocks;
+mod nix;
 pub(crate) mod native;
 mod package;
 mod remote;
@@ -46,6 +46,7 @@ pub(crate) use core::{active_tmp_marker_is_live, CoreProvider};
 pub use core::{sweep_build_scratch, ACTIVE_TMP_MARKER, BUILD_SCRATCH_DIR};
 use cran::CranProvider;
 use luarocks::LuaRocksProvider;
+use nix::NixProvider;
 use native::NativeProvider;
 use script_registry::{Kind as ScriptRegistryKind, ScriptRegistryProvider};
 
@@ -319,42 +320,10 @@ pub fn validate_cache_authority(
     table: &SourceTable,
     ctx: &Ctx,
 ) -> Result<(), ProviderError> {
-    let Some(project) = ctx.project_dir else {
+    if ctx.project_dir.is_none() {
         return Ok(());
-    };
-    match resolve_kind_in_context(spec, table, ctx) {
-        ProviderKind::Cran => {
-            let Some((_, _, repository, locked, _)) =
-                super::Lock::cran_realization(project, &spec.raw)
-            else {
-                return Ok(());
-            };
-            let current = cran::cache_authority(ctx)?;
-            ensure_locked_authority("CRAN", &repository, &locked, &current)
-        }
-        ProviderKind::LuaRocks => {
-            let Some((_, _, repository, locked, _)) =
-                super::Lock::luarocks_realization(project, &spec.raw)
-            else {
-                return Ok(());
-            };
-            let current = luarocks::cache_authority(ctx)?;
-            ensure_locked_authority("LuaRocks", &repository, &locked, &current)
-        }
-        ProviderKind::RubyGems | ProviderKind::Cpan | ProviderKind::Packagist => {
-            let kind = script_registry_kind(resolve_kind_in_context(spec, table, ctx)).ok_or_else(
-                || ProviderError::Registry("script registry", "unknown provider".into()),
-            )?;
-            let Some((_, _, repository, locked, _)) =
-                super::Lock::registry_realization(project, kind.label(), &spec.raw)
-            else {
-                return Ok(());
-            };
-            let current = script_registry::cache_authority(kind, ctx)?;
-            ensure_locked_authority(kind.title(), &repository, &locked, &current)
-        }
-        _ => Ok(()),
     }
+    provider_for_ref(spec, table, ctx).validate_cache_authority(spec, table, ctx)
 }
 
 fn ensure_locked_authority(
@@ -384,252 +353,17 @@ pub fn cache_expectation(
     table: &SourceTable,
     ctx: &Ctx,
 ) -> Option<super::Store::CacheExpectation> {
-    match resolve_kind_in_context(spec, table, ctx) {
-        ProviderKind::Core => {
-            let upstream = table.upstream(spec.source.label())?;
-            let repo = source_repo(upstream, &spec.package, ctx).ok()?;
-            let canonical_package = match find_canonical_package(&repo, &spec.package) {
-                Ok(package) => package,
-                Err(_) => return None,
-            };
-            let canonical = canonical_package.as_ref().map(|(_, facts)| facts);
-            let src_dir = canonical_package
-                .as_ref()
-                .and_then(|(root, facts)| canonical_source_dir(root, facts))
-                .or_else(|| Package::discover_module_in(&repo, &spec.package).ok())?;
-            validate_core_source_tree(&src_dir).ok()?;
-            let toolchain = super::Toolchain::Toolchain::resolve_for_core(ctx.offline);
-            if ctx.offline
-                && src_dir.join("Cargo.toml").is_file()
-                && !toolchain.as_ref().is_some_and(|toolchain| toolchain.pinned)
-            {
-                return None;
-            }
-            let source_fingerprint = core_tree_fingerprint(&src_dir).ok()?;
-            let (manifest, canonical) = if canonical.is_some() {
-                (None, canonical)
-            } else {
-                let manifest = match Package::PackageFacts::load(&repo) {
-                    None => None,
-                    Some(Ok(manifest)) => Some(manifest),
-                    Some(Err(_)) => return None,
-                };
-                (manifest, None)
-            };
-            let kind = canonical
-                .and_then(|facts| canonical_package_kind(facts, &spec.package))
-                .or_else(|| {
-                    manifest
-                        .as_ref()
-                        .and_then(|manifest| manifest.package_kind(&spec.package))
-                })
-                .unwrap_or_else(|| infer_package_kind(&src_dir));
-            let recipe = core_recipe_identity(
-                &src_dir,
-                &spec.package,
-                manifest.as_ref(),
-                kind,
-                canonical,
-                toolchain.as_ref(),
-            )
-            .ok()?;
-            Some(super::Store::CacheExpectation {
-                identity: cache_identity(&source_fingerprint, &recipe, ctx),
-                owned_output: Some(ctx.store_dir.join(format!(
-                    "{}-{}",
-                    spec.package,
-                    &source_fingerprint[..12]
-                ))),
-                allow_unsigned_local: true,
-            })
-        }
-        // D-JPK-OFFLINE2=B: a Nix ref may reuse a hangar copy offline, but only
-        // against a locked identity recorded in the project `.jet/lock` — a plain
-        // file read, zero live Nix/network. The identity reproduces exactly what
-        // the realize path recorded (content-hash source anchor + constant
-        // recipe/policy + host platform); `verify_cache_entry` then re-hashes the
-        // on-disk closure through the same proof gate core refs use. No lock / no
-        // entry → None, so offline keeps failing loudly (E1276), never serving a
-        // spelling-trusted stale copy (card #418).
-        ProviderKind::Nix => {
-            if let Some(index) = ctx.nix_index {
-                if let Ok(Some(recipe)) = index.resolve_native_recipe(&spec.package) {
-                    return Some(native::catalog_cache_expectation(spec, &recipe, ctx));
-                }
-            }
-            let project = ctx.project_dir?;
-            let (output, env) = super::Lock::nix_realization(project, &spec.raw)?;
-            if env.output_hash.is_empty() {
-                return None;
-            }
-            let platform = if env.platform.is_empty() {
-                super::Envelope::host_platform()
-            } else {
-                env.platform.clone()
-            };
-            Some(super::Store::CacheExpectation {
-                identity: nix_cache_identity(&env.output_hash, &platform, spec, table, ctx),
-                owned_output: Some(PathBuf::from(output)),
-                allow_unsigned_local: true,
-            })
-        }
-        ProviderKind::Cran => {
-            let project = ctx.project_dir?;
-            let (output, source_hash, _repository, _locked_authority, env) =
-                super::Lock::cran_realization(project, &spec.raw)?;
-            let authority = cran::cache_authority(ctx).ok()?;
-            Some(super::Store::CacheExpectation {
-                identity: super::Store::CacheIdentity {
-                    platform: if env.platform.is_empty() {
-                        super::Envelope::host_platform()
-                    } else {
-                        env.platform.clone()
-                    },
-                    ..provider_cache_identity(
-                        &source_hash,
-                        cran::RECIPE_ID,
-                        ctx,
-                        &authority.provenance(),
-                    )
-                },
-                owned_output: Some(PathBuf::from(output)),
-                allow_unsigned_local: true,
-            })
-        }
-        ProviderKind::LuaRocks => {
-            let project = ctx.project_dir?;
-            let (output, source_hash, _repository, _locked_authority, env) =
-                super::Lock::luarocks_realization(project, &spec.raw)?;
-            let authority = luarocks::cache_authority(ctx).ok()?;
-            Some(super::Store::CacheExpectation {
-                identity: super::Store::CacheIdentity {
-                    platform: if env.platform.is_empty() {
-                        super::Envelope::host_platform()
-                    } else {
-                        env.platform.clone()
-                    },
-                    ..provider_cache_identity(
-                        &source_hash,
-                        luarocks::RECIPE_ID,
-                        ctx,
-                        &authority.provenance(),
-                    )
-                },
-                owned_output: Some(PathBuf::from(output)),
-                allow_unsigned_local: true,
-            })
-        }
-        ProviderKind::RubyGems | ProviderKind::Cpan | ProviderKind::Packagist => {
-            let project = ctx.project_dir?;
-            let kind = script_registry_kind(resolve_kind_in_context(spec, table, ctx))?;
-            let (output, source_hash, _repository, _locked_authority, env) =
-                super::Lock::registry_realization(project, kind.label(), &spec.raw)?;
-            let authority = script_registry::cache_authority(kind, ctx).ok()?;
-            Some(super::Store::CacheExpectation {
-                identity: super::Store::CacheIdentity {
-                    platform: if env.platform.is_empty() {
-                        super::Envelope::host_platform()
-                    } else {
-                        env.platform.clone()
-                    },
-                    ..provider_cache_identity(
-                        &source_hash,
-                        kind.recipe(),
-                        ctx,
-                        &authority.provenance(),
-                    )
-                },
-                owned_output: Some(PathBuf::from(output)),
-                allow_unsigned_local: true,
-            })
-        }
-        ProviderKind::JetPackage => native::cache_expectation(spec, table, ctx),
-        ProviderKind::JetRegistry
-        | ProviderKind::Npm
-        | ProviderKind::Cargo
-        | ProviderKind::PyPI
-        | ProviderKind::SwiftPM => None,
-        // An inferred source realized offline defaults to nix with no lock-backed
-        // identity to match; no early cache path.
-        ProviderKind::Infer => None,
-    }
+    provider_for_ref(spec, table, ctx).cache_expectation(spec, table, ctx)
 }
 
-/// Return the exact external approval subject for a Core Cargo action without
-/// executing package code. Every realization caller must gate this subject
-/// before the Store reaches the provider; project metadata can therefore
-/// describe a build but cannot authorize its Cargo/build-script execution.
-pub(crate) fn core_build_identity(
+/// Return the exact external approval subject for a provider action without
+/// executing package code. Each adapter owns the facts for actions it can run.
+pub(crate) fn approval_facts(
     spec: &RefSpec,
     table: &SourceTable,
     ctx: &Ctx,
 ) -> Result<Option<String>, String> {
-    if resolve_kind_in_context(spec, table, ctx) != ProviderKind::Core {
-        return Ok(None);
-    }
-    let upstream = table.upstream(spec.source.label()).ok_or_else(|| {
-        format!(
-            "Core source `{}` has no resolved upstream",
-            spec.source.label()
-        )
-    })?;
-    let repo = source_repo(upstream, &spec.package, ctx)
-        .map_err(|error| format!("could not resolve Core source: {error:?}"))?;
-    let canonical_package = find_canonical_package(&repo, &spec.package)?;
-    let canonical_facts = canonical_package.as_ref().map(|(_, facts)| facts);
-    let src_dir = if let Some(source) = canonical_package
-        .as_ref()
-        .and_then(|(root, facts)| canonical_source_dir(root, facts))
-    {
-        source
-    } else {
-        Package::discover_module_in(&repo, &spec.package)
-            .map_err(|error| format!("could not identify Core source: {error:?}"))?
-    };
-    validate_core_source_tree(&src_dir)?;
-    let source_digest = core_tree_fingerprint(&src_dir)?;
-    let (manifest, canonical) = if canonical_facts.is_some() {
-        (None, canonical_facts)
-    } else {
-        let manifest = match Package::PackageFacts::load(&repo) {
-            None => None,
-            Some(Ok(manifest)) => Some(manifest),
-            Some(Err(error)) => return Err(format!("Core package manifest is invalid: {error:?}")),
-        };
-        (manifest, None)
-    };
-    let kind = canonical
-        .and_then(|facts| canonical_package_kind(facts, &spec.package))
-        .or_else(|| {
-            manifest
-                .as_ref()
-                .and_then(|manifest| manifest.package_kind(&spec.package))
-        })
-        .unwrap_or_else(|| infer_package_kind(&src_dir));
-    if kind != Package::PackageKind::Library || !src_dir.join("Cargo.toml").is_file() {
-        return Ok(None);
-    }
-    let toolchain = super::Toolchain::Toolchain::resolve_for_core(ctx.offline);
-    if ctx.offline && !toolchain.as_ref().is_some_and(|toolchain| toolchain.pinned) {
-        return Ok(None);
-    }
-    let recipe = core_recipe_identity(
-        &src_dir,
-        &spec.package,
-        manifest.as_ref(),
-        kind,
-        canonical,
-        toolchain.as_ref(),
-    )?;
-    let platform = super::Envelope::host_platform();
-    let authority = format!(
-        "jet-core-build-hook.v1\npackage={}\nprovider={}\nsource={}\nsource_digest={}\nplatform={}\nrecipe={}\ncapabilities=exec:cargo\n",
-        spec.package, upstream, spec.raw, source_digest, platform, recipe
-    );
-    Ok(Some(format!(
-        "build-sha256:{}",
-        SHA256::sha256_hex(authority.as_bytes())
-    )))
+    provider_for_ref(spec, table, ctx).approval_facts(spec, table, ctx)
 }
 
 /// Derive the adapter cache identity without trusting an existing output.
@@ -810,12 +544,35 @@ fn admitted_output_digest(
         .hangar_dir()
         .join(super::Store::OBJECTS_DIR)
         .join(&digest);
-    let metadata = std::fs::symlink_metadata(&expected).ok()?;
+    std::fs::symlink_metadata(&expected).ok()?;
+    // Admission already enforced the object-shape law; identity here only
+    // requires the realized path to be the verified hangar object (directory,
+    // file, or symlink root are all legal admitted Nix shapes).
     (Path::new(path) == expected
-        && metadata.is_dir()
-        && !metadata.file_type().is_symlink()
-        && !digest.is_empty())
-    .then_some(digest)
+        && !digest.is_empty()
+        && super::Store::check_seal(&expected, &roots.hangar_dir())
+            .ok()
+            .flatten()
+            .is_some_and(|sealed| sealed == digest))
+        .then_some(digest)
+}
+
+/// Hash realized output bytes. Objects living in the Hangar use the sealed
+/// stat manifest and fall back to the Nix shape law; everything else keeps the
+/// strict native law.
+fn hash_output_bytes(ctx: &Ctx, path: &str) -> Result<String, String> {
+    if let Some(roots) = ctx.nix_roots {
+        let hangar = roots.hangar_dir();
+        if Path::new(path).starts_with(hangar.join(super::Store::OBJECTS_DIR)) {
+            return super::Store::verified_output_hash_persistent(
+                Path::new(path),
+                Some(&hangar),
+                false,
+            )
+            .map_err(|error| error.to_string());
+        }
+    }
+    super::Envelope::try_output_hash_of(path)
 }
 
 /// Prepare the Nix identity from the authenticated admission digest when this
@@ -836,7 +593,7 @@ pub(crate) fn prepare_nix_identity(
         }
         let digest = match admitted_output_digest(ctx, realized, name, path) {
             Some(digest) => digest,
-            None => super::Envelope::try_output_hash_of(path).map_err(|reason| {
+            None => hash_output_bytes(ctx, path).map_err(|reason| {
                 ProviderError::Ingest(format!(
                     "Nix output `{name}` at `{path}` could not be hashed from its bytes: {reason}"
                 ))
@@ -1257,9 +1014,9 @@ impl ProviderError {
     }
 }
 
-/// What a provider needs to realize a ref, beyond the ref and source table:
-/// the offline fixtures dir (nix) and the Jetpack store dir to materialize into
-/// (core). Bundled so the `Provider` trait stays stable as providers grow.
+/// What a provider needs to acquire and realize a ref, beyond the ref and source
+/// table: its offline fixtures, store, project, signed-index, and cache roots.
+/// Bundled so the `Provider` trait stays stable as providers grow.
 pub struct Ctx<'a> {
     pub fixtures: Option<&'a Path>,
     pub store_dir: &'a Path,
@@ -1418,7 +1175,10 @@ fn locked_nix_index_key_for_project(
         channel,
         revision: revision.to_string(),
         system: host_system.to_string(),
-        attrpath: vec![nix_package_name(&spec.package).to_string()],
+        attrpath: nix_package_name(&spec.package)
+            .split('.')
+            .map(str::to_string)
+            .collect(),
     })
 }
 
@@ -1456,15 +1216,69 @@ pub fn fixtures_from_env(explicit: Option<PathBuf>) -> Option<PathBuf> {
 // ──────────────────────────────────────────────
 // Provider boundary (R0; see docs/plans/epoch-5/unified-ecosystem.md).
 //
-// The first-party core resolver owns realization; providers are extensions
-// behind one trait. `core` realizes first-party Jet packages (no Nix); `nix`
-// leverages nixpkgs. Source classification is performed once at the provider
-// boundary, so every caller shares the same dispatch and evidence.
+// Each provider owns acquisition and realization behind one trait. `core`
+// realizes first-party Jet packages (no Nix); `nix` leverages nixpkgs. Source
+// classification is performed once at this boundary, so every caller shares
+// the same dispatch and evidence.
 // ──────────────────────────────────────────────
 
-/// A backend that realizes a ref into bytes + a `bin` dir. Both the first-party
-/// `core` provider and the `nix` compatibility provider implement this.
+/// A package-acquisition adapter. Every provider-specific policy crosses this
+/// seam: cache authority, cache identity, planning, approval facts, repair,
+/// and realization.
 pub(crate) trait Provider {
+    /// Validate that the current provider authority still matches a recorded
+    /// cache binding.
+    fn validate_cache_authority(
+        &self,
+        _spec: &RefSpec,
+        _table: &SourceTable,
+        _ctx: &Ctx,
+    ) -> Result<(), ProviderError> {
+        Ok(())
+    }
+
+    /// Derive the exact current identity required to trust a cached output.
+    fn cache_expectation(
+        &self,
+        _spec: &RefSpec,
+        _table: &SourceTable,
+        _ctx: &Ctx,
+    ) -> Option<super::Store::CacheExpectation> {
+        None
+    }
+
+    /// Return the exact approval subject for an executable provider action.
+    fn approval_facts(
+        &self,
+        _spec: &RefSpec,
+        _table: &SourceTable,
+        _ctx: &Ctx,
+    ) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    /// Plan acquisition for this adapter's refs. The caller groups refs by
+    /// the single resolved adapter so Nix can plan one shared closure.
+    fn plan_downloads(
+        &self,
+        _specs: &[RefSpec],
+        _table: &SourceTable,
+        _ctx: &Ctx,
+    ) -> Result<DownloadPlan, ProviderError> {
+        Ok(DownloadPlan::default())
+    }
+
+    /// Whether this adapter may repair an invalid indexed cache candidate.
+    fn can_repair(&self, _spec: &RefSpec, _table: &SourceTable, _ctx: &Ctx) -> bool {
+        false
+    }
+
+    /// Whether this adapter has acquisition work to show in the plan. Local
+    /// Core paths are already present and therefore contribute no download.
+    fn requires_acquisition(&self, _spec: &RefSpec, _table: &SourceTable) -> bool {
+        true
+    }
+
     /// Realize `spec`. `table` resolves named sources; `ctx` carries the
     /// offline fixtures dir and the store dir to materialize into.
     fn realize(
@@ -1474,12 +1288,6 @@ pub(crate) trait Provider {
         ctx: &Ctx,
     ) -> Result<Realized, ProviderError>;
 }
-
-/// The Nix compatibility provider for package references that are not yet
-/// representable by the native provider. The normal path admits an explicit
-/// pinned result or signed-index/cache substitution; a true signed-catalog miss
-/// may use one interactive local Nix evaluation before Jetpack takes ownership.
-pub(crate) struct NixProvider;
 
 struct UnsupportedProvider(&'static str);
 
@@ -1494,79 +1302,6 @@ impl Provider for UnsupportedProvider {
             "provider `{}` has no realization path for `{}`; import and lock its native facts first",
             self.0, spec.raw
         )))
-    }
-}
-
-impl Provider for NixProvider {
-    fn realize(
-        &self,
-        spec: &RefSpec,
-        table: &SourceTable,
-        ctx: &Ctx,
-    ) -> Result<Realized, ProviderError> {
-        if let Some(dir) = ctx.fixtures {
-            let path = dir.join(fixture_name(spec));
-            let stdout =
-                std::fs::read_to_string(&path).map_err(|_| ProviderError::FixtureMissing(path))?;
-            let mut realized = parse_realization(spec, &stdout)?;
-            realized
-                .producer
-                .facts
-                .insert(NIX_NATIVE_FORMAT.to_string(), "json".to_string());
-            realized
-                .producer
-                .facts
-                .insert(NIX_NATIVE_DOCUMENT.to_string(), stdout);
-            return finalize_nix_realization(spec, table, ctx, realized);
-        }
-
-        let index = ctx.nix_index.ok_or_else(|| {
-            if ctx.offline {
-                ProviderError::Offline(format!(
-                    "`{}` is not in the hangar and --offline forbids fetching provider output",
-                    spec.raw
-                ))
-            } else {
-                ProviderError::Unsupported(format!(
-                    "Nix package realization needs an exact signed-index record or an exact-lock local fallback policy for `{}`; ambient nixpkgs is never accepted",
-                    spec.raw
-                ))
-            }
-        })?;
-        let host_system = host_nix_system().ok_or_else(|| {
-            ProviderError::Unsupported(
-                "the host system is not supported by the signed nixpkgs index".into(),
-            )
-        })?;
-        let key = locked_nix_index_key(spec, table, ctx, host_system)?;
-        let verified = match index.resolve(&key) {
-            Ok(verified) => verified,
-            Err(NixIndexError::NotIndexed { .. })
-                if crate::NixFallbackPolicy::allowed_from_environment(ctx.offline) =>
-            {
-                return realize_from_local_nix(spec, table, ctx, &key);
-            }
-            Err(error) => return Err(ProviderError::NixIndex(error)),
-        };
-        let roots = ctx.nix_roots.ok_or_else(|| {
-            ProviderError::BadOutput(
-                "index-backed Nix realization has no Hangar roots for closure admission".into(),
-            )
-        })?;
-        let requests = verified
-            .record
-            .outputs
-            .iter()
-            .map(|(name, store_path)| NixOutputRequest {
-                name: name.clone(),
-                store_path: store_path.clone(),
-            })
-            .collect::<Vec<_>>();
-        let admitted =
-            admit_nix_closure_with_progress(roots, &requests, ctx.offline, current_progress())
-                .map_err(|error| nix_cache_error(roots, error))?;
-        let realized = realization_from_index(spec, &key, verified, admitted)?;
-        finalize_nix_realization(spec, table, ctx, realized)
     }
 }
 
@@ -1637,12 +1372,7 @@ fn missing_nix_store_path(roots: &Roots) -> Option<String> {
         .filter_map(|entry| {
             let producer = crate::Store::ProducerRecord::decode(&entry.producer_record).ok()?;
             let store_path = producer.facts.get("nix.store-path")?.clone();
-            let digest = crate::Envelope::try_output_hash_of_in_hangar(
-                &entry.out,
-                &roots.hangar_dir(),
-                false,
-            )
-            .ok();
+            let digest = crate::Store::try_entry_output_hash(roots, &entry).ok();
             (digest.as_deref() != Some(entry.envelope.output_hash.as_str())).then_some(store_path)
         })
         .next()
@@ -1905,6 +1635,7 @@ fn realization_from_index(
 /// they never fall through to the Nix compatibility provider.
 pub(crate) fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
     match kind {
+        ProviderKind::Nix | ProviderKind::Infer => Box::new(NixProvider),
         ProviderKind::Core => Box::new(CoreProvider),
         ProviderKind::Cran => Box::new(CranProvider),
         ProviderKind::LuaRocks => Box::new(LuaRocksProvider),
@@ -1917,8 +1648,11 @@ pub(crate) fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
         ProviderKind::Cargo => Box::new(UnsupportedProvider("cargo")),
         ProviderKind::PyPI => Box::new(UnsupportedProvider("pypi")),
         ProviderKind::SwiftPM => Box::new(UnsupportedProvider("swiftpm")),
-        _ => Box::new(NixProvider),
     }
+}
+
+fn provider_for_ref(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> Box<dyn Provider> {
+    provider_for(resolve_kind_in_context(spec, table, ctx))
 }
 
 /// Resolve a ref's concrete provider kind, running the U9
@@ -1993,15 +1727,6 @@ pub fn resolve_kind(
     }
 }
 
-fn script_registry_kind(kind: ProviderKind) -> Option<ScriptRegistryKind> {
-    match kind {
-        ProviderKind::RubyGems => Some(ScriptRegistryKind::RubyGems),
-        ProviderKind::Cpan => Some(ScriptRegistryKind::Cpan),
-        ProviderKind::Packagist => Some(ScriptRegistryKind::Packagist),
-        _ => None,
-    }
-}
-
 /// True when realizing this ref goes through the Nix compatibility provider.
 /// Resolves the kind first (so an inferred `…@github` source is probed).
 pub fn uses_nix_provider(
@@ -2038,27 +1763,86 @@ fn resolve_kind_in_context(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> Pr
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlanState {
+    New,
+    Cached,
+    Repaired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlanItem {
+    pub package: String,
+    pub state: PlanState,
+    pub download_bytes: Option<u64>,
+    pub disk_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DownloadPlan {
-    pub packages: usize,
-    pub bytes: Option<u64>,
+    pub new: usize,
+    pub cached: usize,
+    pub repaired: usize,
+    pub download_bytes: Option<u64>,
+    pub disk_bytes: Option<u64>,
+    pub estimated_seconds: Option<u64>,
+    pub items: Vec<PlanItem>,
 }
 
 impl Default for DownloadPlan {
     fn default() -> Self {
         Self {
-            packages: 0,
-            bytes: Some(0),
+            new: 0,
+            cached: 0,
+            repaired: 0,
+            download_bytes: Some(0),
+            disk_bytes: Some(0),
+            estimated_seconds: None,
+            items: Vec::new(),
         }
     }
 }
 
 impl DownloadPlan {
-    fn add(&mut self, packages: usize, bytes: Option<u64>) {
-        self.packages = self.packages.saturating_add(packages);
-        self.bytes = match (self.bytes, bytes) {
+    pub(crate) fn add_item(&mut self, item: PlanItem) {
+        match item.state {
+            PlanState::New => self.new = self.new.saturating_add(1),
+            PlanState::Cached => self.cached = self.cached.saturating_add(1),
+            PlanState::Repaired => self.repaired = self.repaired.saturating_add(1),
+        }
+        self.download_bytes = match (self.download_bytes, item.download_bytes) {
             (Some(left), Some(right)) => left.checked_add(right),
             _ => None,
         };
+        self.disk_bytes = match (self.disk_bytes, item.disk_bytes) {
+            (Some(left), Some(right)) => left.checked_add(right),
+            _ => None,
+        };
+        self.items.push(item);
+    }
+
+    pub(crate) fn extend(&mut self, other: DownloadPlan) {
+        if other.estimated_seconds.is_some() {
+            self.estimated_seconds = other.estimated_seconds;
+        }
+        for item in other.items {
+            self.add_item(item);
+        }
+    }
+
+    fn add_nix(&mut self, nix: crate::Store::NixDownloadPlan) {
+        self.estimated_seconds = nix.estimated_seconds;
+        for item in nix.items {
+            self.add_item(PlanItem {
+                package: item.package,
+                state: match item.state {
+                    crate::Store::NixPlanState::New => PlanState::New,
+                    crate::Store::NixPlanState::Cached => PlanState::Cached,
+                    crate::Store::NixPlanState::Repaired => PlanState::Repaired,
+                },
+                download_bytes: Some(item.download_bytes),
+                disk_bytes: Some(item.disk_bytes),
+            });
+        }
     }
 }
 
@@ -2071,78 +1855,19 @@ pub(crate) fn plan_downloads(
     table: &SourceTable,
     ctx: &Ctx,
 ) -> Result<DownloadPlan, ProviderError> {
-    let mut plan = DownloadPlan::default();
-    let mut nix_paths = Vec::new();
-
+    let mut groups: Vec<(ProviderKind, Vec<RefSpec>)> = Vec::new();
     for spec in specs {
-        match resolve_kind_in_context(spec, table, ctx) {
-            ProviderKind::Nix => {
-                let index = ctx.nix_index.ok_or_else(|| {
-                    ProviderError::Unsupported(format!(
-                        "download planning needs a signed index for `{}`",
-                        spec.raw
-                    ))
-                })?;
-                if let Some(recipe) = index
-                    .resolve_native_recipe(&spec.package)
-                    .map_err(ProviderError::NixIndex)?
-                {
-                    plan.add(1, native::catalog_download_size(&recipe)?);
-                    continue;
-                }
-                let host_system = host_nix_system().ok_or_else(|| {
-                    ProviderError::Unsupported(
-                        "the host system is not supported by the signed nixpkgs index".into(),
-                    )
-                })?;
-                let key = locked_nix_index_key(spec, table, ctx, host_system)?;
-                let verified = match index.resolve(&key) {
-                    Ok(verified) => verified,
-                    Err(NixIndexError::NotIndexed { .. }) => {
-                        // The policy and executable are checked during
-                        // realization. Planning must not turn an authorized
-                        // fallback into a false signed-index failure.
-                        plan.add(1, None);
-                        continue;
-                    }
-                    Err(error) => return Err(ProviderError::NixIndex(error)),
-                };
-                nix_paths.extend(verified.record.outputs.values().cloned());
-            }
-            ProviderKind::JetPackage => {
-                plan.add(1, native::download_size(spec, table, ctx)?);
-            }
-            ProviderKind::Core => {
-                if table
-                    .upstream(spec.source.label())
-                    .is_none_or(|upstream| !upstream.starts_with("path:"))
-                {
-                    plan.add(1, None);
-                }
-            }
-            ProviderKind::Cran
-            | ProviderKind::LuaRocks
-            | ProviderKind::RubyGems
-            | ProviderKind::Cpan
-            | ProviderKind::Packagist => plan.add(1, None),
-            ProviderKind::Infer
-            | ProviderKind::JetRegistry
-            | ProviderKind::Npm
-            | ProviderKind::Cargo
-            | ProviderKind::PyPI
-            | ProviderKind::SwiftPM => {}
+        let kind = resolve_kind_in_context(spec, table, ctx);
+        if let Some((_, group)) = groups.iter_mut().find(|(candidate, _)| *candidate == kind) {
+            group.push(spec.clone());
+        } else {
+            groups.push((kind, vec![spec.clone()]));
         }
     }
 
-    if !nix_paths.is_empty() {
-        let roots = ctx.nix_roots.ok_or_else(|| {
-            ProviderError::BadOutput(
-                "download planning has no Hangar roots for closure admission".into(),
-            )
-        })?;
-        let nix = plan_nix_downloads(roots, &nix_paths, ctx.offline, current_progress())
-            .map_err(|error| nix_cache_error(roots, error))?;
-        plan.add(nix.packages, Some(nix.bytes));
+    let mut plan = DownloadPlan::default();
+    for (kind, specs) in groups {
+        plan.extend(provider_for(kind).plan_downloads(&specs, table, ctx)?);
     }
     Ok(plan)
 }
@@ -2175,9 +1900,17 @@ pub fn needs_nix_bridge(
 /// index/cache path that created it. Other providers keep the Store's
 /// fail-closed integrity behavior when no generic cache binding exists.
 pub(crate) fn can_repair_indexed_nix(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> bool {
-    ctx.fixtures.is_none()
-        && resolve_kind_in_context(spec, table, ctx) == ProviderKind::Nix
-        && locked_nix_index_key(spec, table, ctx, host_nix_system().unwrap_or_default()).is_ok()
+    provider_for_ref(spec, table, ctx).can_repair(spec, table, ctx)
+}
+
+pub(crate) fn requires_acquisition(
+    spec: &RefSpec,
+    table: &SourceTable,
+    offline: bool,
+    cache_dir: &Path,
+) -> bool {
+    let kind = resolve_kind(spec, table, offline, cache_dir);
+    provider_for(kind).requires_acquisition(spec, table)
 }
 
 /// Realize a ref through its provider. The resolver entry point: it never knows
@@ -2187,18 +1920,7 @@ pub(crate) fn realize(
     table: &SourceTable,
     ctx: &Ctx,
 ) -> Result<Realized, ProviderError> {
-    let kind = resolve_kind_in_context(spec, table, ctx);
-    let mut realized = if let Some(index) = ctx.nix_index {
-        match index
-            .resolve_native_recipe(&spec.package)
-            .map_err(ProviderError::NixIndex)?
-        {
-            Some(recipe) => native::realize_catalog_recipe(spec, &recipe, ctx)?,
-            None => provider_for(kind).realize(spec, table, ctx)?,
-        }
-    } else {
-        provider_for(kind).realize(spec, table, ctx)?
-    };
+    let mut realized = provider_for_ref(spec, table, ctx).realize(spec, table, ctx)?;
     refresh_provider_facts(&mut realized.producer, &realized.reference)?;
     Ok(realized)
 }
@@ -2533,7 +2255,7 @@ mod tests {
     }
 
     #[test]
-    fn locked_nix_index_key_uses_exact_channel_and_literal_dot_attr() {
+    fn locked_nix_index_key_uses_exact_channel_and_splits_dotted_attrpath() {
         let project = unique_dir("locked-nix-index-key");
         let managed = project.join(crate::Syntax::SOURCE_ROOT_DIR);
         std::fs::create_dir_all(&managed).unwrap();
@@ -2564,7 +2286,7 @@ mod tests {
         assert_eq!(key.channel, "nixpkgs-unstable");
         assert_eq!(key.revision, revision);
         assert_eq!(key.system, "x86_64-linux");
-        assert_eq!(key.attrpath, vec!["ripgrep.foo"]);
+        assert_eq!(key.attrpath, vec!["ripgrep", "foo"]);
         std::fs::remove_dir_all(project).ok();
     }
 
@@ -2788,6 +2510,87 @@ mod tests {
                 Ok(_) => panic!("direct ecosystem root unexpectedly used a provider"),
             }
         }
+    }
+
+    #[test]
+    fn acquisition_hooks_dispatch_through_core_nix_and_script_adapters() {
+        use super::super::RefSpec::{classify_in, ProviderKind, SourceTable};
+
+        let base = unique_dir("jpk-provider-seam");
+        let store = base.join("store");
+        let fixtures = base.join("fixtures");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::create_dir_all(&fixtures).unwrap();
+
+        let core_table = SourceTable::from_decls([(
+            "mine".to_string(),
+            "file:///remote/core".to_string(),
+            ProviderKind::Core,
+        )]);
+        let core_spec = classify_in("hello@mine", &core_table).unwrap();
+        let online = Ctx {
+            fixtures: None,
+            store_dir: &store,
+            offline: false,
+            project_dir: None,
+            nix_index: None,
+            nix_roots: None,
+        };
+        let core_plan = plan_downloads(&[core_spec], &core_table, &online).unwrap();
+        assert_eq!(core_plan.new, 1);
+        assert_eq!(core_plan.items.len(), 1);
+
+        let registry_spec = classify("rack@ruby#version=3.0.0").unwrap();
+        let registry_plan = plan_downloads(&[registry_spec.clone()], &empty(), &online).unwrap();
+        assert_eq!(registry_plan.new, 1);
+        assert_eq!(registry_plan.items[0].package, registry_spec.raw);
+
+        let offline = Ctx {
+            fixtures: None,
+            store_dir: &store,
+            offline: true,
+            project_dir: None,
+            nix_index: None,
+            nix_roots: None,
+        };
+        assert!(matches!(
+            realize(&registry_spec, &empty(), &offline),
+            Err(ProviderError::Offline(reason)) if reason.contains("--offline")
+        ));
+
+        let nix_spec = classify("fastfetch@jetpack").unwrap();
+        assert!(matches!(
+            plan_downloads(std::slice::from_ref(&nix_spec), &empty(), &offline),
+            Err(ProviderError::Unsupported(reason)) if reason.contains("signed index")
+        ));
+        assert!(matches!(
+            provider_for(ProviderKind::Nix).realize(&nix_spec, &empty(), &offline),
+            Err(ProviderError::Offline(reason)) if reason.contains("--offline")
+        ));
+
+        let output = base.join("nix-output");
+        std::fs::create_dir_all(output.join("bin")).unwrap();
+        std::fs::write(output.join("bin/fastfetch"), "#!/bin/sh\n").unwrap();
+        std::fs::write(
+            fixtures.join(fixture_name(&nix_spec)),
+            format!(
+                r#"[{{"drvPath":"/nix/store/test-fastfetch.drv","outputs":{{"out":"{}"}}}}]"#,
+                output.display()
+            ),
+        )
+        .unwrap();
+        let fixture_ctx = Ctx {
+            fixtures: Some(&fixtures),
+            store_dir: &store,
+            offline: true,
+            project_dir: None,
+            nix_index: None,
+            nix_roots: None,
+        };
+        let realized = realize(&nix_spec, &empty(), &fixture_ctx).unwrap();
+        assert_eq!(realized.source_state, SourceState::Substituted);
+        assert_eq!(realized.out, output.to_string_lossy().into_owned());
+        std::fs::remove_dir_all(base).ok();
     }
 
     #[test]
@@ -3171,6 +2974,8 @@ mod tests {
         let r = realize(&spec, &table, &ctx).unwrap();
         assert_eq!(r.name, "hello");
         assert!(std::path::Path::new(&r.bin).join("hello").is_file());
+        let expectation = cache_expectation(&spec, &table, &ctx).expect("core cache identity");
+        assert_eq!(expectation.identity, r.cache_identity);
         let shared = ProviderFacts::from_json(
             r.producer
                 .facts

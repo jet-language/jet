@@ -169,7 +169,7 @@ fn import_verified_archive(roots: &Roots, archive: Archive) -> io::Result<Archiv
 /// mistaken for abandoned state. A symlinked stage root stops recovery rather
 /// than allowing cleanup to follow an attacker-controlled path.
 pub(super) fn recover_archive_staging_unlocked(roots: &Roots) -> io::Result<usize> {
-    super::Ingest::sweep_abandoned_directory(
+    super::Transaction::sweep_abandoned_directory(
         &roots.hangar_dir().join(ARCHIVE_STAGE),
         "Hangar archive staging",
     )
@@ -278,6 +278,7 @@ pub(super) fn recover_repair_quarantine_unlocked(roots: &Roots) -> io::Result<us
                         }
                         return Err(error);
                     }
+                    super::write_seal(&destination, &roots.hangar_dir(), &digest)?;
                     super::sync_store_directory(&objects)?;
                 }
                 Err(error) => return Err(error),
@@ -806,9 +807,9 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
                 )));
             }
             if metadata.is_ok() {
-                let actual = Envelope::try_output_hash_of_in_hangar(
-                    &destination.to_string_lossy(),
-                    &roots.hangar_dir(),
+                let actual = super::Ingest::verified_output_hash_persistent(
+                    &destination,
+                    Some(&roots.hangar_dir()),
                     false,
                 )
                 .map_err(io::Error::other)?;
@@ -827,6 +828,7 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
                 fs::rename(&staged, &destination)?;
                 moved.push((destination.clone(), staged.clone()));
                 seal_tree(&destination)?;
+                super::write_seal(&destination, &roots.hangar_dir(), digest)?;
             }
         }
 
@@ -838,7 +840,7 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
     })();
     let result = match result {
         Ok(value) => Ok(value),
-        Err(error) => match rollback_import_moves(&mut moved) {
+        Err(error) => match rollback_import_moves(&mut moved, &roots.hangar_dir()) {
             Ok(()) => Err(error),
             Err(rollback) => Err(io::Error::other(format!(
                 "{error}; archive import rollback failed: {rollback}"
@@ -1365,9 +1367,10 @@ fn validate_import_destinations(
     Ok(())
 }
 
-fn rollback_import_moves(moved: &mut Vec<(PathBuf, PathBuf)>) -> io::Result<()> {
+fn rollback_import_moves(moved: &mut Vec<(PathBuf, PathBuf)>, hangar: &Path) -> io::Result<()> {
     for (destination, staged) in moved.drain(..).rev() {
         if fs::symlink_metadata(&destination).is_ok() {
+            super::remove_seal(&destination, hangar)?;
             make_tree_writable(&destination)?;
             fs::rename(destination, staged)?;
         }

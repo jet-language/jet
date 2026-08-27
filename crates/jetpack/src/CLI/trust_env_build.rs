@@ -25,6 +25,44 @@ use jet_env_model::ModuleEval;
 use jet_pkg_model::Authority::AuthorityResolver;
 use jet_pkg_model::WorkspacePlan::{WorkspaceSource, WorkspaceSourceRole};
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(super) struct EnvReadyStats {
+    total: usize,
+    cache_hits: usize,
+    realized: Vec<(String, String)>,
+}
+
+impl EnvReadyStats {
+    fn record(&mut self, entry: &Store::StoreEntry, state: Provider::SourceState, version: &str) {
+        self.total += 1;
+        // A local reuse and a verified binary-cache substitution both avoid
+        // fresh work for the user entering the environment.
+        if matches!(
+            state,
+            Provider::SourceState::Cached | Provider::SourceState::Substituted
+        ) {
+            self.cache_hits += 1;
+        }
+        self.realized
+            .push((entry.name.clone(), version.to_string()));
+    }
+
+    pub(super) fn cache_hit_percent(&self) -> usize {
+        if self.total == 0 {
+            100
+        } else {
+            self.cache_hits.saturating_mul(100) / self.total
+        }
+    }
+
+    pub(super) fn realized_set(&self) -> Vec<(String, String)> {
+        let mut realized = self.realized.clone();
+        realized.sort();
+        realized.dedup();
+        realized
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct NativeDevTool {
     definition: &'static str,
@@ -415,10 +453,29 @@ pub(super) fn compose_env_scoped(
     scope: RealizeScope,
     confirm_download: bool,
 ) -> Result<Env, i32> {
-    if confirm_download {
-        if let Err(code) = reject_unprompted_acquisition(theme, roots, flags, plan, scope) {
-            return Err(code);
-        }
+    compose_env_scoped_with_stats(theme, roots, flags, plan, scope, confirm_download)
+        .map(|(env, _)| env)
+}
+
+pub(super) fn compose_env_scoped_with_stats(
+    theme: &Theme,
+    roots: &Roots,
+    flags: &Flags,
+    plan: &RunPlan,
+    scope: RealizeScope,
+    confirm_download: bool,
+) -> Result<(Env, EnvReadyStats), i32> {
+    let mut lock_diff = (scope == RealizeScope::Project)
+        .then(|| super::lock::LockDiffGuard::new(theme, &plan.project_root));
+    let download_plan = if confirm_download {
+        Some(reject_unprompted_acquisition(
+            theme, roots, flags, plan, scope,
+        )?)
+    } else {
+        None
+    };
+    if let (Some(lock_diff), Some(download_plan)) = (lock_diff.as_mut(), download_plan.as_ref()) {
+        lock_diff.set_sizes(super::lock::sizes_from_plan(download_plan));
     }
     enforce_required_sandbox_policy(theme, flags.json)?;
     if let Err(error) = validate_integration_facts(plan) {
@@ -459,6 +516,7 @@ pub(super) fn compose_env_scoped(
     let mut failed = false;
     let mut unavailable = false;
     let mut cache_leases = Vec::new();
+    let mut ready_stats = EnvReadyStats::default();
     let name_w = name_column_width(&plan.refs);
     // Multi-package realization gets one pinned aggregate on a TTY and one
     // settled row per package. Plain output keeps only those settled rows so
@@ -493,11 +551,17 @@ pub(super) fn compose_env_scoped(
             live_arg,
             scope,
         ) {
-            RefOutcome::Realized(entry, _state, line, lease) => {
+            RefOutcome::Realized(entry, state, line, lease) => {
                 if live_mode {
                     live.finish(&line);
                 }
                 completed_steps += 1;
+                let version = if entry.version.is_empty() {
+                    super::realize::version_from_out(&entry.name, &entry.out).unwrap_or_default()
+                } else {
+                    entry.version.clone()
+                };
+                ready_stats.record(&entry, state, &version);
                 let leased_output = match lease.stable_path(&entry.out) {
                     Ok(path) => path,
                     Err(error) => {
@@ -584,7 +648,13 @@ pub(super) fn compose_env_scoped(
             );
         }
         match realize_adapter(theme, roots, flags, adapter, &plan.table, true) {
-            Some((entry, _state, lease)) => {
+            Some((entry, state, lease)) => {
+                let version = if entry.version.is_empty() {
+                    super::realize::version_from_out(&entry.name, &entry.out).unwrap_or_default()
+                } else {
+                    entry.version.clone()
+                };
+                ready_stats.record(&entry, state, &version);
                 if let Some(bin) = lease.projected_bin_dir() {
                     bin_dirs.push(bin.to_string_lossy().into_owned());
                 }
@@ -678,21 +748,19 @@ pub(super) fn compose_env_scoped(
             );
             return Err(2);
         }
-        let dotenv_path = match jet_env_model::ModuleEval::checked_dotenv_path(
-            &plan.project_root,
-            path,
-        ) {
-            Ok(path) => path,
-            Err(error) => {
-                live.clear();
-                theme.error(
-                    "couldn't load dotenv file",
-                    &format!("`{path}`: {error}"),
-                    "keep dotenv files inside the project and remove symlink escapes.",
-                );
-                return Err(2);
-            }
-        };
+        let dotenv_path =
+            match jet_env_model::ModuleEval::checked_dotenv_path(&plan.project_root, path) {
+                Ok(path) => path,
+                Err(error) => {
+                    live.clear();
+                    theme.error(
+                        "couldn't load dotenv file",
+                        &format!("`{path}`: {error}"),
+                        "keep dotenv files inside the project and remove symlink escapes.",
+                    );
+                    return Err(2);
+                }
+            };
         match read_dotenv(&dotenv_path) {
             Ok(values) => {
                 for (name, value) in values {
@@ -748,19 +816,22 @@ pub(super) fn compose_env_scoped(
     if let Some(native_projection) = native_projection {
         composed_vars.extend(native_projection.env_vars());
     }
-    // Tier 1 (D-FE-CLI1): the per-package `✓` rows above are the whole
-    // report — `jet env`/`run`/`dev` hand off straight to the shell
-    // threshold rule (`Shell::enter`) instead of a redundant summary line.
-    Ok(Env {
-        bin_dirs,
-        vars: composed_vars,
-        unset_vars: plan.environment.lifecycle.unset.clone(),
-        refs: realized_refs,
-        label: plan.label.clone(),
-        prompt_path: plan.prompt_path,
-        prompt_strip: plan.prompt_strip,
-        cache_leases,
-    })
+    // Tier 1 (D-FE-CLI1): the per-package `✓` rows above remain the realization
+    // report — callers may append a measured env-entry banner, but this shared
+    // composer does not print a second package summary before shell handoff.
+    Ok((
+        Env {
+            bin_dirs,
+            vars: composed_vars,
+            unset_vars: plan.environment.lifecycle.unset.clone(),
+            refs: realized_refs,
+            label: plan.label.clone(),
+            prompt_path: plan.prompt_path,
+            prompt_strip: plan.prompt_strip,
+            cache_leases,
+        },
+        ready_stats,
+    ))
 }
 
 /// A piped `jetpack env`/`use` command must not start realization without an
@@ -773,11 +844,18 @@ fn reject_unprompted_acquisition(
     flags: &Flags,
     plan: &RunPlan,
     scope: RealizeScope,
-) -> Result<(), i32> {
+) -> Result<Provider::DownloadPlan, i32> {
     let specs = plan
         .refs
         .iter()
-        .filter(|spec| ref_needs_acquisition(spec, &plan.table))
+        .filter(|spec| {
+            Provider::requires_acquisition(
+                spec,
+                &plan.table,
+                flags.offline,
+                &roots.hangar_dir(),
+            )
+        })
         .cloned()
         .collect::<Vec<_>>();
     let label = match scope {
@@ -806,46 +884,23 @@ fn reject_unprompted_acquisition(
     };
     live.clear();
     let mut download = result?;
-    if !plan.adapters.is_empty() {
-        download.packages = download.packages.saturating_add(plan.adapters.len());
-        download.bytes = None;
+    for adapter in &plan.adapters {
+        download.add_item(Provider::PlanItem {
+            package: adapter.name.clone(),
+            state: Provider::PlanState::New,
+            download_bytes: None,
+            disk_bytes: None,
+        });
     }
-    if download.packages == 0 {
-        return Ok(());
+    if download.items.is_empty() {
+        return Ok(download);
     }
 
-    if theme.confirm_download(&label, download.packages, download.bytes, flags.assume_yes) {
-        Ok(())
+    if theme.confirm_download(&label, &download, flags.explain_plan, flags.assume_yes) {
+        Ok(download)
     } else {
         Err(2)
     }
-}
-
-fn ref_needs_acquisition(spec: &RefSpec::RefSpec, table: &RefSpec::SourceTable) -> bool {
-    let provider = match &spec.source {
-        RefSpec::Source::Named(name) => table.provider(name),
-        RefSpec::Source::Releases => ProviderKind::JetPackage,
-        RefSpec::Source::Cran => ProviderKind::Cran,
-        RefSpec::Source::LuaRocks => ProviderKind::LuaRocks,
-        RefSpec::Source::RubyGems => ProviderKind::RubyGems,
-        RefSpec::Source::Cpan => ProviderKind::Cpan,
-        RefSpec::Source::Packagist => ProviderKind::Packagist,
-        RefSpec::Source::JetRegistry => ProviderKind::JetRegistry,
-        RefSpec::Source::Npm => ProviderKind::Npm,
-        RefSpec::Source::Cargo => ProviderKind::Cargo,
-        RefSpec::Source::PyPI => ProviderKind::PyPI,
-        RefSpec::Source::SwiftPM => ProviderKind::SwiftPM,
-        RefSpec::Source::Jetpack
-        | RefSpec::Source::Nixpkgs
-        | RefSpec::Source::Github
-        | RefSpec::Source::Path => ProviderKind::Nix,
-    };
-    if provider != ProviderKind::Core {
-        return true;
-    }
-    table
-        .upstream(spec.source.label())
-        .is_none_or(|upstream| !upstream.starts_with("path:"))
 }
 
 pub(super) fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {

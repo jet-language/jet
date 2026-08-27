@@ -571,7 +571,7 @@ pub fn verify_cache_transfer(
             failures.push(format!("{mirror}: {error}"));
             continue;
         }
-        match verify_hangar_endpoint(&endpoint, &expected) {
+        match verify_hangar_endpoint(roots, &endpoint, &expected) {
             Ok(Some(bytes)) => {
                 return Ok(CacheTransferReport {
                     role: binding.role.clone(),
@@ -668,7 +668,7 @@ pub fn substitute_cache_entry(
             failures.push(format!("{mirror}: {error}"));
             continue;
         }
-        match substitute_hangar_endpoint(&endpoint, &expected, destination) {
+        match substitute_hangar_endpoint(roots, &endpoint, &expected, destination) {
             Ok(Some(bytes)) => {
                 return Ok(CacheTransferReport {
                     role: binding.role.clone(),
@@ -2086,13 +2086,14 @@ fn promote_remote(
 }
 
 fn verify_hangar_endpoint(
+    roots: &Roots,
     endpoint: &CacheEndpoint,
     entry: &StoreEntry,
 ) -> io::Result<Option<Vec<u8>>> {
     if !matches!(endpoint, CacheEndpoint::Hangar) {
         return Ok(None);
     }
-    let actual = crate::Envelope::try_output_hash_of(&entry.out).map_err(io::Error::other)?;
+    let actual = super::try_entry_output_hash(roots, entry).map_err(io::Error::other)?;
     if actual != entry.envelope.output_hash {
         return Err(invalid(
             "local Hangar output hash disagrees with its identity",
@@ -2103,6 +2104,7 @@ fn verify_hangar_endpoint(
 }
 
 fn substitute_hangar_endpoint(
+    roots: &Roots,
     endpoint: &CacheEndpoint,
     entry: &StoreEntry,
     destination: &Path,
@@ -2111,7 +2113,7 @@ fn substitute_hangar_endpoint(
         return Ok(None);
     }
     let result = (|| {
-        let actual = crate::Envelope::try_output_hash_of(&entry.out).map_err(io::Error::other)?;
+        let actual = super::try_entry_output_hash(roots, entry).map_err(io::Error::other)?;
         if actual != entry.envelope.output_hash {
             return Err(invalid(
                 "local Hangar output hash disagrees with its identity",

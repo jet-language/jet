@@ -123,6 +123,7 @@ pub(super) fn plan_downloads(
         flags.fixtures.clone()
     };
     let mut pending = Vec::new();
+    let mut plan = Provider::DownloadPlan::default();
 
     for spec in specs {
         let uses_nix = Provider::uses_nix_provider_for_project(
@@ -152,12 +153,17 @@ pub(super) fn plan_downloads(
         // persisted user-profile candidate is enough to keep the fully
         // cached entry path out of closure verification; the subsequent Store
         // realization still proves the complete closure before reuse.
-        if matches!(scope, RealizeScope::Use | RealizeScope::UserProfile)
-            && Store::find_by_reference_read_only(roots, &spec.raw).is_some_and(|entry| {
-                !uses_nix
-                    || nix_catalog_cache_entry_matches(&entry, flags.local_nix_catalog.is_some())
-            })
-        {
+        if let Some(entry) = Store::find_by_reference_read_only(roots, &spec.raw).filter(|entry| {
+            matches!(scope, RealizeScope::Use | RealizeScope::UserProfile)
+                && (!uses_nix
+                    || nix_catalog_cache_entry_matches(&entry, flags.local_nix_catalog.is_some()))
+        }) {
+            plan.add_item(Provider::PlanItem {
+                package: spec.raw.clone(),
+                state: Provider::PlanState::Cached,
+                download_bytes: Some(0),
+                disk_bytes: Some(Store::dir_size(Path::new(&entry.out))),
+            });
             continue;
         }
         let probe = Provider::Ctx {
@@ -189,13 +195,22 @@ pub(super) fn plan_downloads(
             && !uses_nix
             && expectation.is_none()
             && Store::find_by_reference_read_only(roots, &spec.raw).is_some();
-        if !cached && !recorded_project_candidate {
+        if cached || recorded_project_candidate {
+            if let Some(entry) = Store::find_by_reference_read_only(roots, &spec.raw) {
+                plan.add_item(Provider::PlanItem {
+                    package: spec.raw.clone(),
+                    state: Provider::PlanState::Cached,
+                    download_bytes: Some(0),
+                    disk_bytes: Some(Store::dir_size(Path::new(&entry.out))),
+                });
+            }
+        } else {
             pending.push(spec.clone());
         }
     }
 
     if pending.is_empty() {
-        return Ok(Provider::DownloadPlan::default());
+        return Ok(plan);
     }
 
     let uses_nix = pending.iter().any(|spec| {
@@ -235,7 +250,10 @@ pub(super) fn plan_downloads(
         nix_roots: Some(roots),
     };
     match Provider::plan_downloads(&pending, table, &ctx) {
-        Ok(plan) => Ok(plan),
+        Ok(downloads) => {
+            plan.extend(downloads);
+            Ok(plan)
+        }
         Err(error) => {
             report_provider_error(theme, &error);
             Err(2)
@@ -563,7 +581,7 @@ pub(super) fn realize_ref_outcome(
     // even when its package manifest is locally reviewed. The exact staged
     // source/recipe/capability identity must be approved outside the project
     // metadata before Store realization can reach the provider.
-    match Provider::core_build_identity(spec, table, &ctx) {
+    match Provider::approval_facts(spec, table, &ctx) {
         Ok(Some(identity)) => {
             drop(spinner.take());
             clear_live_region(&mut live);
@@ -938,7 +956,7 @@ fn report_realize_error(theme: &Theme, error: &Store::RealizeError) {
 /// Best-effort version out of a store-path basename like
 /// `<hash>-ripgrep-14.1.0`: everything after `<name>-`, if it starts with a
 /// digit (so `my-tool-src` never masquerades as a version).
-fn version_from_out(name: &str, out: &str) -> Option<String> {
+pub(super) fn version_from_out(name: &str, out: &str) -> Option<String> {
     let base = out.rsplit('/').next()?;
     let idx = base.find(&format!("-{name}-"))?;
     let version = &base[idx + name.len() + 2..];
@@ -1327,6 +1345,7 @@ pub(super) fn apply_locked_channels(
     table: &mut RefSpec::SourceTable,
     flags: &Flags,
 ) -> Result<(), i32> {
+    let _lock_diff = super::lock::LockDiffGuard::new(theme, project_dir);
     for source in channel_sources(table) {
         if source.policy == RefSpec::ChannelPolicy::Automatic && !flags.offline {
             match resolve_source_channel(&source, flags) {

@@ -7,7 +7,7 @@ use std::sync::{Mutex, OnceLock};
 static QUARANTINE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static SHARED_CAS_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) type DigestStamp = (u64, u64, i64, i64);
+pub(crate) type DigestStamp = (u64, u64, u64, i64, i64);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum DigestKind {
@@ -24,8 +24,9 @@ struct DigestKey {
     kind: DigestKind,
 }
 
-// Process-local acceleration only. The stamp invalidates entries when the
-// object root is replaced; persistent manifests remain owner-gated.
+// Process-local acceleration for staging and compatibility helpers. Persistent
+// Hangar verification uses Seal and never treats this root-only stamp as a
+// durable integrity proof.
 static VERIFIED_DIGESTS: OnceLock<Mutex<HashMap<DigestKey, (DigestStamp, String)>>> =
     OnceLock::new();
 
@@ -165,12 +166,21 @@ fn ensure_shared_file(
                 || permission_identity(&metadata) != mode
                 || !files_equal(&destination, source_path)?
             {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("shared CAS entry is corrupt: {}", destination.display()),
+                // Self-healing default: a drifted pool entry (for example one
+                // rewritten through a peer hardlink) is swept aside and
+                // replaced by a fresh copy of the verified source bytes.
+                // Objects still hardlinked to the bad inode fail their own
+                // verification and heal independently.
+                let corrupt = shared.join(format!(
+                    ".{key}.corrupt-{}-{}",
+                    std::process::id(),
+                    SHARED_CAS_SEQUENCE.fetch_add(1, Ordering::Relaxed)
                 ));
+                fs::rename(&destination, &corrupt)?;
+                let _ = fs::remove_file(&corrupt);
+            } else {
+                return Ok((destination, false));
             }
-            return Ok((destination, false));
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
@@ -317,18 +327,14 @@ pub(crate) fn try_entry_output_hash(roots: &Roots, entry: &StoreEntry) -> Result
     let out = Path::new(&entry.out);
     let hangar_root = (out.starts_with(&hangar) || out.starts_with(&canonical_hangar))
         .then_some(canonical_hangar.as_path());
-    verified_output_hash(
-        out,
-        hangar_root,
-        !entry.platform_artifact_kind.is_empty(),
-    )
-    .map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            format!("output `{}` does not exist", entry.out)
-        } else {
-            error.to_string()
-        }
-    })
+    verified_output_hash_persistent(out, hangar_root, !entry.platform_artifact_kind.is_empty())
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                format!("output `{}` does not exist", entry.out)
+            } else {
+                error.to_string()
+            }
+        })
 }
 
 pub(crate) fn verified_output_hash(
@@ -351,28 +357,147 @@ pub(crate) fn verified_output_hash(
         .get(&key)
         .and_then(|(cached_stamp, digest)| (cached_stamp == &stamp).then(|| digest.clone()))
     {
+        probe_output_readable(path)?;
         return Ok(digest);
     }
     #[cfg(test)]
     note_verified_digest_miss(path);
-    let digest = match hangar_root {
+    let digest = hash_output_content(path, hangar_root, allow_semantic_xattrs)?;
+    memo.lock()
+        .map_err(|_| std::io::Error::other("verified digest memo is poisoned"))?
+        .insert(key, (stamp, digest.clone()));
+    Ok(digest)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VerificationStatus {
+    pub reused: bool,
+    pub resealed: bool,
+    pub reseal_needed: bool,
+}
+
+/// Verify a Hangar output through its sealed stat manifest. A missing,
+/// malformed, or drifting seal takes the full canonical hash path and writes
+/// a fresh seal only when that hash agrees with the canonical object name.
+pub(crate) fn verified_output_hash_persistent(
+    path: &Path,
+    hangar_root: Option<&Path>,
+    allow_semantic_xattrs: bool,
+) -> std::io::Result<String> {
+    Ok(verified_output_hash_persistent_with_status(
+        path,
+        hangar_root,
+        allow_semantic_xattrs,
+        false,
+    )?
+    .0)
+}
+
+/// Full cryptographic verification for `jetpack hangar verify`. This bypasses
+/// both the persistent seal and the process-local memo, then refreshes the
+/// seal after a clean hash.
+pub(crate) fn full_verified_output_hash(
+    path: &Path,
+    hangar_root: &Path,
+    allow_semantic_xattrs: bool,
+) -> std::io::Result<String> {
+    Ok(verified_output_hash_persistent_with_status(
+        path,
+        Some(hangar_root),
+        allow_semantic_xattrs,
+        true,
+    )?
+    .0)
+}
+
+/// Doctor uses the same seal decision but does not mutate the Hangar when it
+/// is running in read-only mode. Callers that own the Hangar lock use the
+/// persistent helper above instead.
+pub(crate) fn read_only_output_hash(
+    path: &Path,
+    hangar_root: Option<&Path>,
+    allow_semantic_xattrs: bool,
+) -> std::io::Result<String> {
+    if let Some(hangar_root) = hangar_root {
+        if let Some(digest) = super::check_seal(path, hangar_root)? {
+            return Ok(digest);
+        }
+    }
+    hash_output_content(path, hangar_root, allow_semantic_xattrs)
+}
+
+pub(crate) fn verified_output_hash_persistent_with_status(
+    path: &Path,
+    hangar_root: Option<&Path>,
+    allow_semantic_xattrs: bool,
+    force_full: bool,
+) -> std::io::Result<(String, VerificationStatus)> {
+    verified_output_hash_with_options(path, hangar_root, allow_semantic_xattrs, force_full, true)
+}
+
+pub(crate) fn verified_output_hash_with_options(
+    path: &Path,
+    hangar_root: Option<&Path>,
+    allow_semantic_xattrs: bool,
+    force_full: bool,
+    write_seal: bool,
+) -> std::io::Result<(String, VerificationStatus)> {
+    if !force_full {
+        if let Some(hangar_root) = hangar_root {
+            if let Some(digest) = super::check_seal(path, hangar_root)? {
+                return Ok((
+                    digest,
+                    VerificationStatus {
+                        reused: true,
+                        resealed: false,
+                        reseal_needed: false,
+                    },
+                ));
+            }
+        }
+    }
+    #[cfg(test)]
+    note_verified_digest_miss(path);
+    let digest = hash_output_content(path, hangar_root, allow_semantic_xattrs)?;
+    let canonical_digest = hangar_root.and_then(|hangar_root| {
+        super::object_digest_for_path(path, hangar_root)
+    });
+    let reseal_needed = canonical_digest.as_deref() == Some(digest.as_str());
+    let resealed = if write_seal && reseal_needed {
+        let hangar_root = hangar_root.expect("canonical digest requires a Hangar root");
+        super::write_seal(path, hangar_root, &digest).map(|()| true)?
+    } else {
+        false
+    };
+    Ok((
+        digest,
+        VerificationStatus {
+            reused: false,
+            resealed,
+            reseal_needed: reseal_needed && !resealed,
+        },
+    ))
+}
+
+fn hash_output_content(
+    path: &Path,
+    hangar_root: Option<&Path>,
+    allow_semantic_xattrs: bool,
+) -> std::io::Result<String> {
+    match hangar_root {
         Some(hangar_root) => super::super::Envelope::try_output_hash_of_in_hangar(
             &path.to_string_lossy(),
             hangar_root,
             allow_semantic_xattrs,
         )
-        .map_err(std::io::Error::other)?,
+        .map_err(std::io::Error::other),
         None => super::super::Envelope::try_output_hash_of_with_policy(
             &path.to_string_lossy(),
             allow_semantic_xattrs,
             &mut |_, _| {},
         )
-        .map_err(std::io::Error::other)?,
-    };
-    memo.lock()
-        .map_err(|_| std::io::Error::other("verified digest memo is poisoned"))?
-        .insert(key, (stamp, digest.clone()));
-    Ok(digest)
+        .map_err(std::io::Error::other),
+    }
 }
 
 pub(crate) fn verified_file_hash(path: &Path) -> std::io::Result<String> {
@@ -388,14 +513,12 @@ pub(crate) fn verified_file_hash(path: &Path) -> std::io::Result<String> {
         .get(&key)
         .and_then(|(cached_stamp, digest)| (cached_stamp == &stamp).then(|| digest.clone()))
     {
+        fs::File::open(path)?;
         return Ok(digest);
     }
     #[cfg(test)]
     note_verified_digest_miss(path);
-    let digest = format!(
-        "sha256-{}",
-        super::super::SHA256::sha256_file_hex(path)?
-    );
+    let digest = format!("sha256-{}", super::super::SHA256::sha256_file_hex(path)?);
     memo.lock()
         .map_err(|_| std::io::Error::other("verified digest memo is poisoned"))?
         .insert(key, (stamp, digest.clone()));
@@ -436,11 +559,32 @@ fn normalize_memo_path(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+fn probe_output_readable(path: &Path) -> std::io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)? {
+            probe_output_readable(&entry?.path())?;
+        }
+    } else if metadata.is_file() {
+        fs::File::open(path)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn object_stamp(metadata: &fs::Metadata) -> DigestStamp {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt as _;
-        return (metadata.dev(), metadata.ino(), metadata.mtime(), metadata.mtime_nsec());
+        return (
+            metadata.dev(),
+            metadata.ino(),
+            metadata.len(),
+            metadata.mtime(),
+            metadata.mtime_nsec(),
+        );
     }
     #[cfg(windows)]
     {
@@ -449,6 +593,7 @@ pub(crate) fn object_stamp(metadata: &fs::Metadata) -> DigestStamp {
         return (
             u64::from(metadata.volume_serial_number().unwrap_or_default()),
             metadata.file_index().unwrap_or_default(),
+            metadata.len(),
             mtime_secs,
             mtime_nanos,
         );
@@ -456,7 +601,7 @@ pub(crate) fn object_stamp(metadata: &fs::Metadata) -> DigestStamp {
     #[cfg(not(any(unix, windows)))]
     {
         let (mtime_secs, mtime_nanos) = modified_stamp(metadata);
-        (0, 0, mtime_secs, mtime_nanos)
+        (0, 0, metadata.len(), mtime_secs, mtime_nanos)
     }
 }
 
@@ -594,6 +739,10 @@ pub fn quarantine_invalid_entry(
         if current.id != current_expected_id {
             return Err(std::io::Error::other("invalid cache record identity"));
         }
+        // A proven-mismatch check must re-hash real bytes: the process-local
+        // stamp memo and a sealed digest may both trust content this entry is
+        // explicitly suspected of drifting from.
+        invalidate_verified_digest(Path::new(&current.out));
         let proof = verify_cache_entry_with_graph(
             roots,
             &current,
@@ -604,9 +753,13 @@ pub fn quarantine_invalid_entry(
         if proof.trusted() {
             return Ok(());
         }
+        // Quarantine unless a real hash confirms the recorded digest: a
+        // mismatch is proven drift, and an unverifiable output (for example a
+        // tampered file whose pool hardlink no longer matches its CAS key) is
+        // equally untrustworthy.
         let quarantine_output = !current.envelope.output_hash.is_empty()
-            && try_entry_output_hash(roots, &current)
-                .is_ok_and(|actual| actual.as_str() != current.envelope.output_hash.as_str());
+            && !try_entry_output_hash(roots, &current)
+                .is_ok_and(|actual| actual.as_str() == current.envelope.output_hash.as_str());
         let hangar = roots.hangar_dir();
         let mut permissions = MovePathPermissions::default();
         let operation = (|| {
@@ -647,6 +800,7 @@ pub fn quarantine_invalid_entry(
                         let destination =
                             quarantine.join(format!("output-{name}-{stamp}-{unique}"));
                         fs::rename(owned, &destination)?;
+                        let _ = super::remove_seal(owned, &hangar);
                         permissions.renamed(owned, &destination);
                     }
                 }
@@ -848,87 +1002,8 @@ impl From<std::io::Error> for IngestError {
 /// Sweep abandoned staging / `.partial` object dirs left by a crash.
 pub fn recover_hangar_staging(roots: &Roots) -> std::io::Result<usize> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        recover_hangar_staging_unlocked(roots)
+        super::AdmissionTransaction::recover_unlocked(roots)
     })
-}
-
-pub(super) fn recover_hangar_staging_unlocked(roots: &Roots) -> std::io::Result<usize> {
-    let hangar = roots.hangar_dir();
-    let mut swept = 0usize;
-    let stage = hangar.join(STAGE_DIR);
-    swept += sweep_abandoned_directory(&stage, "Hangar ingest staging")?;
-    let objects = hangar.join(OBJECTS_DIR);
-    let metadata = match fs::symlink_metadata(&objects) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(swept),
-        Err(error) => return Err(error),
-    };
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Hangar object pool is not a real directory; repair the path before recovery",
-        ));
-    }
-    for ent in fs::read_dir(&objects)? {
-        let ent = ent?;
-        let name = ent.file_name().to_string_lossy().into_owned();
-        if name.ends_with(PARTIAL_SUFFIX) {
-            let path = ent.path();
-            let metadata = fs::symlink_metadata(&path)?;
-            if metadata.file_type().is_symlink() || metadata.is_file() {
-                fs::remove_file(&path)?;
-            } else if metadata.is_dir() {
-                fs::remove_dir_all(&path)?;
-            } else {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "Hangar partial object `{}` is not removable",
-                        path.display()
-                    ),
-                ));
-            }
-            swept += 1;
-        }
-    }
-    Ok(swept)
-}
-
-/// Remove only abandoned children from a staging directory. The directory
-/// itself must be a real directory; a symlink is a path-escape repair stop,
-/// not permission to walk or remove the target it names.
-pub(super) fn sweep_abandoned_directory(path: &Path, label: &str) -> std::io::Result<usize> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-        Err(error) => return Err(error),
-    };
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("{label} is not a real directory; repair the path before recovery"),
-        ));
-    }
-    let mut swept = 0;
-    for entry in fs::read_dir(path)? {
-        let child = entry?.path();
-        let metadata = fs::symlink_metadata(&child)?;
-        if metadata.file_type().is_symlink() || metadata.is_file() {
-            fs::remove_file(&child)?;
-        } else if metadata.is_dir() {
-            fs::remove_dir_all(&child)?;
-        } else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "{label} contains an unsupported entry `{}`",
-                    child.display()
-                ),
-            ));
-        }
-        swept += 1;
-    }
-    Ok(swept)
 }
 
 pub(super) fn ensure_real_directory(path: &Path, label: &str) -> std::io::Result<()> {
@@ -992,7 +1067,7 @@ fn ingest_tree_unlocked(roots: &Roots, req: &IngestRequest) -> Result<IngestedOb
     }
     let hangar = roots.hangar_dir();
     ensure_real_directory(&hangar, "Hangar root")?;
-    recover_hangar_staging_unlocked(roots)?;
+    super::AdmissionTransaction::recover_unlocked(roots)?;
 
     let stamp = format!("{}-{}", now_secs(), std::process::id());
     ensure_real_directory(&hangar.join(STAGE_DIR), "Hangar ingest staging")?;
@@ -1000,24 +1075,6 @@ fn ingest_tree_unlocked(roots: &Roots, req: &IngestRequest) -> Result<IngestedOb
     fs::create_dir(&stage)?;
 
     let result = (|| {
-        let mut planned_bytes = 0u64;
-        for source in req.outputs.values() {
-            source_metadata(source)?;
-            planned_bytes = planned_bytes
-                .checked_add(super::admission_size(source).map_err(|error| {
-                    IngestError::IO(format!(
-                        "cannot measure output `{}`: {error}",
-                        source.display()
-                    ))
-                })?)
-                .ok_or_else(|| IngestError::IO("Hangar admission size overflowed".into()))?;
-        }
-        super::ensure_hangar_capacity(
-            roots,
-            super::admission_reservation(planned_bytes),
-            Some(&stage),
-        )
-        .map_err(|error| IngestError::IO(format!("Hangar quota admission failed: {error}")))?;
         let mut named_digests = BTreeMap::new();
         let mut staged_outs = BTreeMap::new();
         for (name, src) in &req.outputs {
@@ -1132,93 +1189,41 @@ fn ingest_tree_unlocked(roots: &Roots, req: &IngestRequest) -> Result<IngestedOb
             realized_at: read_meta(&dir).and_then(|m| m.realized_at).unwrap_or(now),
             last_used_at: now,
         };
-        let mut staged_entry = entry.clone();
-        staged_entry.out = staged_outs
-            .get("out")
-            .ok_or_else(|| IngestError::Invalid("missing staged `out` path".into()))?
-            .to_string_lossy()
-            .into_owned();
-        // Certify while the candidate is still in the private ingest stage.
-        // A divergent tree therefore never becomes a Hangar CAS object or a
-        // closure record; failed-stage cleanup remains untrusted quarantine.
-        super::certify_registration_unlocked(roots, &staged_entry, &[])
-            .map_err(|error| IngestError::Invalid(error.to_string()))?;
-        let mut incoming_bytes = 0u64;
+        let mut transaction = super::AdmissionTransaction::new(roots)?;
         for (name, staged) in &staged_outs {
             let digest = named_digests.get(name).ok_or_else(|| {
                 IngestError::Invalid(format!("named output `{name}` has no digest"))
             })?;
-            if !objects.join(digest).is_dir() {
-                let staged_bytes = super::admission_size(staged).map_err(|error| {
-                    IngestError::IO(format!(
-                        "cannot measure staged output `{}`: {error}",
-                        staged.display()
-                    ))
-                })?;
-                incoming_bytes = incoming_bytes
-                    .checked_add(staged_bytes)
-                    .ok_or_else(|| IngestError::IO("Hangar admission size overflowed".into()))?;
-            }
+            let bytes = super::admission_size(staged).map_err(|error| {
+                IngestError::IO(format!(
+                    "cannot measure staged output `{}`: {error}",
+                    staged.display()
+                ))
+            })?;
+            transaction.stage_object(super::AdmissionObject {
+                source: staged.clone(),
+                digest: digest.clone(),
+                bytes,
+                allow_semantic_xattrs: req.allow_semantic_xattrs(),
+                repair_corrupt: false,
+            })?;
         }
-        super::ensure_hangar_capacity(
-            roots,
-            super::admission_reservation(incoming_bytes),
-            Some(&stage),
-        )
-        .map_err(|error| IngestError::IO(format!("Hangar quota admission failed: {error}")))?;
-        for (name, staged) in &staged_outs {
-            let digest = named_digests.get(name).ok_or_else(|| {
-                IngestError::Invalid(format!("named output `{name}` has no digest"))
-            })?;
-            let destination = objects.join(digest);
-            if destination.is_dir() {
-                seal_node(&destination)?;
-                let actual = super::super::Envelope::try_output_hash_of_in_hangar(
-                    &destination.to_string_lossy(),
-                    &hangar,
-                    req.allow_semantic_xattrs(),
-                )
-                .map_err(IngestError::Invalid)?;
-                if &actual != digest {
-                    return Err(IngestError::Invalid(format!(
-                        "existing object `{digest}` re-hashed as `{actual}`"
-                    )));
-                }
-                fsync_tree(&destination)?;
-                super::sync_store_directory(&objects)?;
-                make_tree_writable_for_removal(staged)?;
-                fs::remove_dir_all(staged)?;
-                continue;
-            }
-            let partial = objects.join(format!("{digest}{PARTIAL_SUFFIX}"));
-            if partial.exists() {
-                let _ = fs::remove_dir_all(&partial);
-            }
-            // This filesystem denies renaming a read-only directory. Reopen
-            // only inside the Hangar lock, publish, then restore the sealed
-            // mode before the canonical path or metadata becomes visible.
-            make_tree_writable_for_removal(staged)?;
-            fs::rename(staged, &partial)?;
-            seal_node(&partial)?;
-            let actual = super::super::Envelope::try_output_hash_of_in_hangar(
-                &partial.to_string_lossy(),
-                &hangar,
-                req.allow_semantic_xattrs(),
+        transaction
+            .commit(
+                std::slice::from_mut(&mut entry),
+                &[],
+                Some(&stage),
+                super::Closure::RegistrationMode::Native,
+                None,
             )
-            .map_err(IngestError::Invalid)?;
-            if &actual != digest {
-                return Err(IngestError::Invalid(format!(
-                    "sealed object `{digest}` re-hashed as `{actual}`"
-                )));
-            }
-            fsync_tree(&partial)?;
-            super::sync_store_directory(&objects)?;
-            fs::rename(&partial, &destination)?;
-            super::sync_store_directory(&objects)?;
-        }
-
-        super::Closure::prepare_entry_receipt(roots, &mut entry)?;
-        register_entry_unlocked(roots, &entry)?;
+            .map_err(|error| {
+                let error = error.to_string();
+                if error.starts_with("Hangar store limit exceeded") {
+                    IngestError::IO(format!("Hangar quota admission failed: {error}"))
+                } else {
+                    IngestError::IO(error)
+                }
+            })?;
         Ok(IngestedObject {
             entry,
             deduplicated,
@@ -1873,10 +1878,8 @@ mod share_tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "jet-ingest-share-{}-{stamp}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-ingest-share-{}-{stamp}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let roots = Roots::at(root.clone());
         let output = roots.hangar_dir().join("objects").join("share-test");

@@ -1154,11 +1154,14 @@ fn cmd_hangar_doctor(theme: &Theme, parsed: &Parsed) -> i32 {
                 remaining == 0,
                 "hangar.doctor",
                 &format!(
-                    ",\"objects\":{},\"findings\":[{}],\"fixed\":{},\"remaining\":{}",
+                    ",\"objects\":{},\"findings\":[{}],\"fixed\":{},\"remaining\":{},\"seal_reused\":{},\"seal_resealed\":{},\"seal_reseal_needed\":{}",
                     report.objects,
                     findings,
                     report.fixed_count(),
                     remaining,
+                    report.seal_reused,
+                    report.seal_resealed,
+                    report.seal_reseal_needed,
                 ),
             )
         );
@@ -1183,6 +1186,10 @@ fn cmd_hangar_doctor(theme: &Theme, parsed: &Parsed) -> i32 {
             report.fixed_count(),
             remaining,
         ));
+        theme.status(&format!(
+            "verification seals: {} reused, {} resealed, {} pending",
+            report.seal_reused, report.seal_resealed, report.seal_reseal_needed,
+        ));
     }
     i32::from(remaining != 0)
 }
@@ -1190,7 +1197,7 @@ fn cmd_hangar_doctor(theme: &Theme, parsed: &Parsed) -> i32 {
 fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let Some(target) = positional_path_after(parsed, "verify") else {
-        let entries = match Store::list_checked(&roots) {
+        let entries = match Store::list_for_full_audit(&roots) {
             Ok(entries) => entries,
             Err(error) => {
                 return hangar_report_error(
@@ -1220,7 +1227,7 @@ fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {
         return 0;
     };
     let target = target.to_string_lossy().into_owned();
-    let entries = match Store::list_checked(&roots) {
+    let entries = match Store::list_for_full_audit(&roots) {
         Ok(entries) => entries,
         Err(error) => {
             return hangar_report_error(

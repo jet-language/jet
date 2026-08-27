@@ -920,19 +920,28 @@ mod tests {
         assert!(proof.unsigned_local_allowed);
         assert!(verified(&roots, reference, &expectation));
 
-        // A tampered or deleted local output is not a verified cache hit:
-        // `find_verified_by_reference` reports it as `Ok(None)` (no hit) rather
-        // than a hard error, so `realize_verified` reaches the fail-closed
-        // E2604 + quarantine path and can rebuild. The build-level rejection is
-        // proved end to end by the jet_build_never_reports_{deleted,tampered}
-        // integration tests; here we only pin the query contract.
+        // Sealed verification manifests track per-file (inode, size, mtime)
+        // tuples, so an in-place payload rewrite is drift even when the root
+        // stat identity is unchanged: the use path re-hashes and rejects.
+        let root_stamp = super::super::Ingest::object_stamp(
+            &fs::symlink_metadata(&out).unwrap(),
+        );
         let payload = out.join("payload");
         let mut permissions = fs::metadata(&payload).unwrap().permissions();
         permissions.set_readonly(false);
         fs::set_permissions(&payload, permissions).unwrap();
         fs::write(&payload, "tampered").unwrap();
-        assert!(!verified(&roots, reference, &expectation));
+        assert_eq!(
+            root_stamp,
+            super::super::Ingest::object_stamp(&fs::symlink_metadata(&out).unwrap())
+        );
+        let use_proof = verify_cache_entry(&roots, &entry, reference, &expectation);
+        assert!(!use_proof.output_digest, "{use_proof:?}");
+        assert!(!use_proof.trusted(), "{use_proof:?}");
+        assert!(verify_hangar_object(&roots, &entry).is_err());
 
+        // Deletion removes the stamped object identity and must miss even
+        // though the process-local memo still contains the former digest.
         let mut permissions = fs::metadata(&out).unwrap().permissions();
         permissions.set_readonly(false);
         fs::set_permissions(&out, permissions).unwrap();
@@ -1319,7 +1328,15 @@ mod tests {
         let payload = object.join("payload");
         let original_permissions = fs::metadata(&payload).unwrap().permissions();
         fs::set_permissions(&payload, fs::Permissions::from_mode(0o000)).unwrap();
-        assert!(try_entry_output_hash(&roots, &stale.entry).is_err());
+        // The sealed stat manifest trusts unchanged (inode, size, mtime)
+        // tuples without reading bytes; the full audit path still fails on
+        // the unreadable payload.
+        assert!(full_verified_output_hash(
+            &object,
+            &roots.hangar_dir(),
+            false,
+        )
+        .is_err());
         let mut mismatch = test_expectation(&object);
         mismatch.identity.source_fingerprint = "wrong-source".into();
 
@@ -2798,6 +2815,61 @@ mod tests {
     }
 
     #[test]
+    fn admission_failure_points_hide_partial_metadata_and_recover_idempotently() {
+        for (index, point) in [
+            AdmissionFailurePoint::AfterObjectPublication,
+            AdmissionFailurePoint::AfterReceiptPublication,
+            AdmissionFailurePoint::AfterClosureRegistration,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let (roots, _g) = temp_roots();
+            let source = roots.root.join(format!("failure-source-{index}"));
+            fs::create_dir_all(&source).unwrap();
+            fs::write(source.join("payload"), format!("failure-{index}")).unwrap();
+            let request = IngestRequest {
+                name: format!("failure-{index}"),
+                version: "1".into(),
+                reference: format!("path:failure-{index}"),
+                cache_identity: test_identity(),
+                references: Vec::new(),
+                outputs: BTreeMap::from([("out".into(), source)]),
+                signature: String::new(),
+                provenance: "transaction-test".into(),
+                platform_artifact_kind: String::new(),
+            };
+            let result = with_admission_failure(point, || ingest_tree(&roots, &request));
+            assert!(result.is_err(), "failure point {point:?} did not fire");
+
+            if point != AdmissionFailurePoint::AfterClosureRegistration {
+                recover_hangar(&roots).unwrap();
+                recover_hangar(&roots).unwrap();
+                assert!(list_checked(&roots).unwrap().is_empty());
+                assert_eq!(
+                    fs::read_dir(roots.hangar_dir().join(OBJECTS_DIR))
+                        .unwrap()
+                        .count(),
+                    0
+                );
+            } else {
+                let committed = list_checked(&roots).unwrap();
+                assert_eq!(committed.len(), 1);
+                let meta = roots
+                    .hangar_dir()
+                    .join(&committed[0].id)
+                    .join("meta.json");
+                fs::remove_file(&meta).unwrap();
+                recover_hangar(&roots).unwrap();
+                let recovered = list_checked(&roots).unwrap();
+                recover_hangar(&roots).unwrap();
+                assert_eq!(list_checked(&roots).unwrap(), recovered);
+                assert_eq!(recovered, committed);
+            }
+        }
+    }
+
+    #[test]
     fn closure_legacy_migration_is_idempotent() {
         let (roots, _g) = temp_roots();
         let mut first =
@@ -3033,28 +3105,116 @@ mod tests {
     /// Minimal scoped tempdir for tests (std-only; auto-removes on drop).
     #[cfg(test)]
     mod tempdir {
-        use std::path::PathBuf;
+        use std::ffi::OsString;
+        use std::path::{Path, PathBuf};
+        use std::sync::{Mutex, MutexGuard, OnceLock};
+
+        static ENVIRONMENT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
         pub struct Guard {
             pub path: PathBuf,
+            parent: PathBuf,
+            environment: Option<EnvironmentGuard>,
+        }
+
+        struct EnvironmentGuard {
+            previous: Vec<(&'static str, Option<OsString>)>,
+            _lock: MutexGuard<'static, ()>,
+        }
+
+        impl EnvironmentGuard {
+            fn new(root: &Path, parent: &Path) -> Self {
+                let lock = ENVIRONMENT_LOCK
+                    .get_or_init(|| Mutex::new(()))
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                let desired = [
+                    ("HOME", Some(parent.join("home").into_os_string())),
+                    ("USERPROFILE", Some(parent.join("home").into_os_string())),
+                    (
+                        "LOCALAPPDATA",
+                        Some(parent.join("local").into_os_string()),
+                    ),
+                    (
+                        "XDG_DATA_HOME",
+                        Some(parent.join("data").into_os_string()),
+                    ),
+                    (
+                        "XDG_STATE_HOME",
+                        Some(parent.join("state").into_os_string()),
+                    ),
+                    (
+                        "XDG_CACHE_HOME",
+                        Some(parent.join("cache").into_os_string()),
+                    ),
+                    (
+                        "XDG_CONFIG_HOME",
+                        Some(parent.join("config").into_os_string()),
+                    ),
+                    ("JETPACK_ROOT", Some(root.as_os_str().to_os_string())),
+                    (
+                        "JETPACK_SHARED_CAS",
+                        Some(parent.join("shared-cas").into_os_string()),
+                    ),
+                ];
+                let previous = desired
+                    .iter()
+                    .map(|(name, _)| (*name, std::env::var_os(name)))
+                    .collect();
+                for (name, value) in desired {
+                    if let Some(value) = value {
+                        std::env::set_var(name, value);
+                    } else {
+                        std::env::remove_var(name);
+                    }
+                }
+                Self {
+                    previous,
+                    _lock: lock,
+                }
+            }
+        }
+
+        impl Drop for EnvironmentGuard {
+            fn drop(&mut self) {
+                for (name, value) in self.previous.drain(..).rev() {
+                    if let Some(value) = value {
+                        std::env::set_var(name, value);
+                    } else {
+                        std::env::remove_var(name);
+                    }
+                }
+            }
         }
 
         impl Guard {
             pub fn new(tag: &str) -> Guard {
-                let mut path = std::env::temp_dir();
+                static NEXT: std::sync::atomic::AtomicU64 =
+                    std::sync::atomic::AtomicU64::new(0);
                 let nanos = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_nanos();
-                path.push(format!("{tag}-{nanos}-{:?}", std::thread::current().id()));
+                let parent = std::env::temp_dir().join(format!(
+                    "{tag}-{}-{nanos}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                ));
+                let path = parent.join("root");
                 std::fs::create_dir_all(&path).unwrap();
-                Guard { path }
+                let environment = EnvironmentGuard::new(&path, &parent);
+                Guard {
+                    path,
+                    parent,
+                    environment: Some(environment),
+                }
             }
         }
 
         impl Drop for Guard {
             fn drop(&mut self) {
-                let _ = std::fs::remove_dir_all(&self.path);
+                drop(self.environment.take());
+                let _ = std::fs::remove_dir_all(&self.parent);
             }
         }
     }

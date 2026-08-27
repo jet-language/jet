@@ -10,7 +10,9 @@ use super::services_secrets_config::{
     run_lifecycle_hooks_silent, validate_declared_secrets, wait_for_services_ready,
 };
 use super::tool::reject_unavailable_provider;
-use super::trust_env_build::{compose_env, compose_env_scoped, validate_integration_facts};
+use super::trust_env_build::{
+    compose_env, compose_env_scoped, compose_env_scoped_with_stats, validate_integration_facts,
+};
 use super::workspace_sources::{
     cwd_table, load_workspace_for_source, workspace_root_snapshot_or_exit,
 };
@@ -27,7 +29,9 @@ use crate::Syntax;
 use crate::Trust;
 use jet_env_model::ModuleEval;
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// `jetpack use [<ref>] [-- cmd…]`
 ///
@@ -1570,6 +1574,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         _ => {}
     }
 
+    let ready_started = Instant::now();
     let cwd = std::env::current_dir().unwrap_or_default();
     let project_dir = project_env_root(&cwd);
 
@@ -1685,8 +1690,15 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
 
-    let env = match compose_env_scoped(theme, &roots, &flags, &plan, RealizeScope::Project, true) {
-        Ok(env) => env,
+    let (env, ready_stats) = match compose_env_scoped_with_stats(
+        theme,
+        &roots,
+        &flags,
+        &plan,
+        RealizeScope::Project,
+        true,
+    ) {
+        Ok(result) => result,
         Err(code) => return code,
     };
     if flags.prep {
@@ -1707,6 +1719,15 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
 
+    if let Err(error) = announce_env_ready(
+        theme,
+        &project_dir,
+        ready_started.elapsed(),
+        &ready_stats,
+    ) {
+        theme.detail(&format!("couldn't record env entry: {error}"));
+    }
+
     let code = match &parsed.command {
         Some(cmd) if !cmd.is_empty() => Shell::run_command(&env, cmd),
         _ => Shell::enter(theme, &env, ShellKind::detect()),
@@ -1715,6 +1736,167 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         auto_clean_after_success(theme, &roots);
     }
     code
+}
+
+const ENV_ENTRY_RECEIPT_HEADER: &str = "jetpack-env-entry-v1";
+const ENV_ENTRY_RECEIPT_NAME: &str = "env-entry";
+
+fn env_entry_receipt_path(project_dir: &Path) -> PathBuf {
+    project_dir
+        .join(".jet")
+        .join("receipts")
+        .join(ENV_ENTRY_RECEIPT_NAME)
+}
+
+fn canonical_env_entry(packages: &[(String, String)]) -> Vec<(String, String)> {
+    let mut packages = packages.to_vec();
+    packages.sort();
+    packages.dedup();
+    packages
+}
+
+fn read_env_entry_receipt(project_dir: &Path) -> Option<Vec<(String, String)>> {
+    let contents = std::fs::read_to_string(env_entry_receipt_path(project_dir)).ok()?;
+    let mut lines = contents.lines();
+    if lines.next() != Some(ENV_ENTRY_RECEIPT_HEADER) {
+        return None;
+    }
+    let mut packages = Vec::new();
+    for line in lines {
+        let (name, version) = line.split_once('\t')?;
+        if name.is_empty() {
+            return None;
+        }
+        packages.push((name.to_string(), version.to_string()));
+    }
+    Some(canonical_env_entry(&packages))
+}
+
+fn write_env_entry_receipt(
+    project_dir: &Path,
+    packages: &[(String, String)],
+) -> std::io::Result<()> {
+    for (name, version) in packages {
+        if name
+            .chars()
+            .chain(version.chars())
+            .any(|character| matches!(character, '\t' | '\n' | '\r'))
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "environment entry package fields cannot contain line separators",
+            ));
+        }
+    }
+    let path = env_entry_receipt_path(project_dir);
+    let parent = path.parent().expect("environment entry receipt has a parent");
+    std::fs::create_dir_all(parent)?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let temporary = parent.join(format!(
+        ".{ENV_ENTRY_RECEIPT_NAME}.{}.{}.tmp",
+        std::process::id(),
+        nonce
+    ));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)?;
+        writeln!(file, "{ENV_ENTRY_RECEIPT_HEADER}")?;
+        for (name, version) in canonical_env_entry(packages) {
+            writeln!(file, "{name}\t{version}")?;
+        }
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn format_env_ready(elapsed: Duration, cache_hit_percent: usize) -> String {
+    format!(
+        "env ready in {:.1}s (cache hit {cache_hit_percent} percent)",
+        elapsed.as_secs_f64()
+    )
+}
+
+fn package_label(name: &str, version: &str) -> String {
+    if version.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name} {version}")
+    }
+}
+
+fn format_env_changes(
+    previous: &[(String, String)],
+    current: &[(String, String)],
+) -> Option<String> {
+    let previous = previous.iter().cloned().collect::<BTreeMap<_, _>>();
+    let current = current.iter().cloned().collect::<BTreeMap<_, _>>();
+    let names = previous
+        .keys()
+        .chain(current.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut updated = Vec::new();
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    for name in names {
+        match (previous.get(&name), current.get(&name)) {
+            (Some(old), Some(new)) if old != new => {
+                updated.push((name, old.clone(), new.clone()));
+            }
+            (None, Some(version)) => added.push((name, version.clone())),
+            (Some(version), None) => removed.push((name, version.clone())),
+            _ => {}
+        }
+    }
+    let mut parts = Vec::new();
+    if let Some((name, old, new)) = updated.first() {
+        let detail = if old.is_empty() || new.is_empty() {
+            format!("{name} updated")
+        } else {
+            format!("{name} {old} to {new}")
+        };
+        parts.push(detail);
+        if updated.len() > 1 {
+            parts.push(format!("{} tools updated", updated.len()));
+        }
+    }
+    if let Some((name, version)) = added.first() {
+        parts.push(format!("{} added", package_label(name, version)));
+        if added.len() > 1 {
+            parts.push(format!("{} tools added", added.len()));
+        }
+    }
+    if let Some((name, version)) = removed.first() {
+        parts.push(format!("{} removed", package_label(name, version)));
+        if removed.len() > 1 {
+            parts.push(format!("{} tools removed", removed.len()));
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join(", "))
+}
+
+fn announce_env_ready(
+    theme: &Theme,
+    project_dir: &Path,
+    elapsed: Duration,
+    stats: &super::trust_env_build::EnvReadyStats,
+) -> std::io::Result<()> {
+    let current = stats.realized_set();
+    theme.status(&format_env_ready(elapsed, stats.cache_hit_percent()));
+    if let Some(previous) = read_env_entry_receipt(project_dir) {
+        if let Some(changes) = format_env_changes(&previous, &current) {
+            theme.status(&format!("what changed: {changes}"));
+        }
+    }
+    write_env_entry_receipt(project_dir, &current)
 }
 
 /// `jetpack use <package>... [-- cmd]` — realize exactly the named refs in the
@@ -3254,6 +3436,39 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn env_entry_receipt_round_trip_reports_changed_tools() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let root = std::env::temp_dir().join(format!(
+            "jet-env-entry-banner-{}-{nonce}",
+            std::process::id()
+        ));
+        let previous = vec![
+            ("cargo".to_string(), "1.97.0".to_string()),
+            ("rustc".to_string(), "1.97.0".to_string()),
+        ];
+        let current = vec![
+            ("cargo".to_string(), "1.97.1".to_string()),
+            ("rustc".to_string(), "1.97.1".to_string()),
+        ];
+
+        write_env_entry_receipt(&root, &previous).unwrap();
+        assert_eq!(read_env_entry_receipt(&root), Some(previous.clone()));
+        assert_eq!(
+            format_env_ready(Duration::from_millis(1800), 100),
+            "env ready in 1.8s (cache hit 100 percent)"
+        );
+        assert_eq!(
+            format_env_changes(&previous, &current).as_deref(),
+            Some("cargo 1.97.0 to 1.97.1, 2 tools updated")
+        );
+        assert_eq!(format_env_changes(&current, &current), None);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn job_cache_key_changes_when_job_arguments_change() {

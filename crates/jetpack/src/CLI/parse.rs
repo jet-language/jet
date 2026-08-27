@@ -3,6 +3,7 @@ use super::bridge_os_studio::{cmd_bridge, cmd_os, cmd_studio, cmd_user};
 use super::browser::cmd_browser;
 use super::cmd_doctor;
 use super::package_hangar_vendor::{cmd_audit, cmd_hangar};
+use super::lock::cmd_lock;
 use super::profile::cmd_profile;
 use super::run_enter_dev::{cmd_env, cmd_use};
 use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_service_probe, cmd_services};
@@ -53,6 +54,8 @@ pub(super) struct Flags {
     pub(super) pure: bool,
     /// D-VERDICT-2189-1: materialize without entering a shell.
     pub(super) prep: bool,
+    /// Card #2214: show the full environment acquisition plan.
+    pub(super) explain_plan: bool,
     /// D-JPK-IMAGE1: `jet image <name> --push <ref>` — the registry ref to
     /// push to. HTTP(S) references use the native OCI Distribution adapter;
     /// other values are local layout paths.
@@ -90,6 +93,8 @@ pub(super) struct Flags {
     pub(super) update_deps: bool,
     /// D-VERDICT-2192-1: narrow `jetpack update` to user tools.
     pub(super) update_tools: bool,
+    /// Card #2218: git revision used by `jetpack lock diff`.
+    pub(super) lock_against: Option<String>,
     /// D-JPK-TOOLRUN1: `jetpack tool install <ref> --as <name>` bin rename.
     pub(super) as_name: Option<String>,
     /// D-BROWSER-AUTO1=A (#1187): `jetpack browser lock --binary <path>`.
@@ -158,6 +163,7 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
         flake: false,
         pure: false,
         prep: false,
+        explain_plan: false,
         push: None,
         adapt: false,
         json: false,
@@ -166,6 +172,7 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
         assume_yes: false,
         update_deps: false,
         update_tools: false,
+        lock_against: None,
         as_name: None,
         browser_binary: None,
         browser_version: None,
@@ -211,13 +218,24 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
                 flags.assume_yes = true;
             }
             a if verb == "update" && a == Syntax::UPDATE_FLAG_DEPS => flags.update_deps = true,
-            a if verb == "update" && a == Syntax::UPDATE_FLAG_TOOLS => {
-                flags.update_tools = true
+            a if verb == "update" && a == Syntax::UPDATE_FLAG_TOOLS => flags.update_tools = true,
+            a if verb == Syntax::JETPACK_LOCK_VERB && a == Syntax::LOCK_DIFF_FLAG_AGAINST => {
+                i += 1;
+                flags.lock_against = args.get(i).cloned().or_else(|| Some(String::new()));
+            }
+            a if verb == Syntax::JETPACK_LOCK_VERB
+                && a.starts_with(&format!("{}=", Syntax::LOCK_DIFF_FLAG_AGAINST)) =>
+            {
+                flags.lock_against = Some(
+                    a.trim_start_matches(&format!("{}=", Syntax::LOCK_DIFF_FLAG_AGAINST))
+                        .to_string(),
+                );
             }
             a if a == Syntax::TRUST_BYPASS_FLAG => flags.trust = true,
             a if a == Syntax::ENV_FLAG_FLAKE => flags.flake = true,
             a if a == Syntax::ENV_FLAG_PURE => flags.pure = true,
             a if a == Syntax::ENV_FLAG_PREP => flags.prep = true,
+            a if a == Syntax::ENV_FLAG_EXPLAIN => flags.explain_plan = true,
             a if a == Syntax::ENV_FLAG_PRESET => {
                 i += 1;
                 if let Some(name) = args.get(i) {
@@ -416,11 +434,9 @@ pub(super) fn before_argument_separator(args: &[String]) -> &[String] {
 /// Entry point. Returns a process exit code.
 pub fn main(args: Vec<String>) -> i32 {
     let Some((verb, rest)) = args.split_first() else {
-        let theme = Theme::resolve_choice(ColorChoice::Auto);
-        eprintln!("{}", super::usage_tests::usage_with_color(theme.color));
-        // Bare `jetpack` is reserved for the future interactive TUI. Until
-        // then, help is the complete operation; never fall through to env.
-        return 0;
+        // Bare `jetpack` is the keyboard-first dashboard. Its own TTY guard
+        // keeps the status-summary floor for pipes, CI, and redirected output.
+        return super::dashboard::run_dashboard();
     };
     let parsed = parse_args_for(verb, rest);
     let color = if parsed.flags.json {
@@ -506,9 +522,13 @@ pub fn main(args: Vec<String>) -> i32 {
         && parsed.positional.get(1).map(String::as_str) == Some("status");
     let read_only_hangar_doctor = verb == "hangar"
         && parsed.positional.first().map(String::as_str) == Some("doctor")
-        && !parsed.positional.iter().any(|argument| argument == "--repair");
+        && !parsed
+            .positional
+            .iter()
+            .any(|argument| argument == "--repair");
     let read_only_command = matches!(verb.as_str(), "doctor" | "audit")
         || verb == Syntax::JETPACK_WHY
+        || verb == Syntax::JETPACK_LOCK_VERB
         || read_only_hangar_doctor;
     if !read_only_command && !read_only_shared_store_status {
         let roots = Store::resolve();
@@ -531,7 +551,11 @@ pub fn main(args: Vec<String>) -> i32 {
         }
     }
 
-    let drift_code = check_user_tools_drift(&theme, &parsed);
+    let drift_code = if verb == Syntax::JETPACK_LOCK_VERB {
+        0
+    } else {
+        check_user_tools_drift(&theme, &parsed)
+    };
     if drift_code != 0 {
         return drift_code;
     }
@@ -548,6 +572,7 @@ pub fn main(args: Vec<String>) -> i32 {
         "add" => cmd_add(&theme, &parsed),
         "remove" => cmd_remove(&theme, &parsed),
         "update" => cmd_update(&theme, &parsed),
+        v if v == Syntax::JETPACK_LOCK_VERB => cmd_lock(&theme, &parsed),
         "outdated" => cmd_outdated(&theme, &parsed),
         "search" => cmd_search(&theme, &parsed),
         "info" => cmd_info(&theme, &parsed),
@@ -603,7 +628,10 @@ fn retired_shell_spelling(verb: &str) -> Option<(String, &'static str, &'static 
             "development commands execute Jet source and belong to `jet`",
             "use `jet dev`",
         ),
-        "test" => ("tests execute Jet source and belong to `jet`", "use `jet test`"),
+        "test" => (
+            "tests execute Jet source and belong to `jet`",
+            "use `jet test`",
+        ),
         "fmt" => (
             "source formatting belongs to `jet`, not `jetpack`",
             "use `jet fmt`",

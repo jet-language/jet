@@ -281,6 +281,13 @@ pub(super) fn apply_project_update(theme: &Theme, plan: ProjectUpdatePlan) -> i3
         project_dir,
         updates,
     } = plan;
+    let download_bytes = updates
+        .iter()
+        .map(|update| update.download_bytes)
+        .collect::<Option<Vec<_>>>()
+        .map(|sizes| sizes.into_iter().sum());
+    let mut lock_diff = super::lock::LockDiffGuard::new(theme, &project_dir);
+    lock_diff.set_sizes(super::lock::sizes_from_bytes(download_bytes, None));
     let mut ok = true;
     for update in updates {
         let source = update.source;

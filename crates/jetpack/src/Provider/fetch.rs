@@ -161,8 +161,7 @@ impl Authority {
             let body = scratch.join(format!("fetch-{}-{redirect}.body", stable_suffix(url)));
             let mut command = hardened_curl(&self.curl);
             for address in addresses {
-                command
-                    .args(["--resolve", &format!("{authority}:443:{}", address.ip())]);
+                command.args(["--resolve", &format!("{authority}:443:{}", address.ip())]);
             }
             let output = command
                 .args(["--dump-header"])
@@ -550,7 +549,9 @@ fn authority_of(url: &str) -> Result<String, String> {
         }
         if let Ok(ip) = authority.parse() {
             if !jet_net::is_public_ip(ip) {
-                return Err(format!("provider URL targets a non-public address `{authority}`"));
+                return Err(format!(
+                    "provider URL targets a non-public address `{authority}`"
+                ));
             }
         }
         return Ok(authority);
