@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2232,
-    "rev": 45743,
+    "nextNum": 2234,
+    "rev": 45752,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -153130,21 +153130,32 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": "jet run site/generate.jet emits site/dist; pages render correctly in Chromium at desktop and mobile widths; live widget runs Jet wasm; all code samples compile on the current binary",
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet run site/generate.jet emits dist; all pages render in Chromium desktop+mobile; live widget runs Jet wasm; samples compile on current binary",
+          "status": "met",
+          "metBy": "fable-site",
+          "verifiedBy": null,
+          "evidence": "Verified 2026-08-26: jet run --release generate.jet exit 0 (14.6s, full env; default tier blocked by fs.copy_dir evaluator gap, carded #2231); dist/index+tour+install+e byte-verified; Chromium checks at 1440 and 390 widths incl reduced-motion; facet lens toggle works; live widget (Jet wasm) clicks 0->2 with one DOM tree after #2222/#2223 fixes; every inline sample run on the generating binary (hero, values, failure, cube, arms outputs captured). Commits fba946f04 + 2d35b026d.",
+          "at": "2026-08-27T01:33:56.046Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-27T00:51:17.691Z",
-      "updated": "2026-08-27T00:51:17.691Z",
-      "updatedBy": "fable-site"
+      "updated": "2026-08-27T01:33:57.090Z",
+      "updatedBy": "fable-site",
+      "completedAt": "2026-08-27T01:33:57.090Z"
     },
     {
       "id": "c044jwnr",
@@ -153226,6 +153237,60 @@
       "created": "2026-08-27T01:19:54.865Z",
       "updated": "2026-08-27T01:19:54.865Z",
       "updatedBy": "fable-site"
+    },
+    {
+      "id": "c0s9kjxe",
+      "num": 2232,
+      "title": "Repo env.dev is unrealizable: E1340 on lld@default, so E1355's own fix dead-ends",
+      "body": "The chain, reproduced 2026-08-26 on this machine: (1) any jet run targeting a file inside the repo stops with E1355 'this project declares env; you are not inside it', whose Fix line is 'jetpack env -- jet run'. (2) jetpack env --prep -y spends ~25 minutes resolving the env.dev plan, then fails realization after a further hour: Error [E1340]: that source can't be realized yet — Nix package realization needs an exact signed-index record or an exact-lock local fallback policy for lld@default; ambient nixpkgs is never accepted. So the compiler's suggested fix cannot succeed for this repository's own declared environment: env.jet declares lld, but no signed-index record or exact-lock fallback exists for it. Either the index needs the lld record, env.jet needs a realizable pin, or the exact-lock local fallback policy needs to cover it. Until then every in-repo jet run is gated behind an unrealizable env (agents work around it by copying targets to scratch dirs outside the repo). Related but distinct: #2158 (index-backed NixProvider realization, done) and the known resolve-latency problem.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": "jetpack env --prep -y completes on a clean machine; jetpack env -- jet run examples/features/basics/hello.jet prints hello, world from the repo root",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T02:00:14.741Z",
+      "updated": "2026-08-27T02:00:14.741Z",
+      "updatedBy": "fable-site"
+    },
+    {
+      "id": "c06nrxwx",
+      "num": 2233,
+      "title": "Streamline the repository: example suites, docs GC, root layout law",
+      "body": "Repo-wide streamlining proposal. Full text: docs/proposals/streamline-one-repo.md. Three planes. Plane A: consolidate the positive example corpus into 52 curated suites plus a checks tree, per the complete 681-row mapping in Appendix A; amends D-REPO-EXAMPLES1, preserves D-EXAMPLES-SHORTPATH1 and the golden suffix taxonomy. Plane B: docs garbage collection with a flat delete list, fold list, hold list, and a single-source-of-truth table per surface topic, plus 11 live drift fixes. Plane C: root layout law, session-artifact lifetime policy, and exact .gitignore hardening. Non-goals: no syntax changes, no harness redesign beyond path migration, no compat shims. Already executed under existing junk policy: commits 6675d936a and c86657b2e removed probe files, scratch trees, session report copies, and stale logs (~30G reclaimed). Four ballots on this card decide the planes.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Phase 0 ratify ballots and freeze the mapping; Phase 1 add suite/check discovery additively; Phases 2-3 migrate clusters and special tiers with old proof kept complete; Phase 4 atomic close of the example merge; Phase 5 docs GC and SSOT; Phase 6 root/session boundary enforcement. Per-phase proof commands are in the proposal's Rollout and Verification sections.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/streamline-one-repo.md"
+      ],
+      "tags": [
+        "streamline"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T02:14:37.617Z",
+      "updated": "2026-08-27T02:14:46.279Z",
+      "updatedBy": "fable-streamline"
     }
   ],
   "decisions": [
@@ -210220,6 +210285,330 @@
           "resolvedAt": "2026-08-26T10:16:50.044Z"
         }
       ]
+    },
+    {
+      "id": "D-DOCS-GC1",
+      "cardId": "c06nrxwx",
+      "group": "tooling",
+      "title": "Apply docs garbage collection and the canonical docs layout",
+      "gist": "Choose which documents stay active and which leave.",
+      "lesson": "An active document is a current input for users, tools, or owner decisions. A fold moves durable law into its canonical home before its old file leaves. A delete removes a source with no current owner or consumer. An archive keeps history outside active navigation. A hold keeps a live source until its gate, consumer, contradiction, or owner question closes. This split lets readers find current law without losing needed evidence or open choices.",
+      "explainer": "",
+      "story": "Rina maintains Jet's language docs while several finished design papers still look current. She needs a contributor to find the spec, a maintainer to find live plans, and an owner to see open choices. A cleanup pass must preserve hard consumers and move only durable law.",
+      "inWild": "# Before\n# docs/proposals/authority-one-model.md\n# docs/spec/syntax-decisions.md\n# Both state authority and amendment rules.\n\n# After\n# docs/spec/syntax-decisions.md\n# One current law home.\n# docs/archive/authority-one-model.md\n# History is hidden from active navigation.\n\n$ rg -n \"authority-one-model|syntax-decisions\" docs tests Source\n docs/spec/syntax-decisions.md:15: current law owns the result",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Delete and fold per Plane B",
+          "detail": "Keep 64 live files. Fold missing law into specs, references, or the roadmap. Delete 37 direct stale sources and 30 fold-then-delete sources. Gain: active navigation shows current work and one law home. Loss: a finished paper leaves the active tree after its useful content moves.",
+          "technical": "Apply the 67-row flat DELETE list. Apply the 30-row FOLD list before deleting each fold source. Keep the six proposal exceptions, live audits, live research, current plans, sidequests, one ballot, user guides, and agent infrastructure. Update hard consumers before removal. Keep docs/archive hidden.",
+          "code": "# Active tree after cleanup\ndocs/spec/syntax-decisions.md\ndocs/spec/diagnostics.md\ndocs/reference/core-library.md\ndocs/plans/\ndocs/proposals/structure-program-is-a-value.md\ndocs/archive/\n\n$ rg -n \"authority-one-model|runtime-error-report\" docs tests Source\n# no active source remains"
+        },
+        {
+          "key": "B",
+          "name": "Fold content but delete nothing",
+          "detail": "Copy missing law into canonical homes, but keep all 131 census files active. Gain: no historical file disappears and links remain easy to find. Loss: superseded proposals, dated audits, and generated snapshots still compete with current law and keep stale claims visible.",
+          "technical": "Apply the 30-row FOLD list. Do not remove any source. Keep current navigation and all duplicate projections. Mark no new archive boundary. Active docs remain 131 files and the old sources continue to require review.",
+          "code": "# Both copies remain active\ndocs/proposals/authority-one-model.md\ndocs/spec/syntax-decisions.md\n\n$ rg -n \"authority|amendment\" docs/proposals/authority-one-model.md docs/spec/syntax-decisions.md\n docs/proposals/authority-one-model.md:3: ratified authority\n docs/spec/syntax-decisions.md:15: current law"
+        },
+        {
+          "key": "C",
+          "name": "Archive every removal",
+          "detail": "Fold missing law, then move every proposed removal into docs/archive instead of deleting it. Gain: the full paper trail remains recoverable. Loss: the archive grows by 67 files, old claims stay one search away, and future readers may treat history as current.",
+          "technical": "Apply the 30-row FOLD list. Move all 67 DELETE rows to docs/archive with their paths preserved. Update links that point to active paths. Keep archive navigation hidden and add no second active index.",
+          "code": "# Active tree points to one law home\ndocs/spec/syntax-decisions.md\n\n# Historical copy remains\ndocs/archive/proposals/authority-one-model.md\n\n$ rg -n \"authority-one-model\" docs\n docs/archive/proposals/authority-one-model.md:1: historical record"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust keeps accepted language rules in the reference and tracks many design discussions in an archive of RFCs. The active guide does not present every old proposal as current law.",
+          "code": "The Rust Reference\nRFC 0000"
+        },
+        {
+          "lang": "Python",
+          "note": "Python uses accepted PEPs for decisions and separate historical records for rejected or superseded proposals. A reader can distinguish rule from discussion.",
+          "code": "python.org/dev/peps/"
+        },
+        {
+          "lang": "Git",
+          "note": "Git keeps project history in commits while the working tree presents current files. A hidden archive serves a similar navigation goal for finished docs.",
+          "code": "git log -- docs/proposals"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A follows the accepted docs cleanup shape and the census evidence. It leaves current law, live gates, open choices, and hard consumers visible while removing finished duplicate reports.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B preserves every stale source in active navigation. Folding content does not remove duplicate status claims or the search cost that caused the cleanup."
+          },
+          {
+            "key": "C",
+            "reason": "C preserves history, but the 67 moved files still enlarge the archive and remain easy to mistake for active evidence. The census already identifies durable sources that need to stay."
+          }
+        ],
+        "tradeoff": "A accepts deletion after each fold and consumer update. History remains in Git or the existing archive policy, while active docs keep one clear role."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base pass separated current law, live consumers, owner choices, folded law, and stale reports. It kept 64 files and counted 37 direct deletes plus 30 fold-then-delete sources.",
+        "boilOcean": "The breadth pass checked proposals, audits, research, plans, sidequests, ballots, user guides, agents, specs, references, and archive policy. It kept hard consumers and excluded spec and reference files from the census delete list.",
+        "hybrid": "The hybrid pass tested delete, archive, and fold-only outcomes. It kept archive as a history policy, but retained deletion as the active-tree rule after required folds.",
+        "cooperative": "The cooperative pass strengthened B with clear current pointers and C with hidden archive paths. It kept their recoverability gains visible while preserving A's active boundary.",
+        "adversarial": "The adversarial pass attacked hard references, generated files, open contradictions, stale Tower status, and the missing Epoch 5 link. It added consumer updates and five explicit hold questions."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-27T02:14:45.164Z"
+    },
+    {
+      "id": "D-DOCS-SSOT1",
+      "cardId": "c06nrxwx",
+      "group": "tooling",
+      "title": "Set one source of truth for each surface topic",
+      "gist": "Choose which document owns each surface truth.",
+      "lesson": "A source of truth is the one place that owns a rule or inventory. A pointer explains where readers should look without copying the rule. A generated projection renders source data for another audience. A hand-written guide can teach meaning, but it must not become a second syntax or inventory source. This split matters because one changed constructor, command, or diagnostic can otherwise leave several current-looking copies behind.",
+      "explainer": "",
+      "story": "Leah changes Jet's constructor spelling after an owner decision. The syntax record uses Build{...}, but a typed diagnostic row, an error page, and llms.text still show Build.{...}. She needs one edit to update every projection and one test to catch stale copies.",
+      "inWild": "# Before\n# Owner law\ndocs/spec/syntax-decisions.md\nBuild{ optimize: \"size\" }\n\n# Typed row and digest\ncrates/jet-codegen/src/Prelude/Diagnostics.jet\nBuild.{ optimize: \"size\" }\nllms.text\nBuild.{ optimize: \"size\" }\n\n# After\n# Source row and projections agree\ncrates/jet-codegen/src/Prelude/Diagnostics.jet\nBuild{ optimize: \"size\" }\n\n$ scripts/agent/jet-env jet inspect digest > llms.text\n$ tests/truthfulness\npass: generated digest matches source registries",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Spec owners, pointers, and generated projections",
+          "detail": "Give each topic one normative owner. Make guides point to that owner. Generate diagnostic rows, error pages, the digest, and machine indexes from their registries where the report recommends it. Gain: one correction reaches every projection. Loss: generated files need a named refresh command and byte checks.",
+          "technical": "Syntax.rs plus docs/spec/syntax-decisions.md own user syntax. docs/spec/spec.md owns meaning and grammar. Diagnostics.jet owns typed rows. Generate docs/spec/diagnostic-rows.md, docs/reference/errors/*.md, and diagnostic digest sections. Keep core-surface-ledger.json as the machine inventory and Markdown as its index. Keep llms.text generated and truthfulness-checked.",
+          "code": "# One source row\n# crates/jet-codegen/src/Prelude/Diagnostics.jet\nBuild{ optimize: \"size\" }\n\n# Generated views\ndocs/spec/diagnostic-rows.md\ndocs/reference/errors/E1219.md\nllms.text\n\n$ scripts/agent/jet-env jet inspect digest > llms.text\n$ scripts/agent/jet-env cargo test --test truthfulness\npass: source and projections agree"
+        },
+        {
+          "key": "B",
+          "name": "Spec owners and pointers without new generation",
+          "detail": "Give specs ownership and replace many human copies with links, but add no new generator. Gain: fewer hand-written law copies and less tooling change. Loss: existing diagnostic and inventory projections still need manual refresh or remain separate checked artifacts.",
+          "technical": "Keep the same normative owners and pointer rules as A. Do not add registry generation for diagnostic pages, Core indexes, or new digest sections. Keep existing generated files and current refresh commands unchanged. Narrow hand-written pages where possible, but accept manual updates for every retained projection.",
+          "code": "# Human pages point to the owner\ndocs/spec/syntax-decisions.md\nBuild{ optimize: \"size\" }\n\ndocs/reference/core-library.md\nSee docs/spec/stdlib-api-laws.md for naming law.\n\n# Existing row still needs a separate refresh\ndocs/spec/diagnostic-rows.md\nBuild.{ optimize: \"size\" }"
+        },
+        {
+          "key": "C",
+          "name": "Keep the current document copies",
+          "detail": "Keep current duplicated tables, examples, diagnostic detail, digest, and inventories. Gain: no ownership change. Loss: a single surface change can leave conflicting syntax, stale row text, and different counts in several current-looking files.",
+          "technical": "Keep current ownership claims and all repeated tables. Do not narrow pages, add pointers, or change generation. F1 through F11 remain as documented. The active diagnostic row and generated output may continue to disagree.",
+          "code": "# One change leaves two current forms\ndocs/spec/syntax-decisions.md\nBuild{ optimize: \"size\" }\n\ndocs/spec/diagnostics.md\nBuild{ optimize: \"size\" }\n\ncrates/jet-codegen/src/Prelude/Diagnostics.jet\nBuild.{ optimize: \"size\" }\n\n$ rg -n \"Build\\\\.?\\\\{\" docs/spec crates/jet-codegen llms.text\n# both spellings remain"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "OpenAPI",
+          "note": "An OpenAPI document can generate client and server views. The schema owns the wire shape, while generated files are outputs rather than competing contracts.",
+          "code": "openapi.yaml\nopenapi-generator generate -i openapi.yaml"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust source owns item meaning, while rustdoc renders a user-facing view. A changed signature does not require hand-editing every rendered page.",
+          "code": "cargo doc --no-deps"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "TypeScript projects often generate API reports from declarations. The declaration source and checked report have separate roles and a refresh check.",
+          "code": "api-extractor run --local"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A matches the existing registry and digest contracts. It makes law, teaching, machine inventory, and generated views distinct, then uses exact refresh and byte checks to catch drift.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B removes some copies, but retained rows and inventories still need separate manual updates. It leaves the same source-row mismatch path that F8 exposes."
+          },
+          {
+            "key": "C",
+            "reason": "C preserves every duplicate surface. It accepts known disagreements between current law, examples, typed rows, generated pages, and the digest."
+          }
+        ],
+        "tradeoff": "A accepts generator ownership and refresh steps for projections. In return, a topic has one law source and every checked view can be rebuilt from it."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base pass compared generated projections, pointer-only docs, and duplicated copies. It assigned exact owners to syntax, semantics, diagnostics, Core inventories, commands, examples, and the digest.",
+        "boilOcean": "The breadth pass checked diagnostics, Core APIs, encoding, packages, CLI, beginner workflow, safety, proof, performance, Canvas, external datasets, and LLM output. It kept distinct evidence roles.",
+        "hybrid": "The hybrid pass kept B's narrow teaching pages and A's generated diagnostic and digest views. It rejected B as the primary choice because retained projections still need manual sync.",
+        "cooperative": "The cooperative pass gave B a valid low-generation path and C a stable no-change path. It added explicit ownership and drift costs to both losing options.",
+        "adversarial": "The adversarial pass attacked stale constructor rows, typed locals, arrow history, marker prose, failure names, collection verbs, README commands, and duplicated inventories. It made F1 through F11 visible in the ballot."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-27T02:14:45.536Z"
+    },
+    {
+      "id": "D-EXAMPLES-SUITES1",
+      "cardId": "c06nrxwx",
+      "group": "tooling",
+      "title": "Consolidate feature examples into curated suites",
+      "gist": "Choose how feature examples become curated suites.",
+      "lesson": "An executable example is language evidence that a tool can run. A suite is one program that carries one user goal through related mechanisms and prints one stable result. A check proves a compiler error, target, host, harness, or gate that is not an honest portable story. A golden is expected output paired with a source path. That path is also a proof identity in tests and manifests. A merge therefore needs a map that keeps each old behavior, special channel, and consumer visible.",
+      "explainer": "",
+      "story": "Maya maintains Jet examples while an agent repairs compiler regressions. She wants a beginner to find one useful story, while the team keeps target, web, FFI, and diagnostic proofs. The current topic tree gives each tiny case a path, but it hides related behavior and lengthens every repair search.",
+      "inWild": "# Before: examples/features/functions/lambda_inference.jet\nfn run() {\n    nums :: [1, 2, 3, 4, 5]\n    big :: nums.filter(x -> x > 3)\n    print(big)\n}\n\n# After: examples/suites/functions.jet\nfn run() {\n    nums :: [1, 2, 3, 4, 5]\n    big :: nums.filter(x -> x > 3)\n    print(big)\n}\n\n$ jet run examples/suites/functions.jet\n[4, 5]",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full merge per Appendix A",
+          "detail": "Move positive teaching stories into 52 suites. Move special proofs into checks. Keep learn, interop, Jetpack, performance, continuity, and canon in their current roles. Gain: one domain story gives agents and learners a short repair path. Loss: every path, golden, manifest, and literal consumer must change as one map.",
+          "technical": "This decision amends D-REPO-EXAMPLES1 and preserves D-EXAMPLES-SHORTPATH1. Map all 681 rows. Merge 488 rows into 52 target suites, keep 185 rows, and delete 8 duplicate or probe rows. Use examples/suites/expected and examples/checks/expected as mirrors. Keep the existing suffix meanings. Preserve case identity for every retained behavior. Do not add aliases or fallback discovery.",
+          "code": "# One source story, one suite output\n# examples/suites/functions.jet\nfn run() {\n    nums :: [1, 2, 3, 4, 5]\n    big :: nums.filter(x -> x > 3)\n    print(big)\n}\n\n$ jet run examples/suites/functions.jet\n[4, 5]\n\n# Special proofs use examples/checks/ with their own expected channels."
+        },
+        {
+          "key": "B",
+          "name": "Two-layer showcase plus corpus deduplication",
+          "detail": "Add the 52 curated showcases, but keep the feature tree as the main corpus. Deduplicate only pure duplicates. Gain: a learner gets a shorter index while existing path contracts remain. Loss: two active teaching trees remain, so agents still search duplicate stories and docs can point to different proofs.",
+          "technical": "Add examples/suites without moving the positive feature sources. Deduplicate only the eight named carriers and leftovers. Keep existing feature discovery, expected paths, corpus rows, and literal consumers. The showcase files may copy content, but no shared case identity joins the two trees.",
+          "code": "# Original remains the corpus proof\n# examples/features/functions/lambda_inference.jet\nfn run() {\n    nums :: [1, 2, 3, 4, 5]\n    big :: nums.filter(x -> x > 3)\n    print(big)\n}\n\n# A second showcase copy is added\n# examples/suites/functions.jet\nfn run() {\n    nums :: [1, 2, 3, 4, 5]\n    big :: nums.filter(x -> x > 3)\n    print(big)\n}\n\n$ jet run examples/suites/functions.jet\n[4, 5]"
+        },
+        {
+          "key": "C",
+          "name": "Keep the current topic corpus",
+          "detail": "Keep the current feature files and topic folders. Gain: current paths and expected channels remain stable. Loss: 681 files still mix teaching stories, tiny probes, target gates, and project fixtures, so the first useful path and repair owner stay unclear.",
+          "technical": "Keep examples/features and its expected mirror as the only positive corpus. Keep the current direct discovery rules and path-derived proof identities. Do not add suites, checks, or a new case map. The eight duplicate or probe rows remain unless another decision removes them.",
+          "code": "# The current path remains the public route\n# examples/features/functions/lambda_inference.jet\nfn run() {\n    nums :: [1, 2, 3, 4, 5]\n    big :: nums.filter(x -> x > 3)\n    print(big)\n}\n\n$ jet run examples/features/functions/lambda_inference.jet\n[4, 5]"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust examples often sit beside tests and book chapters. The source file and test identity can stay separate, so a path move still needs explicit fixture updates.",
+          "code": "cargo test --test golden"
+        },
+        {
+          "lang": "Go",
+          "note": "Go example functions attach output to a named example. The name gives one readable story, while package tests keep separate proof scope.",
+          "code": "func ExampleFilter() { fmt.Println([]int{4, 5}) }"
+        },
+        {
+          "lang": "Python",
+          "note": "Python projects often mix tutorial scripts, unit tests, and benchmark fixtures. A curated index helps, but it does not replace special test contracts.",
+          "code": "pytest tests/test_filter.py"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives learners one safe story per domain and gives agents one nearby output contract. It preserves special proof classes, expert siblings, and every mapped behavior.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a useful index, but it leaves duplicate positive sources and two competing paths. That keeps the search cost and drift risk that this decision targets."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps stable paths, but it keeps unrelated proof roles in one corpus. It does not make the first path, expert control, or repair owner clear."
+          }
+        ],
+        "tradeoff": "A accepts one atomic path migration and a temporary discovery bridge. The final corpus has fewer public stories, while checks retain specialized coverage."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base pass compared full merge, two layers, and the current corpus. It added the exact 681, 488, 52, 185, and 8 counts to option A and kept the full identity map.",
+        "boilOcean": "The breadth pass tested learn, interop, Jetpack, performance, continuity, canon, nested projects, web, FFI, jobs, and diagnostics. It kept those contracts outside ordinary suites.",
+        "hybrid": "The hybrid pass kept B's showcase index as a bridge tactic, but rejected it as the final choice because it leaves two active positive trees.",
+        "cooperative": "The cooperative pass strengthened B with links to the original corpus and made C's stable paths explicit. It kept both losing options as genuine choices.",
+        "adversarial": "The adversarial pass attacked path-only renames, orphaned suffixes, nested run.jet discovery, web harness paths, corpus ghosts, and lost manual expert behavior. It made case identity and atomic deletion explicit."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-27T02:14:45.909Z"
+    },
+    {
+      "id": "D-REPO-LAYOUT1",
+      "cardId": "c06nrxwx",
+      "group": "tooling",
+      "title": "Set the repository root and session artifact law",
+      "gist": "Choose how the root and session artifacts stay clean.",
+      "lesson": "A root allow-list names intentional project entries. An ephemeral entry may exist during a build or session, but it is never source and is never tracked. A session cache stores reports, probes, and logs outside the repository for one run. An ignore rule blocks accidental tracking, but it does not delete a tracked file. A growth bound rejects oversized durable state before it consumes memory or disk.",
+      "explainer": "",
+      "story": "Noah runs Jet's parity and browser checks from one checkout. Each run creates reports, probes, target trees, and timing files. He needs the next agent to see project files at the root, find evidence in the lane cache, and avoid trusting a 2.0 GiB lock or a stale generated tree.",
+      "inWild": "# Before\n$ git status --short\n?? .checked_text_probe.jet\n?? .claude/verify_full.log\n?? jit-aot-parity-report-1/\n?? .cache/jet/run/module.bin\n?? jet-timing.json\n\n# After\n$ git status --short\n# clean project boundary\n$ find \"$HOME/.cache/jet-luna\" -maxdepth 3 -type f\n/home/nate/.cache/jet-luna/parity/run-42/report.txt\n/home/nate/.cache/jet-luna/parity/run-42/probe.jet\n$ find . -maxdepth 1 -name 'jet-timing.json'\n# no output",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full root law with enforcement check",
+          "detail": "Allow only named project roots. Put reports, probes, and logs under the lane cache. Permit target-<name> only for one active checkout session. Add all 18 exact ignore patterns and an enforcement check. Gain: root state has one meaning and sessions leave bounded evidence. Loss: tools that write at the root must move their output contract.",
+          "technical": "Use the exhaustive root allow-list from Plane C. Use $HOME/.cache/jet-luna/<lane>/<run-id>/ for reports and probes, $HOME/.cache/jet-test-scratch for test scratch, and checkout-local target-<name> for active isolation. Add the 18 listed patterns. Enforce no tracked root junk, no tracked runtime cache, no generated root src, and no session files in .claude. Keep .jet/lock bounded and durable.",
+          "code": "$ scripts/agent/check-repo-layout.sh\nroot: ok\ntracked session artifacts: none\ntracked root cache artifacts: none\nsession reports: external\n\n$ git check-ignore -v .checked_text_probe.jet .cache/jet/run/module.bin\n.gitignore:1:/.checked_text_probe.jet .checked_text_probe.jet\n.gitignore:18:/.cache/ .cache/jet/run/module.bin"
+        },
+        {
+          "key": "B",
+          "name": "Add the exact ignore patterns only",
+          "detail": "Add the 18 patterns that block known probes, reports, logs, partial binaries, and cache output. Gain: accidental adds become less likely. Loss: the root still has no enforced shape, session output still has no lifetime rule, and tracked artifacts remain tracked.",
+          "technical": "Change only .gitignore. Add the exact patterns from Plane C. Do not add a root allow-list, a layout checker, a cache lifetime rule, a lock size guard, or a timing output contract. Existing tracked paths remain in the index.",
+          "code": "$ git check-ignore -v .checked_text_probe.jet\n.gitignore:1:/.checked_text_probe.jet .checked_text_probe.jet\n\n$ scripts/agent/check-repo-layout.sh\ncommand not found\n\n$ git ls-files .cache/jet/run\n.cache/jet/run/module.bin"
+        },
+        {
+          "key": "C",
+          "name": "Keep the current layout",
+          "detail": "Keep current root rules and ignore patterns. Gain: no project boundary changes. Loss: probes, session logs, generated trees, runtime cache files, and timing reports can return to the repository root without a shared rule.",
+          "technical": "Make no root policy change. Keep current .gitignore behavior, current tracked artifacts, current .claude session output, and current cwd timing writes. Do not enforce .jet growth or target lifetime.",
+          "code": "$ git status --short\n?? .checked_text_probe.jet\n?? .claude/verify_full.log\n?? jit-aot-parity-report-1/\n?? jet-timing.json\n\n$ git check-ignore .checked_text_probe.jet\n# no output"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust Cargo",
+          "note": "Cargo writes build output under target and lets each checkout own a target directory. Jet extends this boundary to reports, probes, and named session targets.",
+          "code": "cargo build --target-dir target"
+        },
+        {
+          "lang": "Bazel",
+          "note": "Bazel separates source trees from output bases. The same separation keeps generated and session output away from Jet's root source map.",
+          "code": "bazel --output_user_root=/cache/bazel build //..."
+        },
+        {
+          "lang": "Git",
+          "note": "Git ignore rules prevent untracked noise but do not remove an indexed path. A layout check must inspect both the filesystem and the index.",
+          "code": "git check-ignore -v path\n git ls-files path"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives Jet one root contract, one session cache location, and one check for drift. It closes the gap between ignoring new junk and removing old tracked artifacts.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B blocks some future accidents, but it does not define artifact lifetime or detect tracked files. The same root pollution can return through an unlisted class."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps the current boundary even though the hygiene report already found repeated probes, logs, caches, generated trees, and cwd timing output."
+          }
+        ],
+        "tradeoff": "A accepts explicit output paths and a layout check for every session. In return, root files, durable state, and disposable evidence remain distinguishable."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base pass compared an enforced allow-list, ignore-only protection, and status quo. It kept the 18 exact patterns, external lane cache, named targets, and root exceptions.",
+        "boilOcean": "The breadth pass checked root entries, worktrees, Cargo output, Zed output, .claude artifacts, .cache runtime files, .jet state, and timing reports. It kept product roots and separated disposable output.",
+        "hybrid": "The hybrid pass kept ignore rules as a safety net inside A, but rejected B's ignore-only boundary as the final law. It also kept target-<name> for active isolation.",
+        "cooperative": "The cooperative pass gave B a useful first step and C a zero-change fallback. It strengthened A with an index check because ignore rules do not affect tracked paths.",
+        "adversarial": "The adversarial pass attacked root src duplication, tracked cache files, unbounded lock provenance, alternate worktree roots, and cwd timing writes. It added explicit lifetime and size rules."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-27T02:14:46.279Z"
     }
   ],
   "questions": [
@@ -212301,6 +212690,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-27T02:14:46.279Z",
+      "by": "fable-streamline",
+      "action": "decision.add",
+      "ref": "D-REPO-LAYOUT1",
+      "note": "Set the repository root and session artifact law"
+    },
+    {
+      "at": "2026-08-27T02:14:45.910Z",
+      "by": "fable-streamline",
+      "action": "decision.add",
+      "ref": "D-EXAMPLES-SUITES1",
+      "note": "Consolidate feature examples into curated suites"
+    },
+    {
+      "at": "2026-08-27T02:14:45.537Z",
+      "by": "fable-streamline",
+      "action": "decision.add",
+      "ref": "D-DOCS-SSOT1",
+      "note": "Set one source of truth for each surface topic"
+    },
+    {
+      "at": "2026-08-27T02:14:45.164Z",
+      "by": "fable-streamline",
+      "action": "decision.add",
+      "ref": "D-DOCS-GC1",
+      "note": "Apply docs garbage collection and the canonical docs layout"
+    },
+    {
+      "at": "2026-08-27T02:14:37.618Z",
+      "by": "fable-streamline",
+      "action": "card.add",
+      "ref": "c06nrxwx",
+      "note": "Streamline the repository: example suites, docs GC, root layout law"
+    },
+    {
+      "at": "2026-08-27T02:00:14.742Z",
+      "by": "fable-site",
+      "action": "card.add",
+      "ref": "c0s9kjxe",
+      "note": "Repo env.dev is unrealizable: E1340 on lld@default, so E1355's own fix dead-ends"
+    },
+    {
+      "at": "2026-08-27T01:33:57.090Z",
+      "by": "fable-site",
+      "action": "card.update",
+      "ref": "c090lkeu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-27T01:33:56.046Z",
+      "by": "fable-site",
+      "action": "card.criteria-meet",
+      "ref": "c090lkeu",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-27T01:33:55.037Z",
+      "by": "fable-site",
+      "action": "card.criteria-add",
+      "ref": "c090lkeu",
+      "note": "#1 jet run site/generate.jet emits dist; all pages render in Ch"
+    },
     {
       "at": "2026-08-27T01:19:55.267Z",
       "by": "fable-site",
@@ -215737,69 +216189,6 @@
       "action": "card.criteria-meet",
       "ref": "c0he3z7n",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-26T01:15:34.628Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0buykp2",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-26T01:15:34.269Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0vtcu2n",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-26T01:15:33.847Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01onu4d",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-26T01:15:33.499Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01onu4d",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-26T01:15:33.104Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01onu4d",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-26T01:15:32.727Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c01onu4d",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-26T01:15:32.316Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0lu3g79",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-26T01:15:31.959Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0lu3g79",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-26T01:15:31.579Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0lu3g79",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
