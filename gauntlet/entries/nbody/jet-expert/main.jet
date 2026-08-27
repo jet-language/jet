@@ -1,0 +1,265 @@
+use core.math as math
+use core.process as process
+use core.text.fmt as fmt
+
+#Inline(Always)
+fn kinetic(vx: Float, vy: Float, vz: Float, mass: Float) Float ->
+    Float{0.5} * mass * (vx * vx + vy * vy + vz * vz)
+
+#Inline(Always)
+fn potential(
+    xi: Float, yi: Float, zi: Float, mi: Float,
+    xj: Float, yj: Float, zj: Float, mj: Float
+) Float -> {
+    dx :: xi - xj
+    dy :: yi - yj
+    dz :: zi - zj
+    return mi * mj / math.sqrt(dx * dx + dy * dy + dz * dz)
+}
+
+fn energy(
+    x0: Float, y0: Float, z0: Float, vx0: Float, vy0: Float, vz0: Float, m0: Float,
+    x1: Float, y1: Float, z1: Float, vx1: Float, vy1: Float, vz1: Float, m1: Float,
+    x2: Float, y2: Float, z2: Float, vx2: Float, vy2: Float, vz2: Float, m2: Float,
+    x3: Float, y3: Float, z3: Float, vx3: Float, vy3: Float, vz3: Float, m3: Float,
+    x4: Float, y4: Float, z4: Float, vx4: Float, vy4: Float, vz4: Float, m4: Float
+) Float -> {
+    total := kinetic(vx0, vy0, vz0, m0)
+    total -= potential(x0, y0, z0, m0, x1, y1, z1, m1)
+    total -= potential(x0, y0, z0, m0, x2, y2, z2, m2)
+    total -= potential(x0, y0, z0, m0, x3, y3, z3, m3)
+    total -= potential(x0, y0, z0, m0, x4, y4, z4, m4)
+    total += kinetic(vx1, vy1, vz1, m1)
+    total -= potential(x1, y1, z1, m1, x2, y2, z2, m2)
+    total -= potential(x1, y1, z1, m1, x3, y3, z3, m3)
+    total -= potential(x1, y1, z1, m1, x4, y4, z4, m4)
+    total += kinetic(vx2, vy2, vz2, m2)
+    total -= potential(x2, y2, z2, m2, x3, y3, z3, m3)
+    total -= potential(x2, y2, z2, m2, x4, y4, z4, m4)
+    total += kinetic(vx3, vy3, vz3, m3)
+    total -= potential(x3, y3, z3, m3, x4, y4, z4, m4)
+    total += kinetic(vx4, vy4, vz4, m4)
+    return total
+}
+
+fn run() {
+    steps :: Int.parse(process.argv().get(1) ?? "50000") ?? 50000
+    pi :: Float{3.141592653589793}
+    solar_mass :: Float{4.0} * pi * pi
+    year :: Float{365.24}
+
+    x0 := Float{0.0}
+    y0 := Float{0.0}
+    z0 := Float{0.0}
+    vx0 := Float{0.0}
+    vy0 := Float{0.0}
+    vz0 := Float{0.0}
+    m0 :: solar_mass
+
+    x1 := Float{4.84143144246472090}
+    y1 := Float{-1.16032004402742839}
+    z1 := Float{-0.103622044471123109}
+    vx1 := Float{0.00166007664274403694} * year
+    vy1 := Float{0.00769901118419740425} * year
+    vz1 := Float{-0.0000690460016972063023} * year
+    m1 :: Float{0.000954791938424326609} * solar_mass
+
+    x2 := Float{8.34336671824457987}
+    y2 := Float{4.12479856412430479}
+    z2 := Float{-0.403523417114321381}
+    vx2 := Float{-0.00276742510726862411} * year
+    vy2 := Float{0.00499852801234917238} * year
+    vz2 := Float{0.0000230417297573763929} * year
+    m2 :: Float{0.000285885980666130812} * solar_mass
+
+    x3 := Float{12.8943695621391310}
+    y3 := Float{-15.1111514016986312}
+    z3 := Float{-0.223307578892655734}
+    vx3 := Float{0.00296460137564761618} * year
+    vy3 := Float{0.00237847173959480950} * year
+    vz3 := Float{-0.0000296589568540237556} * year
+    m3 :: Float{0.0000436624404335156298} * solar_mass
+
+    x4 := Float{15.3796971148509165}
+    y4 := Float{-25.9193146099879641}
+    z4 := Float{0.179258772950371181}
+    vx4 := Float{0.00268067772490389322} * year
+    vy4 := Float{0.00162824170038242201} * year
+    vz4 := Float{-0.0000951592254519715870} * year
+    m4 :: Float{0.0000515138902046611451} * solar_mass
+
+    px := Float{0.0}
+    py := Float{0.0}
+    pz := Float{0.0}
+    px += vx1 * m1
+    py += vy1 * m1
+    pz += vz1 * m1
+    px += vx2 * m2
+    py += vy2 * m2
+    pz += vz2 * m2
+    px += vx3 * m3
+    py += vy3 * m3
+    pz += vz3 * m3
+    px += vx4 * m4
+    py += vy4 * m4
+    pz += vz4 * m4
+    vx0 = -px / m0
+    vy0 = -py / m0
+    vz0 = -pz / m0
+
+    print(fmt.decimal(energy(
+        x0, y0, z0, vx0, vy0, vz0, m0,
+        x1, y1, z1, vx1, vy1, vz1, m1,
+        x2, y2, z2, vx2, vy2, vz2, m2,
+        x3, y3, z3, vx3, vy3, vz3, m3,
+        x4, y4, z4, vx4, vy4, vz4, m4
+    ), 9))
+
+    remaining := steps
+    loop remaining > 0 {
+        dx01 :: x0 - x1
+        dy01 :: y0 - y1
+        dz01 :: z0 - z1
+        ds01 :: dx01 * dx01 + dy01 * dy01 + dz01 * dz01
+        mag01 :: Float{0.01} / (ds01 * math.sqrt(ds01))
+        vx0 -= dx01 * m1 * mag01
+        vy0 -= dy01 * m1 * mag01
+        vz0 -= dz01 * m1 * mag01
+        vx1 += dx01 * m0 * mag01
+        vy1 += dy01 * m0 * mag01
+        vz1 += dz01 * m0 * mag01
+
+        dx02 :: x0 - x2
+        dy02 :: y0 - y2
+        dz02 :: z0 - z2
+        ds02 :: dx02 * dx02 + dy02 * dy02 + dz02 * dz02
+        mag02 :: Float{0.01} / (ds02 * math.sqrt(ds02))
+        vx0 -= dx02 * m2 * mag02
+        vy0 -= dy02 * m2 * mag02
+        vz0 -= dz02 * m2 * mag02
+        vx2 += dx02 * m0 * mag02
+        vy2 += dy02 * m0 * mag02
+        vz2 += dz02 * m0 * mag02
+
+        dx03 :: x0 - x3
+        dy03 :: y0 - y3
+        dz03 :: z0 - z3
+        ds03 :: dx03 * dx03 + dy03 * dy03 + dz03 * dz03
+        mag03 :: Float{0.01} / (ds03 * math.sqrt(ds03))
+        vx0 -= dx03 * m3 * mag03
+        vy0 -= dy03 * m3 * mag03
+        vz0 -= dz03 * m3 * mag03
+        vx3 += dx03 * m0 * mag03
+        vy3 += dy03 * m0 * mag03
+        vz3 += dz03 * m0 * mag03
+
+        dx04 :: x0 - x4
+        dy04 :: y0 - y4
+        dz04 :: z0 - z4
+        ds04 :: dx04 * dx04 + dy04 * dy04 + dz04 * dz04
+        mag04 :: Float{0.01} / (ds04 * math.sqrt(ds04))
+        vx0 -= dx04 * m4 * mag04
+        vy0 -= dy04 * m4 * mag04
+        vz0 -= dz04 * m4 * mag04
+        vx4 += dx04 * m0 * mag04
+        vy4 += dy04 * m0 * mag04
+        vz4 += dz04 * m0 * mag04
+
+        dx12 :: x1 - x2
+        dy12 :: y1 - y2
+        dz12 :: z1 - z2
+        ds12 :: dx12 * dx12 + dy12 * dy12 + dz12 * dz12
+        mag12 :: Float{0.01} / (ds12 * math.sqrt(ds12))
+        vx1 -= dx12 * m2 * mag12
+        vy1 -= dy12 * m2 * mag12
+        vz1 -= dz12 * m2 * mag12
+        vx2 += dx12 * m1 * mag12
+        vy2 += dy12 * m1 * mag12
+        vz2 += dz12 * m1 * mag12
+
+        dx13 :: x1 - x3
+        dy13 :: y1 - y3
+        dz13 :: z1 - z3
+        ds13 :: dx13 * dx13 + dy13 * dy13 + dz13 * dz13
+        mag13 :: Float{0.01} / (ds13 * math.sqrt(ds13))
+        vx1 -= dx13 * m3 * mag13
+        vy1 -= dy13 * m3 * mag13
+        vz1 -= dz13 * m3 * mag13
+        vx3 += dx13 * m1 * mag13
+        vy3 += dy13 * m1 * mag13
+        vz3 += dz13 * m1 * mag13
+
+        dx14 :: x1 - x4
+        dy14 :: y1 - y4
+        dz14 :: z1 - z4
+        ds14 :: dx14 * dx14 + dy14 * dy14 + dz14 * dz14
+        mag14 :: Float{0.01} / (ds14 * math.sqrt(ds14))
+        vx1 -= dx14 * m4 * mag14
+        vy1 -= dy14 * m4 * mag14
+        vz1 -= dz14 * m4 * mag14
+        vx4 += dx14 * m1 * mag14
+        vy4 += dy14 * m1 * mag14
+        vz4 += dz14 * m1 * mag14
+
+        dx23 :: x2 - x3
+        dy23 :: y2 - y3
+        dz23 :: z2 - z3
+        ds23 :: dx23 * dx23 + dy23 * dy23 + dz23 * dz23
+        mag23 :: Float{0.01} / (ds23 * math.sqrt(ds23))
+        vx2 -= dx23 * m3 * mag23
+        vy2 -= dy23 * m3 * mag23
+        vz2 -= dz23 * m3 * mag23
+        vx3 += dx23 * m2 * mag23
+        vy3 += dy23 * m2 * mag23
+        vz3 += dz23 * m2 * mag23
+
+        dx24 :: x2 - x4
+        dy24 :: y2 - y4
+        dz24 :: z2 - z4
+        ds24 :: dx24 * dx24 + dy24 * dy24 + dz24 * dz24
+        mag24 :: Float{0.01} / (ds24 * math.sqrt(ds24))
+        vx2 -= dx24 * m4 * mag24
+        vy2 -= dy24 * m4 * mag24
+        vz2 -= dz24 * m4 * mag24
+        vx4 += dx24 * m2 * mag24
+        vy4 += dy24 * m2 * mag24
+        vz4 += dz24 * m2 * mag24
+
+        dx34 :: x3 - x4
+        dy34 :: y3 - y4
+        dz34 :: z3 - z4
+        ds34 :: dx34 * dx34 + dy34 * dy34 + dz34 * dz34
+        mag34 :: Float{0.01} / (ds34 * math.sqrt(ds34))
+        vx3 -= dx34 * m4 * mag34
+        vy3 -= dy34 * m4 * mag34
+        vz3 -= dz34 * m4 * mag34
+        vx4 += dx34 * m3 * mag34
+        vy4 += dy34 * m3 * mag34
+        vz4 += dz34 * m3 * mag34
+
+        x0 += Float{0.01} * vx0
+        y0 += Float{0.01} * vy0
+        z0 += Float{0.01} * vz0
+        x1 += Float{0.01} * vx1
+        y1 += Float{0.01} * vy1
+        z1 += Float{0.01} * vz1
+        x2 += Float{0.01} * vx2
+        y2 += Float{0.01} * vy2
+        z2 += Float{0.01} * vz2
+        x3 += Float{0.01} * vx3
+        y3 += Float{0.01} * vy3
+        z3 += Float{0.01} * vz3
+        x4 += Float{0.01} * vx4
+        y4 += Float{0.01} * vy4
+        z4 += Float{0.01} * vz4
+        remaining -= 1
+    }
+
+    print(fmt.decimal(energy(
+        x0, y0, z0, vx0, vy0, vz0, m0,
+        x1, y1, z1, vx1, vy1, vz1, m1,
+        x2, y2, z2, vx2, vy2, vz2, m2,
+        x3, y3, z3, vx3, vy3, vz3, m3,
+        x4, y4, z4, vx4, vy4, vz4, m4
+    ), 9))
+}

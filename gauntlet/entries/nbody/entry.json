@@ -87,7 +87,15 @@
     },
     "jet-expert": {
       "author": "sol-high",
-      "status": "pending"
+      "turns": 2,
+      "retries": 4,
+      "diagnosticsHit": [
+        "sh: line 1: /usr/bin/time: No such file or directory",
+        "SyntaxError: unexpected character after line continuation character",
+        "cycle-1 jet run main.jet -- 50000 timed out after approximately 180 seconds after emitting only -0.169075164",
+        "timeout exit 124: final unrolled jet run main.jet -- 50000 exceeded 180 seconds after emitting only -0.169075164"
+      ],
+      "notes": "AOT attempt 1 used a #Inline(Always) scalar kick helper, built cleanly, matched expected.out, and measured 0.004341s median. Generated Rust retained hot-path JetOutcome/trace wrapping around each kick, so attempt 2 directly unrolled all ten scalar pair updates; it built cleanly, matched expected.out, and measured 0.003358s median versus 0.002801s for beginner C (31 canonical runs each). No #Unsafe region helped: Jet exposes neither portable SIMD vectors nor floating-point SIMD intrinsics/inline assembly. Default jet run emitted the correct initial energy but did not finish N=50000 within approximately 180 seconds; AOT is proven canonical."
     }
   }
 }

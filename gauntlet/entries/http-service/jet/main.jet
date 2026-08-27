@@ -1,0 +1,72 @@
+use core.http.server as server
+use core.net as net
+use core.process as process
+
+fn health(_req: HTTPRequest) HTTPResponse !HTTPError ->
+    Ok(server.response(200, "{{\"status\":\"ok\"}}").header("content-type", "application/json"))
+
+fn put_value(req: HTTPRequest, values: Shared<[String]>) HTTPResponse !HTTPError -> {
+    key :: req.param("key") ?? ""
+    value :: req.body().text(8388608) ?? ""
+    guard := values.guard_edit()
+    next := guard.value
+    i := 0
+    found := false
+    loop i < next.len() {
+        if next[i] == key {
+            next[i + 1] = ~value
+            found = true
+            break
+        }
+        i += 2
+    }
+    if !found {
+        next.push(~key)
+        next.push(~value)
+    }
+    guard.value = next
+    return Ok(server.response(200, "{{\"stored\":\"{key}\"}}").header("content-type", "application/json"))
+}
+
+fn get_value(req: HTTPRequest, values: Shared<[String]>) HTTPResponse !HTTPError -> {
+    key :: req.param("key") ?? ""
+    guard :: values.guard_read()
+    i := 0
+    loop i < guard.value.len() {
+        if guard.value[i] == key {
+            stored :: guard.value[i + 1]
+            return Ok(server.response(200, "{{\"key\":\"{key}\",\"value\":\"{stored}\"}}").header("content-type", "application/json"))
+        }
+        i += 2
+    }
+    return Ok(server.response(404, "{{\"error\":\"not found\"}}").header("content-type", "application/json"))
+}
+
+fn shutdown(_req: HTTPRequest, state: Shared<Bool>) HTTPResponse !HTTPError -> {
+    guard :: state.guard_edit()
+    guard.value = true
+    return Ok(server.response(200, "{{\"bye\":true}}").header("content-type", "application/json"))
+}
+
+fn stopped(state: Shared<Bool>) Bool !Err -> {
+    guard :: state.guard_read()
+    if guard.value -> return true
+    return false
+}
+
+fn run() !(HTTPError | NetError | IOError) {
+    port :: process.argv().get(1) ?? "18080"
+    listener :: net.tcp_listen("127.0.0.1:{port}")
+    values :: shared [String]{"", ""}
+    state :: shared false
+    mux :: server.mux()
+    mux.get("/health", (req: HTTPRequest) -> health(req))
+    mux.put("/kv/:key", (req: HTTPRequest) -> put_value(req, values))
+    mux.get("/kv/:key", (req: HTTPRequest) -> get_value(req, values))
+    mux.get("/shutdown", (req: HTTPRequest) -> shutdown(req, state))
+    loop {
+        stopping :: stopped(state) ?? false
+        if stopping -> break
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+    }
+}

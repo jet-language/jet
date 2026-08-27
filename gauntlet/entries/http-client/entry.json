@@ -1,0 +1,21 @@
+{
+  "name": "http-client",
+  "tier": "program",
+  "cells": ["netserv.client"],
+  "mode": "batch",
+  "perf": false,
+  "languages": ["jet", "rust", "python", "go"],
+  "spec": {
+    "behavior": "Use an HTTP client to GET a fixed JSON item list, print its count and total quantity, then GET item ids 2, 5, and 99 and print the two records plus a missing marker for the 404.",
+    "args": ["http://127.0.0.1:18400"],
+    "fixtureGen": null,
+    "peer": {"script": "fixtures/peer.py", "port": 18400},
+    "expected": "expected.out"
+  },
+  "authoring": {
+    "jet": {"author": "luna-max", "turns": 4, "retries": 3, "diagnosticsHit": ["E2105: can't find the file `jet/main.jet`", "E1803: application authority is undecided for `Exec`", "internal compiler error: generated Rust E0308 mismatched types in derived #CLI Codable support", "L0507 (branch_arm_table): prefer an ordered arm table for this branch", "L0103 (unused_import): import `http_client` is never used"], "notes": "Uses dynamic DataTree parsing after typed #CLI/Codable generated invalid Rust. Uses canonical loopback peer URL because process.argv adds Exec authority. The harness canonical argument is accepted by peer-language ports; Jet is fixed to the contract's canonical URL."},
+    "rust": {"author": "luna-max", "turns": 3, "retries": 1, "diagnosticsHit": ["error: couldn't read `rust/main.rs`: No such file or directory (os error 2)"], "notes": "Rust std has no HTTP or JSON client; hand-wrote HTTP/1.1 over TcpStream and fixed-schema JSON field extraction, including quantity summation."},
+    "python": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["python3: can't open file `python/main.py`: [Errno 2] No such file or directory"], "notes": "Uses urllib and stdlib json."},
+    "go": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["package `go/main.go` is not in std"], "notes": "Uses net/http and encoding/json."}
+  }
+}
