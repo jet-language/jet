@@ -291,7 +291,7 @@ async function discoverJetArtifact(dir) {
 
 function buildCommand(language, jetBin, sourceDir) {
   if (language === "jet") return [jetBin, "build", "main.jet"];
-  if (language === "rust") return ["rustc", "-O", "main.rs", "-o", "main-rust"];
+  if (language === "rust") return ["rustc", "--edition=2021", "-O", "main.rs", "-o", "main-rust"];
   if (language === "c") return ["gcc", "-O2", "main.c", "-o", "main-c", "-lm"];
   if (language === "zig") return ["zig", "build-exe", "-O", "ReleaseFast", "--cache-dir", "zig-cache", "--global-cache-dir", "zig-global-cache", "main.zig"];
   if (language === "go") return ["env", "GO111MODULE=off", `GOCACHE=${path.join(sourceDir, "go-cache")}`, "go", "build", "-o", "main-go", "main.go"];
@@ -602,6 +602,10 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     const stagedSource = path.join(entryStage, language);
     await fs.cp(sourceDir, stagedSource, { recursive: true });
     if (fixture) await fs.cp(commonFixtures, path.join(stagedSource, "fixtures"), { recursive: true });
+    for (const item of await fs.readdir(entryDir, { withFileTypes: true })) {
+      if (!item.isFile() || item.name === "entry.json" || item.name === path.basename(expectedPath)) continue;
+      await fs.copyFile(path.join(entryDir, item.name), path.join(stagedSource, item.name));
+    }
     let fixtureReset = null;
     if (fixture && generatedFixture) {
       const fixtureTarget = path.join(stagedSource, fixture.out);
