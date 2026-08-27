@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install Jet</title>
+<meta name="description" content="Install the Jet toolchain on x86_64 Linux or macOS with Nix, or build it from source, and run your first program.">
+<meta property="og:title" content="Jet: safe at any speed">
+<meta property="og:description" content="A memory-safe compiled language. No ceremony to start, full control when you want it.">
+<meta property="og:image" content="https://jet-lang.dev/assets/jet-logo.png">
+<meta property="og:url" content="https://jet-lang.dev/">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<header class="wrap nav">
+  <a class="nav-brand" href="index.html" aria-label="Jet home">
+    <svg viewBox="0 0 120 64" aria-hidden="true"><path fill="#E8232A" d="M112 32 L52 6 L66 32 L52 58 Z"/><rect fill="#E8232A" x="26" y="14" width="18" height="6" rx="3"/><rect fill="#E8232A" x="4" y="29" width="36" height="6" rx="3"/><rect fill="#E8232A" x="16" y="44" width="24" height="6" rx="3"/></svg>
+    <span class="word">jet</span>
+  </a>
+  <nav>
+    <ul class="nav-links">
+      <li><a href="tour.html">Tour</a></li>
+      <li><a href="install.html" aria-current="page">Install</a></li>
+      <li><a href="https://github.com/jet-language/jet">GitHub</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main>
+<section class="wrap page">
+  <div class="page-header">
+    <p class="eyebrow">// install</p>
+    <h1>From zero to running in one command.</h1>
+    <p>Jet is pre-release. Today the supported install path is Nix on x86_64 Linux and macOS; everything else means building from source. Both take minutes.</p>
+  </div>
+</section>
+<article class="wrap article">
+  <section>
+    <h2>Install with Nix</h2>
+    <div class="term"><span class="ps">$</span> <span class="cmd">nix --extra-experimental-features "nix-command flakes" \</span>
+    <span class="cmd">profile install github:jet-language/jet</span>
+<span class="ps">$</span> <span class="cmd">jet version</span></div>
+    <p>No Nix yet? The one-line installer at nixos.org sets it up on any Linux distribution or macOS.</p>
+  </section>
+
+  <section>
+    <h2>Or build from source</h2>
+    <div class="term"><span class="ps">$</span> <span class="cmd">git clone https://github.com/jet-language/jet</span>
+<span class="ps">$</span> <span class="cmd">cd jet</span>
+<span class="ps">$</span> <span class="cmd">nix build</span>
+<span class="ps">$</span> <span class="cmd">export PATH="$PWD/result/bin:$PATH"</span>
+<span class="ps">$</span> <span class="cmd">jet version</span></div>
+  </section>
+
+  <section>
+    <h2>Your first program</h2>
+    <div class="term"><span class="ps">$</span> <span class="cmd">jet new hello</span>
+<span class="ps">$</span> <span class="cmd">cd hello</span>
+<span class="ps">$</span> <span class="cmd">jet run</span>
+<span class="out">hello, world</span></div>
+    <p>jet new writes a small project: run.jet with a passing #Test block, a package.jet manifest, and typed command entries. jet run compiles and runs it with the fast profile; jet run --release uses the optimized native build.</p>
+  </section>
+
+  <section>
+    <h2>When something breaks</h2>
+    <p>Every Jet error has a registered code, a what, a why, and a fix. jet explain takes any code you see and gives the full story offline; jet fix applies the compiler's own suggested repairs to your file.</p>
+    <div class="term"><span class="ps">$</span> <span class="cmd">jet explain E0112</span>
+<span class="ps">$</span> <span class="cmd">jet fix run.jet</span></div>
+  </section>
+
+  <section>
+    <h2>What works today</h2>
+    <ul>
+      <li>The compiler, the checker, the test runner, and the formatter, on every example in the repository.</li>
+      <li>Native builds through the default fast profile and the optimized release profile.</li>
+      <li>An early web backend: jet build --target web compiles a checked subset to WebAssembly.</li>
+      <li>jetpack, the environment engine: declared, reproducible project shells.</li>
+    </ul>
+    <p>What does not work yet: a package registry, Windows, and stability promises. The language is changing weekly, and the diagnostics are the most reliable map of what is true right now.</p>
+  </section>
+</article>
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-grid">
+    <a class="nav-brand" href="index.html" aria-label="Jet home">
+      <svg viewBox="0 0 120 64" aria-hidden="true"><path fill="#E8232A" d="M112 32 L52 6 L66 32 L52 58 Z"/><rect fill="#E8232A" x="26" y="14" width="18" height="6" rx="3"/><rect fill="#E8232A" x="4" y="29" width="36" height="6" rx="3"/><rect fill="#E8232A" x="16" y="44" width="24" height="6" rx="3"/></svg>
+      <span class="word">jet</span>
+    </a>
+    <ul class="footer-links">
+      <li><a href="tour.html">Tour</a></li>
+      <li><a href="install.html" aria-current="page">Install</a></li>
+      <li><a href="e/index.html">Error codes</a></li>
+      <li><a href="https://github.com/jet-language/jet">GitHub</a></li>
+    </ul>
+    <p class="made">This page was generated by site/generate.jet, a Jet program.</p>
+  </div>
+</footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

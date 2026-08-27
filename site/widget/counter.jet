@@ -1,0 +1,22 @@
+// The live widget on jet-lang.dev: a reactive counter compiled to WebAssembly.
+// Adapted from examples/features/web/ui_web_click.jet (golden-tested).
+use core.ui as ui
+use core.reactive as reactive
+#[Target(Web), HTML("shell.html")]
+
+fn run() {
+    count :: reactive.signal(0)
+    ui.reactive_render(() -> {
+        n := count.get()
+        color := "#2E2E33"
+        if n % 2 == 1 -> color = "#E8232A"
+        backend :: ui.null_backend()
+        tree :: ui.box([
+            ui.node_color("count: {n}", 160.0, 40.0, color),
+            ui.button("Add one", on_click: () -> {
+                count.set(count.get() + 1)
+            })
+        ])
+        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 300.0, 120.0))
+    })
+}

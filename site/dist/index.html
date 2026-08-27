@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jet, a memory-safe compiled language</title>
+<meta name="description" content="Jet is a memory-safe compiled language. Start with no ceremony; go as deep as raw memory. Every step away from safety costs one written word.">
+<meta property="og:title" content="Jet: safe at any speed">
+<meta property="og:description" content="A memory-safe compiled language. No ceremony to start, full control when you want it.">
+<meta property="og:image" content="https://jet-lang.dev/assets/jet-logo.png">
+<meta property="og:url" content="https://jet-lang.dev/">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<header class="wrap nav">
+  <a class="nav-brand" href="index.html" aria-label="Jet home">
+    <svg viewBox="0 0 120 64" aria-hidden="true"><path fill="#E8232A" d="M112 32 L52 6 L66 32 L52 58 Z"/><rect fill="#E8232A" x="26" y="14" width="18" height="6" rx="3"/><rect fill="#E8232A" x="4" y="29" width="36" height="6" rx="3"/><rect fill="#E8232A" x="16" y="44" width="24" height="6" rx="3"/></svg>
+    <span class="word">jet</span>
+  </a>
+  <nav>
+    <ul class="nav-links">
+      <li><a href="tour.html">Tour</a></li>
+      <li><a href="install.html">Install</a></li>
+      <li><a href="https://github.com/jet-language/jet">GitHub</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main>
+  <section class="wrap hero">
+    <div class="hero-grid">
+      <div>
+        <p class="eyebrow">// pre-release, built in the open</p>
+        <h1>Safe at any <span class="hot">speed.</span></h1>
+        <p class="hero-sub">Jet is a <strong>memory-safe compiled language</strong> with one surface for starting fast and another for going deep. Beginners get a language with no ceremony and no footguns. Experts get raw memory, layout control, and every fact the compiler knows. Moving between the two costs one written word.</p>
+        <div class="hero-ctas">
+          <a class="btn btn-primary" href="install.html"><svg class="delta" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M15 8 L3 2.5 L6 8 L3 13.5 Z"/></svg>Install jet</a>
+          <a class="btn btn-ghost" href="tour.html">Read the tour</a>
+        </div>
+        <p class="hero-note">Flip the lens on the right. The same program has two honest readings, and the compiler backs both.</p>
+      </div>
+      <div class="lens" id="hero-lens">
+        <div class="lens-bar">
+          <span class="lens-file">hero.jet</span>
+          <div class="lens-toggle" role="group" aria-label="Choose a reading of this program">
+            <button type="button" data-facet="beginner" aria-pressed="true">Beginner</button>
+            <button type="button" data-facet="expert" aria-pressed="false">Expert</button>
+          </div>
+        </div>
+        <div class="lens-code"><pre><code><span class="c">// hero.jet is a complete program. Run it: jet run hero.jet</span>
+<span class="k">fn</span> <span class="f">plan</span>(dest: <span class="t">String</span>, seats: <span class="t">Int</span>{<span class="n">2</span>}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{dest}, party of {seats}"</span>
+<span class="xr">          &#9492; default rides the type: plan("Lisbon") seats 2</span>
+<span class="k">fn</span> <span class="f">load_port</span>() <span class="t">Int</span> <span class="g">!</span><span class="t">IOError</span> <span class="g">-&gt;</span> <span class="f">Ok</span>(<span class="n">8080</span>)
+<span class="xr">             &#9492; the whole failure contract, in the signature</span>
+<span class="k">fn</span> <span class="f">run</span>() {
+<span class="xr">      &#9492; inferred effect row -[IO]&gt;: this program prints</span>
+    port <span class="g">::</span> <span class="f">load_port</span>() <span class="g">??</span> <span class="n">3000</span>
+<span class="xr">                        &#9492; ?? discharges the failure or it propagates</span>
+    <span class="f">print</span>(<span class="f">plan</span>(<span class="s">"Lisbon"</span>, <span class="n">3</span>))
+    <span class="f">print</span>(<span class="s">"listening on {port}"</span>)
+}</code></pre></div>
+        <ul class="lens-notes" data-facet="beginner">
+          <li>One file is a complete program. No manifest, no project folder, no setup.</li>
+          <li><code>::</code> binds a value. Strings fill in <code>{name}</code> slots themselves.</li>
+          <li>If <code>load_port</code> fails with no fallback, the program reports the error and exits 1. Failure is never silent.</li>
+        </ul>
+        <ul class="lens-notes" data-facet="expert" hidden>
+          <li>Effects are typed. <code>run()</code> infers <code>-[IO]&gt;</code>; declare a row to cap what a function may touch.</li>
+          <li>Failure is part of the signature. <code>!IOError</code> is the entire contract; unchecked exceptions do not exist.</li>
+          <li>Facts move toward safety silently. Every move away is one written word, at the site, on the record.</li>
+        </ul>
+        <div class="lens-run"><span class="ps">$ jet run hero.jet</span><br><span class="out">Lisbon, party of 3<br>listening on 8080</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap section" id="safety">
+    <p class="eyebrow">// the deal</p>
+    <h2>No footguns. Not hidden. Gone.</h2>
+    <p class="section-lead">Memory safety and type safety are <strong>never configurable</strong>. Undefined behavior is not a beginner mistake you learn to avoid; in Jet it is structurally out of reach until an expert asks for it in writing.</p>
+    <div class="pillars">
+      <div class="pillar">
+        <h3>Footguns are opt-in</h3>
+        <p>When you need raw memory or exact layout, the escape hatch exists, and it signs its name. Every unsafe region carries a written reason, at the site, on the record.</p>
+        <div class="code"><div class="code-body"><pre><code><span class="g">#Unsafe</span>(<span class="s">"read a device register"</span>) {
+    <span class="c">// audited, on the record</span>
+}</code></pre></div></div>
+      </div>
+      <div class="pillar">
+        <h3>One way to do each thing</h3>
+        <p>There is exactly one way to perform each operation, so two programs that do the same thing read the same way. Code you did not write still looks like code you did.</p>
+        <div class="code"><div class="code-head"><span>examples/features/basics/pattern_matching.jet</span></div><div class="code-body"><pre><code><span class="k">if</span> c == {
+    .Active(id) | .Reconnecting(id) <span class="g">-&gt;</span> { <span class="k">return</span> <span class="s">"live:{id}"</span> }
+    .Idle(_) <span class="g">-&gt;</span> { <span class="k">return</span> <span class="s">"idle"</span> }
+    .Closed <span class="g">-&gt;</span> <span class="k">return</span> <span class="s">"closed"</span>
+    <span class="k">else</span> <span class="g">-&gt;</span> <span class="k">return</span> <span class="s">"unknown"</span>
+}</code></pre></div></div>
+      </div>
+      <div class="pillar">
+        <h3>Errors are part of the product</h3>
+        <p>Every diagnostic has a registered code, a what, a why, and a fix, and its text is snapshot-tested like any feature. This one is real:</p>
+        <div class="diag"><span class="e">Error [E0112]:</span> `plan` wants Int (a whole number) for argument 2, but this is String (text)
+  <span class="loc">--&gt; broken.jet:4:26</span>
+    |
+  4 |     print(plan("Lisbon", "three"))
+    |                          <span class="pointer">^^^^^^^</span>
+ <span class="why">Why: every argument must match its parameter's type</span>
+ <span class="fix">Fix: use Int (a whole number) here</span>
+<span class="more">More: jet-lang.dev/e/E0112</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap section" id="spec">
+    <p class="eyebrow">// proof over promises</p>
+    <h2>The examples are the spec.</h2>
+    <p class="section-lead">Every feature ships as a runnable example with golden-tested output. The samples on this site are copied from those files or verified by running them on the build that generated this page. When one stops compiling, the compiler's own test suite goes red before this page does.</p>
+    <div class="duo">
+      <div class="duo-item">
+        <h3>Defaults ride the type</h3>
+        <p>A default value lives on the type, and it may name an earlier parameter. Call <code>box_dims(4)</code> and get a cube.</p>
+        <div class="code"><div class="code-head"><span>cube.jet</span><span>from examples/features/basics/default_refs.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">box_dims</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{w}, d: <span class="t">Int</span>{h}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{w}x{h}x{d}"</span>
+
+<span class="k">fn</span> <span class="f">run</span>() {
+    <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>))
+    <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>))
+    <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>, <span class="n">1</span>))
+}</code></pre></div><div class="code-out"><span class="ps">$ jet run cube.jet</span><br>4x4x4<br>4x2x2<br>4x2x1</div></div>
+      </div>
+      <div class="duo-item">
+        <h3>Concurrency that cannot leak</h3>
+        <p>A spawned task owes an answer. Join it, hand it to <code>all</code>, <code>race</code>, or <code>any</code>, or detach it on purpose; forgetting it is a compile error, not a 3 a.m. page.</p>
+        <div class="code"><div class="code-head"><span>examples/features/concurrency/tasks_join_all.jet</span></div><div class="code-body"><pre><code>joined <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
+<span class="f">print</span>(joined.<span class="f">join</span>() <span class="g">??</span> <span class="f">panic</span>(<span class="s">"join failed"</span>))
+
+results <span class="g">::</span> <span class="k">task</span>.all {<span class="f">work</span>(<span class="n">1</span>), <span class="f">work</span>(<span class="n">2</span>), <span class="f">work</span>(<span class="n">3</span>)} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"task.all failed"</span>)
+<span class="f">print</span>(results[<span class="n">0</span>] + results[<span class="n">1</span>] + results[<span class="n">2</span>])</code></pre></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap section" id="live">
+    <p class="eyebrow">// alive in your browser</p>
+    <h2>This box is not a video.</h2>
+    <p class="section-lead">It is a Jet program, compiled to WebAssembly by <code>jet build --target web</code>, running in your browser right now. The web backend is early and covers a checked subset; what it does run is the same language, with the same meaning.</p>
+    <div class="live">
+      <div class="live-frame">
+        <iframe src="widget/index.html" title="A Jet program running in the browser" loading="lazy"></iframe>
+        <div class="live-tag">widget/counter.jet, compiled to wasm</div>
+      </div>
+      <div class="code"><div class="code-head"><span>widget/counter.jet</span></div><div class="code-body"><pre><code><span class="k">use</span> core.ui <span class="k">as</span> ui
+<span class="k">use</span> core.reactive <span class="k">as</span> reactive
+<span class="g">#[Target(Web), HTML("shell.html")]</span>
+
+<span class="k">fn</span> <span class="f">run</span>() {
+    count <span class="g">::</span> reactive.<span class="f">signal</span>(<span class="n">0</span>)
+    ui.<span class="f">reactive_render</span>(() <span class="g">-&gt;</span> {
+        n <span class="g">:=</span> count.<span class="f">get</span>()
+        color <span class="g">:=</span> <span class="s">"#2E2E33"</span>
+        <span class="k">if</span> n % <span class="n">2</span> == <span class="n">1</span> <span class="g">-&gt;</span> color = <span class="s">"#E8232A"</span>
+        backend <span class="g">::</span> ui.<span class="f">null_backend</span>()
+        tree <span class="g">::</span> ui.<span class="f">box</span>([
+            ui.<span class="f">node_color</span>(<span class="s">"count: {n}"</span>, <span class="n">160.0</span>, <span class="n">40.0</span>, color),
+            ui.<span class="f">button</span>(<span class="s">"Add one"</span>, on_click: () <span class="g">-&gt;</span> {
+                count.<span class="f">set</span>(count.<span class="f">get</span>() + <span class="n">1</span>)
+            })
+        ])
+        ui.<span class="f">mount</span>(backend, tree, ui.<span class="f">constraint</span>(<span class="n">0.0</span>, <span class="n">0.0</span>, <span class="n">300.0</span>, <span class="n">120.0</span>))
+    })
+}</code></pre></div></div>
+    </div>
+  </section>
+
+  <section class="wrap section" id="jetpack">
+    <p class="eyebrow">// jetpack</p>
+    <h2>The environment is part of the program.</h2>
+    <div class="split">
+      <div class="prose">
+        <p><strong>jetpack is Jet's environment engine.</strong> A project declares its tools in <code>env.jet</code>; <code>jetpack env</code> realizes them and drops you into a shell where they exist, current and trusted. No global installs, no version drift, no "works on my machine".</p>
+        <p><strong>Try a tool without adopting it.</strong> <code>jetpack use</code> builds an ephemeral shell for exactly the packages you name, runs your command, and leaves nothing behind.</p>
+        <p><strong>The same work never runs twice.</strong> <code>jet build</code> writes a receipt keyed by the exact sources, imports, and toolchain that went in. Ask again with nothing changed and the answer replays instead of rebuilding.</p>
+      </div>
+      <div class="term"><span class="ps">$</span> <span class="cmd">jetpack env</span> <span class="dim"># enter the project's declared shell</span>
+<span class="ps">$</span> <span class="cmd">jetpack use ripgrep@nixpkgs -- rg --version</span> <span class="dim"># borrow a tool</span>
+<span class="ps">$</span> <span class="cmd">jetpack add ripgrep@nixpkgs</span> <span class="dim"># adopt it into env.jet</span>
+<span class="ps">$</span> <span class="cmd">jetpack hangar du</span> <span class="dim"># see what the store holds</span>
+<span class="ps">$</span> <span class="cmd">jet build</span> <span class="dim"># receipted; unchanged inputs replay</span></div>
+    </div>
+  </section>
+
+  <section class="wrap section" id="start">
+    <p class="eyebrow">// start now</p>
+    <h2>Your first hour is one command long.</h2>
+    <div class="start">
+      <div class="term"><span class="dim"># install (x86_64 Linux and macOS, via Nix)</span>
+<span class="ps">$</span> <span class="cmd">nix profile install github:jet-language/jet</span>
+<span class="ps">$</span> <span class="cmd">jet version</span></div>
+      <div class="term"><span class="dim"># first program</span>
+<span class="ps">$</span> <span class="cmd">jet new hello</span>
+<span class="ps">$</span> <span class="cmd">cd hello</span>
+<span class="ps">$</span> <span class="cmd">jet run</span>
+<span class="out">hello, world</span></div>
+    </div>
+    <p class="fineprint">Jet is pre-release and changes weekly. There is no package registry yet, and some corners are unfinished on purpose. If this site ever disagrees with the compiler, the compiler is right; <code>jet explain</code> knows more than any web page.</p>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-grid">
+    <a class="nav-brand" href="index.html" aria-label="Jet home">
+      <svg viewBox="0 0 120 64" aria-hidden="true"><path fill="#E8232A" d="M112 32 L52 6 L66 32 L52 58 Z"/><rect fill="#E8232A" x="26" y="14" width="18" height="6" rx="3"/><rect fill="#E8232A" x="4" y="29" width="36" height="6" rx="3"/><rect fill="#E8232A" x="16" y="44" width="24" height="6" rx="3"/></svg>
+      <span class="word">jet</span>
+    </a>
+    <ul class="footer-links">
+      <li><a href="tour.html">Tour</a></li>
+      <li><a href="install.html">Install</a></li>
+      <li><a href="e/index.html">Error codes</a></li>
+      <li><a href="https://github.com/jet-language/jet">GitHub</a></li>
+    </ul>
+    <p class="made">This page was generated by site/generate.jet, a Jet program.</p>
+  </div>
+</footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2211,
-    "rev": 45705,
+    "nextNum": 2232,
+    "rev": 45743,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27,10 +27,12 @@
         "radar:e11",
         "radar:e12",
         "radar:e13",
-        "radar:e5"
+        "radar:e5",
+        "radar:e3",
+        "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-26T23:31:21.897Z"
+    "completionCursor": "2026-08-26T23:59:20.759Z"
   },
   "epochs": [
     {
@@ -152665,6 +152667,565 @@
       "created": "2026-08-26T13:27:41.403Z",
       "updated": "2026-08-26T14:19:53.481Z",
       "updatedBy": "orchestrator"
+    },
+    {
+      "id": "c0vt3izm",
+      "num": 2211,
+      "title": "Hangar Nix admission: four laws break real nixpkgs closures and corrupt the store",
+      "body": "Reproduced with jetpack env against cache.nixos.org (279-package env.dev). Four root causes, all diagnosed with on-disk evidence at ~/.local/share/jet/hangar:\n\n1. E1315: the canonical-hash hardlink law requires exact peer enumeration, but the machine-wide shared CAS pool hardlinks inodes into unenumerable foreign roots (found: ~/.cache/jet-test-scratch/criterion1-root sharing cargo's bin/.cargo-wrapped inode, nlink=3). Fix: an inode that matches its own CAS pool entry is trusted without peer counting. Also removes a whole-hangar walk per multi-link inode (major latency).\n\n2. E1340: Ingest::share_node is not idempotent. A second share pass over the same tree (triggered by register_entries_unlocked on env realization) skips nlink>1 files without reserving their CAS key, then links a second identical file to the same pool entry, creating an in-tree hardlink pair that silently changes the object's canonical digest. Live corruption found: lld bin/ld.lld+bin/ld64.lld and tzdata zoneinfo pairs share inodes; their objects fail every re-hash.\n\n3. E1350: store paths whose NAR root is a symlink (gcc-wrapper -info, pkg-config -man) are rejected outright (output root must not be a symlink) in Envelope hashing and store admission/registration.\n\n4. E1350: relative symlink containment uses fs::canonicalize, which follows chains through absolute /nix/store intermediates (nodejs bin/corepack) and lands outside the staged root. Validation must be lexical over the target bytes.\n\nPlus: admission must self-heal existing objects whose re-hash mismatches (replace from the freshly verified staged tree) instead of dead-ending, and stale stage/nix-cache-<pid>-* dirs from dead processes must be swept (16 found).\n\nFix in flight this session: crates/jet-pkg-model/src/Envelope.rs and crates/jetpack/src/Store/{Ingest,NixCache,Closure,Cache}.rs, with unit tests per bug. Proof: targeted tests plus a real jetpack env run to green on the affected machine.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": "Envelope unit tests for pool-backed inode trust, symlink-root hashing, lexical symlink containment; NixCache tests for share idempotence, symlink-root admission, self-heal, stage sweep; real jetpack env completes with zero errors",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:03:21.363Z",
+      "updated": "2026-08-27T00:03:21.365Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c06awybp",
+      "num": 2212,
+      "title": "jetpack hangar doctor: one-command store verify and repair",
+      "body": "A user store that drifts (corruption, interrupted admissions, foreign hardlinks, stale stage dirs) should be repaired by one boring command, not by wiping the hangar. jetpack hangar doctor walks objects, re-verifies digests, repairs drifted objects from the binary cache (same self-heal path admission uses), sweeps dead staging directories and orphaned CAS entries, and prints a one-line verdict per problem plus a summary. Read-only by default with --repair to act. Nix's nix-store --verify --repair equivalent, but discoverable, safe, and pretty. Depends on the admission self-heal shipped by card #2211.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:03:41.588Z",
+      "updated": "2026-08-27T00:03:41.590Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0ecw2ax",
+      "num": 2213,
+      "title": "Collapse repeated diagnostics: one failure card per root cause",
+      "body": "A failing jetpack env printed the same E1350 diagnostic 10+ times across 4 screens, interleaved with progress lines. The CLI must aggregate: group identical (code, root-cause key) diagnostics, print the full card once, then a count line (7 more objects failed with the same cause), and end with a single next-step line. Never print the same what/why/fix text twice in one invocation. Applies to all jetpack realization surfaces; snapshot-tested as product copy per I4.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:03:42.075Z",
+      "updated": "2026-08-27T00:03:42.076Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0lzskdb",
+      "num": 2214,
+      "title": "jetpack env plan table: real sizes and counts before the confirm prompt",
+      "body": "Today the prompt says: env.dev needs 279 packages, size unknown - Continue? Narinfo metadata (FileSize, NarSize) is already fetched during plan_nix_downloads, so size unknown is a gap, not a limitation. Before Y/n show: packages new / cached / repaired counts, download bytes, on-disk bytes after, and estimated time from measured recent throughput. Beginner sees the one-line summary; --explain expands the full per-package table. Never block the prompt on metadata for already-cached objects.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:03:42.537Z",
+      "updated": "2026-08-27T00:03:42.537Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0ap19sp",
+      "num": 2215,
+      "title": "Single status region: progress and diagnostics never tear each other",
+      "body": "During jetpack env, progress lines and error output interleave and tear (observed: torn checkmark lines mid-diagnostic in a real session). Route all realization output through one writer: a bottom-anchored live status region for progress, with diagnostics printed atomically above it. ANSI-aware with a plain sequential fallback for NO_COLOR, non-TTY, and CI. Frontend acceptance needs the real terminal state matrix: interactive TTY, piped, NO_COLOR, narrow widths.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:03:44.031Z",
+      "updated": "2026-08-27T00:03:44.031Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0elpo6q",
+      "num": 2216,
+      "title": "jetpack why: answer provenance and trust questions per package",
+      "body": "jetpack why <package> answers: why is this in my env (requesting env file and lock line), where did it come from (catalog, endpoint, signature chain), what trust grade does it carry (signed / reproduced / unverified-mapping, the same distinctions the admission banner prints today), what it costs on disk, and what depends on it. Producer records, receipts, and closure references already store all of this; the card is the surface. One-screen answer by default, --json for tooling. Nix's why-depends dumps a graph; ours answers the question.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:04:10.388Z",
+      "updated": "2026-08-27T00:04:10.391Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0oyyagj",
+      "num": 2217,
+      "title": "Env entry banner: what changed, and time-to-shell as a visible promise",
+      "body": "Entering jetpack env prints up to three lines: env ready in 1.8s (cache hit 100 percent), what changed since the last entry (cargo 1.97.0 to 1.97.1, 2 tools updated), and nothing else when nothing changed. Makes speed a measured product promise so regressions are felt immediately, and gives users the changelog nix never shows. Requires storing the previous realized set per project (lock/receipts already carry it).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:04:11.015Z",
+      "updated": "2026-08-27T00:04:11.016Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0z4qi6k",
+      "num": 2218,
+      "title": "Human-readable lock diff on update",
+      "body": "When the lock changes (jetpack update, env re-resolve), print a changelog-shaped diff: package old to new, added and removed counts, net download and disk delta, and trust-grade changes. Also jetpack lock diff [--against rev] for explicit use. The lock is the single U2 file; this is presentation only, no schema change.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:04:11.630Z",
+      "updated": "2026-08-27T00:04:11.630Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0med3vj",
+      "num": 2219,
+      "title": "Verified-once objects: stop re-hashing the whole store on every admission",
+      "body": "existing_object and publish re-hash full object trees (sha256 over gigabytes) on every jetpack env, and verify_registration_output re-hashes again at registration. Cryptographically pure but a real latency tax at 279-package scale. Proposal: a sealed verification manifest per object (digest plus per-file inode, size, mtime captured under the hangar lock at admission), re-hash only entries whose identity tuple drifted. Full re-hash remains for doctor, GC, and any manifest miss. This relaxes when bytes are re-proven, so it is owner-gated: draft the ballot at plan time with measured before/after numbers from the fixed E1315 path (which already removes the whole-hangar inode walks). Blocked by measurement, not by code: first profile a real jetpack env after card #2211 lands.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-27",
+          "by": "fable",
+          "text": "Owner direction from 2026-08-26 interview: sealed-manifest posture chosen over always-re-hash (option: trust sealed manifests). Formal ballot still required at plan time with measured numbers; owner also ratified failure UX: self-healing by default with full expert auditability."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:04:21.744Z",
+      "updated": "2026-08-27T00:18:14.743Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c066e6hi",
+      "num": 2220,
+      "title": "Bare jetpack: full interactive TUI dashboard",
+      "body": "Owner direction (2026-08-26 interview): full interactive TUI soon, not just best-in-class CLI. Bare jetpack (reserved by card #2189's ruling) opens a dashboard: current project env and its state, store health and sizes, available updates, doctor findings, recent activity - the k9s of package management. Keyboard-first, instant launch, degrades to the status summary on non-TTY. Serves all three ratified personas: beginner (see and fix everything without learning commands), nix refugee (visible superiority moment), agent (the same data stays available as JSON via CLI verbs).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:18:12.294Z",
+      "updated": "2026-08-27T00:18:12.295Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0fo76np",
+      "num": 2221,
+      "title": "jetpack import flake.nix: one-command migration from nix",
+      "body": "Owner direction (2026-08-26 interview): the nix-refugee migration story is one command. jetpack import reads an existing flake.nix / shell.nix / default.nix, maps devShell inputs to catalog packages, and writes env.jet plus lock so the repo works day one. Report anything unmappable explicitly (one line per item with the nearest catalog candidate) instead of half-importing. Fits the ratified bridge-then-replace posture: nixpkgs is the bootstrap feed, the imported project lives natively in jetpack from that point on.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:18:12.868Z",
+      "updated": "2026-08-27T00:18:12.868Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0yaexyw",
+      "num": 2222,
+      "title": "Web bundle default shell imports run() but app.js exports jet_main",
+      "body": "jet build --target web emits a build/index.html whose module script does: import { run } from './app.js'; run(); but the emitted app.js exports only JetError, jet_main, jet_web_edge_result, render. The import fails and the app never mounts, silently (no console error surfaces from the module resolution failure). REPRO (deterministic, 2026-08-26, fresh debug binary): copy examples/features/web/ui_web_click.jet to a scratch dir with package.jet authority allow [IO, Mem.Alloc, Browser]; run jet build --target web ui_web_click.jet; serve build/ over HTTP; open index.html: #jet-app stays empty. Calling (await import('./app.js')).jet_main() by hand mounts the counter and it works. One of the two names is wrong: either the shell template should call jet_main() or the module should export run. Writer: Source/CmdCompile.rs web artifact emission (~5661-5824).",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": "Build ui_web_click.jet with --target web; serve build/; open index.html in Chromium; the counter mounts with no manual import",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The web build of ui_web_click mounts in a real browser straight from the emitted/companion page, with no manual import",
+          "status": "met",
+          "metBy": "fable-site",
+          "verifiedBy": null,
+          "evidence": "examples/features/web/ui_web_click.html now imports { jet_main } and calls it; tests/web_build.rs web_click_companion_starts_exported_entrypoint pins the contract; verified in Chromium 2026-08-26 via the site widget shell (mounts on load, count increments)",
+          "at": "2026-08-27T01:18:37.294Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:50:20.446Z",
+      "updated": "2026-08-27T01:18:39.242Z",
+      "updatedBy": "fable-site",
+      "completedAt": "2026-08-27T01:18:39.242Z"
+    },
+    {
+      "id": "c0a2n3rv",
+      "num": 2223,
+      "title": "ui.reactive_render duplicates the tree on every signal change in a real browser",
+      "body": "In a real Chromium DOM, each signal change appends a fresh rendered tree instead of replacing the previous one. REPRO (deterministic, 2026-08-26): build examples/features/web/ui_web_click.jet with jet build --target web; serve build/; call jet_main(); click the 'Click me' button once; document.getElementById('jet-app').textContent is 'Clicks: 0Click meClicks: 1Click me' (both generations present). Expected: one tree showing Clicks: 1. The FAKE_DOM harness in tests/web_build.rs calls render manually and cannot catch this. Suspect ui.mount / reactive re-render path in the web DomRuntime.js (mount ~235-242, reactive ~588-653): mount should clear or reconcile the container on re-render.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": "Serve the ui_web_click web build; click the button twice; exactly one counter label exists and reads Clicks: 2",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Clicking the mounted counter updates one DOM tree in a real browser: no duplicate generations after repeated clicks",
+          "status": "met",
+          "metBy": "fable-site",
+          "verifiedBy": null,
+          "evidence": "DomRuntime.js reactive effects re-enter the captured DOM scope so paint reconciles by key; Chromium 2026-08-26: three clicks give textContent 'count: 3Add one', single tree; FAKE_DOM harness drives jet_main+click and golden updated; lane-check CHECK OK",
+          "at": "2026-08-27T01:18:38.695Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:50:32.042Z",
+      "updated": "2026-08-27T01:18:40.602Z",
+      "updatedBy": "fable-site",
+      "completedAt": "2026-08-27T01:18:40.602Z"
+    },
+    {
+      "id": "c0whgugr",
+      "num": 2224,
+      "title": "Golden example fallible_run.jet is red: ?? fallback rejects ?Int success under the new failure law",
+      "body": "examples/features/errors/fallible_run.jet (the canonical D-FAILURE-FOUNDATION1=A example, golden at examples/features/expected/errors/fallible_run.out) fails to compile on a fresh 2026-08-26 debug build. REPRO: jet run examples/features/errors/fallible_run.jet (standalone dir with IO+Mem.Alloc authority) yields Error [E0405]: the fallback is Int (a whole number), but the success value is ?Int, at port :: load_port() ?? 0. Either ?? should unwrap the optional-success role (the example's clear intent: port prints 8080) or the example and golden are stale against the ratified cutover. This is the front-door example for the new failure law, so it is P0: the spelling the spec teaches does not compile.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": "jet run examples/features/errors/fallible_run.jet prints port 8080; golden test for errors/fallible_run passes",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:50:57.342Z",
+      "updated": "2026-08-27T00:50:57.342Z",
+      "updatedBy": "fable-site"
+    },
+    {
+      "id": "c04da9pa",
+      "num": 2225,
+      "title": "One type error printed twice: E0112 renders two identical diagnostics and counts 2 problems",
+      "body": "A single wrong-argument-type error is rendered twice, verbatim, and the summary says '2 problems found'. REPRO (deterministic, 2026-08-26 debug build): a 5-line file with fn plan(dest: String, seats: Int{2}) String -> \"...\" and fn run() { print(plan(\"Lisbon\", \"three\")) } produces two identical Error [E0112] blocks pointing at the same span (file:4:26) and '2 problems found'. Expected: one diagnostic, '1 problem found'. Likely a duplicated sema check on call arguments (default-bearing parameter path checking the same argument twice).",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": "The repro file reports exactly one E0112 and '1 problem found'",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:50:57.819Z",
+      "updated": "2026-08-27T00:50:57.819Z",
+      "updatedBy": "fable-site"
+    },
+    {
+      "id": "c0cdd4db",
+      "num": 2226,
+      "title": "jet explain E1803 describes a REPL diagnostic while jet run emits an application-authority E1803",
+      "body": "One code, two meanings. jet run (no authority) emits: Error [E1803]: application authority is undecided for IO ... Fix: declare the effect in authority.holds.allow, deny it deliberately, or approve it once or for the project in an interactive terminal. But jet explain E1803 answers with REPL copy: 'REPL host effects require both an enclosing #FX and runtime invocation authority ... restart with the matching jet repl --allow-{root} flag'. The explain text does not match the diagnostic the user just saw, and docs/spec/diagnostics.md:1986 carries the application-authority wording. Either two diagnostics share E1803 or the explain registry serves a stale row. I4 treats diagnostics as products; explain must serve the row the compiler actually emitted. REPRO (2026-08-26): run any IO program in a dir with no authority grant, then jet explain E1803.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": "jet explain E1803 renders the same what/why/fix family as the emitted application-authority diagnostic",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:50:58.303Z",
+      "updated": "2026-08-27T00:50:58.303Z",
+      "updatedBy": "fable-site"
+    },
+    {
+      "id": "c013ir39",
+      "num": 2227,
+      "title": "canon.jet and README still teach the pre-cutover failure spelling",
+      "body": "D-FAILURE-FOUNDATION1=A (docs/spec/syntax-decisions.md ~8114-8123, ratified 2026-08-26) makes prefix roles canonical (?Success !Error) and demotes suffix/infix forms to diagnostics. But examples/canon.jet:64-76 still teaches fn parse_age(raw: String) Int !ParseError with the old comment header claiming everything in the file is ratified and current, and README.md:104-108 shows the same stale spelling. canon.jet advertises itself as the canonical what-works-today reference, so it must be migrated (or the cutover reverted) in the same coherent change as the law. Greenfield rule: migrate every in-repo consumer, delete the replaced form.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": "canon.jet and README failure examples use the ratified current spelling and canon compiles under jet run",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:51:17.212Z",
+      "updated": "2026-08-27T00:51:17.212Z",
+      "updatedBy": "fable-site"
+    },
+    {
+      "id": "c090lkeu",
+      "num": 2228,
+      "title": "jet-lang.dev site: Jet-generated marketing, install, and tour pages",
+      "body": "Owner-directed (2026-08-26, direct chat): build the jet-lang.dev site as a dogfood exercise. Scope ratified in chat: marketing page plus install and tour pages; a Jet program (site/generate.jet) generates all HTML; the Jet web target powers the live demo widget; honest early-access copy; wordmark and mark designed from assets/jetlang.png; site ships in-repo, no live deploy. No AI or agent mentions anywhere on the site (owner directive). Design system: near-black ground, jet red from the logo, Exo 2 display, Atkinson Hyperlegible body, JetBrains Mono code, speed-dash motif, beginner/expert facet lens as the signature interaction. Diagnostics already print jet-lang.dev/e/CODE URLs, so the site ships an /e/ landing page. Blockers found while dogfooding are carded separately: #2222 (web shell import), #2223 (reactive re-render duplication), #2224 (fallible_run red), #2225 (E0112 duplicate), #2226 (E1803 explain drift), plus the canon.jet staleness card.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": "jet run site/generate.jet emits site/dist; pages render correctly in Chromium at desktop and mobile widths; live widget runs Jet wasm; all code samples compile on the current binary",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:51:17.691Z",
+      "updated": "2026-08-27T00:51:17.691Z",
+      "updatedBy": "fable-site"
+    },
+    {
+      "id": "c044jwnr",
+      "num": 2229,
+      "title": "jet new scaffold cannot jet run: no authority block, E1803 on the first-hour flow",
+      "body": "The documented beginner flow (docs/first-hour.md: jet new hello; cd hello; jet run) fails on a fresh 2026-08-26 debug build. jet new writes a package.jet with name/version/jet/deps but NO authority block, and the scaffolded run.jet prints, so jet run stops with Error [E1803]: application authority is undecided for IO. The diagnostic offers interactive one-time approval, but no prompt appears even under a PTY; the flow dead-ends for the exact audience the scaffold exists for. Candidate fixes, owner may care which: (a) jet new emits authority: .{ holds: { allow: [IO] } } (or the ratified beginner default set) in the scaffold, (b) an interactive approval prompt that actually fires on a TTY, (c) a ratified application-default authority for IO. Philosophy rank 2 (beginner experience) says the first command a learner types must not print a policy error. REPRO: jet new hellonew; cd hellonew; jet run (non-interactive AND pty both yield E1803).",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": "jet new demo; cd demo; jet run prints hello, world on a fresh scaffold with no manual manifest edits",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T00:56:30.852Z",
+      "updated": "2026-08-27T00:56:30.852Z",
+      "updatedBy": "fable-site"
+    },
+    {
+      "id": "c0dyawq4",
+      "num": 2230,
+      "title": "Web ui.button gets a 2px-high frame in a real browser: null_backend measure stubs button height",
+      "body": "Any ui.button rendered through the web DOM runtime gets height 2px, so the label overflows and the button is a hairline. REPRO (deterministic, 2026-08-26 debug build): build examples/features/web/ui_web_click.jet (or any ui.box with node_color + button) with jet build --target web, serve, mount, then getBoundingClientRect() on the button element: height is 2 regardless of constraint (tried 300x120 and 320x150) or sibling sizes. The label node_color(w, h) gets its declared frame; only buttons collapse. Suspect the measure path for button nodes under the null/web backend returns a stub height. Site widget currently ships a shell CSS height override as a workaround; remove it when this is fixed (site/widget/shell.html).",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": "Mount the ui_web_click web build in Chromium; the button's bounding rect height matches its measured label height, not 2px",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-27",
+          "by": "fable-site",
+          "text": "Related real-DOM button behavior seen while styling the site widget: the runtime autofocuses the mounted button (document.activeElement is the BUTTON immediately after jet_main), which steals focus from the host page when embedded in an iframe and fires :focus-visible at rest. Same fix area as the 2px measure."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T01:01:57.963Z",
+      "updated": "2026-08-27T01:03:44.664Z",
+      "updatedBy": "fable-site"
+    },
+    {
+      "id": "c03xkaan",
+      "num": 2231,
+      "title": "Default jet run cannot execute fs.copy_dir: E0956 evaluator gap breaks tier parity",
+      "body": "jet run (default fast tier) fails with E0956: core.files.copy_dir() unsupported by current evaluator, while jet run --release executes the same program correctly. Found running site/generate.jet (the jet-lang.dev site generator), which is an ordinary FS program: read files, write files, copy a directory tree. I9 says AOT, JIT, and interpreter preserve one meaning for every Core API; a Core call that only works on the release tier is exactly the parity drift the invariant names. REPRO (2026-08-26 debug build): any program calling fs.copy_dir under default jet run in a package granting FS.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": "jet run of a program using fs.copy_dir succeeds on the default tier with the same result as jet run --release",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-27T01:19:54.865Z",
+      "updated": "2026-08-27T01:19:54.865Z",
+      "updatedBy": "fable-site"
     }
   ],
   "decisions": [
@@ -211701,9 +212262,290 @@
       "tags": [],
       "status": "open",
       "created": "2026-08-25T16:44:20.109Z"
+    },
+    {
+      "id": "b3ztxnsm",
+      "text": "Website design for jet",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-26T23:59:30.867Z"
+    },
+    {
+      "id": "b0cz1fux",
+      "text": "Enter the env instantly with stub shims on PATH; each tool fetches on first invocation while the closure completes in the background. Two-second env entry even cold. Semantics change (env usable before closure complete) needs an owner ballot on the default; could ship as an explicit flag first.",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-27T00:04:12.467Z"
+    },
+    {
+      "id": "b0l2qz8t",
+      "text": "Version bumps re-download whole NARs today. The CAS pool already dedupes at file granularity across objects; when a new version shares most files with a held version, fetch only changed files (requires per-file manifest from the catalog side, so pairs with the owned index endpoints card c095d6zw).",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-27T00:04:12.957Z"
+    },
+    {
+      "id": "b0fiw6ad",
+      "text": "jet-lang.dev/e/<CODE> pages: diagnostics link there today; generate one page per registered diagnostic (what/why/fix + jet explain parity) from the diagnostics registry as part of site generation",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-27T00:51:18.084Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-27T01:19:55.267Z",
+      "by": "fable-site",
+      "action": "papercut.add",
+      "ref": "pc0al7mqq",
+      "note": ""
+    },
+    {
+      "at": "2026-08-27T01:19:54.865Z",
+      "by": "fable-site",
+      "action": "card.add",
+      "ref": "c03xkaan",
+      "note": "Default jet run cannot execute fs.copy_dir: E0956 evaluator gap breaks tier parity"
+    },
+    {
+      "at": "2026-08-27T01:18:40.602Z",
+      "by": "fable-site",
+      "action": "card.update",
+      "ref": "c0a2n3rv",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-27T01:18:39.242Z",
+      "by": "fable-site",
+      "action": "card.update",
+      "ref": "c0yaexyw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-27T01:18:38.695Z",
+      "by": "fable-site",
+      "action": "card.criteria-meet",
+      "ref": "c0a2n3rv",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-27T01:18:38.301Z",
+      "by": "fable-site",
+      "action": "card.criteria-add",
+      "ref": "c0a2n3rv",
+      "note": "#1 Clicking the mounted counter updates one DOM tree in a real "
+    },
+    {
+      "at": "2026-08-27T01:18:37.295Z",
+      "by": "fable-site",
+      "action": "card.criteria-meet",
+      "ref": "c0yaexyw",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-27T01:18:36.063Z",
+      "by": "fable-site",
+      "action": "card.criteria-add",
+      "ref": "c0yaexyw",
+      "note": "#1 The web build of ui_web_click mounts in a real browser strai"
+    },
+    {
+      "at": "2026-08-27T01:03:44.664Z",
+      "by": "fable-site",
+      "action": "card.update",
+      "ref": "c0dyawq4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-27T01:01:57.964Z",
+      "by": "fable-site",
+      "action": "card.add",
+      "ref": "c0dyawq4",
+      "note": "Web ui.button gets a 2px-high frame in a real browser: null_backend measure stubs button height"
+    },
+    {
+      "at": "2026-08-27T00:56:30.852Z",
+      "by": "fable-site",
+      "action": "card.add",
+      "ref": "c044jwnr",
+      "note": "jet new scaffold cannot jet run: no authority block, E1803 on the first-hour flow"
+    },
+    {
+      "at": "2026-08-27T00:51:18.085Z",
+      "by": "fable-site",
+      "action": "idea.add",
+      "ref": "b0fiw6ad",
+      "note": "jet-lang.dev/e/<CODE> pages: diagnostics link there today; g"
+    },
+    {
+      "at": "2026-08-27T00:51:17.691Z",
+      "by": "fable-site",
+      "action": "card.add",
+      "ref": "c090lkeu",
+      "note": "jet-lang.dev site: Jet-generated marketing, install, and tour pages"
+    },
+    {
+      "at": "2026-08-27T00:51:17.212Z",
+      "by": "fable-site",
+      "action": "card.add",
+      "ref": "c013ir39",
+      "note": "canon.jet and README still teach the pre-cutover failure spelling"
+    },
+    {
+      "at": "2026-08-27T00:50:58.303Z",
+      "by": "fable-site",
+      "action": "card.add",
+      "ref": "c0cdd4db",
+      "note": "jet explain E1803 describes a REPL diagnostic while jet run emits an application-authority E1803"
+    },
+    {
+      "at": "2026-08-27T00:50:57.819Z",
+      "by": "fable-site",
+      "action": "card.add",
+      "ref": "c04da9pa",
+      "note": "One type error printed twice: E0112 renders two identical diagnostics and counts 2 problems"
+    },
+    {
+      "at": "2026-08-27T00:50:57.342Z",
+      "by": "fable-site",
+      "action": "card.add",
+      "ref": "c0whgugr",
+      "note": "Golden example fallible_run.jet is red: ?? fallback rejects ?Int success under the new failure law"
+    },
+    {
+      "at": "2026-08-27T00:50:32.043Z",
+      "by": "fable-site",
+      "action": "card.add",
+      "ref": "c0a2n3rv",
+      "note": "ui.reactive_render duplicates the tree on every signal change in a real browser"
+    },
+    {
+      "at": "2026-08-27T00:50:20.446Z",
+      "by": "fable-site",
+      "action": "card.add",
+      "ref": "c0yaexyw",
+      "note": "Web bundle default shell imports run() but app.js exports jet_main"
+    },
+    {
+      "at": "2026-08-27T00:18:14.743Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0med3vj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-27T00:18:12.868Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0fo76np",
+      "note": "jetpack import flake.nix: one-command migration from nix"
+    },
+    {
+      "at": "2026-08-27T00:18:12.295Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c066e6hi",
+      "note": "Bare jetpack: full interactive TUI dashboard"
+    },
+    {
+      "at": "2026-08-27T00:04:21.744Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0med3vj",
+      "note": "Verified-once objects: stop re-hashing the whole store on every admission"
+    },
+    {
+      "at": "2026-08-27T00:04:12.957Z",
+      "by": "fable",
+      "action": "idea.add",
+      "ref": "b0l2qz8t",
+      "note": "Version bumps re-download whole NARs today. The CAS pool alr"
+    },
+    {
+      "at": "2026-08-27T00:04:12.467Z",
+      "by": "fable",
+      "action": "idea.add",
+      "ref": "b0cz1fux",
+      "note": "Enter the env instantly with stub shims on PATH; each tool f"
+    },
+    {
+      "at": "2026-08-27T00:04:11.630Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0z4qi6k",
+      "note": "Human-readable lock diff on update"
+    },
+    {
+      "at": "2026-08-27T00:04:11.016Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0oyyagj",
+      "note": "Env entry banner: what changed, and time-to-shell as a visible promise"
+    },
+    {
+      "at": "2026-08-27T00:04:10.391Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0elpo6q",
+      "note": "jetpack why: answer provenance and trust questions per package"
+    },
+    {
+      "at": "2026-08-27T00:03:44.031Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0ap19sp",
+      "note": "Single status region: progress and diagnostics never tear each other"
+    },
+    {
+      "at": "2026-08-27T00:03:42.537Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0lzskdb",
+      "note": "jetpack env plan table: real sizes and counts before the confirm prompt"
+    },
+    {
+      "at": "2026-08-27T00:03:42.076Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0ecw2ax",
+      "note": "Collapse repeated diagnostics: one failure card per root cause"
+    },
+    {
+      "at": "2026-08-27T00:03:41.590Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c06awybp",
+      "note": "jetpack hangar doctor: one-command store verify and repair"
+    },
+    {
+      "at": "2026-08-27T00:03:21.365Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0vt3izm",
+      "note": "Hangar Nix admission: four laws break real nixpkgs closures and corrupt the store"
+    },
+    {
+      "at": "2026-08-26T23:59:30.867Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b3ztxnsm",
+      "note": "Website design for jet"
+    },
+    {
+      "at": "2026-08-26T23:59:20.762Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-26T23:59:20.759Z"
+    },
     {
       "at": "2026-08-26T23:39:17.527Z",
       "by": "orchestrator",
@@ -214958,251 +215800,6 @@
       "action": "card.criteria-meet",
       "ref": "c0lu3g79",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-26T01:15:31.234Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0lu3g79",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-26T01:15:30.806Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0g664up",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-26T01:15:30.390Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0g664up",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-26T01:15:30.005Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0g664up",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-26T01:15:29.642Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0g664up",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-26T01:15:29.281Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c1eixac0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-26T01:02:57.912Z",
-      "by": "Main",
-      "action": "acceptance.reject",
-      "ref": "D-ACCEPT-2189",
-      "note": "cli decision ratify: CLI cannot resolve owner verification"
-    },
-    {
-      "at": "2026-08-26T00:55:12.075Z",
-      "by": "orchestrator",
-      "action": "milestone.delete",
-      "ref": "m0xzlz0i",
-      "note": "M09 · Native nixpkgs ingestion and no-Nix dogfood"
-    },
-    {
-      "at": "2026-08-26T00:53:59.950Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0k1wwnw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-26T00:53:59.574Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0t4root",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-26T00:53:27.475Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0k1wwnw",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-26T00:53:26.228Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0lrmc2p",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-26T00:53:25.027Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0vet6tl",
-      "note": "phase,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-26T00:53:23.953Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0nlb95c",
-      "note": "phase,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-26T00:53:22.919Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0qzh7vn",
-      "note": "phase,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-26T00:53:22.389Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0w7rdo4",
-      "note": "phase,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-26T00:53:21.868Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0k1wwnw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-26T00:53:21.487Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0kgi07h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-26T00:53:21.124Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c095d6zw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-26T00:53:20.753Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0nctuf1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-26T00:53:20.372Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0vet6tl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-26T00:53:20.012Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0nlb95c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-26T00:53:19.427Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0qzh7vn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-26T00:53:18.644Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0w7rdo4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-26T00:53:17.858Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0lrmc2p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-26T00:45:29.828Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0wqwqaq",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-26T00:45:29.307Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c06r4us6",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-26T00:45:28.775Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c00cnpnb",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-26T00:45:28.234Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0tpkgc7",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-26T00:45:27.690Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c08t6mf1",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-26T00:45:27.168Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c06m9njm",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-26T00:45:26.524Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0fylvpy",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-26T00:45:25.773Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0eaqe17",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-26T00:45:25.038Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0rzz168",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-08-26T00:45:23.744Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c018q48o",
-      "note": "epoch,milestoneId,logEntry"
     }
   ],
   "nextNum": 368,
@@ -215925,6 +216522,14 @@
       "status": "resolved",
       "resolvedAt": "2026-08-19T23:42:04.057Z",
       "resolvedBy": "owner"
+    },
+    {
+      "id": "pc0al7mqq",
+      "by": "fable-site",
+      "text": "scripts/agent/jet-env run from a cwd outside the repo prints '/tmp/nix-shell.XXXX: line 2233: <cwd>/scripts/agent/clean-nix-tmp.sh: No such file or directory' on every invocation because it resolves the cleanup script relative to cwd, not the repo. Harmless but noisy; hits every agent that runs jet-env against scratch dirs.",
+      "cardId": null,
+      "created": "2026-08-27T01:19:55.267Z",
+      "status": "open"
     }
   ]
 }
