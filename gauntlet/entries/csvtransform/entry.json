@@ -1,0 +1,20 @@
+{
+  "name": "csvtransform",
+  "tier": "program",
+  "cells": ["formats.csv-cli"],
+  "mode": "batch",
+  "perf": true,
+  "languages": ["jet", "rust", "python", "go"],
+  "spec": {
+    "behavior": "Read sales.csv as RFC-4180 CSV, discard rows whose amount is not positive, group the remaining rows by region, and print ascending region counts and two-decimal sums followed by the overall count and sum.",
+    "args": ["sales.csv"],
+    "fixtureGen": {"script": "fixtures/gen.py", "out": "sales.csv"},
+    "expected": "expected.out"
+  },
+  "authoring": {
+    "jet": {"author": "luna-max", "turns": 19, "retries": 17, "diagnosticsHit": ["Warning [L0504]: field `amount` looks like money but has type `Float`", "Error [E0405]: `??` only works on a fallible value, not [DataGroup]", "Error [E0107]: nothing named `group` exists here", "Warning [L0508]: arrow loop body computes a value and drops it", "Error [E0108]: `total` holds Decimal, but this value is Float", "Error [E0112]: Decimal can't use `:Fixed(n)`", "Error [E1803]: application authority is undecided for `Exec, IO, Mem.Alloc, Panic`", "Error [E0002]: this `{` never gets a matching `}`", "Error [E1803]: application authority is undecided for `Env`", "Error [E3001]: `panic: read failed`", "Error [E0305]: pattern `Val` doesn't match this value's type", "Error [E0202]: cannot write to `regions` — it does not have the write-access marker `&`", "Error [E0956]: prelude static `jet_std::DataLimits.safe` isn't supported by the current evaluator yet", "Internal compiler error: whole-program TIR lowering produced no program for the dev interpreter", "Error [E3011]: `#Todo at jet/main.jet:745 — expected method to_float receiver type`", "Error [E0152]: a String is not a Regex pattern", "Error [E0405]: `??` only works on a fallible value, not String (text)", "Error [E0320]: inferred record construction uses `{…}`, not `.{…}`", "rustc E0308: generated Encode returned Result<DataTree> where DataTree was expected", "rustc E0425: cannot find function `jet_fmt_decimal` in this scope", "Runtime/JIT: process.argv() did not receive trailing CLI args; 200000-row default run timed out after 20s with exit 124 and empty stdout/stderr"], "notes": "Uses shipped core.encoding.csv.parse RFC-4180 parser and one-pass maps; no Jet CSV gap. AOT build/run passes. Default JIT/interpreter did not forward the trailing CLI argument in this smoke environment and timed out on the 200000-row parse, so the program falls back to canonical sales.csv in cwd; AOT accepts the argument. `fmt.decimal` plus typed Regex removes grouped thousands while retaining exact two-decimal output."},
+    "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only implementation includes a small RFC-4180 parser; Rust std has no shipped CSV module."},
+    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses Python's shipped csv module."},
+    "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses Go's encoding/csv package."}
+  }
+}

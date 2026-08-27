@@ -1,0 +1,55 @@
+use core.files as files
+use core.process as process
+use core.time as time
+
+fn run() !IOError {
+    path :: process.argv().get(1) ?? "app.log"
+    input :: files.open(~path) ?? panic("open log")
+    levels :: ["DEBUG", "INFO", "WARN", "ERROR"]
+    components :: ["api", "auth", "cache", "db", "jobs", "mailer", "payments", "queue", "search", "storage", "worker", "web"]
+    level_counts := [String:Int]{}
+    error_components := [String:Int]{}
+    first_text := ""
+    last_text := ""
+    first_ms := 0
+    last_ms := 0
+    total := 0
+
+    loop line in input.lines() {
+        fields :: line.split(" ").to_list()
+        timestamp_text :: fields.get(0) ?? panic("bad log line")
+        level :: fields.get(1) ?? panic("bad log line")
+        component :: fields.get(2) ?? panic("bad log line")
+        timestamp :: time.parse_rfc3339(timestamp_text) ?? panic("bad timestamp")
+        timestamp_ms :: timestamp.to_unix_ms()
+        if total == 0 {
+            first_text = timestamp_text.copy()
+            first_ms = timestamp_ms
+        }
+        last_text = timestamp_text.copy()
+        last_ms = timestamp_ms
+        level_counts[level] = (level_counts.get(level) ?? 0) + 1
+        if level == "ERROR" -> error_components[component] = (error_components.get(component) ?? 0) + 1
+        total += 1
+    }
+
+    loop level in levels {
+        print("{level} {level_counts.get(level) ?? 0}")
+    }
+    print("top-error-components:")
+    top := [String]{}
+    loop _ in 0..<3 {
+        best_name := ""
+        best_count := -1
+        loop component in components {
+            count :: error_components.get(component) ?? 0
+            if !top.contains(component) && (count > best_count || (count == best_count && (best_name == "" || component < best_name))) {
+                best_name = component
+                best_count = count
+            }
+        }
+        print("{best_count} {best_name}")
+        top.push(best_name)
+    }
+    print("span {first_text} .. {last_text} ({(last_ms - first_ms) / 1000}s)")
+}

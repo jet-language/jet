@@ -1,0 +1,21 @@
+{
+  "name": "binparse",
+  "tier": "micro",
+  "cells": ["formats.binary-kernel"],
+  "mode": "batch",
+  "perf": true,
+  "languages": ["jet", "rust", "python", "c", "zig"],
+  "spec": {
+    "behavior": "Read a deterministic little-endian JGB1 binary record file, validate its header, sum values for records whose id is divisible by 7, and compute FNV-1a over all name bytes in file order.",
+    "args": ["records.bin"],
+    "fixtureGen": {"script": "fixtures/gen.py", "out": "records.bin"},
+    "expected": "expected.out"
+  },
+  "authoring": {
+    "jet": {"author": "luna-max", "turns": 11, "retries": 9, "diagnosticsHit": ["E0956: `a non-Int used as a number` isn't supported by the current evaluator yet", "E3010: `value doesn't fit in U8`", "E1803: application authority is undecided for `Env`", "rustc E0425: cannot find function `jet_fmt_decimal` in this scope", "Error: cannot read input", "timeout after 30s on canonical default-tier run"], "notes": "Replaced unavailable default-tier math.from_bits with manual IEEE-754 decode, made the cwd input path explicit, and formatted six decimals with integer arithmetic. Default `jet run` passed on a generated 1,000-record file; canonical default run exceeded 30s. AOT canonical passed and produced expected.out."},
+    "rust": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["rustc E0599: no method named `try_into` found for slice `[u8]` in the current scope"], "notes": "Build requires `rustc --edition 2021 -O`; the checked-in source uses TryInto's 2021 prelude."},
+    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
+    "c": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
+    "zig": {"author": "luna-max", "turns": 1, "retries": 1, "diagnosticsHit": ["error: @bitCast must have a known result type"], "notes": "Checked-in source does not compile with available Zig 0.16; it needs an explicit result type for @bitCast."}
+  }
+}

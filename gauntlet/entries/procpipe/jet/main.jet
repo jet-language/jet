@@ -1,0 +1,21 @@
+use core.process as process
+
+fn run() {
+    calc :: process.cmd(["python3", "-c", "print(6*7)"]).run() ?? panic("calc failed")
+    print("calc {calc.output.trim()}")
+
+    source :: process.cmd(["python3", "-c", "print('b');print('a');print('c')"])
+    sorter :: process.cmd(["sort"])
+    sorted :: process.pipeline([source, sorter]) ?? panic("sort failed")
+    print("sorted {sorted.output.trim().lines().join(",")}")
+
+    slow :: process.cmd(["python3", "-c", "import time;time.sleep(5)"])
+        .timeout(Duration.milliseconds(300) ?? panic("duration"))
+        .run() ?? panic("slow failed")
+    if slow.timed_out -> print("slow timeout")
+
+    process.cmd(["python3", "-c", "import sys;sys.exit(3)"]).run_checked() ?? {
+        print("exit 3")
+        return
+    }
+}

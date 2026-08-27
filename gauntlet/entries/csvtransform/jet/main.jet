@@ -1,0 +1,39 @@
+use core.encoding as encoding
+use core.files as files
+use core.process as process
+use core.regex as re
+use core.sys as sys
+use core.text.fmt as fmt
+
+fn run() {
+    args :: process.argv()
+    cwd :: sys.current_dir() ?? "."
+    path :: if args.len() > 1 -> args.get(1) ?? "sales.csv" else -> Path.from(cwd).join("sales.csv").to_string()
+    text :: files.read(path) ?? panic("read failed")
+    rows :: encoding.csv.parse(text) ?? panic("csv failed")
+    counts := [String:Int]{}
+    sums := [String:Float]{}
+    total_count := 0
+    total := Float{0.0}
+    loop i in 1..<rows.len() {
+        row :: rows[i]
+        region :: row.get(1) ?? ""
+        amount_text :: row.get(3) ?? ""
+        amount :: Float.parse(amount_text) ?? Float{0.0}
+        if amount > 0.0 {
+            counts[region] = (counts.get(region) ?? 0) + 1
+            sums[region] = (sums.get(region) ?? Float{0.0}) + amount
+            total_count += 1
+            total += amount
+        }
+    }
+    regions := counts.keys().to_list()
+    regions.sort()
+    loop region in regions {
+        sum :: sums.get(region) ?? Float{0.0}
+        formatted :: re.replace_all(Regex{","}, fmt.decimal(sum, 2), "")
+        print("{region} n={counts.get(region) ?? 0} sum={formatted}")
+    }
+    formatted_total :: re.replace_all(Regex{","}, fmt.decimal(total, 2), "")
+    print("total n={total_count} sum={formatted_total}")
+}

@@ -1,0 +1,46 @@
+use core.files as fs
+use core.process as process
+use core.regex as re
+
+fn run() {
+    path :: process.argv().get(1) ?? "access.log"
+    text :: fs.read(path) ?? return Err("read failed")
+    pattern :: Regex{"^([0-9.]+) - - \[01/Jan/2026:00:00:00 \+0000\] \"GET (/api/[^ ]+) HTTP/1\.1\" 5[0-9][0-9] "}
+    counts := [String:Int]{}
+    matches := 0
+
+    loop line in text.lines() {
+        if line.contains(" /api/") && line.contains("\" 5") {
+            found :: re.match(pattern, line)
+            if found == .Val(mat) {
+                ip :: mat.group(1) ?? ""
+                counts[ip] = (counts.get(ip) ?? 0) + 1
+                matches += 1
+            }
+        }
+    }
+
+    print("matches {matches}")
+    top := [Int]{}
+    loop _ in 0..<5 {
+        best_i := 0
+        best_count := -1
+        loop i in 1..50 {
+            ip_for_count :: "192.0.2.{i}"
+            count :: counts.get(ip_for_count) ?? 0
+            ip_for_compare :: "192.0.2.{i}"
+            best_ip_for_compare :: "192.0.2.{best_i}"
+            if !top.contains(i) && (count > best_count || (count == best_count && (best_i == 0 || ip_for_compare < best_ip_for_compare))) {
+                best_i = i
+                best_count = count
+            }
+        }
+        top.push(best_i)
+    }
+    loop i in top {
+        ip_for_count :: "192.0.2.{i}"
+        count :: counts.get(ip_for_count) ?? 0
+        ip_for_print :: "192.0.2.{i}"
+        print("{count} {ip_for_print}")
+    }
+}

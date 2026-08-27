@@ -1,0 +1,20 @@
+{
+  "name": "procpipe",
+  "tier": "program",
+  "cells": ["files.orchestration"],
+  "mode": "batch",
+  "perf": false,
+  "languages": ["jet", "rust", "python", "go"],
+  "spec": {
+    "behavior": "Run four deterministic child-process orchestration steps: capture Python arithmetic, pipeline generated lines through sort, time out a sleeping Python child after 300ms, and use checked execution to observe exit code 3. Print one transcript line per step.",
+    "args": [],
+    "fixtureGen": null,
+    "expected": "expected.out"
+  },
+  "authoring": {
+    "jet": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["E1803: application authority is undecided for `Mem.Alloc, Panic`"], "notes": "Added inferred Mem.Alloc and Panic authority holds."},
+    "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Removed one rustc unused-mut warning after the first build."},
+    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
+    "go": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": [], "notes": "Initial run blocked because producer was not started; added source.Start()."}
+  }
+}

@@ -1,0 +1,107 @@
+use core.encoding.json as json
+use core.files as files
+use core.process as process
+
+fn task_id(tree: DataTree) Int ![FieldError] -> {
+    value :: tree.field("id")
+    id :: value.int()
+    return Ok(id)
+}
+
+fn task_text(tree: DataTree) String ![FieldError] -> {
+    value :: tree.field("text")
+    text :: value.text()
+    return Ok(text)
+}
+
+fn task_done(tree: DataTree) Bool ![FieldError] -> {
+    value :: tree.field("done")
+    done :: value.bool()
+    return Ok(done)
+}
+
+fn make_task(id: Int, text: String, done: Bool) DataTree !JSONError -> DataTree.Object({
+    "id": DataTree.Int(id),
+    "text": DataTree.Text(~text),
+    "done": DataTree.Bool(done)
+})
+
+fn load() [DataTree] !(IOError | JSONError | [FieldError]) -> {
+    if !files.exists("tasks.json") -> return []
+    raw :: files.read("tasks.json")
+    tree :: json.parse(raw) ?? DataTree.Object({"tasks": DataTree.Array([])})
+    task_tree :: tree.field("tasks")
+    if task_tree == .Array(items) -> return Ok(items)
+    return Ok([])
+}
+
+fn save(tasks: [DataTree]) !IOError -> {
+    tree :: DataTree.Object({"tasks": DataTree.Array(~tasks)})
+    files.write("tasks.json", json.to_string(tree))
+}
+
+fn mark_done(tasks: [DataTree], wanted: Int) [DataTree] !(IOError | JSONError | [FieldError]) -> {
+    out := [DataTree]{}
+    loop x in tasks {
+        id :: task_id(x)
+        if {
+            id == wanted -> {
+                text :: task_text(x)
+                out.push(make_task(id, text, true))
+            }
+            else -> out.push(x)
+        }
+    }
+    return Ok(out)
+}
+
+fn run() !(IOError | JSONError | [FieldError]) {
+    args :: process.argv()
+    command :: args.get(1) ?? ""
+    tasks := load()
+
+    if {
+        command == "add" -> {
+            text :: args.get(2) ?? ""
+            id := tasks.len() + 1
+            tasks.push(make_task(id, text, false))
+            save(tasks)
+            print("added {id} {text}")
+        }
+        command == "done" -> {
+            id :: Int.parse(args.get(2) ?? "") ?? -1
+            found := false
+            loop x in tasks {
+                if task_id(x) == id -> found = true
+            }
+            if {
+                found -> {
+                    tasks = mark_done(tasks, id)
+                    save(tasks)
+                    print("done {id}")
+                }
+                else -> print("no task {id}")
+            }
+        }
+        command == "list" -> {
+            open := 0
+            done := 0
+            loop x in tasks {
+                id :: task_id(x)
+                text :: task_text(x)
+                if {
+                    task_done(x) -> {
+                        print("[x] {id} {text}")
+                        done += 1
+                    }
+                    else -> {
+                        print("[ ] {id} {text}")
+                        open += 1
+                    }
+                }
+            }
+            print("open {open} done {done}")
+        }
+        else -> {}
+    }
+}

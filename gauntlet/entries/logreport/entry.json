@@ -1,0 +1,52 @@
+{
+  "name": "logreport",
+  "tier": "program",
+  "cells": ["text.report-cli"],
+  "mode": "batch",
+  "perf": true,
+  "languages": ["jet", "rust", "python", "go"],
+  "spec": {
+    "behavior": "Stream a deterministic application log line by line, parse each RFC3339 UTC timestamp, count all levels in fixed order, rank the three components with the most ERROR records by count descending and name ascending, and print the first timestamp, last timestamp, and elapsed span in seconds.",
+    "args": ["app.log"],
+    "fixtureGen": {"script": "fixtures/gen.py", "out": "app.log"},
+    "expected": "expected.out"
+  },
+  "authoring": {
+    "jet": {
+      "author": "luna-max",
+      "turns": 6,
+      "retries": 5,
+      "diagnosticsHit": [
+        "E0108: this `Err` holds String (text), but `IOError` was expected",
+        "E0102: `Iter` has no method `get`",
+        "L0508: arrow_loop_value_drop",
+        "E0121: `timestamp_text` was given away earlier",
+        "E1803: application authority is undecided for `Time`",
+        "E0956: `for-in method collection` isn't supported by the current evaluator yet",
+        "internal compiler error: generated Rust borrowed moved `__jet_best_name`"
+      ],
+      "notes": "AOT stream implementation passes and matches expected.out. Default `jet run` cannot evaluate the streaming file iterator and reports E0956; changing to whole-file loading would hide that gap and violate the streaming contract. Rust has no std datetime parser, so its port hand-parses the fixed RFC3339 format."
+    },
+    "rust": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Rust std ships no datetime parser; hand-parses the fixed RFC3339 UTC format."
+    },
+    "python": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Uses datetime.fromisoformat as required."
+    },
+    "go": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Uses time.Parse with time.RFC3339 as required."
+    }
+  }
+}

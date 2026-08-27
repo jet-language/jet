@@ -1,0 +1,72 @@
+{
+  "name": "wordfreq",
+  "tier": "micro",
+  "cells": ["text.kernel"],
+  "mode": "batch",
+  "perf": true,
+  "languages": ["jet", "rust", "python", "c", "zig"],
+  "spec": {
+    "behavior": "Read input.txt, split on ASCII whitespace, count exact tokens, print the top 20 by count descending with word-ascending ties, then print the distinct-token count and total-token count.",
+    "args": ["input.txt"],
+    "fixtureGen": {"script": "fixtures/gen.py", "out": "input.txt"},
+    "expected": "expected.out"
+  },
+  "authoring": {
+    "jet": {
+      "author": "luna-max",
+      "turns": 13,
+      "retries": 10,
+      "diagnosticsHit": [
+        "E2105: can't find the file `main.jet`",
+        "E0108: this `Err` holds String (text), but `IOError` was expected",
+        "E0403: `?` only works inside a function that returns a fallible result",
+        "L0508: arrow_loop_value_drop",
+        "E1803: application authority is undecided for `Exec, IO, Mem.Alloc, Panic`",
+        "E3001: panic: read failed",
+        "E1803: application authority is undecided for `Env`",
+        "timeout: `core.text.words` did not finish after approximately 2 minutes",
+        "timeout: ASCII map-count run exceeded approximately 6 minutes",
+        "exit 101: internal compiler error, generated Rust did not compile (struct trait generation)",
+        "E0121: `counts` was given away earlier, so it can't be used here",
+        "exit 127: `./jet/build/main` not found (actual output was `build/main`)"
+      ],
+      "notes": "Default jet run did not complete within approximately 6 minutes and was terminated; AOT build/run passed. Final source uses cwd join plus input fallback because this run's process.argv() exposed only [jet]."
+    },
+    "rust": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": ""
+    },
+    "python": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": ""
+    },
+    "c": {
+      "author": "luna-max",
+      "turns": 2,
+      "retries": 1,
+      "diagnosticsHit": [
+        "gcc: implicit declaration of function `strdup`; assignment to `char *` from `int`"
+      ],
+      "notes": "Replaced non-portable strdup with a small stdlib copy helper."
+    },
+    "zig": {
+      "author": "luna-max",
+      "turns": 6,
+      "retries": 5,
+      "diagnosticsHit": [
+        "zig 0.16: `std.process.argsAlloc` does not exist",
+        "zig 0.16: `std.fs.cwd` does not exist",
+        "zig 0.16: `std.ArrayList(Entry).init` does not exist",
+        "zig 0.16: `std.ArrayList(Entry){}` missing fields `items`, `capacity`",
+        "run exit 0 with empty stdout until writer.flush() was added"
+      ],
+      "notes": "Port uses Zig 0.16 Init/Io APIs and explicit stdout flush."
+    }
+  }
+}

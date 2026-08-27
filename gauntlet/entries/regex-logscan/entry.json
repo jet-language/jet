@@ -1,0 +1,20 @@
+{
+  "name": "regex-logscan",
+  "tier": "micro",
+  "cells": ["text.regex-kernel"],
+  "mode": "batch",
+  "perf": true,
+  "languages": ["jet", "rust", "python", "c"],
+  "spec": {
+    "behavior": "Scan 500,000 combined-log rows, select rows with a 5xx status and an /api/ path, then print the match count and the five most frequent client IPs ordered by descending count and ascending IP on ties.",
+    "args": ["access.log"],
+    "fixtureGen": {"script": "fixtures/gen.py", "out": "access.log"},
+    "expected": "expected.out"
+  },
+  "authoring": {
+    "jet": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["rustc E0308: generated Args equal/compare/encode returned Result where plain values were expected"], "notes": "Initial #CLI String argument caused AOT ICE; raw process.argv() removes generated Args derives. Default tier proven on 1,000-row scratch log; AOT proven on canonical log."},
+    "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "std-only string parsing; Rust-as-shipped lacks regex"},
+    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "uses shipped re module"},
+    "c": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "uses shipped POSIX regex.h"}
+  }
+}

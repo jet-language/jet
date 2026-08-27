@@ -1,0 +1,93 @@
+{
+  "name": "nbody",
+  "tier": "micro",
+  "cells": [
+    "numerics.float-kernel"
+  ],
+  "mode": "batch",
+  "perf": true,
+  "languages": [
+    "jet",
+    "rust",
+    "python",
+    "c",
+    "zig"
+  ],
+  "spec": {
+    "behavior": "Simulate the classic five-body solar system for N symplectic-Euler steps with dt 0.01, after offsetting the Sun's momentum, and print initial and final system energy with nine decimal places.",
+    "args": [
+      "50000"
+    ],
+    "fixtureGen": null,
+    "expected": "expected.out"
+  },
+  "authoring": {
+    "jet": {
+      "author": "luna-max",
+      "turns": 15,
+      "retries": 10,
+      "diagnosticsHit": [
+        "E1803: application authority is undecided for `Exec, IO, Mem.Alloc`",
+        "E1803: application authority is undecided for `IO, Mem.Alloc`",
+        "E2102: `--steps` isn't a flag jet understands",
+        "L0103: import `process` is never used",
+        "rustc E0425: cannot find function `jet_fmt_decimal` in this scope",
+        "rustc E0308: generated Args equal/compare/encode returned Result where plain values were expected",
+        "E1803: application authority is undecided for `Exec`",
+        "rustc E0308: generated Body equal/encode returned Result where plain values were expected",
+        "E0164: compound assignment can't target an indexed slot"
+      ],
+      "notes": "Default jet run emits the initial line but did not finish N=50000 within 180 seconds; lower-N run matched. Four source-only AOT retries: attempt 1 exact error `Error [E1803]: application authority is undecided for Exec`; attempt 2 exact rustc errors `expected bool, found Result<bool, _>` and `expected DataTree, found Result<DataTree, _>` in generated Body equal/encode; attempt 3 exact error `Error [E0164]: compound assignment can't target an indexed slot`; attempt 4 built but `./build/main 50000` emitted `-0.169289903` and `-0.169248379`. Restored typed-CLI Body source as best clean version. AOT cell remains broken; expected.out is peer-confirmed and Jet's canonical final line was not observed."
+    },
+    "rust": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": ""
+    },
+    "python": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": ""
+    },
+    "c": {
+      "author": "luna-max",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": ""
+    },
+    "zig": {
+      "author": "luna-max",
+      "turns": 2,
+      "retries": 1,
+      "diagnosticsHit": [
+        "error: root source file struct 'std' has no member named 'io'"
+      ],
+      "notes": "Updated stdout writer for Zig 0.16 API."
+    }
+  },
+  "expert": {
+    "c-expert": {
+      "sourced": true,
+      "author": "Miles",
+      "source": "https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-gcc-9.html",
+      "license": "BSD-3-Clause",
+      "notes": "benchmarks-game fastest C row (AVX intrinsics, rsqrt approximation); checked in verbatim as the sourced expert reference"
+    },
+    "rust-expert": {
+      "sourced": true,
+      "author": "Henry Jayakusuma (converted from Miles C #9)",
+      "source": "https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-rust-9.html",
+      "license": "BSD-3-Clause",
+      "notes": "benchmarks-game fastest Rust row (SSE/AVX intrinsics, unsafe, std-only); sourced expert reference"
+    },
+    "jet-expert": {
+      "author": "sol-high",
+      "status": "pending"
+    }
+  }
+}
