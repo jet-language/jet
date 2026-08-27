@@ -592,8 +592,9 @@ pub fn output_hash_of(out: &str) -> String {
 
 /// Canonical archive digest. The byte stream records every node's relative
 /// path, type, mode, and type-specific payload. Symlinks are never followed
-/// while encoding and must resolve inside the root. Hardlink identity is
-/// explicit; unsupported special files fail closed.
+/// while encoding; relative targets must stay lexically inside the root and
+/// absolute Nix-store targets are allowed only in Hangar mode. Hardlink identity
+/// is explicit; unsupported special files fail closed.
 pub fn try_output_hash_of(out: &str) -> Result<String, String> {
     try_output_hash_of_with_policy(out, false, &mut |_, _| {})
 }
@@ -646,12 +647,24 @@ fn try_output_hash_of_with_hook(
     if !p.exists() && !p.is_symlink() {
         return Err(format!("output `{out}` does not exist"));
     }
-    if fs::symlink_metadata(p)
-        .map_err(|e| format!("cannot inspect `{out}`: {e}"))?
-        .file_type()
-        .is_symlink()
-    {
-        return Err(format!("output root `{out}` must not be a symlink"));
+    let output_meta = fs::symlink_metadata(p)
+        .map_err(|e| format!("cannot inspect `{out}`: {e}"))?;
+    if output_meta.file_type().is_symlink() {
+        if hangar_root.is_none() {
+            return Err(format!("output root `{out}` must not be a symlink"));
+        }
+        let target = fs::read_link(p)
+            .map_err(|e| format!("cannot read symlink `{out}`: {e}"))?;
+        if !target.is_absolute() {
+            return Err("Nix symlink target must be absolute".into());
+        }
+        validate_nix_store_symlink_target(&target)?;
+        let mut archive = b"jet-hangar-archive-v1\0".to_vec();
+        hook(p, "node");
+        record_header(&mut archive, b'L', &[], mode_of(&output_meta));
+        push_bytes(&mut archive, &path_bytes(&target));
+        encode_semantic_xattrs(p, &mut archive, allow_semantic_xattrs)?;
+        return Ok(format!("sha256-{}", SHA256::sha256_hex(&archive)));
     }
     let root = fs::canonicalize(p).map_err(|e| format!("cannot resolve `{out}`: {e}"))?;
     let mut archive = b"jet-hangar-archive-v1\0".to_vec();
@@ -666,6 +679,8 @@ fn try_output_hash_of_with_hook(
         hangar_root.is_some(),
         hook,
     )?;
+    // Admission and validation changes below do not alter archive bytes for
+    // any tree that already hashes successfully.
     for (key, link) in &hardlinks {
         if link.seen == link.total {
             continue;
@@ -679,8 +694,21 @@ fn try_output_hash_of_with_hook(
                     add_allowed_hangar_root(&mut hangars, machine_hangar);
                 }
             }
+            let local_cas_paths: Vec<_> = hangars
+                .iter()
+                .filter_map(|hangar| canonical_real_directory(&hangar.join("cas")))
+                .collect();
+            if link.cas_key.as_deref().is_some_and(|cas_key| {
+                local_cas_paths
+                    .iter()
+                    .any(|pool| count_cas_peer(pool, cas_key, *key) == 1)
+                    || shared_cas
+                        .as_ref()
+                        .is_some_and(|pool| count_cas_peer(pool, cas_key, *key) == 1)
+            }) {
+                continue;
+            }
             let mut allowed_peers = 0;
-            let mut local_cas_paths = Vec::new();
             for hangar in &hangars {
                 let local_cas = canonical_real_directory(&hangar.join("cas"));
                 let mut excluded = vec![root.as_path()];
@@ -693,7 +721,6 @@ fn try_output_hash_of_with_hook(
                 }
                 allowed_peers += count_inode_peers_under_except(hangar, *key, &excluded);
                 if let Some(local_cas) = &local_cas {
-                    local_cas_paths.push(local_cas.clone());
                     if let Some(cas_key) = link.cas_key.as_deref() {
                         allowed_peers += count_cas_peer(local_cas, cas_key, *key);
                     }
@@ -881,10 +908,33 @@ fn encode_node(
             }
             validate_nix_store_symlink_target(&target)?;
         } else {
-            let resolved = fs::canonicalize(path)
-                .map_err(|e| format!("symlink `{}` is dangling or cyclic: {e}", path.display()))?;
-            if !resolved.starts_with(root) {
-                return Err(format!("symlink `{}` escapes output root", path.display()));
+            let mut stack = Vec::new();
+            if let Some(parent) = rel.parent() {
+                for component in parent.components() {
+                    if let Component::Normal(value) = component {
+                        stack.push(value.to_os_string());
+                    }
+                }
+            }
+            for component in target.components() {
+                match component {
+                    Component::CurDir => {}
+                    Component::ParentDir => {
+                        if stack.pop().is_none() {
+                            return Err(format!(
+                                "symlink `{}` escapes output root",
+                                path.display()
+                            ));
+                        }
+                    }
+                    Component::Normal(value) => stack.push(value.to_os_string()),
+                    Component::RootDir | Component::Prefix(_) => {
+                        return Err(format!(
+                            "symlink `{}` escapes output root",
+                            path.display()
+                        ));
+                    }
+                }
             }
         }
         record_header(archive, b'L', &rel_bytes, mode_of(&meta));
@@ -1321,6 +1371,116 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn canonical_archive_accepts_pool_backed_inode_with_foreign_peer() {
+        let hangar = scratch("pool-backed-hardlink");
+        let output = hangar.join("objects/output");
+        let pool = hangar.join("cas");
+        fs::create_dir_all(&output).unwrap();
+        fs::create_dir_all(&pool).unwrap();
+        let file = output.join("payload");
+        let bytes = b"trusted";
+        fs::write(&file, bytes).unwrap();
+        let cas_key = cas_key_for(&fs::metadata(&file).unwrap(), bytes);
+        fs::hard_link(&file, pool.join(&cas_key)).unwrap();
+        let foreign = hangar.parent().unwrap().join(format!(
+            "{}-foreign-peer",
+            hangar.file_name().unwrap().to_string_lossy()
+        ));
+        fs::hard_link(&file, &foreign).unwrap();
+
+        let digest = try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false)
+            .unwrap();
+        assert!(digest.starts_with("sha256-"), "{digest}");
+
+        fs::remove_file(foreign).ok();
+        fs::remove_dir_all(hangar).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_rejects_foreign_peer_without_cas_entry() {
+        let hangar = scratch("foreign-hardlink-no-cas");
+        let output = hangar.join("objects/output");
+        fs::create_dir_all(&output).unwrap();
+        let file = output.join("payload");
+        fs::write(&file, b"trusted").unwrap();
+        let foreign = hangar.parent().unwrap().join(format!(
+            "{}-foreign-peer",
+            hangar.file_name().unwrap().to_string_lossy()
+        ));
+        fs::hard_link(&file, &foreign).unwrap();
+
+        let error =
+            try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap_err();
+        assert!(error.contains("only 1 are inside"), "{error}");
+
+        fs::remove_file(foreign).ok();
+        fs::remove_dir_all(hangar).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_hashes_symlink_root_only_in_hangar_mode() {
+        use std::os::unix::fs::symlink;
+
+        let hangar = scratch("symlink-root");
+        let output = hangar.join("objects/output");
+        fs::create_dir_all(output.parent().unwrap()).unwrap();
+        symlink(
+            "/nix/store/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-foo",
+            &output,
+        )
+        .unwrap();
+
+        let first = try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap();
+        let second =
+            try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap();
+        assert_eq!(first, second);
+        let error = try_output_hash_of(&output.to_string_lossy()).unwrap_err();
+        assert!(error.contains("must not be a symlink"), "{error}");
+
+        fs::remove_file(&output).unwrap();
+        symlink("relative", &output).unwrap();
+        assert!(try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).is_err());
+
+        fs::remove_file(&output).unwrap();
+        symlink("/tmp/not-a-store-path", &output).unwrap();
+        assert!(try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).is_err());
+
+        fs::remove_dir_all(hangar).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_validates_relative_symlinks_lexically() {
+        use std::os::unix::fs::symlink;
+
+        let hangar = scratch("lexical-symlinks");
+        let output = hangar.join("objects/output");
+        fs::create_dir_all(output.join("bin")).unwrap();
+        fs::create_dir_all(output.join("lib")).unwrap();
+        symlink("../lib/real", output.join("bin/x")).unwrap();
+        symlink(
+            "/nix/store/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-foo/f",
+            output.join("lib/real"),
+        )
+        .unwrap();
+        assert!(try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).is_ok());
+
+        symlink("../../escape", output.join("up")).unwrap();
+        let error =
+            try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).unwrap_err();
+        assert!(error.contains("escapes output root"), "{error}");
+        fs::remove_file(output.join("up")).unwrap();
+
+        symlink("missing/target", output.join("dangling")).unwrap();
+        assert!(try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false).is_ok());
+
+        fs::remove_dir_all(hangar).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn canonical_archive_rejects_concurrent_add_remove_and_replace() {
         let dir = scratch("concurrent-directory");
         let keep = dir.join("keep");
@@ -1438,7 +1598,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn canonical_archive_rejects_symlink_escape_cycle_and_special_file() {
+    fn canonical_archive_rejects_symlink_escape_and_special_file() {
         use std::os::unix::fs::symlink;
         use std::os::unix::net::UnixListener;
 
@@ -1451,7 +1611,7 @@ mod tests {
 
         symlink("b", dir.join("a")).unwrap();
         symlink("a", dir.join("b")).unwrap();
-        assert!(try_output_hash_of(&dir.to_string_lossy()).is_err());
+        assert!(try_output_hash_of(&dir.to_string_lossy()).is_ok());
         fs::remove_file(dir.join("a")).unwrap();
         fs::remove_file(dir.join("b")).unwrap();
 

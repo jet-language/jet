@@ -1856,7 +1856,7 @@ impl<'a> Checker<'a> {
                 // to this statement.
                 let must_use_call_target = self.ignored_must_use_call_target(expr);
                 let saved_expected = self.expected_type.take();
-                let inferred = self.infer_fallible_stmt(expr);
+                let inferred = self.infer_statement_expr(expr);
                 self.expected_type = saved_expected;
                 if let Some(ty) = inferred {
                     if ty.is_fallible() && !self.suppress_must_use {

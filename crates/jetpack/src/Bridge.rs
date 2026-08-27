@@ -18,10 +18,13 @@
 use super::Output::Theme;
 use super::Provider::ProviderError;
 use super::SemanticLock::FlakeGraph;
-use super::JSON;
+use super::JSON::{self, JSONValue};
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
-use std::path::{Component, Path};
+use std::collections::BTreeSet;
+use std::fs;
+use std::io::Write;
+use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 
 /// Facts pulled from a flake's default devShell.
@@ -752,6 +755,631 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
         );
     }
     println!("{}", render_shim(&facts));
+    0
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ImportGap {
+    item: String,
+    candidate: String,
+}
+
+#[derive(Debug, Default)]
+struct ImportCatalog {
+    names: BTreeSet<String>,
+}
+
+impl ImportCatalog {
+    fn load(project_dir: &Path, fixtures: Option<&Path>, local_catalog: Option<&Path>) -> Self {
+        let mut names = BTreeSet::new();
+        if let Some(fixtures) = fixtures {
+            add_catalog_json(&fixtures.join("catalog.json"), &mut names);
+            add_fixture_catalog_names(fixtures, &mut names);
+        }
+        if let Some(local_catalog) = local_catalog {
+            add_catalog_json(&local_catalog.join("recipes-v1.json"), &mut names);
+            add_catalog_json(&local_catalog.join("catalog.json"), &mut names);
+        }
+        if let Ok(Some(index)) = crate::Discovery::load(project_dir) {
+            names.extend(
+                index
+                    .packages
+                    .into_iter()
+                    .map(|package| package.name)
+                    .filter(|name| is_catalog_name(name)),
+            );
+        }
+        Self { names }
+    }
+
+    fn is_authoritative(&self) -> bool {
+        !self.names.is_empty()
+    }
+
+    fn nearest(&self, item: &str, fallback: &[String]) -> String {
+        let mut candidates = self.names.clone();
+        candidates.extend(
+            fallback
+                .iter()
+                .filter(|name| is_catalog_name(name))
+                .cloned(),
+        );
+        let query = item
+            .rsplit(['/', ':', '.'])
+            .next()
+            .filter(|value| !value.is_empty())
+            .unwrap_or(item);
+        candidates
+            .into_iter()
+            .map(|candidate| (edit_distance(query, &candidate), candidate))
+            .min_by(|(left_distance, left), (right_distance, right)| {
+                left_distance.cmp(right_distance).then(left.cmp(right))
+            })
+            .map(|(_, candidate)| candidate)
+            .unwrap_or_else(|| "none".to_string())
+    }
+}
+
+fn add_catalog_json(path: &Path, names: &mut BTreeSet<String>) {
+    let Ok(text) = fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(value) = JSON::parse(&text) else {
+        return;
+    };
+    add_catalog_value(&value, names);
+}
+
+fn add_catalog_value(value: &JSONValue, names: &mut BTreeSet<String>) {
+    match value {
+        JSONValue::String(name) if is_catalog_name(name) => {
+            names.insert(name.clone());
+        }
+        JSONValue::Array(values) => {
+            for value in values {
+                add_catalog_value(value, names);
+            }
+        }
+        JSONValue::Object(fields) => {
+            if let Some(name) = fields.get("name").and_then(|value| value.as_str().ok()) {
+                if is_catalog_name(name) {
+                    names.insert(name.to_string());
+                }
+            }
+            for field in ["packages", "records", "catalog", "recipes"] {
+                if let Some(value) = fields.get(field) {
+                    add_catalog_value(value, names);
+                }
+            }
+        }
+        JSONValue::String(_) | JSONValue::Null | JSONValue::Bool(_) | JSONValue::Number(_) | JSONValue::Flt(_) => {}
+    }
+}
+
+fn add_fixture_catalog_names(dir: &Path, names: &mut BTreeSet<String>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let entry_path = entry.path();
+        let Some(stem) = entry_path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        for prefix in ["nixpkgs-", "jetpack-", "default-", "stable-", "unstable-"] {
+            if let Some(name) = stem.strip_prefix(prefix).filter(|name| is_catalog_name(name)) {
+                names.insert(name.to_string());
+                break;
+            }
+        }
+    }
+}
+
+fn is_catalog_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'+'))
+}
+
+fn import_package_name(raw: &str) -> Option<&str> {
+    if raw.starts_with("cross:") {
+        return None;
+    }
+    raw.rsplit(['/', ':', '.'])
+        .next()
+        .filter(|name| is_catalog_name(name))
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let right = right.chars().collect::<Vec<_>>();
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    for (left_index, left_char) in left.chars().enumerate() {
+        let mut current = vec![left_index + 1];
+        for (right_index, right_char) in right.iter().enumerate() {
+            let substitution = previous[right_index] + usize::from(left_char != *right_char);
+            let insertion = current[right_index] + 1;
+            let deletion = previous[right_index + 1] + 1;
+            current.push(substitution.min(insertion).min(deletion));
+        }
+        previous = current;
+    }
+    previous[right.len()]
+}
+
+fn import_source_path(dir: &Path, requested: Option<&Path>) -> Result<PathBuf, String> {
+    let candidates = |root: &Path| {
+        [
+            Syntax::FOREIGN_FLAKE_FILE,
+            Syntax::FOREIGN_SHELL_FILE,
+            Syntax::FOREIGN_DEFAULT_FILE,
+            Syntax::FOREIGN_DEVENV_FILE,
+        ]
+        .into_iter()
+        .map(|name| root.join(name))
+        .find(|path| path.is_file())
+    };
+    let path = match requested {
+        Some(requested) => {
+            let path = if requested.is_absolute() {
+                requested.to_path_buf()
+            } else {
+                dir.join(requested)
+            };
+            if path.is_dir() {
+                candidates(&path)
+            } else if path.is_file() {
+                Some(path)
+            } else {
+                None
+            }
+        }
+        None => candidates(dir),
+    }
+    .ok_or_else(|| {
+        format!(
+            "no `{}`, `{}`, or `{}` was found in `{}`",
+            Syntax::FOREIGN_FLAKE_FILE,
+            Syntax::FOREIGN_SHELL_FILE,
+            Syntax::FOREIGN_DEFAULT_FILE,
+            dir.display()
+        )
+    })?;
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if !matches!(
+        name,
+        Syntax::FOREIGN_FLAKE_FILE
+            | Syntax::FOREIGN_SHELL_FILE
+            | Syntax::FOREIGN_DEFAULT_FILE
+            | Syntax::FOREIGN_DEVENV_FILE
+    ) {
+        return Err(format!(
+            "`{}` is not a supported Nix environment file; use `{}`, `{}`, or `{}`",
+            path.display(),
+            Syntax::FOREIGN_FLAKE_FILE,
+            Syntax::FOREIGN_SHELL_FILE,
+            Syntax::FOREIGN_DEFAULT_FILE
+        ));
+    }
+    Ok(path)
+}
+
+fn read_import_devshell_facts(
+    project_dir: &Path,
+    source_path: &Path,
+    fixtures: Option<&Path>,
+) -> Result<DevShellFacts, ProviderError> {
+    if let Some(fixtures) = fixtures {
+        let path = fixtures.join(FIXTURE_FILE);
+        let stdout = fs::read_to_string(&path).map_err(|_| ProviderError::FixtureMissing(path))?;
+        return parse_facts_json(&stdout);
+    }
+    let source = fs::read_to_string(source_path).map_err(|error| {
+        ProviderError::Unsupported(format!(
+            "couldn't read `{}`: {error}",
+            source_path.display()
+        ))
+    })?;
+    let source_root = source_path
+        .parent()
+        .unwrap_or(project_dir)
+        .canonicalize()
+        .map_err(|error| {
+            ProviderError::Unsupported(format!(
+                "couldn't resolve Nix project root `{}`: {error}",
+                source_path.parent().unwrap_or(project_dir).display()
+            ))
+        })?;
+    let authority = native_authority(&source_root)?;
+    let evaluation = crate::NixEval::evaluate_devshell_with_import_authority(
+        &source,
+        &host_system(),
+        Some(authority),
+    )
+    .map_err(|error| {
+        let reason = error.to_string();
+        if reason.contains("project-root authority")
+            || reason.contains("project-root")
+            || reason.contains("symlink")
+        {
+            ProviderError::Unsupported(reason)
+        } else {
+            ProviderError::ForeignProjection(reason)
+        }
+    })?;
+    Ok(DevShellFacts {
+        packages: evaluation.packages().to_vec(),
+        unmapped: evaluation
+            .unsupported()
+            .iter()
+            .cloned()
+            .chain(
+                evaluation
+                    .cross_packages()
+                    .iter()
+                    .map(|package| format!("cross-package:{package}")),
+            )
+            .collect(),
+    })
+}
+
+fn render_import_env(packages: &[String]) -> String {
+    format!(
+        "// Generated by `jetpack import` from a bounded Nix devShell.\n\
+         module env.dev {{\n\
+         \x20   packages: [{}]\n\
+         }}\n",
+        packages.join(", ")
+    )
+}
+
+fn import_projection(
+    facts: &DevShellFacts,
+    catalog: &ImportCatalog,
+) -> (Vec<String>, Vec<ImportGap>) {
+    let mut packages = Vec::new();
+    let mut gaps = Vec::new();
+    for package in &facts.packages {
+        let Some(package_name) = import_package_name(package) else {
+            gaps.push(ImportGap {
+                item: package.clone(),
+                candidate: catalog.nearest(package, &packages),
+            });
+            continue;
+        };
+        if catalog.is_authoritative() && !catalog.names.contains(package_name) {
+            gaps.push(ImportGap {
+                item: package.clone(),
+                candidate: catalog.nearest(package, &packages),
+            });
+            continue;
+        }
+        if !packages.iter().any(|existing| existing == package_name) {
+            packages.push(package_name.to_string());
+        }
+    }
+    for item in &facts.unmapped {
+        gaps.push(ImportGap {
+            item: item.clone(),
+            candidate: catalog.nearest(item, &packages),
+        });
+    }
+    packages.sort();
+    gaps.sort_by(|left, right| left.item.cmp(&right.item));
+    gaps.dedup_by(|left, right| left.item == right.item);
+    (packages, gaps)
+}
+
+fn report_import_gap(file: &str, gap: &ImportGap) {
+    let item = one_line(&gap.item);
+    let candidate = one_line(&gap.candidate);
+    let diagnostic = Diagnostic::lint(
+        "JT0101",
+        format!("unmappable Nix input `{item}` at `{file}`"),
+        "the bounded importer could not prove a catalog package for this input".to_string(),
+        format!(
+            "review the generated env.jet and use the nearest catalog candidate `{candidate}` if it fits"
+        ),
+        None,
+    );
+    eprintln!(
+        "Warning [{}]: {}; nearest catalog candidate: `{candidate}`",
+        diagnostic.code, diagnostic.what
+    );
+}
+
+fn one_line(value: &str) -> String {
+    value.replace(['\r', '\n'], " ")
+}
+
+fn add_import_source_record(
+    lock: &mut super::SemanticLock::SemanticLockFile,
+    file: &str,
+    fingerprint: &str,
+) {
+    let key = format!("nix-import-source:{file}");
+    lock.records.retain(|record| record.identity.key != key);
+    lock.records.push(super::SemanticLock::SemanticRecord::new(
+        super::SemanticLock::LockIdentity {
+            kind: super::SemanticLock::LockRecordKind::SourceRef,
+            key,
+            exact: fingerprint.to_string(),
+            hash: fingerprint.to_string(),
+            platform: String::new(),
+        },
+        super::SemanticLock::LockRationale {
+            source_ref: file.to_string(),
+            provider: "nix-import".to_string(),
+            exact_output: fingerprint.to_string(),
+            reason: "bounded Nix devShell source fingerprint".to_string(),
+            ..super::SemanticLock::LockRationale::default()
+        },
+    ));
+}
+
+fn clear_import_records(lock: &mut super::SemanticLock::SemanticLockFile) {
+    lock.inputs.clear();
+    lock.records.retain(|record| {
+        let graph_record = record.identity.key.starts_with("flake-");
+        let import_record = record.identity.key.starts_with("nix-import-");
+        let imported_package =
+            record.identity.kind == super::SemanticLock::LockRecordKind::Package
+                && record.rationales.iter().any(|rationale| {
+                    rationale
+                        .reason
+                        .starts_with("imported from bounded Nix devShell")
+                });
+        !graph_record && !import_record && !imported_package
+    });
+}
+
+fn add_import_gap_record(
+    lock: &mut super::SemanticLock::SemanticLockFile,
+    file: &str,
+    gap: &ImportGap,
+) {
+    let item = one_line(&gap.item);
+    let candidate = one_line(&gap.candidate);
+    let key = format!("nix-import-unmapped:{item}");
+    let exact = format!("source={file};item={item};nearest={candidate}");
+    lock.records.retain(|record| record.identity.key != key);
+    lock.records.push(super::SemanticLock::SemanticRecord::new(
+        super::SemanticLock::LockIdentity {
+            kind: super::SemanticLock::LockRecordKind::FlakeUnsupported,
+            key,
+            exact: exact.clone(),
+            hash: crate::SHA256::sha256_hex(exact.as_bytes()),
+            platform: String::new(),
+        },
+        super::SemanticLock::LockRationale {
+            source_ref: file.to_string(),
+            provider: "nix-import".to_string(),
+            exact_output: exact,
+            reason: format!("no catalog package mapping; nearest candidate is `{candidate}`"),
+            ..super::SemanticLock::LockRationale::default()
+        },
+    ));
+}
+
+fn add_import_evaluator_record(
+    lock: &mut super::SemanticLock::SemanticLockFile,
+    file: &str,
+    packages: &[String],
+    gaps: &[ImportGap],
+    system: &str,
+) {
+    let key = format!("nix-import-evaluator:{file}");
+    let exact = format!(
+        "packages={};unmapped={}",
+        packages.join(","),
+        gaps.iter()
+            .map(|gap| gap.item.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    lock.records.retain(|record| record.identity.key != key);
+    lock.records.push(super::SemanticLock::SemanticRecord::new(
+        super::SemanticLock::LockIdentity {
+            kind: super::SemanticLock::LockRecordKind::FlakeEvaluator,
+            key,
+            exact: exact.clone(),
+            hash: crate::SHA256::sha256_hex(exact.as_bytes()),
+            platform: system.to_string(),
+        },
+        super::SemanticLock::LockRationale {
+            source_ref: file.to_string(),
+            provider: "native-nix-evaluator".to_string(),
+            exact_output: exact,
+            reason: "bounded direct Nix environment import projection".to_string(),
+            ..super::SemanticLock::LockRationale::default()
+        },
+    ));
+}
+
+fn import_nixpkgs_channel(
+    graph: &super::SemanticLock::FlakeGraph,
+) -> Option<crate::Lock::LockedSourceChannel> {
+    let input = graph.inputs.iter().find(|input| {
+        input.name == "nixpkgs" || input.url.contains("NixOS/nixpkgs")
+    })?;
+    if input.revision.is_empty() {
+        return None;
+    }
+    let channel = input
+        .url
+        .split('?')
+        .next()
+        .and_then(|url| url.strip_prefix("github:NixOS/nixpkgs/"))
+        .filter(|channel| !channel.is_empty())
+        .unwrap_or("nixos-unstable")
+        .to_string();
+    Some(crate::Lock::LockedSourceChannel {
+        name: Syntax::REF_SOURCE_JETPACK.to_string(),
+        channel,
+        exact: format!("github:NixOS/nixpkgs#{}", input.revision),
+    })
+}
+
+fn write_import_env(dir: &Path, contents: &str) -> Result<(), String> {
+    let path = dir.join(Syntax::ENV_FILE);
+    let temporary = dir.join(format!(".env.jet.import.{}.tmp", std::process::id()));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&temporary)?;
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&temporary, &path)?;
+        Ok::<(), std::io::Error>(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result.map_err(|error| format!("couldn't write `{}`: {error}", path.display()))
+}
+
+/// `jetpack import [flake.nix|shell.nix|default.nix]` — migrate the bounded
+/// devShell projection into canonical `env.jet` and the unified semantic lock.
+/// Package inputs that are not in the available catalog evidence remain out of
+/// the generated environment, with one JT0101 line naming the nearest option.
+pub fn cmd_import(
+    theme: &Theme,
+    dir: &Path,
+    requested: Option<&Path>,
+    fixtures: Option<&Path>,
+    local_catalog: Option<&Path>,
+) -> i32 {
+    let source_path = match import_source_path(dir, requested) {
+        Ok(path) => path,
+        Err(error) => {
+            theme.error(
+                "couldn't find a Nix environment",
+                &error,
+                "run `jetpack import flake.nix`, `jetpack import shell.nix`, or `jetpack import default.nix` from the project directory",
+            );
+            return 2;
+        }
+    };
+    let facts = match read_import_devshell_facts(dir, &source_path, fixtures) {
+        Ok(facts) => facts,
+        Err(error) => {
+            super::CLI::report_provider_error(theme, &error);
+            return 1;
+        }
+    };
+    let catalog = ImportCatalog::load(dir, fixtures, local_catalog);
+    let (packages, mut gaps) = import_projection(&facts, &catalog);
+    let file = source_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(Syntax::FOREIGN_FLAKE_FILE)
+        .to_string();
+    let env = render_import_env(&packages);
+    let env_path = dir.join(Syntax::ENV_FILE);
+    if let Ok(existing) = fs::read(&env_path) {
+        if existing != env.as_bytes() {
+            theme.error_coded(
+                "JT0199",
+                &format!("source import conflict in `{}`", env_path.display()),
+                "an existing env.jet is editable project source and cannot be overwritten by an import",
+                "move or reconcile the existing env.jet, then rerun the import",
+            );
+            return 2;
+        }
+    }
+
+    let source = match fs::read(&source_path) {
+        Ok(source) => source,
+        Err(error) => {
+            theme.error(
+                "couldn't read the Nix environment",
+                &format!("couldn't read `{}`: {error}", source_path.display()),
+                "fix the source file permissions and rerun the import",
+            );
+            return 1;
+        }
+    };
+    let fingerprint = crate::SHA256::sha256_hex(&source);
+    let mut lock = super::SemanticLock::load(dir).unwrap_or_default();
+    clear_import_records(&mut lock);
+    let mut source_channel = None;
+    if file == Syntax::FOREIGN_FLAKE_FILE {
+        match FlakeGraph::load(&source_path) {
+            Ok(graph) => {
+                let graph_lock = graph.semantic_lock();
+                lock.inputs = graph_lock.inputs;
+                lock.records.extend(graph_lock.records);
+                source_channel = import_nixpkgs_channel(&graph);
+            }
+            Err(error) => gaps.push(ImportGap {
+                item: format!("flake metadata: {error}"),
+                candidate: catalog.nearest("flake", &packages),
+            }),
+        }
+    }
+    add_import_source_record(&mut lock, &file, &fingerprint);
+    for package in &packages {
+        let provider_ref = format!("{package}@{}", Syntax::REF_SOURCE_JETPACK);
+        let hash = crate::SHA256::sha256_hex(
+            format!("catalog\0{provider_ref}\0{fingerprint}").as_bytes(),
+        );
+        super::SemanticLock::record_catalog_selection(
+            &mut lock,
+            "env.dev",
+            package,
+            &provider_ref,
+            &hash,
+            &host_system(),
+            &format!("imported from bounded Nix devShell `{file}`"),
+        );
+    }
+    gaps.sort_by(|left, right| left.item.cmp(&right.item));
+    gaps.dedup_by(|left, right| left.item == right.item);
+    for gap in &gaps {
+        add_import_gap_record(&mut lock, &file, gap);
+    }
+    add_import_evaluator_record(&mut lock, &file, &packages, &gaps, &host_system());
+
+    if let Some(source_channel) = source_channel {
+        crate::Lock::record_source_channel(dir, source_channel);
+    }
+    if let Err(error) = super::SemanticLock::atomic_commit(dir, &lock) {
+        theme.error(
+            "couldn't commit the import lock",
+            &error.message(),
+            "fix the project lock permissions and rerun the import",
+        );
+        return 1;
+    }
+    if !env_path.is_file() {
+        if let Err(error) = write_import_env(dir, &env) {
+            theme.error(
+                "couldn't write env.jet",
+                &error,
+                "fix the project directory permissions and rerun the import",
+            );
+            return 1;
+        }
+    }
+    for gap in &gaps {
+        report_import_gap(&file, gap);
+    }
+    println!(
+        "imported `{file}` into `{}`: {} catalog package{}",
+        Syntax::ENV_FILE,
+        packages.len(),
+        if packages.len() == 1 { "" } else { "s" }
+    );
     0
 }
 

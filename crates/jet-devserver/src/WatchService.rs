@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::file_mtime;
@@ -684,6 +685,19 @@ pub fn any_stamp_changed(graph: &WatchGraph) -> bool {
 /// Re-export for callers that previously only had `file_mtime`.
 pub fn path_mtime(path: &Path) -> Option<SystemTime> {
     file_mtime(path)
+}
+
+/// The session-owned source boundary. Canvas and project transactions use one
+/// gate so a client cannot publish a stale result after a newer one.
+#[derive(Default)]
+pub struct SessionBroker {
+    source_transactions: Mutex<()>,
+}
+
+impl SessionBroker {
+    pub(crate) fn lock_source_transaction(&self) -> MutexGuard<'_, ()> {
+        self.source_transactions.lock().unwrap()
+    }
 }
 
 #[cfg(test)]

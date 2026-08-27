@@ -501,6 +501,15 @@ pub(super) fn edit_error(kind: &str, message: &str) -> String {
     )
 }
 
+pub(super) fn edit_conflict(message: &str, current_revision: &str) -> String {
+    format!(
+        "{{\"protocol\":\"jet.canvas.edit\",\"schema_version\":{},\"ok\":false,\"kind\":\"conflict\",\"message\":{},\"current_revision\":{}}}",
+        EDIT_SCHEMA_VERSION,
+        json_str(message),
+        json_str(current_revision)
+    )
+}
+
 fn edit_error_with_diagnostics(
     kind: &str,
     message: &str,
@@ -575,6 +584,15 @@ pub(super) fn project_edit_error(kind: &str, message: &str) -> String {
         PROJECT_SCHEMA_VERSION,
         json_str(kind),
         json_str(message)
+    )
+}
+
+pub(super) fn project_edit_conflict(message: &str, current_revision: &str) -> String {
+    format!(
+        "{{\"protocol\":\"jet.canvas.project.edit\",\"schema_version\":{},\"ok\":false,\"kind\":\"conflict\",\"message\":{},\"current_revision\":{}}}",
+        PROJECT_SCHEMA_VERSION,
+        json_str(message),
+        json_str(current_revision)
     )
 }
 

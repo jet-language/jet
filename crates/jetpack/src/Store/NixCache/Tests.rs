@@ -4,7 +4,7 @@ use self::TestCache::{
 use super::*;
 use ed25519_dalek::SigningKey;
 use std::fs;
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::path::PathBuf;
 
 #[path = "TestCache.rs"]
@@ -439,6 +439,269 @@ fn nar_with_directory_entries(names: &[&[u8]]) -> Vec<u8> {
 }
 
 #[cfg(unix)]
+fn nar_with_symlink_root(target: &str) -> Vec<u8> {
+    fn put(output: &mut Vec<u8>, value: &[u8]) {
+        output.extend_from_slice(&(value.len() as u64).to_le_bytes());
+        output.extend_from_slice(value);
+        let padding = (8 - value.len() % 8) % 8;
+        output.resize(output.len() + padding, 0);
+    }
+
+    let mut output = Vec::new();
+    put(&mut output, b"nix-archive-1");
+    put(&mut output, b"(");
+    put(&mut output, b"type");
+    put(&mut output, b"symlink");
+    put(&mut output, b"target");
+    put(&mut output, target.as_bytes());
+    put(&mut output, b")");
+    output
+}
+
+#[cfg(unix)]
+fn single_object_cache(
+    tag: &str,
+    store_path: &str,
+    nar_name: &str,
+    nar: &[u8],
+    signing_key: &SigningKey,
+) -> (PathBuf, Roots, TestCacheServer) {
+    let root = unique_dir(tag);
+    let info = signed_narinfo(
+        store_path,
+        nar_name,
+        nar,
+        &[],
+        "test-cache-1",
+        signing_key,
+    );
+    let hash = store_path
+        .rsplit('/')
+        .next()
+        .and_then(|name| name.get(..32))
+        .unwrap();
+    let server = TestCacheServer::start(BTreeMap::from([
+        (
+            "/nix-cache-info".to_string(),
+            b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
+        ),
+        (format!("/{hash}.narinfo"), info),
+        (format!("/nar/{nar_name}"), nar.to_vec()),
+    ]));
+    let jet_root = root.join("jetpack");
+    fs::create_dir_all(jet_root.join("config")).unwrap();
+    fs::create_dir_all(jet_root.join("trust")).unwrap();
+    fs::write(
+        jet_root.join("config/nix-cache-v1.endpoint"),
+        &server.endpoint,
+    )
+    .unwrap();
+    fs::write(
+        jet_root.join("trust/nix-cache-v1.ed25519.pub"),
+        format!(
+            "test-cache-1:{}\n",
+            base64_encode(&signing_key.verifying_key().to_bytes())
+        ),
+    )
+    .unwrap();
+    (root, Roots::at(jet_root), server)
+}
+
+#[cfg(unix)]
+#[test]
+fn native_nix_cache_planning_skips_narinfo_for_a_fully_admitted_closure() {
+    let store_path = "/nix/store/44444444444444444444444444444444-planned";
+    let nar = nar_with_directory_entries(&[]);
+    let signing_key = SigningKey::from_bytes(&[13; 32]);
+    let (root, roots, server) = single_object_cache(
+        "planning-admitted",
+        store_path,
+        "planned.nar",
+        &nar,
+        &signing_key,
+    );
+    let request = NixOutputRequest {
+        name: "out".into(),
+        store_path: store_path.into(),
+    };
+
+    admit_nix_closure(&roots, std::slice::from_ref(&request), false).unwrap();
+    server.replace_routes(BTreeMap::from([(
+        "/nix-cache-info".to_string(),
+        b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
+    )]));
+
+    assert_eq!(
+        plan_nix_downloads(&roots, &[store_path.into()], false, None).unwrap(),
+        NixDownloadPlan::default()
+    );
+    drop(server);
+    remove_dir(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn native_nix_cache_memoizes_verified_digest_until_root_replacement() {
+    let root = unique_dir("digest-memo");
+    let hangar = root.join("hangar");
+    let objects = hangar.join("objects");
+    fs::create_dir_all(&objects).unwrap();
+    let object = objects.join("memo");
+    let nar = nar_with_directory_entries(&[b"payload"]);
+    super::super::read_nar_stream(Cursor::new(nar.clone()), &object, nar.len() as u64).unwrap();
+
+    let first = super::super::Ingest::verified_output_hash(&object, Some(&hangar), false).unwrap();
+    let before =
+        super::super::Ingest::object_stamp(&fs::symlink_metadata(&object).unwrap());
+    super::super::make_tree_writable_for_removal(&object).unwrap();
+    fs::write(object.join("payload"), b"corrupt").unwrap();
+    assert_eq!(
+        before,
+        super::super::Ingest::object_stamp(&fs::symlink_metadata(&object).unwrap())
+    );
+    assert_eq!(
+        super::super::Ingest::verified_output_hash(&object, Some(&hangar), false).unwrap(),
+        first
+    );
+
+    let replacement = objects.join("memo-replacement");
+    fs::create_dir(&replacement).unwrap();
+    fs::write(replacement.join("payload"), b"corrupt").unwrap();
+    let displaced = objects.join("memo-displaced");
+    fs::rename(&object, &displaced).unwrap();
+    fs::rename(&replacement, &object).unwrap();
+    assert_ne!(
+        before,
+        super::super::Ingest::object_stamp(&fs::symlink_metadata(&object).unwrap())
+    );
+    assert_ne!(
+        super::super::Ingest::verified_output_hash(&object, Some(&hangar), false).unwrap(),
+        first
+    );
+    remove_dir(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn native_nix_cache_admits_and_reuses_a_symlink_root() {
+    let store_path = "/nix/store/22222222222222222222222222222222-symlink-root";
+    let target = "/nix/store/cccccccccccccccccccccccccccccccc-target";
+    let nar = nar_with_symlink_root(target);
+    let signing_key = SigningKey::from_bytes(&[11; 32]);
+    let (root, roots, server) = single_object_cache(
+        "symlink-root",
+        store_path,
+        "symlink-root.nar",
+        &nar,
+        &signing_key,
+    );
+    let request = NixOutputRequest {
+        name: "out".into(),
+        store_path: store_path.into(),
+    };
+
+    let first = admit_nix_closure(&roots, std::slice::from_ref(&request), false).unwrap();
+    let object = &first.objects[store_path];
+    let metadata = fs::symlink_metadata(&object.hangar_path).unwrap();
+    assert!(metadata.file_type().is_symlink());
+    assert_eq!(
+        fs::read_link(&object.hangar_path).unwrap(),
+        PathBuf::from(target)
+    );
+    let object_path = roots
+        .hangar_dir()
+        .join("objects")
+        .join(&object.hangar_digest);
+    assert!(fs::symlink_metadata(object_path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    let entry = crate::Store::list_checked(&roots)
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.name == "symlink-root")
+        .unwrap();
+    assert!(entry.bin.is_empty());
+
+    server.replace_routes(BTreeMap::from([(
+        "/nix-cache-info".to_string(),
+        b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
+    )]));
+    let second = admit_nix_closure(&roots, &[request], false).unwrap();
+    assert_eq!(
+        second.objects[store_path].hangar_digest,
+        object.hangar_digest
+    );
+    drop(server);
+    remove_dir(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn native_nix_cache_replaces_a_corrupt_existing_object() {
+    let store_path = "/nix/store/33333333333333333333333333333333-corruptible";
+    let nar = nar_with_directory_entries(&[]);
+    let signing_key = SigningKey::from_bytes(&[12; 32]);
+    let (root, roots, server) = single_object_cache(
+        "self-heal",
+        store_path,
+        "corruptible.nar",
+        &nar,
+        &signing_key,
+    );
+    let request = NixOutputRequest {
+        name: "out".into(),
+        store_path: store_path.into(),
+    };
+
+    let first = admit_nix_closure(&roots, std::slice::from_ref(&request), false).unwrap();
+    let object = first.objects[store_path].hangar_path.clone();
+    super::super::make_tree_writable_for_removal(&object).unwrap();
+    fs::write(object.join("corrupt"), b"untrusted content").unwrap();
+
+    let second = admit_nix_closure(&roots, &[request], false).unwrap();
+    let digest = first.objects[store_path].hangar_digest.clone();
+    assert_eq!(second.objects[store_path].hangar_digest, digest);
+    assert!(!object.join("corrupt").exists());
+    assert_eq!(
+        crate::Envelope::try_output_hash_of_in_hangar(
+            &object.to_string_lossy(),
+            &roots.hangar_dir(),
+            false,
+        )
+        .unwrap(),
+        digest
+    );
+    drop(server);
+    remove_dir(&root);
+}
+
+#[cfg(unix)]
+#[test]
+fn native_nix_cache_sweeps_dead_stages_but_keeps_current_pid_stages() {
+    let root = unique_dir("stage-sweep");
+    let roots = Roots::at(root.join("jetpack"));
+    let stage_parent = roots.hangar_dir().join("stage");
+    fs::create_dir_all(stage_parent.join("nix-cache-999999999-1/nested")).unwrap();
+    fs::write(
+        stage_parent.join("nix-cache-999999999-1/nested/payload"),
+        b"stale",
+    )
+    .unwrap();
+    let current = stage_parent.join(format!("nix-cache-{}-1", std::process::id()));
+    fs::create_dir_all(&current).unwrap();
+    let unrelated = stage_parent.join("nix-cache-not-a-pid-1");
+    fs::create_dir_all(&unrelated).unwrap();
+
+    let transaction = AdmissionTransaction::new(&roots).unwrap();
+    assert!(!stage_parent.join("nix-cache-999999999-1").exists());
+    assert!(current.exists());
+    assert!(unrelated.exists());
+    drop(transaction);
+    remove_dir(&root);
+}
+
+#[cfg(unix)]
 #[test]
 fn native_nix_cache_reads_canonical_directories_symlinks_and_executables() {
     fn put(output: &mut Vec<u8>, value: &[u8]) {
@@ -540,6 +803,101 @@ fn native_nix_cache_reads_canonical_directories_symlinks_and_executables() {
     remove_dir(&destination);
 }
 
+#[cfg(unix)]
+#[test]
+fn native_nix_cache_removes_a_readonly_partial_stream_tree() {
+    use std::os::unix::fs::PermissionsExt;
+
+    struct SealAfterFile {
+        input: Cursor<Vec<u8>>,
+        destination: PathBuf,
+        sealed: bool,
+    }
+
+    impl Read for SealAfterFile {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if !self.sealed && self.destination.join("payload").is_file() {
+                let mut permissions = fs::metadata(&self.destination)?.permissions();
+                permissions.set_mode(0o555);
+                fs::set_permissions(&self.destination, permissions)?;
+                self.sealed = true;
+            }
+            let limit = buffer.len().min(1);
+            self.input.read(&mut buffer[..limit])
+        }
+    }
+
+    let valid_nar = nar_with_directory_entries(&[b"payload"]);
+    let mut nar = valid_nar.clone();
+    nar.extend_from_slice(b"trailing");
+    let destination = unique_dir("readonly-partial-stream");
+    remove_dir(&destination);
+    let reader = SealAfterFile {
+        input: Cursor::new(nar.clone()),
+        destination: destination.clone(),
+        sealed: false,
+    };
+    let error = super::super::read_nar_stream(reader, &destination, nar.len() as u64).unwrap_err();
+    assert!(error.to_string().contains("trailing"));
+    assert!(!destination.exists());
+    super::super::read_nar_stream(
+        Cursor::new(valid_nar.clone()),
+        &destination,
+        valid_nar.len() as u64,
+    )
+    .unwrap();
+    assert!(destination.join("payload").is_file());
+    remove_dir(&destination);
+}
+
+#[test]
+fn native_nix_cache_registration_reports_the_failed_cas_condition() {
+    let root = unique_dir("registration-condition");
+    let roots = Roots::at(root.join("jetpack"));
+    let digest = format!("sha256-{}", "a".repeat(64));
+    let expected = roots.hangar_dir().join("objects").join(&digest);
+    fs::create_dir_all(&expected).unwrap();
+    let producer = ProducerRecord::new(
+        "nix",
+        "/nix/store/test.drv",
+        "sha256-source",
+        crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::new()).unwrap(),
+        "nix-test",
+        "policy=test\nplatform=test",
+        BTreeMap::new(),
+    )
+    .unwrap();
+    let out = roots.root.join("not-the-canonical-object");
+    let entry = StoreEntry {
+        id: "registration-condition".into(),
+        name: "registration-condition".into(),
+        version: "1".into(),
+        reference: "registration-condition@nixpkgs".into(),
+        out: out.to_string_lossy().into_owned(),
+        bin: String::new(),
+        rlib: String::new(),
+        envelope: crate::Envelope::Envelope {
+            output_hash: digest,
+            platform: crate::Envelope::host_platform(),
+            signature: String::new(),
+            provenance: "registration-condition via nix".into(),
+        },
+        cache_identity: CacheIdentity::default(),
+        references: Vec::new(),
+        named_outputs: BTreeMap::new(),
+        platform_artifact_kind: String::new(),
+        producer_record: producer.encode(),
+        receipt: String::new(),
+        realized_at: 0,
+        last_used_at: 0,
+    };
+    let error = crate::Store::register_admitted_nix_entries_unlocked(&roots, &[entry]).unwrap_err();
+    let detail = error.to_string();
+    assert!(detail.contains(out.to_string_lossy().as_ref()));
+    assert!(detail.contains("output path"));
+    remove_dir(&root);
+}
+
 fn assert_single_nix_cache_failure(
     tag: &str,
     store_path: &str,
@@ -547,7 +905,7 @@ fn assert_single_nix_cache_failure(
     object: Vec<u8>,
     trusted_key: &SigningKey,
     expected: NixCacheErrorKind,
-) {
+) -> NixCacheError {
     let root = unique_dir(tag);
     let narinfo_text = String::from_utf8(narinfo.clone()).unwrap();
     let mut routes = BTreeMap::from([
@@ -612,6 +970,7 @@ fn assert_single_nix_cache_failure(
     }
     drop(server);
     remove_dir(&root);
+    error
 }
 
 #[test]
@@ -621,6 +980,10 @@ fn native_nix_cache_negative_inputs_fail_closed() {
     let wrong_key = SigningKey::from_bytes(&[10; 32]);
     let key_id = "test-cache-1";
     let valid_nar = nar_with_directory_entries(&[]);
+    let mut invalid_magic_nar = Vec::new();
+    invalid_magic_nar.extend_from_slice(&9u64.to_le_bytes());
+    invalid_magic_nar.extend_from_slice(b"not-a-nar");
+    invalid_magic_nar.extend_from_slice(&[0u8; 7]);
 
     assert_single_nix_cache_failure(
         "wrong-key",
@@ -659,21 +1022,23 @@ fn native_nix_cache_negative_inputs_fail_closed() {
         NixCacheErrorKind::CompressedCorruption,
     );
 
-    assert_single_nix_cache_failure(
+    let nar_error = assert_single_nix_cache_failure(
         "nar-corruption",
         store_path,
         signed_narinfo(
             store_path,
             "negative.nar",
-            b"not-a-nar",
+            &invalid_magic_nar,
             &[],
             key_id,
             &signing_key,
         ),
-        b"not-a-nar".to_vec(),
+        invalid_magic_nar,
         &signing_key,
         NixCacheErrorKind::NarCorruption,
     );
+    assert!(nar_error.to_string().contains(store_path));
+    assert!(nar_error.to_string().contains("invalid magic"));
 
     let duplicate_nar = nar_with_directory_entries(&[b"A", b"a"]);
     assert_single_nix_cache_failure(

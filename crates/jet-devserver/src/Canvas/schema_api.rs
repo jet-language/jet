@@ -24,8 +24,8 @@ use super::edit_actions::{
     inline_helper_candidate, write_checked_formatted, write_checked_source,
 };
 use super::graph_helpers::{
-    canvas_action_preview_ok, diagnostics_json, edit_error, preview_ok, project_edit_error,
-    query_error,
+    canvas_action_preview_ok, diagnostics_json, edit_conflict, edit_error, preview_ok,
+    project_edit_conflict, project_edit_error, query_error,
 };
 use super::project_scan::{
     env_project_json, lock_project_json, packages_project_json, project_context_for_entry,
@@ -538,9 +538,9 @@ fn apply_project_transaction_json_inner(path: &Path, request: &str) -> Result<St
     }
     let project_revision = required_project_string(request, "project_revision")?;
     if project_revision != ctx.project_revision {
-        return Err(project_edit_error(
-            "conflict",
+        return Err(project_edit_conflict(
             "project changed since this Canvas transaction was drawn",
+            &ctx.project_revision,
         ));
     }
     let op = required_project_string(request, "op")?;
@@ -1148,10 +1148,11 @@ fn apply_transaction_json_inner(path: &Path, request: &str) -> Result<String, St
 fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Result<String, String> {
     let src = fs::read_to_string(path).map_err(|e| edit_error("io", &e.to_string()))?;
     let revision = required_string(request, "revision")?;
-    if revision != source_revision(&src) {
-        return Err(edit_error(
-            "conflict",
+    let current_revision = source_revision(&src);
+    if revision != current_revision {
+        return Err(edit_conflict(
             "source changed since this Canvas graph was drawn",
+            &current_revision,
         ));
     }
     let schema = json_usize_field(request, "schema_version").unwrap_or(0);

@@ -696,7 +696,7 @@ smallest offending source span:
 | E3403 | sema  | non-deterministic construct in pure evaluation (e.g. time/random) |
 | E1801 | repl  | per-input fuel cap hit — snippet ran more than ~10M interpreter steps |
 | E1802 | repl  | hard-rejected feature in the REPL (FFI, tasks, `#Unsafe`, OS-level APIs) |
-| E1803 | repl  | a REPL Core effect lacks lexical or invocation authority, or its exact operation/resource was denied |
+| E1803 | repl  | application authority is undecided or denies a required effect |
 | E0801 | sema  | lambda parameter type unknown |
 | E0803 | sema  | calling a value that isn't a function |
 | E-CALL-VALUE | parse | function values use `.call(…)`, not the retired adjacent-call spelling `)(` (D-CALLVALUE1=B) |
@@ -1983,7 +1983,7 @@ REPL step number in place of a file span (`<repl:N>`).
 |------|------|-----|-----|
 | E1801 | This snippet ran more than `{N}` interpreter steps without finishing. | The REPL interpreter caps each input to avoid hanging your session; this almost always means a loop that never ends. | Check any loops for a condition that never becomes false. Use `:run` to allow unbounded execution (compiles and runs instead of interpreting). |
 | E1802 | The REPL interpreter can't run `{feature}`. | The REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler. | Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler. |
-| E1803 | application authority is undecided or denies a required effect. | The diagnostic keeps the application projection explicit: `required_effects`, `granted_effects`, `denied_effects`, and `authority` are separate facts; an undecided or denied effect stops before host state changes. | Declare the effect in `authority.holds.allow`, deny it deliberately, or approve the exact operation once or for the project in an interactive terminal. |
+| E1803 | Application authority is undecided or denies a required effect; the report names `required_effects`, `granted_effects`, `denied_effects`, and `authority` separately. | The effect projection distinguishes sema requirements from policy grants, denials, and the policy identity; execution stops before host state changes. | Declare the effect in `authority.holds.allow`, deny it deliberately, or approve the exact operation once or for the project in an interactive terminal. |
 
 ## Source import diagnostics (D-JPK-IMPORTTODO1, D-MIGRATE-SRC1)
 

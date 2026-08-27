@@ -125,6 +125,37 @@ fn failure_contract_matrix_agrees_across_execution_tiers() {
 }
 
 #[test]
+fn optional_success_result_fallback_agrees_across_execution_tiers() {
+    tir_support::assert_tiers_agree_with_application_policy(
+        "optional_success_result_fallback",
+        r#"
+#Error
+enum TestFailure {
+    Missing
+}
+
+fn optional_success_result(value: Int) ?Int !TestFailure -> {
+    if value == -1 {
+        return Err(TestFailure.Missing)
+    }
+    if value == 0 {
+        return None
+    }
+    return Ok(Val(value))
+}
+
+fn run() {
+    print(optional_success_result(8080) ?? 0)
+    print(optional_success_result(0) ?? 0)
+    print(optional_success_result(-1) ?? 0)
+}
+"#,
+        "8080\n0\n0\n",
+        "name: \"optional_success_result_fallback\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO, Mem.Alloc] } }\n",
+    );
+}
+
+#[test]
 fn never_contract_rejects_every_reachable_failure_route() {
     let cases = [
         (

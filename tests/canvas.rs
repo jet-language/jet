@@ -2527,6 +2527,46 @@ fn canvas_stale_transaction_conflicts_without_writing() {
 }
 
 #[test]
+fn canvas_concurrent_clients_get_one_winner_and_current_revision_conflict() {
+    let path = write_fixture("concurrent_conflict", CANVAS_FIXTURE);
+    let before = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&before);
+    let first_request = format!(
+        "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{revision}\",\"from\":\"total\",\"to\":\"first\",\"client_id\":\"client-a\"}}"
+    );
+    let second_request = format!(
+        "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{revision}\",\"from\":\"total\",\"to\":\"second\",\"client_id\":\"client-b\"}}"
+    );
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let first_path = path.clone();
+    let first_barrier = std::sync::Arc::clone(&barrier);
+    let first = std::thread::spawn(move || {
+        first_barrier.wait();
+        jet::Canvas::apply_transaction_json(&first_path, &first_request)
+    });
+    let second_path = path.clone();
+    let second_barrier = std::sync::Arc::clone(&barrier);
+    let second = std::thread::spawn(move || {
+        second_barrier.wait();
+        jet::Canvas::apply_transaction_json(&second_path, &second_request)
+    });
+    let first = first.join().unwrap();
+    let second = second.join().unwrap();
+    assert!(
+        first.is_ok() ^ second.is_ok(),
+        "exactly one client must win"
+    );
+    let loser = first.err().or_else(|| second.err()).expect("one conflict");
+    let current = fs::read_to_string(&path).unwrap();
+    let current_revision = jet::Canvas::source_revision(&current);
+    assert!(loser.contains("\"kind\":\"conflict\""), "{loser}");
+    assert!(
+        loser.contains(&format!("\"current_revision\":\"{current_revision}\"")),
+        "{loser}"
+    );
+}
+
+#[test]
 fn canvas_code_lens_source_edit_uses_replace_source_transaction() {
     let path = write_fixture("code_lens_edit", "fn run() {\n    print(\"old\")\n}\n");
     let before = fs::read_to_string(&path).unwrap();

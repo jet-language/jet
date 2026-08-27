@@ -401,16 +401,26 @@ pub(super) fn lower_or_fallback(
     let value_t = lower_expr(value, cx, env);
     let result_ty = match &value_t.ty {
         Type::Option(inner) => (**inner).clone(),
-        Type::Result { ok, .. } => (**ok).clone(),
+        Type::Result { ok, .. } => ok
+            .as_ref()
+            .unwrap_option()
+            .unwrap_or(ok.as_ref())
+            .clone(),
         other => other.clone(),
     };
+    let optional_success = matches!(&value_t.ty, Type::Option(_))
+        || matches!(&value_t.ty, Type::Result { ok, .. } if matches!(ok.as_ref(), Type::Option(_)));
     let mut fallback_env = clone_env(env);
     if let Type::Result { err, .. } = &value_t.ty {
-        fallback_env.bind(
-            Syntax::AMBIENT_ERR,
-            ambient_err_local(),
-            Some((**err).clone()),
-        );
+        // Optional-success fallbacks recover both absence and explicit
+        // failure, but do not expose `err` (D-FAIL-BIND1=A).
+        if !optional_success {
+            fallback_env.bind(
+                Syntax::AMBIENT_ERR,
+                ambient_err_local(),
+                Some((**err).clone()),
+            );
+        }
     }
     let tfallback = match fallback {
         OrFallback::Value(e) => TOrFallback::Value(Box::new(lower_expr(e, cx, &mut fallback_env))),

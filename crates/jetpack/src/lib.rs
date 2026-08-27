@@ -207,5 +207,6 @@ pub mod WorkspaceLock;
 
 /// Process entry point used by the `jetpack` binary.
 pub fn run(args: Vec<String>) -> i32 {
+    let _diagnostics = Output::begin_invocation();
     CLI::main(args)
 }

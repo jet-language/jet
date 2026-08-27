@@ -493,7 +493,22 @@ pub(crate) fn certify_registration_unlocked(
     entry: &StoreEntry,
     additional: &[StoreEntry],
 ) -> io::Result<()> {
-    certify_registration_unlocked_mode(roots, entry, additional, None)
+    let existing = list_unlocked(roots)?;
+    certify_registration_unlocked_mode(roots, entry, additional, None, &existing)
+}
+
+/// Certify one closure batch against one snapshot of the existing projection.
+/// The per-entry form remains for single registrations; batch registration must
+/// not re-read every existing metadata record for every candidate.
+pub(crate) fn certify_registrations_unlocked(
+    roots: &Roots,
+    entries: &[StoreEntry],
+) -> io::Result<()> {
+    let existing = list_unlocked(roots)?;
+    for entry in entries {
+        certify_registration_unlocked_mode(roots, entry, entries, None, &existing)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn certify_registration_unlocked_with_fresh_agreement(
@@ -502,7 +517,8 @@ pub(crate) fn certify_registration_unlocked_with_fresh_agreement(
     additional: &[StoreEntry],
     action_key: &str,
 ) -> io::Result<()> {
-    certify_registration_unlocked_mode(roots, entry, additional, Some(action_key))
+    let existing = list_unlocked(roots)?;
+    certify_registration_unlocked_mode(roots, entry, additional, Some(action_key), &existing)
 }
 
 fn certify_registration_unlocked_mode(
@@ -510,6 +526,7 @@ fn certify_registration_unlocked_mode(
     entry: &StoreEntry,
     additional: &[StoreEntry],
     fresh_action_key: Option<&str>,
+    existing: &[StoreEntry],
 ) -> io::Result<()> {
     let action_key = entry_action_key(entry);
     let producer = decode_producer(entry)?;
@@ -525,23 +542,20 @@ fn certify_registration_unlocked_mode(
         ));
     }
     let mut candidates = BTreeMap::new();
-    for candidate in list_unlocked(roots)?
-        .into_iter()
-        .chain(additional.iter().cloned())
-    {
-        if candidate.id != entry.id && entry_action_key(&candidate) == action_key {
-            candidates.insert(candidate.id.clone(), candidate);
+    for candidate in existing.iter().chain(additional.iter()) {
+        if candidate.id != entry.id && entry_action_key(candidate) == action_key {
+            candidates.insert(candidate.id.as_str(), candidate);
         }
     }
 
     for candidate in candidates.into_values() {
-        let candidate_producer = decode_producer(&candidate)?;
-        verify_existing_output(roots, &candidate)?;
+        let candidate_producer = decode_producer(candidate)?;
+        verify_existing_output(roots, candidate)?;
         let (left, right, left_producer, right_producer) =
-            if entry_sort_key(entry) <= entry_sort_key(&candidate) {
-                (entry, &candidate, &producer, &candidate_producer)
+            if entry_sort_key(entry) <= entry_sort_key(candidate) {
+                (entry, candidate, &producer, &candidate_producer)
             } else {
-                (&candidate, entry, &candidate_producer, &producer)
+                (candidate, entry, &candidate_producer, &producer)
             };
         let difference =
             compare_registration_entries(roots, left, right, left_producer, right_producer)?;

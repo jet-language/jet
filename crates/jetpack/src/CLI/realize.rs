@@ -54,6 +54,53 @@ fn current_project_dir() -> Option<std::path::PathBuf> {
     }
 }
 
+/// Refresh the lock witness on a verified cached Nix entry before the Store
+/// projects its receipt. Each package realization may extend the same project
+/// lock, so older entries can carry the digest from the lock state in which
+/// they were first recorded. The output and closure must verify against the
+/// current lock-backed expectation before this metadata-only refresh is
+/// allowed.
+fn refresh_stale_project_nix_entry(
+    roots: &Roots,
+    project: &Path,
+    spec: &RefSpec::RefSpec,
+    table: &RefSpec::SourceTable,
+    ctx: &Provider::Ctx<'_>,
+) -> Result<(), Store::RealizeError> {
+    let result = RuntimePolicy::with_project_lock(project, "nix-cache-reconciliation", || {
+        let Some(candidate) = Store::find_by_reference_read_only(roots, &spec.raw) else {
+            return Ok(());
+        };
+        let Ok(producer) = Store::ProducerRecord::decode(&candidate.producer_record) else {
+            return Ok(());
+        };
+        if producer.provider != "nix" {
+            return Ok(());
+        }
+        let Some(prepared) = producer.facts.get("nix.lock.digest") else {
+            return Ok(());
+        };
+        let Some(expectation) = Provider::cache_expectation(spec, table, ctx) else {
+            return Ok(());
+        };
+        if !Store::cache_candidate_matches(roots, &spec.raw, &expectation) {
+            return Ok(());
+        }
+        let current = Provider::project_lock_digest(Some(project))
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        if current == *prepared {
+            return Ok(());
+        }
+        let Some(hit) = Store::find_verified_by_reference(roots, &spec.raw, &expectation)? else {
+            return Ok(());
+        };
+        Store::refresh_nix_lock_digest(roots, &hit.entry, &current)?;
+        Ok(())
+    })
+    .map_err(Store::RealizeError::Store);
+    result
+}
+
 /// Assemble the acquisition plan before provider realization. Nix narinfo is
 /// read here for its signed closure sizes; payload admission remains behind
 /// the caller's single confirmation gate.
@@ -545,6 +592,11 @@ pub(super) fn realize_ref_outcome(
     let realize = || match recorded_reuse {
         Some(realized) => Ok(realized),
         None => {
+            if scope == RealizeScope::Project {
+                if let Some(project) = ctx.project_dir {
+                    refresh_stale_project_nix_entry(roots, project, spec, table, &ctx)?;
+                }
+            }
             Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table })
         }
     };

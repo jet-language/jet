@@ -11,6 +11,7 @@ use super::trust_env_build::cmd_trust;
 use super::update_search_info::{
     cmd_explain, cmd_info, cmd_logs, cmd_outdated, cmd_override, cmd_search, cmd_update,
 };
+use super::why::cmd_why;
 use crate::Output::Theme;
 use crate::Store;
 use crate::Syntax;
@@ -503,7 +504,12 @@ pub fn main(args: Vec<String>) -> i32 {
     let read_only_shared_store_status = verb == "hangar"
         && parsed.positional.first().map(String::as_str) == Some("shared")
         && parsed.positional.get(1).map(String::as_str) == Some("status");
-    let read_only_command = matches!(verb.as_str(), "doctor" | "audit");
+    let read_only_hangar_doctor = verb == "hangar"
+        && parsed.positional.first().map(String::as_str) == Some("doctor")
+        && !parsed.positional.iter().any(|argument| argument == "--repair");
+    let read_only_command = matches!(verb.as_str(), "doctor" | "audit")
+        || verb == Syntax::JETPACK_WHY
+        || read_only_hangar_doctor;
     if !read_only_command && !read_only_shared_store_status {
         let roots = Store::resolve();
         if let Err(error) = Store::migrate_legacy_hangar(&roots) {
@@ -538,6 +544,7 @@ pub fn main(args: Vec<String>) -> i32 {
         v if v == Syntax::TRUST_SUBCOMMAND => cmd_trust(&theme, &parsed),
         "hangar" => cmd_hangar(&theme, &parsed),
         "audit" => cmd_audit(&theme),
+        v if v == Syntax::JETPACK_IMPORT_VERB => super::cmd_import(&theme, &parsed),
         "add" => cmd_add(&theme, &parsed),
         "remove" => cmd_remove(&theme, &parsed),
         "update" => cmd_update(&theme, &parsed),
@@ -545,6 +552,7 @@ pub fn main(args: Vec<String>) -> i32 {
         "search" => cmd_search(&theme, &parsed),
         "info" => cmd_info(&theme, &parsed),
         "explain" => cmd_explain(&theme, &parsed),
+        v if v == Syntax::JETPACK_WHY => cmd_why(&theme, &parsed),
         "logs" => cmd_logs(&theme, &parsed),
         "__service-probe" => cmd_service_probe(&theme, &parsed),
         "override" => cmd_override(&theme, &parsed),

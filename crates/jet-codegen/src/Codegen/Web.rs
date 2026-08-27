@@ -76,6 +76,10 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
 );
 const INLINE_HANDLER_PLACEHOLDER: &str = "/*__JET_INLINE_HANDLER__*/null";
 
+fn result_has_optional_success(ty: &Type) -> bool {
+    matches!(ty, Type::Result { ok, .. } if matches!(ok.as_ref(), Type::Option(_)))
+}
+
 /// D-WEBTIR1=A: data-only fact reported by codegen's TIR coverage gate.
 /// The driver/API layer owns the user-facing diagnostic text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -6610,11 +6614,21 @@ fn wasm_emit_expr(
             value,
             fallback: TIR::TOrFallback::Value(fallback),
             ..
-        } => format!(
-            "match ({}) {{ Ok(value) => value, Err(_) => {{ jet_journey_reset(); {} }} }}",
-            wasm_emit_expr(value, funcs, file_prefix, reconstructions)?,
-            wasm_emit_expr(fallback, funcs, file_prefix, reconstructions)?
-        ),
+        } => {
+            let rendered_value = wasm_emit_expr(value, funcs, file_prefix, reconstructions)?;
+            let rendered_fallback = wasm_emit_expr(fallback, funcs, file_prefix, reconstructions)?;
+            if result_has_optional_success(&value.ty) {
+                format!(
+                    "match ({}) {{ Ok(Ok(value)) => value, Ok(Err(_)) | Err(_) => {{ jet_journey_reset(); {} }} }}",
+                    rendered_value, rendered_fallback
+                )
+            } else {
+                format!(
+                    "match ({}) {{ Ok(value) => value, Err(_) => {{ jet_journey_reset(); {} }} }}",
+                    rendered_value, rendered_fallback
+                )
+            }
+        }
         TIR::TExprKind::DistinctConvert {
             name,
             arg,
@@ -6632,20 +6646,33 @@ fn wasm_emit_expr(
             reconstructions,
         )?,
         TIR::TExprKind::OrFallback { value, fallback } => {
+            let optional_success = result_has_optional_success(&value.ty);
             let value = wasm_emit_expr(value, funcs, file_prefix, reconstructions)?;
             let TIR::TOrFallback::Panic { msg, loc } = fallback else {
                 return Err(())
             };
             let msg = wasm_emit_expr(msg, funcs, file_prefix, reconstructions)?;
-            jet_name_format!(
-                "match ({value}) {{ Ok({name_prefix}ok) => {name_prefix}ok, Err(_) => {{ jet_journey_reset(); jet_panic_rich({:?}, {}, {:?}, {:?}, {}, {}, &({msg})) }} }}",
-                loc.file,
-                loc.line,
-                loc.fn_name,
-                loc.src_line,
-                loc.col,
-                loc.caret,
-            )
+            if optional_success {
+                jet_name_format!(
+                    "match ({value}) {{ Ok(Ok({name_prefix}ok)) => {name_prefix}ok, Ok(Err(_)) | Err(_) => {{ jet_journey_reset(); jet_panic_rich({:?}, {}, {:?}, {:?}, {}, {}, &({msg})) }} }}",
+                    loc.file,
+                    loc.line,
+                    loc.fn_name,
+                    loc.src_line,
+                    loc.col,
+                    loc.caret,
+                )
+            } else {
+                jet_name_format!(
+                    "match ({value}) {{ Ok({name_prefix}ok) => {name_prefix}ok, Err(_) => {{ jet_journey_reset(); jet_panic_rich({:?}, {}, {:?}, {:?}, {}, {}, &({msg})) }} }}",
+                    loc.file,
+                    loc.line,
+                    loc.fn_name,
+                    loc.src_line,
+                    loc.col,
+                    loc.caret,
+                )
+            }
         }
         TIR::TExprKind::DistinctRaw(inner) => {
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
@@ -9517,30 +9544,56 @@ fn tir_js_expr(
             value,
             fallback: TIR::TOrFallback::Value(fallback),
         } => {
-            // Tagged Option/Result unwrap; also accepts legacy nullish from older emit.
-            jet_format!(
-                "((({jet_prefix}v) => ({jet_prefix}v != null && ({jet_prefix}v.tag === \"Some\" || {jet_prefix}v.tag === \"Ok\") ? {jet_prefix}v.values[0] : {}))({}))",
-                tir_js_expr(fallback, funcs, file_prefix)?,
-                tir_js_expr(value, funcs, file_prefix)?
-            )
+            // Tagged Option/Result unwrap; optional-success Result values have
+            // one additional tagged carrier around the Some payload.
+            let rendered_value = tir_js_expr(value, funcs, file_prefix)?;
+            let rendered_fallback = tir_js_expr(fallback, funcs, file_prefix)?;
+            if result_has_optional_success(&value.ty) {
+                jet_format!(
+                    "((({jet_prefix}v) => ({jet_prefix}v != null && {jet_prefix}v.tag === \"Ok\" && {jet_prefix}v.values[0] != null && {jet_prefix}v.values[0].tag === \"Some\" ? {jet_prefix}v.values[0].values[0] : {}))({}))",
+                    rendered_fallback,
+                    rendered_value
+                )
+            } else {
+                jet_format!(
+                    "((({jet_prefix}v) => ({jet_prefix}v != null && ({jet_prefix}v.tag === \"Some\" || {jet_prefix}v.tag === \"Ok\") ? {jet_prefix}v.values[0] : {}))({}))",
+                    rendered_fallback,
+                    rendered_value
+                )
+            }
         }
         E::OrFallback {
             value,
             fallback: TIR::TOrFallback::Panic { msg, loc },
         } => {
+            let optional_success = result_has_optional_success(&value.ty);
             let value = tir_js_expr(value, funcs, file_prefix)?;
             let msg = tir_js_expr(msg, funcs, file_prefix)?;
-            jet_format!(
-                "((({jet_prefix}v) => ({jet_prefix}v != null && ({jet_prefix}v.tag === \"Some\" || {jet_prefix}v.tag === \"Ok\") ? {jet_prefix}v.values[0] : jet_runtime_stop(\"E3001\", {}, {}, {}, {}, {}, {}, {}, \"\")))({}))",
-                json_quote(&loc.file),
-                loc.line,
-                msg,
-                json_quote(&loc.fn_name),
-                json_quote(&loc.src_line),
-                loc.col,
-                loc.caret,
-                value,
-            )
+            if optional_success {
+                jet_format!(
+                    "((({jet_prefix}v) => ({jet_prefix}v != null && {jet_prefix}v.tag === \"Ok\" && {jet_prefix}v.values[0] != null && {jet_prefix}v.values[0].tag === \"Some\" ? {jet_prefix}v.values[0].values[0] : jet_runtime_stop(\"E3001\", {}, {}, {}, {}, {}, {}, {}, \"\")))({}))",
+                    json_quote(&loc.file),
+                    loc.line,
+                    msg,
+                    json_quote(&loc.fn_name),
+                    json_quote(&loc.src_line),
+                    loc.col,
+                    loc.caret,
+                    value,
+                )
+            } else {
+                jet_format!(
+                    "((({jet_prefix}v) => ({jet_prefix}v != null && ({jet_prefix}v.tag === \"Some\" || {jet_prefix}v.tag === \"Ok\") ? {jet_prefix}v.values[0] : jet_runtime_stop(\"E3001\", {}, {}, {}, {}, {}, {}, {}, \"\")))({}))",
+                    json_quote(&loc.file),
+                    loc.line,
+                    msg,
+                    json_quote(&loc.fn_name),
+                    json_quote(&loc.src_line),
+                    loc.col,
+                    loc.caret,
+                    value,
+                )
+            }
         }
         E::IfExpr {
             cond,

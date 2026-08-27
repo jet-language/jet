@@ -112,42 +112,6 @@ fn jet_std_fs_absolute(path: &String) -> Result<String, jet_std::IOError> {
     };
     Ok(abs.to_string_lossy().to_string())
 }
-fn jet_std_fs_copy_dir(from: &String, to: &String) -> Result<(), jet_std::IOError> {
-    if jet_fault_should_fail("FS.Read") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some(from.clone()),
-            "fault injected: FS.Read",
-        ));
-    }
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Write,
-            Some(to.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    fn copy_tree(
-        src: &std::path::Path,
-        dst: &std::path::Path,
-        shown: &str,
-    ) -> Result<(), jet_std::IOError> {
-        std::fs::create_dir_all(dst).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, shown, e))?;
-        for entry in std::fs::read_dir(src).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))? {
-            let entry = entry.map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))?;
-            let src_path = entry.path();
-            let dst_path = dst.join(entry.file_name());
-            let ft = entry.file_type().map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))?;
-            if ft.is_dir() {
-                copy_tree(&src_path, &dst_path, shown)?;
-            } else if ft.is_file() {
-                std::fs::copy(&src_path, &dst_path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, shown, e))?;
-            }
-        }
-        Ok(())
-    }
-    copy_tree(std::path::Path::new(from), std::path::Path::new(to), from)
-}
 fn jet_std_fs_walk(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(

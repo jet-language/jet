@@ -1271,6 +1271,50 @@ impl<'a> Checker<'a> {
         Some(Type::Named(Syntax::TYPE_REGEX.to_string()))
     }
 
+    fn can_prewrap_auto_propagation(&self, e: &Expr) -> bool {
+        if self.compiler_generated || self.failure_auto_depth != 0 {
+            return false;
+        }
+        if self.expected_type.as_ref().is_some_and(|expected| {
+            matches!(
+                expected,
+                Type::Result { err, .. }
+                    if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
+            )
+        }) {
+            return false;
+        }
+        let Expr::Call(call) = e.without_parens() else {
+            return false;
+        };
+        self.funcs
+            .get(&call.name)
+            .is_some_and(|sig| matches!(sig.effective_return_type(), Type::Result { .. }))
+    }
+
+    fn prewrap_auto_propagation(&mut self, e: &mut Expr) -> bool {
+        if !self.can_prewrap_auto_propagation(e) {
+            return false;
+        }
+        let span = e.span();
+        let inner = std::mem::replace(e, Expr::Absent(span));
+        *e = Expr::Try(Box::new(inner), span, TryConvert::None, None);
+        true
+    }
+
+    /// Statement inference has a special direct-call path for valueless
+    /// functions. Put a known fallible direct call through the existing
+    /// `Try` checker before that path checks it, so automatic propagation does
+    /// not walk the same arguments a second time.
+    pub(crate) fn infer_statement_expr(&mut self, expr: &mut Expr) -> Option<Type> {
+        self.normalize_imported_core_expr(expr);
+        self.normalize_prelude_expr(expr);
+        if self.prewrap_auto_propagation(expr) {
+            return self.infer(expr);
+        }
+        self.infer_fallible_stmt(expr)
+    }
+
     /// Infer and check an expression. Returns None when a problem was
     /// already reported (avoids error cascades).
     ///
@@ -1358,6 +1402,7 @@ impl<'a> Checker<'a> {
         let result = if let Some(result) = self.fold_reflect_call(e) {
             result
         } else {
+            self.prewrap_auto_propagation(e);
             self.infer_checked(e)
         };
         self.expected_type = saved_expected;

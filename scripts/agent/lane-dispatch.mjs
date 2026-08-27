@@ -60,7 +60,10 @@ const tower = (args) =>
   execFileSync("node", ["plugins/tower/tower.mjs", ...args], { cwd: REPO, encoding: "utf8", maxBuffer: 1 << 28 });
 
 const cards = () => {
-  const raw = JSON.parse(tower(["card", "list", "--epoch", EPOCH, "--json"]));
+  // LANE_EPOCH=all lists the whole board — required for sidequest cards,
+  // which carry no epoch and are invisible to an --epoch filter.
+  const filter = EPOCH === "all" ? [] : ["--epoch", EPOCH];
+  const raw = JSON.parse(tower(["card", "list", ...filter, "--json"]));
   return Array.isArray(raw) ? raw : raw.cards;
 };
 

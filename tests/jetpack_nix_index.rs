@@ -12,7 +12,9 @@ mod jetpack_fixtures;
 #[path = "support/nix_index_cache_server.rs"]
 mod nix_index_cache_server;
 
-use jetpack_fixtures::{jetpack, Scratch};
+use jetpack_fixtures::{
+    assert_jetos_stderr_snapshot_normalized, jetpack, Scratch,
+};
 use nix_index_cache_server::{NixIndexCacheServer, LIB_PATH, RUNTIME_PATH};
 
 const REVISION: &str = nix_index_cache_server::REVISION;
@@ -200,4 +202,91 @@ fn index_backed_nixpkgs_repairs_only_missing_transitive_object() {
     assert_eq!(server.object_request_count(LIB_PATH), 0);
     assert_eq!(server.object_request_count(RUNTIME_PATH), 2);
     assert_eq!(server.count("/nix-cache-info"), 1);
+}
+
+#[test]
+fn hangar_doctor_reports_and_repairs_cache_drift_and_staging() {
+    let project_root = Scratch::new("nix-index-doctor-project");
+    let hangar_root = Scratch::new("nix-index-doctor-hangar");
+    let server = NixIndexCacheServer::start_ripgrep(&project_root.path);
+    server.install(&hangar_root.path);
+    project(&project_root);
+    assert!(build(&project_root, &hangar_root, false).status.success());
+
+    let roots = Store::Roots::at(hangar_root.path.clone());
+    let (runtime_output, runtime_digest) = Store::list_checked(&roots)
+        .expect("list Hangar before doctor")
+        .into_iter()
+        .find_map(|entry| {
+            let producer = ProducerRecord::decode(&entry.producer_record).ok()?;
+            (producer.facts.get("nix.store-path").map(String::as_str) == Some(RUNTIME_PATH))
+                .then_some((entry.out, entry.envelope.output_hash))
+        })
+        .expect("runtime Hangar object");
+    let runtime_output = Path::new(&runtime_output);
+    make_writable(runtime_output);
+    let corruption = runtime_output.join("share/doctor-corruption");
+    fs::write(&corruption, b"drift").expect("corrupt runtime object");
+
+    let stale_stage = roots
+        .hangar_dir()
+        .join("stage/nix-cache-999999999-1/payload");
+    fs::create_dir_all(&stale_stage).expect("create stale admission stage");
+    fs::write(stale_stage.join("bytes"), b"stale").expect("write stale admission stage");
+    let orphan_cas = roots.hangar_dir().join("cas/orphan");
+    fs::create_dir_all(orphan_cas.parent().expect("CAS parent")).expect("create CAS pool");
+    fs::write(&orphan_cas, b"orphan").expect("write orphan CAS entry");
+
+    let mut doctor = jetpack();
+    let read_only = doctor
+        .args(["hangar", "doctor", "--no-color"])
+        .current_dir(&project_root.path)
+        .env("JETPACK_ROOT", &hangar_root.path)
+        .output()
+        .expect("run read-only Hangar doctor");
+    assert_eq!(read_only.status.code(), Some(1));
+    assert_jetos_stderr_snapshot_normalized(
+        "hangar_doctor_findings",
+        &String::from_utf8_lossy(&read_only.stderr),
+        &[(runtime_digest.as_str(), "<runtime-digest>")],
+    );
+    assert!(corruption.exists(), "read-only doctor changed object bytes");
+    assert!(
+        stale_stage.parent().expect("stage parent").exists(),
+        "read-only doctor removed staging"
+    );
+    assert!(orphan_cas.exists(), "read-only doctor removed CAS entry");
+
+    server.reset_counts();
+    let mut repair = jetpack();
+    let repaired = repair
+        .args(["hangar", "doctor", "--repair", "--no-color"])
+        .current_dir(&project_root.path)
+        .env("JETPACK_ROOT", &hangar_root.path)
+        .output()
+        .expect("run repairing Hangar doctor");
+    assert!(
+        repaired.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&repaired.stdout),
+        String::from_utf8_lossy(&repaired.stderr)
+    );
+    assert_jetos_stderr_snapshot_normalized(
+        "hangar_doctor_repair",
+        &String::from_utf8_lossy(&repaired.stderr),
+        &[(runtime_digest.as_str(), "<runtime-digest>")],
+    );
+    assert!(server.object_request_count(RUNTIME_PATH) > 0);
+    assert!(!stale_stage.parent().expect("stage parent").exists());
+    assert!(!orphan_cas.exists());
+    assert!(!corruption.exists());
+    assert_eq!(
+        jetpack::Envelope::try_output_hash_of_in_hangar(
+            &runtime_output.to_string_lossy(),
+            &roots.hangar_dir(),
+            false,
+        )
+        .expect("rehash repaired runtime"),
+        runtime_digest
+    );
 }

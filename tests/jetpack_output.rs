@@ -60,6 +60,24 @@ fn pinned_channel_update_uses_registered_report_snapshot() {
 }
 
 #[test]
+fn repeated_diagnostic_uses_one_card_count_and_next_step_snapshot() {
+    let theme = jetpack::Output::Theme { color: false };
+    let actual = theme.render_collapsed_error(
+        "E1350",
+        "native Nix cache closure could not be admitted",
+        "the same signed Nix closure failed for every requested object",
+        "repair the signed cache response or restore network access, then retry the realization.",
+        8,
+    );
+    assert_eq!(
+        actual,
+        include_str!("fixtures/jetpack-diagnostics/collapsed_diagnostics.stderr")
+    );
+    assert_eq!(actual.matches("Error [E1350]").count(), 1);
+    assert_eq!(actual.matches("Next:").count(), 1);
+}
+
+#[test]
 fn retired_off_compiler_report_renderers_do_not_return() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut sources = Vec::new();

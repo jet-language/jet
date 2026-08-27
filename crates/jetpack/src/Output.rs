@@ -7,11 +7,268 @@
 
 use super::RefSpec::RefError;
 use crate::Syntax;
-use jet_foundation::Diagnostics::Diagnostic;
+use jet_foundation::Diagnostics::{display_char_width, Diagnostic};
 use jet_foundation::Terminal::{ColorChoice, Theme as SharedTheme};
-use std::io::IsTerminal;
+use std::fmt;
+use std::io::{IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+/// Every Jetpack stderr transition takes this lock and writes its complete
+/// terminal update in one critical section. Progress callbacks run on worker
+/// threads, so line-at-a-time `eprint!` calls are not enough.
+static OUTPUT_WRITER: Mutex<()> = Mutex::new(());
+
+fn with_output(write: impl FnOnce(&mut dyn Write)) {
+    let _guard = OUTPUT_WRITER
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let mut stderr = std::io::stderr().lock();
+    write(&mut stderr);
+    let _ = stderr.flush();
+}
+
+fn write_output(args: fmt::Arguments<'_>) {
+    with_output(|stderr| {
+        let _ = stderr.write_fmt(args);
+    });
+}
+
+#[derive(Debug)]
+struct DiagnosticGroup {
+    code: String,
+    root_cause_key: String,
+    what: String,
+    why: String,
+    fix: String,
+    count: usize,
+    color: bool,
+}
+
+#[derive(Default, Debug)]
+struct DiagnosticCollector {
+    groups: Vec<DiagnosticGroup>,
+}
+
+impl DiagnosticCollector {
+    fn record(
+        &mut self,
+        color: bool,
+        code: &str,
+        root_cause_key: &str,
+        what: &str,
+        why: &str,
+        fix: &str,
+    ) {
+        if let Some(group) = self.groups.iter_mut().find(|group| {
+            group.code == code
+                && (group.root_cause_key == root_cause_key
+                    || (group.what == what && group.why == why && group.fix == fix))
+        }) {
+            group.count += 1;
+            return;
+        }
+
+        self.groups.push(DiagnosticGroup {
+            code: code.to_string(),
+            root_cause_key: root_cause_key.to_string(),
+            what: what.to_string(),
+            why: why.to_string(),
+            fix: fix.to_string(),
+            count: 1,
+            color,
+        });
+    }
+
+    fn render(&self) -> String {
+        let mut rendered = String::new();
+        let repeated_root_causes = self.groups.iter().filter(|group| group.count > 1).count();
+
+        for group in &self.groups {
+            let theme = Theme { color: group.color };
+            rendered.push_str(&theme.render_diagnostic_group(
+                &group.code,
+                &group.what,
+                &group.why,
+                &group.fix,
+                group.count,
+            ));
+        }
+
+        if repeated_root_causes > 0 {
+            rendered.push_str(next_step_line(self.groups.len() > 1));
+        }
+        rendered
+    }
+}
+
+static DIAGNOSTIC_INVOCATION: Mutex<Option<DiagnosticCollector>> = Mutex::new(None);
+
+/// Collect coded failures for one Jetpack invocation and flush them on exit.
+pub(crate) struct DiagnosticInvocation {
+    active: bool,
+}
+
+pub(crate) fn begin_invocation() -> DiagnosticInvocation {
+    let mut active = DIAGNOSTIC_INVOCATION
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if active.is_some() {
+        return DiagnosticInvocation { active: false };
+    }
+    *active = Some(DiagnosticCollector::default());
+    DiagnosticInvocation { active: true }
+}
+
+impl Drop for DiagnosticInvocation {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+
+        let collector = DIAGNOSTIC_INVOCATION
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        if let Some(collector) = collector {
+            let rendered = collector.render();
+            if !rendered.is_empty() {
+                write_output(format_args!("{rendered}"));
+            }
+        }
+    }
+}
+
+fn record_diagnostic(
+    theme: &Theme,
+    code: &str,
+    root_cause_key: &str,
+    what: &str,
+    why: &str,
+    fix: &str,
+) -> bool {
+    let mut active = DIAGNOSTIC_INVOCATION
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let Some(collector) = active.as_mut() else {
+        return false;
+    };
+    collector.record(theme.color, code, root_cause_key, what, why, fix);
+    true
+}
+
+fn repeat_count_line(count: usize) -> String {
+    let extra = count.saturating_sub(1);
+    let noun = if extra == 1 { "object" } else { "objects" };
+    format!("  {extra} more {noun} failed with the same cause.\n")
+}
+
+fn next_step_line(multiple: bool) -> &'static str {
+    if multiple {
+        "Next: resolve the root causes above, then retry the command.\n"
+    } else {
+        "Next: resolve the root cause above, then retry the command.\n"
+    }
+}
+
+fn live_output_enabled(color: bool, is_terminal: bool, ci: bool) -> bool {
+    color && is_terminal && !ci
+}
+
+fn terminal_columns() -> usize {
+    std::env::var("COLUMNS")
+        .ok()
+        .and_then(|columns| columns.trim().parse::<usize>().ok())
+        .filter(|columns| *columns > 0)
+        .unwrap_or(80)
+}
+
+fn ansi_sequence_end(input: &str, start: usize) -> usize {
+    let bytes = input.as_bytes();
+    if start + 1 >= bytes.len() {
+        return bytes.len();
+    }
+    match bytes[start + 1] {
+        b'[' => bytes
+            .iter()
+            .enumerate()
+            .skip(start + 2)
+            .find(|(_, byte)| (0x40..=0x7e).contains(*byte))
+            .map_or(bytes.len(), |(index, _)| index + 1),
+        b']' => {
+            let mut index = start + 2;
+            while index < bytes.len() {
+                if bytes[index] == 0x07 {
+                    return index + 1;
+                }
+                if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
+                    return index + 2;
+                }
+                index += 1;
+            }
+            bytes.len()
+        }
+        _ => (start + 2).min(bytes.len()),
+    }
+}
+
+fn ansi_visible_width(input: &str) -> usize {
+    let bytes = input.as_bytes();
+    let mut index = 0;
+    let mut width: usize = 0;
+    while index < bytes.len() {
+        if bytes[index] == 0x1b {
+            index = ansi_sequence_end(input, index);
+            continue;
+        }
+        let character = input[index..].chars().next().unwrap_or_default();
+        width = width.saturating_add(display_char_width(character));
+        index += character.len_utf8();
+    }
+    width
+}
+
+/// Keep a live line on one physical terminal row. ANSI control sequences do
+/// not consume columns and a reset is restored when an active style is cut.
+fn fit_terminal_line(input: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if ansi_visible_width(input) <= width {
+        return input.to_string();
+    }
+    let content_width = width.saturating_sub(1);
+    let bytes = input.as_bytes();
+    let mut index = 0;
+    let mut visible: usize = 0;
+    let mut output = String::new();
+    while index < bytes.len() {
+        if bytes[index] == 0x1b {
+            let end = ansi_sequence_end(input, index);
+            output.push_str(&input[index..end]);
+            index = end;
+            continue;
+        }
+        let character = input[index..].chars().next().unwrap_or_default();
+        let character_width = display_char_width(character);
+        if visible.saturating_add(character_width) > content_width {
+            break;
+        }
+        output.push(character);
+        visible = visible.saturating_add(character_width);
+        index += character.len_utf8();
+    }
+    output.push('…');
+    if input.contains('\x1b') {
+        output.push_str("\x1b[0m");
+    }
+    output
+}
+
+fn fit_live_line(input: &str, columns: usize) -> String {
+    let pad = Syntax::JETPACK_PROMPT_LABEL.len() + 4;
+    fit_terminal_line(input, columns.saturating_sub(pad + 1).max(1))
+}
 
 #[derive(Clone, Copy)]
 pub struct Theme {
@@ -159,18 +416,17 @@ impl ByteProgress {
         });
     }
 
-    fn clear_renderer(&self) {
+    fn clear_renderer_locked(&self, stderr: &mut dyn Write) {
         let mut renderer = self
             .renderer
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let Some(renderer) = renderer.as_mut() else {
+        let Some(renderer) = renderer.take() else {
             return;
         };
         if renderer.tty && renderer.drawn > 0 {
-            eprint!("\x1b[{}F\x1b[0J", renderer.drawn);
+            let _ = write!(stderr, "\x1b[{}F\x1b[0J", renderer.drawn);
         }
-        renderer.drawn = 0;
     }
 
     fn phase(&self, phase: &str) {
@@ -231,34 +487,33 @@ impl ByteProgress {
                 structural,
             )
         };
-        let mut renderer = self
-            .renderer
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let Some(renderer) = renderer.as_mut() else {
-            return;
-        };
-        if !renderer.tty && !structural {
-            return;
-        }
-        let line = renderer.theme.render_aggregate_progress(
-            &snapshot.phase,
-            snapshot.package_done,
-            snapshot.package_total,
-            snapshot.object_done,
-            snapshot.object_total,
-            snapshot.transferred,
-            snapshot.total,
-        );
-        if renderer.tty {
-            if renderer.drawn > 0 {
-                eprint!("\x1b[{}F\x1b[0J", renderer.drawn);
+        with_output(|stderr| {
+            let mut renderer = self
+                .renderer
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let Some(renderer) = renderer.as_mut() else {
+                return;
+            };
+            if !renderer.tty && !structural {
+                return;
             }
-            eprintln!("{}{}", LiveRegion::pad(), line);
+            let line = renderer.theme.render_aggregate_progress(
+                &snapshot.phase,
+                snapshot.package_done,
+                snapshot.package_total,
+                snapshot.object_done,
+                snapshot.object_total,
+                snapshot.transferred,
+                snapshot.total,
+            );
+            if renderer.tty && renderer.drawn > 0 {
+                let _ = write!(stderr, "\x1b[{}F\x1b[0J", renderer.drawn);
+            }
+            let line = fit_live_line(&line, terminal_columns());
+            let _ = writeln!(stderr, "{}{}", LiveRegion::pad(), line);
             renderer.drawn = 1;
-        } else {
-            eprintln!("{}{}", LiveRegion::pad(), line);
-        }
+        });
     }
 }
 
@@ -346,6 +601,14 @@ impl Theme {
         self.shared().border(t)
     }
 
+    pub(crate) fn live_enabled(&self) -> bool {
+        live_output_enabled(
+            self.color,
+            std::io::stderr().is_terminal(),
+            std::env::var_os("CI").is_some(),
+        )
+    }
+
     /// The aligned `jet` gutter every status line shares.
     fn gutter(&self) -> String {
         self.cyan(Syntax::JETPACK_PROMPT_LABEL)
@@ -353,13 +616,13 @@ impl Theme {
 
     /// A primary status line: `  jet  <msg>`.
     pub fn status(&self, msg: &str) {
-        eprintln!("  {}  {}", self.gutter(), msg);
+        write_output(format_args!("  {}  {}\n", self.gutter(), msg));
     }
 
     /// A secondary, indented detail line: `           ▸ <msg>`.
     pub fn detail(&self, msg: &str) {
         let pad = " ".repeat(Syntax::JETPACK_PROMPT_LABEL.len() + 4);
-        eprintln!("{pad}{} {}", self.gray("▸"), msg);
+        write_output(format_args!("{pad}{} {}\n", self.gray("▸"), msg));
     }
 
     pub fn graph_identity(&self, identity: &str) {
@@ -368,12 +631,17 @@ impl Theme {
 
     /// A success line ending in a green check.
     pub fn ok(&self, msg: &str) {
-        eprintln!("  {}  {} {}", self.gutter(), msg, self.green("✓"));
+        write_output(format_args!(
+            "  {}  {} {}\n",
+            self.gutter(),
+            msg,
+            self.green("✓")
+        ));
     }
 
     /// A plain note (no gutter), e.g. the trust-prompt preamble.
     pub fn note(&self, msg: &str) {
-        eprintln!("\n  {}\n", self.gray(msg));
+        write_output(format_args!("\n  {}\n", self.gray(msg)));
     }
 
     /// An aligned ledger row for one realized package:
@@ -394,7 +662,10 @@ impl Theme {
 
     pub fn row(&self, name: &str, name_w: usize, version: &str, state: &str) {
         let pad = " ".repeat(Syntax::JETPACK_PROMPT_LABEL.len() + 4);
-        eprintln!("{pad}{}", self.render_row(name, name_w, version, state));
+        write_output(format_args!(
+            "{pad}{}\n",
+            self.render_row(name, name_w, version, state)
+        ));
     }
 
     pub fn render_plan_row(
@@ -423,10 +694,10 @@ impl Theme {
     /// the same + / - / ~ symbols for deterministic logs and review.
     pub fn plan_row(&self, mark: PlanMark, name: &str, name_w: usize, from: &str, to: &str) {
         let pad = " ".repeat(Syntax::JETPACK_PROMPT_LABEL.len() + 4);
-        eprintln!(
-            "{pad}{}",
+        write_output(format_args!(
+            "{pad}{}\n",
             self.render_plan_row(mark, name, name_w, from, to)
-        );
+        ));
     }
 
     pub fn render_progress_chain(
@@ -522,10 +793,10 @@ impl Theme {
     /// can later pin/redraw this same line; non-TTY appends it as stable ledger.
     pub fn progress_chain(&self, phase: &str, done: usize, total: usize, node: &str, edge: &str) {
         let pad = " ".repeat(Syntax::JETPACK_PROMPT_LABEL.len() + 4);
-        eprintln!(
-            "{pad}{}",
+        write_output(format_args!(
+            "{pad}{}\n",
             self.render_progress_chain(phase, done, total, node, edge)
-        );
+        ));
     }
 
     // -- Tier 1: trivial ops (add/remove/env resolve). One aligned `✓ name
@@ -548,7 +819,10 @@ impl Theme {
 
     pub fn ready_row(&self, name: &str, name_w: usize, version: &str) {
         let pad = " ".repeat(Syntax::JETPACK_PROMPT_LABEL.len() + 4);
-        eprintln!("{pad}{}", self.render_ready_row(name, name_w, version));
+        write_output(format_args!(
+            "{pad}{}\n",
+            self.render_ready_row(name, name_w, version)
+        ));
     }
 
     /// `N Packages Ready ✓` / `1 Package Ready ✓`.
@@ -558,7 +832,11 @@ impl Theme {
     }
 
     pub fn ready_summary(&self, count: usize) {
-        eprintln!("  {}  {}", self.gutter(), self.render_ready_summary(count));
+        write_output(format_args!(
+            "  {}  {}\n",
+            self.gutter(),
+            self.render_ready_summary(count)
+        ));
     }
 
     // -- Tier 2: long builds/downloads. A pinned live region shows
@@ -589,15 +867,14 @@ impl Theme {
         format!("{verb} {done}/{total} {} {}", self.gray("·"), current)
     }
 
-    /// A live region for one tier-2 phase. TTY: redraws its status lines in
-    /// place (ANSI cursor-up + clear-to-end) and lets finished rows scroll
-    /// permanently above it. Non-TTY: `finish` is the only thing that prints
-    /// (plain sequential ledger lines); `set_status`/`collapse` are inert so
-    /// output stays deterministic (the CI-safe floor).
+    /// A live region for one tier-2 phase. An interactive TTY redraws its
+    /// status lines in place (ANSI cursor-up + clear-to-end) and lets finished
+    /// rows scroll permanently above it. Non-TTY, `NO_COLOR`, and CI use the
+    /// plain sequential ledger so output stays deterministic.
     pub fn live_region(&self) -> LiveRegion<'_> {
         LiveRegion {
             theme: self,
-            tty: self.color && std::io::stderr().is_terminal(),
+            tty: self.live_enabled(),
             drawn: 0,
             progress: ByteProgress::new(),
         }
@@ -640,9 +917,7 @@ impl Theme {
             self.status("plan only; pass -y or --yes to apply in a non-interactive shell.");
             return false;
         }
-        eprint!("  {}  Apply? [y/N] ", self.gutter());
-        use std::io::Write;
-        let _ = std::io::stderr().flush();
+        write_output(format_args!("  {}  Apply? [y/N] ", self.gutter()));
         let mut answer = String::new();
         if std::io::stdin().read_line(&mut answer).is_err() {
             self.status("plan cancelled.");
@@ -684,9 +959,11 @@ impl Theme {
             );
             return false;
         }
-        eprint!("  {}  {} - Continue? [Y/n] ", self.gutter(), summary);
-        use std::io::Write;
-        let _ = std::io::stderr().flush();
+        write_output(format_args!(
+            "  {}  {} - Continue? [Y/n] ",
+            self.gutter(),
+            summary
+        ));
         let mut answer = String::new();
         if std::io::stdin().read_line(&mut answer).is_err() {
             self.status("download cancelled.");
@@ -725,12 +1002,10 @@ impl Theme {
                 );
                 return None;
             }
-            eprint!(
+            write_output(format_args!(
                 "  {}  Use and remember this catalog for this project? [Y/n] ",
                 self.gutter()
-            );
-            use std::io::Write;
-            let _ = std::io::stderr().flush();
+            ));
             let mut answer = String::new();
             if std::io::stdin().read_line(&mut answer).is_err() {
                 self.status("catalog setup cancelled.");
@@ -756,9 +1031,7 @@ impl Theme {
             );
             return None;
         }
-        eprint!("  {}  Local catalog directory: ", self.gutter());
-        use std::io::Write;
-        let _ = std::io::stderr().flush();
+        write_output(format_args!("  {}  Local catalog directory: ", self.gutter()));
         let mut answer = String::new();
         if std::io::stdin().read_line(&mut answer).is_err() || answer.trim().is_empty() {
             self.status("catalog setup cancelled.");
@@ -792,15 +1065,15 @@ impl Theme {
             line.push_str(&format!("{} {} ", self.border("─"), self.gray(&tail)));
         }
         line.push_str(&self.border(&fill));
-        eprintln!("\n  {line}\n");
+        write_output(format_args!("\n  {line}\n"));
     }
 
-    /// A live spinner while a package realizes. Only spins when color is on
-    /// (a TTY); otherwise it is inert and the caller's plain status line
-    /// stands. Dropping it stops the thread and clears the line, so the final
-    /// ledger row prints over a clean slate.
+    /// A live spinner while a package realizes. It only spins when the output
+    /// stream is an interactive, non-CI TTY; otherwise it is inert and the
+    /// caller's plain status line stands. Dropping it stops the thread and
+    /// clears the line, so the final ledger row prints over a clean slate.
     pub fn spinner(&self, msg: &str) -> Spinner {
-        if !self.color {
+        if !self.live_enabled() {
             return Spinner {
                 stop: None,
                 handle: None,
@@ -809,24 +1082,20 @@ impl Theme {
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
         let pad = " ".repeat(Syntax::JETPACK_PROMPT_LABEL.len() + 4);
-        let msg = msg.to_string();
+        let msg = fit_live_line(msg, terminal_columns().saturating_sub(1));
         let accent = SharedTheme::ACCENT_SGR;
         let handle = std::thread::spawn(move || {
             const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let mut i = 0usize;
             while !flag.load(Ordering::Relaxed) {
-                eprint!(
+                write_output(format_args!(
                     "\r{pad}\x1b[{accent}m{}\x1b[0m {msg}",
                     FRAMES[i % FRAMES.len()]
-                );
-                use std::io::Write;
-                let _ = std::io::stderr().flush();
+                ));
                 i += 1;
                 std::thread::sleep(std::time::Duration::from_millis(80));
             }
-            eprint!("\r\x1b[2K");
-            use std::io::Write;
-            let _ = std::io::stderr().flush();
+            write_output(format_args!("\r\x1b[2K"));
         });
         Spinner {
             stop: Some(stop),
@@ -860,9 +1129,59 @@ impl Theme {
         .render_colored("", "", self.color)
     }
 
+    fn render_diagnostic_group(
+        &self,
+        code: &str,
+        what: &str,
+        why: &str,
+        fix: &str,
+        count: usize,
+    ) -> String {
+        let mut rendered = self.render_error_coded(code, what, why, fix);
+        if count > 1 {
+            rendered.push_str(&repeat_count_line(count));
+        }
+        rendered
+    }
+
+    /// Render one collapsed diagnostic card and its invocation next step.
+    pub fn render_collapsed_error(
+        &self,
+        code: &str,
+        what: &str,
+        why: &str,
+        fix: &str,
+        count: usize,
+    ) -> String {
+        let mut rendered = self.render_diagnostic_group(code, what, why, fix, count);
+        if count > 1 {
+            rendered.push_str(next_step_line(false));
+        }
+        rendered
+    }
+
     /// Render a coded Jetpack failure through the shared terminal renderer.
+    /// The displayed Why text is the default root-cause key for callers that
+    /// do not have a more stable structured cause token.
     pub fn error_coded(&self, code: &str, headline: &str, why: &str, fix: &str) {
-        eprint!("{}", self.render_error_coded(code, headline, why, fix));
+        self.error_coded_with_root_cause(code, why, headline, why, fix);
+    }
+
+    pub(crate) fn error_coded_with_root_cause(
+        &self,
+        code: &str,
+        root_cause_key: &str,
+        headline: &str,
+        why: &str,
+        fix: &str,
+    ) {
+        if record_diagnostic(self, code, root_cause_key, headline, why, fix) {
+            return;
+        }
+        write_output(format_args!(
+            "{}",
+            self.render_error_coded(code, headline, why, fix)
+        ));
     }
 
     /// Render a coded Jetpack warning through the shared terminal renderer.
@@ -874,16 +1193,15 @@ impl Theme {
             fix.to_string(),
             None,
         );
-        eprint!("{}", diagnostic.render_colored("", "", self.color));
+        write_output(format_args!("{}", diagnostic.render_colored("", "", self.color)));
     }
 }
 
 /// A tier-2 live region: `set_status` redraws its lines in place on a TTY;
 /// `finish` promotes one permanent row above it (scrolls up, the way a
 /// finished download/build leaves the pinned area in `nh`/`cargo`-style
-/// output). Non-TTY only ever prints through `finish` — `set_status` and
-/// `collapse`'s redraw are no-ops there, so CI/piped output stays plain
-/// sequential lines.
+/// output). Non-TTY, `NO_COLOR`, and CI only ever print sequential lines;
+/// `set_status` and `collapse` never emit cursor controls there.
 pub struct LiveRegion<'a> {
     theme: &'a Theme,
     tty: bool,
@@ -898,20 +1216,20 @@ impl<'a> LiveRegion<'a> {
         " ".repeat(Syntax::JETPACK_PROMPT_LABEL.len() + 4)
     }
 
+    fn clear_locked(&mut self, stderr: &mut dyn Write) {
+        self.progress.clear_renderer_locked(stderr);
+        if self.tty && self.drawn > 0 {
+            let _ = write!(stderr, "\x1b[{}F\x1b[0J", self.drawn);
+        }
+        self.drawn = 0;
+    }
+
     /// Erase the live region's currently drawn status lines. `pub(crate)`:
     /// callers outside `Output` (the tier-2 realize loop) need to force a
     /// clear right before any diagnostic print, so stale progress-bar text
     /// never sits above/below an error.
     pub(crate) fn clear(&mut self) {
-        self.progress.clear_renderer();
-        if !self.tty || self.drawn == 0 {
-            self.drawn = 0;
-            return;
-        }
-        // Move the cursor up `drawn` lines (to column 1) and clear from
-        // there to the end of the screen.
-        eprint!("\x1b[{}F\x1b[0J", self.drawn);
-        self.drawn = 0;
+        with_output(|stderr| self.clear_locked(stderr));
     }
 
     /// Promote one finished row: erase the live region, print the row
@@ -920,8 +1238,11 @@ impl<'a> LiveRegion<'a> {
     /// it. On non-TTY this is the only thing that ever prints — the plain,
     /// deterministic ledger line.
     pub fn finish(&mut self, line: &str) {
-        self.clear();
-        eprintln!("{}{}", Self::pad(), line);
+        with_output(|stderr| {
+            self.clear_locked(stderr);
+            let line = fit_live_line(line, terminal_columns());
+            let _ = writeln!(stderr, "{}{}", Self::pad(), line);
+        });
     }
 
     /// Redraw the live region's status lines in place. A no-op on non-TTY
@@ -930,11 +1251,14 @@ impl<'a> LiveRegion<'a> {
         if !self.tty {
             return;
         }
-        self.clear();
-        for line in lines {
-            eprintln!("{}{}", Self::pad(), line);
-        }
-        self.drawn = lines.len();
+        with_output(|stderr| {
+            self.clear_locked(stderr);
+            for line in lines {
+                let line = fit_live_line(line, terminal_columns());
+                let _ = writeln!(stderr, "{}{}", Self::pad(), line);
+            }
+            self.drawn = lines.len();
+        });
     }
 
     /// Start or advance the aggregate realization line. Byte and object
@@ -984,7 +1308,7 @@ impl<'a> LiveRegion<'a> {
             base_line
         };
         if !self.tty {
-            eprintln!("{}{}", Self::pad(), line);
+            write_output(format_args!("{}{}\n", Self::pad(), line));
             return;
         }
         self.set_status(&[
@@ -1000,8 +1324,12 @@ impl<'a> LiveRegion<'a> {
     /// Close the live region out, collapsing it to one final summary line
     /// (tier 2's `<tool> build ready ✓`).
     pub fn collapse(&mut self, summary: &str) {
-        self.clear();
-        eprintln!("  {}  {}", self.theme.gutter(), summary);
+        with_output(|stderr| {
+            self.clear_locked(stderr);
+            let line = format!("  {}  {}", self.theme.gutter(), summary);
+            let line = fit_terminal_line(&line, terminal_columns());
+            let _ = writeln!(stderr, "{line}");
+        });
     }
 
     pub(crate) fn progress_handle(&self) -> crate::Store::ProgressHandle {
@@ -1155,6 +1483,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn diagnostic_collector_keeps_one_card_per_root_cause() {
+        let mut collector = DiagnosticCollector::default();
+        for _ in 0..8 {
+            collector.record(
+                false,
+                "E1350",
+                "signed-cache-closure",
+                "native Nix cache closure could not be admitted",
+                "the signed closure failed validation",
+                "repair the cache response and retry the realization.",
+            );
+        }
+        collector.record(
+            false,
+            "E1272",
+            "nix-bridge",
+            "Nix realization needs a bridge",
+            "the native Nix bridge is not available",
+            "install the bridge and retry the realization.",
+        );
+
+        let rendered = collector.render();
+        assert_eq!(rendered.matches("Error [E1350]").count(), 1);
+        assert_eq!(rendered.matches("Error [E1272]").count(), 1);
+        assert_eq!(rendered.matches("Next:").count(), 1);
+        assert!(rendered.contains("7 more objects failed with the same cause."));
+    }
+
+    #[test]
     fn plan_rows_keep_symbols_without_color() {
         let theme = Theme { color: false };
         assert_eq!(
@@ -1222,6 +1579,32 @@ mod tests {
     }
 
     #[test]
+    fn live_controls_require_an_interactive_non_ci_tty() {
+        assert!(live_output_enabled(true, true, false));
+        assert!(!live_output_enabled(true, false, false), "non-TTY");
+        assert!(!live_output_enabled(false, true, false), "NO_COLOR");
+        assert!(!live_output_enabled(true, true, true), "CI");
+    }
+
+    #[test]
+    fn live_lines_fit_a_narrow_terminal_with_ansi_intact() {
+        let theme = Theme { color: true };
+        let line = theme.render_dependency_status(
+            "Resolving",
+            0,
+            99,
+            "github",
+            "extremely-long-package-name",
+            "Fetching",
+        );
+        let fitted = fit_live_line(&line, 28);
+        let rendered = format!("{}{}", LiveRegion::pad(), fitted);
+        assert!(ansi_visible_width(&rendered) < 28, "rendered: {rendered:?}");
+        assert!(fitted.contains('…'), "fitted: {fitted:?}");
+        assert!(fitted.ends_with("\x1b[0m"), "fitted: {fitted:?}");
+    }
+
+    #[test]
     fn live_region_plain_fallback_is_deterministic_when_no_color_and_piped() {
         const CHILD: &str = "JETPACK_OUTPUT_PLAIN_CHILD";
         if std::env::var_os(CHILD).is_some() {
@@ -1277,6 +1660,10 @@ mod tests {
         assert!(
             !stderr.as_bytes().contains(&0x1b),
             "plain output: {stderr:?}"
+        );
+        assert!(
+            !stderr.contains("\x1b["),
+            "plain fallback must not move or clear the cursor: {stderr:?}"
         );
     }
 

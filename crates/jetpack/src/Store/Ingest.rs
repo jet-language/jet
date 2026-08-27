@@ -1,9 +1,36 @@
 use super::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::io::{Read as _, Write as _};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 static QUARANTINE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static SHARED_CAS_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) type DigestStamp = (u64, u64, i64, i64);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum DigestKind {
+    Output {
+        hangar_root: Option<PathBuf>,
+        allow_semantic_xattrs: bool,
+    },
+    File,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct DigestKey {
+    path: PathBuf,
+    kind: DigestKind,
+}
+
+// Process-local acceleration only. The stamp invalidates entries when the
+// object root is replaced; persistent manifests remain owner-gated.
+static VERIFIED_DIGESTS: OnceLock<Mutex<HashMap<DigestKey, (DigestStamp, String)>>> =
+    OnceLock::new();
+
+#[cfg(test)]
+static VERIFIED_DIGEST_HASH_COUNTS: OnceLock<Mutex<HashMap<PathBuf, usize>>> = OnceLock::new();
 
 pub(crate) fn with_shared_cas_lock<T>(
     roots: &Roots,
@@ -36,6 +63,9 @@ pub(crate) fn share_tree_files_unlocked(
     allow_semantic_xattrs: bool,
 ) -> std::io::Result<()> {
     if allow_semantic_xattrs {
+        return Ok(());
+    }
+    if fs::symlink_metadata(root)?.file_type().is_symlink() {
         return Ok(());
     }
     let hangar = roots.hangar_dir();
@@ -75,20 +105,27 @@ fn share_node(path: &Path, shared: &Path, used: &mut BTreeSet<String>) -> std::i
     if !metadata.is_file() {
         return Ok(());
     }
+    let source_len = metadata.len();
+    let mode = permission_identity(&metadata) & !0o222;
+    let key = format!(
+        "{}-{:08x}",
+        super::super::SHA256::sha256_file_hex(path)?,
+        mode
+    );
     // Preserve an existing hardlink topology. New ingest files are unlinked;
     // this guard protects objects already optimized by the local CAS pass.
     if file_link_count(&metadata) > 1 {
+        // A second pass must still mark the first shared occurrence as used;
+        // otherwise its equal, unshared sibling could be linked in-tree.
+        used.insert(key);
         return Ok(());
     }
-    let bytes = fs::read(path)?;
-    let mode = permission_identity(&metadata) & !0o222;
-    let key = format!("{}-{:08x}", super::super::SHA256::sha256_hex(&bytes), mode);
     // Hardlinking two equal files within one output changes its canonical
     // archive identity. Share only the first occurrence in each output tree.
     if !used.insert(key.clone()) {
         return Ok(());
     }
-    let (shared_file, created) = ensure_shared_file(shared, &key, &bytes, &metadata, mode)?;
+    let (shared_file, created) = ensure_shared_file(shared, &key, path, &metadata, mode)?;
     if same_file_inode(path, &shared_file) {
         return Ok(());
     }
@@ -97,7 +134,7 @@ fn share_node(path: &Path, shared: &Path, used: &mut BTreeSet<String>) -> std::i
     }
     if created
         && fs::metadata(&shared_file)
-            .map(|metadata| metadata.len() == bytes.len() as u64)
+            .map(|metadata| metadata.len() == source_len)
             .unwrap_or(false)
     {
         let _ = fs::remove_file(shared_file);
@@ -108,7 +145,7 @@ fn share_node(path: &Path, shared: &Path, used: &mut BTreeSet<String>) -> std::i
 fn ensure_shared_file(
     shared: &Path,
     key: &str,
-    bytes: &[u8],
+    source_path: &Path,
     source: &fs::Metadata,
     mode: u32,
 ) -> std::io::Result<(PathBuf, bool)> {
@@ -124,9 +161,9 @@ fn ensure_shared_file(
             ));
         }
         Ok(metadata) => {
-            if metadata.len() != bytes.len() as u64
+            if metadata.len() != source.len()
                 || permission_identity(&metadata) != mode
-                || fs::read(&destination)? != bytes
+                || !files_equal(&destination, source_path)?
             {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -148,8 +185,7 @@ fn ensure_shared_file(
         .write(true)
         .create_new(true)
         .open(&partial)?;
-    use std::io::Write as _;
-    file.write_all(bytes)?;
+    copy_file(source_path, &mut file)?;
     file.sync_all()?;
     let mut permissions = source.permissions();
     #[cfg(unix)]
@@ -163,11 +199,50 @@ fn ensure_shared_file(
     if let Err(error) = fs::rename(&partial, &destination) {
         let _ = fs::remove_file(&partial);
         if error.kind() == std::io::ErrorKind::AlreadyExists {
-            return ensure_shared_file(shared, key, bytes, source, mode);
+            return ensure_shared_file(shared, key, source_path, source, mode);
         }
         return Err(error);
     }
     Ok((destination, true))
+}
+
+fn copy_file(source_path: &Path, destination: &mut fs::File) -> std::io::Result<u64> {
+    let mut source = fs::File::open(source_path)?;
+    let mut buffer = [0u8; 64 * 1024];
+    let mut copied = 0u64;
+    loop {
+        let count = source.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(copied);
+        }
+        destination.write_all(&buffer[..count])?;
+        copied = copied
+            .checked_add(count as u64)
+            .ok_or_else(|| std::io::Error::other("shared CAS file size overflowed"))?;
+    }
+}
+
+fn files_equal(left: &Path, right: &Path) -> std::io::Result<bool> {
+    if fs::metadata(left)?.len() != fs::metadata(right)?.len() {
+        return Ok(false);
+    }
+    let mut left = fs::File::open(left)?;
+    let mut right = fs::File::open(right)?;
+    let mut left_buffer = [0u8; 64 * 1024];
+    let mut right_buffer = [0u8; 64 * 1024];
+    loop {
+        let left_count = left.read(&mut left_buffer)?;
+        let right_count = right.read(&mut right_buffer)?;
+        if left_count != right_count {
+            return Ok(false);
+        }
+        if left_count == 0 {
+            return Ok(true);
+        }
+        if left_buffer[..left_count] != right_buffer[..right_count] {
+            return Ok(false);
+        }
+    }
 }
 
 fn replace_with_shared_link(path: &Path, shared: &Path) -> std::io::Result<()> {
@@ -240,16 +315,186 @@ pub(crate) fn try_entry_output_hash(roots: &Roots, entry: &StoreEntry) -> Result
     let hangar = roots.hangar_dir();
     let canonical_hangar = fs::canonicalize(&hangar).unwrap_or_else(|_| hangar.clone());
     let out = Path::new(&entry.out);
-    if out.starts_with(&hangar) || out.starts_with(&canonical_hangar) {
-        // Hangar-owned objects may share payload inodes with its cas pool.
-        super::super::Envelope::try_output_hash_of_in_hangar(
-            &entry.out,
-            &canonical_hangar,
-            !entry.platform_artifact_kind.is_empty(),
-        )
-    } else {
-        super::super::Envelope::try_output_hash_of(&entry.out)
+    let hangar_root = (out.starts_with(&hangar) || out.starts_with(&canonical_hangar))
+        .then_some(canonical_hangar.as_path());
+    verified_output_hash(
+        out,
+        hangar_root,
+        !entry.platform_artifact_kind.is_empty(),
+    )
+    .map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("output `{}` does not exist", entry.out)
+        } else {
+            error.to_string()
+        }
+    })
+}
+
+pub(crate) fn verified_output_hash(
+    path: &Path,
+    hangar_root: Option<&Path>,
+    allow_semantic_xattrs: bool,
+) -> std::io::Result<String> {
+    let stamp = object_stamp(&fs::symlink_metadata(path)?);
+    let key = DigestKey {
+        path: path.to_path_buf(),
+        kind: DigestKind::Output {
+            hangar_root: hangar_root.map(normalize_memo_path),
+            allow_semantic_xattrs,
+        },
+    };
+    let memo = VERIFIED_DIGESTS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(digest) = memo
+        .lock()
+        .map_err(|_| std::io::Error::other("verified digest memo is poisoned"))?
+        .get(&key)
+        .and_then(|(cached_stamp, digest)| (cached_stamp == &stamp).then(|| digest.clone()))
+    {
+        return Ok(digest);
     }
+    #[cfg(test)]
+    note_verified_digest_miss(path);
+    let digest = match hangar_root {
+        Some(hangar_root) => super::super::Envelope::try_output_hash_of_in_hangar(
+            &path.to_string_lossy(),
+            hangar_root,
+            allow_semantic_xattrs,
+        )
+        .map_err(std::io::Error::other)?,
+        None => super::super::Envelope::try_output_hash_of_with_policy(
+            &path.to_string_lossy(),
+            allow_semantic_xattrs,
+            &mut |_, _| {},
+        )
+        .map_err(std::io::Error::other)?,
+    };
+    memo.lock()
+        .map_err(|_| std::io::Error::other("verified digest memo is poisoned"))?
+        .insert(key, (stamp, digest.clone()));
+    Ok(digest)
+}
+
+pub(crate) fn verified_file_hash(path: &Path) -> std::io::Result<String> {
+    let stamp = object_stamp(&fs::symlink_metadata(path)?);
+    let key = DigestKey {
+        path: path.to_path_buf(),
+        kind: DigestKind::File,
+    };
+    let memo = VERIFIED_DIGESTS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(digest) = memo
+        .lock()
+        .map_err(|_| std::io::Error::other("verified digest memo is poisoned"))?
+        .get(&key)
+        .and_then(|(cached_stamp, digest)| (cached_stamp == &stamp).then(|| digest.clone()))
+    {
+        return Ok(digest);
+    }
+    #[cfg(test)]
+    note_verified_digest_miss(path);
+    let digest = format!(
+        "sha256-{}",
+        super::super::SHA256::sha256_file_hex(path)?
+    );
+    memo.lock()
+        .map_err(|_| std::io::Error::other("verified digest memo is poisoned"))?
+        .insert(key, (stamp, digest.clone()));
+    Ok(digest)
+}
+
+pub(crate) fn refresh_verified_digest(
+    path: &Path,
+    hangar_root: &Path,
+    allow_semantic_xattrs: bool,
+    digest: &str,
+) -> std::io::Result<()> {
+    let stamp = object_stamp(&fs::symlink_metadata(path)?);
+    let key = DigestKey {
+        path: path.to_path_buf(),
+        kind: DigestKind::Output {
+            hangar_root: Some(normalize_memo_path(hangar_root)),
+            allow_semantic_xattrs,
+        },
+    };
+    VERIFIED_DIGESTS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| std::io::Error::other("verified digest memo is poisoned"))?
+        .insert(key, (stamp, digest.to_string()));
+    Ok(())
+}
+
+pub(crate) fn invalidate_verified_digest(path: &Path) {
+    if let Some(memo) = VERIFIED_DIGESTS.get() {
+        if let Ok(mut memo) = memo.lock() {
+            memo.retain(|key, _| key.path != path);
+        }
+    }
+}
+
+fn normalize_memo_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+pub(crate) fn object_stamp(metadata: &fs::Metadata) -> DigestStamp {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        return (metadata.dev(), metadata.ino(), metadata.mtime(), metadata.mtime_nsec());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        let (mtime_secs, mtime_nanos) = modified_stamp(metadata);
+        return (
+            u64::from(metadata.volume_serial_number().unwrap_or_default()),
+            metadata.file_index().unwrap_or_default(),
+            mtime_secs,
+            mtime_nanos,
+        );
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let (mtime_secs, mtime_nanos) = modified_stamp(metadata);
+        (0, 0, mtime_secs, mtime_nanos)
+    }
+}
+
+#[cfg(not(unix))]
+fn modified_stamp(metadata: &fs::Metadata) -> (i64, i64) {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| {
+            (
+                i64::try_from(duration.as_secs()).unwrap_or(i64::MAX),
+                i64::from(duration.subsec_nanos()),
+            )
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+fn note_verified_digest_miss(path: &Path) {
+    let counts = VERIFIED_DIGEST_HASH_COUNTS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut counts = counts.lock().unwrap();
+    *counts.entry(path.to_path_buf()).or_default() += 1;
+}
+
+#[cfg(test)]
+pub(crate) fn reset_verified_digest_hash_count(path: &Path) {
+    if let Some(counts) = VERIFIED_DIGEST_HASH_COUNTS.get() {
+        counts.lock().unwrap().remove(path);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn verified_digest_hash_count(path: &Path) -> usize {
+    VERIFIED_DIGEST_HASH_COUNTS
+        .get()
+        .and_then(|counts| counts.lock().unwrap().get(path).copied())
+        .unwrap_or_default()
 }
 
 #[derive(Default)]
@@ -1613,5 +1858,62 @@ mod portability_tests {
             target_os = "ios",
         )))]
         assert!(super::super::super::Envelope::nofollow_open_flag().is_err());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod share_tests {
+    use super::*;
+    use std::fs;
+    use std::os::unix::fs::MetadataExt as _;
+
+    #[test]
+    fn sharing_a_tree_twice_preserves_digest_and_inode_separation() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "jet-ingest-share-{}-{stamp}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let roots = Roots::at(root.clone());
+        let output = roots.hangar_dir().join("objects").join("share-test");
+        fs::create_dir_all(&output).unwrap();
+        fs::write(output.join("first"), b"same bytes").unwrap();
+        fs::write(output.join("second"), b"same bytes").unwrap();
+        // Production hashes objects only after `seal_node` (admission seals the
+        // staged tree before its first digest), so the stability baseline must
+        // be a sealed tree as well.
+        seal_node(&output).unwrap();
+
+        let before = super::super::super::Envelope::try_output_hash_of_in_hangar(
+            &output.to_string_lossy(),
+            &roots.hangar_dir(),
+            false,
+        )
+        .unwrap();
+        share_tree_files(&roots, &output, false).unwrap();
+        let after_first = super::super::super::Envelope::try_output_hash_of_in_hangar(
+            &output.to_string_lossy(),
+            &roots.hangar_dir(),
+            false,
+        )
+        .unwrap();
+        share_tree_files(&roots, &output, false).unwrap();
+        let after_second = super::super::super::Envelope::try_output_hash_of_in_hangar(
+            &output.to_string_lossy(),
+            &roots.hangar_dir(),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(before, after_first);
+        assert_eq!(before, after_second);
+        let first = fs::metadata(output.join("first")).unwrap();
+        let second = fs::metadata(output.join("second")).unwrap();
+        assert_ne!((first.dev(), first.ino()), (second.dev(), second.ino()));
+        let _ = fs::remove_dir_all(root);
     }
 }

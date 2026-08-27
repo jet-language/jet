@@ -7,7 +7,9 @@ use jet_driver::Diagnostics::{Diagnostic, Severity};
 use jet_driver::FixEngine;
 use jet_semindex::{DefinitionAnchor, SourceSpan, SymbolDef, SymbolRef};
 
-use super::graph_helpers::{edit, project_edit_error, project_edit_ok, simple_diff};
+use super::graph_helpers::{
+    edit, project_edit_conflict, project_edit_error, project_edit_ok, simple_diff,
+};
 use super::project_scan::{
     project_context_for_entry, project_revision_from_files, ProjectChange, ProjectContext,
     ProjectFileRec, TouchedProjectFile,
@@ -91,9 +93,9 @@ pub(super) fn validate_touched_project_files(
             ));
         };
         if current.revision != file.revision {
-            return Err(project_edit_error(
-                "conflict",
+            return Err(project_edit_conflict(
                 "source file changed since this Canvas project was drawn",
+                &ctx.project_revision,
             ));
         }
     }
@@ -210,8 +212,16 @@ pub(super) fn apply_project_rename(
     validate_ident_for_project(&from)?;
     validate_ident_for_project(&to)?;
     let selected_path = ctx.project_root.join(&selected_rel);
-    let plan = prepare_project_rename(ctx, &selected_path, &from, &to, Some(touched))
-        .map_err(|error| project_edit_error(error.kind, &error.message))?;
+    let plan = prepare_project_rename(ctx, &selected_path, &from, &to, Some(touched)).map_err(
+        |error| {
+            if error.kind == "conflict" {
+                let current_revision = project_context_for_entry(&ctx.entry_path).project_revision;
+                project_edit_conflict(&error.message, &current_revision)
+            } else {
+                project_edit_error(error.kind, &error.message)
+            }
+        },
+    )?;
     let op = json_string_field(request, "op").unwrap_or_else(|| "rename_binding".to_string());
     finish_project_changes(ctx, request, &op, plan.changes)
 }
@@ -1450,10 +1460,13 @@ fn write_project_changes_with_rollback(
         Ok(())
     })
     .map_err(|error| match error {
-        SourceWriteError::Conflict => project_edit_error(
-            "conflict",
-            "source changed while this Canvas project transaction was prepared",
-        ),
+        SourceWriteError::Conflict => {
+            let current_revision = project_context_for_entry(&ctx.entry_path).project_revision;
+            project_edit_conflict(
+                "source changed while this Canvas project transaction was prepared",
+                &current_revision,
+            )
+        }
         SourceWriteError::Io(error) => project_edit_error("io", &error.to_string()),
     })
 }

@@ -27,6 +27,7 @@ mod tool;
 mod trust_env_build;
 mod update_search_info;
 mod usage_tests;
+mod why;
 mod workspace_sources;
 
 use parse::Parsed;
@@ -56,4 +57,25 @@ fn cmd_doctor(theme: &Theme, parsed: &Parsed) -> i32 {
         eprint!("{}", report.to_human());
     }
     report.exit_code()
+}
+
+fn cmd_import(theme: &Theme, parsed: &Parsed) -> i32 {
+    if parsed.positional.len() > 1 || parsed.command.is_some() {
+        theme.error(
+            "import accepts one Nix file",
+            "the bounded Nix migration reads one flake.nix, shell.nix, or default.nix at a time",
+            "run `jetpack import [flake.nix|shell.nix|default.nix]` without a trailing command",
+        );
+        return 2;
+    }
+    let requested = parsed.positional.first().map(PathBuf::from);
+    let dir = std::env::current_dir().unwrap_or_default();
+    let fixtures = workspace_sources::fixtures_for(&parsed.flags);
+    super::Bridge::cmd_import(
+        theme,
+        &dir,
+        requested.as_deref(),
+        fixtures.as_deref(),
+        parsed.flags.local_nix_catalog.as_deref(),
+    )
 }

@@ -894,6 +894,36 @@ mod registration_tests {
         assert!(changed);
         assert_eq!(list_checked(&roots).unwrap(), vec![ingested.entry]);
     }
+
+    #[test]
+    fn batch_registration_hashes_each_output_once() {
+        let (roots, _guard) = roots();
+        let entries = (0..3)
+            .map(|index| ingest(&roots, &format!("batch-{index}")))
+            .map(|ingested| ingested.entry)
+            .collect::<Vec<_>>();
+
+        for entry in &entries {
+            assert!(remove_closure_record(&roots, &entry.id).unwrap());
+            let path = Path::new(&entry.out);
+            super::super::Ingest::invalidate_verified_digest(path);
+            super::super::Ingest::reset_verified_digest_hash_count(path);
+        }
+
+        assert!(crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            register_entries_unlocked(&roots, &entries)
+        })
+        .unwrap());
+
+        for entry in &entries {
+            assert_eq!(
+                super::super::Ingest::verified_digest_hash_count(Path::new(&entry.out)),
+                1,
+                "output `{}` was hashed more than once",
+                entry.out
+            );
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1213,11 +1243,12 @@ fn closure_object_rehashes(roots: &Roots, graph: &ClosureGraph, digest: &str) ->
         return true;
     }
     let path = Path::new(&object.path);
-    if path.is_file() {
-        return SHA256::sha256_file_hex(path)
-            .is_ok_and(|actual| format!("sha256-{actual}") == digest);
+    if fs::symlink_metadata(path).is_ok_and(|metadata| {
+        metadata.is_file() && !metadata.file_type().is_symlink()
+    }) {
+        return Ingest::verified_file_hash(path).is_ok_and(|actual| actual == digest);
     }
-    super::super::Envelope::try_output_hash_of_in_hangar(&object.path, &roots.hangar_dir(), false)
+    Ingest::verified_output_hash(path, Some(&roots.hangar_dir()), false)
         .is_ok_and(|actual| actual == digest)
 }
 
@@ -1476,23 +1507,34 @@ fn register_entries_unlocked_mode(
                 .hangar_dir()
                 .join(OBJECTS_DIR)
                 .join(&entry.envelope.output_hash);
-            let metadata = fs::symlink_metadata(&expected)?;
-            if producer.provider != "nix"
-                || Path::new(&entry.out) != expected
-                || entry.envelope.output_hash.is_empty()
-                || metadata.file_type().is_symlink()
-                || !metadata.is_dir()
-            {
-                return Err(std::io::Error::other(
-                    "admitted Nix entry is not its verified canonical CAS object",
-                ));
+            let metadata = fs::symlink_metadata(&expected).map_err(|error| {
+                std::io::Error::other(format!(
+                    "admitted Nix entry `{}` is not its verified canonical CAS object: canonical CAS path `{}` could not be inspected: {error}",
+                    entry.out,
+                    expected.display(),
+                ))
+            })?;
+            let reason = if producer.provider != "nix" {
+                Some("producer provider is not `nix`")
+            } else if Path::new(&entry.out) != expected {
+                Some("entry output path does not equal its output-hash CAS path")
+            } else if entry.envelope.output_hash.is_empty() {
+                Some("output hash is empty")
+            } else if !metadata.file_type().is_symlink() && !metadata.is_dir() {
+                Some("canonical CAS path is not a directory or symlink")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                return Err(std::io::Error::other(format!(
+                    "admitted Nix entry `{}` is not its verified canonical CAS object: {reason}",
+                    entry.out
+                )));
             }
         }
     }
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
-    for entry in entries {
-        super::certify_registration_unlocked(roots, entry, entries)?;
-    }
+    super::Reproducibility::certify_registrations_unlocked(roots, entries)?;
     let mut object_map = BTreeMap::new();
     let mut records = Vec::new();
     let mut seen_records = BTreeSet::new();
@@ -2819,14 +2861,8 @@ fn store_validates_complete_closure(
 }
 
 fn rehashes_as_recorded(roots: &Roots, meta: &ParsedMeta, record: &ClosureRecord) -> bool {
-    super::super::Envelope::try_output_hash_of_in_hangar(
-        &meta.out,
-        &roots.hangar_dir(),
-        !meta.platform_artifact_kind.is_empty(),
-    )
-    .ok()
-    .as_ref()
-        == Some(&record.primary)
+    Ingest::try_entry_output_hash(roots, &store_entry_from_meta(&record.id, meta))
+        .is_ok_and(|actual| actual == record.primary)
 }
 
 fn store_entry_from_meta(id: &str, meta: &ParsedMeta) -> StoreEntry {

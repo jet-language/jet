@@ -8,14 +8,15 @@ use jet_semindex::SourceSpan;
 
 use super::debug_source_git::canonical_path;
 use super::graph_helpers::{
-    diagnostics_error, edit, edit_error, edit_ok, edit_ok_source, function_signature_span,
-    graph_id_name_span, indentation_at, line_after, line_start, snippet,
+    diagnostics_error, edit, edit_conflict, edit_error, edit_ok, edit_ok_source,
+    function_signature_span, graph_id_name_span, indentation_at, line_after, line_start, snippet,
     span_through_closing_parens,
 };
 use super::graph_json::{canvas_collapse_hints, func_source_span};
 use super::graph_projection::trait_method_signature;
 use super::project_scan::project_file;
 use super::query_actions::default_arg_for_type;
+use super::schema_api::source_revision;
 use super::source_model::{write_source_if_unchanged, SourceWriteError};
 use super::validation_json::{
     extract_params, find_comment_hint, find_hint_region, find_simple_helper, json_str,
@@ -3861,10 +3862,15 @@ fn write_checked_candidate(path: &Path, before: &str, candidate: &str) -> Result
     let changed = candidate != before;
     if changed {
         write_source_if_unchanged(path, before, candidate).map_err(|error| match error {
-            SourceWriteError::Conflict => edit_error(
-                "conflict",
-                "source changed while this Canvas edit was prepared",
-            ),
+            SourceWriteError::Conflict => {
+                let current_revision = fs::read_to_string(path)
+                    .map(|source| source_revision(&source))
+                    .unwrap_or_else(|_| "missing".to_string());
+                edit_conflict(
+                    "source changed while this Canvas edit was prepared",
+                    &current_revision,
+                )
+            }
             SourceWriteError::Io(error) => edit_error("io", &error.to_string()),
         })?;
     }

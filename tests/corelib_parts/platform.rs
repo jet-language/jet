@@ -79,14 +79,25 @@ fn core_files_depth_example_runs() {
         .args(["run", "examples/features/io/files_depth.jet"])
         .output()
         .expect("run files_depth");
+    let release = Command::new(&jet)
+        .args(["run", "--release", "examples/features/io/files_depth.jet"])
+        .output()
+        .expect("run files_depth release");
     assert!(
         out.status.success(),
         "files_depth failed\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    assert!(
+        release.status.success(),
+        "files_depth release failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&release.stdout),
+        String::from_utf8_lossy(&release.stderr)
+    );
     let expected = fs::read_to_string("examples/features/expected/io/files_depth.out").unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
+    assert_eq!(release.stdout, out.stdout);
 }
 
 #[test]

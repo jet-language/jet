@@ -19,6 +19,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+pub(crate) use super::Ingest::invalidate_verified_digest;
+
 const DEFAULT_ENDPOINT: &str = "https://cache.nixos.org";
 const DEFAULT_PUBLIC_KEY: &str = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=";
 const MAX_METADATA_BYTES: u64 = 1024 * 1024;
@@ -184,6 +186,10 @@ pub(crate) fn plan_nix_downloads(
         .as_ref()
         .map(|info| info.store_dir.as_str())
         .unwrap_or("/nix/store");
+    let existing_entries = nix_entries_by_store_path(
+        super::list_checked(roots)
+            .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?,
+    );
     let mut queue = BTreeSet::new();
     for store_path in store_paths {
         validate_store_path(store_path, store_dir)?;
@@ -209,9 +215,32 @@ pub(crate) fn plan_nix_downloads(
             queue.remove(store_path);
         }
 
+        let results = std::thread::scope(|scope| {
+            let handles = wave
+                .iter()
+                .map(|store_path| {
+                    scope.spawn(|| {
+                        existing_object(roots, &existing_entries, store_path, store_dir)
+                            .map(|existing| (store_path.clone(), existing))
+                    })
+                })
+                .collect::<Vec<_>>();
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle.join().unwrap_or_else(|_| {
+                        Err(NixCacheError::new(
+                            NixCacheErrorKind::Admission,
+                            "Nix cache worker panicked during existing-object planning",
+                        ))
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
         let mut pending = Vec::new();
-        for store_path in wave {
-            if let Some(existing) = existing_object(roots, &store_path, store_dir)? {
+        for result in results {
+            let (store_path, existing) = result?;
+            if let Some(existing) = existing {
                 for reference in existing.references {
                     if scheduled.insert(reference.clone()) {
                         queue.insert(reference);
@@ -346,6 +375,8 @@ impl<'a> AdmissionTransaction<'a> {
         ensure_dir(&stage_parent, NixCacheErrorKind::Admission)?;
         let stage = stage_parent.join(format!("nix-cache-{}", unique_suffix()));
         fs::create_dir(&stage).map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
+        #[cfg(unix)]
+        sweep_dead_admission_stages(&stage_parent);
         Ok(Self {
             roots,
             stage,
@@ -372,6 +403,10 @@ impl<'a> AdmissionTransaction<'a> {
             .as_ref()
             .map(|info| info.store_dir.as_str())
             .unwrap_or("/nix/store");
+        let existing_entries = nix_entries_by_store_path(
+            super::list_checked(self.roots)
+                .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?,
+        );
         let mut queue = requests
             .values()
             .map(|request| request.store_path.clone())
@@ -395,12 +430,41 @@ impl<'a> AdmissionTransaction<'a> {
                 queue.remove(store_path);
             }
 
+            let probe_wave = wave
+                .into_iter()
+                .filter(|store_path| !fetched.contains_key(store_path))
+                .collect::<Vec<_>>();
+            let results = std::thread::scope(|scope| {
+                let handles = probe_wave
+                    .iter()
+                    .map(|store_path| {
+                        scope.spawn(|| {
+                            existing_object(
+                                self.roots,
+                                &existing_entries,
+                                store_path,
+                                store_dir,
+                            )
+                            .map(|existing| (store_path.clone(), existing))
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                handles
+                    .into_iter()
+                    .map(|handle| {
+                        handle.join().unwrap_or_else(|_| {
+                            Err(NixCacheError::new(
+                                NixCacheErrorKind::Admission,
+                                "Nix cache worker panicked during existing-object admission",
+                            ))
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            });
             let mut pending = Vec::new();
-            for store_path in wave {
-                if fetched.contains_key(&store_path) {
-                    continue;
-                }
-                if let Some(existing) = existing_object(self.roots, &store_path, store_dir)? {
+            for result in results {
+                let (store_path, existing) = result?;
+                if let Some(existing) = existing {
                     for reference in &existing.references {
                         if scheduled.insert(reference.clone()) {
                             queue.insert(reference.clone());
@@ -614,7 +678,10 @@ impl<'a> AdmissionTransaction<'a> {
         .map_err(|error| {
             NixCacheError::new(
                 classify_nar_error(&error),
-                "Nix cache object is not a valid canonical NAR",
+                format!(
+                    "Nix cache object {} is not a valid canonical NAR: {error}",
+                    info.info.store_path
+                ),
             )
         })?;
         if body.count != compressed_limit {
@@ -625,37 +692,53 @@ impl<'a> AdmissionTransaction<'a> {
         }
         let compressed_hash = format!("sha256:{}", bytes_to_hex(&body.hasher.finalize()));
         if let Some(expected) = &info.info.file_hash {
-            if super::normalize_nar_hash(expected).map_err(|_| {
+            let expected = super::normalize_nar_hash(expected).map_err(|error| {
                 NixCacheError::new(
                     NixCacheErrorKind::CompressedCorruption,
-                    "Nix cache FileHash is invalid",
+                    format!(
+                        "Nix cache FileHash is invalid for {}: {error}",
+                        info.info.store_path
+                    ),
                 )
-            })? != super::normalize_nar_hash(&compressed_hash).map_err(|_| {
+            })?;
+            let actual = super::normalize_nar_hash(&compressed_hash).map_err(|error| {
                 NixCacheError::new(
                     NixCacheErrorKind::CompressedCorruption,
-                    "Nix cache compressed hash is invalid",
+                    format!(
+                        "Nix cache compressed hash is invalid for {}: {error}",
+                        info.info.store_path
+                    ),
                 )
-            })? {
+            })?;
+            if expected != actual {
                 return Err(NixCacheError::new(
                     NixCacheErrorKind::CompressedCorruption,
                     "Nix cache compressed bytes do not match signed FileHash",
                 ));
             }
         }
-        if super::normalize_nar_hash(&stats.digest).map_err(|_| {
-            NixCacheError::new(NixCacheErrorKind::NarCorruption, "Nix NAR hash is invalid")
-        })? != super::normalize_nar_hash(&info.info.nar_hash).map_err(|_| {
-            NixCacheError::new(NixCacheErrorKind::NarCorruption, "Nix NarHash is invalid")
-        })? {
+        let actual_nar_hash = super::normalize_nar_hash(&stats.digest).map_err(|error| {
+            NixCacheError::new(
+                NixCacheErrorKind::NarCorruption,
+                format!("Nix NAR hash is invalid for {}: {error}", info.info.store_path),
+            )
+        })?;
+        let expected_nar_hash = super::normalize_nar_hash(&info.info.nar_hash).map_err(|error| {
+            NixCacheError::new(
+                NixCacheErrorKind::NarCorruption,
+                format!("Nix NarHash is invalid for {}: {error}", info.info.store_path),
+            )
+        })?;
+        if actual_nar_hash != expected_nar_hash {
             return Err(NixCacheError::new(
                 NixCacheErrorKind::NarCorruption,
                 "Nix NAR bytes do not match signed NarHash",
             ));
         }
         super::seal_node(&tree).map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
-        let hangar_digest = Envelope::try_output_hash_of_in_hangar(
-            &tree.to_string_lossy(),
-            &self.roots.hangar_dir(),
+        let hangar_digest = super::Ingest::verified_output_hash(
+            &tree,
+            Some(&self.roots.hangar_dir()),
             false,
         )
         .map_err(|error| {
@@ -746,31 +829,38 @@ impl<'a> AdmissionTransaction<'a> {
         for (store_path, object) in fetched.iter_mut() {
             let final_path = objects_dir.join(&object.hangar_digest);
             if let Some(stage) = &object.stage {
-                if let Ok(metadata) = fs::symlink_metadata(&final_path) {
-                    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                let reuse_existing = if let Ok(metadata) = fs::symlink_metadata(&final_path) {
+                    if !metadata.file_type().is_symlink() && !metadata.is_dir() {
                         return Err(NixCacheError::new(
                             NixCacheErrorKind::Admission,
                             "existing Hangar object is not a real directory",
                         ));
                     }
-                    let actual = Envelope::try_output_hash_of_in_hangar(
-                        &final_path.to_string_lossy(),
-                        &self.roots.hangar_dir(),
+                    if super::Ingest::verified_output_hash(
+                        &final_path,
+                        Some(&self.roots.hangar_dir()),
                         false,
                     )
-                    .map_err(|_| {
-                        NixCacheError::new(
-                            NixCacheErrorKind::Admission,
-                            "existing Hangar object could not be verified",
-                        )
-                    })?;
-                    if actual != object.hangar_digest {
-                        return Err(NixCacheError::new(
-                            NixCacheErrorKind::Admission,
-                            "existing Hangar object conflicts with verified bytes",
-                        ));
+                        .is_ok_and(|actual| actual == object.hangar_digest)
+                    {
+                        true
+                    } else {
+                        // The staged tree was re-verified against the signed
+                        // NarHash above. Replacing this broken same-digest
+                        // path restores every record that references it.
+                        super::Ingest::invalidate_verified_digest(&final_path);
+                        make_tree_root_writable(&final_path)
+                            .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
+                        remove_tree(&final_path)
+                            .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
+                        false
                     }
-                    remove_tree(stage);
+                } else {
+                    false
+                };
+                if reuse_existing {
+                    remove_tree(stage)
+                        .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
                 } else {
                     make_tree_root_writable(stage)
                         .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
@@ -778,6 +868,13 @@ impl<'a> AdmissionTransaction<'a> {
                         .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
                     self.created_objects.push(final_path.clone());
                     super::seal_node(&final_path)
+                        .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
+                    super::Ingest::refresh_verified_digest(
+                        &final_path,
+                        &self.roots.hangar_dir(),
+                        false,
+                        &object.hangar_digest,
+                    )
                         .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
                 }
             }
@@ -852,7 +949,10 @@ impl<'a> AdmissionTransaction<'a> {
                 &identity,
                 &object.direct_reference_digests,
             );
-            let bin = object.hangar_path.join("bin");
+            let bin = fs::symlink_metadata(&object.hangar_path)
+                .ok()
+                .filter(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+                .map(|_| object.hangar_path.join("bin"));
             entries.push(StoreEntry {
                 id: entry_id(
                     &name,
@@ -865,8 +965,8 @@ impl<'a> AdmissionTransaction<'a> {
                 reference,
                 out: object.hangar_path.display().to_string(),
                 bin: bin
-                    .is_dir()
-                    .then(|| bin.display().to_string())
+                    .filter(|path| path.is_dir())
+                    .map(|path| path.display().to_string())
                     .unwrap_or_default(),
                 rlib: String::new(),
                 envelope: Envelope::Envelope {
@@ -926,9 +1026,9 @@ impl<'a> AdmissionTransaction<'a> {
         if self.committed {
             return;
         }
-        remove_tree(&self.stage);
+        let _ = remove_tree(&self.stage);
         for path in self.created_objects.drain(..) {
-            remove_tree(&path);
+            let _ = remove_tree(&path);
         }
         if let Some(path) = self.receipt.take() {
             let _ = fs::remove_file(path);
@@ -1051,17 +1151,17 @@ impl CacheEndpoint {
         };
         validate_endpoint(&endpoint)?;
         let trusted_keys = if key_present {
-            vec![NixPublicKey::parse(&read_config(&key_path)?).map_err(|_| {
+            vec![NixPublicKey::parse(&read_config(&key_path)?).map_err(|error| {
                 NixCacheError::new(
                     NixCacheErrorKind::Metadata,
-                    "Nix cache trust key is malformed",
+                    format!("Nix cache trust key is malformed: {error}"),
                 )
             })?]
         } else {
-            vec![NixPublicKey::parse(DEFAULT_PUBLIC_KEY).map_err(|_| {
+            vec![NixPublicKey::parse(DEFAULT_PUBLIC_KEY).map_err(|error| {
                 NixCacheError::new(
                     NixCacheErrorKind::Metadata,
-                    "embedded Nix cache trust key is malformed",
+                    format!("embedded Nix cache trust key is malformed: {error}"),
                 )
             })?]
         };
@@ -1079,8 +1179,11 @@ impl CacheEndpoint {
                 "Nix cache-info endpoint is absent",
             )
         })?;
-        let text = std::str::from_utf8(&bytes).map_err(|_| {
-            NixCacheError::new(NixCacheErrorKind::Metadata, "Nix cache-info is not UTF-8")
+        let text = std::str::from_utf8(&bytes).map_err(|error| {
+            NixCacheError::new(
+                NixCacheErrorKind::Metadata,
+                format!("Nix cache-info is not UTF-8: {error}"),
+            )
         })?;
         let mut store_dir = None;
         for line in text.lines() {
@@ -1121,11 +1224,17 @@ impl CacheEndpoint {
         let Some(bytes) = self.get(&url, MAX_METADATA_BYTES)? else {
             return Ok(None);
         };
-        let text = std::str::from_utf8(&bytes).map_err(|_| {
-            NixCacheError::new(NixCacheErrorKind::Metadata, "Nix narinfo is not UTF-8")
+        let text = std::str::from_utf8(&bytes).map_err(|error| {
+            NixCacheError::new(
+                NixCacheErrorKind::Metadata,
+                format!("Nix narinfo is not UTF-8 for {store_path}: {error}"),
+            )
         })?;
         let info = NixNarInfo::parse(text).map_err(|error| {
-            NixCacheError::new(classify_narinfo_error(&error), "Nix narinfo is malformed")
+            NixCacheError::new(
+                classify_narinfo_error(&error),
+                format!("Nix narinfo is malformed for {store_path}: {error}"),
+            )
         })?;
         if info.store_path != store_path {
             return Err(NixCacheError::new(
@@ -1133,10 +1242,10 @@ impl CacheEndpoint {
                 "Nix narinfo StorePath disagrees with the requested path",
             ));
         }
-        let fingerprint = info.fingerprint(store_dir).map_err(|_| {
+        let fingerprint = info.fingerprint(store_dir).map_err(|error| {
             NixCacheError::new(
                 NixCacheErrorKind::Signature,
-                "Nix narinfo fingerprint is invalid",
+                format!("Nix narinfo fingerprint is invalid for {store_path}: {error}"),
             )
         })?;
         let key_matches = info.signatures.iter().any(|signature| {
@@ -1152,10 +1261,10 @@ impl CacheEndpoint {
         }
         let (key_id, signature) = info
             .verified_signature(store_dir, &self.trusted_keys)
-            .map_err(|_| {
+            .map_err(|error| {
                 NixCacheError::new(
                     NixCacheErrorKind::Signature,
-                    "Nix narinfo signature does not verify",
+                    format!("Nix narinfo signature does not verify for {store_path}: {error}"),
                 )
             })?;
         Ok(Some(FetchedInfo {
@@ -1288,37 +1397,50 @@ fn validate_requests(
     Ok(result)
 }
 
+fn nix_entries_by_store_path(entries: Vec<StoreEntry>) -> BTreeMap<String, StoreEntry> {
+    let mut by_store_path = BTreeMap::new();
+    for entry in entries {
+        let Some(store_path) = ProducerRecord::decode(&entry.producer_record)
+            .ok()
+            .and_then(|producer| producer.facts.get("nix.store-path").cloned())
+        else {
+            continue;
+        };
+        by_store_path.entry(store_path).or_insert(entry);
+    }
+    by_store_path
+}
+
 fn existing_object(
     roots: &Roots,
+    entries: &BTreeMap<String, StoreEntry>,
     store_path: &str,
     store_dir: &str,
 ) -> Result<Option<FetchedObject>, NixCacheError> {
-    let entries = super::list_checked(roots)
-        .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
-    let Some(entry) = entries.into_iter().find(|entry| {
-        ProducerRecord::decode(&entry.producer_record)
-            .ok()
-            .and_then(|producer| producer.facts.get("nix.store-path").cloned())
-            .as_deref()
-            == Some(store_path)
-    }) else {
+    let Some(entry) = entries.get(store_path) else {
         return Ok(None);
     };
     let output = Path::new(&entry.out);
     let output_meta = match fs::symlink_metadata(output) {
-        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => metadata,
+        Ok(metadata) if metadata.file_type().is_symlink() || metadata.is_dir() => metadata,
         _ => return Ok(None),
     };
-    if !output.starts_with(roots.hangar_dir()) || !output_meta.is_dir() {
+    if !output.starts_with(roots.hangar_dir())
+        || (!output_meta.file_type().is_symlink() && !output_meta.is_dir())
+    {
         return Ok(None);
     }
-    let digest = Envelope::try_output_hash_of_in_hangar(&entry.out, &roots.hangar_dir(), false)
-        .map_err(|_| {
-            NixCacheError::new(
-                NixCacheErrorKind::Admission,
-                "existing Nix object failed re-hash",
-            )
-        })?;
+    let digest = super::Ingest::verified_output_hash(
+        output,
+        Some(&roots.hangar_dir()),
+        false,
+    )
+    .map_err(|error| {
+        NixCacheError::new(
+            NixCacheErrorKind::Admission,
+            format!("existing Nix object {store_path} failed re-hash: {error}"),
+        )
+    })?;
     if digest != entry.envelope.output_hash {
         return Ok(None);
     }
@@ -1349,7 +1471,7 @@ fn existing_object(
         hangar_path: output.to_path_buf(),
         hangar_digest: digest,
         references,
-        direct_reference_digests: entry.references,
+        direct_reference_digests: entry.references.clone(),
         unpacked_bytes: 0,
         proof: producer.facts.get("nix.proof").cloned().unwrap_or_default(),
     }))
@@ -1673,20 +1795,31 @@ fn classify_nar_error(error: &io::Error) -> NixCacheErrorKind {
     }
 }
 
-fn remove_tree(path: &Path) {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return;
+fn remove_tree(path: &Path) -> io::Result<()> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
     };
     if metadata.file_type().is_symlink() || metadata.is_file() {
-        let _ = fs::remove_file(path);
+        fs::remove_file(path)
     } else if metadata.is_dir() {
-        let _ = super::make_tree_writable_for_removal(path);
-        let _ = fs::remove_dir_all(path);
+        super::make_tree_writable_for_removal(path)?;
+        fs::remove_dir_all(path)
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Nix cache staging path is not removable",
+        ))
     }
 }
 
 fn make_tree_root_writable(path: &Path) -> io::Result<()> {
-    let mut permissions = fs::symlink_metadata(path)?.permissions();
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    let mut permissions = metadata.permissions();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1695,6 +1828,60 @@ fn make_tree_root_writable(path: &Path) -> io::Result<()> {
     #[cfg(not(unix))]
     permissions.set_readonly(false);
     fs::set_permissions(path, permissions)
+}
+
+#[cfg(unix)]
+fn sweep_dead_admission_stages(stage_parent: &Path) {
+    let Ok(entries) = fs::read_dir(stage_parent) else {
+        return;
+    };
+    let current_pid = std::process::id();
+    for entry in entries.flatten() {
+        if !admission_stage_is_dead(&entry.file_name(), current_pid) {
+            continue;
+        }
+        let _ = remove_tree(&entry.path());
+    }
+}
+
+#[cfg(unix)]
+pub(crate) fn admission_stage_is_dead(name: &std::ffi::OsStr, current_pid: u32) -> bool {
+    let Some(pid) = admission_stage_pid(name) else {
+        return false;
+    };
+    pid != current_pid && !admission_process_alive(pid)
+}
+
+#[cfg(unix)]
+fn admission_stage_pid(name: &std::ffi::OsStr) -> Option<u32> {
+    let name = name.to_str()?;
+    let suffix = name.strip_prefix("nix-cache-")?;
+    let (pid, nonce) = suffix.split_once('-')?;
+    if nonce.is_empty() || nonce.contains('-') {
+        return None;
+    }
+    let pid = pid.parse::<u32>().ok()?;
+    let _ = nonce.parse::<u128>().ok()?;
+    (pid != 0).then_some(pid)
+}
+
+#[cfg(target_os = "linux")]
+fn admission_process_alive(pid: u32) -> bool {
+    Path::new(&format!("/proc/{pid}")).exists()
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn admission_process_alive(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    unsafe extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+    let result = unsafe { kill(pid, 0) };
+    result == 0
+        || (result == -1
+            && io::Error::last_os_error().kind() == io::ErrorKind::PermissionDenied)
 }
 
 fn unique_suffix() -> String {

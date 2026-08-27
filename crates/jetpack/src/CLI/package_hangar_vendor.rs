@@ -369,6 +369,7 @@ fn hangar_nested(parsed: &Parsed) -> Parsed {
 /// Hangar Store v2 also exposes:
 /// - `hangar ingest <dir> --name <n> [--version <v>] [--ref <r>]`
 /// - `hangar verify <digest-or-id>`
+/// - `hangar doctor [--repair]` — verify objects and repair cache drift
 /// - `hangar referrers <digest>`
 /// - `hangar recover` — sweep crashed Hangar/build staging and `.partial` objects
 /// - `hangar export|import|dump|restore|copy|sign|repair` — one signed archive
@@ -549,6 +550,7 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
             0
         }
         Some("ingest") => cmd_hangar_ingest(theme, parsed),
+        Some("doctor") => cmd_hangar_doctor(theme, parsed),
         Some("verify") => cmd_hangar_verify(theme, parsed),
         Some("export") => cmd_hangar_archive(theme, parsed, "export"),
         Some("import") => cmd_hangar_archive(theme, parsed, "import"),
@@ -592,7 +594,7 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
                 parsed,
                 "E1340",
                 &format!("`hangar {other}` is not a hangar command"),
-                "hangar subcommands: `path`, `du`, `list`, `clean`, `vendor`, `cache`, `shared`, `ingest`, `verify`, `export`, `import`, `dump`, `restore`, `copy`, `sign`, `repair`, `referrers`, `recover`, `register-external-root`, `list-external-roots`, `unregister-external-root`.",
+                "hangar subcommands: `path`, `du`, `list`, `clean`, `vendor`, `cache`, `shared`, `ingest`, `doctor`, `verify`, `export`, `import`, `dump`, `restore`, `copy`, `sign`, `repair`, `referrers`, `recover`, `register-external-root`, `list-external-roots`, `unregister-external-root`.",
                 "run `jetpack hangar path`.",
             )
         }
@@ -1093,6 +1095,96 @@ fn cmd_hangar_ingest(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         Err(err) => hangar_ingest_error(theme, parsed, &err),
     }
+}
+
+fn cmd_hangar_doctor(theme: &Theme, parsed: &Parsed) -> i32 {
+    let unexpected = parsed
+        .positional
+        .iter()
+        .skip(1)
+        .filter(|argument| argument.as_str() != "--repair")
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unexpected.is_empty() {
+        return hangar_report_error(
+            theme,
+            parsed,
+            "E1340",
+            "`hangar doctor` accepts only `--repair`",
+            "doctor scans the complete Hangar and has no object selector.",
+            "run `jetpack hangar doctor` or `jetpack hangar doctor --repair`.",
+        );
+    }
+
+    let repair = parsed.positional.iter().any(|argument| argument == "--repair");
+    let roots = Store::resolve();
+    let report = match Store::hangar_doctor(&roots, repair, parsed.flags.offline) {
+        Ok(report) => report,
+        Err(error) => {
+            return hangar_report_error(
+                theme,
+                parsed,
+                "E1340",
+                "could not inspect the Hangar",
+                &error.to_string(),
+                "repair the Hangar root or journal, then retry doctor.",
+            )
+        }
+    };
+    let remaining = report.remaining_count();
+    if parsed.flags.json {
+        let findings = report
+            .findings
+            .iter()
+            .map(|finding| {
+                format!(
+                    "{{\"kind\":{},\"subject\":{},\"detail\":{},\"fixed\":{}}}",
+                    crate::JSON::quote(&finding.kind),
+                    crate::JSON::quote(&finding.subject),
+                    crate::JSON::quote(&finding.detail),
+                    finding.fixed,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{}",
+            jet_foundation::Report::render_status_json(
+                if remaining == 0 { "ok" } else { "degraded" },
+                remaining == 0,
+                "hangar.doctor",
+                &format!(
+                    ",\"objects\":{},\"findings\":[{}],\"fixed\":{},\"remaining\":{}",
+                    report.objects,
+                    findings,
+                    report.fixed_count(),
+                    remaining,
+                ),
+            )
+        );
+    } else {
+        for finding in &report.findings {
+            let verdict = if finding.fixed {
+                "fixed"
+            } else if repair {
+                "unfixed"
+            } else {
+                "found"
+            };
+            theme.status(&format!(
+                "{verdict} {} {}: {}",
+                finding.kind, finding.subject, finding.detail
+            ));
+        }
+        theme.status(&format!(
+            "hangar doctor: checked {} object(s), {} finding(s), {} fixed, {} remaining",
+            report.objects,
+            report.findings.len(),
+            report.fixed_count(),
+            remaining,
+        ));
+    }
+    i32::from(remaining != 0)
 }
 
 fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {

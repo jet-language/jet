@@ -1907,6 +1907,7 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
         let request = String::from_utf8_lossy(&body);
+        let _transaction = session.lock_source_transaction();
         return match crate::Canvas::apply_transaction_json(Path::new(canvas_file), &request) {
             Ok(body) => {
                 status.version.fetch_add(1, Ordering::SeqCst);
@@ -1939,6 +1940,7 @@ fn handle_connection(
             return method_not_allowed(&mut stream);
         }
         let request = String::from_utf8_lossy(&body);
+        let _transaction = session.lock_source_transaction();
         return match crate::Canvas::apply_project_transaction_json(Path::new(canvas_file), &request)
         {
             Ok(body) => {
@@ -2460,11 +2462,12 @@ mod tests {
         stage_and_swap, CanvasHostOptions, DevStatus, ListenerKind, Ordering, WebHost,
     };
     use crate::Request;
-    use std::io::Read;
     use std::collections::HashMap;
+    use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
-    use std::sync::Arc;
+    use std::sync::{Arc, Barrier};
     use std::thread;
+    use std::time::Duration;
 
     #[cfg(unix)]
     #[test]
@@ -2838,6 +2841,95 @@ mod tests {
 
         WebHost::bind_canvas("app.jet", false, Some(port))
             .expect("a shut down Canvas session must release its port");
+    }
+
+    #[test]
+    fn concurrent_canvas_clients_share_checked_revision_boundary() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-devserver-concurrent-canvas-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("main.jet");
+        std::fs::write(&path, "fn run() {\n    total := 1\n    print(total)\n}\n").unwrap();
+        let before = std::fs::read_to_string(&path).unwrap();
+        let revision = crate::Canvas::source_revision(&before);
+        let host = WebHost::bind_canvas(path.to_str().unwrap(), false, None).unwrap();
+        let port = host.status.port();
+        let secret = host.session_secret.clone();
+        host.start_canvas();
+
+        let barrier = Arc::new(Barrier::new(3));
+        let responses = [
+            ("client-a", "first"),
+            ("client-b", "second"),
+        ]
+        .into_iter()
+        .map(|(client, name)| {
+            let barrier = Arc::clone(&barrier);
+            let secret = secret.clone();
+            let body = format!(
+                "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{revision}\",\"from\":\"total\",\"to\":\"{name}\",\"client_id\":\"{client}\"}}"
+            );
+            thread::spawn(move || {
+                barrier.wait();
+                post_canvas_transaction(port, &secret, client, &body)
+            })
+        })
+        .collect::<Vec<_>>();
+        barrier.wait();
+        let responses = responses
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            responses
+                .iter()
+                .filter(|response| response.starts_with("HTTP/1.1 200 OK"))
+                .count(),
+            1,
+            "exactly one client must publish the shared revision"
+        );
+        let loser = responses
+            .iter()
+            .find(|response| response.starts_with("HTTP/1.1 409 Conflict"))
+            .expect("one client must receive a conflict");
+        let current = std::fs::read_to_string(&path).unwrap();
+        let current_revision = crate::Canvas::source_revision(&current);
+        assert!(loser.contains("\"kind\":\"conflict\""), "{loser}");
+        assert!(
+            loser.contains(&format!("\"current_revision\":\"{current_revision}\"")),
+            "{loser}"
+        );
+        let session = host.session.json();
+        assert!(
+            session.contains(&format!("\"accepted_revision\":\"{current_revision}\"")),
+            "{session}"
+        );
+        assert!(session.contains("\"status\":\"accepted\""));
+        assert!(session.contains("\"status\":\"refused\""));
+        drop(host);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn post_canvas_transaction(port: u16, secret: &str, client: &str, body: &str) -> String {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let request = format!(
+            "POST /canvas/transaction?client_id={client} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\nAuthorization: Bearer {secret}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).unwrap();
+        String::from_utf8(response).unwrap()
     }
 
     #[test]

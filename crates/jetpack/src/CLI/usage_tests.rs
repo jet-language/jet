@@ -45,12 +45,15 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} update --deps                   refresh project dependency pins only
   {bin} update --tools                  refresh user-tools pins only
   {bin} bridge flake                   print an env.* shim translated from ./flake.nix
+  {bin} import [<flake.nix|shell.nix|default.nix>]
+                                      migrate a Nix devShell into env.jet + lock
 
 {store}
   {bin} doctor [--online]              check hangar, registry, locks, cache, and signing
   {bin} hangar list                    show realized packages
   {bin} hangar du [--all]              honest hangar disk usage; --all spans machine roots
   {bin} hangar path                    print the resolved user Hangar path
+  {bin} hangar doctor [--repair]        verify objects; repair cache drift
   {bin} hangar verify [<entry-or-archive>] verify Hangar bytes and signatures
   {bin} hangar export <entry> --to <archive.hangar>
                                       export one signed closure archive
@@ -78,6 +81,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} hangar clean                  collect stale hangar objects + optimize
   {bin} search <query>                 search the local offline package index
   {bin} info <source>.<package>         show local offline package metadata
+  {bin} why <package>                  show package provenance, trust, size, and dependents
   {bin} explain <ref>                  show dependency, closure, liveness, and rebuild facts
   {bin} explain why-depends <ref>      explain direct/transitive package dependencies
   {bin} explain what-depends <ref>     explain direct/transitive package referrers
@@ -163,6 +167,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   --as <name>                          (tool install) project bin under a different name
   --to <path>                          (hangar archive) archive/output destination
   --from <path>                        (hangar repair) signed recovery archive
+  --repair                             (hangar doctor) repair drift and staging
   --key <path-or-name>                 (hangar archive) signer key
   --no-deps                            (hangar export/dump) select one object
   --allow-unsigned                     (hangar import/restore) explicit local escape hatch
@@ -197,6 +202,16 @@ mod tests {
     }
 
     #[test]
+    fn import_is_in_the_canonical_route_registry_and_help() {
+        assert!(Syntax::JETPACK_VERBS.contains(&Syntax::JETPACK_IMPORT_VERB));
+        assert!(usage_with_color(false).contains("jetpack import"));
+        assert_eq!(
+            RuntimePolicy::verb_policy(Syntax::JETPACK_IMPORT_VERB, &[]).verb,
+            Syntax::JETPACK_IMPORT_VERB
+        );
+    }
+
+    #[test]
     fn jetpack_verbs_keep_the_ratified_non_jetos_count() {
         let jetos_verbs = [
             Syntax::OS_SUBCOMMAND,
@@ -210,16 +225,28 @@ mod tests {
             .iter()
             .filter(|verb| !jetos_verbs.contains(verb))
             .count();
-        assert_eq!(non_jetos, 20);
-        assert_eq!(Syntax::JETPACK_VERBS.len(), 26);
+        assert_eq!(non_jetos, 22);
+        assert_eq!(Syntax::JETPACK_VERBS.len(), 28);
         assert!(Syntax::JETPACK_VERBS.contains(&"env"));
         assert!(Syntax::JETPACK_VERBS.contains(&"use"));
+        assert!(Syntax::JETPACK_VERBS.contains(&Syntax::JETPACK_WHY));
+        assert!(Syntax::JETPACK_VERBS.contains(&Syntax::JETPACK_IMPORT_VERB));
         for retired in ["dev", "test", "fmt", "build", "run", "enter"] {
             assert!(!Syntax::JETPACK_VERBS.contains(&retired));
         }
         for retired in ["cache", "shared-store", "vendor", "clean", "list"] {
             assert!(!Syntax::JETPACK_VERBS.contains(&retired));
         }
+    }
+
+    #[test]
+    fn why_is_a_read_only_json_capable_route() {
+        let help = usage_with_color(false);
+        assert!(help.contains("jetpack why <package>"));
+        assert_eq!(RuntimePolicy::verb_policy("why", &[]).verb, "why");
+        let parsed = parse_args_for("why", &["ripgrep".into(), "--json".into()]);
+        assert_eq!(parsed.positional, vec!["ripgrep"]);
+        assert!(parsed.flags.json);
     }
 
     #[test]
@@ -277,6 +304,7 @@ mod tests {
     #[test]
     fn hangar_recovery_is_in_help() {
         assert!(usage_with_color(false).contains("hangar recover"));
+        assert!(usage_with_color(false).contains("hangar doctor [--repair]"));
         assert!(usage_with_color(false).contains("hangar verify"));
     }
 

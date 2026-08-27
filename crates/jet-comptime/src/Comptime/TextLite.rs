@@ -337,6 +337,9 @@ mod text_kernel {
     pub(super) fn fs_copy(from: &str, to: &str) -> Result<(), jet_std::IOError> {
         jet_std_fs_copy(&from.to_string(), &to.to_string())
     }
+    pub(super) fn fs_copy_dir(from: &str, to: &str) -> Result<(), jet_std::IOError> {
+        jet_std_fs_copy_dir(&from.to_string(), &to.to_string())
+    }
     pub(super) fn fs_list_dir(path: &str) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
         jet_std_fs_list_dir(&path.to_string())
     }
@@ -484,6 +487,9 @@ pub(super) fn fs_remove_all(path: &str) -> FsResult<()> {
 }
 pub(super) fn fs_copy(from: &str, to: &str) -> FsResult<()> {
     text_kernel::fs_copy(from, to).map_err(io_error_ct)
+}
+pub(super) fn fs_copy_dir(from: &str, to: &str) -> FsResult<()> {
+    text_kernel::fs_copy_dir(from, to).map_err(io_error_ct)
 }
 /// `(name, full path, is_dir)` rows in the kernel's own sorted order (D-LSDIR1).
 pub(super) fn fs_list_dir(path: &str) -> FsResult<Vec<(String, String, bool)>> {

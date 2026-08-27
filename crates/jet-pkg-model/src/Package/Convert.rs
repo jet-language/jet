@@ -124,6 +124,7 @@ jet: "{ver}"
 description: ""
 license: "MIT OR Apache-2.0"
 repository: ""
+authority: .{{ holds: {{ allow: [IO] }} }}
 
 // Jet package dependencies:
 // deps: .{{
@@ -140,6 +141,7 @@ jet: "{ver}"
 description: ""
 license: "MIT OR Apache-2.0"
 repository: ""
+authority: .{{ holds: {{ allow: [IO] }} }}
 
 deps: .{{
 }}

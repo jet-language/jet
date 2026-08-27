@@ -24,7 +24,6 @@ use crate::WorkspaceFile::WorkspaceMember;
 use jet_env_model::ModuleEval;
 use jet_pkg_model::Authority::AuthorityResolver;
 use jet_pkg_model::WorkspacePlan::{WorkspaceSource, WorkspaceSourceRole};
-use std::io::IsTerminal;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct NativeDevTool {
@@ -466,7 +465,7 @@ pub(super) fn compose_env_scoped(
     // a large package set does not become a duplicate status/row ledger.
     let total_steps = plan.refs.len() + plan.adapters.len();
     let live_mode = total_steps > 1;
-    let live_tty = live_mode && theme.color && std::io::stderr().is_terminal();
+    let live_tty = live_mode && theme.live_enabled();
     let mut live = theme.live_region();
     let mut completed_steps = 0usize;
     for spec in plan.refs.iter() {
@@ -791,7 +790,7 @@ fn reject_unprompted_acquisition(
         RealizeScope::UserProfile => "tool".to_string(),
     };
     let planning = !specs.is_empty() || !plan.adapters.is_empty();
-    let planning_live = planning && theme.color && std::io::stderr().is_terminal();
+    let planning_live = planning && theme.live_enabled();
     let mut live = theme.live_region();
     if planning_live {
         live.set_aggregate_status("Planning", 0, specs.len() + plan.adapters.len());

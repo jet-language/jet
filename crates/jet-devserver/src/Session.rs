@@ -47,6 +47,7 @@ struct RetainedView {
 /// reconnect or multiply without creating another source history or another
 /// accepted-revision stream.
 pub struct ResidentDevSession {
+    source_transactions: crate::WatchService::SessionBroker,
     id: String,
     entry: String,
     canvas_host: String,
@@ -83,6 +84,7 @@ impl ResidentDevSession {
     ) -> Self {
         let serial = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
         Self {
+            source_transactions: crate::WatchService::SessionBroker::default(),
             id: format!("jet-session-{}-{}", std::process::id(), serial),
             entry: entry.to_string(),
             canvas_host: canvas_host.to_string(),
@@ -128,8 +130,13 @@ impl ResidentDevSession {
     }
 
     pub fn observe_source(&self, revision: &str) {
-        if !revision.is_empty() {
-            *self.current_revision.lock().unwrap() = revision.to_string();
+        if revision.is_empty() {
+            return;
+        }
+        *self.current_revision.lock().unwrap() = revision.to_string();
+        let mut accepted = self.accepted_revision.lock().unwrap();
+        if accepted.is_empty() {
+            *accepted = revision.to_string();
         }
     }
 
@@ -229,6 +236,7 @@ impl ResidentDevSession {
     }
 
     pub fn refuse_transaction(&self, request: &str, current_revision: &str) {
+        self.observe_source(current_revision);
         self.push_receipt(Receipt {
             kind: request_string(request, "op"),
             status: "refused".to_string(),
@@ -237,6 +245,10 @@ impl ResidentDevSession {
             client: request_string(request, "client_id"),
             output: request_string(request, "output"),
         });
+    }
+
+    pub(crate) fn lock_source_transaction(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.source_transactions.lock_source_transaction()
     }
 
     pub fn record_command(&self, request: &str) {
@@ -592,6 +604,7 @@ mod tests {
 
         for expected in [
             "\"source_revision\":\"broken-revision\"",
+            "\"accepted_revision\":\"good-revision\"",
             "\"last_good_revision\":\"good-revision\"",
             "\"last_good_program\":\"web-build-1\"",
             "\"last_good_views\":{\"graph\":{\"revision\":\"good-revision\",\"source_id\":null,\"payload\":\"graph-good\"},\"debugger\":{\"revision\":\"good-revision\",\"source_id\":null,\"payload\":\"debug-good\"},\"runtime\":{\"revision\":\"good-revision\",\"source_id\":null,\"payload\":\"runtime-good\"}}",
@@ -602,6 +615,16 @@ mod tests {
         ] {
             assert!(json.contains(expected), "session lost {expected}: {json}");
         }
+    }
+
+    #[test]
+    fn first_observed_source_is_the_accepted_session_baseline() {
+        let session = ResidentDevSession::new("app.jet", 4567, 49152);
+        session.observe_source("initial-revision");
+        session.observe_source("current-revision");
+        let json = session.json();
+        assert!(json.contains("\"source_revision\":\"current-revision\""));
+        assert!(json.contains("\"accepted_revision\":\"initial-revision\""));
     }
 
     #[test]

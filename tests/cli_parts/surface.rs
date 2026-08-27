@@ -1975,6 +1975,23 @@ fn explain_golden() {
 }
 
 #[test]
+fn explain_golden_e1803_application_authority() {
+    let out = Command::new(jet())
+        .arg("explain")
+        .arg("E1803")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "jet explain E1803 should succeed");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        stdout.contains("Application authority is undecided or denies a required effect"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("REPL host effects"), "{stdout}");
+    check_snapshot("explain_E1803.txt", &stdout);
+}
+
+#[test]
 fn explain_build_fact_golden() {
     let dir = isolated_cwd("explain_build_fact");
     let file = dir.join("fact.jet");

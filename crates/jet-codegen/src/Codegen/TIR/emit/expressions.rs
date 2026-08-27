@@ -3965,17 +3965,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         // c109 Phase 8: the `??` fallback operator. Mirrors `emit_or_fallback`
-        // (Statement.rs). D-FAIL-CARRIER1=A: one carrier, so one unwrap — the value
-        // side is the payload and the report side runs the fallback.
+        // (Statement.rs). D-FAIL-CARRIER1=A: unwrap the optional-success role
+        // inside an explicit Result before running the fallback.
         TExprKind::OrFallback { value, fallback } => {
             let v = emit_tir_expr(value, cx);
             let fb = emit_tir_orfallback_rhs(fallback, cx);
-            jet_format!(
-                "match {} {{ Ok({jet_prefix}ok) => {jet_prefix}ok, Err({}) => {{ jet_journey_reset(); {} }} }}",
-                v,
-                ambient_err_local().rust_name(),
-                fb
-            )
+            if matches!(&value.ty, Type::Result { ok, .. } if matches!(ok.as_ref(), Type::Option(_))) {
+                jet_format!(
+                    "match {} {{ Ok(Ok({jet_prefix}ok)) => {jet_prefix}ok, Ok(Err(_)) | Err(_) => {{ jet_journey_reset(); {} }} }}",
+                    v,
+                    fb
+                )
+            } else {
+                jet_format!(
+                    "match {} {{ Ok({jet_prefix}ok) => {jet_prefix}ok, Err({}) => {{ jet_journey_reset(); {} }} }}",
+                    v,
+                    ambient_err_local().rust_name(),
+                    fb
+                )
+            }
         }
         // c109 Phase 8: optional chaining `base?.member`. Mirrors `Expr::OptField`:
         // `(base).clone().{and_then|map}(|__optv| __optv.{member})`. The combinator is

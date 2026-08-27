@@ -4214,6 +4214,28 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         let value = eval_expr_cache_take(state.value).ok_or_else(|| {
                             unreachable!("fallback value missing from evaluator worklist")
                         })?;
+                        // `?T !E` is one Result carrier whose success role is
+                        // itself optional: `Ok(Val(x))` is a nested Present,
+                        // while `Ok(None)` is a Present-wrapped clean failure.
+                        // Normalize that inner role before applying the one
+                        // fallback path used by plain Result and Option.
+                        let optional_success = matches!(
+                            &state.value.ty,
+                            Type::Result { ok, .. }
+                                if matches!(ok.as_ref(), Type::Option(_))
+                        );
+                        let value = if optional_success {
+                            match value {
+                                CtValue::Present(inner) => match *inner {
+                                    CtValue::Present(payload) => *payload,
+                                    CtValue::Failed(report) => CtValue::Failed(report),
+                                    other => other,
+                                },
+                                other => other,
+                            }
+                        } else {
+                            value
+                        };
                         let miss = matches!(
                             &value,
                             CtValue::Failed(CtReport::Clean(_))

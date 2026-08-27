@@ -5,11 +5,11 @@
 //! come from the stored action identity and build attempt record.
 
 use super::{entry_action_key, ClosureGraph, Lifecycle, ProducerRecord, Roots, StoreEntry};
-use crate::{BuildDebug, ProviderFacts, SemanticLock, JSON};
+use crate::{BuildDebug, ProviderFacts, SemanticLock, Syntax, JSON};
 use jet_foundation::Report::ReportEnvelope;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExplainLens {
@@ -172,6 +172,60 @@ pub struct PackageExplain {
     pub reports: Vec<ExplainReport>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhyLocation {
+    pub path: String,
+    pub line: Option<usize>,
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhyRequesting {
+    pub env_file: WhyLocation,
+    pub lock_file: WhyLocation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhyOrigin {
+    pub catalog: String,
+    pub endpoint: String,
+    pub cache_endpoint: String,
+    pub signature_chain: String,
+    pub source: String,
+    pub source_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhyTrust {
+    pub grade: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhyDisk {
+    pub bytes: Option<u64>,
+    pub objects: usize,
+}
+
+/// The compact, package-shaped projection used by `jetpack why`.
+///
+/// This intentionally keeps the command a renderer over the existing
+/// producer, receipt, lock, and closure records. `PackageExplain` remains the
+/// detailed diagnostic surface; this projection only selects the facts needed
+/// to answer the common provenance question in one screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageWhy {
+    pub query: String,
+    pub package: String,
+    pub available: bool,
+    pub requesting: WhyRequesting,
+    pub origin: WhyOrigin,
+    pub trust: WhyTrust,
+    pub disk: WhyDisk,
+    pub dependents: Vec<String>,
+    pub receipt: String,
+}
+
 /// Explain one package through the production Store, closure, lifecycle, and
 /// build-debug records. `None` means neither a realized entry nor a recorded
 /// build attempt exists for the query.
@@ -263,6 +317,538 @@ pub fn explain_package(
         rebuild,
         reports,
     }))
+}
+
+/// Explain the package facts that belong on the one-screen `why` surface.
+/// This is read-only: the detailed explanation path already uses the
+/// non-repairing Store projection and closure readers.
+pub fn why_package(roots: &Roots, query: &str) -> std::io::Result<Option<PackageWhy>> {
+    let Some(explanation) = explain_package(roots, query, ExplainLens::All)? else {
+        return Ok(None);
+    };
+    PackageWhy::from_explain(roots, explanation).map(Some)
+}
+
+impl PackageWhy {
+    fn from_explain(roots: &Roots, explanation: PackageExplain) -> std::io::Result<Self> {
+        let package = explanation
+            .entry
+            .as_ref()
+            .map(|entry| entry.name.clone())
+            .unwrap_or_else(|| package_name(&explanation.query));
+        let mut names = vec![package.clone()];
+        let mut qualified = vec![explanation.query.clone()];
+        if let Some(entry) = &explanation.entry {
+            names.push(entry.name.clone());
+            qualified.push(entry.reference.clone());
+        }
+        names.sort();
+        names.dedup();
+        qualified.sort();
+        qualified.dedup();
+        let requesting = requesting_projection(&names, &qualified)?;
+
+        let (provider, facts, source, source_digest) = explanation
+            .provider
+            .as_ref()
+            .map(|provider| {
+                (
+                    provider.provider.clone(),
+                    Some(&provider.producer_facts),
+                    provider.immutable_source.clone(),
+                    provider.source_digest.clone(),
+                )
+            })
+            .unwrap_or_else(|| (String::new(), None, String::new(), String::new()));
+        let origin = origin_projection(roots, &provider, facts, &source, &source_digest);
+        let trust = trust_projection(&provider, facts);
+        let disk = disk_projection(&explanation.graph);
+        let dependents = dependent_projection(&explanation.graph);
+        let receipt = explanation
+            .entry
+            .as_ref()
+            .map(|entry| entry.receipt.clone())
+            .filter(|receipt| !receipt.is_empty())
+            .unwrap_or_else(|| "not recorded".to_string());
+
+        Ok(Self {
+            query: explanation.query,
+            package,
+            available: explanation.entry.is_some(),
+            requesting,
+            origin,
+            trust,
+            disk,
+            dependents,
+            receipt,
+        })
+    }
+
+    pub fn to_json(&self) -> String {
+        let bytes = self
+            .disk
+            .bytes
+            .map(|bytes| bytes.to_string())
+            .unwrap_or_else(|| "null".to_string());
+        jet_foundation::Report::render_status_json(
+            "ok",
+            true,
+            "why",
+            &format!(
+                ",\"query\":{},\"package\":{},\"available\":{},\"requesting\":{{\"env_file\":{},\"lock_file\":{}}},\"origin\":{{\"catalog\":{},\"endpoint\":{},\"cache_endpoint\":{},\"signature_chain\":{},\"source\":{},\"source_digest\":{}}},\"trust\":{{\"grade\":{},\"reason\":{}}},\"disk\":{{\"bytes\":{},\"objects\":{}}},\"dependents\":{},\"receipt\":{}",
+                JSON::quote(&self.query),
+                JSON::quote(&self.package),
+                self.available,
+                self.requesting.env_file.to_json(),
+                self.requesting.lock_file.to_json(),
+                JSON::quote(&self.origin.catalog),
+                JSON::quote(&self.origin.endpoint),
+                JSON::quote(&self.origin.cache_endpoint),
+                JSON::quote(&self.origin.signature_chain),
+                JSON::quote(&self.origin.source),
+                JSON::quote(&self.origin.source_digest),
+                JSON::quote(&self.trust.grade),
+                JSON::quote(&self.trust.reason),
+                bytes,
+                self.disk.objects,
+                json_array(self.dependents.iter().map(|dependent| JSON::quote(dependent))),
+                JSON::quote(&self.receipt),
+            ),
+        )
+    }
+
+    pub fn text(&self) -> String {
+        let dependents = if self.dependents.is_empty() {
+            "-".to_string()
+        } else {
+            self.dependents.join(", ")
+        };
+        let disk = match self.disk.bytes {
+            Some(bytes) => format!("{bytes} B ({} closure objects)", self.disk.objects),
+            None if self.disk.objects > 0 => {
+                format!("not recorded ({} closure objects)", self.disk.objects)
+            }
+            None => "not recorded".to_string(),
+        };
+        let mut output = String::new();
+        output.push_str(&format!("package why {}\n", self.package));
+        if !self.available {
+            output.push_str("status       no realized StoreEntry\n");
+        }
+        output.push_str(&format!(
+            "requesting\n  env file     {}\n  lock line    {}\n",
+            location_text(&self.requesting.env_file),
+            location_text(&self.requesting.lock_file),
+        ));
+        output.push_str(&format!(
+            "origin\n  catalog      {}\n  endpoint     {}\n  cache        {}\n  signature chain {}\n  source       {}\n  source digest {}\n",
+            empty_dash(&self.origin.catalog),
+            empty_dash(&self.origin.endpoint),
+            empty_dash(&self.origin.cache_endpoint),
+            empty_dash(&self.origin.signature_chain),
+            empty_dash(&self.origin.source),
+            empty_dash(&self.origin.source_digest),
+        ));
+        output.push_str(&format!(
+            "trust        {} ({})\ndisk         {}\ndependents   {}\nreceipt      {}\n",
+            self.trust.grade,
+            self.trust.reason,
+            disk,
+            dependents,
+            empty_dash(&self.receipt),
+        ));
+        output
+    }
+}
+
+impl WhyLocation {
+    fn to_json(&self) -> String {
+        format!(
+            "{{\"path\":{},\"line\":{},\"text\":{}}}",
+            JSON::quote(&self.path),
+            self.line
+                .map(|line| line.to_string())
+                .unwrap_or_else(|| "null".to_string()),
+            self.text
+                .as_deref()
+                .map(JSON::quote)
+                .unwrap_or_else(|| "null".to_string()),
+        )
+    }
+}
+
+fn requesting_projection(names: &[String], qualified: &[String]) -> std::io::Result<WhyRequesting> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let env_path = nearest_real_file(&cwd, Syntax::ENV_FILE);
+    let env_file = source_location(env_path, names, qualified, false);
+    let lock_path = super::nearest_lock_path(&cwd)?;
+    let lock_file = source_location(lock_path, names, qualified, true);
+    Ok(WhyRequesting {
+        env_file,
+        lock_file,
+    })
+}
+
+fn nearest_real_file(start: &Path, name: &str) -> Option<PathBuf> {
+    let mut directory = Some(start);
+    while let Some(current) = directory {
+        let candidate = current.join(name);
+        if let Ok(metadata) = fs::symlink_metadata(&candidate) {
+            if metadata.is_file() && !metadata.file_type().is_symlink() {
+                return Some(candidate);
+            }
+        }
+        directory = current.parent();
+    }
+    None
+}
+
+fn source_location(
+    path: Option<PathBuf>,
+    names: &[String],
+    qualified: &[String],
+    lock: bool,
+) -> WhyLocation {
+    let Some(path) = path else {
+        return WhyLocation {
+            path: "not found".to_string(),
+            line: None,
+            text: None,
+        };
+    };
+    let path_text = path.display().to_string();
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(_) => {
+            return WhyLocation {
+                path: path_text,
+                line: None,
+                text: None,
+            }
+        }
+    };
+    let found = if lock {
+        lock_line(&raw, names, qualified)
+    } else {
+        raw.lines()
+            .enumerate()
+            .find(|(_, line)| source_line_matches(line, names, qualified))
+            .map(|(index, line)| (index + 1, line.trim().to_string()))
+    };
+    WhyLocation {
+        path: path_text,
+        line: found.as_ref().map(|(line, _)| *line),
+        text: found.map(|(_, text)| text),
+    }
+}
+
+fn lock_line(raw: &str, names: &[String], qualified: &[String]) -> Option<(usize, String)> {
+    let mut block: Option<Vec<(usize, &str)>> = None;
+    for (index, line) in raw.lines().enumerate() {
+        if line.trim() == "[[package]]" {
+            if let Some(previous) = block.take() {
+                if let Some(found) = matching_lock_block(&previous, names, qualified) {
+                    return Some(found);
+                }
+            }
+            block = Some(Vec::new());
+        }
+        if let Some(block) = block.as_mut() {
+            block.push((index + 1, line));
+        }
+    }
+    block
+        .as_deref()
+        .and_then(|block| matching_lock_block(block, names, qualified))
+}
+
+fn matching_lock_block(
+    block: &[(usize, &str)],
+    names: &[String],
+    qualified: &[String],
+) -> Option<(usize, String)> {
+    let name_line = block.iter().find(|(_, line)| {
+        names.iter().any(|name| {
+            !name.is_empty() && lock_name(line) == Some(name.as_str())
+        })
+    });
+    if let Some((line, text)) = name_line {
+        return Some((*line, text.trim().to_string()));
+    }
+    block
+        .iter()
+        .find(|(_, line)| {
+            qualified
+                .iter()
+                .any(|reference| !reference.is_empty() && line.contains(reference))
+        })
+        .map(|(line, text)| (*line, text.trim().to_string()))
+}
+
+fn source_line_matches(line: &str, names: &[String], qualified: &[String]) -> bool {
+    let code = line.split_once("//").map_or(line, |(code, _)| code);
+    names
+        .iter()
+        .chain(qualified.iter())
+        .any(|value| !value.is_empty() && contains_package_token(code, value))
+}
+
+fn contains_package_token(haystack: &str, needle: &str) -> bool {
+    let mut offset = 0;
+    while let Some(relative) = haystack[offset..].find(needle) {
+        let start = offset + relative;
+        let end = start + needle.len();
+        let before = haystack[..start].chars().next_back();
+        let after = haystack[end..].chars().next();
+        if !before.is_some_and(package_token_char) && !after.is_some_and(package_token_char) {
+            return true;
+        }
+        offset = end;
+    }
+    false
+}
+
+fn package_token_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
+}
+
+fn lock_name(line: &str) -> Option<&str> {
+    let line = line.trim();
+    let value = line.strip_prefix("name = \"")?;
+    value.strip_suffix('\"')
+}
+
+fn location_text(location: &WhyLocation) -> String {
+    match location.line {
+        Some(line) => match location.text.as_deref() {
+            Some(text) => format!("{}:{line} ({})", location.path, compact_line(text)),
+            None => format!("{}:{line}", location.path),
+        },
+        None => location.path.clone(),
+    }
+}
+
+fn compact_line(line: &str) -> String {
+    const MAX_CHARS: usize = 120;
+    let mut compact = line.chars().take(MAX_CHARS).collect::<String>();
+    if line.chars().count() > MAX_CHARS {
+        compact.push_str("…");
+    }
+    compact
+}
+
+fn origin_projection(
+    roots: &Roots,
+    provider: &str,
+    facts: Option<&BTreeMap<String, String>>,
+    source: &str,
+    source_digest: &str,
+) -> WhyOrigin {
+    let fact = |key: &str| facts.and_then(|facts| facts.get(key)).cloned();
+    let tier = fact("nix.index.tier");
+    let catalog = catalog_origin(tier.as_deref(), facts, provider);
+    let cache_endpoint = fact("nix.cache.endpoint")
+        .or_else(|| {
+            (provider == "nix")
+                .then(|| config_value(roots, "config/nix-cache-v1.endpoint"))
+                .flatten()
+        })
+        .or_else(|| {
+            (provider == "nix").then(|| "https://cache.nixos.org".to_string())
+        })
+        .or_else(|| fact("source.url"))
+        .unwrap_or_else(|| "not recorded".to_string());
+    // A signed-index endpoint is the strongest catalog origin. If it was not
+    // persisted, the configured cache endpoint still answers where the bytes
+    // came from for a realized Nix package.
+    let endpoint = fact("nix.index.endpoint")
+        .or_else(|| {
+            (provider == "nix")
+                .then(|| config_value(roots, "config/nix-index-v1.endpoint"))
+                .flatten()
+        })
+        .or_else(|| {
+            if provider == "nix" && cache_endpoint != "not recorded" {
+                Some(cache_endpoint.clone())
+            } else {
+                fact("source.url")
+            }
+        })
+        .unwrap_or_else(|| "not recorded".to_string());
+    let signature_chain = fact("nix.index.signature-chain")
+        .or_else(|| {
+            fact("artifact.verification").map(|verification| {
+                format!("not applicable ({verification})")
+            })
+        })
+        .unwrap_or_else(|| "not recorded".to_string());
+    WhyOrigin {
+        catalog,
+        endpoint,
+        cache_endpoint,
+        signature_chain,
+        source: if source.is_empty() {
+            "not recorded".to_string()
+        } else {
+            source.to_string()
+        },
+        source_digest: if source_digest.is_empty() {
+            "not recorded".to_string()
+        } else {
+            source_digest.to_string()
+        },
+    }
+}
+
+fn catalog_origin(
+    tier: Option<&str>,
+    facts: Option<&BTreeMap<String, String>>,
+    provider: &str,
+) -> String {
+    let Some(tier) = tier else {
+        return facts
+            .and_then(|facts| {
+                facts
+                    .get("source.repository")
+                    .or_else(|| facts.get("source.kind"))
+            })
+            .cloned()
+            .or_else(|| (!provider.is_empty()).then(|| provider.to_string()))
+            .unwrap_or_else(|| "not recorded".to_string());
+    };
+    let Some(proof) = facts.and_then(|facts| facts.get("nix.index.proof.v1")) else {
+        return tier.to_string();
+    };
+    let channel = json_string_field(proof, "channel");
+    let revision = json_string_field(proof, "revision");
+    let system = json_string_field(proof, "system");
+    match (channel, revision, system) {
+        (Some(channel), Some(revision), Some(system)) => {
+            format!("{tier} ({channel}@{revision} / {system})")
+        }
+        _ => tier.to_string(),
+    }
+}
+
+fn json_string_field(raw: &str, field: &str) -> Option<String> {
+    let value = JSON::parse(raw).ok()?;
+    let object = value.as_object().ok()?;
+    object.get(field)?.as_str().ok().map(str::to_string)
+}
+
+fn config_value(roots: &Roots, relative: &str) -> Option<String> {
+    let path = roots.root.join(relative);
+    let metadata = fs::symlink_metadata(&path).ok()?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return None;
+    }
+    let value = fs::read_to_string(path).ok()?;
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn trust_projection(
+    provider: &str,
+    facts: Option<&BTreeMap<String, String>>,
+) -> WhyTrust {
+    let fact = |key: &str| facts.and_then(|facts| facts.get(key)).map(String::as_str);
+    let tier = fact("nix.index.tier");
+    let source_kind = fact("source.kind");
+    let local_mapping = tier == Some("local-unofficial")
+        || source_kind == Some("local-unofficial-catalog")
+        || (provider == "nix" && fact("nix.index.trust") == Some("unverified"));
+    if local_mapping {
+        let native_recipe = provider == "jetpackage"
+            && source_kind == Some("local-unofficial-catalog");
+        return WhyTrust {
+            grade: "unverified-mapping".to_string(),
+            reason: if native_recipe {
+                "native recipe mapping is unverified; artifact bytes remain SHA-256-verified"
+                    .to_string()
+            } else {
+                "name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified"
+                    .to_string()
+            },
+        };
+    }
+    if (tier == Some("official-signed") && fact("nix.index.signature-chain") == Some("present"))
+        || (fact("nix.index.trust") == Some("verified")
+            && fact("nix.index.signature-chain") == Some("present"))
+    {
+        return WhyTrust {
+            grade: "signed".to_string(),
+            reason: "the catalog and signature chain are verified".to_string(),
+        };
+    }
+    if fact("cache.reproducibility").is_some_and(reproducibility_proof) {
+        return WhyTrust {
+            grade: "reproduced".to_string(),
+            reason: "the producer record carries a reproducibility proof".to_string(),
+        };
+    }
+    WhyTrust {
+        grade: "unverified-mapping".to_string(),
+        reason: "no signed mapping or reproducibility proof is recorded".to_string(),
+    }
+}
+
+fn reproducibility_proof(value: &str) -> bool {
+    value == "attested-v1" || value.starts_with("independent-agreeing-v1:")
+}
+
+fn disk_projection(graph: &ExplainGraph) -> WhyDisk {
+    let mut paths = BTreeSet::new();
+    let mut bytes = 0u64;
+    let mut objects = 0usize;
+    let mut measurable = true;
+    for object in &graph.closure {
+        if object.external || !object.known || object.path.is_empty() {
+            continue;
+        }
+        if !paths.insert(object.path.clone()) {
+            continue;
+        }
+        let path = Path::new(&object.path);
+        objects += 1;
+        let Some(size) = disk_size(path) else {
+            measurable = false;
+            continue;
+        };
+        let Some(next) = bytes.checked_add(size) else {
+            measurable = false;
+            continue;
+        };
+        bytes = next;
+    }
+    WhyDisk {
+        bytes: (objects > 0 && measurable).then_some(bytes),
+        objects,
+    }
+}
+
+fn disk_size(path: &Path) -> Option<u64> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if metadata.file_type().is_symlink() {
+        return None;
+    }
+    if metadata.is_dir() {
+        Some(super::dir_size(path))
+    } else if metadata.is_file() {
+        Some(metadata.len())
+    } else {
+        None
+    }
+}
+
+fn dependent_projection(graph: &ExplainGraph) -> Vec<String> {
+    graph
+        .referrers
+        .iter()
+        .chain(graph.direct_referrers.iter())
+        .flat_map(|object| object.owners.iter().cloned())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn find_entry(entries: &[StoreEntry], query: &str) -> std::io::Result<Option<StoreEntry>> {
@@ -2035,5 +2621,71 @@ fn empty_dash(value: &str) -> &str {
         "-"
     } else {
         value
+    }
+}
+
+#[cfg(test)]
+mod why_projection_tests {
+    use super::*;
+
+    #[test]
+    fn requesting_source_matching_ignores_comments_and_prefix_collisions() {
+        let names = vec!["ripgrep".to_string()];
+        let qualified = vec!["ripgrep@default".to_string()];
+        assert!(source_line_matches("        ripgrep,", &names, &qualified));
+        assert!(source_line_matches(
+            "        ripgrep@default,",
+            &names,
+            &qualified
+        ));
+        assert!(!source_line_matches("// ripgrep,", &names, &qualified));
+        assert!(!source_line_matches("        ripgrep2,", &names, &qualified));
+    }
+
+    #[test]
+    fn lock_source_matching_stays_inside_package_records() {
+        let raw = "version = 1\n[root]\ndependencies = [\"ripgrep\"]\n\n[[package]]\nname = \"ripgrep2\"\n\n[[package]]\nname = \"ripgrep\"\n";
+        let names = vec!["ripgrep".to_string()];
+        let found = lock_line(raw, &names, &[]).expect("package lock line");
+        assert_eq!(found.1, "name = \"ripgrep\"");
+        assert_eq!(found.0, 9);
+    }
+
+    #[test]
+    fn trust_projection_covers_admission_grades() {
+        let reproduced = BTreeMap::from([(
+            "cache.reproducibility".to_string(),
+            "independent-agreeing-v1:sha256-proof".to_string(),
+        )]);
+        assert_eq!(
+            trust_projection("native", Some(&reproduced)).grade,
+            "reproduced"
+        );
+
+        let native = BTreeMap::from([
+            (
+                "source.kind".to_string(),
+                "local-unofficial-catalog".to_string(),
+            ),
+            (
+                "nix.index.tier".to_string(),
+                "local-unofficial".to_string(),
+            ),
+        ]);
+        let trust = trust_projection("jetpackage", Some(&native));
+        assert_eq!(trust.grade, "unverified-mapping");
+        assert!(trust.reason.contains("native recipe mapping"));
+
+        let signed = BTreeMap::from([
+            (
+                "nix.index.tier".to_string(),
+                "official-signed".to_string(),
+            ),
+            (
+                "nix.index.signature-chain".to_string(),
+                "present".to_string(),
+            ),
+        ]);
+        assert_eq!(trust_projection("nix", Some(&signed)).grade, "signed");
     }
 }

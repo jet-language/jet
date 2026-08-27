@@ -536,6 +536,12 @@ pub const REF_SOURCE_PROVIDERS: &[&str] = &[
 ];
 
 /// D-JPK2/9: the Phase 1 verb set.
+/// Card #2216: answer one package's environment, provenance, trust, size, and
+/// dependent questions without dumping the full dependency graph.
+pub const JETPACK_WHY: &str = "why";
+/// D-JPK-IMPORTCMD1=A: import a foreign environment into canonical Jet source.
+pub const JETPACK_IMPORT_VERB: &str = "import";
+
 pub const JETPACK_VERBS: &[&str] = &[
     // Card #479: reuses D-DX2's existing `doctor` spelling for Jetpack health.
     "doctor",
@@ -550,6 +556,8 @@ pub const JETPACK_VERBS: &[&str] = &[
     "search",
     "info",
     "explain",
+    JETPACK_WHY,
+    JETPACK_IMPORT_VERB,
     "logs",
     "override",
     "push",
@@ -609,6 +617,9 @@ pub const BRIDGE_VERB_FLAKE: &str = "flake";
 /// manifest declares no `env.*` module; `--flake` forces it either way.
 pub const FOREIGN_FLAKE_FILE: &str = "flake.nix";
 pub const FOREIGN_DEVENV_FILE: &str = "devenv.nix";
+/// D-JPK-IMPORTCMD1=A: legacy Nix shell expressions accepted by `jetpack import`.
+pub const FOREIGN_SHELL_FILE: &str = "shell.nix";
+pub const FOREIGN_DEFAULT_FILE: &str = "default.nix";
 
 /// U19 (D-JPK-DEVCOMPOSE1=D, card c9jetpackgates): the project-level `jetpack
 /// dev` engine verb — distinct from the already-shipped `jet dev <file.jet>`

@@ -953,6 +953,509 @@ pub(super) fn verify_hangar_object_unlocked(
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HangarDoctorFinding {
+    pub kind: String,
+    pub subject: String,
+    pub detail: String,
+    pub fixed: bool,
+    repair: DoctorRepair,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HangarDoctorReport {
+    pub objects: usize,
+    pub findings: Vec<HangarDoctorFinding>,
+}
+
+impl HangarDoctorReport {
+    pub fn fixed_count(&self) -> usize {
+        self.findings.iter().filter(|finding| finding.fixed).count()
+    }
+
+    pub fn remaining_count(&self) -> usize {
+        self.findings
+            .iter()
+            .filter(|finding| !finding.fixed)
+            .count()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DoctorRepair {
+    None,
+    Remove(PathBuf),
+    Refresh { path: PathBuf, digest: String },
+}
+
+struct DoctorScan {
+    report: HangarDoctorReport,
+    repair_paths: BTreeMap<String, String>,
+}
+
+/// Inspect the Hangar without taking a lock, replaying a journal, or creating
+/// a missing store. `repair` is the explicit mutation boundary; it reuses the
+/// native Nix admission path so a corrupt object is replaced only by bytes
+/// that pass the signed cache verification already used during admission.
+pub fn hangar_doctor(
+    roots: &Roots,
+    repair: bool,
+    offline: bool,
+) -> std::io::Result<HangarDoctorReport> {
+    if !repair {
+        return Ok(scan_hangar_doctor(roots)?.report);
+    }
+
+    crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let mut scan = scan_hangar_doctor(roots)?;
+        let hangar = roots.hangar_dir();
+        let mut requests = BTreeMap::new();
+        let mut request_index = 0usize;
+        for finding in &scan.report.findings {
+            let DoctorRepair::Refresh { path, digest } = &finding.repair else {
+                continue;
+            };
+            NixCache::invalidate_verified_digest(path);
+            let Some(store_path) = scan.repair_paths.get(digest) else {
+                continue;
+            };
+            if !requests.contains_key(store_path) {
+                let name = format!("doctor-{request_index}");
+                requests.insert(
+                    store_path.clone(),
+                    NixOutputRequest {
+                        name,
+                        store_path: store_path.clone(),
+                    },
+                );
+                request_index += 1;
+            }
+        }
+
+        let mut repair_errors = BTreeMap::new();
+        for (store_path, request) in requests {
+            if let Err(error) = admit_nix_closure_with_progress(roots, &[request], offline, None) {
+                repair_errors.insert(store_path, error.to_string());
+            }
+        }
+
+        for finding in &mut scan.report.findings {
+            let action = finding.repair.clone();
+            match action {
+                DoctorRepair::None => {}
+                DoctorRepair::Remove(path) => match remove_doctor_node(&path) {
+                    Ok(()) => {
+                        finding.fixed = true;
+                        finding.detail = "removed".to_string();
+                    }
+                    Err(error) => {
+                        finding.detail = format!("could not remove: {error}");
+                    }
+                },
+                DoctorRepair::Refresh { path, digest } => {
+                    let Some(store_path) = scan.repair_paths.get(&digest) else {
+                        finding.detail = "no native binary-cache provenance".to_string();
+                        continue;
+                    };
+                    if let Some(error) = repair_errors.get(store_path) {
+                        finding.detail = format!("cache repair failed: {error}");
+                        continue;
+                    }
+                    match doctor_object_digest(&path, &hangar) {
+                        Ok(actual) if actual == digest => {
+                            finding.fixed = true;
+                            finding.detail = "repaired from native binary cache".to_string();
+                        }
+                        Ok(actual) => {
+                            finding.detail = format!("repair left digest {actual}");
+                        }
+                        Err(error) => {
+                            finding.detail = format!("repair could not verify object: {error}");
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(scan.report)
+    })
+}
+
+fn scan_hangar_doctor(roots: &Roots) -> std::io::Result<DoctorScan> {
+    let hangar = roots.hangar_dir();
+    let mut scan = DoctorScan {
+        report: HangarDoctorReport::default(),
+        repair_paths: BTreeMap::new(),
+    };
+    match fs::symlink_metadata(&hangar) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            scan.report.findings.push(HangarDoctorFinding {
+                kind: "drift".to_string(),
+                subject: "hangar".to_string(),
+                detail: "Hangar root is not a real directory".to_string(),
+                fixed: false,
+                repair: DoctorRepair::None,
+            });
+            return Ok(scan);
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(scan),
+        Err(error) => return Err(error),
+    }
+    let cas_keys = scan_doctor_objects(&hangar, &mut scan.report)?;
+    scan_doctor_staging(&hangar, &mut scan.report)?;
+    scan_doctor_cas(&hangar, &cas_keys, &mut scan.report)?;
+
+    match super::list_read_only_checked(roots) {
+        Ok(entries) => doctor_repair_paths(entries, &mut scan.repair_paths),
+        Err(error) => scan.report.findings.push(HangarDoctorFinding {
+            kind: "drift".to_string(),
+            subject: "package records".to_string(),
+            detail: format!("could not read: {error}"),
+            fixed: false,
+            repair: DoctorRepair::None,
+        }),
+    }
+    scan.report
+        .findings
+        .sort_by(|left, right| doctor_finding_sort_key(left).cmp(&doctor_finding_sort_key(right)));
+    Ok(scan)
+}
+
+fn doctor_finding_sort_key(finding: &HangarDoctorFinding) -> (u8, &str) {
+    let rank = match finding.kind.as_str() {
+        "drift" => 0,
+        "stale stage" => 1,
+        "orphan CAS" => 2,
+        _ => 3,
+    };
+    (rank, finding.subject.as_str())
+}
+
+fn scan_doctor_objects(
+    hangar: &Path,
+    report: &mut HangarDoctorReport,
+) -> std::io::Result<BTreeSet<String>> {
+    let objects = hangar.join(OBJECTS_DIR);
+    let metadata = match fs::symlink_metadata(&objects) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(BTreeSet::new())
+        }
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        report.findings.push(HangarDoctorFinding {
+            kind: "drift".to_string(),
+            subject: "objects".to_string(),
+            detail: "object pool is not a directory".to_string(),
+            fixed: false,
+            repair: DoctorRepair::None,
+        });
+        return Ok(BTreeSet::new());
+    }
+
+    let mut entries = fs::read_dir(&objects)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    let canonical_hangar = fs::canonicalize(hangar).unwrap_or_else(|_| hangar.to_path_buf());
+    let mut cas_keys = BTreeSet::new();
+    for entry in entries {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.ends_with(PARTIAL_SUFFIX) {
+            continue;
+        }
+        report.objects += 1;
+        let metadata = fs::symlink_metadata(&path)?;
+        if !valid_receipt_digest(&name) {
+            report.findings.push(HangarDoctorFinding {
+                kind: "drift".to_string(),
+                subject: doctor_subject(hangar, &path),
+                detail: "object name is not a content digest".to_string(),
+                fixed: false,
+                repair: DoctorRepair::None,
+            });
+            continue;
+        }
+        if !metadata.file_type().is_symlink() && !metadata.is_dir() {
+            report.findings.push(HangarDoctorFinding {
+                kind: "drift".to_string(),
+                subject: doctor_subject(hangar, &path),
+                detail: "object is not a directory".to_string(),
+                fixed: false,
+                repair: DoctorRepair::None,
+            });
+            continue;
+        }
+        match doctor_object_digest(&path, &canonical_hangar) {
+            Ok(actual) if actual == name => {}
+            Ok(_) => report.findings.push(HangarDoctorFinding {
+                kind: "drift".to_string(),
+                subject: doctor_subject(hangar, &path),
+                detail: "content digest differs from the object name".to_string(),
+                fixed: false,
+                repair: DoctorRepair::Refresh {
+                    path: path.clone(),
+                    digest: name.clone(),
+                },
+            }),
+            Err(error) => report.findings.push(HangarDoctorFinding {
+                kind: "drift".to_string(),
+                subject: doctor_subject(hangar, &path),
+                detail: format!("content digest could not be verified: {error}"),
+                fixed: false,
+                repair: DoctorRepair::Refresh {
+                    path: path.clone(),
+                    digest: name.clone(),
+                },
+            }),
+        }
+        if metadata.is_dir() {
+            collect_doctor_cas_keys(&path, &mut cas_keys);
+        }
+    }
+    Ok(cas_keys)
+}
+
+fn collect_doctor_cas_keys(object: &Path, keys: &mut BTreeSet<String>) {
+    for file in files_under(object) {
+        let Ok(metadata) = fs::symlink_metadata(&file) else {
+            continue;
+        };
+        if !metadata.is_file() || metadata.len() == 0 {
+            continue;
+        }
+        let Ok(bytes) = fs::read(&file) else {
+            continue;
+        };
+        keys.insert(format!(
+            "{}-{:08x}",
+            SHA256::sha256_hex(&bytes),
+            permission_identity(&metadata)
+        ));
+    }
+}
+
+fn scan_doctor_staging(hangar: &Path, report: &mut HangarDoctorReport) -> std::io::Result<()> {
+    scan_doctor_stage_dir(hangar, Path::new(STAGE_DIR), false, report)?;
+    scan_doctor_stage_dir(hangar, Path::new("stage"), true, report)?;
+
+    let objects = hangar.join(OBJECTS_DIR);
+    let Ok(metadata) = fs::symlink_metadata(&objects) else {
+        return Ok(());
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Ok(());
+    }
+    let mut entries = fs::read_dir(objects)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.ends_with(PARTIAL_SUFFIX) {
+            continue;
+        }
+        let path = entry.path();
+        report.findings.push(HangarDoctorFinding {
+            kind: "stale stage".to_string(),
+            subject: doctor_subject(hangar, &path),
+            detail: "abandoned partial object".to_string(),
+            fixed: false,
+            repair: doctor_remove_repair(&path),
+        });
+    }
+    Ok(())
+}
+
+fn scan_doctor_stage_dir(
+    hangar: &Path,
+    relative: &Path,
+    admission_only: bool,
+    report: &mut HangarDoctorReport,
+) -> std::io::Result<()> {
+    let stage = hangar.join(relative);
+    let metadata = match fs::symlink_metadata(&stage) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        report.findings.push(HangarDoctorFinding {
+            kind: "drift".to_string(),
+            subject: doctor_subject(hangar, &stage),
+            detail: "staging path is not a directory".to_string(),
+            fixed: false,
+            repair: DoctorRepair::None,
+        });
+        return Ok(());
+    }
+    let mut entries = fs::read_dir(&stage)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        if admission_only {
+            #[cfg(unix)]
+            {
+                let name = entry.file_name();
+                let is_native_stage = name
+                    .to_str()
+                    .is_some_and(|value| value.starts_with("nix-cache-"));
+                if is_native_stage
+                    && !NixCache::admission_stage_is_dead(&name, std::process::id())
+                {
+                    continue;
+                }
+            }
+        }
+        let path = entry.path();
+        report.findings.push(HangarDoctorFinding {
+            kind: "stale stage".to_string(),
+            subject: doctor_subject(hangar, &path),
+            detail: "abandoned staging directory".to_string(),
+            fixed: false,
+            repair: doctor_remove_repair(&path),
+        });
+    }
+    Ok(())
+}
+
+fn scan_doctor_cas(
+    hangar: &Path,
+    referenced: &BTreeSet<String>,
+    report: &mut HangarDoctorReport,
+) -> std::io::Result<()> {
+    let cas = hangar.join(CAS_DIR);
+    let metadata = match fs::symlink_metadata(&cas) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        report.findings.push(HangarDoctorFinding {
+            kind: "drift".to_string(),
+            subject: doctor_subject(hangar, &cas),
+            detail: "CAS pool is not a directory".to_string(),
+            fixed: false,
+            repair: DoctorRepair::None,
+        });
+        return Ok(());
+    }
+    let mut entries = fs::read_dir(&cas)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let metadata = fs::symlink_metadata(&path)?;
+        if name.ends_with(PARTIAL_SUFFIX) {
+            report.findings.push(HangarDoctorFinding {
+                kind: "stale stage".to_string(),
+                subject: doctor_subject(hangar, &path),
+                detail: "abandoned CAS partial".to_string(),
+                fixed: false,
+                repair: doctor_remove_repair(&path),
+            });
+            continue;
+        }
+        if referenced.contains(&name) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                report.findings.push(HangarDoctorFinding {
+                    kind: "drift".to_string(),
+                    subject: doctor_subject(hangar, &path),
+                    detail: "referenced CAS entry is not a regular file".to_string(),
+                    fixed: false,
+                    repair: DoctorRepair::None,
+                });
+            }
+            continue;
+        }
+        report.findings.push(HangarDoctorFinding {
+            kind: "orphan CAS".to_string(),
+            subject: doctor_subject(hangar, &path),
+            detail: "not referenced by any Hangar object".to_string(),
+            fixed: false,
+            repair: doctor_remove_repair(&path),
+        });
+    }
+    Ok(())
+}
+
+fn doctor_repair_paths(entries: Vec<StoreEntry>, paths: &mut BTreeMap<String, String>) {
+    for entry in entries {
+        let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
+            continue;
+        };
+        if producer.provider != "nix" {
+            continue;
+        }
+        let primary = entry.envelope.output_hash;
+        if let Some(store_path) = producer.facts.get("nix.store-path") {
+            if store_path.starts_with("/nix/store/") {
+                paths.entry(primary.clone()).or_insert_with(|| store_path.clone());
+            }
+        }
+        for (key, store_path) in &producer.facts {
+            let Some(output_name) = key.strip_prefix("nix.output.") else {
+                continue;
+            };
+            if !store_path.starts_with("/nix/store/") {
+                continue;
+            }
+            let Some(digest) = (output_name == "out")
+                .then_some(primary.clone())
+                .or_else(|| entry.named_outputs.get(output_name).cloned())
+            else {
+                continue;
+            };
+            paths.entry(digest).or_insert_with(|| store_path.clone());
+        }
+    }
+}
+
+fn doctor_object_digest(path: &Path, hangar: &Path) -> Result<String, String> {
+    crate::Envelope::try_output_hash_of_in_hangar(&path.to_string_lossy(), hangar, false)
+}
+
+fn doctor_subject(hangar: &Path, path: &Path) -> String {
+    path.strip_prefix(hangar)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn doctor_remove_repair(path: &Path) -> DoctorRepair {
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if !metadata.file_type().is_symlink() && (metadata.is_dir() || metadata.is_file()) =>
+        {
+            DoctorRepair::Remove(path.to_path_buf())
+        }
+        _ => DoctorRepair::None,
+    }
+}
+
+fn remove_doctor_node(path: &Path) -> std::io::Result<()> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "refusing to remove a symlinked Hangar repair path",
+        ));
+    }
+    make_tree_writable_for_removal(path)?;
+    if metadata.is_dir() {
+        fs::remove_dir_all(path)
+    } else if metadata.is_file() {
+        fs::remove_file(path)
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Hangar repair path is not removable",
+        ))
+    }
+}
+
 fn hardlink_replace(first: &Path, file: &Path) -> std::io::Result<()> {
     if first == file {
         return Ok(());

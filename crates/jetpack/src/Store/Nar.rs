@@ -1937,6 +1937,7 @@ fn remove_tree(path: &Path) -> io::Result<()> {
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         fs::remove_file(path)
     } else {
+        super::make_tree_writable_for_removal(path)?;
         fs::remove_dir_all(path)
     }
 }

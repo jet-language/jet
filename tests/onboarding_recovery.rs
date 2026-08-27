@@ -50,6 +50,11 @@ fn first_hour_scaffold_edit_check_test_and_run_recover() {
     for file in ["package.jet", "run.jet", ".gitignore"] {
         assert!(project.join(file).is_file(), "scaffold is missing {file}");
     }
+    let manifest = fs::read_to_string(project.join("package.jet")).unwrap();
+    assert!(
+        manifest.contains("authority: .{ holds: { allow: [IO] } }"),
+        "scaffold must grant the IO used by its generated run.jet:\n{manifest}"
+    );
 
     let first_run = jet(&["run"], &project);
     assert!(
