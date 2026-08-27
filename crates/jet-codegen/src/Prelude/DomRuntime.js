@@ -650,7 +650,17 @@ export function makeEffect(body) {
 
 /** Runtime-owned rendering effect; public `reactive.effect` returns its handle. */
 export function reactiveRender(body) {
-  jetReactiveRootEffects.add(makeEffect(body));
+  const scopeName = jetDomScopeName;
+  // Re-enter the caller's DOM scope on every synchronous rerun so backend
+  // keys restart at the same root and paint reconciles the existing nodes.
+  jetReactiveRootEffects.add(makeEffect(() => {
+    enterRenderScope(scopeName);
+    try {
+      body();
+    } finally {
+      exitRenderScope();
+    }
+  }));
 }
 
 export async function instantiateWasm(wasmPath, imports = {}) {

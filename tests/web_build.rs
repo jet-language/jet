@@ -247,12 +247,14 @@ fn run() {
 /// `DomRuntime.js`'s `paint()`/`createBackend()` actually touches (see that
 /// file's `jetDomContainer()`) — so the real-DOM code path can be exercised
 /// under plain `node` (no browser, no new npm dependency) exactly the way a
-/// real page would drive it: import an exported function, call it multiple
-/// times as if in response to clicks, and observe the DOM tree it built.
+/// real page would drive it: import the entry wrapper, click the rendered
+/// button, and observe the single updated DOM tree it built.
 const FAKE_DOM_HARNESS: &str = r#"
 class FakeElement {
-  constructor(tag) { this.tagName = tag; this.style = {}; this.dataset = {}; this.children = []; this.textContent = ""; this.id = ""; }
+  constructor(tag) { this.tagName = tag; this.style = {}; this.dataset = {}; this.children = []; this.textContent = ""; this.id = ""; this.listeners = new Map(); }
   appendChild(child) { this.children.push(child); return child; }
+  addEventListener(name, handler) { const list = this.listeners.get(name) ?? []; list.push(handler); this.listeners.set(name, list); }
+  click() { for (const handler of this.listeners.get("click") ?? []) handler({ type: "click", target: this }); }
   querySelector(sel) {
     if (sel === "[data-jet-node]") return this.children.find((c) => c.dataset.jetNode) ?? null;
     return null;
@@ -268,19 +270,18 @@ const origAppend = doc.body.appendChild.bind(doc.body);
 doc.body.appendChild = (el) => { if (el.id) doc._byId.set(el.id, el); return origAppend(el); };
 globalThis.document = doc;
 
-const { render } = await import("./app.js");
-for (const n of [0, 1, 2]) {
-  render(n);
-  const container = doc.getElementById("jet-app");
-  const box = container.children.find((c) => c.dataset.jetNode);
-  console.log(`click ${n}: children=${container.children.length} text=${JSON.stringify(box.textContent)} left=${box.style.left} top=${box.style.top} background=${box.style.background} color=${box.style.color}`);
-}
+const { jet_main } = await import("./app.js");
+await jet_main();
+const container = doc.getElementById("jet-app");
+const text = () => container.children.map((child) => child.textContent).join("");
+console.log(`initial: children=${container.children.length} text=${JSON.stringify(text())}`);
+container.children.find((child) => child.tagName === "button").click();
+console.log(`after click: children=${container.children.length} text=${JSON.stringify(text())}`);
 "#;
 
-/// Runs `FAKE_DOM_HARNESS` against the compiled `app.js` — the same click-then-
-/// observe loop a real browser session would produce, proving `paint()` mounts
-/// one real element and reuses it (not one-new-div-per-click) as the exported
-/// `render(n)` is called repeatedly, the way a button's `onclick` calls it.
+/// Runs `FAKE_DOM_HARNESS` against compiled `app.js` — the same entry/click/
+/// observe loop a real browser session would produce, proving a reactive
+/// re-render keeps one mounted tree instead of appending a second generation.
 fn run_web_click_harness(dir: &PathBuf) -> String {
     let harness_path = dir.join("build/harness.mjs");
     fs::write(&harness_path, FAKE_DOM_HARNESS).unwrap();
@@ -3396,12 +3397,10 @@ fn web_reactive_dom_snapshot_roundtrip() {
 
 #[test]
 fn web_click_counter_dom_roundtrip() {
-    // 196_ui_web_click.jet: every top-level `#Target(JS) fn` is exported (not just
-    // `main`), and `paint()` mounts a real, reused DOM element when a
-    // `document` exists. This proves both, end to end: a fake `document` (no
-    // browser, no new dependency) stands in for the click-driven host page
-    // (examples/features/web/ui_web_click.html), calling the exported
-    // `render(n)` three times and observing the same element update in place.
+    // 196_ui_web_click.jet: the exported `jet_main()` entry registers a
+    // reactive render whose button click must update one real DOM tree. This
+    // fake `document` (no browser, no new dependency) drives the same
+    // entry/click path as examples/features/web/ui_web_click.html.
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build click counter (need rustc + node)");
         return;
@@ -3412,6 +3411,14 @@ fn web_click_counter_dom_roundtrip() {
     let expected = include_str!("../examples/features/expected/web/ui_web_click.harness.out");
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_click_companion_starts_exported_entrypoint() {
+    let html = include_str!("../examples/features/web/ui_web_click.html");
+    assert!(html.contains("import { jet_main } from \"./app.js\";"));
+    assert!(html.contains("jet_main();"));
+    assert!(!html.contains("import { run } from \"./app.js\";"));
 }
 
 #[test]

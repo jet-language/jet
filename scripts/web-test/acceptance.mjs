@@ -94,7 +94,7 @@ console.log = (...args) => {
 
   await driver.navigate(`http://127.0.0.1:${port}/click/index.html`);
   let box = await waitFor(() => domBox(driver), "click initial paint");
-  assert(box.children === 1, `click create: ${JSON.stringify(box)}`);
+  assert(box.children === 2, `click create: ${JSON.stringify(box)}`);
   assert(box.text.includes("Clicks: 0"), `click initial text: ${box.text}`);
   assert(
     box.background.includes("rgb(51, 102, 255)") || box.background.includes("#3366ff"),
@@ -105,7 +105,7 @@ console.log = (...args) => {
     const next = await domBox(driver);
     return next && next.text.includes("Clicks: 1") ? next : null;
   }, "click update");
-  assert(box.children === 1, `click reuse: ${JSON.stringify(box)}`);
+  assert(box.children === 2, `click reuse: ${JSON.stringify(box)}`);
   assert(
     box.background.includes("rgb(232, 121, 12)") || box.background.includes("#e8790c"),
     `click updated color: ${box.background}`,
@@ -115,7 +115,7 @@ console.log = (...args) => {
     const next = await domBox(driver);
     return next && next.text.includes("Clicks: 2") ? next : null;
   }, "click second update");
-  assert(box.children === 1, `click still one node: ${JSON.stringify(box)}`);
+  assert(box.children === 2, `click still one tree: ${JSON.stringify(box)}`);
 
   await driver.navigate(`http://127.0.0.1:${port}/reactive/index.html`);
   box = await waitFor(async () => {
