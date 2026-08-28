@@ -5587,9 +5587,10 @@ static NATIVE_TOOLCHAIN_IDENTITY: LazyLock<String> = LazyLock::new(|| {
         .map(|name| command_identity(name, &["--version"]))
         .unwrap_or_else(|| "system".into());
     format!(
-        "abi={NATIVE_CACHE_COMPILER_ABI}\u{1}build={compiler_build}\u{1}version={}\u{1}semindex={}\u{1}rustc={rustc}\u{1}backend={backend}\u{1}linker-selection={}\u{1}linker-name={linker_name}\u{1}linker={linker}\u{1}linker-backend={}\u{1}linker-backend-name={linker_backend_program_name}\u{1}linker-backend-identity={linker_backend}",
+        "abi={NATIVE_CACHE_COMPILER_ABI}\u{1}build={compiler_build}\u{1}version={}\u{1}semindex={}\u{1}rustc-pin={}\u{1}rustc={rustc}\u{1}backend={backend}\u{1}linker-selection={}\u{1}linker-name={linker_name}\u{1}linker={linker}\u{1}linker-backend={}\u{1}linker-backend-name={linker_backend_program_name}\u{1}linker-backend-identity={linker_backend}",
         jet::Manifest::COMPILER_VERSION,
         jet_semindex::SCHEMA_VERSION,
+        jet::Doctor::RUSTC_VERSION_PIN,
         linker_selection.label(),
         linker_backend_name,
     )
@@ -6976,7 +6977,18 @@ pub(crate) fn build(
     // into codegen. Everything here is decided once and replayed per attempt:
     // one rustc invocation over one prepared program.
     let run_rustc = |prepared: &jet::RuntimeCache::PreparedRuntime| -> std::process::Output {
-        if let Err(e) = fs::write(&tmp_rs, prepared.rust()) {
+        #[cfg(debug_assertions)]
+        let rust = if std::env::var_os("JET_ICE_RUSTC_REJECTION_SELF_TEST").is_some() {
+            format!(
+                "{}\ncompile_error!(\"JET_RUSTC_REJECTION_SENTINEL\");\n",
+                prepared.rust()
+            )
+        } else {
+            prepared.rust().to_string()
+        };
+        #[cfg(not(debug_assertions))]
+        let rust = prepared.rust().to_string();
+        if let Err(e) = fs::write(&tmp_rs, rust) {
             crate::cli_error!("E2105", "couldn't write {}: {}", tmp_rs.display(), e);
             exit(ExitCodes::USER_ERROR);
         }
@@ -7064,11 +7076,7 @@ pub(crate) fn build(
             eprintln!("More: jet-lang.dev/e/L2101");
             exit(ExitCodes::USER_ERROR);
         }
-        let detail = format!(
-            "  generated: {}\n--- rustc said ---\n{}",
-            rs_path.display(),
-            stderr
-        );
+        let detail = format!("  generated: {}", rs_path.display());
         eprintln!(
             "{}",
             jet::Diagnostics::render_ice_report(

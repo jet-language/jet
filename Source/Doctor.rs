@@ -14,6 +14,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+/// Exact rustc release owned by the current Jet build.
+pub const RUSTC_VERSION_PIN: &str = "1.97.1";
+
 /// Health of one checked thing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Health {
@@ -123,13 +126,34 @@ fn check_rustc() -> Check {
     match Command::new("rustc").arg("--version").output() {
         Ok(o) if o.status.success() => {
             let v = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            Check::ok("toolchain", "rustc", v)
+            let actual = v
+                .strip_prefix("rustc ")
+                .and_then(|version| version.split_whitespace().next());
+            if actual == Some(RUSTC_VERSION_PIN) {
+                Check::ok(
+                    "toolchain",
+                    "rustc",
+                    format!("{v} (Jet pin: rustc {RUSTC_VERSION_PIN})"),
+                )
+            } else {
+                Check::problem(
+                    "toolchain",
+                    "rustc",
+                    format!("{v} (Jet requires rustc {RUSTC_VERSION_PIN})"),
+                    format!(
+                        "use rustc {RUSTC_VERSION_PIN} from the project toolchain, then re-run `jet self doctor`"
+                    ),
+                    false,
+                )
+            }
         }
         _ => Check::problem(
             "toolchain",
             "rustc",
-            "not found on PATH",
-            "install Rust from https://rustup.rs, then re-run; v1 of Jet uses rustc as its hidden backend",
+            format!("not found on PATH (Jet pin: rustc {RUSTC_VERSION_PIN})"),
+            format!(
+                "install Rust {RUSTC_VERSION_PIN} from https://rustup.rs, then re-run; v1 of Jet uses rustc as its hidden backend"
+            ),
             false,
         ),
     }
