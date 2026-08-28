@@ -224,6 +224,15 @@ clean `cargo build` warning count is NOT a goal worth churning code for. Relates
 to [[single-source-of-truth-docs]] caution about not deleting things you didn't
 create.
 
+### default-tier-zero-tolerance
+
+*Owner decree 2026-08-28 — ANY bug/gap/breakage is "ABSOLUTELY AND UNEQUIVOCALLY UNACCEPTABLE", ESPECIALLY on the default tier; harden testing structurally, without reckless bloat*
+
+Owner (2026-08-28, after the five-video mine surfaced Display/Debug and E0956 defects): "ANY issues of that kind (like the defects you found) are ABSOLUTELY AND UNEQUIVOCALLY UNACCEPTABLE. We must not have ANY bugs/issues/gaps/breakage ESPECIALLY not on the default tier. Clearly our testing/harnesses are not thorough enough & do not validate appropriately. I dont want to recklessly bloat the testing, but we need to strengthen it so these issues are structurally impossible if at all possible."
+**Why:** the beginner-facing default `jet run` tier was the weakest tier — five `core.time` constructors, `uuid.v4()`, user method calls, and match-in-named-fn all failed there while `--release` worked; user Display/Debug impls were silently ignored. That inverts the mission ordering (beginner experience first).
+
+**How to apply:** default-tier divergence findings are P0 by default. Enforcement is structural, not test-count: (1) registry claims must be reconciled against real per-tier dispatch arms — never trust a `CoreCallCoverage::ALL`-style declaration (#2285); (2) every public Core function needs a conformance program that CONSUMES its result and runs through the three-tier byte-diff gate — bind-and-discard probes false-green (#2286); (3) closed admission spaces (Display/Debug shapes) get an exhaustive golden matrix with an admission-widening ratchet (#2287). Probing law: exhaustive both-tier probing with used results; every divergence carded same-run per [[log-everything-now]].
+
 ### design-options-vary-ux-not-paint
 
 *Ballot design options must differ in UX structure (interaction model, IA, workflow), never just palette/skin — owner angrily rejected palette-only variants*
