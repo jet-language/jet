@@ -109,7 +109,8 @@ disposition and does not replace independent security validation.
 
 ### Current dispositions
 
-The dispositions below are source-backed traces against the current tree. The full traces remain in `docs/audits/security-deep-scan-2026-08-03-full.md`.
+The dispositions below are the retained source-backed traces against the
+current tree.
 
 | Candidate ID | Disposition | HEAD evidence |
 |---|---|---|

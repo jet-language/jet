@@ -41,15 +41,13 @@ runtime/tool projection after that baseline was recorded.
    `(nix_version, nixpkgs_revision, system)`. Remove an index-only limitation
    only after the matching graph and closure rows pass.
 
-This is the derived plan because `docs/plans/jetpack-dogfood/` has plans for
-cards #2155–#2160 and #2164, but no plan for #2162. The plan follows step 7 of
-`docs/audits/jetpack-native-nixpkgs-2026-08-24.md`.
+This is the derived plan for cards #2155–#2160, #2162, and #2164. It follows
+step 7 of `docs/audits/jetpack-native-nixpkgs-2026-08-24.md`.
 
-The existing dogfood plan remains the authority for the index path. It requires
-an independent Nix invocation, fresh evaluator state, exact `drvPath` and
-output-map comparison, and publication stop on any mismatch
-(`docs/plans/jetpack-dogfood/plan-2157-2158.md:103-112`). This evaluator plan
-does not replace that producer contract.
+The retained architecture law remains the authority for the index path. It
+requires an independent Nix invocation, fresh evaluator state, exact `drvPath`
+and output-map comparison, and publication stop on any mismatch. This evaluator
+plan does not replace that producer contract.
 
 ## Differential report implementation
 

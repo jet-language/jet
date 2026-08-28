@@ -112,4 +112,5 @@ Before editing a terminal surface, cite this document and answer:
 6. What happens at `COLUMNS=60`, on resize, and without a TTY?
 7. Where does raw mode restore on every exit path?
 
-Reference audit: `docs/audits/tui-dx-audit-2026-08-20.md`.
+The interaction contract is maintained here; implementation checks belong in
+the TUI test fixtures.

@@ -76,6 +76,30 @@
                     $T(crate::jet_simd_div_array(&self.0, &o.0))
                 }
             }
+            impl std::ops::AddAssign for $T {
+                #[inline(always)]
+                fn add_assign(&mut self, o: $T) {
+                    *self = *self + o;
+                }
+            }
+            impl std::ops::SubAssign for $T {
+                #[inline(always)]
+                fn sub_assign(&mut self, o: $T) {
+                    *self = *self - o;
+                }
+            }
+            impl std::ops::MulAssign for $T {
+                #[inline(always)]
+                fn mul_assign(&mut self, o: $T) {
+                    *self = *self * o;
+                }
+            }
+            impl std::ops::DivAssign for $T {
+                #[inline(always)]
+                fn div_assign(&mut self, o: $T) {
+                    *self = *self / o;
+                }
+            }
         };
     }
     jet_lane_ops!(F32x4, f32, 4);

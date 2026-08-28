@@ -251,7 +251,8 @@ The shipped `examples/features/serde/json.jet` used an obsolete mixture of
 `JSON` and `DataTree` constructors. The example-quality pass repaired the
 source contract, and the example now passes `jet check`. The default JIT still
 reports an E0956 support gap on this path, so complete executable parity remains
-compiler work. See `docs/audits/example-quality-2026-07-26.md`.
+compiler work. The example-quality pass is recorded in the current example
+golden harness.
 
 ### HTTP clients
 
@@ -572,7 +573,7 @@ The audit ran:
 - `jet check examples/features/serde/json.jet` — now passes after the
   example-quality correction.
 - Corpus-wide example-quality verification is recorded in
-  `docs/audits/example-quality-2026-07-26.md`.
+  the current example golden harness.
 
 This report changes no syntax and makes no owner-gated design choice.
 

@@ -2209,7 +2209,7 @@ committed `editors/tree-sitter/` grammar.
 
 *How to launch + screenshot/drive Canvas headlessly on this NixOS box*
 
-Canvas = `nix develop -c jet dev examples/features/tooling/canvas_blueprint_demo.jet --target=web --port=<N>` then http://localhost:<N>/canvas. Rebuild + restart server after compiler changes (wrapper execs target/debug/jet at spawn).
+Canvas = `nix develop -c jet dev examples/features/tooling/canvas_blueprint_demo.jet --canvas --target=web --canvas-port=<N>` then http://localhost:<N>/canvas. Rebuild + restart server after compiler changes (wrapper execs target/debug/jet at spawn).
 
 Headless browser: playwright-core (npm i in scratchpad) + `executablePath: /etc/profiles/per-user/nate/bin/brave-origin-beta`. Playwright's own downloaded chromium FAILS on NixOS (libglib missing). Node at /nix/store/.../nodejs-22.23.1/bin (get via `nix develop -c which node`).
 

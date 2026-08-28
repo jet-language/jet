@@ -161,8 +161,8 @@ distinct-type arithmetic gating like `#Numeric`).
 | `Option.lift2(f, a, b)` | `(fn(T, U) R, ?T, ?U) ?R` | Applies a two-argument function to `a`/`b` only when both are present |
 
 ```jet
-price: ?Float :: lookup_price(id)
-qty: ?Float :: lookup_qty(id)
+price :: lookup_price(id)
+qty :: lookup_qty(id)
 
 // zip: both present produces a pair; either None produces None
 total1 :: price.zip(qty).map((pair) -> pair.a * pair.b)
@@ -200,9 +200,9 @@ returns `[T]`. Build maps with ordinary map operations, build sets with
 `Set.from(...)`, and use the existing iterator adapters when work must stay
 lazy. An expected type never changes the collector or evaluation time.
 
-The collection method rows below render the one verb table in
-[`docs/spec/stdlib-api-laws.md`](../spec/stdlib-api-laws.md); future API review
-uses that truth row.
+The collection rows below are the user-facing API inventory. The one naming-law
+table in [`docs/spec/stdlib-api-laws.md`](../spec/stdlib-api-laws.md) owns verb
+choices; this inventory records the resulting methods and does not add aliases.
 
 | Type | Constructors | Main methods |
 | --- | --- | --- |
@@ -1790,15 +1790,15 @@ column-major. Operators `+`/`-` are element-wise, `*` is element-wise on vectors
 
 ```jet
 fn run() {
-a: Vec3 :: Vec3(1.0, 2.0, 3.0)
-b: Vec3 :: Vec3(4.0, 5.0, 6.0)
-sum: Vec3 :: a + b
+a :: Vec3(1.0, 2.0, 3.0)
+b :: Vec3(4.0, 5.0, 6.0)
+sum :: a + b
     print(a.dot(b))                 // 32.0
     print(a.cross(b).to_array())    // [-3.0, 6.0, -3.0]
     print(Vec3(0.0, 3.0, 4.0).length())   // 5.0
 
-scale: Mat3 :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
-out: Vec3 :: scale * Vec3(1.0, 2.0, 3.0)
+scale :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+out :: scale * Vec3(1.0, 2.0, 3.0)
     print(out.to_array())           // [2.0, 4.0, 6.0]
 }
 ```
@@ -1818,19 +1818,23 @@ out: Vec3 :: scale * Vec3(1.0, 2.0, 3.0)
 
 ---
 
-### SIMD lanes — `F32x4`, `F64x2` (D-SIMD1/D-SIMD2)
+### SIMD lanes — portable lane family (D-SIMD1/D-SIMD2/D-SIMD3)
 
-Built-in portable lane types — no import. `F32x4` holds four `F32` lanes, `F64x2`
-two `F64`. Element-wise `+`/`-`/`*`/`/` run across every lane at once; `v[i]`
-reads a lane; reductions fold the lanes. On the pinned stable toolchain these
-lower to a safe scalar-array fallback (no intrinsics, no `std::simd` gate) — a
-portable-SIMD backend can replace it later behind the same surface.
+Built-in portable lane types — no import. The family has 128-bit and 256-bit
+float lanes (`F32x4`, `F64x2`, `F32x8`, `F64x4`) and signed/unsigned integer
+lanes (`I8`/`I16`/`I32`/`I64` and `U8`/`U16`/`U32`/`U64`) at the matching lane
+widths. Element-wise `+`/`-`/`*`/`/` run across every lane at once; `v[i]`
+reads a lane; reductions fold the lanes left to right. Native AOT builds use
+the host CPU by default so LLVM can auto-vectorize these fixed-width loops.
+Use `#Scalar` on a function or method to make that codegen boundary scalar.
+The shared Prelude remains a safe fixed-array fallback on every tier; raw
+target intrinsics still require an audited `#Unsafe` region.
 
 ```jet
 fn run() {
-v: F32x4 :: F32x4(1.0, 2.0, 3.0, 4.0)
-w: F32x4 :: F32x4(10.0, 20.0, 30.0, 40.0)
-s: F32x4 :: v + w
+v :: F32x4(1.0, 2.0, 3.0, 4.0)
+w :: F32x4(10.0, 20.0, 30.0, 40.0)
+s :: v + w
     print(s.to_array())             // [11.0, 22.0, 33.0, 44.0]
     print(v[2])                     // 3.0
     print(v.sum())                  // 10.0
@@ -1841,8 +1845,8 @@ s: F32x4 :: v + w
 
 | Item | Notes |
 |------|-------|
-| `F32x4(a, b, c, d)` / `F64x2(a, b)` | Positional lane construction |
-| `T.splat(x)` / `T.from_array(a)` | One scalar in every lane / build from `[F32#4]`·`[F64#2]` |
+| `T(a, …)` | Positional construction for every named lane family member |
+| `T.splat(x)` / `T.from_array(a)` | One scalar in every lane / build from the matching `[scalar#N]` fixed list |
 | `v[i]` | Read lane `i` (bounds-checked) |
 | `+` `-` `*` `/` | Element-wise across all lanes |
 | `v.sum()` `v.product()` `v.min()` `v.max()` | Named reductions → lane scalar |
@@ -2231,7 +2235,7 @@ read through it; the clock only moves when you `tick` it, so the result is
 reproducible:
 
 ```jet
-fn at(clock: Clock) -[]> Int {
+fn at(clock: Clock) Int -[]> {
     return clock.now()             // current value in ms; pure read
 }
 fn run() {
@@ -2674,7 +2678,7 @@ order is preserved.
 model) returns `T ![FieldError]` for
 json/toml/yaml, and `[T] ![FieldError]` for csv (one struct per row, columns mapped
 to fields by header name). The target type comes from the `<T>` turbofish or an
-cfg: Config :: json.decode(text)`). Bare `json.decode(text)` with no
+cfg :: json.decode(text)`). Bare `json.decode(text)` with no
 target stays the lenient dynamic `JSON` (above). Decode failures carry an
 accumulated `[FieldError]` list; each item has a `path` and a `reason`.
 Compose it with `??`.
@@ -3049,7 +3053,7 @@ fn run() {
         print(mat.group(1) ?? "")   // 42
     }
 
-    print(re.replace_all("\\d+", text, "#") ?? panic("bad pattern"))
+    print(re.replace_all("\\d+", "#", text) ?? panic("bad pattern"))
 
     flags :: re.flags(true, true, false)              // case-insensitive, multiline, dotall
     rx :: re.compile_with("^(?<word>[a-z]+)", flags) ?? panic("bad pattern")
@@ -3073,8 +3077,8 @@ fn run() {
 | `re.find(pat, text)` | `?String !String` | first matched substring, `None` if none |
 | `re.find_all(pat, text)` | `[String] !String` | every non-overlapping match, left to right |
 | `re.matches(pat, text)` | `[Match] !String` | every non-overlapping match with captures/spans |
-| `re.replace(pat, text, repl)` | `String !String` | replace the first match (`$1`, `${name}` allowed in `repl`) |
-| `re.replace_all(pat, text, repl)` | `String !String` | replace every match |
+| `re.replace(pat, repl, text)` | `String !String` | replace the first match (`$1`, `${name}` allowed in `repl`) |
+| `re.replace_all(pat, repl, text)` | `String !String` | replace every match |
 | `re.split(pat, text)` | `[String] !String` | split `text` on every match |
 | `re.split_limit(pat, text, n)` | `[String] !String` | split at most `n - 1` times |
 | `rx.is_match(text)` | `Bool` | reuse a compiled regex |
@@ -3494,7 +3498,7 @@ error (**E1003**).
 
 ```jet
 fn run() {
-    b: U8 :: 255
+    b :: 255
     print(Int.from_u8(b))                   // 255 as Int
     n :: U8.from_int(42) ?? return          // checked conversion
     bytes :: "hi".bytes()                  // [U8]
@@ -3521,7 +3525,7 @@ parsing, without a dedicated operator.
 
 ```jet
 fn run() {
-    packet: [U8] :: [0x2a, 0x00, 0x00, 0x00, 0x03, 0x00]
+    packet :: [0x2a, 0x00, 0x00, 0x00, 0x03, 0x00]
     r :: Reader.over(packet)
     magic :: r.read_u32_le() ?? panic("short")   // 42
     count :: r.read_u16_le() ?? panic("short")   // 3
@@ -3537,7 +3541,7 @@ ordinary error value.
 
 ```jet
 fn run() {
-    header: [U8] :: [0x45, 0x00, 0x00, 0x28]
+    header :: [0x45, 0x00, 0x00, 0x28]
     r :: Reader.over(header)
     h :: r.take_pattern([U8]{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}"}) ?? panic("bad header")
     print("{h.version} {h.ihl} {h.tos} {h.len}")   // 4 5 0 40
@@ -3595,8 +3599,8 @@ operation out at the use site:
 
 ```jet
 fn run() {
-hi: U8 :: 200
-lo: U8 :: 100
+hi :: 200
+lo :: 100
     print(wrapping(hi + lo))            // 44   — wraps around (C behaviour)
     print(saturating(hi + lo))          // 255  — clamps to the type's range
     print(checked(hi + lo) ?? 0)        // 0    — checked(…) ?T, None on overflow

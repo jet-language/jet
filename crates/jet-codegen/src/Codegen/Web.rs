@@ -7306,7 +7306,7 @@ fn emit_js_app(
         out.push_str("let _wasm = null;\n\n");
         out.push_str("async function loadWasm() {\n");
         out.push_str("  if (_wasm) return _wasm;\n");
-        out.push_str("  const instance = await jetDom.instantiateWasm(\"./app.wasm\");\n");
+        out.push_str("  const instance = await jetDom.instantiateWasm(new URL(\"./app.wasm\", import.meta.url));\n");
         out.push_str("  _wasm = instance.exports;\n");
         out.push_str("  return _wasm;\n");
         out.push_str("}\n\n");

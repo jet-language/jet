@@ -757,11 +757,11 @@ mod jet_std {
         pattern.matches(text)
     }
 
-    pub fn jet_regex_replace(pattern: &JetRegex, text: &str, repl: &str) -> String {
+    pub fn jet_regex_replace(pattern: &JetRegex, repl: &str, text: &str) -> String {
         pattern.replace(text, repl)
     }
 
-    pub fn jet_regex_replace_all(pattern: &JetRegex, text: &str, repl: &str) -> String {
+    pub fn jet_regex_replace_all(pattern: &JetRegex, repl: &str, text: &str) -> String {
         pattern.replace_all(text, repl)
     }
 
@@ -927,11 +927,19 @@ mod jet_std {
             };
             let mut items = Vec::new();
             while let Some(ch) = self.peek() {
-                if ch == ']' {
+                if ch == ']' && !items.is_empty() {
                     self.pos += 1;
                     return Ok(RegexClass { negated, items });
                 }
-                let first = self.parse_class_item()?;
+                // Standard class grammar: `]` as the FIRST member (after the
+                // optional `^`) is a literal — `[^]]+` matches any run of
+                // non-`]` characters, it is not an empty negated class.
+                let first = if ch == ']' {
+                    self.pos += 1;
+                    RegexClassItem::Char(']')
+                } else {
+                    self.parse_class_item()?
+                };
                 if self.peek() == Some('-') && self.peek_n(1) != Some(']') {
                     self.pos += 1;
                     let second = self.parse_class_char()?;

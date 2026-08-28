@@ -456,8 +456,7 @@ evals; avoid: wrap-on-overflow release arithmetic, per-target backend holes
 shipped as structured blockers, capability theater (`World` gates stdout while
 `std.*` stays ambient), token-optimized human syntax (reverted after user
 revolt), bug workarounds encoded as agent doctrine. Report at
-`docs/research/2026-08-20-zerolang-mining.md`; cards #2104–#2108, evidence logs
-on #2062 and #1165.
+cards #2104–#2108, evidence logs on #2062 and #1165.
 - https://github.com/vercel-labs/zerolang · https://zerolang.ai
 
 ---

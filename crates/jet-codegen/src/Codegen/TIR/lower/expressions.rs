@@ -50,6 +50,7 @@ use crate::Codegen::TIR::TModuleCallForm;
 use crate::Codegen::TIR::TOrFallback;
 use crate::Codegen::TIR::TRequireKind;
 use crate::Codegen::TIR::TStaticOwner;
+use crate::Codegen::TIR::TNumericOp;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TStrPart;
 use crate::Codegen::TIR::TTryConvert;
@@ -402,9 +403,17 @@ pub(super) fn lower_or_fallback(
         let Some(return_ty) = env.ret_ty.clone() else {
             return value;
         };
-        let kind = match return_ty {
-            Type::Result { .. } => TExprKind::Ok(Box::new(value)),
-            Type::Option(_) => TExprKind::Present(Box::new(value)),
+        // An explicit `Err(...)`/`Ok(...)` (or any carrier-typed expression)
+        // already IS the failure carrier; wrapping it again emits the invalid
+        // double carrier `Ok(Err(...))` (leaked rustc E0308 on every
+        // `?? return Err(...)` inside a fallible callable).
+        let kind = match &return_ty {
+            Type::Result { .. } if !matches!(value.ty, Type::Result { .. }) => {
+                TExprKind::Ok(Box::new(value))
+            }
+            Type::Option(_) if !matches!(value.ty, Type::Option(_)) => {
+                TExprKind::Present(Box::new(value))
+            }
             _ => return value,
         };
         TExpr { ty: return_ty, kind }
@@ -2339,8 +2348,61 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
     }
     match e {
-        Expr::Int(n, _, width, raw) => {
+        Expr::Int(n, span, width, raw) => {
             in_own_frame(|| {
+                // D-INTBIG1 / D-FIXED-CONSTRUCT1: the lexer keeps the raw
+                // spelling when its i64 fast path overflows. A fixed-width
+                // literal must cross the same exact-Int conversion seam as a
+                // runtime `U64.from_int(...)` call; emitting `n` here would
+                // turn the token's fallback zero into the program's value.
+                if let Some(width) = width {
+                    if let Some(raw) = raw.as_deref() {
+                        let raw = raw.replace('_', "");
+                        if let Ok(value) =
+                            jet_foundation::Numeric::CtBigInt::from_literal(&raw)
+                        {
+                            if value.try_i64().is_none() {
+                                let target = int_lit_type(&Some(*width));
+                                let conversion =
+                                    crate::Codegen::TIR::resolve_numeric_conversion_op(
+                                        &target.name(),
+                                        "Int",
+                                    )
+                                    .expect("fixed-width Int literal has a numeric conversion");
+                                let TNumericOp::TryFrom {
+                                    host_kind,
+                                    dst_rust,
+                                    dst_spelling,
+                                } = conversion
+                                else {
+                                    unreachable!(
+                                        "fixed-width Int literal conversion must be checked"
+                                    );
+                                };
+                                return TExpr {
+                                    ty: target,
+                                    kind: TExprKind::NumericMethod {
+                                        recv: Box::new(TExpr {
+                                            ty: Type::Int,
+                                            kind: TExprKind::CtLit(CtValue::BigInt(value)),
+                                        }),
+                                        op: TNumericOp::CheckedIntToFixed {
+                                            host_kind,
+                                            dst_rust,
+                                            dst_spelling,
+                                            line: crate::Diagnostics::span_line_col(
+                                                &cx.src,
+                                                span.start,
+                                            )
+                                            .0
+                                                as u32,
+                                        },
+                                    },
+                                };
+                            }
+                        }
+                    }
+                }
                 // D-INTBIG1: the lexer preserves a decimal literal that does not
                 // fit its token fast path. Keep it as a normal `Int` literal and
                 // let the packed Prelude constructor own the spill.

@@ -18,8 +18,9 @@
 //           no golden example, no parser/sema support). Verify before relying.
 //
 // `#`/`@` in the actual code below (e.g. `#Unsafe`, `#Codable`, `[T#N]`)
-// is REAL Jet syntax. Applied rules use `@` (D-SHAPE2); `#` remains in bounded
-// non-rule forms such as fixed-list lengths and package selectors.
+// is REAL Jet syntax. Applied rules use `#` (D-SHAPE2); `@` marks compile-time
+// names and locations, while `#` also remains in fixed-list lengths and package
+// selectors.
 // Only a full line beginning `# RATIFIED…` is a not-yet-implemented marker.
 //
 // Implemented features are written as live code. Ratified-but-UNIMPLEMENTED
@@ -272,7 +273,7 @@ fn describe(s: Shape) String -> {
 //>>> tracked: #32 D-ENUMDOT1
 
 // Nested patterns + guards via `&&` on freshly-bound names (D-PAT1/D-PAT2).
-fn nested(r: Shape !Error) Bool -> {
+fn nested(r: Shape !Err) Bool -> {
     return if r == {
         .Ok(.Rect(w, h)) && w > h -> true
         else -> false
@@ -283,8 +284,8 @@ fn nested(r: Shape !Error) Bool -> {
 // ============================================================================
 // ERRORS, RESULT & OPTION
 // ============================================================================
-// Failure-returning types use prefix roles: `?Success`, `!Error`, and
-// `!(E1 | E2)`. The ordinary fallible route omits the default `Error` contract;
+// Failure-returning types use prefix roles: `?Success`, `!NamedError`, and
+// `!(E1 | E2)`. The ordinary fallible route omits the default `Err` contract;
 // present/absent optionals are written `?T` (S32).
 
 enum ParseError { Empty }
@@ -323,7 +324,7 @@ impl String -> Err {
     return Err(self)
 }
 // fn load() !Config {
-//     return Err(Error.message("bad config").code(2).with_source(io_err))
+//     return Err("bad config", code: "CFG404", cause: io_err)
 // }
 // fn run() {
 //     cfg :: load()

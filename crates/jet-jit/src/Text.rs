@@ -612,7 +612,7 @@ fn jet_jit_regex_match(pat: i64, text: i64) -> i64 {
         .unwrap_or_default()
 }
 
-fn jet_jit_regex_replace_all(pat: i64, text: i64, repl: i64) -> i64 {
+fn jet_jit_regex_replace_all(pat: i64, repl: i64, text: i64) -> i64 {
     let t = clone_string(text);
     let r = clone_string(repl);
     clone_compiled_regex(pat)
@@ -622,7 +622,7 @@ fn jet_jit_regex_replace_all(pat: i64, text: i64, repl: i64) -> i64 {
         .unwrap_or_default()
 }
 
-fn jet_jit_regex_replace(pat: i64, text: i64, repl: i64) -> i64 {
+fn jet_jit_regex_replace(pat: i64, repl: i64, text: i64) -> i64 {
     let text = clone_string(text);
     let replacement = clone_string(repl);
     clone_compiled_regex(pat)

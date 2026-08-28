@@ -20,6 +20,24 @@ One home per kind of document. Start here.
 | Thin the docs tree (archive vs delete choices) | [plans/docs-cleanup-sweep.md](plans/docs-cleanup-sweep.md) |
 | Re-run improvement / competitive checks | [`.agents/skills/`](../.agents/skills/) |
 
+## Source-of-truth map
+
+Each topic has one durable owner. Other pages explain or render that owner's
+facts; they do not create a second law.
+
+| Topic | Source of truth | Renderers or guidance |
+|---|---|---|
+| Language priorities | [spec/philosophy.md](spec/philosophy.md) | README and references |
+| User syntax | [Syntax registry](../crates/jet-foundation/src/Syntax.rs) and [syntax decisions](spec/syntax-decisions.md) | [examples/canon.jet](../examples/canon.jet), formatter, editors |
+| Grammar and meaning | [spec/spec.md](spec/spec.md) | syntax decisions for spelling |
+| Diagnostic rows | [Prelude/Diagnostics.jet](../crates/jet-codegen/src/Prelude/Diagnostics.jet) | [diagnostic rows](spec/diagnostic-rows.md), error pages, `jet explain` |
+| Diagnostic contract | [spec/diagnostics.md](spec/diagnostics.md) | snapshots and UI renderers |
+| Core user API | [reference/core-library.md](reference/core-library.md) | [Core API laws](spec/stdlib-api-laws.md) |
+| Core machine inventory | [core-surface-ledger.json](reference/core-surface-ledger.json) | [ledger index](reference/core-surface-ledger.md) |
+| Beginner workflow | [first-hour.md](first-hour.md) | README launcher and examples navigation |
+| Example truth | [examples/canon.jet](../examples/canon.jet) and executable examples | [examples/README.md](../examples/README.md), suite goldens |
+| Package workflow | [syntax decisions](spec/syntax-decisions.md) and [Jetpack reference](reference/jetpack-epoch5.md) | README and CLI reference |
+
 ## Tower Docs tab
 
 Collapsible sections: Spec, Proposals, Plans (+ sidequests), Research, Audits,

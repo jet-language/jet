@@ -235,14 +235,14 @@ pub(super) fn regex_replace(
     all: bool,
 ) -> Result<CtValue, Diagnostic> {
     let re = regex_pattern(&args, span)?;
-    let text = as_string(
+    let rep = as_string(
         args.get(1)
-            .ok_or_else(|| unsupported("regex.replace: missing text argument", span))?,
+            .ok_or_else(|| unsupported("regex.replace: missing replacement argument", span))?,
         span,
     )?;
-    let rep = as_string(
+    let text = as_string(
         args.get(2)
-            .ok_or_else(|| unsupported("regex.replace: missing replacement argument", span))?,
+            .ok_or_else(|| unsupported("regex.replace: missing text argument", span))?,
         span,
     )?;
     Ok(CtValue::Str(if all {

@@ -113,8 +113,8 @@ fn run() {
     print(nums.len())
 
     // replace / replace_all (with group reference)
-    print(re.replace(.{"ok"}, text, "done"))
-    print(re.replace_all(.{"\d"}, text, "#"))
+    print(re.replace(.{"ok"}, "done", text))
+    print(re.replace_all(.{"\d"}, "#", text))
 
     // split
     parts :: re.split(.{"-"}, "a-b-c")
