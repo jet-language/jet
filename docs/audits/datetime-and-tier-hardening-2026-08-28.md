@@ -120,3 +120,25 @@ That `module_items.rs` is the complete public-Core denominator. If any user-reac
 is registered elsewhere (builtin receiver methods route through a separate table, as
 `Duration`'s do), #2286's denominator law must union those tables — the card's first
 implementation step should verify the union before trusting the count of 926.
+
+## Addendum: differential accuracy run (owner directive, same day)
+
+Owner: "stress test the date stuff for accuracy not just look at what it should do."
+First run executed: 689 scenarios / ~2100 lines, Jet vs Python 3.13 `zoneinfo` (IANA) and
+GNU date, fixed seed, oracle-side-only normalizations. Report:
+`~/.cache/jet-luna/mine-2026-08-28/artifacts/jet-dtacc.md`.
+
+| Family | Verdict |
+|---|---|
+| Epoch round-trips (150, incl. negative timestamps) | **accurate** |
+| Zones/DST (59: Lord Howe 30-min, Apia skipped day, transitions ±1s) | **accurate** |
+| add_days / diff_days / day_of_year / iso_week / leap / quarter | **accurate** |
+| Default-vs-release tier control | **0 diffs** |
+| `weekday()` | **wrong on all 150 dates** — rotated (Thursday=2; ISO variant correct) |
+| `add_months` negative deltas | **wrong** — truncated division: `2024-02-29 −12mo` → `2024-01-29` (−1 month); −1/−25 correct, so data-dependent |
+| `parse_rfc3339` | accepts RFC-invalid `+24:00` offset |
+| Fall-back overlap resolution | internally inconsistent: NY picks earlier instant, London/Lord Howe/Chatham pick later |
+
+Silent-wrong-data defects carded **#2289 P0** (first-hand verified); durable harness is
+**#2288** (gates #2284). Harness pin learned this run: oracle tzdata (2026b) and Jet TZDIR
+(2026c) silently differed — the landed harness pins one tzdata for both sides.
