@@ -230,7 +230,7 @@ fn ansi_visible_width(input: &str) -> usize {
 
 /// Keep a live line on one physical terminal row. ANSI control sequences do
 /// not consume columns and a reset is restored when an active style is cut.
-fn fit_terminal_line(input: &str, width: usize) -> String {
+pub(crate) fn fit_terminal_line(input: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
     }

@@ -1588,7 +1588,11 @@ fn record_receipt_projection(
     }
     package.receipt = Some(receipt.to_string());
     crate::Lock::ensure_build_stamp(project_root, &mut lock);
-    write_project_lock_atomically(&lock_path, &crate::Lock::write(&lock))?;
+    crate::Lock::write_lock_atomically(&lock_path, &crate::Lock::write(&lock))
+        .map_err(std::io::Error::other)?;
+    if let Some(parent) = lock_path.parent() {
+        sync_store_directory(parent)?;
+    }
     Ok(true)
 }
 
@@ -1678,52 +1682,6 @@ fn valid_receipt_digest(value: &str) -> bool {
         && hex
             .bytes()
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
-}
-
-fn write_project_lock_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
-    use std::io::Write as _;
-
-    let parent = path
-        .parent()
-        .ok_or_else(|| std::io::Error::other("project lock has no parent directory"))?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| std::io::Error::other("project lock has no UTF-8 file name"))?;
-    let mut temporary = None;
-    for attempt in 0..32u32 {
-        let candidate = parent.join(format!(
-            ".{file_name}.{}.partial",
-            std::process::id() + attempt
-        ));
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
-            Ok(mut file) => {
-                if let Err(error) = file
-                    .write_all(contents.as_bytes())
-                    .and_then(|()| file.sync_all())
-                {
-                    let _ = fs::remove_file(&candidate);
-                    return Err(error);
-                }
-                temporary = Some(candidate);
-                break;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
-        }
-    }
-    let temporary = temporary.ok_or_else(|| {
-        std::io::Error::other("could not allocate a temporary project lock path after 32 attempts")
-    })?;
-    if let Err(error) = fs::rename(&temporary, path) {
-        let _ = fs::remove_file(&temporary);
-        return Err(error);
-    }
-    sync_store_directory(parent)
 }
 
 /// Try every host-owned cache role before a bad local candidate is rebuilt.

@@ -562,7 +562,15 @@ pub(super) fn realize_ref_outcome(
         };
         match built {
             Ok(client) => Some(Ok(client)),
-            Err(_) if cache_candidate_ok => None,
+            Err(error) if cache_candidate_ok => {
+                if std::env::var_os("JETPACK_VERIFY_TRACE").is_some() {
+                    eprintln!(
+                        "VERIFY-TRACE index-construction swallowed for `{}` (cache candidate present): {error}",
+                        spec.raw
+                    );
+                }
+                None
+            }
             Err(error) => Some(Err(ProviderError::NixIndex(error))),
         }
     } else {
@@ -1316,6 +1324,21 @@ pub(super) struct ChannelSource {
     pub(super) channel: RefSpec::ChannelRef,
     pub(super) policy: RefSpec::ChannelPolicy,
     pub(super) raw: String,
+    lock_channel: String,
+    nix_channel: Option<String>,
+    preserve_manifest: bool,
+}
+
+impl ChannelSource {
+    pub(super) fn lock_channel(&self) -> &str {
+        &self.lock_channel
+    }
+
+    fn resolution_channel(&self) -> &str {
+        self.nix_channel
+            .as_deref()
+            .unwrap_or_else(|| self.channel.as_str())
+    }
 }
 
 pub(super) fn channel_sources(table: &RefSpec::SourceTable) -> Vec<ChannelSource> {
@@ -1325,29 +1348,83 @@ pub(super) fn channel_sources(table: &RefSpec::SourceTable) -> Vec<ChannelSource
         .filter_map(|(name, upstream, _)| {
             let (base, channel) = RefSpec::split_channel_ref(&upstream);
             let policy = table.channel_policy(&name);
+            let raw = table.source_ref(&name).unwrap_or(base).to_string();
+            let nix_channel = nixpkgs_channel(&raw).or_else(|| nixpkgs_channel(base));
+            let channel = channel.or_else(|| {
+                policy
+                    .moves()
+                    .then_some(RefSpec::ChannelRef::Latest)
+                    .or_else(|| nix_channel.as_ref().map(|_| RefSpec::ChannelRef::Latest))
+            })?;
             let base = if policy.moves() {
                 base.split_once(Syntax::REF_CHANNEL_MARKER)
                     .map(|(base, _)| base)
                     .unwrap_or(base)
+            } else if nix_channel.is_some() {
+                "github:NixOS/nixpkgs"
             } else {
                 base
             };
-            let raw = table.source_ref(&name).unwrap_or(base).to_string();
+            let lock_channel = if policy == RefSpec::ChannelPolicy::Pinned {
+                nix_channel
+                    .as_deref()
+                    .unwrap_or_else(|| channel.as_str())
+                    .to_string()
+            } else {
+                channel.as_str().to_string()
+            };
             Some(ChannelSource {
                 name,
                 base: base.to_string(),
-                channel: channel
-                    .or_else(|| policy.moves().then_some(RefSpec::ChannelRef::Latest))?,
+                channel,
                 policy,
                 raw,
+                lock_channel,
+                preserve_manifest: policy == RefSpec::ChannelPolicy::Pinned
+                    && nix_channel.is_some(),
+                nix_channel,
             })
         })
         .collect()
 }
 
+/// A NixOS/nixpkgs target names a channel when it is not already a 40-hex
+/// revision. The exact target is a pin, not a channel declaration; leave it
+/// out of this discovery pass.
+fn nixpkgs_channel(raw: &str) -> Option<String> {
+    let target = RefSpec::classify_provider_ref(raw)
+        .ok()
+        .filter(|reference| {
+            reference.provider == RefSpec::Source::Github
+                || reference.provider == RefSpec::Source::Nixpkgs
+        })
+        .map(|reference| reference.target)
+        .or_else(|| {
+            raw.strip_prefix("github:NixOS/nixpkgs/")
+                .map(str::to_string)
+        })?;
+    let channel = target
+        .split_once(Syntax::REF_CHANNEL_MARKER)
+        .map_or(target.as_str(), |(channel, _)| channel);
+    let channel = channel.strip_prefix("NixOS/nixpkgs/").unwrap_or(channel);
+    if channel.is_empty() || channel.contains('/') {
+        return None;
+    }
+    if channel.len() == 40
+        && channel
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return None;
+    }
+    Some(channel.to_string())
+}
+
 /// D-CHANNEL-AUTO1=A: refresh automatic channels before applying the exact
-/// lock. Manual channels still move only in `jetpack update`; pinned sources
-/// never enter this loop.
+/// lock. Manual channels still move only in `jetpack update`; ordinary pinned
+/// sources never enter this loop. NixOS/nixpkgs channel declarations are the
+/// one implicit moving-source form because the provider requires their exact
+/// lock before realization.
 pub(super) fn apply_locked_channels(
     theme: &Theme,
     project_dir: &Path,
@@ -1378,7 +1455,7 @@ pub(super) fn apply_locked_channels(
                             project_dir,
                             Lock::LockedSourceChannel {
                                 name: source.name.clone(),
-                                channel: source.channel.as_str().to_string(),
+                                channel: source.lock_channel().to_string(),
                                 exact: exact.clone(),
                             },
                         );
@@ -1392,11 +1469,11 @@ pub(super) fn apply_locked_channels(
             }
         }
         let Some(lock) = Lock::locked_source_channel(project_dir, &source.name) else {
-            report_unlocked_channel(theme, &source.name, source.channel.as_str());
+            report_unlocked_channel(theme, &source.name, source.lock_channel());
             return Err(2);
         };
-        if lock.channel != source.channel.as_str() {
-            report_unlocked_channel(theme, &source.name, source.channel.as_str());
+        if lock.channel != source.lock_channel() {
+            report_unlocked_channel(theme, &source.name, source.lock_channel());
             return Err(2);
         }
         table.set_upstream(&source.name, lock.exact);
@@ -1411,6 +1488,9 @@ pub(super) fn rewrite_channel_manifest(
     source: &ChannelSource,
     exact: &str,
 ) -> Result<(), String> {
+    if source.preserve_manifest {
+        return Ok(());
+    }
     let path = EnvFile::path_in(project_dir);
     let current = std::fs::read_to_string(&path)
         .map_err(|error| format!("could not read `{}`: {error}", path.display()))?;
@@ -1486,14 +1566,34 @@ pub(super) fn resolve_source_channel(
     if let Some(exact) = resolve_channel_from_fixture(source, flags) {
         return Ok(exact);
     }
+    if let (Some(channel), Some(catalog)) = (
+        source.nix_channel.as_deref(),
+        flags.local_nix_catalog.as_deref(),
+    ) {
+        let system = Provider::host_nix_system().ok_or_else(|| {
+            ProviderError::Channel(
+                "the host system is not supported by the local nixpkgs catalog".to_string(),
+            )
+        })?;
+        let client = NixIndexClient::from_local_catalog(catalog, flags.offline)
+            .map_err(ProviderError::NixIndex)?;
+        let revision = client
+            .local_channel_revision(channel, system)
+            .map_err(ProviderError::NixIndex)?;
+        return Ok(format!(
+            "github:NixOS/nixpkgs{}{}",
+            Syntax::REF_CHANNEL_MARKER,
+            revision
+        ));
+    }
     if flags.offline || ci_mode() {
         return Err(ProviderError::Channel(format!(
             "source `{}` tracks `{}` but no exact lock entry exists",
             source.name,
-            source.channel.as_str()
+            source.lock_channel()
         )));
     }
-    let key = (source.base.clone(), source.channel.as_str().to_string());
+    let key = (source.base.clone(), source.resolution_channel().to_string());
     if let Ok(cache) = RESOLVED_CHANNELS.lock() {
         if let Some(exact) = cache.get(&key) {
             return Ok(exact.clone());
@@ -1515,7 +1615,13 @@ fn resolve_channel_from_fixture(source: &ChannelSource, flags: &Flags) -> Option
             continue;
         }
         let cols: Vec<&str> = line.split_whitespace().collect();
-        if cols.len() >= 3 && cols[0] == source.base && cols[1] == source.channel.as_str() {
+        if cols.len() >= 3
+            && cols[0] == source.base
+            && [source.nix_channel.as_deref(), Some(source.channel.as_str())]
+                .into_iter()
+                .flatten()
+                .any(|channel| cols[1] == channel)
+        {
             return Some(exact_upstream(&source.base, cols[2]));
         }
     }
@@ -1530,7 +1636,12 @@ pub(super) fn channel_download_size_from_fixture(
     let raw = std::fs::read_to_string(dir.join("channels.txt")).ok()?;
     raw.lines().find_map(|line| {
         let cols = line.split_whitespace().collect::<Vec<_>>();
-        (cols.len() >= 4 && cols[0] == source.base && cols[1] == source.channel.as_str())
+        (cols.len() >= 4
+            && cols[0] == source.base
+            && [source.nix_channel.as_deref(), Some(source.channel.as_str())]
+                .into_iter()
+                .flatten()
+                .any(|channel| cols[1] == channel))
             .then(|| cols[3].parse().ok())
             .flatten()
     })
@@ -1565,6 +1676,14 @@ fn resolve_channel_with_git(source: &ChannelSource) -> Result<String, ProviderEr
         )));
     }
     let url = format!("https://github.com/{owner}/{repo}.git");
+    if let Some(channel) = source.nix_channel.as_deref() {
+        let out = git_ls_remote(&url, &format!("refs/heads/{channel}"))?;
+        let rev = out
+            .split_whitespace()
+            .next()
+            .ok_or_else(|| ProviderError::Channel(format!("no `{channel}` head found")))?;
+        return Ok(format!("github:NixOS/nixpkgs#{}", rev));
+    }
     match &source.channel {
         RefSpec::ChannelRef::Main => {
             let out = git_ls_remote(&url, "refs/heads/main")?;

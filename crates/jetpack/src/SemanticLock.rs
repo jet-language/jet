@@ -3776,12 +3776,7 @@ pub fn atomic_commit(project: &Path, lock: &SemanticLockFile) -> Result<(), Lock
         } else {
             format!("{}\n\n{semantic}", machine.trim_end())
         };
-        let tmp = path
-            .parent()
-            .map(|p| p.join("lock.tmp"))
-            .unwrap_or_else(|| PathBuf::from("lock.tmp"));
-        std::fs::write(&tmp, &body)?;
-        std::fs::rename(&tmp, &path)?;
+        crate::Lock::write_lock_atomically(&path, &body).map_err(std::io::Error::other)?;
         Ok(())
     })
     .map_err(|e| LockCommitError {

@@ -1439,7 +1439,10 @@ fn project_catalog_binding(roots: &Store::Roots, project_dir: &Path) -> PathBuf 
     roots.root.join("config/local-catalogs").join(key)
 }
 
-fn remembered_project_catalog(roots: &Store::Roots, project_dir: &Path) -> Option<PathBuf> {
+pub(super) fn remembered_project_catalog(
+    roots: &Store::Roots,
+    project_dir: &Path,
+) -> Option<PathBuf> {
     let path = std::fs::read_to_string(project_catalog_binding(roots, project_dir)).ok()?;
     let catalog = PathBuf::from(path.trim());
     catalog.is_dir().then_some(catalog)

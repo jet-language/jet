@@ -10,7 +10,7 @@ use crate::Overlay::{OverlayPolicy, OverlaySet, PackageOverride, ProviderOverrid
 use crate::Syntax;
 use crate::SHA256::sha256_hex;
 use jet_foundation::Facts::BuildStamp;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, Write};
 use std::path::Path;
 
@@ -659,6 +659,8 @@ fn canonical_ref(reference: &str) -> String {
 }
 
 pub fn write(lock: &LockFile) -> String {
+    let mut lock = lock.clone();
+    canonicalize_lock(&mut lock);
     let mut out = String::new();
     out.push_str(&format!("version = {}\n", lock.version));
 
@@ -717,8 +719,14 @@ pub fn write(lock: &LockFile) -> String {
     for pkg in &lock.packages {
         out.push('\n');
         out.push_str("[[package]]\n");
-        out.push_str(&format!("name = \"{}\"\n", pkg.name));
-        out.push_str(&format!("version = \"{}\"\n", pkg.version));
+        out.push_str(&format!(
+            "name = \"{}\"\n",
+            escape_str(&pkg.name)
+        ));
+        out.push_str(&format!(
+            "version = \"{}\"\n",
+            escape_str(&pkg.version)
+        ));
 
         let source_str = match &pkg.source {
             LockSource::Root => "{ root = \".\" }".to_string(),
@@ -759,27 +767,29 @@ pub fn write(lock: &LockFile) -> String {
         if let Some(rev) = &pkg.locked {
             out.push_str(&format!(
                 "locked = {{ rev = \"{}\", tree-hash = \"{}\", last-modified = {} }}\n",
-                rev.rev, rev.tree_hash, rev.last_modified
+                escape_str(&rev.rev),
+                escape_str(&rev.tree_hash),
+                rev.last_modified
             ));
         }
 
-        out.push_str(&format!("fingerprint = \"{}\"\n", pkg.fingerprint));
+        out.push_str(&format!(
+            "fingerprint = \"{}\"\n",
+            escape_str(&pkg.fingerprint)
+        ));
 
         // D-CASTORE1=A: content hash of installed source tree.
         if let Some(ref ch) = pkg.content_hash {
-            out.push_str(&format!("content-hash = \"{}\"\n", ch));
+            out.push_str(&format!(
+                "content-hash = \"{}\"\n",
+                escape_str(ch)
+            ));
         }
 
-        if !pkg.dependencies.is_empty() {
-            let deps: Vec<String> = pkg
-                .dependencies
-                .iter()
-                .map(|d| format!("\"{}\"", d))
-                .collect();
-            out.push_str(&format!("dependencies = [{}]\n", deps.join(", ")));
-        } else {
-            out.push_str("dependencies = []\n");
-        }
+        out.push_str(&format!(
+            "dependencies = {}\n",
+            write_string_array(&pkg.dependencies)
+        ));
 
         if let Some(layer) = pkg.layer {
             out.push_str(&format!("layer = \"{}\"\n", layer.as_str()));
@@ -790,16 +800,16 @@ pub fn write(lock: &LockFile) -> String {
 
         // D-EFFBUDGET1: per-dependency effect provenance + audited grants.
         if !pkg.effects.is_empty() {
-            let effects: Vec<String> = pkg.effects.iter().map(|e| format!("\"{}\"", e)).collect();
-            out.push_str(&format!("effects = [{}]\n", effects.join(", ")));
+            out.push_str(&format!(
+                "effects = {}\n",
+                write_string_array(&pkg.effects)
+            ));
         }
         if !pkg.effect_grants.is_empty() {
-            let grants: Vec<String> = pkg
-                .effect_grants
-                .iter()
-                .map(|e| format!("\"{}\"", e))
-                .collect();
-            out.push_str(&format!("effect-grants = [{}]\n", grants.join(", ")));
+            out.push_str(&format!(
+                "effect-grants = {}\n",
+                write_string_array(&pkg.effect_grants)
+            ));
         }
         let required_effects = if pkg.required_effects.is_empty() {
             &pkg.effects
@@ -813,32 +823,20 @@ pub fn write(lock: &LockFile) -> String {
         };
         if !required_effects.is_empty() {
             out.push_str(&format!(
-                "required-effects = [{}]\n",
-                required_effects
-                    .iter()
-                    .map(|effect| format!("\"{}\"", effect))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                "required-effects = {}\n",
+                write_string_array(required_effects)
             ));
         }
         if !granted_effects.is_empty() {
             out.push_str(&format!(
-                "granted-effects = [{}]\n",
-                granted_effects
-                    .iter()
-                    .map(|effect| format!("\"{}\"", effect))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                "granted-effects = {}\n",
+                write_string_array(granted_effects)
             ));
         }
         if !pkg.denied_effects.is_empty() {
             out.push_str(&format!(
-                "denied-effects = [{}]\n",
-                pkg.denied_effects
-                    .iter()
-                    .map(|effect| format!("\"{}\"", effect))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                "denied-effects = {}\n",
+                write_string_array(&pkg.denied_effects)
             ));
         }
         if let Some(authority) = &pkg.effect_authority {
@@ -936,16 +934,10 @@ pub fn write(lock: &LockFile) -> String {
 
     out.push('\n');
     out.push_str("[root]\n");
-    if !lock.root_dependencies.is_empty() {
-        let deps: Vec<String> = lock
-            .root_dependencies
-            .iter()
-            .map(|d| format!("\"{}\"", d))
-            .collect();
-        out.push_str(&format!("dependencies = [{}]\n", deps.join(", ")));
-    } else {
-        out.push_str("dependencies = []\n");
-    }
+    out.push_str(&format!(
+        "dependencies = {}\n",
+        write_string_array(&lock.root_dependencies)
+    ));
     if let Some(authority) = &lock.authority {
         out.push_str(&format!(
             "authority = {}\n",
@@ -962,6 +954,70 @@ pub fn write(lock: &LockFile) -> String {
     }
 
     out
+}
+
+/// Normalize the model before every serialization. Lock updates are read,
+/// changed, and rewritten; keeping this boundary canonical means a replayed
+/// record replaces its prior identity instead of growing another table.
+fn canonicalize_lock(lock: &mut LockFile) {
+    lock.root_dependencies.sort();
+    lock.root_dependencies.dedup();
+
+    for package in &mut lock.packages {
+        for values in [
+            &mut package.dependencies,
+            &mut package.effects,
+            &mut package.effect_grants,
+            &mut package.required_effects,
+            &mut package.granted_effects,
+            &mut package.denied_effects,
+        ] {
+            values.sort();
+            values.dedup();
+        }
+    }
+    canonicalize_last(&mut lock.packages, |package| package.name.clone());
+    canonicalize_last(&mut lock.workspace_members, |member| member.name.clone());
+    canonicalize_last(&mut lock.toolchains, |toolchain| toolchain.id.clone());
+    canonicalize_last(&mut lock.browsers, |browser| browser.engine.clone());
+    canonicalize_last(&mut lock.source_channels, |source| source.name.clone());
+    canonicalize_last(&mut lock.comptime_inputs, |input| input.path.clone());
+
+    lock.build_contributions.sort_by(|left, right| {
+        left.package
+            .cmp(&right.package)
+            .then_with(|| left.key.cmp(&right.key))
+            .then_with(|| left.layer.cmp(&right.layer))
+            .then_with(|| left.scope.cmp(&right.scope))
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.value.cmp(&right.value))
+            .then_with(|| left.reason.cmp(&right.reason))
+    });
+    lock.build_contributions.dedup();
+
+    let policy = &mut lock.workspace_overlay_policy;
+    for values in [&mut policy.allow_unfree, &mut policy.build_deny] {
+        values.sort();
+        values.dedup();
+    }
+    for (_, effects) in &mut policy.build_grants {
+        effects.sort();
+        effects.dedup();
+    }
+    policy.build_grants.sort_by(|left, right| left.0.cmp(&right.0));
+    policy.build_grants.dedup_by(|left, right| left.0 == right.0);
+}
+
+fn canonicalize_last<T, K, F>(values: &mut Vec<T>, mut key: F)
+where
+    K: Ord,
+    F: FnMut(&T) -> K,
+{
+    let mut by_key = BTreeMap::new();
+    for value in values.drain(..) {
+        by_key.insert(key(&value), value);
+    }
+    values.extend(by_key.into_values());
 }
 
 fn write_string_array(values: &[String]) -> String {
@@ -1143,7 +1199,11 @@ fn write_workspace_overlay_policy(out: &mut String, policy: &OverlayPolicy) {
 }
 
 fn escape_str(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 fn unescape_str(s: &str) -> String {
@@ -1175,10 +1235,17 @@ fn unescape_str(s: &str) -> String {
     out
 }
 
-const MAX_LOCK_VALUE_BYTES: usize = 1024 * 1024;
+/// Hard upper bound for one committed lockfile. A lock is a human-reviewed
+/// artifact; exceeding this limit indicates a serializer invariant failure.
+pub const MAX_LOCK_BYTES: usize = 1024 * 1024;
+const MAX_LOCK_VALUE_BYTES: usize = MAX_LOCK_BYTES;
 
 fn oversized_lock_value_message(line: usize) -> String {
     format!("lock value exceeds the 1 MiB safety limit at line {line}")
+}
+
+fn oversized_lock_file_message() -> String {
+    "lock file exceeds the 1 MiB safety limit".to_string()
 }
 
 /// D-JPK-CACHE1=A (A4): serialize the envelope field set (shared by
@@ -1217,6 +1284,9 @@ fn write_envelope(out: &mut String, env: &LockEnvelope) {
 // ──────────────────────────────────────────────
 
 pub fn parse(raw: &str) -> Result<LockFile, String> {
+    if raw.len() > MAX_LOCK_BYTES {
+        return Err(oversized_lock_file_message());
+    }
     let mut version: Option<u32> = None;
     let mut packages: Vec<LockedPackage> = Vec::new();
     let mut root_deps: Vec<String> = Vec::new();
@@ -1521,11 +1591,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         }
         if let Some(ref mut pkg) = current_pkg {
             match key {
-                "name" => pkg.name = Some(val.trim_matches('"').to_string()),
-                "version" => pkg.version = Some(val.trim_matches('"').to_string()),
-                "fingerprint" => pkg.fingerprint = Some(val.trim_matches('"').to_string()),
+                "name" => pkg.name = Some(unescape_str(val)),
+                "version" => pkg.version = Some(unescape_str(val)),
+                "fingerprint" => pkg.fingerprint = Some(unescape_str(val)),
                 // D-CASTORE1=A: content hash is optional (old lockfiles omit it).
-                "content-hash" => pkg.content_hash = Some(val.trim_matches('"').to_string()),
+                "content-hash" => pkg.content_hash = Some(unescape_str(val)),
                 "source" => pkg.source_raw = Some(val.to_string()),
                 "locked" => pkg.locked_raw = Some(val.to_string()),
                 "dependencies" => pkg.deps = parse_string_array(val),
@@ -1609,7 +1679,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         workspace_policy_build_deny,
     )?;
 
-    Ok(LockFile {
+    let mut lock = LockFile {
         version: version.unwrap_or(0),
         packages,
         root_dependencies: root_deps,
@@ -1623,7 +1693,9 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         source_channels,
         build_stamp,
         build_contributions,
-    })
+    };
+    canonicalize_lock(&mut lock);
+    Ok(lock)
 }
 
 /// Parse a lock for a user-facing path. A malformed or oversized lock is
@@ -2241,6 +2313,21 @@ fn read_lock_text(path: &Path) -> std::io::Result<String> {
                     oversized_lock_value_message(line_number),
                 ));
             }
+            let new_length = raw
+                .len()
+                .checked_add(take)
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        oversized_lock_file_message(),
+                    )
+                })?;
+            if new_length > MAX_LOCK_BYTES {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    oversized_lock_file_message(),
+                ));
+            }
             raw.extend_from_slice(&chunk[..take]);
             (take, content_length, newline.is_some())
         };
@@ -2374,7 +2461,7 @@ pub fn record_inferred_layer(
     };
     pkg.inferred_layer = Some(layer);
     ensure_build_stamp(project_root, &mut lock);
-    let _ = std::fs::write(lock_path, write(&lock));
+    publish_lock_or_report(&lock_path, &write(&lock));
 }
 
 /// D-JPK-CACHE1=A (A4): stamp a realized package's output envelope into the
@@ -2395,7 +2482,7 @@ pub fn record_envelope(project_root: &Path, package_name: &str, envelope: LockEn
     };
     pkg.envelope = Some(envelope);
     ensure_build_stamp(project_root, &mut lock);
-    let _ = std::fs::write(lock_path, write(&lock));
+    publish_lock_or_report(&lock_path, &write(&lock));
 }
 
 /// D-JPK-OFFLINE2=B: after a successful Nix-provider realize, record the locked
@@ -2628,7 +2715,17 @@ pub fn record_foreign_realization(
     write_lock_atomically(&lock_path, &write(&lock))
 }
 
-fn write_lock_atomically(path: &Path, contents: &str) -> Result<(), String> {
+/// Publish one complete canonical lock serialization without exposing a
+/// partially written file. The size check runs before creating a temporary so
+/// a rejected lock cannot replace the last good lock or leave scratch bytes.
+pub fn write_lock_atomically(path: &Path, contents: &str) -> Result<(), String> {
+    if contents.len() > MAX_LOCK_BYTES {
+        return Err(format!(
+            "internal error: refusing to write project lock `{}`: serialized lock is {} bytes, over the 1 MiB limit",
+            path.display(),
+            contents.len()
+        ));
+    }
     let parent = path
         .parent()
         .ok_or_else(|| format!("project lock `{}` has no parent directory", path.display()))?;
@@ -2675,6 +2772,14 @@ fn write_lock_atomically(path: &Path, contents: &str) -> Result<(), String> {
             path.display()
         )
     })
+}
+
+/// Keep the historical best-effort recorder APIs observable: a rejected lock
+/// write is an internal error, never a silently successful update.
+fn publish_lock_or_report(path: &Path, contents: &str) {
+    if let Err(error) = write_lock_atomically(path, contents) {
+        eprintln!("{error}");
+    }
 }
 
 /// D-JPK-OFFLINE2=B: read the recorded Nix realization for `reference` from the
@@ -2807,7 +2912,7 @@ pub fn record_cran_realization(
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(lock_path, write(&lock));
+    publish_lock_or_report(&lock_path, &write(&lock));
 }
 
 /// Exact CRAN realization trust root for online integrity and offline replay.
@@ -2940,7 +3045,7 @@ pub fn record_luarocks_realization(
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(lock_path, write(&lock));
+    publish_lock_or_report(&lock_path, &write(&lock));
 }
 
 /// Exact LuaRocks realization trust root for online integrity and offline replay.
@@ -3079,7 +3184,7 @@ pub fn record_registry_realization(
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(lock_path, write(&lock));
+    publish_lock_or_report(&lock_path, &write(&lock));
 }
 
 /// Exact scripting-registry trust root for online drift checks and offline replay.
@@ -3157,7 +3262,7 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(lock_path, write(&lock));
+    publish_lock_or_report(&lock_path, &write(&lock));
 }
 
 /// D-BROWSER-AUTO1=A (#1187): upsert a project-locked browser binary by engine.
@@ -3195,7 +3300,7 @@ pub fn record_browser(project_root: &Path, browser: LockedBrowser) {
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(lock_path, write(&lock));
+    publish_lock_or_report(&lock_path, &write(&lock));
 }
 
 /// D-BUILDGEN1: record generated-module output hashes in the unified lock.
@@ -3324,19 +3429,9 @@ pub fn record_generated_inputs(
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| lock_write_error(&lock_path, error))?;
     }
-    let temp = lock_path.with_extension(format!("lock.tmp.{}", std::process::id()));
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&temp)
-        .map_err(|error| lock_write_error(&lock_path, error))?;
-    use std::io::Write;
-    file.write_all(write(&lock).as_bytes())
-        .map_err(|error| lock_write_error(&lock_path, error))?;
-    file.sync_all()
-        .map_err(|error| lock_write_error(&lock_path, error))?;
-    std::fs::rename(&temp, &lock_path).map_err(|error| lock_write_error(&lock_path, error))?;
+    write_lock_atomically(&lock_path, &write(&lock)).map_err(|error| {
+        lock_write_error(&lock_path, std::io::Error::other(error))
+    })?;
     Ok(())
 }
 
@@ -3473,18 +3568,9 @@ pub fn record_build_contributions(
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| lock_write_error(&lock_path, error))?;
     }
-    let temp = lock_path.with_extension(format!("lock.tmp.{}", std::process::id()));
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&temp)
-        .map_err(|error| lock_write_error(&lock_path, error))?;
-    file.write_all(write(&lock).as_bytes())
-        .map_err(|error| lock_write_error(&lock_path, error))?;
-    file.sync_all()
-        .map_err(|error| lock_write_error(&lock_path, error))?;
-    std::fs::rename(&temp, &lock_path).map_err(|error| lock_write_error(&lock_path, error))?;
+    write_lock_atomically(&lock_path, &write(&lock)).map_err(|error| {
+        lock_write_error(&lock_path, std::io::Error::other(error))
+    })?;
     Ok(())
 }
 
@@ -3542,7 +3628,7 @@ pub fn record_source_channel(project_root: &Path, source: LockedSourceChannel) {
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = std::fs::write(lock_path, write(&lock));
+    publish_lock_or_report(&lock_path, &write(&lock));
 }
 
 /// D-RINGLAYER1=A M2: set manifest `runtime:` ceiling on locked packages at fetch time.
@@ -3745,9 +3831,9 @@ pub fn e1203() -> Diagnostic {
 /// Compute a lock source selector string for a git dep.
 pub fn git_selector_str(sel: &GitSelector) -> String {
     match sel {
-        GitSelector::Tag(t) => format!("tag = \"{}\"", t),
-        GitSelector::Branch(b) => format!("branch = \"{}\"", b),
-        GitSelector::Rev(r) => format!("rev = \"{}\"", r),
+        GitSelector::Tag(t) => format!("tag = \"{}\"", escape_str(t)),
+        GitSelector::Branch(b) => format!("branch = \"{}\"", escape_str(b)),
+        GitSelector::Rev(r) => format!("rev = \"{}\"", escape_str(r)),
     }
 }
 
@@ -3962,13 +4048,107 @@ mod a4_envelope_tests {
         }];
 
         let first = write(&lock);
+        assert!(first.len() <= MAX_LOCK_BYTES);
         let mut current = first.clone();
-        for cycle in 1..=3 {
+        for cycle in 1..=32 {
             let loaded = parse(&current)
                 .unwrap_or_else(|error| panic!("lock must parse on cycle {cycle}: {error}"));
             current = write(&loaded);
             assert_eq!(current, first, "lock changed on cycle {cycle}");
         }
+    }
+
+    #[test]
+    fn lock_writer_deduplicates_replayed_records_and_stays_bounded() {
+        let old = pkg_with(
+            "duplicate",
+            Some(env("sha256-old", "x86_64-linux", "", "old")),
+        );
+        let newest = pkg_with(
+            "duplicate",
+            Some(env("sha256-new", "x86_64-linux", "", "new")),
+        );
+        let mut lock = base_lock(vec![old, newest, pkg_with("other", None)], Vec::new());
+        lock.root_dependencies = vec![
+            "other".to_string(),
+            "duplicate".to_string(),
+            "other".to_string(),
+        ];
+
+        let first = write(&lock);
+        assert_eq!(first.matches("[[package]]").count(), 2);
+        assert!(first.len() <= MAX_LOCK_BYTES);
+        let parsed = parse(&first).expect("canonical lock must parse");
+        assert_eq!(parsed.packages[0].name, "duplicate");
+        assert_eq!(
+            parsed.packages[0].envelope.as_ref().unwrap().provenance,
+            "new"
+        );
+
+        let mut current = first.clone();
+        for cycle in 1..=32 {
+            current = write(
+                &parse(&current)
+                    .unwrap_or_else(|error| panic!("cycle {cycle} must parse: {error}")),
+            );
+            assert_eq!(current, first, "canonical lock changed on cycle {cycle}");
+            assert!(current.len() <= MAX_LOCK_BYTES);
+        }
+    }
+
+    #[test]
+    fn atomic_lock_writer_rejects_oversized_output_without_replacing_lock() {
+        let dir = std::env::temp_dir().join(format!(
+            "lock-writer-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(Syntax::UNIFIED_LOCK_FILE);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let original = "version = 1\n[root]\ndependencies = []\n";
+        std::fs::write(&path, "stale lock bytes\n".repeat(128)).unwrap();
+
+        write_lock_atomically(&path, original).expect("small lock write");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+
+        let error = write_lock_atomically(&path, &"x".repeat(MAX_LOCK_BYTES + 1))
+            .expect_err("oversized lock must be refused");
+        assert!(error.contains("internal error"), "{error}");
+        assert!(error.contains("1 MiB"), "{error}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn repeated_source_channel_updates_are_byte_identical_and_bounded() {
+        let dir = std::env::temp_dir().join(format!(
+            "lock-channel-cycles-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let source = LockedSourceChannel {
+            name: "stable".to_string(),
+            channel: "stable".to_string(),
+            exact: "owner/repo@github#v1".to_string(),
+        };
+        let path = dir.join(Syntax::UNIFIED_LOCK_FILE);
+        let mut first = None;
+        for cycle in 1..=32 {
+            record_source_channel(&dir, source.clone());
+            let bytes = std::fs::read(&path).unwrap();
+            assert!(bytes.len() <= MAX_LOCK_BYTES);
+            if let Some(expected) = &first {
+                assert_eq!(bytes, *expected, "lock changed on update cycle {cycle}");
+            } else {
+                first = Some(bytes);
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -4009,6 +4189,27 @@ mod a4_envelope_tests {
         let error = read_lock_text(&path).expect_err("oversized line must be rejected");
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert!(error.to_string().contains("1 MiB safety limit"));
+        assert!(load(&dir).is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn bounded_lock_reader_rejects_oversized_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "lock-file-reader-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join(".jet")).unwrap();
+        let path = dir.join(Syntax::UNIFIED_LOCK_FILE);
+        let raw = format!("version = 1\n{}", "x\n".repeat(MAX_LOCK_BYTES / 2 + 1));
+        std::fs::write(&path, raw).unwrap();
+
+        let error = read_lock_text(&path).expect_err("oversized file must be rejected");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("lock file exceeds"));
         assert!(load(&dir).is_none());
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -4282,6 +4483,10 @@ priority = 2
         p.required_effects = p.effects.clone();
         let lock = base_lock(vec![p.clone()], Vec::new());
         let back = parse(&write(&lock)).expect("parse");
+        // The canonical writer sorts effect rows; round-trip returns the
+        // canonical form of the same package.
+        p.effects.sort();
+        p.required_effects.sort();
         assert_eq!(back.packages[0], p);
     }
 }

@@ -1010,6 +1010,80 @@ fn optimizer_rejects_symlinked_object_pool_without_touching_outside_data() {
 
 #[cfg(unix)]
 #[test]
+fn cleanup_unlinks_orphaned_object_symlink_without_following_target() {
+    let (roots, _g) = temp_roots();
+    let objects = roots.hangar_dir().join("objects");
+    let outside = roots.root.join("symlink-target");
+    fs::create_dir_all(&objects).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("must-survive"), "outside bytes").unwrap();
+
+    let digest = format!("sha256-{}", "a".repeat(64));
+    let object = objects.join(&digest);
+    std::os::unix::fs::symlink(&outside, &object).unwrap();
+    let link_bytes = fs::symlink_metadata(&object).unwrap().len();
+
+    let plan = clean_plan(&roots).unwrap();
+    assert_eq!(plan.removed_objects, 1, "{plan:?}");
+    assert_eq!(plan.removed_bytes, link_bytes, "{plan:?}");
+
+    let report = clean(&roots).unwrap();
+    assert_eq!(report.removed_objects, 1, "{report:?}");
+    assert!(fs::symlink_metadata(&object).is_err());
+    assert_eq!(
+        fs::read_to_string(outside.join("must-survive")).unwrap(),
+        "outside bytes"
+    );
+}
+
+#[test]
+fn cleanup_protects_named_outputs_from_canonical_gc() {
+    let (roots, _g) = temp_roots();
+    let entry = ingest_fixture(
+        &roots,
+        "named-output-gc",
+        &[("out", "primary"), ("dev", "secondary")],
+        Vec::new(),
+    );
+
+    let orphaned = collect_orphaned_canonical_objects(
+        &roots,
+        &LiveRoots::default(),
+        &BTreeSet::new(),
+    )
+    .unwrap();
+    assert!(orphaned.is_empty(), "{orphaned:?} for {}", entry.entry.id);
+}
+
+#[test]
+fn cleanup_quarantines_projection_with_proven_missing_output() {
+    let (roots, _g) = temp_roots();
+    let ingested = ingest_fixture(&roots, "missing-output", &[("out", "bytes")], Vec::new());
+    let entry = ingested.entry;
+    let output = PathBuf::from(&entry.out);
+    fs::remove_dir_all(&output).unwrap();
+    fs::write(
+        roots.hangar_dir().join(&entry.id).join("meta.json"),
+        entry.meta_json(),
+    )
+    .unwrap();
+
+    let plan = clean_plan(&roots).unwrap();
+    assert_eq!(plan.quarantined_objects, 1, "{plan:?}");
+
+    let report = clean(&roots).unwrap();
+    assert_eq!(report.quarantined_objects, 1, "{report:?}");
+    assert!(!roots.hangar_dir().join(&entry.id).exists());
+    assert_eq!(
+        fs::read_dir(roots.hangar_dir().join("quarantine"))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn clean_plan_rejects_symlinked_build_scratch_without_following_it() {
     let (roots, _g) = temp_roots();
     let hangar = roots.hangar_dir();

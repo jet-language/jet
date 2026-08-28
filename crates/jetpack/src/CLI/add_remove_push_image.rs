@@ -136,7 +136,7 @@ pub(super) fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
                             &dir,
                             Lock::LockedSourceChannel {
                                 name: source.name.clone(),
-                                channel: source.channel.as_str().to_string(),
+                                channel: source.lock_channel().to_string(),
                                 exact,
                             },
                         );

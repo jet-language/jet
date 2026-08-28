@@ -671,6 +671,45 @@ impl<'a> NixIndexClient<'a> {
         })
     }
 
+    /// Resolve the current revision for a local catalog channel. Update needs
+    /// the channel manifest before it can mint the exact project lock; keep
+    /// that read on the same validated catalog path used by realization.
+    pub(crate) fn local_channel_revision(
+        &self,
+        channel: &str,
+        system: &str,
+    ) -> Result<String, NixIndexError> {
+        if !self.local_catalog {
+            return Err(NixIndexError::invalid(
+                "channel revision lookup requires a local nixpkgs catalog",
+            ));
+        }
+        validate_channel(channel)?;
+        validate_system(system)?;
+        let path = self
+            .root
+            .join("v1")
+            .join(channel)
+            .join("manifest.json");
+        let bytes = read_regular(&path, MAX_MANIFEST_BYTES)?;
+        let manifest = parse_manifest_strict(&bytes)?;
+        if manifest.channel != channel {
+            return Err(NixIndexError::invalid(
+                "local nixpkgs channel manifest disagrees with its requested channel",
+            ));
+        }
+        manifest
+            .targets
+            .iter()
+            .find(|target| target.system == system)
+            .map(|target| target.revision.clone())
+            .ok_or_else(|| {
+                NixIndexError::invalid(format!(
+                    "local nixpkgs channel manifest has no target for {channel} on {system}"
+                ))
+            })
+    }
+
     /// Resolve a native recipe from the explicit local catalog. Official
     /// signed sources never consult this document, so a bad or missing signed
     /// index cannot silently become an unsigned native source.

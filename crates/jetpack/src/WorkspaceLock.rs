@@ -14,8 +14,6 @@ use crate::{
     Lock::{self, LockFile, LockedWorkspaceMember},
     Syntax,
 };
-use std::fs::OpenOptions;
-use std::io::Write as _;
 use std::path::Path;
 
 /// Write workspace members into `.jet/lock` from a freshly evaluated
@@ -221,7 +219,8 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
             }
         }
         Lock::ensure_build_stamp(workspace_root, &mut lock);
-        write_lock_atomically(&lock_path, &Lock::write(&lock)).map_err(std::io::Error::other)
+        Lock::write_lock_atomically(&lock_path, &Lock::write(&lock))
+            .map_err(std::io::Error::other)
     })
     .map_err(|error| format!("could not write workspace lock: {error}"))
 }
@@ -242,55 +241,6 @@ fn empty_lock() -> LockFile {
         build_stamp: None,
         build_contributions: Vec::new(),
     }
-}
-
-fn write_lock_atomically(path: &Path, contents: &str) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("project lock `{}` has no parent directory", path.display()))?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| format!("project lock `{}` has no UTF-8 file name", path.display()))?;
-    let mut temporary = None;
-    for attempt in 0..32u32 {
-        let candidate = parent.join(format!(
-            ".{file_name}.{}.partial",
-            std::process::id() + attempt
-        ));
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
-            Ok(mut file) => {
-                file.write_all(contents.as_bytes()).map_err(|error| {
-                    let _ = std::fs::remove_file(&candidate);
-                    format!("could not write temporary project lock: {error}")
-                })?;
-                file.sync_all().map_err(|error| {
-                    let _ = std::fs::remove_file(&candidate);
-                    format!("could not sync temporary project lock: {error}")
-                })?;
-                temporary = Some(candidate);
-                break;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => {
-                return Err(format!("could not create temporary project lock: {error}"));
-            }
-        }
-    }
-    let temporary = temporary.ok_or_else(|| {
-        "could not allocate a temporary project lock path after 32 attempts".to_string()
-    })?;
-    std::fs::rename(&temporary, path).map_err(|error| {
-        let _ = std::fs::remove_file(&temporary);
-        format!(
-            "could not atomically publish project lock `{}`: {error}",
-            path.display()
-        )
-    })
 }
 
 // ── check that Syntax::PAYLOAD_FILE is accessible (used for doc purposes) ─────

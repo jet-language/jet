@@ -163,7 +163,7 @@ pub(super) fn plan_project_update(
     theme: &Theme,
     parsed: &Parsed,
 ) -> Result<Option<ProjectUpdatePlan>, i32> {
-    if parsed.flags.offline {
+    if parsed.flags.offline && parsed.flags.local_nix_catalog.is_none() {
         return Err(offline_refusal(theme, "update"));
     }
     let plan = match load_project_plan(theme) {
@@ -200,7 +200,7 @@ pub(super) fn plan_project_update(
         match only {
             Some(name) => theme.error(
                 &format!("no channel source named `{name}`"),
-                "only sources declared with `#latest`, `#main`, or `#vN.x` can be updated.",
+                "only moving channel declarations or supported NixOS/nixpkgs channel sources can be updated.",
                 "run `jetpack outdated` to see channel sources.",
             ),
             None => theme.status("no channel sources to update."),
@@ -208,10 +208,24 @@ pub(super) fn plan_project_update(
         return if only.is_some() { Err(2) } else { Ok(None) };
     }
 
+    // `jetpack env` remembers the project's local unofficial catalog; update
+    // must resolve against the same metadata or its own E1271 fix text lies.
+    let mut flags_eff = parsed.flags.clone();
+    if flags_eff.local_nix_catalog.is_none() {
+        let roots = Store::resolve();
+        if let Some(catalog) = super::run_enter_dev::remembered_project_catalog(&roots, project_dir)
+        {
+            theme.detail(&format!(
+                "local unofficial catalog: {} (remembered for this project)",
+                catalog.display()
+            ));
+            flags_eff.local_nix_catalog = Some(catalog);
+        }
+    }
     let mut ok = true;
     let mut updates = Vec::new();
     for source in selected {
-        match resolve_source_channel(&source, &parsed.flags) {
+        match resolve_source_channel(&source, &flags_eff) {
             Ok(exact) => {
                 let before = Lock::locked_source_channel(&project_dir, &source.name)
                     .map(|lock| lock.exact)
@@ -221,7 +235,7 @@ pub(super) fn plan_project_update(
                     .iter()
                     .filter(|spec| spec.source.label() == source.name)
                     .count();
-                let download_bytes = channel_download_size_from_fixture(&source, &parsed.flags);
+                let download_bytes = channel_download_size_from_fixture(&source, &flags_eff);
                 updates.push(ProjectSourceUpdate {
                     source,
                     before,
@@ -305,14 +319,14 @@ pub(super) fn apply_project_update(theme: &Theme, plan: ProjectUpdatePlan) -> i3
             &project_dir,
             Lock::LockedSourceChannel {
                 name: source.name.clone(),
-                channel: source.channel.as_str().to_string(),
+                channel: source.lock_channel().to_string(),
                 exact: update.after.clone(),
             },
         );
         theme.status(&format!(
             "{} {} → {}",
             theme.bold(&source.name),
-            theme.gray(source.channel.as_str()),
+            theme.gray(source.lock_channel()),
             update.after
         ));
     }
@@ -1035,6 +1049,40 @@ mod tests {
         assert_eq!(scope(&["--deps", "--tools"]), (true, true));
         assert_eq!(scope(&["tools"]), (false, true));
         assert_eq!(scope(&["default"]), (true, false));
+    }
+
+    #[test]
+    fn update_sees_env_sources_from_every_module() {
+        let source = r#"
+module env.dev {
+    sources: { default: NixOS/nixpkgs/nixos-unstable@github }
+    packages: [default.ripgrep]
+}
+module env.full {
+    sources: { tools: NixOS/nixpkgs/nixpkgs-unstable@github }
+    packages: [tools.jq]
+}
+"#;
+        let plan = jet_env_model::ModuleEval::evaluate_env(
+            source,
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+        )
+        .unwrap();
+        let sources = channel_sources(&plan.table);
+        assert_eq!(
+            sources
+                .iter()
+                .map(|source| source.name.as_str())
+                .collect::<Vec<_>>(),
+            ["default", "tools"]
+        );
+        assert_eq!(
+            sources
+                .iter()
+                .map(|source| source.lock_channel())
+                .collect::<Vec<_>>(),
+            ["nixos-unstable", "nixpkgs-unstable"]
+        );
     }
 
     #[test]

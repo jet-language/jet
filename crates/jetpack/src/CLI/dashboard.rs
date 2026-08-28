@@ -5,9 +5,17 @@
 //! `r` starts another snapshot load, and non-TTY callers receive the compact
 //! status summary rendered from a synchronous read-only snapshot.
 
-use crate::{Doctor, EnvFile, Lock, Store, Syntax};
+use crate::{
+    Doctor,
+    EnvFile,
+    Lock,
+    Output::{fit_terminal_line, Theme},
+    Store,
+    Syntax,
+};
 use jet_cli::Term::{self, Key, KeyReader, RawGuard};
 use jet_env_model::ModuleEval;
+use jet_foundation::Terminal::ColorChoice;
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, IsTerminal, Read, Write};
@@ -18,8 +26,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const MAX_RECENT_ACTIVITY: usize = 5;
-const STORE_LOAD_TIMEOUT: Duration = Duration::from_millis(250);
-const STORE_REFRESH_CADENCE: Duration = Duration::from_secs(1);
+const STORE_RETRY_INITIAL: Duration = Duration::from_millis(100);
+const STORE_RETRY_MAX: Duration = Duration::from_secs(2);
 
 static DASHBOARD_SIGNAL: AtomicBool = AtomicBool::new(false);
 
@@ -70,18 +78,20 @@ struct Activity {
 
 enum DashboardFrame {
     Loading,
-    Busy,
+    Busy(Option<DashboardSnapshot>),
+    Refreshing(DashboardSnapshot),
     Ready(DashboardSnapshot),
 }
 
+#[derive(Debug)]
 enum LoadResult {
     Ready(DashboardSnapshot),
     Busy,
+    Retry,
 }
 
 struct SnapshotLoader {
     result: Receiver<LoadResult>,
-    started: Instant,
     handle: Option<JoinHandle<()>>,
 }
 
@@ -93,7 +103,6 @@ impl SnapshotLoader {
         });
         Self {
             result,
-            started: Instant::now(),
             handle: Some(handle),
         }
     }
@@ -102,13 +111,8 @@ impl SnapshotLoader {
         match self.result.try_recv() {
             Ok(result) => Some(result),
             Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(LoadResult::Busy),
+            Err(TryRecvError::Disconnected) => Some(LoadResult::Retry),
         }
-    }
-
-    fn timed_out(&self, now: Instant) -> bool {
-        now.checked_duration_since(self.started)
-            .is_some_and(|elapsed| elapsed >= STORE_LOAD_TIMEOUT)
     }
 
     #[cfg(test)]
@@ -121,11 +125,10 @@ impl SnapshotLoader {
 
 impl Drop for SnapshotLoader {
     fn drop(&mut self) {
-        // A blocking Store::list_checked call cannot be cancelled safely. The
-        // UI never joins this worker; dropping its handle detaches it until
-        // process exit.
-        // ponytail: detached timed-out loader; add cancellation at the Store
-        // lock seam when that API can interrupt an in-flight read.
+        // A snapshot load cannot be cancelled safely. The UI never joins this
+        // worker; dropping its handle detaches it until process exit.
+        // ponytail: detached superseded loader; add cancellation at the
+        // snapshot-read seam when that API can interrupt an in-flight read.
         let _ = self.handle.take();
     }
 }
@@ -133,9 +136,18 @@ impl Drop for SnapshotLoader {
 /// Run the bare command. The TTY check is kept here, at the dispatch seam, so
 /// the non-interactive path cannot emit an alternate-screen control sequence.
 pub(super) fn run_dashboard() -> i32 {
-    let interactive = interactive_mode(io::stdin().is_terminal(), io::stdout().is_terminal());
+    let stdout_tty = io::stdout().is_terminal();
+    let theme = Theme::resolve_for(
+        if stdout_tty {
+            ColorChoice::Auto
+        } else {
+            ColorChoice::Never
+        },
+        stdout_tty,
+    );
+    let interactive = interactive_mode(io::stdin().is_terminal(), stdout_tty);
     if !interactive {
-        print_status_summary();
+        print_status_summary(theme);
         return 0;
     }
 
@@ -145,10 +157,10 @@ pub(super) fn run_dashboard() -> i32 {
     };
     let Some(raw) = RawGuard::enable() else {
         drop(signals);
-        print_status_summary();
+        print_status_summary(theme);
         return 0;
     };
-    run_interactive(signals, raw)
+    run_interactive(signals, raw, theme)
 }
 
 fn interactive_mode(stdin_tty: bool, stdout_tty: bool) -> bool {
@@ -157,7 +169,7 @@ fn interactive_mode(stdin_tty: bool, stdout_tty: bool) -> bool {
 
 // Keep `_raw` declared after `_signals`: Rust drops parameters in reverse
 // declaration order, so raw mode is restored before signal dispositions.
-fn run_interactive(_signals: SignalGuard, _raw: RawGuard) -> i32 {
+fn run_interactive(_signals: SignalGuard, _raw: RawGuard, theme: Theme) -> i32 {
     let _screen = AlternateScreen::enter();
     let stdin = io::stdin();
     let mut reader = KeyReader::new(stdin.lock());
@@ -167,7 +179,7 @@ fn run_interactive(_signals: SignalGuard, _raw: RawGuard) -> i32 {
         &mut reader,
         &mut loader,
         &mut frame,
-        |frame| redraw(&render_frame(frame)),
+        |frame| redraw(&render_frame(frame, theme)),
         start_snapshot_loader,
         Instant::now,
     )
@@ -197,7 +209,8 @@ where
     // Reader exists and the loading frame is visible before the first Store
     // operation starts in the worker.
     draw(frame);
-    let mut next_retry = now() + STORE_REFRESH_CADENCE;
+    let mut retry_delay = STORE_RETRY_INITIAL;
+    let mut next_retry = now() + retry_delay;
     if loader.is_none() {
         *loader = Some(start_loader());
     }
@@ -214,8 +227,10 @@ where
 
         if matches!(key, Key::Char('r') | Key::Char('R')) {
             let _ = loader.take();
-            *frame = DashboardFrame::Loading;
-            next_retry = current + STORE_REFRESH_CADENCE;
+            *frame = stale_snapshot(frame)
+                .map_or(DashboardFrame::Loading, DashboardFrame::Refreshing);
+            retry_delay = STORE_RETRY_INITIAL;
+            next_retry = current + retry_delay;
             draw(frame);
             *loader = Some(start_loader());
             continue;
@@ -223,26 +238,40 @@ where
 
         if let Some(result) = loader.as_ref().and_then(SnapshotLoader::try_result) {
             let _ = loader.take();
+            let stale = stale_snapshot(frame);
             *frame = match result {
-                LoadResult::Ready(snapshot) => DashboardFrame::Ready(snapshot),
-                LoadResult::Busy => DashboardFrame::Busy,
+                LoadResult::Ready(snapshot) => {
+                    retry_delay = STORE_RETRY_INITIAL;
+                    DashboardFrame::Ready(snapshot)
+                }
+                LoadResult::Busy => {
+                    next_retry = current + retry_delay;
+                    retry_delay = retry_delay.saturating_mul(2).min(STORE_RETRY_MAX);
+                    DashboardFrame::Busy(stale)
+                }
+                LoadResult::Retry => {
+                    next_retry = current + retry_delay;
+                    retry_delay = retry_delay.saturating_mul(2).min(STORE_RETRY_MAX);
+                    stale.map_or(DashboardFrame::Loading, DashboardFrame::Refreshing)
+                }
             };
-            next_retry = current + STORE_REFRESH_CADENCE;
             draw(frame);
             continue;
         }
 
-        if let Some(active) = loader.as_ref() {
-            if mark_load_timeout(frame, active, current) {
-                next_retry = current + STORE_REFRESH_CADENCE;
-                draw(frame);
-            }
-        }
-
-        if matches!(frame, DashboardFrame::Busy) && current >= next_retry {
+        if loader.is_none()
+            && matches!(
+                frame,
+                DashboardFrame::Loading
+                    | DashboardFrame::Busy(_)
+                    | DashboardFrame::Refreshing(_)
+            )
+            && current >= next_retry
+        {
             let _ = loader.take();
-            *frame = DashboardFrame::Loading;
-            next_retry = current + STORE_REFRESH_CADENCE;
+            *frame = stale_snapshot(frame)
+                .map_or(DashboardFrame::Loading, DashboardFrame::Refreshing);
+            next_retry = current + retry_delay;
             draw(frame);
             *loader = Some(start_loader());
         }
@@ -257,51 +286,72 @@ fn start_snapshot_loader() -> SnapshotLoader {
 fn load_snapshot() -> LoadResult {
     let roots = Store::resolve();
     let lock_path = roots.root.join(".locks").join("hangar.lock");
-    // Probe the existing kernel lock without waiting. The checked listing is
-    // still the single authoritative Store API, but it can only block here in
-    // the detached loader, never in the terminal loop.
+    // Probe the existing kernel lock without waiting. A real writer gets a
+    // retrying frame; an idle store proceeds to the lock-free snapshot read.
     if matches!(
         super::super::RuntimePolicy::lock_state(&lock_path),
         Ok(super::super::RuntimePolicy::LockState::Held)
     ) {
         return LoadResult::Busy;
     }
-    let entries = Store::list_checked(&roots).unwrap_or_default();
+    // The dashboard observes the committed metadata projection. The checked
+    // engine listing takes the exclusive Hangar lock and verifies every output
+    // tree, which is too slow for a read-only view and falsely looks Busy.
+    let entries = Store::list_read_only(&roots);
     LoadResult::Ready(collect_snapshot_from(roots, entries))
 }
 
-fn mark_load_timeout(frame: &mut DashboardFrame, loader: &SnapshotLoader, now: Instant) -> bool {
-    if matches!(frame, DashboardFrame::Loading) && loader.timed_out(now) {
-        *frame = DashboardFrame::Busy;
-        true
-    } else {
-        false
-    }
-}
-
-fn render_frame(frame: &DashboardFrame) -> String {
-    render_frame_width(frame, terminal_width())
-}
-
-fn render_frame_width(frame: &DashboardFrame, width: usize) -> String {
+fn stale_snapshot(frame: &DashboardFrame) -> Option<DashboardSnapshot> {
     match frame {
-        DashboardFrame::Loading => render_loading_dashboard_width(width, "reading store…"),
-        DashboardFrame::Busy => {
-            render_loading_dashboard_width(width, "store busy (another jetpack is running)")
+        DashboardFrame::Busy(snapshot) => snapshot.clone(),
+        DashboardFrame::Refreshing(snapshot) | DashboardFrame::Ready(snapshot) => {
+            Some(snapshot.clone())
         }
-        DashboardFrame::Ready(snapshot) => render_dashboard_width(snapshot, width),
+        DashboardFrame::Loading => None,
     }
 }
 
-fn render_loading_dashboard_width(width: usize, store_message: &str) -> String {
+fn render_frame(frame: &DashboardFrame, theme: Theme) -> String {
+    render_frame_width(frame, terminal_width(), theme)
+}
+
+fn render_frame_width(frame: &DashboardFrame, width: usize, theme: Theme) -> String {
+    match frame {
+        DashboardFrame::Loading => {
+            render_loading_dashboard_width(width, &theme.gray("reading store…"), theme)
+        }
+        DashboardFrame::Busy(Some(snapshot)) => render_dashboard_width_with_note(
+            snapshot,
+            width,
+            theme,
+            Some("refreshing; store busy (another jetpack is running)"),
+        ),
+        DashboardFrame::Busy(None) => render_loading_dashboard_width(
+            width,
+            &theme.yellow("refreshing; store busy (another jetpack is running)"),
+            theme,
+        ),
+        DashboardFrame::Refreshing(snapshot) => {
+            render_dashboard_width_with_note(snapshot, width, theme, Some("refreshing store…"))
+        }
+        DashboardFrame::Ready(snapshot) => render_dashboard_width(snapshot, width, theme),
+    }
+}
+
+fn render_loading_dashboard_width(width: usize, store_message: &str, theme: Theme) -> String {
     let mut out = String::new();
-    push_line(&mut out, width, 0, "Jetpack dashboard");
-    push_line(&mut out, width, 0, "Project  reading project…");
+    push_line(&mut out, width, 0, theme.cyan("Jetpack dashboard"));
+    push_line(
+        &mut out,
+        width,
+        0,
+        format!("{}{}", theme.gray("Project  "), theme.gray("reading project…")),
+    );
     out.push('\n');
-    push_line(&mut out, width, 0, "Store");
+    push_line(&mut out, width, 0, theme.cyan("Store"));
     push_line(&mut out, width, 2, store_message);
     out.push('\n');
-    push_line(&mut out, width, 0, "r refresh · q quit");
+    push_line(&mut out, width, 0, theme.gray("r refresh · q quit"));
     out
 }
 
@@ -367,9 +417,9 @@ impl Drop for SignalGuard {
     }
 }
 
-fn print_status_summary() {
+fn print_status_summary(theme: Theme) {
     let snapshot = collect_snapshot();
-    print!("{}", render_status_summary(&snapshot));
+    print!("{}", render_status_summary(&snapshot, theme));
     let _ = io::stdout().flush();
 }
 
@@ -531,31 +581,18 @@ fn terminal_width() -> usize {
     }
 }
 
-fn render_status_summary(snapshot: &DashboardSnapshot) -> String {
+fn render_status_summary(snapshot: &DashboardSnapshot, theme: Theme) -> String {
     let width = terminal_width();
     let mut out = String::new();
-    push_line(&mut out, width, 0, "Jetpack status");
-    push_line(
-        &mut out,
-        width,
-        0,
-        format!("Project: {}", path_text(&snapshot.project.root)),
-    );
-    push_line(
-        &mut out,
-        width,
-        0,
-        format!("Environment: {}", environment_state(&snapshot.project)),
-    );
+    push_line(&mut out, width, 0, theme.cyan("Jetpack status"));
     push_line(
         &mut out,
         width,
         0,
         format!(
-            "Store: {} package(s), {}, health {}",
-            snapshot.store.packages,
-            format_size(snapshot.store.bytes),
-            health_word(snapshot.store.health),
+            "{}{}",
+            theme.gray("Project: "),
+            theme.bold(&path_text(&snapshot.project.root))
         ),
     );
     push_line(
@@ -563,8 +600,9 @@ fn render_status_summary(snapshot: &DashboardSnapshot) -> String {
         width,
         0,
         format!(
-            "Updates: {} moving channel(s); run `jetpack outdated` to check latest",
-            snapshot.project.update_channels
+            "{}{}",
+            theme.gray("Environment: "),
+            environment_value(theme, &snapshot.project)
         ),
     );
     push_line(
@@ -572,9 +610,36 @@ fn render_status_summary(snapshot: &DashboardSnapshot) -> String {
         width,
         0,
         format!(
-            "Doctor: {} ({} checks)",
-            health_word(snapshot.doctor.health()),
-            snapshot.doctor.checks.len()
+            "{}{}, {}, health {}",
+            theme.gray("Store: "),
+            theme.cyan(&format!("{} package(s)", snapshot.store.packages)),
+            theme.gray(&format_size(snapshot.store.bytes)),
+            health_value(theme, snapshot.store.health),
+        ),
+    );
+    push_line(
+        &mut out,
+        width,
+        0,
+        format!(
+            "{}{}{}",
+            theme.gray("Updates: "),
+            theme.cyan(&format!(
+                "{} moving channel(s)",
+                snapshot.project.update_channels
+            )),
+            theme.gray("; run `jetpack outdated` to check latest"),
+        ),
+    );
+    push_line(
+        &mut out,
+        width,
+        0,
+        format!(
+            "{}{} ({} checks)",
+            theme.gray("Doctor: "),
+            health_value(theme, snapshot.doctor.health()),
+            theme.cyan(&snapshot.doctor.checks.len().to_string()),
         ),
     );
     let recent = snapshot
@@ -582,40 +647,77 @@ fn render_status_summary(snapshot: &DashboardSnapshot) -> String {
         .first()
         .map(activity_text)
         .unwrap_or_else(|| "none recorded".to_string());
-    push_line(&mut out, width, 0, format!("Recent activity: {recent}"));
-    out
-}
-
-fn render_dashboard_width(snapshot: &DashboardSnapshot, width: usize) -> String {
-    let mut out = String::new();
-    push_line(&mut out, width, 0, "Jetpack dashboard");
     push_line(
         &mut out,
         width,
         0,
-        format!("Project  {}", path_text(&snapshot.project.root)),
+        format!(
+            "{}{}",
+            theme.gray("Recent activity: "),
+            theme.gray(&recent)
+        ),
     );
+    out
+}
+
+fn render_dashboard_width(
+    snapshot: &DashboardSnapshot,
+    width: usize,
+    theme: Theme,
+) -> String {
+    render_dashboard_width_with_note(snapshot, width, theme, None)
+}
+
+fn render_dashboard_width_with_note(
+    snapshot: &DashboardSnapshot,
+    width: usize,
+    theme: Theme,
+    note: Option<&str>,
+) -> String {
+    let mut out = String::new();
+    push_line(&mut out, width, 0, theme.cyan("Jetpack dashboard"));
+    push_line(
+        &mut out,
+        width,
+        0,
+        format!(
+            "{}{}",
+            theme.gray("Project  "),
+            theme.bold(&path_text(&snapshot.project.root))
+        ),
+    );
+    if let Some(note) = note {
+        push_line(&mut out, width, 0, theme.yellow(note));
+    }
     out.push('\n');
 
-    push_line(&mut out, width, 0, "Project environment");
+    push_line(&mut out, width, 0, theme.cyan("Project environment"));
     push_line(
         &mut out,
         width,
         2,
-        format!("state      {}", environment_state(&snapshot.project)),
+        field(theme, "state", environment_value(theme, &snapshot.project)),
     );
     push_line(
         &mut out,
         width,
         2,
-        format!("env file   {}", path_text(&snapshot.project.env_file)),
+        field(
+            theme,
+            "env file",
+            theme.gray(&path_text(&snapshot.project.env_file)),
+        ),
     );
     if let Some(packages) = snapshot.project.declared_packages {
         push_line(
             &mut out,
             width,
             2,
-            format!("declared   {packages} package(s)"),
+            field(
+                theme,
+                "declared",
+                theme.cyan(&format!("{packages} package(s)")),
+            ),
         );
     }
     if let Some(packages) = snapshot.project.locked_packages {
@@ -623,99 +725,129 @@ fn render_dashboard_width(snapshot: &DashboardSnapshot, width: usize) -> String 
             &mut out,
             width,
             2,
-            format!("locked     {packages} package(s)"),
+            field(
+                theme,
+                "locked",
+                theme.cyan(&format!("{packages} package(s)")),
+            ),
         );
     }
     push_line(
         &mut out,
         width,
         2,
-        format!(
-            "lock       {}",
-            lock_text(snapshot.project.lock, snapshot.project.locked_packages)
+        field(
+            theme,
+            "lock",
+            lock_value(theme, snapshot.project.lock, snapshot.project.locked_packages),
         ),
     );
     push_line(
         &mut out,
         width,
         2,
-        format!("active     {}", active_text(&snapshot.project)),
+        field(theme, "active", active_value(theme, &snapshot.project)),
     );
     out.push('\n');
 
-    push_line(&mut out, width, 0, "Store");
+    push_line(&mut out, width, 0, theme.cyan("Store"));
     push_line(
         &mut out,
         width,
         2,
-        format!("health     {}", health_word(snapshot.store.health)),
+        field(theme, "health", health_value(theme, snapshot.store.health)),
     );
     push_line(
         &mut out,
         width,
         2,
-        format!(
-            "size       {} in {}",
-            format_size(snapshot.store.bytes),
-            path_text(&snapshot.store.path)
+        field(
+            theme,
+            "size",
+            format!(
+                "{} in {}",
+                theme.gray(&format_size(snapshot.store.bytes)),
+                theme.gray(&path_text(&snapshot.store.path))
+            ),
         ),
     );
     push_line(
         &mut out,
         width,
         2,
-        format!("packages   {}", snapshot.store.packages),
+        field(
+            theme,
+            "packages",
+            theme.cyan(&snapshot.store.packages.to_string()),
+        ),
     );
     out.push('\n');
 
-    push_line(&mut out, width, 0, "Available updates");
+    push_line(&mut out, width, 0, theme.cyan("Available updates"));
     push_line(
         &mut out,
         width,
         2,
-        format!(
-            "channels   {} moving channel(s) recorded",
-            snapshot.project.update_channels
+        field(
+            theme,
+            "channels",
+            format!(
+                "{} moving channel(s) recorded",
+                theme.cyan(&snapshot.project.update_channels.to_string())
+            ),
         ),
     );
     push_line(
         &mut out,
         width,
         2,
-        "check      run `jetpack outdated` for latest availability",
+        field(
+            theme,
+            "check",
+            theme.gray("run `jetpack outdated` for latest availability"),
+        ),
     );
     out.push('\n');
 
-    push_line(&mut out, width, 0, "Doctor findings");
+    push_line(&mut out, width, 0, theme.cyan("Doctor findings"));
     for check in &snapshot.doctor.checks {
         push_line(
             &mut out,
             width,
             2,
             format!(
-                "[{}] {:<12} {}",
-                health_mark(check.health),
-                check.name,
+                "[{}] {} {}",
+                health_mark(theme, check.health),
+                theme.bold(&format!("{:<12}", check.name)),
                 sanitize(&check.detail)
             ),
         );
         if !check.fix.is_empty() {
-            push_line(&mut out, width, 4, format!("fix: {}", sanitize(&check.fix)));
+            push_line(
+                &mut out,
+                width,
+                4,
+                theme.gray(&format!("fix: {}", sanitize(&check.fix))),
+            );
         }
     }
     out.push('\n');
 
-    push_line(&mut out, width, 0, "Recent activity");
+    push_line(&mut out, width, 0, theme.cyan("Recent activity"));
     if snapshot.activity.is_empty() {
-        push_line(&mut out, width, 2, "none recorded");
+        push_line(&mut out, width, 2, theme.gray("none recorded"));
     } else {
         for activity in &snapshot.activity {
-            push_line(&mut out, width, 2, activity_text(activity));
+            push_line(&mut out, width, 2, theme.gray(&activity_text(activity)));
         }
     }
     out.push('\n');
-    push_line(&mut out, width, 0, "r refresh · q quit");
+    push_line(&mut out, width, 0, theme.gray("r refresh · q quit"));
     out
+}
+
+fn field(theme: Theme, label: &str, value: impl std::fmt::Display) -> String {
+    format!("{}{}", theme.gray(&format!("{label:<10}")), value)
 }
 
 fn environment_state(project: &ProjectSummary) -> String {
@@ -725,7 +857,7 @@ fn environment_state(project: &ProjectSummary) -> String {
     if project.typed {
         let module = project.active_environment.as_deref().map_or_else(
             || "typed module".to_string(),
-            |name| format!("typed module env.{name}"),
+            |name| format!("typed module env.{}", sanitize(name)),
         );
         return project.declared_packages.map_or_else(
             || format!("ready · {module}"),
@@ -741,25 +873,44 @@ fn environment_state(project: &ProjectSummary) -> String {
     format!("ready · {packages} declared package(s)")
 }
 
-fn lock_text(lock: LockState, packages: Option<usize>) -> String {
-    match lock {
-        LockState::Missing => "missing".to_string(),
-        LockState::Ready => format!("ready · {} package(s)", packages.unwrap_or(0)),
-        LockState::Invalid => "invalid; run `jetpack update`".to_string(),
+fn environment_value(theme: Theme, project: &ProjectSummary) -> String {
+    let state = environment_state(project);
+    if state.starts_with("ready") {
+        theme.green(&state)
+    } else if state.contains("unreadable") {
+        theme.red(&state)
+    } else {
+        theme.yellow(&state)
     }
 }
 
-fn active_text(project: &ProjectSummary) -> String {
+fn health_value(theme: Theme, health: Doctor::Health) -> String {
+    match health {
+        Doctor::Health::Healthy => theme.green(health_word(health)),
+        Doctor::Health::Degraded => theme.yellow(health_word(health)),
+        Doctor::Health::Broken => theme.red(health_word(health)),
+    }
+}
+
+fn lock_value(theme: Theme, lock: LockState, packages: Option<usize>) -> String {
+    match lock {
+        LockState::Missing => theme.yellow("missing"),
+        LockState::Ready => theme.green(&format!("ready · {} package(s)", packages.unwrap_or(0))),
+        LockState::Invalid => theme.red("invalid; run `jetpack update`"),
+    }
+}
+
+fn active_value(theme: Theme, project: &ProjectSummary) -> String {
     if !project.active {
-        return "not active in this shell".to_string();
+        return theme.gray("not active in this shell");
     }
     if project.active_refs.is_empty() {
-        "active in this shell".to_string()
+        theme.green("active in this shell")
     } else {
-        format!(
+        theme.green(&format!(
             "active in this shell · refs {}",
             sanitize(&project.active_refs)
-        )
+        ))
     }
 }
 
@@ -784,11 +935,11 @@ fn health_word(health: Doctor::Health) -> &'static str {
     }
 }
 
-fn health_mark(health: Doctor::Health) -> &'static str {
+fn health_mark(theme: Theme, health: Doctor::Health) -> String {
     match health {
-        Doctor::Health::Healthy => "OK",
-        Doctor::Health::Degraded => "WARN",
-        Doctor::Health::Broken => "FAIL",
+        Doctor::Health::Healthy => theme.green("OK"),
+        Doctor::Health::Degraded => theme.yellow("WARN"),
+        Doctor::Health::Broken => theme.red("FAIL"),
     }
 }
 
@@ -828,7 +979,12 @@ fn sanitize(value: &str) -> String {
 
 fn push_line(out: &mut String, width: usize, indent: usize, value: impl std::fmt::Display) {
     let prefix = " ".repeat(indent);
-    let text = fit(&value.to_string(), width.saturating_sub(indent));
+    let value = value.to_string();
+    let text = if value.contains('\x1b') {
+        fit_terminal_line(&value, width.saturating_sub(indent))
+    } else {
+        fit(&value, width.saturating_sub(indent))
+    };
     let _ = writeln!(out, "{prefix}{text}");
 }
 
@@ -884,6 +1040,23 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Instant;
 
+    fn plain_theme() -> Theme {
+        Theme { color: false }
+    }
+
+    fn colored_theme() -> Theme {
+        Theme { color: true }
+    }
+
+    fn completed_loader(result: LoadResult) -> SnapshotLoader {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(result).unwrap();
+        SnapshotLoader {
+            result: receiver,
+            handle: None,
+        }
+    }
+
     fn sample_snapshot() -> DashboardSnapshot {
         DashboardSnapshot {
             project: ProjectSummary {
@@ -925,7 +1098,7 @@ mod tests {
     fn non_tty_selects_ansi_free_status_summary() {
         assert!(!interactive_mode(false, false));
         assert!(!interactive_mode(false, true));
-        let summary = render_status_summary(&sample_snapshot());
+        let summary = render_status_summary(&sample_snapshot(), plain_theme());
         assert!(!summary.contains('\x1b'));
         assert!(summary.contains("Jetpack status"));
         assert!(summary.contains("Environment: ready"));
@@ -943,7 +1116,7 @@ mod tests {
         assert!(key_quits(&Key::Eof));
         assert!(!key_quits(&Key::Char('r')));
 
-        let dashboard = render_dashboard_width(&sample_snapshot(), 100);
+        let dashboard = render_dashboard_width(&sample_snapshot(), 100, plain_theme());
         assert!(dashboard.contains("Jetpack dashboard"));
         assert!(dashboard.contains("Project environment"));
         assert!(dashboard.contains("Available updates"));
@@ -968,7 +1141,7 @@ mod tests {
             &mut reader,
             &mut loader,
             &mut frame,
-            |frame| rendered.push(render_frame_width(frame, 80)),
+            |frame| rendered.push(render_frame_width(frame, 80, plain_theme())),
             &mut start_loader,
             Instant::now,
         );
@@ -995,23 +1168,59 @@ mod tests {
     }
 
     #[test]
-    fn store_busy_rendering_on_load_timeout() {
-        let (release, wait) = mpsc::channel();
-        let mut loader = SnapshotLoader::spawn(move || {
-            let _ = wait.recv();
-            LoadResult::Ready(sample_snapshot())
-        });
+    fn busy_retry_reaches_ready() {
+        let mut loader = None;
         let mut frame = DashboardFrame::Loading;
-        let started = loader.started;
+        let mut rendered = Vec::new();
+        let mut starts = 0;
+        let mut start_loader = || {
+            starts += 1;
+            if starts == 1 {
+                completed_loader(LoadResult::Busy)
+            } else {
+                completed_loader(LoadResult::Ready(sample_snapshot()))
+            }
+        };
+        let start = Instant::now();
+        let mut tick = 0;
+        let mut reader = KeyReader::new(Cursor::new(b"xxxq".to_vec()));
 
-        assert!(mark_load_timeout(
+        let code = run_interactive_loop(
+            &mut reader,
+            &mut loader,
             &mut frame,
-            &loader,
-            started + STORE_LOAD_TIMEOUT
-        ));
-        assert!(render_frame_width(&frame, 80).contains("store busy (another jetpack is running)"));
+            |frame| rendered.push(render_frame_width(frame, 80, plain_theme())),
+            &mut start_loader,
+            || {
+                let now = start + Duration::from_secs(tick * 2);
+                tick += 1;
+                now
+            },
+        );
 
-        release.send(()).unwrap();
-        loader.join();
+        assert_eq!(code, 0);
+        assert_eq!(starts, 2);
+        assert!(rendered
+            .iter()
+            .any(|frame| frame.contains("store busy (another jetpack is running)")));
+        assert!(rendered.iter().any(|frame| frame.contains("ripgrep 14.1")));
+    }
+
+    #[test]
+    fn busy_frame_keeps_stale_snapshot_visible() {
+        let frame = DashboardFrame::Busy(Some(sample_snapshot()));
+        let rendered = render_frame_width(&frame, 80, plain_theme());
+        assert!(rendered.contains("store busy (another jetpack is running)"));
+        assert!(rendered.contains("ripgrep 14.1"));
+    }
+
+    #[test]
+    fn theme_colors_tty_dashboard_and_dims_activity() {
+        let colored = render_dashboard_width(&sample_snapshot(), 100, colored_theme());
+        let plain = render_dashboard_width(&sample_snapshot(), 100, plain_theme());
+        assert!(colored.contains("\x1b[1;96m"));
+        assert!(colored.contains("\x1b[32m"));
+        assert!(colored.contains("\x1b[2;37m"));
+        assert!(!plain.contains('\x1b'));
     }
 }

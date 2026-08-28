@@ -118,7 +118,7 @@ pub(crate) fn verify_cache_entry_with_graph(
     let closure = output_exists
         && closure_is_reachable(roots, entry)
         && graph.is_some_and(|graph| Closure::entry_closure_store_proof(roots, graph, entry));
-    CacheVerification {
+    let verification = CacheVerification {
         output_exists,
         output_digest,
         source,
@@ -128,7 +128,16 @@ pub(crate) fn verify_cache_entry_with_graph(
         signature_verified,
         unsigned_local_allowed,
         closure,
+    };
+    if !verification.trusted() && std::env::var_os("JETPACK_VERIFY_TRACE").is_some() {
+        eprintln!(
+            "VERIFY-TRACE ref={} id={} legs={verification:?} hash_probe={:?}",
+            entry.reference,
+            entry.id,
+            Ingest::try_entry_output_hash(roots, entry)
+        );
     }
+    verification
 }
 
 fn producer_authority_verified(

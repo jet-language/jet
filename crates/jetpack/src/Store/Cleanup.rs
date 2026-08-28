@@ -290,6 +290,19 @@ pub(crate) fn malformed_object_reason(path: &Path) -> std::io::Result<Option<&'s
             if !meta.receipt.is_empty() && !valid_receipt_digest(&meta.receipt) {
                 return Ok(Some("invalid-receipt"));
             }
+            // A missing output makes this projection unusable. Probe through
+            // the output link so a dangling symlink is recognized, but only
+            // classify a proven ENOENT; permission and other I/O failures stay
+            // fail-closed. Quarantine removes the record, never output bytes.
+            if !meta.out.is_empty() {
+                match fs::metadata(&meta.out) {
+                    Ok(_) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        return Ok(Some("missing-output"));
+                    }
+                    Err(_) => {}
+                }
+            }
             Ok(None)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -464,7 +477,12 @@ fn collect_orphaned_canonical_objects_with_graph(
     let mut protected = live.output_hashes.clone();
     for (id, record) in &graph.records {
         if !retired.contains(id) {
-            protected.extend(graph.closure(&record.primary));
+            // A package owns every named output, not only its primary. Keep
+            // this set aligned with the closure disk-usage path so GC cannot
+            // unlink a live secondary output.
+            for output in record.outputs.values() {
+                protected.extend(graph.closure(output));
+            }
         }
     }
 
@@ -491,10 +509,16 @@ fn collect_orphaned_canonical_objects_with_graph(
         let name = item.file_name().to_string_lossy().into_owned();
         let metadata = fs::symlink_metadata(&path)?;
         if metadata.file_type().is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Hangar object entry is a symlink: {}", path.display()),
-            ));
+            // Seal admits a symlink as an object root. Account for the link
+            // itself and never walk its target. Unknown names remain for
+            // Hangar doctor rather than being removed by cleanup.
+            if valid_receipt_digest(&name) && !protected.contains(&name) {
+                orphaned.push(OrphanedCanonicalObject {
+                    path,
+                    bytes: metadata.len(),
+                });
+            }
+            continue;
         }
         if metadata.is_dir() && valid_receipt_digest(&name) && !protected.contains(&name) {
             orphaned.push(OrphanedCanonicalObject {
@@ -508,17 +532,22 @@ fn collect_orphaned_canonical_objects_with_graph(
 }
 
 pub(crate) fn remove_hangar_node(path: &Path) -> std::io::Result<()> {
-    if path
+    let is_object_node = path
         .parent()
         .and_then(|parent| parent.file_name())
-        .is_some_and(|name| name == OBJECTS_DIR)
-    {
+        .is_some_and(|name| name == OBJECTS_DIR);
+    if is_object_node {
         if let Some(hangar) = path.parent().and_then(Path::parent) {
             remove_seal(path, hangar)?;
         }
     }
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
+        if is_object_node {
+            // Removing the directory entry is safe and does not follow the
+            // symlink. Only direct canonical object roots reach this branch.
+            return fs::remove_file(path);
+        }
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("refusing to remove Hangar symlink `{}`", path.display()),
@@ -904,10 +933,9 @@ fn optimize_objects_cas_pool_plan(roots: &Roots) -> std::io::Result<CleanReport>
         let name = ent.file_name().to_string_lossy().into_owned();
         let metadata = fs::symlink_metadata(&path)?;
         if metadata.file_type().is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Hangar object entry is a symlink: {}", path.display()),
-            ));
+            // Object-root symlinks are legal and have no files to share. Do
+            // not follow or reject them while optimizing adjacent directories.
+            continue;
         }
         if metadata.is_dir() && !name.ends_with(PARTIAL_SUFFIX) {
             object_dirs.push(path);
@@ -1015,10 +1043,9 @@ fn optimize_objects_cas_pool(roots: &Roots) -> std::io::Result<CleanReport> {
         let name = ent.file_name().to_string_lossy().into_owned();
         let metadata = fs::symlink_metadata(&path)?;
         if metadata.file_type().is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Hangar object entry is a symlink: {}", path.display()),
-            ));
+            // Object-root symlinks are legal and have no files to share. Do
+            // not follow or reject them while optimizing adjacent directories.
+            continue;
         }
         if !metadata.is_dir() || name.ends_with(PARTIAL_SUFFIX) {
             continue;
