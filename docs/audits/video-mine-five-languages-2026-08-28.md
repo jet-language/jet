@@ -30,8 +30,9 @@ Limitations: four of five had auto-captions only (technical terms OCR-mangled; a
 load-bearing names re-verified against primary sources). No video frames beyond low-res
 storyboards; on-screen code marked as such. One 429 on a duplicate caption track. The Rust
 and JS/GORT/GOLANG lanes needed salvage/correction passes after timeouts; all deliverables
-are complete. Ledgers: `/tmp/jet-mine-<ID>.claims.json`, findings `/tmp/jet-mine-<ID>.findings.md`,
-probes `/tmp/jet-probe-{RUST,PY,JS,GOLANG,GORT}.md` (JS probes re-run by the orchestrator).
+are complete. Durable artifacts (ledgers `jet-mine-<ID>.claims.json`, findings
+`jet-mine-<ID>.findings.md`, probes `jet-probe-{RUST,PY,JS,GOLANG,GORT}.md`) live in
+`~/.cache/jet-luna/mine-2026-08-28/artifacts/`; JS probes were re-run by the orchestrator.
 
 ## Reframes — where the popular reading is wrong
 
