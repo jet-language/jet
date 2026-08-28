@@ -114,6 +114,37 @@ or source-qualified spelling for the same conversion.
 - Convenience shorthand methods are acceptable if they compose existing primitives
   without adding new behavior (e.g. `slice.first()` over an optional `slice[0]` result).
 
+## Law 9 — One root method, optional customization (D-STDLIB-OPTPARAM1=A)
+
+Ratified 2026-08-28 on card #2322. When one semantic operation has a common
+default and a variant, ship ONE method whose default serves the common case and
+whose customization rides an optional parameter. Do not ship sibling methods
+that share a signature shape and differ only by which variant they pick.
+
+- The namespace stays small, there is one name to find, and every option is
+  visible in the signature.
+- The mechanism is already ratified and needs no new syntax: D-CALLPOS1=A
+  supplies defaults after supplied arguments and named arguments to deconflict;
+  a parameter default spells `Type{default}`.
+- Siblings remain correct when the signatures genuinely differ — a different
+  parameter list, a different return shape, or a different fallibility. A
+  strict/lossy pair that returns `T !Err` versus `T` is two signatures, so it
+  stays two methods.
+
+```jet
+// One root method with an optional variant selector.
+text.replace("a", "b")                  // common default: every match
+text.replace("a", "b", .First)          // customization rides a parameter
+
+// Not this: two names, one signature shape.
+text.replace_all("a", "b")
+text.replace_first("a", "b")
+```
+
+A retrofit of an already-ratified verb family (for example the zip verbs under
+D-ZIPLEN1=D) happens only under an explicit owner retrofit decision. New and
+in-flight surfaces follow this law from now on.
+
 ## Signature-honesty review rows
 
 | Row | Core API rule |
@@ -165,6 +196,9 @@ Required evidence: <example, diagnostic snapshot, and focused proof>
 - [ ] `L6` Every error path has the required diagnostic copy and UI snapshot.
 - [ ] `L7` A golden-tested example exists under `examples/features/`.
 - [ ] `L8` No duplicate API or overload family remains.
+- [ ] `L9` No sibling cluster: one root method plus an optional customization
+      parameter, unless the signatures genuinely differ (parameter list, return
+      shape, or fallibility). Name the difference when siblings stay.
 - [ ] `Weakest-guarantee parameters` pass.
 - [ ] `Calculate/do split` passes.
 - [ ] `No hidden-lookup APIs` pass.
