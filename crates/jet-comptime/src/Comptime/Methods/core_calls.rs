@@ -2039,12 +2039,22 @@ pub fn apply_core_call_with_type(
             Ok(CtValue::Str(fmt_kernel::jet_fmt_number(n)))
         }
         ("core.text.fmt", "decimal") => {
-            let value = as_float(one(0)?, span)?;
+            let value = one(0)?;
             let precision = match one(1)? {
                 CtValue::Int(n) => *n,
                 _ => return Err(unsupported("fmt.decimal precision must be Int", span)),
             };
-            Ok(CtValue::Str(fmt_kernel::jet_fmt_decimal(value, precision)))
+            let formatted = match value {
+                CtValue::Float(value) => fmt_kernel::jet_fmt_decimal(value.as_f64(), precision),
+                CtValue::Int(value) => {
+                    fmt_kernel::jet_fmt_decimal_int(&value.to_string(), precision)
+                }
+                CtValue::BigInt(value) => {
+                    fmt_kernel::jet_fmt_decimal_int(&value.to_string_rep(), precision)
+                }
+                _ => return Err(unsupported("fmt.decimal expects a Float or Int", span)),
+            };
+            Ok(CtValue::Str(formatted))
         }
         ("core.text.fmt", "hex") => {
             let value = match one(0)? {
@@ -2060,6 +2070,14 @@ pub fn apply_core_call_with_type(
                 &value, width,
             )))
         }
+        ("core.text.fmt", "sci") => {
+            let value = as_float(one(0)?, span)?;
+            let precision = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("fmt.sci precision must be Int", span)),
+            };
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_sci(value, precision)))
+        }
         ("core.text.fmt", "percent") => {
             let value = as_float(one(0)?, span)?;
             let precision = match one(1)? {
@@ -2067,6 +2085,19 @@ pub fn apply_core_call_with_type(
                 _ => return Err(unsupported("fmt.percent precision must be Int", span)),
             };
             Ok(CtValue::Str(fmt_kernel::jet_fmt_percent(value, precision)))
+        }
+        ("core.text.fmt", "bin" | "oct") => {
+            let value = match one(0)? {
+                CtValue::Int(value) => value.to_string(),
+                CtValue::BigInt(value) => value.to_string_rep(),
+                _ => return Err(unsupported("fmt radix selectors expect an Int", span)),
+            };
+            let formatted = if method == "bin" {
+                fmt_kernel::jet_fmt_bin_decimal(&value)
+            } else {
+                fmt_kernel::jet_fmt_oct_decimal(&value)
+            };
+            Ok(CtValue::Str(formatted))
         }
         ("core.text.fmt", "bytes") => {
             let n = match one(0)? {
@@ -2099,6 +2130,15 @@ pub fn apply_core_call_with_type(
             Ok(CtValue::Str(fmt_kernel::jet_fmt_plural(
                 count, &singular, &plural,
             )))
+        }
+        ("core.text.fmt", "pad") => {
+            let text = as_string(one(0)?, span)?.to_string();
+            let width = match one(1)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("fmt.pad width must be Int", span)),
+            };
+            let fill = as_string(one(2)?, span)?.to_string();
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_pad(&text, width, &fill)))
         }
         ("core.text.fmt", "pad_left") => {
             let text = as_string(one(0)?, span)?.to_string();

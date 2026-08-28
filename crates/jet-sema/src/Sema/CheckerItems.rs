@@ -2886,7 +2886,11 @@ impl<'a> Checker<'a> {
             }
         }
         let subj_ty = cached_subject_ty.clone().or_else(|| {
-            let inferred = self.infer(subject);
+            let inferred = if preserve_result_carrier {
+                self.infer_without_auto_propagation(subject)
+            } else {
+                self.infer(subject)
+            };
             if preserve_result_carrier {
                 if let Some(ty) = inferred.clone() {
                     self.result_handler_subject_types.insert(subject_key, ty);

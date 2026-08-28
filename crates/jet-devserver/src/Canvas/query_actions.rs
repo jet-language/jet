@@ -11,14 +11,14 @@ use super::graph_helpers::{
     text_matches,
 };
 use super::graph_json::node_catalog;
+use super::graph_projection::Projection;
 use super::project_scan::{env_project_json, project_context_for_entry, project_file};
 use super::project_transactions::{
     module_belongs_to, normalize_and_format_project_changes, prepare_project_rename,
     project_revision_after_changes, rel_path, validate_project_rename_overlay,
 };
-use super::schema_api::{
-    source_revision, Projection, ACTION_SCHEMA_VERSION, CORE_CATALOG_SCHEMA_VERSION,
-};
+use super::schema_api::{ACTION_SCHEMA_VERSION, CORE_CATALOG_SCHEMA_VERSION};
+use super::source_model::source_revision;
 use super::validation_json::{json_optional_str, json_str, json_string_field, span_json};
 
 const PROJECT_QUERY_RESULT_LIMIT: usize = 200;

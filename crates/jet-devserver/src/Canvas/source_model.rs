@@ -4,8 +4,15 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
+use jet_driver::SHA256;
+
 static SOURCE_TRANSACTION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Stable source revision used by Canvas source transactions and projections.
+pub fn source_revision(src: &str) -> String {
+    format!("sha256-{}", SHA256::sha256_hex(src.as_bytes()))
+}
 
 #[derive(Debug)]
 pub(super) enum SourceWriteError {

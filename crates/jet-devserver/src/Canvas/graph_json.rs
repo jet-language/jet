@@ -5,7 +5,7 @@ use jet_semindex::SourceSpan;
 
 use super::debug_source_git::span_overlaps;
 use super::graph_helpers::{line_start, snippet};
-use super::schema_api::{GraphBuilder, InlineRec, NodeRec, PinRec, WireRec};
+use super::graph_projection::{GraphBuilder, InlineRec, NodeRec, PinRec, WireRec};
 use super::validation_json::{attr_bounds, attr_span, attr_string, json_str, json_strs, span_json};
 
 #[path = "node_catalog.rs"]

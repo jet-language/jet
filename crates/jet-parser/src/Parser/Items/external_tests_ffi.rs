@@ -521,7 +521,7 @@ impl<'a> Parser<'a> {
         }
         match &parts[0] {
             StrTokPart::Lit(s) => Ok((s.clone(), span)),
-            StrTokPart::Byte(_) | StrTokPart::Interp(_) => Err(Diagnostic::error(
+            StrTokPart::Byte(_) | StrTokPart::ByteText(_) | StrTokPart::Interp(_) => Err(Diagnostic::error(
                 "E0003",
                 "a test name can't contain `{ }` interpolation".to_string(),
                 "names are fixed labels".to_string(),

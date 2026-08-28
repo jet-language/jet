@@ -226,17 +226,13 @@ fn source_form_still_works() {
 }
 
 #[test]
-fn dot_form_not_classified_when_source_is_unknown() {
-    use jetpack::RefSpec::{classify_in, RefError, SourceTable};
+fn bare_package_with_dot_defaults_to_jetpack() {
+    use jetpack::RefSpec::{classify_in, Source, SourceTable};
 
-    let table = SourceTable::empty(); // no sources declared
-    let err =
-        classify_in("unknown.pkg", &table).expect_err("unknown source in dot form should fail");
-    // Falls through to MissingSeparator since no source matched.
-    assert!(
-        matches!(err, RefError::MissingSeparator(_)),
-        "expected MissingSeparator, got {err:?}"
-    );
+    let spec = classify_in("unknown.pkg", &SourceTable::empty())
+        .expect("an undeclared dotted package uses the Jetpack catalog");
+    assert_eq!(spec.source, Source::Jetpack);
+    assert_eq!(spec.package, "unknown.pkg");
 }
 
 // ──────────────────────────────────────────────

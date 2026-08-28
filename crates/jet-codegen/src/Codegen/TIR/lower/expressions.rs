@@ -2180,6 +2180,33 @@ pub(crate) fn lower_debug_text(value: TExpr) -> TExpr {
     }
 }
 
+fn lower_fmt_call(method: &str, args: Vec<TExpr>, source_span: crate::Diagnostics::Span) -> TExpr {
+    TExpr {
+        ty: Type::String,
+        kind: TExprKind::CoreCall {
+            module: "core.text.fmt".to_string(),
+            method: method.to_string(),
+            widen_to_vec: vec![false; args.len()],
+            args,
+            source_span,
+        },
+    }
+}
+
+fn lower_fmt_int(value: i64) -> TExpr {
+    TExpr {
+        ty: Type::Int,
+        kind: TExprKind::IntLit(value, None),
+    }
+}
+
+fn lower_fmt_string(value: String) -> TExpr {
+    TExpr {
+        ty: Type::String,
+        kind: TExprKind::StrLit(vec![TStrPart::Lit(value)]),
+    }
+}
+
 /// D-FAIL-ERROR1=A: top-level comptime values are lowered before sema has
 /// rewritten raw `Err(...)` calls to `Expr::Err` plus the default `Err` struct.
 /// Normalize that one early shape here so the comptime evaluator consumes the
@@ -2486,45 +2513,79 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .map(|p| match p {
                     StrPart::Lit(s) => TStrPart::Lit(s.clone()),
                     StrPart::Interp(e, crate::AST::StrFormat::Fixed(precision)) => {
-                        let source_span = e.span();
-                        let formatted = TExpr {
-                            ty: Type::String,
-                            kind: TExprKind::CoreCall {
-                                module: "core.text.fmt".to_string(),
-                                method: "decimal".to_string(),
-                                args: vec![
-                                    lower_expr(e, cx, env),
-                                    TExpr {
-                                        ty: Type::Int,
-                                        kind: TExprKind::IntLit(*precision, None),
-                                    },
-                                ],
-                                source_span,
-                                widen_to_vec: vec![false, false],
-                            },
-                        };
+                        let formatted = lower_fmt_call(
+                            "decimal",
+                            vec![lower_expr(e, cx, env), lower_fmt_int(*precision)],
+                            e.span(),
+                        );
                         TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
                     }
                     StrPart::Interp(e, crate::AST::StrFormat::Hex(width)) => {
-                        let source_span = e.span();
-                        let formatted = TExpr {
-                            ty: Type::String,
-                            kind: TExprKind::CoreCall {
-                                module: "core.text.fmt".to_string(),
-                                method: "hex".to_string(),
-                                args: vec![
-                                    lower_expr(e, cx, env),
-                                    TExpr {
-                                        ty: Type::Int,
-                                        kind: TExprKind::IntLit(*width, None),
-                                    },
-                                ],
-                                source_span,
-                                widen_to_vec: vec![false, false],
-                            },
-                        };
+                        let formatted = lower_fmt_call(
+                            "hex",
+                            vec![lower_expr(e, cx, env), lower_fmt_int(*width)],
+                            e.span(),
+                        );
                         TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
                     }
+                    StrPart::Interp(
+                        e,
+                        crate::AST::StrFormat::Pad { width, fill },
+                    ) => TStrPart::Interp(
+                        lower_fmt_call(
+                            "pad",
+                            vec![
+                                lower_expr(e, cx, env),
+                                lower_fmt_int(*width),
+                                lower_fmt_string(fill.clone()),
+                            ],
+                            e.span(),
+                        ),
+                        crate::AST::StrFormat::Display,
+                    ),
+                    StrPart::Interp(
+                        e,
+                        crate::AST::StrFormat::PadLeft { width, fill },
+                    ) => TStrPart::Interp(
+                        lower_fmt_call(
+                            "pad_left",
+                            vec![
+                                lower_expr(e, cx, env),
+                                lower_fmt_int(*width),
+                                lower_fmt_string(fill.clone()),
+                            ],
+                            e.span(),
+                        ),
+                        crate::AST::StrFormat::Display,
+                    ),
+                    StrPart::Interp(e, crate::AST::StrFormat::Sci(precision)) => {
+                        TStrPart::Interp(
+                            lower_fmt_call(
+                                "sci",
+                                vec![lower_expr(e, cx, env), lower_fmt_int(*precision)],
+                                e.span(),
+                            ),
+                            crate::AST::StrFormat::Display,
+                        )
+                    }
+                    StrPart::Interp(e, crate::AST::StrFormat::Percent(precision)) => {
+                        TStrPart::Interp(
+                            lower_fmt_call(
+                                "percent",
+                                vec![lower_expr(e, cx, env), lower_fmt_int(*precision)],
+                                e.span(),
+                            ),
+                            crate::AST::StrFormat::Display,
+                        )
+                    }
+                    StrPart::Interp(e, crate::AST::StrFormat::Bin) => TStrPart::Interp(
+                        lower_fmt_call("bin", vec![lower_expr(e, cx, env)], e.span()),
+                        crate::AST::StrFormat::Display,
+                    ),
+                    StrPart::Interp(e, crate::AST::StrFormat::Oct) => TStrPart::Interp(
+                        lower_fmt_call("oct", vec![lower_expr(e, cx, env)], e.span()),
+                        crate::AST::StrFormat::Display,
+                    ),
                     StrPart::Interp(e, crate::AST::StrFormat::Unit(style)) => {
                         let value = lower_expr(e, cx, env);
                         TStrPart::Interp(
@@ -2552,7 +2613,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         lower_display_value(lower_expr(e, cx, env), cx),
                         crate::AST::StrFormat::Display,
                     ),
-                    StrPart::Interp(e, fmt) => TStrPart::Interp(lower_expr(e, cx, env), *fmt),
+                    StrPart::Interp(e, fmt) => {
+                        TStrPart::Interp(lower_expr(e, cx, env), fmt.clone())
+                    }
                 })
                 .collect();
             TExpr {

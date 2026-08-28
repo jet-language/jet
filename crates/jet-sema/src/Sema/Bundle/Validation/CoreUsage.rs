@@ -927,6 +927,12 @@ pub(crate) fn collect_core_expr(
                         crate::AST::StrFormat::Pretty
                             | crate::AST::StrFormat::Fixed(_)
                             | crate::AST::StrFormat::Hex(_)
+                            | crate::AST::StrFormat::Pad { .. }
+                            | crate::AST::StrFormat::PadLeft { .. }
+                            | crate::AST::StrFormat::Sci(_)
+                            | crate::AST::StrFormat::Percent(_)
+                            | crate::AST::StrFormat::Bin
+                            | crate::AST::StrFormat::Oct
                     ) {
                         note_core_usage(
                             used,

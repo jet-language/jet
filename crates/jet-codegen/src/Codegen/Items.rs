@@ -2534,7 +2534,13 @@ pub(crate) fn emit_trait_impl(
                     method.name
                 );
             }
-            TIR::lower_trait_method(method, type_name, cx, &block.trait_name)
+            TIR::lower_trait_method(
+                method,
+                type_name,
+                cx,
+                &block.trait_name,
+                block.compiler_generated && method.compiler_generated,
+            )
         })
         .collect();
     let mut extra: std::collections::HashMap<String, Vec<String>> =
@@ -2970,7 +2976,13 @@ fn emit_trait_method(
     // derived `encode`/`decode` — an authority difference, never a capability
     // one. A hand-written `impl T.Encode` keeps the unconditional ICE.
     if compiler_written || TIR::tir_covers_trait_method(f, type_name, cx, trait_name) {
-        let tir = TIR::lower_trait_method(f, type_name, cx, trait_name);
+        let tir = TIR::lower_trait_method(
+            f,
+            type_name,
+            cx,
+            trait_name,
+            compiler_written && f.compiler_generated,
+        );
         if let Some(name) = helper_name {
             if let TFuncKind::TraitMethod {
                 serde: Some(codec), ..

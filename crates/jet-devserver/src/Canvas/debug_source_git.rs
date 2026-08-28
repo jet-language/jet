@@ -8,7 +8,8 @@ use std::sync::Mutex;
 use jet_driver::Diagnostics::Diagnostic;
 use jet_semindex::SourceSpan;
 
-use super::schema_api::{source_revision, DEBUG_SCHEMA_VERSION};
+use super::schema_api::DEBUG_SCHEMA_VERSION;
+use super::source_model::source_revision;
 use super::validation_json::{
     json_str, json_string_field, json_usize_field, parse_json_string, span_json,
 };

@@ -240,6 +240,279 @@ fn map_hoist_root(
     Some(root)
 }
 
+/// The map-update fusion only changes a fully pure key/default/delta shape.
+/// Keeping the root out of every captured expression also prevents a closure
+/// from trying to borrow the map while the update helper owns its mutable
+/// entry borrow.
+fn map_update_expr_safe(expr: &TExpr, root: &TLocal) -> bool {
+    match &expr.kind {
+        TExprKind::IntLit(..)
+        | TExprKind::FloatLit(..)
+        | TExprKind::BoolLit(..)
+        | TExprKind::CharLit(..)
+        | TExprKind::Unit
+        | TExprKind::DefaultLit
+        | TExprKind::CtLit(..)
+        | TExprKind::ConstRef(..) => true,
+        TExprKind::Local(local) => {
+            !local.deref && !local.is_persistent() && !same_local(local, root)
+        }
+        TExprKind::StrLit(parts) => parts
+            .iter()
+            .all(|part| matches!(part, crate::Codegen::TIR::TStrPart::Lit(_))),
+        TExprKind::Unary { operand, .. }
+        | TExprKind::Clone(operand)
+        | TExprKind::ExplicitCopy(operand) => map_update_expr_safe(operand, root),
+        TExprKind::Binary { lhs, rhs, .. } => {
+            map_update_expr_safe(lhs, root) && map_update_expr_safe(rhs, root)
+        }
+        _ => false,
+    }
+}
+
+fn same_pure_expr(left: &TExpr, right: &TExpr, root: &TLocal) -> bool {
+    if !map_update_expr_safe(left, root) || !map_update_expr_safe(right, root) {
+        return false;
+    }
+    match (&left.kind, &right.kind) {
+        (TExprKind::IntLit(a, aw), TExprKind::IntLit(b, bw)) => a == b && aw == bw,
+        (TExprKind::FloatLit(a), TExprKind::FloatLit(b)) => a == b,
+        (TExprKind::BoolLit(a), TExprKind::BoolLit(b)) => a == b,
+        (TExprKind::CharLit(a), TExprKind::CharLit(b)) => a == b,
+        (TExprKind::Unit, TExprKind::Unit)
+        | (TExprKind::DefaultLit, TExprKind::DefaultLit) => true,
+        (TExprKind::ConstRef(a), TExprKind::ConstRef(b)) => a == b,
+        (TExprKind::Local(a), TExprKind::Local(b)) => a == b,
+        (TExprKind::StrLit(a), TExprKind::StrLit(b)) => {
+            a.len() == b.len()
+                && a.iter().zip(b).all(|(left, right)| match (left, right) {
+                    (
+                        crate::Codegen::TIR::TStrPart::Lit(left),
+                        crate::Codegen::TIR::TStrPart::Lit(right),
+                    ) => left == right,
+                    _ => false,
+                })
+        }
+        (
+            TExprKind::Unary { op: a, operand: left },
+            TExprKind::Unary { op: b, operand: right },
+        ) => a == b && same_pure_expr(left, right, root),
+        (TExprKind::Clone(left), TExprKind::Clone(right))
+        | (TExprKind::ExplicitCopy(left), TExprKind::ExplicitCopy(right)) => {
+            same_pure_expr(left, right, root)
+        }
+        (
+            TExprKind::Binary {
+                op: a,
+                overflow: ao,
+                line: al,
+                lhs: alhs,
+                rhs: arhs,
+            },
+            TExprKind::Binary {
+                op: b,
+                overflow: bo,
+                line: bl,
+                lhs: blhs,
+                rhs: brhs,
+            },
+        ) => {
+            a == b
+                && ao == bo
+                && al == bl
+                && same_pure_expr(alhs, blhs, root)
+                && same_pure_expr(arhs, brhs, root)
+        }
+        _ => false,
+    }
+}
+
+/// Recognize the generic `m[k] = (m.get(k) ?? default) OP delta` update.
+/// The shape is deliberately independent of corpus names or benchmark sizes.
+fn map_update_shape<'a>(
+    base: &'a TExpr,
+    index: &'a TExpr,
+    value: &'a TExpr,
+) -> Option<(TLocal, BinOp, &'a TExpr, &'a TExpr)> {
+    let root = map_root_local(base)?;
+    let TExprKind::Binary { op, lhs, rhs, .. } = &value.kind else {
+        return None;
+    };
+    if !matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul)
+        || !matches!(value.ty, Type::Int)
+        || !matches!(rhs.ty, Type::Int)
+    {
+        return None;
+    }
+    let TExprKind::OrFallback {
+        value: lookup,
+        fallback: TOrFallback::Value(default),
+    } = &lhs.kind
+    else {
+        return None;
+    };
+    if !matches!(lookup.ty, Type::Int) || !matches!(default.ty, Type::Int) {
+        return None;
+    }
+    let TExprKind::BuiltinMethod {
+        recv,
+        op: TBuiltinOp::GetMap,
+        args,
+    } = &lookup.kind
+    else {
+        return None;
+    };
+    let [key] = args.as_slice() else {
+        return None;
+    };
+    let Some(get_root) = map_root_local(recv) else {
+        return None;
+    };
+    if !same_local(&root, &get_root)
+        || !map_update_expr_safe(index, &root)
+        || !same_pure_expr(index, key, &root)
+        || !map_update_expr_safe(default, &root)
+        || !map_update_expr_safe(rhs, &root)
+    {
+        return None;
+    }
+    Some((root, *op, default, rhs))
+}
+
+/// A split callback cannot carry a Jet `return`, `break`, `next`, or deferred
+/// control-flow lowering out through a Rust closure. Keep the admitted body
+/// subset structural and conservative; unsupported bodies retain the ordinary
+/// Iterator path.
+fn split_callback_expr_safe(expr: &TExpr) -> bool {
+    match &expr.kind {
+        TExprKind::IntLit(..)
+        | TExprKind::FloatLit(..)
+        | TExprKind::BoolLit(..)
+        | TExprKind::CharLit(..)
+        | TExprKind::Unit
+        | TExprKind::DefaultLit
+        | TExprKind::Uninit
+        | TExprKind::CtLit(..)
+        | TExprKind::ConstRef(..)
+        | TExprKind::Absent => true,
+        TExprKind::Local(local) => !local.deref,
+        TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
+            crate::Codegen::TIR::TStrPart::Lit(_) => true,
+            crate::Codegen::TIR::TStrPart::Interp(value, _) => split_callback_expr_safe(value),
+        }),
+        TExprKind::Binary { lhs, rhs, .. } => {
+            split_callback_expr_safe(lhs) && split_callback_expr_safe(rhs)
+        }
+        TExprKind::Unary { operand, .. }
+        | TExprKind::Clone(operand)
+        | TExprKind::ExplicitCopy(operand)
+        | TExprKind::MaterializeView(operand)
+        | TExprKind::Present(operand)
+        | TExprKind::Ok(operand)
+        | TExprKind::Err(operand)
+        | TExprKind::DistinctRaw(operand)
+        | TExprKind::Print(operand)
+        | TExprKind::Drop(operand)
+        | TExprKind::Close(operand)
+        | TExprKind::ResourceNew(operand)
+        | TExprKind::Deref(operand)
+        | TExprKind::RawOf(operand) => split_callback_expr_safe(operand),
+        TExprKind::OrFallback { value, fallback } => {
+            split_callback_expr_safe(value)
+                && matches!(fallback, TOrFallback::Value(fallback) if split_callback_expr_safe(fallback))
+        }
+        TExprKind::BuiltinMethod { recv, args, .. } => {
+            split_callback_expr_safe(recv)
+                && args.iter().all(split_callback_expr_safe)
+        }
+        TExprKind::Index { base, index, .. } => {
+            split_callback_expr_safe(base) && split_callback_expr_safe(index)
+        }
+        TExprKind::MapLit(entries) => entries.iter().all(|(key, value)| {
+            split_callback_expr_safe(key) && split_callback_expr_safe(value)
+        }),
+        TExprKind::ListLit(items) => items.iter().all(split_callback_expr_safe),
+        TExprKind::TupleLit { fields, .. } => fields
+            .iter()
+            .all(|(_, value)| split_callback_expr_safe(value)),
+        TExprKind::Call { args, .. } => args
+            .iter()
+            .all(|arg| split_callback_expr_safe(&arg.value)),
+        _ => false,
+    }
+}
+
+fn split_callback_stmt_safe(stmt: &TStmt) -> bool {
+    match stmt {
+        TStmt::SourceSpan(_) | TStmt::LineMarker(_) => true,
+        TStmt::Let { init, .. } => split_callback_expr_safe(init),
+        TStmt::ExprStmt(expr) => split_callback_expr_safe(expr),
+        TStmt::Assign { place, value, .. } => {
+            let place_safe = match place {
+                TPlace::Local(local) => !local.deref,
+                TPlace::Expr(expr) => split_callback_expr_safe(expr),
+            };
+            place_safe && split_callback_expr_safe(value)
+        }
+        TStmt::IndexAssign {
+            base,
+            index,
+            value,
+            ..
+        } => {
+            split_callback_expr_safe(base)
+                && split_callback_expr_safe(index)
+                && split_callback_expr_safe(value)
+        }
+        TStmt::Inline(stmts) => stmts.iter().all(split_callback_stmt_safe),
+        _ => false,
+    }
+}
+
+fn split_callback_parts<'a>(collection: &'a TExpr, body: &'a [TStmt]) -> Option<(&'a TExpr, &'a TExpr)> {
+    let TExprKind::BuiltinMethod {
+        recv,
+        op: TBuiltinOp::Split,
+        args,
+    } = &collection.kind
+    else {
+        return None;
+    };
+    let [sep] = args.as_slice() else {
+        return None;
+    };
+    if !matches!(recv.ty, Type::String)
+        || !matches!(&recv.kind, TExprKind::Local(local) if !local.deref && !local.mutable && !local.is_persistent())
+        || !body.iter().all(split_callback_stmt_safe)
+    {
+        return None;
+    }
+    Some((recv, sep))
+}
+
+fn emit_split_separator(
+    sep: &TExpr,
+    cx: &Cx,
+    active_deferred_closes: &[ActiveCleanup],
+) -> String {
+    if let TExprKind::StrLit(parts) = &sep.kind {
+        let mut literal = String::new();
+        if parts.iter().all(|part| match part {
+            crate::Codegen::TIR::TStrPart::Lit(value) => {
+                literal.push_str(value);
+                true
+            }
+            crate::Codegen::TIR::TStrPart::Interp(..) => false,
+        }) {
+            return format!("{:?}", literal);
+        }
+    }
+    format!(
+        "({}).as_str()",
+        emit_expr_with_cleanups(sep, cx, active_deferred_closes)
+    )
+}
+
 /// D-EXPSEM1=A / D-FLOORDIV1=A / D-STR-CONCAT1: these compound operations
 /// cannot use Rust's direct `place OP= value` form for Jet's meaning. This
 /// builds the one Prelude call that replaces it. `None` means the operator is
@@ -1679,21 +1952,40 @@ fn emit_tir_stmt(
                 emit_mut_collection_place(base, cx, active_deferred_closes)
             };
             let i = emit_expr_with_cleanups(index, cx, active_deferred_closes);
-            let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
             if *is_map {
-                out.push_str(&jet_format!(
-                    "{pad}{{ let {jet_prefix}v = {v}; jet_map_insert(&mut ({b}), ({i}).clone(), {jet_prefix}v); }}\n",
-                ));
+                if let Some((_, op, default, delta)) = map_update_shape(base, index, value) {
+                    let default = emit_expr_with_cleanups(default, cx, active_deferred_closes);
+                    let delta = emit_expr_with_cleanups(delta, cx, active_deferred_closes);
+                    let helper = match op {
+                        BinOp::Add => "jet_int_add",
+                        BinOp::Sub => "jet_int_sub",
+                        BinOp::Mul => "jet_int_mul",
+                        _ => unreachable!("map update shape only admits integer add/sub/mul"),
+                    };
+                    let helper = format!("{}jet_std::{helper}", cx.root_prefix);
+                    let old = mangle_generated("map_old");
+                    out.push_str(&format!(
+                        "{pad}{{ jet_map_update(&mut ({b}), ({i}).clone(), |{old}| {{ {helper}({old}.cloned().unwrap_or_else(|| {default}), {delta}) }}); }}\n"
+                    ));
+                } else {
+                    let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
+                    out.push_str(&jet_format!(
+                        "{pad}{{ let {jet_prefix}v = {v}; jet_map_insert(&mut ({b}), ({i}).clone(), {jet_prefix}v); }}\n",
+                    ));
+                }
             } else if *uninit {
+                let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
                 out.push_str(&jet_format!(
                     "{pad}{{ let {jet_prefix}v = {v}; ({b}).write({i} as usize, {jet_prefix}v); }}\n",
                 ));
             } else if is_compute_view_mut(&base.ty) {
+                let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
                 out.push_str(&jet_format!(
                     "{pad}{{ let {jet_prefix}v = {v}; {}jet_compute_window_set_view(&mut ({}), ({}), {jet_prefix}v).unwrap_or_else(|{jet_prefix}error| jet_panic({:?}, {}, &{jet_prefix}error)); }}\n",
                     cx.root_prefix, b, i, cx.file, 0
                 ));
             } else if is_float_view(&base.ty) {
+                let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
                 // Never duplicate Tensor/view validation in the emitter. The
                 // shared Prelude setter owns finite-value and bounds policy for
                 // both AOT and resident/ambient execution.
@@ -1702,11 +1994,13 @@ fn emit_tir_stmt(
                     cx.file, 0
                 ));
             } else if is_view(&base.ty) {
+                let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
                 out.push_str(&jet_format!(
                     "{pad}{{ let {jet_prefix}v = {v}; jet_view_set(&mut *({b}), {i}, {jet_prefix}v, {:?}, {}); }}\n",
                     cx.file, 0
                 ));
             } else {
+                let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
                 out.push_str(&jet_format!(
                     "{pad}{{ let {jet_prefix}v = {v}; ({b})[{i} as usize] = {jet_prefix}v; }}\n",
                 ));
@@ -1850,6 +2144,32 @@ fn emit_tir_stmt(
                     "{pad}{{ let mut {name} = jet_map_make_mut(&mut ({name}));\n",
                     name = root.rust_name(),
                 ));
+            }
+            if method_kind.is_none() && var2.is_none() && step.is_none() {
+                if let Some((recv, sep)) = split_callback_parts(collection, body) {
+                    let recv = emit_expr_with_cleanups(recv, cx, active_deferred_closes);
+                    let sep = emit_split_separator(sep, cx, active_deferred_closes);
+                    let item = mangle_generated("split_item");
+                    out.push_str(&format!(
+                        "{pad}jet_string_split_for_each(&({recv}), {sep}, |{item}| {{\n"
+                    ));
+                    out.push_str(&format!(
+                        "{pad}    let {} = {item};\n",
+                        mangle(var)
+                    ));
+                    emit_tir_stmts_nested(
+                        body,
+                        cx,
+                        out,
+                        indent + 1,
+                        active_deferred_closes,
+                    );
+                    out.push_str(&format!("{pad}}});\n"));
+                    if map_hoist.is_some() {
+                        out.push_str(&format!("{pad}}}\n"));
+                    }
+                    return;
+                }
             }
             // c109 Phase 22: a method-call collection takes a distinct `emit_for_in`
             // branch (`source` holds the RECEIVER for chars/lines). Only the

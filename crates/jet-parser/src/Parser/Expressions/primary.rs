@@ -1,7 +1,8 @@
 use super::super::{
     describe, AccessConvention, CallArg, Diagnostic, EnumLitArg, Expr, Lambda, LambdaBody,
-    LambdaMeta, Parser, Span, StrPart, StrTokPart, Syntax, TokKind,
+    LambdaMeta, Parser, Span, StrPart, StrTokPart, Syntax, TokKind, Type, TypedLitBody,
 };
+use crate::AST::ByteTextPart;
 
 impl<'a> Parser<'a> {
     pub(super) fn expr_primary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
@@ -911,16 +912,46 @@ impl<'a> Parser<'a> {
         })
     }
 
+    // Interpolation parsing owns a nested parser and selector diagnostics. Keep
+    // those temporaries out of the recursive expression-parser frame so the
+    // source nesting budget remains valid on small embedder stacks.
+    #[inline(never)]
     pub(super) fn str_expr_from_parts(
         &mut self,
         parts: Vec<StrTokPart>,
         span: Span,
     ) -> Result<Expr, Diagnostic> {
+        if parts
+            .iter()
+            .any(|part| matches!(part, StrTokPart::ByteText(_)))
+        {
+            let body = parts
+                .into_iter()
+                .map(|part| match part {
+                    StrTokPart::ByteText(text) | StrTokPart::Lit(text) => {
+                        ByteTextPart::Lit(text)
+                    }
+                    StrTokPart::Byte(byte) => ByteTextPart::Byte(byte),
+                    StrTokPart::Interp(_) => {
+                        unreachable!("byte-string interpolation is lexed as literal braces")
+                    }
+                })
+                .collect();
+            return Ok(Expr::TypedLit {
+                head: Some(Type::List(Box::new(Type::IntN {
+                    signed: false,
+                    bits: 8,
+                }))),
+                body: TypedLitBody::ByteText(body),
+                span,
+            });
+        }
         let mut out = Vec::new();
         for part in parts {
             match part {
                 StrTokPart::Lit(s) => out.push(StrPart::Lit(s)),
                 StrTokPart::Byte(byte) => out.push(StrPart::Lit(char::from(byte).to_string())),
+                StrTokPart::ByteText(text) => out.push(StrPart::Lit(text)),
                 StrTokPart::Interp(toks) => {
                     let mut sub = Parser {
                         toks: &toks,
@@ -1059,37 +1090,38 @@ impl<'a> Parser<'a> {
                                     format = crate::AST::StrFormat::Pretty;
                                 }
                                 crate::Syntax::InterpolationSelectorKind::Fixed => {
-                                    let after_selector =
-                                        format!("after `{selector_head}` in interpolation");
-                                    sub.expect(TokKind::LParen, &after_selector)?;
-                                    let precision = match sub.bump() {
-                                        crate::Lexer::Token {
-                                            kind: TokKind::Int(value, _),
-                                            ..
-                                        } => value,
-                                        token => {
-                                            return Err(Diagnostic::error(
-                                                    "E0003",
-                                                    format!(
-                                                        "expected decimal places inside `{selector_head}( )`"
-                                                    ),
-                                                    format!(
-                                                        "`{selector_head}(n)` takes one nonnegative integer literal"
-                                                    ),
-                                                    format!(
-                                                        "write a precision such as `{selector_head}(2)`"
-                                                    ),
-                                                    Some(token.span),
-                                                ));
-                                        }
-                                    };
-                                    let after_precision =
-                                        format!("after the decimal places in `{selector_head}(n)`");
-                                    sub.expect(TokKind::RParen, &after_precision)?;
-                                    format = crate::AST::StrFormat::Fixed(precision);
+                                    format = crate::AST::StrFormat::Fixed(
+                                        Self::parse_precision_selector(&mut sub, &selector_head)?,
+                                    );
                                 }
                                 crate::Syntax::InterpolationSelectorKind::Hex => {
                                     format = Self::parse_hex_selector(&mut sub, &selector_head)?;
+                                }
+                                crate::Syntax::InterpolationSelectorKind::Pad => {
+                                    let (width, fill) =
+                                        Self::parse_padding_selector(&mut sub, &selector_head)?;
+                                    format = crate::AST::StrFormat::Pad { width, fill };
+                                }
+                                crate::Syntax::InterpolationSelectorKind::PadLeft => {
+                                    let (width, fill) =
+                                        Self::parse_padding_selector(&mut sub, &selector_head)?;
+                                    format = crate::AST::StrFormat::PadLeft { width, fill };
+                                }
+                                crate::Syntax::InterpolationSelectorKind::Sci => {
+                                    format = crate::AST::StrFormat::Sci(
+                                        Self::parse_precision_selector(&mut sub, &selector_head)?,
+                                    );
+                                }
+                                crate::Syntax::InterpolationSelectorKind::Percent => {
+                                    format = crate::AST::StrFormat::Percent(
+                                        Self::parse_precision_selector(&mut sub, &selector_head)?,
+                                    );
+                                }
+                                crate::Syntax::InterpolationSelectorKind::Bin => {
+                                    format = crate::AST::StrFormat::Bin;
+                                }
+                                crate::Syntax::InterpolationSelectorKind::Oct => {
+                                    format = crate::AST::StrFormat::Oct;
                                 }
                                 crate::Syntax::InterpolationSelectorKind::Unit => {
                                     let after_selector =
@@ -1176,31 +1208,104 @@ impl<'a> Parser<'a> {
         Ok(Expr::Str(out, span))
     }
 
+    #[inline(never)]
     fn parse_hex_selector(
         sub: &mut Parser<'_>,
         selector_head: &str,
     ) -> Result<crate::AST::StrFormat, Diagnostic> {
         let after_selector = format!("after `{selector_head}` in interpolation");
         sub.expect(TokKind::LParen, &after_selector)?;
-        let width = match sub.bump() {
-            crate::Lexer::Token {
-                kind: TokKind::Int(value, _),
-                ..
-            } => value,
-            token => {
-                return Err(Diagnostic::error(
-                    "E0003",
-                    format!("expected width inside `{selector_head}( )`"),
-                    format!(
-                        "`{selector_head}(n)` takes one nonnegative integer literal"
-                    ),
-                    format!("write a width such as `{selector_head}(16)`"),
-                    Some(token.span),
-                ));
-            }
-        };
+        let width = Self::parse_selector_integer(sub, selector_head, "width")?;
         let after_width = format!("after the width in `{selector_head}(n)`");
         sub.expect(TokKind::RParen, &after_width)?;
         Ok(crate::AST::StrFormat::Hex(width))
+    }
+
+    #[inline(never)]
+    fn parse_precision_selector(
+        sub: &mut Parser<'_>,
+        selector_head: &str,
+    ) -> Result<i64, Diagnostic> {
+        let after_selector = format!("after `{selector_head}` in interpolation");
+        sub.expect(TokKind::LParen, &after_selector)?;
+        let precision = Self::parse_selector_integer(sub, selector_head, "decimal places")?;
+        let after_precision = format!("after the decimal places in `{selector_head}(n)`");
+        sub.expect(TokKind::RParen, &after_precision)?;
+        Ok(precision)
+    }
+
+    #[inline(never)]
+    fn parse_padding_selector(
+        sub: &mut Parser<'_>,
+        selector_head: &str,
+    ) -> Result<(i64, String), Diagnostic> {
+        let after_selector = format!("after `{selector_head}` in interpolation");
+        sub.expect(TokKind::LParen, &after_selector)?;
+        let width = Self::parse_selector_integer(sub, selector_head, "width")?;
+        let fill = if matches!(&sub.peek().kind, TokKind::Comma) {
+            sub.bump();
+            let crate::Lexer::Token { kind, span } = sub.bump();
+            let TokKind::Str(parts) = kind else {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected a literal fill string inside `{selector_head}( )`"),
+                    format!("`{selector_head}(n, fill)` takes a quoted fill string"),
+                    format!("write a fill such as `{selector_head}(8, \"0\")`"),
+                    Some(span),
+                ));
+            };
+            let mut fill = String::new();
+            for part in parts {
+                match part {
+                    StrTokPart::Lit(text) => fill.push_str(&text),
+                    StrTokPart::Byte(byte) => fill.push(char::from(byte)),
+                    StrTokPart::ByteText(text) => fill.push_str(&text),
+                    StrTokPart::Interp(_) => {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            format!("padding fill inside `{selector_head}( )` cannot interpolate"),
+                            "a padding fill is fixed text, not a second interpolation"
+                                .to_string(),
+                            format!("write a quoted fill such as `{selector_head}(8, \"0\")`"),
+                            Some(span),
+                        ));
+                    }
+                }
+            }
+            fill
+        } else {
+            String::new()
+        };
+        let after_fill = format!("after the fill in `{selector_head}(n, fill)`");
+        sub.expect(TokKind::RParen, &after_fill)?;
+        Ok((width, fill))
+    }
+
+    #[inline(never)]
+    fn parse_selector_integer(
+        sub: &mut Parser<'_>,
+        selector_head: &str,
+        parameter: &str,
+    ) -> Result<i64, Diagnostic> {
+        match sub.bump() {
+            crate::Lexer::Token {
+                kind: TokKind::Int(value, _),
+                ..
+            } => Ok(value),
+            token => {
+                let (example, noun) = if parameter == "width" {
+                    ("16", "width")
+                } else {
+                    ("2", "precision")
+                };
+                Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected {parameter} inside `{selector_head}( )`"),
+                    format!("`{selector_head}(n)` takes one nonnegative integer literal"),
+                    format!("write a {noun} such as `{selector_head}({example})`"),
+                    Some(token.span),
+                ))
+            }
+        }
     }
 }

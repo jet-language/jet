@@ -977,6 +977,72 @@ fn emit_numeric_op(
     }
 }
 
+/// A fallible expression used directly by `??` does not need to materialize
+/// its error carrier on the success path. Keep this classification structural:
+/// the use site must be an immediate `Result` fallback, and the operation must
+/// publish a Prelude fast reader. The operation table only selects the shared
+/// kernel; it does not make every Reader call fast or change its error contract.
+fn fixed_reader_fast_helper(
+    op: &THandleOp,
+) -> Option<(&'static str, &'static str, usize)> {
+    Some(match op {
+        THandleOp::ReaderReadU8 => ("jet_reader_read_u8_fast", "read_u8", 1),
+        THandleOp::ReaderReadU16Le => ("jet_reader_read_u16_le_fast", "read_u16_le", 2),
+        THandleOp::ReaderReadU16Be => ("jet_reader_read_u16_be_fast", "read_u16_be", 2),
+        THandleOp::ReaderReadU32Le => ("jet_reader_read_u32_le_fast", "read_u32_le", 4),
+        THandleOp::ReaderReadU32Be => ("jet_reader_read_u32_be_fast", "read_u32_be", 4),
+        THandleOp::ReaderReadU64Le => ("jet_reader_read_u64_le_fast", "read_u64_le", 8),
+        THandleOp::ReaderReadU64Be => ("jet_reader_read_u64_be_fast", "read_u64_be", 8),
+        THandleOp::ReaderReadF32Le => ("jet_reader_read_f32_le_fast", "read_f32_le", 4),
+        THandleOp::ReaderReadF64Le => ("jet_reader_read_f64_le_fast", "read_f64_le", 8),
+        _ => return None,
+    })
+}
+
+fn immediate_result_fast_path(
+    value: &TExpr,
+) -> Option<(&'static str, &'static str, usize, &TExpr)> {
+    if !matches!(&value.ty, Type::Result { .. }) {
+        return None;
+    }
+    let TExprKind::HandleMethod { recv, op, args } = &value.kind else {
+        return None;
+    };
+    if !args.is_empty() {
+        return None;
+    }
+    let (helper, method, width) = fixed_reader_fast_helper(op)?;
+    Some((helper, method, width, recv))
+}
+
+/// Emit the raw-value branch for an immediate `??` use. `None` means the
+/// ordinary carrier path remains authoritative. The fast Prelude kernel only
+/// reports absence; the cold miss edge reconstructs the shared bounds error
+/// before binding the ambient `err` slot, so fallbacks retain their exact
+/// failure semantics without constructing that String in the loop.
+fn emit_immediate_result_fast_fallback(
+    value: &TExpr,
+    fallback: &crate::Codegen::TIR::TOrFallback,
+    cx: &Cx,
+) -> Option<String> {
+    let (helper, method, width, recv) = immediate_result_fast_path(value)?;
+    let recv = emit_tir_expr(recv, cx);
+    let fallback = emit_tir_orfallback_rhs(fallback, cx);
+    let recv_ref = mangle_generated("reader_fast_recv");
+    let ambient_err = ambient_err_local().rust_name();
+    Some(jet_format!(
+        "{{ let {recv_ref} = &mut ({recv}); match {root}{helper}({recv_ref}) {{ Some({jet_prefix}ok) => {jet_prefix}ok, None => {{ let {ambient_err} = {root}jet_reader_bounds_error({method}, {width}, &*{recv_ref}); jet_journey_reset(); {fallback} }} }} }}",
+        root = cx.root_prefix,
+        helper = helper,
+        method = escape_rust_str(method),
+        width = width,
+        recv = recv,
+        recv_ref = recv_ref,
+        ambient_err = ambient_err,
+        fallback = fallback,
+    ))
+}
+
 fn emit_tir_if_expr(cond: &TIfCond, then_block: &str, else_block: &str, cx: &Cx) -> String {
     let mut ids = Vec::new();
     collect_if_expr_branch_ids(cond, cx, &mut ids);
@@ -3977,6 +4043,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // (Statement.rs). D-FAIL-CARRIER1=A: unwrap the optional-success role
         // inside an explicit Result before running the fallback.
         TExprKind::OrFallback { value, fallback } => {
+            if let Some(fast) = emit_immediate_result_fast_fallback(value, fallback, cx) {
+                return fast;
+            }
             let v = emit_tir_expr(value, cx);
             let fb = emit_tir_orfallback_rhs(fallback, cx);
             if matches!(&value.ty, Type::Result { ok, .. } if matches!(ok.as_ref(), Type::Option(_))) {
@@ -6594,16 +6663,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             } else {
                 call
             };
-            // FFI bridge functions return the declared foreign value directly,
-            // while every fallible Jet call is represented by Rust's Result
-            // carrier. A `Type::Result` declaration already has that carrier;
-            // all other extern returns need the same `Ok` boundary as a normal
-            // Jet function call before `Try` or a caller can consume them.
-            if matches!(&e.ty, Type::Result { .. }) {
-                call
-            } else {
-                format!("Ok({call})")
-            }
+            // FFI bridge functions return the declared foreign value directly.
+            // The TIR type is that payload too; unlike a Jet function call it
+            // is not a Rust `Result` carrier, so do not manufacture an `Ok`.
+            call
         }
     }
 }

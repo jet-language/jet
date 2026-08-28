@@ -353,18 +353,6 @@ fn jet_jit_int_saturating_mul(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_saturating_mul(left, right))
 }
 
-fn jet_jit_int_wrapping_add(left: i64, right: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.int_wrapping_add(left, right))
-}
-
-fn jet_jit_int_wrapping_sub(left: i64, right: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.int_wrapping_sub(left, right))
-}
-
-fn jet_jit_int_wrapping_mul(left: i64, right: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.int_wrapping_mul(left, right))
-}
-
 fn jet_jit_int_int_pow(left: i64, right: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.int_int_pow(left, right))
 }
@@ -689,9 +677,6 @@ host_fns! {
     int_saturating_add: "jet_jit_int_saturating_add" => jet_jit_int_saturating_add: sig_binary;
     int_saturating_sub: "jet_jit_int_saturating_sub" => jet_jit_int_saturating_sub: sig_binary;
     int_saturating_mul: "jet_jit_int_saturating_mul" => jet_jit_int_saturating_mul: sig_binary;
-    int_wrapping_add: "jet_jit_int_wrapping_add" => jet_jit_int_wrapping_add: sig_binary;
-    int_wrapping_sub: "jet_jit_int_wrapping_sub" => jet_jit_int_wrapping_sub: sig_binary;
-    int_wrapping_mul: "jet_jit_int_wrapping_mul" => jet_jit_int_wrapping_mul: sig_binary;
     int_int_pow: "jet_jit_int_int_pow" => jet_jit_int_int_pow: sig_binary;
     int_gcd: "jet_jit_int_gcd" => jet_jit_int_gcd: sig_binary;
     int_lcm: "jet_jit_int_lcm" => jet_jit_int_lcm: sig_binary;

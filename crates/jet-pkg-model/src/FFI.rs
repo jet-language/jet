@@ -656,46 +656,48 @@ mod http_server_tls_persist_tests {
 
     fn read_one(
         stream: &mut rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream>,
+        pending: &mut Vec<u8>,
     ) -> String {
         use std::io::Read;
-        let mut raw = Vec::new();
         let mut buf = [0u8; 4096];
         loop {
-            match stream.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    raw.extend_from_slice(&buf[..n]);
-                    if let Some(header_end) =
-                        raw.windows(4).position(|window| window == b"\r\n\r\n")
-                    {
-                        let headers = std::str::from_utf8(&raw[..header_end]).unwrap_or("");
-                        let length = headers.lines().skip(1).find_map(|line| {
-                            let (name, value) = line.split_once(':')?;
-                            name.eq_ignore_ascii_case("content-length")
-                                .then(|| value.trim().parse::<usize>().ok())
-                                .flatten()
-                        });
-                        if let Some(length) = length {
-                            if raw.len() >= header_end + 4 + length {
-                                break;
-                            }
-                        }
+            if let Some(header_end) = pending
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+            {
+                let headers = std::str::from_utf8(&pending[..header_end]).unwrap_or("");
+                let length = headers.lines().skip(1).find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                });
+                if let Some(length) = length {
+                    let response_end = header_end + 4 + length;
+                    if pending.len() >= response_end {
+                        let response = pending.drain(..response_end).collect::<Vec<_>>();
+                        return String::from_utf8_lossy(&response).into_owned();
                     }
                 }
+            }
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => pending.extend_from_slice(&buf[..n]),
                 Err(error)
                     if matches!(
                         error.kind(),
                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                     ) =>
                 {
-                    if !raw.is_empty() {
+                    if !pending.is_empty() {
                         break;
                     }
                 }
                 Err(error) => panic!("read: {error}"),
             }
         }
-        String::from_utf8_lossy(&raw).into_owned()
+        let response = std::mem::take(pending);
+        String::from_utf8_lossy(&response).into_owned()
     }
 
     #[test]
@@ -746,8 +748,9 @@ mod http_server_tls_persist_tests {
             .unwrap();
         client.flush().unwrap();
 
-        let first = read_one(&mut client);
-        let second = read_one(&mut client);
+        let mut pending = Vec::new();
+        let first = read_one(&mut client, &mut pending);
+        let second = read_one(&mut client, &mut pending);
         assert!(first.ends_with("\r\n\r\npipe1"), "{first}");
         assert!(second.ends_with("\r\n\r\npipe2"), "{second}");
         assert_eq!(calls.load(Ordering::Acquire), 2);

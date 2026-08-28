@@ -48,32 +48,43 @@
 
     macro_rules! jet_lane_ops {
         ($T:ident, $E:ty, $N:literal) => {
+            jet_lane_ops!(
+                $T,
+                $E,
+                $N,
+                crate::jet_simd_add_array,
+                crate::jet_simd_sub_array,
+                crate::jet_simd_mul_array,
+                crate::jet_simd_div_array
+            );
+        };
+        ($T:ident, $E:ty, $N:literal, $add:path, $sub:path, $mul:path, $div:path) => {
             impl std::ops::Add for $T {
                 type Output = $T;
                 #[inline(always)]
                 fn add(self, o: $T) -> $T {
-                    $T(crate::jet_simd_add_array(&self.0, &o.0))
+                    $T($add(&self.0, &o.0))
                 }
             }
             impl std::ops::Sub for $T {
                 type Output = $T;
                 #[inline(always)]
                 fn sub(self, o: $T) -> $T {
-                    $T(crate::jet_simd_sub_array(&self.0, &o.0))
+                    $T($sub(&self.0, &o.0))
                 }
             }
             impl std::ops::Mul for $T {
                 type Output = $T;
                 #[inline(always)]
                 fn mul(self, o: $T) -> $T {
-                    $T(crate::jet_simd_mul_array(&self.0, &o.0))
+                    $T($mul(&self.0, &o.0))
                 }
             }
             impl std::ops::Div for $T {
                 type Output = $T;
                 #[inline(always)]
                 fn div(self, o: $T) -> $T {
-                    $T(crate::jet_simd_div_array(&self.0, &o.0))
+                    $T($div(&self.0, &o.0))
                 }
             }
             impl std::ops::AddAssign for $T {
@@ -105,7 +116,15 @@
     jet_lane_ops!(F32x4, f32, 4);
     jet_lane_ops!(F64x2, f64, 2);
     jet_lane_ops!(F32x8, f32, 8);
-    jet_lane_ops!(F64x4, f64, 4);
+    jet_lane_ops!(
+        F64x4,
+        f64,
+        4,
+        crate::jet_simd_f64x4_add_array,
+        crate::jet_simd_f64x4_sub_array,
+        crate::jet_simd_f64x4_mul_array,
+        crate::jet_simd_f64x4_div_array
+    );
     jet_lane_ops!(I8x16, i8, 16);
     jet_lane_ops!(I16x8, i16, 8);
     jet_lane_ops!(I32x4, i32, 4);

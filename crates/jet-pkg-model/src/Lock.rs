@@ -4279,6 +4279,7 @@ priority = 2
         );
         p.content_hash = Some("sha256-tree".to_string());
         p.effects = vec!["Net".to_string(), "FS".to_string()];
+        p.required_effects = p.effects.clone();
         let lock = base_lock(vec![p.clone()], Vec::new());
         let back = parse(&write(&lock)).expect("parse");
         assert_eq!(back.packages[0], p);

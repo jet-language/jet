@@ -2656,12 +2656,11 @@ fn datetime_from_unix_ms(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn datetime_parse(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(
-        match super::time_kernel::JetDateTime::parse_rfc3339(string_arg(args, 0, span)?) {
-            Ok(datetime) => CtValue::Present(Box::new(DateTime::from_inner(datetime).value())),
-            Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
-        },
-    )
+    let text = string_arg(args, 0, span)?.to_string();
+    Ok(match super::time_kernel::jet_time_parse_rfc3339(&text) {
+        Ok(datetime) => CtValue::Present(Box::new(DateTime::from_inner(datetime).value())),
+        Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+    })
 }
 
 fn datetime_parts(args: &[CtValue], span: Span) -> EvalResult {

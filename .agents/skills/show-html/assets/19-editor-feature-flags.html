@@ -1,0 +1,795 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Acme — flags.production.json</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..600;1,6..72,300..600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  :root {
+    --ivory: #FAF9F5;
+    --slate: #141413;
+    --clay: #D97757;
+    --clay-d: #B85C3E;
+    --oat: #E3DACC;
+    --olive: #788C5D;
+    --olive-d: #5C6F44;
+    --gray-50: #F8F7F3;
+    --gray-100: #F0EEE6;
+    --gray-200: #D1CFC5;
+    --gray-300: #BBB9AF;
+    --gray-500: #87867F;
+    --gray-700: #3D3D3A;
+    --gray-800: #2A2A28;
+    --white: #ffffff;
+    --sky: #6B8FA3;
+    --serif: 'Newsreader', ui-serif, Georgia, serif;
+    --sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background: var(--gray-50);
+    color: var(--slate);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 48px 36px 80px;
+  }
+
+  /* ---------- header ---------- */
+
+  header {
+    margin-bottom: 32px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+
+  .header-left { flex: 1; min-width: 300px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--clay);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .eyebrow::before {
+    content: '';
+    width: 16px;
+    height: 2px;
+    background: var(--clay);
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 22px;
+    letter-spacing: -0.01em;
+    color: var(--slate);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  h1 .env-badge {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--clay);
+    color: var(--white);
+    border-radius: 5px;
+    padding: 3px 8px;
+    vertical-align: middle;
+  }
+
+  .sub {
+    color: var(--gray-500);
+    max-width: 620px;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+
+  /* ---------- layout ---------- */
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 24px;
+    align-items: start;
+  }
+
+  @media (max-width: 920px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: static !important; }
+  }
+
+  /* ---------- warning banner ---------- */
+
+  .banner {
+    grid-column: 1 / -1;
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 18px;
+    border: 1px solid #E8C2AE;
+    background: linear-gradient(135deg, #FDF4EE 0%, #F8E9E0 100%);
+    color: var(--clay-d);
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .banner.show { display: flex; }
+  .banner .glyph { font-size: 14px; line-height: 1; }
+
+  /* ---------- groups / panels ---------- */
+
+  .form-col { display: flex; flex-direction: column; gap: 14px; }
+
+  .group {
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: 14px;
+    overflow: hidden;
+    transition: border-color 0.15s ease;
+  }
+
+  .group:hover { border-color: var(--gray-300); }
+
+  .group-head {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--gray-500);
+    padding: 14px 20px 12px;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .group-head .name { color: var(--gray-700); font-weight: 600; }
+  .group-head .meta { letter-spacing: 0.04em; font-weight: 500; }
+
+  /* ---------- flag rows ---------- */
+
+  .flag {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--gray-100);
+    border-left: 3px solid transparent;
+    transition: border-left-color 0.18s ease, background 0.18s ease;
+  }
+
+  .flag:last-child { border-bottom: none; }
+
+  .flag.warn {
+    border-left-color: var(--clay);
+    background: linear-gradient(135deg, #FDF6F1 0%, #FBF3EE 100%);
+  }
+
+  .flag-info { flex: 1; min-width: 0; }
+
+  .flag-key {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--gray-700);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .dot {
+    display: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--clay);
+    flex: none;
+    animation: dotPulse 2s ease-in-out infinite;
+  }
+
+  @keyframes dotPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .flag.changed .dot { display: inline-block; }
+
+  .rollout {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--sky);
+    background: #E8EFF3;
+    border: 1px solid #D0DCE3;
+    border-radius: 5px;
+    padding: 2px 8px;
+  }
+
+  .flag-desc {
+    color: var(--gray-500);
+    font-size: 12.5px;
+    margin-top: 3px;
+    line-height: 1.5;
+  }
+
+  .req-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    color: var(--gray-500);
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: 5px;
+    padding: 3px 10px;
+  }
+
+  .req-chip .warn-glyph { display: none; }
+
+  .flag.warn .req-chip {
+    color: var(--clay-d);
+    background: #F8E1D5;
+    border-color: #E8C2AE;
+  }
+
+  .flag.warn .req-chip .warn-glyph { display: inline; }
+
+  /* ---------- toggle switch ---------- */
+
+  .toggle {
+    position: relative;
+    flex: none;
+    width: 42px;
+    height: 24px;
+    margin-top: 2px;
+  }
+
+  .toggle input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+    z-index: 1;
+  }
+
+  .toggle .track {
+    position: absolute;
+    inset: 0;
+    background: var(--gray-200);
+    border-radius: 999px;
+    transition: background 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+
+  .toggle .track::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--white);
+    box-shadow: 0 1px 3px rgba(20, 20, 19, 0.15);
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.22s ease;
+  }
+
+  .toggle input:checked + .track {
+    background: var(--olive);
+  }
+
+  .toggle input:checked + .track::after {
+    transform: translateX(18px);
+    box-shadow: 0 1px 4px rgba(120, 140, 93, 0.3);
+  }
+
+  .toggle input:focus-visible + .track {
+    outline: 2px solid var(--slate);
+    outline-offset: 2px;
+  }
+
+  .toggle input:hover + .track {
+    box-shadow: 0 0 0 3px rgba(20, 20, 19, 0.06);
+  }
+
+  /* ---------- sidebar ---------- */
+
+  .sidebar {
+    position: sticky;
+    top: 24px;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: 14px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .side-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--gray-500);
+    font-weight: 600;
+  }
+
+  .side-count {
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 18px;
+    letter-spacing: -0.01em;
+    color: var(--slate);
+    margin-top: 4px;
+  }
+
+  .side-count .warn-n { color: var(--clay-d); }
+  .side-count .sep { color: var(--gray-300); margin: 0 6px; }
+
+  .diff {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.8;
+    background: var(--slate);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    max-height: 320px;
+    overflow-y: auto;
+    white-space: pre;
+    color: #C8C6BC;
+  }
+
+  .diff .minus { color: #D97757; opacity: 0.7; }
+  .diff .plus { color: #A8BF85; }
+  .diff .empty { color: #6B6A64; font-style: italic; }
+
+  .btn {
+    display: block;
+    width: 100%;
+    border: none;
+    border-radius: 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 10px 16px;
+    cursor: pointer;
+    text-align: center;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  }
+
+  .btn:active { transform: translateY(1px); }
+
+  .btn.primary {
+    background: var(--slate);
+    color: var(--ivory);
+  }
+
+  .btn.primary:hover:not(:disabled) { background: var(--gray-800); }
+
+  .btn.primary:disabled {
+    background: var(--gray-200);
+    color: var(--gray-500);
+    cursor: not-allowed;
+  }
+
+  .btn.primary.copied { background: var(--olive); }
+
+  .btn.ghost {
+    background: transparent;
+    color: var(--gray-700);
+    border: 1.5px solid var(--gray-200);
+  }
+
+  .btn.ghost:hover { border-color: var(--gray-500); color: var(--slate); }
+  .btn.ghost.copied { border-color: var(--olive); color: var(--olive); }
+  .btn-stack { display: flex; flex-direction: column; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="header-left">
+      <div class="eyebrow">Acme / editor / feature-flags</div>
+      <h1>flags.production.json <span class="env-badge">production</span></h1>
+      <p class="sub">A form-based editor for the production feature-flag config.
+        Toggle flags, fix dependency warnings as they surface, then copy out
+        only the lines that changed.</p>
+    </div>
+  </header>
+
+  <div class="layout">
+    <div class="banner" id="banner">
+      <span class="glyph">&#9888;</span>
+      <span id="bannerText">1 flag is enabled without its prerequisite</span>
+    </div>
+
+    <div class="form-col" id="formCol"><!-- groups injected --></div>
+
+    <aside class="sidebar">
+      <div>
+        <div class="side-label">Pending changes</div>
+        <div class="side-count" id="sideCount">0 changed</div>
+      </div>
+      <pre class="diff" id="diff"><span class="empty">// no changes yet</span></pre>
+      <div class="btn-stack">
+        <button class="btn primary" id="copyDiff" disabled>Copy diff</button>
+        <button class="btn ghost" id="copyJson">Copy full JSON</button>
+        <button class="btn ghost" id="reset">Reset</button>
+      </div>
+    </aside>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// data — the production flag set, as it exists right now
+// ---------------------------------------------------------------------------
+
+const GROUPS = [
+  {
+    id: "onboarding",
+    label: "Onboarding",
+    flags: [
+      { key: "onboarding.checklist_v2",
+        desc: "New three-step setup checklist replacing the modal tour.",
+        on: true },
+      { key: "onboarding.invite_nudge",
+        desc: "Nudge owners to invite teammates after creating their first project.",
+        on: true },
+      { key: "onboarding.workspace_templates",
+        desc: "Offer prebuilt workspace templates during signup.",
+        on: false, requires: "onboarding.checklist_v2" },
+      { key: "onboarding.skip_email_verify",
+        desc: "Let SSO-domain users in before email verification completes.",
+        on: false }
+    ]
+  },
+  {
+    id: "sync",
+    label: "Sync engine",
+    flags: [
+      { key: "sync.delta_compression",
+        desc: "Send field-level deltas instead of full document snapshots.",
+        on: true },
+      { key: "sync.offline_queue_v2",
+        desc: "Persist offline edits to IndexedDB and replay on reconnect.",
+        on: false, requires: "sync.delta_compression" },
+      { key: "sync.presence_cursors",
+        desc: "Show live collaborator cursors in board and doc views.",
+        on: true },
+      { key: "sync.conflict_banner",
+        desc: "Surface a merge banner instead of silently last-write-wins.",
+        on: false, requires: "sync.offline_queue_v2" },
+      { key: "sync.binary_ws_frames",
+        desc: "Switch the realtime channel to binary WebSocket frames.",
+        on: false, rollout: 10 }
+    ]
+  },
+  {
+    id: "billing",
+    label: "Billing",
+    flags: [
+      { key: "billing.usage_meter",
+        desc: "Show per-seat usage meter on the workspace billing page.",
+        on: false },
+      { key: "billing.annual_discount_banner",
+        desc: "Promote the annual-plan discount in the upgrade flow.",
+        on: true },
+      { key: "billing.proration_preview",
+        desc: "Preview the prorated charge before confirming a plan change.",
+        on: false, requires: "billing.usage_meter" },
+      { key: "billing.dunning_emails_v3",
+        desc: "Use the rewritten dunning sequence with a 14-day grace window.",
+        on: true, rollout: 25 }
+    ]
+  },
+  {
+    id: "internal",
+    label: "Internal",
+    flags: [
+      { key: "internal.shadow_traffic",
+        desc: "Mirror 1% of API traffic to the staging cluster for diffing.",
+        on: false },
+      { key: "internal.query_tracing",
+        desc: "Attach OpenTelemetry spans to every Postgres query.",
+        on: true },
+      { key: "internal.kill_switch_ui",
+        desc: "Expose the emergency kill-switch panel in the admin console.",
+        on: true, requires: "internal.query_tracing" }
+    ]
+  }
+];
+
+// flat lookup, plus a frozen copy of initial state
+const FLAGS = {};
+const INITIAL = {};
+GROUPS.forEach(g => g.flags.forEach(f => {
+  FLAGS[f.key] = f;
+  INITIAL[f.key] = f.on;
+}));
+
+// ---------------------------------------------------------------------------
+// render the form once; state lives in the checkboxes
+// ---------------------------------------------------------------------------
+
+const formCol   = document.getElementById("formCol");
+const banner    = document.getElementById("banner");
+const bannerTxt = document.getElementById("bannerText");
+const sideCount = document.getElementById("sideCount");
+const diffEl    = document.getElementById("diff");
+const copyDiffBtn = document.getElementById("copyDiff");
+const copyJsonBtn = document.getElementById("copyJson");
+const resetBtn    = document.getElementById("reset");
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function buildForm() {
+  formCol.innerHTML = "";
+  for (const g of GROUPS) {
+    const panel = document.createElement("section");
+    panel.className = "group";
+    panel.dataset.group = g.id;
+
+    const head = document.createElement("div");
+    head.className = "group-head";
+    head.innerHTML =
+      '<span class="name">' + esc(g.label) + '</span>' +
+      '<span class="meta" data-meta></span>';
+    panel.appendChild(head);
+
+    for (const f of g.flags) {
+      const row = document.createElement("div");
+      row.className = "flag";
+      row.dataset.key = f.key;
+
+      const rolloutBadge = (typeof f.rollout === "number")
+        ? '<span class="rollout">' + f.rollout + '% rollout</span>'
+        : "";
+
+      const reqChip = f.requires
+        ? '<div class="req-chip"><span class="warn-glyph">&#9888;</span>' +
+          '<span>requires ' + esc(f.requires) + '</span></div>'
+        : "";
+
+      row.innerHTML =
+        '<label class="toggle">' +
+          '<input type="checkbox" data-key="' + esc(f.key) + '"' +
+            (f.on ? " checked" : "") +
+            ' aria-label="' + esc(f.key) + '">' +
+          '<span class="track"></span>' +
+        '</label>' +
+        '<div class="flag-info">' +
+          '<div class="flag-key"><span class="dot"></span>' +
+            '<span>' + esc(f.key) + '</span>' + rolloutBadge +
+          '</div>' +
+          '<div class="flag-desc">' + esc(f.desc) + '</div>' +
+          reqChip +
+        '</div>';
+
+      panel.appendChild(row);
+    }
+    formCol.appendChild(panel);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// state helpers
+// ---------------------------------------------------------------------------
+
+function currentState() {
+  const state = {};
+  formCol.querySelectorAll("input[type=checkbox]").forEach(cb => {
+    state[cb.dataset.key] = cb.checked;
+  });
+  return state;
+}
+
+function computeDiff(state) {
+  const lines = [];
+  for (const g of GROUPS) {
+    for (const f of g.flags) {
+      if (state[f.key] !== INITIAL[f.key]) {
+        lines.push({ key: f.key, from: INITIAL[f.key], to: state[f.key] });
+      }
+    }
+  }
+  return lines;
+}
+
+function diffText(lines) {
+  return lines.map(l =>
+    '- "' + l.key + '": ' + l.from + '\n' +
+    '+ "' + l.key + '": ' + l.to
+  ).join("\n");
+}
+
+function fullJson(state) {
+  let out = "{\n";
+  GROUPS.forEach((g, gi) => {
+    g.flags.forEach((f, fi) => {
+      const last = gi === GROUPS.length - 1 && fi === g.flags.length - 1;
+      out += '  "' + f.key + '": ' + state[f.key] + (last ? "" : ",") + "\n";
+    });
+  });
+  out += "}";
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// the live update pass
+// ---------------------------------------------------------------------------
+
+function update() {
+  const state = currentState();
+  let warnCount = 0;
+
+  // per-row decorations
+  for (const g of GROUPS) {
+    let onCount = 0;
+    for (const f of g.flags) {
+      const row = formCol.querySelector('.flag[data-key="' + CSS.escape(f.key) + '"]');
+      const on = state[f.key];
+      if (on) onCount++;
+
+      const changed = on !== INITIAL[f.key];
+      row.classList.toggle("changed", changed);
+
+      let warn = false;
+      if (f.requires && on && !state[f.requires]) warn = true;
+      row.classList.toggle("warn", warn);
+      if (warn) warnCount++;
+    }
+    const meta = formCol.querySelector(
+      '.group[data-group="' + g.id + '"] [data-meta]');
+    meta.textContent = g.flags.length + " flags, " + onCount + " on";
+  }
+
+  // diff + sidebar
+  const lines = computeDiff(state);
+  if (lines.length === 0) {
+    diffEl.innerHTML = '<span class="empty">// no changes yet</span>';
+    copyDiffBtn.disabled = true;
+  } else {
+    diffEl.innerHTML = lines.map(l =>
+      '<span class="minus">- "' + esc(l.key) + '": ' + l.from + '</span>\n' +
+      '<span class="plus">+ "' + esc(l.key) + '": ' + l.to + '</span>'
+    ).join("\n");
+    copyDiffBtn.disabled = false;
+  }
+
+  sideCount.innerHTML =
+    lines.length + " changed" +
+    '<span class="sep">&middot;</span>' +
+    '<span class="' + (warnCount ? "warn-n" : "") + '">' +
+      warnCount + " warning" + (warnCount === 1 ? "" : "s") +
+    "</span>";
+
+  // banner
+  if (warnCount > 0) {
+    bannerTxt.textContent =
+      warnCount === 1
+        ? "1 flag is enabled without its prerequisite"
+        : warnCount + " flags are enabled without their prerequisites";
+    banner.classList.add("show");
+  } else {
+    banner.classList.remove("show");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// clipboard + buttons
+// ---------------------------------------------------------------------------
+
+function flash(btn, label) {
+  const orig = btn.textContent;
+  btn.textContent = label;
+  btn.classList.add("copied");
+  btn.disabled = true;
+  setTimeout(() => {
+    btn.textContent = orig;
+    btn.classList.remove("copied");
+    btn.disabled = false;
+    update();
+  }, 1200);
+}
+
+function writeClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); } catch (e) { /* ignore */ }
+  document.body.removeChild(ta);
+  return Promise.resolve();
+}
+
+copyDiffBtn.addEventListener("click", () => {
+  const lines = computeDiff(currentState());
+  if (!lines.length) return;
+  writeClipboard(diffText(lines)).then(() => flash(copyDiffBtn, "Copied ✓"));
+});
+
+copyJsonBtn.addEventListener("click", () => {
+  writeClipboard(fullJson(currentState())).then(() => flash(copyJsonBtn, "Copied ✓"));
+});
+
+resetBtn.addEventListener("click", () => {
+  formCol.querySelectorAll("input[type=checkbox]").forEach(cb => {
+    cb.checked = INITIAL[cb.dataset.key];
+  });
+  update();
+});
+
+formCol.addEventListener("change", e => {
+  if (e.target.matches("input[type=checkbox]")) update();
+});
+
+// ---------------------------------------------------------------------------
+// boot
+// ---------------------------------------------------------------------------
+
+buildForm();
+update();
+</script>
+<script>
+(function(){var t=localStorage.getItem('gallery-theme');if(!t||t==='gallery')return;var c={dark:{'--ivory':'#1A1A20','--slate':'#E8E6E1','--clay':'#FF7A5C','--oat':'#3A3A42','--olive':'#7ABF6E','--rust':'#E87A4A','--sky':'#6BA3D6','--plum':'#C07AB8','--white':'#1A1A20','--gray-100':'#222228','--gray-200':'#2A2A30','--gray-300':'#3A3A42','--gray-500':'#8A8880','--gray-700':'#B0AEA6','--surface':'#222228','--surface-0':'#181820','--surface-1':'#1A1A20','--surface-2':'#222228','--surface-hover':'#2A2A32','--border':'#2E2E36','--border-subtle':'#262630','--border-focus':'#4A4A56'},terminal:{'--ivory':'#0A0E0A','--slate':'#33FF66','--clay':'#FF9933','--oat':'#1A331A','--olive':'#33FF66','--rust':'#FF6633','--sky':'#33CCFF','--plum':'#CC66FF','--white':'#111611','--gray-100':'#142814','--gray-200':'#1A331A','--gray-300':'#225522','--gray-500':'#1A9940','--gray-700':'#22CC55','--surface':'#0D140D','--surface-0':'#080C08','--surface-1':'#111611','--surface-2':'#0D140D','--surface-hover':'#152015','--border':'#1A331A','--border-subtle':'#142814','--border-focus':'#225522'},zen:{'--ivory':'#FEFEFE','--slate':'#2C2C2C','--clay':'#C88870','--oat':'#E8E8E0','--olive':'#8CB880','--rust':'#B89080','--sky':'#8898B0','--plum':'#A088A0','--white':'#FFFFFF','--gray-100':'#F6F6F6','--gray-200':'#EEEEEE','--gray-300':'#DDDDDD','--gray-500':'#8C8C8C','--gray-700':'#5C5C5C','--surface':'#F6F6F6','--surface-0':'#FEFEFE','--surface-1':'#FFFFFF','--surface-2':'#F6F6F6','--surface-hover':'#F0F0F0','--border':'#E0E0E0','--border-subtle':'#EBEBEB','--border-focus':'#CCCCCC'}};var s=document.documentElement.style;var m=c[t]||{};Object.keys(m).forEach(function(k){s.setProperty(k,m[k])});})();
+</script>
+</body>
+</html>

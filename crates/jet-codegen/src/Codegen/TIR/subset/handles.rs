@@ -794,6 +794,7 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
             }
         }
         ("core.encoding.json", "to_string" | "to_string_pretty") => return Type::String,
+        ("core.text.fmt", "decimal") => return Type::String,
         // D-TYPE2-UNCERT1=A: internal canonical measurement constructor route.
         ("core.units", "from") => {
             return Type::Apply {

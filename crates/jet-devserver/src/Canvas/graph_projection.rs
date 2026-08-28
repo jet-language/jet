@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use jet_driver::Diagnostics::Span;
@@ -16,11 +16,115 @@ use super::graph_json::{
     add_source_comment_regions, add_wire, add_wire_with_span, graph_to_json, meta_attr_json,
     node_catalog, set_pin_append, set_pin_source_span,
 };
-use super::schema_api::{
-    source_revision, CanvasCallableExport, GraphBuilder, GraphEditAnchor, InlineExpr, NodeQueryRef,
-    NodeRec, PinRec, Projection, GRAPH_SCHEMA_VERSION,
-};
+use super::schema_api::GRAPH_SCHEMA_VERSION;
+use super::source_model::source_revision;
 use super::validation_json::{json_str, span_json};
+
+#[derive(Debug, Clone)]
+pub(super) struct InlineExpr {
+    pub(super) id: String,
+    pub(super) span: SourceSpan,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct GraphEditAnchor {
+    pub(super) graph_id: String,
+    pub(super) insert_offset: usize,
+    pub(super) fallible: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct NodeQueryRef {
+    pub(super) graph_id: String,
+    pub(super) node_id: String,
+    pub(super) kind: String,
+    pub(super) title: String,
+    pub(super) span: SourceSpan,
+}
+
+/// One source-backed callable that the entry module can actually name.
+///
+/// The semantic ledger owns visibility. Canvas keeps only the source anchor so
+/// the action query cannot mistake every SemIndex function-shaped row for a
+/// palette export (for example a foreign or generated helper).
+#[derive(Debug, Clone)]
+pub(super) struct CanvasCallableExport {
+    pub(super) module_path: String,
+    pub(super) span: SourceSpan,
+    pub(super) callee: String,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct Projection {
+    pub(super) json: String,
+    pub(super) inline_exprs: Vec<InlineExpr>,
+    pub(super) graph_anchors: Vec<GraphEditAnchor>,
+    pub(super) node_refs: Vec<NodeQueryRef>,
+    pub(super) callable_exports: Vec<CanvasCallableExport>,
+}
+
+#[derive(Default)]
+pub(super) struct GraphBuilder {
+    pub(super) graph_id: String,
+    pub(super) nodes: Vec<NodeRec>,
+    pub(super) pins: Vec<PinRec>,
+    pub(super) wires: Vec<WireRec>,
+    pub(super) regions: Vec<String>,
+    pub(super) inline_exprs: Vec<InlineRec>,
+    pub(super) local_pins: HashMap<String, String>,
+    pub(super) local_types: HashMap<String, String>,
+    pub(super) getter_pins: HashMap<String, String>,
+    pub(super) next_wire: usize,
+}
+
+#[derive(Clone)]
+pub(super) struct NodeRec {
+    pub(super) id: String,
+    pub(super) kind: String,
+    pub(super) archetype: String,
+    pub(super) title: String,
+    pub(super) span: SourceSpan,
+    pub(super) x: i32,
+    pub(super) y: i32,
+    pub(super) badges: Vec<String>,
+    pub(super) affordances: Vec<String>,
+    pub(super) meta_json: Option<String>,
+}
+
+pub(super) struct PinRec {
+    pub(super) id: String,
+    pub(super) node_id: String,
+    pub(super) name: String,
+    pub(super) direction: String,
+    pub(super) ty: String,
+    pub(super) role: Option<String>,
+    pub(super) pattern_source: Option<String>,
+    pub(super) ability: String,
+    pub(super) fallible: bool,
+    pub(super) effect_grant_need: Option<String>,
+    pub(super) span: SourceSpan,
+    pub(super) pattern_source_span: Option<SourceSpan>,
+    pub(super) append_op: Option<String>,
+    pub(super) element_index: Option<usize>,
+}
+
+pub(super) struct WireRec {
+    pub(super) id: String,
+    pub(super) from_pin: String,
+    pub(super) to_pin: String,
+    pub(super) kind: String,
+    pub(super) span: Option<SourceSpan>,
+    pub(super) from_span: Option<SourceSpan>,
+    pub(super) to_span: Option<SourceSpan>,
+}
+
+pub(super) struct InlineRec {
+    pub(super) id: String,
+    pub(super) node_id: String,
+    pub(super) role: String,
+    pub(super) source: String,
+    pub(super) span: SourceSpan,
+}
 
 pub(super) fn project_checked(
     path: &Path,

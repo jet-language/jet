@@ -9,11 +9,50 @@ pub(crate) fn jet_fmt_decimal(value: f64, precision: i64) -> String {
     comma_decimal(format!("{:.*}", precision, value))
 }
 
+/// D-FMT-INTERP3=B: format an exact integer with fixed decimal places. The
+/// caller supplies the carrier's decimal spelling so native and spilled `Int`
+/// values use one kernel without a lossy float conversion.
+pub(crate) fn jet_fmt_decimal_int(value: &str, precision: i64) -> String {
+    let precision = precision.clamp(0, 9) as usize;
+    let value = value.trim();
+    let (negative, digits) = if let Some(rest) = value.strip_prefix('-') {
+        (true, rest)
+    } else if let Some(rest) = value.strip_prefix('+') {
+        (false, rest)
+    } else {
+        (false, value)
+    };
+    if digits.is_empty() || !digits.bytes().all(|digit| digit.is_ascii_digit()) {
+        return value.to_string();
+    }
+    let digits = digits.trim_start_matches('0');
+    let digits = if digits.is_empty() { "0" } else { digits };
+    let sign = if negative && digits != "0" { "-" } else { "" };
+    let whole = group_decimal_digits(digits);
+    if precision == 0 {
+        format!("{sign}{whole}")
+    } else {
+        format!("{sign}{whole}.{}", "0".repeat(precision))
+    }
+}
+
 /// D-FMT-INTERP3=B: convert an exact decimal integer spelling to lowercase
 /// hexadecimal, then zero-pad its digits to the requested width. The caller
 /// supplies the carrier's decimal spelling so the same kernel handles native
 /// small and spilled `Int` values.
 pub(crate) fn jet_fmt_hex_decimal(value: &str, width: i64) -> String {
+    jet_fmt_radix_decimal(value, 16, width)
+}
+
+pub(crate) fn jet_fmt_bin_decimal(value: &str) -> String {
+    jet_fmt_radix_decimal(value, 2, 0)
+}
+
+pub(crate) fn jet_fmt_oct_decimal(value: &str) -> String {
+    jet_fmt_radix_decimal(value, 8, 0)
+}
+
+fn jet_fmt_radix_decimal(value: &str, radix: u16, width: i64) -> String {
     let value = value.trim();
     let (negative, digits) = if let Some(rest) = value.strip_prefix('-') {
         (true, rest)
@@ -33,33 +72,38 @@ pub(crate) fn jet_fmt_hex_decimal(value: &str, width: i64) -> String {
         decimal.remove(0);
     }
 
-    let mut hexadecimal = Vec::new();
+    let mut converted = Vec::new();
     while decimal.iter().any(|digit| *digit != 0) {
         let mut carry = 0u16;
         let mut quotient = Vec::with_capacity(decimal.len());
         for digit in decimal {
             let current = carry * 10 + u16::from(digit);
-            let next = current / 16;
-            carry = current % 16;
+            let next = current / radix;
+            carry = current % radix;
             if !quotient.is_empty() || next != 0 {
                 quotient.push(next as u8);
             }
         }
-        hexadecimal.push(b"0123456789abcdef"[carry as usize] as char);
+        converted.push(b"0123456789abcdef"[carry as usize] as char);
         decimal = quotient;
     }
-    if hexadecimal.is_empty() {
-        hexadecimal.push('0');
+    if converted.is_empty() {
+        converted.push('0');
     } else {
-        hexadecimal.reverse();
+        converted.reverse();
     }
-    let hexadecimal = hexadecimal.into_iter().collect::<String>();
-    let padding = "0".repeat((width.max(0) as usize).saturating_sub(hexadecimal.len()));
-    if negative && hexadecimal != "0" {
-        format!("-{padding}{hexadecimal}")
+    let converted = converted.into_iter().collect::<String>();
+    let padding = "0".repeat((width.max(0) as usize).saturating_sub(converted.len()));
+    if negative && converted != "0" {
+        format!("-{padding}{converted}")
     } else {
-        format!("{padding}{hexadecimal}")
+        format!("{padding}{converted}")
     }
+}
+
+pub(crate) fn jet_fmt_sci(value: f64, precision: i64) -> String {
+    let precision = precision.clamp(0, 9) as usize;
+    format!("{:.*e}", precision, value)
 }
 
 /// D-FMT-PRETTY1=A: expand canonical Debug text without inspecting terminal
@@ -289,6 +333,10 @@ pub(crate) fn jet_fmt_plural(count: i64, singular: &String, plural: &String) -> 
     format!("{} {}", comma_int(count), word)
 }
 
+pub(crate) fn jet_fmt_pad(text: &String, width: i64, fill: &String) -> String {
+    jet_fmt_pad_right(text, width, fill)
+}
+
 pub(crate) fn jet_fmt_pad_left(text: &String, width: i64, fill: &String) -> String {
     let need = pad_need(text, width);
     format!("{}{}", pad_fill(fill, need), text)
@@ -323,19 +371,25 @@ fn pad_fill(fill: &str, len: usize) -> String {
 }
 
 fn comma_int(value: i64) -> String {
-    let raw = value.abs().to_string();
+    group_decimal_digits(&value.to_string())
+}
+
+fn group_decimal_digits(raw: &str) -> String {
+    let (sign, digits) = if let Some(rest) = raw.strip_prefix('-') {
+        ("-", rest)
+    } else if let Some(rest) = raw.strip_prefix('+') {
+        ("+", rest)
+    } else {
+        ("", raw)
+    };
     let mut out = String::new();
-    for (index, ch) in raw.chars().rev().enumerate() {
+    for (index, ch) in digits.chars().rev().enumerate() {
         if index > 0 && index % 3 == 0 {
             out.push(',');
         }
         out.push(ch);
     }
-    let mut text: String = out.chars().rev().collect();
-    if value < 0 {
-        text.insert(0, '-');
-    }
-    text
+    format!("{sign}{}", out.chars().rev().collect::<String>())
 }
 
 fn comma_decimal(raw: String) -> String {

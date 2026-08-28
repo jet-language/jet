@@ -1347,7 +1347,7 @@ mod tests {
         .unwrap();
         let options = BindOptions {
             lib: "math".into(),
-            target: std::env::var("JET_BUILD_TARGET").unwrap(),
+            target: crate::FFI::host_target(),
             clang: tool("clang++"),
             archiver: tool("ar"),
             include_dirs: vec![root.clone()],

@@ -242,7 +242,11 @@ impl WatchGraph {
                 return RootKind::Generated;
             }
         }
-        match path.extension().and_then(|e| e.to_str()) {
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase());
+        match extension.as_deref() {
             Some("jet") => RootKind::Import,
             Some("html" | "htm") => RootKind::HTML,
             Some("css") => RootKind::Style,
@@ -265,6 +269,7 @@ impl WatchGraph {
         let mut graph = Self::new();
         let entry = canonicalize_loose(entry);
         graph.set_entry(entry.clone());
+        let mut html_paths = Vec::new();
 
         let entry_dir = entry.parent().unwrap_or_else(|| Path::new("."));
         let project = jet_driver::Loader::find_manifest_root_checked(entry_dir)?
@@ -274,7 +279,7 @@ impl WatchGraph {
             (manifest, RootKind::Manifest),
             (Some(project.join(".jet/lock")), RootKind::Lock),
             (
-                Some(project.join(format!(
+                Some(entry_dir.join(format!(
                     "{}.html",
                     entry.file_stem().and_then(|s| s.to_str()).unwrap_or("app")
                 ))),
@@ -293,9 +298,16 @@ impl WatchGraph {
             let Some(path) = path else {
                 continue;
             };
-            if path.exists() || kind == RootKind::Manifest || kind == RootKind::Lock {
+            if path.exists()
+                || kind == RootKind::Manifest
+                || kind == RootKind::Lock
+                || kind == RootKind::HTML
+            {
                 graph.upsert(path.clone(), kind);
-                graph.link(entry.clone(), path);
+                graph.link(entry.clone(), path.clone());
+                if kind == RootKind::HTML {
+                    html_paths.push(path);
+                }
             }
         }
 
@@ -306,9 +318,118 @@ impl WatchGraph {
             }
             let kind = Self::classify(&path);
             graph.upsert(path.clone(), kind);
-            graph.link(entry.clone(), path);
+            graph.link(entry.clone(), path.clone());
+            if kind == RootKind::HTML {
+                html_paths.push(path);
+            }
         }
+        graph.scan_html_references(&html_paths);
+        graph.scan_runtime_inputs();
         Ok(graph)
+    }
+
+    /// Track literal paths passed to the file-reading side of `core.files`.
+    /// The runtime still owns all file semantics; this is only the watcher
+    /// discovering which paths can invalidate a generator.
+    fn scan_runtime_inputs(&mut self) {
+        let sources: Vec<PathBuf> = self
+            .nodes
+            .values()
+            .filter(|node| node.kind == RootKind::Import)
+            .map(|node| node.path.clone())
+            .collect();
+        let base = self
+            .entry
+            .as_deref()
+            .and_then(Path::parent)
+            .unwrap_or_else(|| Path::new("."));
+        let mut inputs = BTreeSet::new();
+        for source in sources {
+            let Ok(text) = fs::read_to_string(source) else {
+                continue;
+            };
+            for raw in runtime_file_inputs(&text) {
+                let path = Path::new(&raw);
+                if path.is_absolute() {
+                    inputs.insert(canonicalize_loose(path));
+                } else {
+                    inputs.insert(canonicalize_loose(&base.join(path)));
+                }
+            }
+        }
+        let mut visited = BTreeSet::new();
+        for input in inputs {
+            self.add_runtime_input_tree(&input, &mut visited);
+        }
+    }
+
+    fn add_runtime_input_tree(&mut self, path: &Path, visited: &mut BTreeSet<PathBuf>) {
+        let path = canonicalize_loose(path);
+        if !visited.insert(path.clone()) {
+            return;
+        }
+        let kind = if path.is_dir() {
+            RootKind::Asset
+        } else {
+            Self::classify(&path)
+        };
+        self.upsert(path.clone(), kind);
+        if let Some(entry) = &self.entry {
+            self.link(entry.clone(), path.clone());
+        }
+        if !path.is_dir() {
+            return;
+        }
+        let mut children: Vec<PathBuf> = fs::read_dir(path)
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item.ok().map(|item| item.path()))
+            .collect();
+        children.sort();
+        for child in children {
+            self.add_runtime_input_tree(&child, visited);
+        }
+    }
+
+    fn scan_html_references(&mut self, roots: &[PathBuf]) {
+        let mut visited = BTreeSet::new();
+        for root in roots {
+            self.add_reference_tree(root, &mut visited);
+        }
+    }
+
+    fn scan_existing_html_references(&mut self) {
+        let roots: Vec<PathBuf> = self
+            .nodes
+            .values()
+            .filter(|node| node.kind == RootKind::HTML)
+            .map(|node| node.path.clone())
+            .collect();
+        self.scan_html_references(&roots);
+    }
+
+    fn add_reference_tree(&mut self, path: &Path, visited: &mut BTreeSet<PathBuf>) {
+        let path = canonicalize_loose(path);
+        if !visited.insert(path.clone()) {
+            return;
+        }
+        let kind = Self::classify(&path);
+        self.upsert(path.clone(), kind);
+        if let Some(entry) = &self.entry {
+            self.link(entry.clone(), path.clone());
+        }
+        let Ok(source) = fs::read_to_string(&path) else {
+            return;
+        };
+        let Some(parent) = path.parent() else {
+            return;
+        };
+        for reference in referenced_paths(&path, &source) {
+            let Some(child) = local_reference_path(parent, &reference) else {
+                continue;
+            };
+            self.add_reference_tree(&child, visited);
+        }
     }
 
     /// Rebuild from disk using the compiler loader's dependency list.
@@ -323,6 +444,13 @@ impl WatchGraph {
                 let mut paths = deps;
                 for module in &bundle.modules {
                     paths.push(module.path.clone());
+                }
+                if let Some(module) = bundle.modules.get(bundle.entry) {
+                    if let (Some(parent), Some(html)) = (module.path.parent(), &module.html_path) {
+                        if let Some(path) = local_reference_path(parent, html) {
+                            paths.push(path);
+                        }
+                    }
                 }
                 for input in &bundle.comptime_inputs {
                     paths.push(bundle.project_root.join(&input.path));
@@ -347,6 +475,239 @@ fn canonicalize_loose(path: &Path) -> PathBuf {
                 .join(path)
         }
     })
+}
+
+const RUNTIME_FILE_INPUT_METHODS: [&str; 11] = [
+    "copy",
+    "copy_dir",
+    "exists",
+    "is_dir",
+    "list_dir",
+    "read",
+    "read_bytes",
+    "walk",
+    "walk_parallel",
+    "glob",
+    "stat",
+];
+
+fn runtime_file_inputs(source: &str) -> Vec<String> {
+    let mut inputs = BTreeSet::new();
+    for method in RUNTIME_FILE_INPUT_METHODS {
+        let marker = format!(".{method}");
+        let mut offset = 0;
+        while let Some(relative) = source[offset..].find(&marker) {
+            let start = offset + relative;
+            let mut cursor = start + marker.len();
+            if source
+                .as_bytes()
+                .get(cursor)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            {
+                offset = cursor;
+                continue;
+            }
+            while source
+                .as_bytes()
+                .get(cursor)
+                .is_some_and(|byte| byte.is_ascii_whitespace())
+            {
+                cursor += 1;
+            }
+            if source.as_bytes().get(cursor) != Some(&b'(') {
+                offset = cursor;
+                continue;
+            }
+            cursor += 1;
+            while source
+                .as_bytes()
+                .get(cursor)
+                .is_some_and(|byte| byte.is_ascii_whitespace())
+            {
+                cursor += 1;
+            }
+            if let Some((value, end)) = quoted_literal(source, cursor) {
+                if !value.is_empty()
+                    && !value.contains('{')
+                    && !value.contains('}')
+                    && !value.contains("://")
+                {
+                    inputs.insert(value.to_string());
+                }
+                offset = end.saturating_add(1);
+            } else {
+                offset = cursor.saturating_add(1);
+            }
+        }
+    }
+    inputs.into_iter().collect()
+}
+
+fn quoted_literal(source: &str, start: usize) -> Option<(&str, usize)> {
+    let bytes = source.as_bytes();
+    let quote = *bytes.get(start)?;
+    if quote != b'\'' && quote != b'"' {
+        return None;
+    }
+    let value_start = start + 1;
+    let mut cursor = value_start;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'\\' => cursor = cursor.saturating_add(2),
+            byte if byte == quote => return Some((&source[value_start..cursor], cursor)),
+            _ => cursor += 1,
+        }
+    }
+    None
+}
+
+fn local_reference_path(base: &Path, raw: &str) -> Option<PathBuf> {
+    let reference = raw
+        .trim()
+        .split(|ch| ch == '?' || ch == '#')
+        .next()?
+        .trim();
+    if reference.is_empty()
+        || reference.starts_with("//")
+        || reference.starts_with("data:")
+        || reference.starts_with("blob:")
+        || reference.starts_with("http:")
+        || reference.starts_with("https:")
+        || reference.starts_with("mailto:")
+        || reference.starts_with("javascript:")
+        || reference.contains('\\')
+    {
+        return None;
+    }
+    let reference = reference.trim_start_matches('/');
+    let path = Path::new(reference);
+    if path.is_absolute() {
+        return None;
+    }
+    Some(canonicalize_loose(&base.join(path)))
+}
+
+fn referenced_paths(path: &Path, source: &str) -> Vec<String> {
+    let mut references = Vec::new();
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    if matches!(extension.as_deref(), Some("html" | "htm")) {
+        for attribute in ["src", "href", "poster", "srcset"] {
+            extract_values_after(source, attribute, Some(b'='), false, attribute == "srcset", &mut references);
+        }
+    }
+    if matches!(extension.as_deref(), Some("html" | "htm" | "css")) {
+        extract_values_after(source, "url", Some(b'('), false, false, &mut references);
+    }
+    if matches!(extension.as_deref(), Some("js" | "mjs")) {
+        extract_values_after(source, "from", None, false, false, &mut references);
+        extract_values_after(source, "import", None, true, false, &mut references);
+    }
+    references
+}
+
+fn is_attribute_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
+}
+
+fn extract_values_after(
+    source: &str,
+    keyword: &str,
+    delimiter: Option<u8>,
+    optional_parentheses: bool,
+    split_srcset: bool,
+    out: &mut Vec<String>,
+) {
+    let lower = source.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let mut offset = 0;
+    while let Some(relative) = lower[offset..].find(keyword) {
+        let start = offset + relative;
+        let before = start.checked_sub(1).and_then(|index| bytes.get(index));
+        let after = bytes.get(start + keyword.len());
+        if before.is_some_and(|byte| is_attribute_name_byte(*byte))
+            || after.is_some_and(|byte| is_attribute_name_byte(*byte))
+        {
+            offset = start + keyword.len();
+            continue;
+        }
+        let mut cursor = start + keyword.len();
+        while bytes.get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+            cursor += 1;
+        }
+        match delimiter {
+            Some(b'=') if bytes.get(cursor) == Some(&b'=') => {
+                cursor += 1;
+                while bytes.get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+                    cursor += 1;
+                }
+            }
+            Some(b'=') => {
+                offset = start + keyword.len();
+                continue;
+            }
+            Some(b'(') if bytes.get(cursor) == Some(&b'(') => {
+                cursor += 1;
+                while bytes.get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+                    cursor += 1;
+                }
+            }
+            Some(b'(') => {
+                offset = start + keyword.len();
+                continue;
+            }
+            None if optional_parentheses && bytes.get(cursor) == Some(&b'(') => {
+                cursor += 1;
+                while bytes.get(cursor).is_some_and(|byte| byte.is_ascii_whitespace()) {
+                    cursor += 1;
+                }
+            }
+            None => {}
+            _ => unreachable!(),
+        }
+        let quote = bytes
+            .get(cursor)
+            .copied()
+            .filter(|byte| *byte == b'\'' || *byte == b'"');
+        if quote.is_some() {
+            cursor += 1;
+        }
+        if quote.is_none() && delimiter.is_none() {
+            offset = start + keyword.len();
+            continue;
+        }
+        let value_start = cursor;
+        let value_end = if let Some(quote) = quote {
+            source[cursor..]
+                .find(char::from(quote))
+                .map(|index| cursor + index)
+                .unwrap_or(source.len())
+        } else {
+            source[cursor..]
+                .find(|ch: char| {
+                    ch.is_ascii_whitespace()
+                        || ch == '>'
+                        || (delimiter == Some(b'(') && ch == ')')
+                })
+                .map(|index| cursor + index)
+                .unwrap_or(source.len())
+        };
+        if value_start < value_end {
+            let value = &source[value_start..value_end];
+            if split_srcset {
+                for candidate in value.split(',') {
+                    if let Some(path) = candidate.split_whitespace().next() {
+                        out.push(path.to_string());
+                    }
+                }
+            } else {
+                out.push(value.to_string());
+            }
+        }
+        offset = value_end.saturating_add(1);
+    }
 }
 
 /// Live poll session over a `WatchGraph`.
@@ -538,6 +899,8 @@ impl WatchSession {
             }
         }
         self.graph.refresh_stamps();
+        self.graph.scan_existing_html_references();
+        self.graph.scan_runtime_inputs();
         Ok(())
     }
 
@@ -776,6 +1139,62 @@ mod tests {
         assert!(receipt.render().contains("\"generation\":"));
         assert!(within_budget(&receipt));
         session.acknowledge(&receipt).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn html_shell_tracks_local_assets_and_future_creates() {
+        let dir = tmp_dir("html_assets");
+        let entry = dir.join("app.jet");
+        let shell = dir.join("shell.html");
+        let stylesheet = dir.join("theme.css");
+        let image = dir.join("logo.png");
+        fs::write(&entry, "fn run() {}\n").unwrap();
+        fs::write(
+            &shell,
+            "<html><head><link href=\"theme.css\"></head><body><img src=\"logo.png\"></body></html>",
+        )
+        .unwrap();
+        fs::write(&stylesheet, "body { color: white; }\n").unwrap();
+
+        let graph = WatchGraph::from_entry(&entry, &[shell.clone()]).unwrap();
+        let shell = canonicalize_loose(&shell);
+        let stylesheet = canonicalize_loose(&stylesheet);
+        let image = canonicalize_loose(&image);
+        let entry = canonicalize_loose(&entry);
+        assert!(graph.nodes.contains_key(&shell));
+        assert!(graph.nodes.contains_key(&stylesheet));
+        assert!(graph.nodes.contains_key(&image));
+        assert!(!graph.nodes.get(&image).unwrap().stamp.exists);
+        assert!(graph.reverse_edges().get(&stylesheet).unwrap().contains(&entry));
+        assert!(graph.reverse_edges().get(&image).unwrap().contains(&entry));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn runtime_file_inputs_track_generator_directories_and_files() {
+        let dir = tmp_dir("runtime_inputs");
+        let entry = dir.join("generate.jet");
+        let assets = dir.join("assets");
+        let image = assets.join("logo.png");
+        fs::create_dir_all(&assets).unwrap();
+        fs::write(&image, "asset").unwrap();
+        fs::write(
+            &entry,
+            "use core.files as fs\nfn run() {\n    fs.copy_dir(\"assets\", \"dist/assets\")\n}\n",
+        )
+        .unwrap();
+
+        let graph = WatchGraph::from_entry(&entry, &[]).unwrap();
+        let entry = canonicalize_loose(&entry);
+        let assets = canonicalize_loose(&assets);
+        let image = canonicalize_loose(&image);
+        assert!(graph.nodes.contains_key(&assets));
+        assert!(graph.nodes.contains_key(&image));
+        assert!(graph.reverse_edges().get(&assets).unwrap().contains(&entry));
+        assert!(graph.reverse_edges().get(&image).unwrap().contains(&entry));
+
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -56,6 +56,7 @@ impl<'a> Lexer<'a> {
         start: usize,
         raw_head: bool,
         byte_head: bool,
+        byte_literal: bool,
     ) -> Option<Token> {
         self.i += 1; // opening quote
         let mut parts: Vec<StrTokPart> = Vec::new();
@@ -118,6 +119,14 @@ impl<'a> Lexer<'a> {
                             self.i += 2;
                         }
                     }
+                }
+                '{' if byte_literal => {
+                    lit.push('{');
+                    self.i += 1;
+                }
+                '}' if byte_literal => {
+                    lit.push('}');
+                    self.i += 1;
                 }
                 '{' if self.at(self.i + 1) == '{' => {
                     lit.push('{');
@@ -241,6 +250,17 @@ impl<'a> Lexer<'a> {
         if !lit.is_empty() || parts.is_empty() {
             parts.push(StrTokPart::Lit(lit));
         }
+        let parts = if byte_literal {
+            parts
+                .into_iter()
+                .map(|part| match part {
+                    StrTokPart::Lit(text) => StrTokPart::ByteText(text),
+                    other => other,
+                })
+                .collect()
+        } else {
+            parts
+        };
         Some(Token {
             kind: TokKind::Str(parts),
             span: Span::new(start, self.pos(self.i)),
@@ -260,6 +280,7 @@ impl<'a> Lexer<'a> {
         start: usize,
         raw_head: bool,
         byte_head: bool,
+        byte_literal: bool,
     ) -> Option<Token> {
         let open_end = self.i + 3; // char index just past the opening `"""`
 
@@ -293,6 +314,7 @@ impl<'a> Lexer<'a> {
                 '\\' if !raw_head => j += 2,
                 '\\' if self.at(j + 1) == '"' => j += 2,
                 '\\' => j += 1,
+                '{' if byte_literal => j += 1,
                 '{' if self.at(j + 1) != '{' => {
                     depth += 1;
                     j += 1;
@@ -421,6 +443,14 @@ impl<'a> Lexer<'a> {
                         k += 2;
                     }
                 }
+                '{' if byte_literal => {
+                    lit.push('{');
+                    k += 1;
+                }
+                '}' if byte_literal => {
+                    lit.push('}');
+                    k += 1;
+                }
                 '{' if self.at(k + 1) == '{' => {
                     lit.push('{');
                     k += 2;
@@ -528,6 +558,17 @@ impl<'a> Lexer<'a> {
         if !lit.is_empty() || parts.is_empty() {
             parts.push(StrTokPart::Lit(lit));
         }
+        let parts = if byte_literal {
+            parts
+                .into_iter()
+                .map(|part| match part {
+                    StrTokPart::Lit(text) => StrTokPart::ByteText(text),
+                    other => other,
+                })
+                .collect()
+        } else {
+            parts
+        };
         Some(Token {
             kind: TokKind::Str(parts),
             span: Span::new(start, self.pos(self.i)),

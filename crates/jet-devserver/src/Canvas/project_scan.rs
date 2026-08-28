@@ -5,9 +5,9 @@ use jet_driver::Diagnostics::{Diagnostic, Severity};
 use jet_driver::SHA256;
 use jet_env_model::Authority::AuthorityResolver;
 
-use super::graph_projection::project_checked;
+use super::graph_projection::{project_checked, Projection};
 use super::project_transactions::{diagnostic_json, rel_path};
-use super::schema_api::{source_revision, Projection};
+use super::source_model::source_revision;
 use super::validation_json::{json_optional_str, json_str};
 
 pub(super) fn project_file(path: &Path) -> Result<Projection, Vec<Diagnostic>> {

@@ -25,13 +25,32 @@ fn jet_jit_fmt_decimal(value: f64, precision: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_decimal(value, precision))
 }
 
+fn jet_jit_fmt_decimal_int(value: i64, precision: i64) -> i64 {
+    let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
+    alloc_string(fmt_rt::jet_fmt_decimal_int(&value, precision))
+}
+
 fn jet_jit_fmt_hex(value: i64, width: i64) -> i64 {
     let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
     alloc_string(fmt_rt::jet_fmt_hex_decimal(&value, width))
 }
 
+fn jet_jit_fmt_sci(value: f64, precision: i64) -> i64 {
+    alloc_string(fmt_rt::jet_fmt_sci(value, precision))
+}
+
 fn jet_jit_fmt_percent(value: f64, precision: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_percent(value, precision))
+}
+
+fn jet_jit_fmt_bin(value: i64) -> i64 {
+    let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
+    alloc_string(fmt_rt::jet_fmt_bin_decimal(&value))
+}
+
+fn jet_jit_fmt_oct(value: i64) -> i64 {
+    let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
+    alloc_string(fmt_rt::jet_fmt_oct_decimal(&value))
 }
 
 fn jet_jit_fmt_bytes(value: i64) -> i64 {
@@ -50,6 +69,12 @@ fn jet_jit_fmt_plural(count: i64, singular: i64, plural: i64) -> i64 {
     let singular = clone_string(singular);
     let plural = clone_string(plural);
     alloc_string(fmt_rt::jet_fmt_plural(count, &singular, &plural))
+}
+
+fn jet_jit_fmt_pad(text: i64, width: i64, fill: i64) -> i64 {
+    let text = clone_string(text);
+    let fill = clone_string(fill);
+    alloc_string(fmt_rt::jet_fmt_pad(&text, width, &fill))
 }
 
 fn jet_jit_fmt_pad_left(text: i64, width: i64, fill: i64) -> i64 {
@@ -97,12 +122,17 @@ host_fns! {
     number: "jet_jit_fmt_number" => jet_jit_fmt_number: sig_i64;
     pretty: "jet_jit_fmt_pretty" => jet_jit_fmt_pretty: sig_i64;
     decimal: "jet_jit_fmt_decimal" => jet_jit_fmt_decimal: sig_f64_i64;
+    decimal_int: "jet_jit_fmt_decimal_int" => jet_jit_fmt_decimal_int: sig_i64_i64;
     hex: "jet_jit_fmt_hex" => jet_jit_fmt_hex: sig_i64_i64;
+    sci: "jet_jit_fmt_sci" => jet_jit_fmt_sci: sig_f64_i64;
     percent: "jet_jit_fmt_percent" => jet_jit_fmt_percent: sig_f64_i64;
+    bin: "jet_jit_fmt_bin" => jet_jit_fmt_bin: sig_i64;
+    oct: "jet_jit_fmt_oct" => jet_jit_fmt_oct: sig_i64;
     bytes: "jet_jit_fmt_bytes" => jet_jit_fmt_bytes: sig_i64;
     duration: "jet_jit_fmt_duration" => jet_jit_fmt_duration: sig_i64;
     ordinal: "jet_jit_fmt_ordinal" => jet_jit_fmt_ordinal: sig_i64;
     plural: "jet_jit_fmt_plural" => jet_jit_fmt_plural: sig_i64x3;
+    pad: "jet_jit_fmt_pad" => jet_jit_fmt_pad: sig_i64x3;
     pad_left: "jet_jit_fmt_pad_left" => jet_jit_fmt_pad_left: sig_i64x3;
     pad_right: "jet_jit_fmt_pad_right" => jet_jit_fmt_pad_right: sig_i64x3;
     pad_center: "jet_jit_fmt_pad_center" => jet_jit_fmt_pad_center: sig_i64x3;

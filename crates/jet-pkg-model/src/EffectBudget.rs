@@ -66,24 +66,11 @@ impl EffectProjection {
 
     /// Required effects with no policy verdict at the application boundary.
     pub fn undecided(&self) -> EffectSet {
-        let empty = Holds::new();
-        self.required_effects
-            .iter()
-            .filter(|effect| {
-                answer(&self.granted_effects, &self.denied_effects, effect)
-                    == Verdict::Missing
-                    && answer(&empty, &self.denied_effects, effect) != Verdict::Denied
-            })
-            .cloned()
-            .collect()
+        self.application_authority().undecided_effects()
     }
 
     pub fn is_allowed(&self) -> bool {
-        self.undecided().is_empty()
-            && self
-                .required_effects
-                .iter()
-                .all(|effect| answer(&self.granted_effects, &self.denied_effects, effect) != Verdict::Denied)
+        self.application_authority().is_allowed()
     }
 }
 
@@ -902,6 +889,50 @@ mod tests {
         );
         assert!(projection.undecided().is_empty());
         assert_eq!(projection.authority, "application default");
+    }
+
+    #[test]
+    fn manifestless_projection_does_not_request_a_panic_grant() {
+        let required = EffectSet::from(["IO".to_string(), "Panic".to_string()]);
+        let projection = project_application_effects(&required, None);
+
+        assert!(projection.undecided().is_empty());
+        assert!(projection.is_allowed());
+    }
+
+    #[test]
+    fn ambient_basics_leave_file_and_network_effects_undecided() {
+        for effect in ["FS", "Net"] {
+            let required = EffectSet::from([effect.to_string()]);
+            let projection = project_application_effects(&required, None);
+
+            assert_eq!(projection.undecided(), required);
+            let diagnostic = application_policy_diagnostic(&projection, &EffectSet::new());
+            assert_eq!(diagnostic.code, "E1803");
+            assert!(diagnostic.fix.contains(&format!("allow: [{effect}]")));
+        }
+    }
+
+    #[test]
+    fn explicit_manifest_denial_overrides_ambient_basics() {
+        let mut manifest = PackageFacts::default();
+        manifest.authority.holds.allow = Some(vec!["IO".to_string(), "Mem.Alloc".to_string()]);
+        manifest.authority.holds.deny = Some(vec!["Exec".to_string()]);
+        let required = EffectSet::from([
+            "IO".to_string(),
+            "Mem.Alloc".to_string(),
+            "Exec".to_string(),
+        ]);
+
+        let projection = project_application_effects(&required, Some(&manifest));
+        assert!(projection.granted_effects.contains("IO"));
+        assert!(!projection.granted_effects.contains("Exec"));
+        assert!(projection.denied_effects.contains("Exec"));
+        assert!(!projection.is_allowed());
+        let diagnostic =
+            application_policy_diagnostic(&projection, &EffectSet::from(["Exec".to_string()]));
+        assert!(diagnostic.what.contains("denies `Exec`"));
+        assert!(diagnostic.fix.contains("adjust the denial"));
     }
 
     #[test]

@@ -406,15 +406,15 @@ fn index_body() String -> """
     """
 
 fn tour_body() String -> {
-    hello :: code_card_out("examples/features/basics/hello.jet", hello_code(), "examples/features/basics/hello.jet", "hello, world")
-    values :: code_card_out("run it", values_code(), "values.jet", "values: Jet 2026<br>count: 3")
-    signature :: code_card_out("examples/features/basics/signature_shape.jet", signature_code(), "examples/features/basics/signature_shape.jet", "40<br>41")
-    matching :: code_card("examples/features/basics/pattern_matching.jet", pattern_code())
-    failure :: code_card_out("run it", failure_code(), "failure.jet", "port 8080")
-    defaults :: code_card_out("examples/features/basics/default_refs.jet", defaults_code(), "examples/features/basics/default_refs.jet", "5x5<br>5x3<br>4x4x4<br>4x2x2<br>4x2x1")
-    loops :: code_card("examples/features/basics/loop_values.jet", loops_code())
-    concurrency :: code_card("examples/features/concurrency/tasks_join_all.jet", concurrency_code())
-    files :: code_card("examples/features/io/files.jet", files_code())
+    hello :: code_card_out("examples/features/basics/hello.jet", hello_code() ?? return Err("could not render hello example"), "examples/features/basics/hello.jet", "hello, world")
+    values :: code_card_out("run it", values_code() ?? return Err("could not render values example"), "values.jet", "values: Jet 2026<br>count: 3")
+    signature :: code_card_out("examples/features/basics/signature_shape.jet", signature_code() ?? return Err("could not render signature example"), "examples/features/basics/signature_shape.jet", "40<br>41")
+    matching :: code_card("examples/features/basics/pattern_matching.jet", pattern_code() ?? return Err("could not render pattern example"))
+    failure :: code_card_out("run it", failure_code() ?? return Err("could not render failure example"), "failure.jet", "port 8080")
+    defaults :: code_card_out("examples/features/basics/default_refs.jet", defaults_code() ?? return Err("could not render defaults example"), "examples/features/basics/default_refs.jet", "5x5<br>5x3<br>4x4x4<br>4x2x2<br>4x2x1")
+    loops :: code_card("examples/features/basics/loop_values.jet", loops_code() ?? return Err("could not render loops example"))
+    concurrency :: code_card("examples/features/concurrency/tasks_join_all.jet", concurrency_code() ?? return Err("could not render concurrency example"))
+    files :: code_card("examples/features/io/files.jet", files_code() ?? return Err("could not render files example"))
     """
     <section class="wrap page">
       <div class="page-header">

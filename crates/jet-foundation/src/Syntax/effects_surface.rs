@@ -257,6 +257,12 @@ pub enum InterpolationSelectorKind {
     Pretty,
     Fixed,
     Hex,
+    Pad,
+    PadLeft,
+    Sci,
+    Percent,
+    Bin,
+    Oct,
     Unit,
 }
 
@@ -265,6 +271,7 @@ pub enum InterpolationSelectorArguments {
     None,
     Precision,
     Width,
+    WidthFill,
     UnitStyle(&'static [&'static str]),
 }
 
@@ -298,6 +305,36 @@ pub const INTERPOLATION_SELECTORS: &[InterpolationSelector] = &[
         name: "Hex",
         kind: InterpolationSelectorKind::Hex,
         arguments: InterpolationSelectorArguments::Width,
+    },
+    InterpolationSelector {
+        name: "Pad",
+        kind: InterpolationSelectorKind::Pad,
+        arguments: InterpolationSelectorArguments::WidthFill,
+    },
+    InterpolationSelector {
+        name: "PadLeft",
+        kind: InterpolationSelectorKind::PadLeft,
+        arguments: InterpolationSelectorArguments::WidthFill,
+    },
+    InterpolationSelector {
+        name: "Sci",
+        kind: InterpolationSelectorKind::Sci,
+        arguments: InterpolationSelectorArguments::Precision,
+    },
+    InterpolationSelector {
+        name: "Percent",
+        kind: InterpolationSelectorKind::Percent,
+        arguments: InterpolationSelectorArguments::Precision,
+    },
+    InterpolationSelector {
+        name: "Bin",
+        kind: InterpolationSelectorKind::Bin,
+        arguments: InterpolationSelectorArguments::None,
+    },
+    InterpolationSelector {
+        name: "Oct",
+        kind: InterpolationSelectorKind::Oct,
+        arguments: InterpolationSelectorArguments::None,
     },
     InterpolationSelector {
         name: "Unit",
@@ -340,7 +377,10 @@ mod interpolation_selector_tests {
                 .iter()
                 .map(|selector| selector.name)
                 .collect::<Vec<_>>(),
-            vec!["Debug", "Pretty", "Fixed", "Hex", "Unit"]
+            vec![
+                "Debug", "Pretty", "Fixed", "Hex", "Pad", "PadLeft", "Sci", "Percent",
+                "Bin", "Oct", "Unit",
+            ]
         );
         assert!(matches!(
             interpolation_selector("Unit").map(|selector| selector.arguments),
@@ -350,6 +390,10 @@ mod interpolation_selector_tests {
         assert!(matches!(
             interpolation_selector("Hex").map(|selector| selector.arguments),
             Some(InterpolationSelectorArguments::Width)
+        ));
+        assert!(matches!(
+            interpolation_selector("Pad").map(|selector| selector.arguments),
+            Some(InterpolationSelectorArguments::WidthFill)
         ));
         assert!(interpolation_selector("Repr").is_none());
     }

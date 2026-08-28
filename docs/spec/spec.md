@@ -3336,7 +3336,11 @@ A program with no `package.jet` receives the beginner ambient basics
 `IO`, `Mem.Alloc`, and `Exec`. This covers stdout, ordinary allocation, and
 argv reads without manifest ceremony. An explicit `package.jet` replaces this
 default with its `authority.holds` allow/deny rows, so an expert can deny or
-audit the same effects deliberately.
+audit the same effects deliberately. The floor does not authorize filesystem,
+network, process-control, or other effects; those still stop with E1803. A
+manifest deny wins over an ambient grant. The inferred deny-only `Panic` row
+stays visible for audit, but it never creates a positive `allow:` request; an
+explicit `deny: [Panic]` still stops it.
 
 ### Cryptography (D-CRYPTO-API1)
 

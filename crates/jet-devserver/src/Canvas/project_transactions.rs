@@ -14,9 +14,8 @@ use super::project_scan::{
     project_context_for_entry, project_revision_from_files, ProjectChange, ProjectContext,
     ProjectFileRec, TouchedProjectFile,
 };
-use super::schema_api::source_revision;
 use super::source_model::{
-    replace_source_if_unchanged_locked, with_source_transaction, SourceWriteError,
+    replace_source_if_unchanged_locked, source_revision, with_source_transaction, SourceWriteError,
 };
 use super::validation_json::{
     json_array_body, json_bool_field, json_object_bodies, json_str, json_string_array,

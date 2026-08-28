@@ -1,0 +1,615 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Empty state — four visual directions</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:wght@300;400;500;600&display=swap');
+
+    :root {
+      --ivory:    #FAF9F5;
+      --slate:    #141413;
+      --clay:     #D97757;
+      --oat:      #E3DACC;
+      --olive:    #788C5D;
+      --gray-100: #F5F3EC;
+      --gray-150: #F0EEE6;
+      --gray-200: #E4E2D9;
+      --gray-300: #D1CFC5;
+      --gray-500: #87867F;
+      --gray-700: #3D3D3A;
+      --white:    #FFFFFF;
+
+      --serif: 'Cormorant Garamond', ui-serif, Georgia, serif;
+      --sans:  'Source Sans 3', system-ui, -apple-system, sans-serif;
+      --mono:  'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--ivory);
+      color: var(--gray-700);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      padding-bottom: 96px;
+    }
+
+    /* ---------- sticky toolbar ---------- */
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(250, 249, 245, 0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--gray-200);
+      padding: 14px 40px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      font-size: 13px;
+    }
+
+    .toolbar .title {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      color: var(--gray-500);
+      margin-right: auto;
+    }
+
+    .toolbar .field {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .toolbar .field > span {
+      color: var(--gray-700);
+      font-weight: 500;
+      font-size: 13px;
+    }
+
+    .seg {
+      display: inline-flex;
+      border: 1px solid var(--gray-200);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--white);
+    }
+
+    .seg label {
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--gray-700);
+      user-select: none;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .seg label + label {
+      border-left: 1px solid var(--gray-200);
+    }
+
+    .seg input { display: none; }
+
+    .seg input:checked + span {
+      color: var(--slate);
+      font-weight: 600;
+    }
+
+    .seg label:has(input:checked) {
+      background: var(--oat);
+    }
+
+    /* ---------- page header ---------- */
+
+    .page {
+      max-width: 1300px;
+      margin: 0 auto;
+      padding: 56px 40px 0;
+    }
+
+    header.page-head {
+      max-width: 680px;
+      margin-bottom: 56px;
+      position: relative;
+    }
+
+    header.page-head::after {
+      content: '';
+      position: absolute;
+      bottom: -24px;
+      left: 0;
+      width: 48px;
+      height: 2px;
+      background: var(--clay);
+      border-radius: 1px;
+    }
+
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--clay);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .eyebrow::before {
+      content: '';
+      width: 16px;
+      height: 1px;
+      background: var(--clay);
+    }
+
+    h1 {
+      font-family: var(--serif);
+      font-weight: 500;
+      font-size: 42px;
+      line-height: 1.12;
+      color: var(--slate);
+      margin-bottom: 20px;
+      letter-spacing: -0.02em;
+    }
+
+    .prompt-box {
+      background: var(--white);
+      border: 1px solid var(--gray-200);
+      border-radius: 10px;
+      padding: 18px 22px;
+      font-size: 14.5px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+
+    .prompt-box .label {
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--gray-500);
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    /* ---------- artboard grid (staggered masonry) ---------- */
+
+    .board {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 28px;
+    }
+
+    /* Stagger the second column down */
+    .board > :nth-child(2) {
+      margin-top: 48px;
+    }
+
+    .board > :nth-child(3) {
+      margin-top: -32px;
+    }
+
+    @media (max-width: 960px) {
+      .board {
+        grid-template-columns: 1fr;
+      }
+      .board > :nth-child(2),
+      .board > :nth-child(3) {
+        margin-top: 0;
+      }
+    }
+
+    .artboard {
+      background: var(--white);
+      border: 1px solid var(--gray-200);
+      border-radius: 14px;
+      padding: 24px;
+      position: relative;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.03), 0 8px 24px rgba(0,0,0,0.02);
+      transition: box-shadow 0.3s ease, transform 0.3s ease;
+    }
+
+    .artboard:hover {
+      box-shadow: 0 4px 16px rgba(0,0,0,0.06), 0 12px 32px rgba(0,0,0,0.04);
+      transform: translateY(-3px);
+    }
+
+    .tag {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      background: var(--gray-100);
+      color: var(--gray-700);
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--gray-200);
+      z-index: 2;
+    }
+
+    .stage {
+      height: 300px;
+      border-radius: 10px;
+      border: 1px solid var(--gray-200);
+      background: linear-gradient(180deg, var(--gray-100) 0%, var(--ivory) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 28px;
+      transition: background 0.2s, border-color 0.2s;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Subtle dot grid background */
+    .stage::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(circle, var(--gray-300) 0.5px, transparent 0.5px);
+      background-size: 20px 20px;
+      opacity: 0.3;
+      pointer-events: none;
+    }
+
+    .stage.dark {
+      background: linear-gradient(180deg, #1F1E1B 0%, var(--slate) 100%);
+      border-color: var(--slate);
+    }
+
+    .stage.dark::before {
+      background-image: radial-gradient(circle, rgba(255,255,255,0.06) 0.5px, transparent 0.5px);
+      opacity: 0.5;
+    }
+
+    .rationale {
+      margin-top: 18px;
+      font-size: 13px;
+      color: var(--gray-500);
+      line-height: 1.55;
+      padding-left: 2px;
+    }
+
+    /* =========================================================
+       Empty-state variants — each scoped under .es-*
+       ========================================================= */
+
+    .stage        { --fg: var(--slate); --muted: var(--gray-500); --line: var(--gray-200); --panel: var(--white); --bg: var(--gray-100); }
+    .stage.dark   { --fg: #F0EEE6;      --muted: #9C9A93;         --line: #3D3D3A;         --panel: #1F1E1B;     --bg: var(--slate); }
+
+    /* ---- A · Minimal ---- */
+
+    .es-a {
+      text-align: center;
+      max-width: 280px;
+      position: relative;
+      z-index: 1;
+    }
+    .es-a h3 {
+      font-family: var(--serif);
+      font-weight: 500;
+      font-size: 22px;
+      color: var(--fg);
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+    .es-a p {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+    .es-a .btn {
+      display: inline-block;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 18px;
+      background: transparent;
+      transition: background 0.15s ease;
+    }
+    .es-a .btn:hover { background: var(--bg); }
+
+    /* ---- B · Illustrated ---- */
+
+    .es-b {
+      text-align: center;
+      max-width: 300px;
+      position: relative;
+      z-index: 1;
+    }
+    .es-b svg {
+      display: block;
+      margin: 0 auto 20px;
+    }
+    .es-b h3 {
+      font-family: var(--serif);
+      font-weight: 500;
+      font-size: 22px;
+      color: var(--fg);
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+    .es-b p {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 18px;
+      line-height: 1.5;
+    }
+    .es-b .btn {
+      display: inline-block;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--white);
+      background: var(--clay);
+      border-radius: 8px;
+      padding: 9px 18px;
+      transition: opacity 0.15s ease;
+    }
+    .es-b .btn:hover { opacity: 0.9; }
+    .stage.dark .es-b .btn { color: var(--slate); background: var(--oat); }
+
+    /* ---- C · Playful ---- */
+
+    .es-c {
+      text-align: center;
+      max-width: 280px;
+      position: relative;
+      z-index: 1;
+    }
+    .es-c .float {
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 20px;
+      position: relative;
+      animation: bob 3.2s ease-in-out infinite;
+    }
+    .es-c .float .card {
+      position: absolute;
+      inset: 0;
+      border-radius: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+    .es-c .float .card:nth-child(1) { transform: rotate(-8deg) translate(-6px, 4px); opacity: 0.5; }
+    .es-c .float .card:nth-child(2) { transform: rotate( 6deg) translate( 6px, 2px); opacity: 0.75; }
+    .es-c .float .card:nth-child(3) { background: var(--oat); border-color: var(--oat); }
+    .stage.dark .es-c .float .card:nth-child(3) { background: var(--clay); border-color: var(--clay); }
+    .es-c .shadow {
+      width: 44px;
+      height: 8px;
+      margin: -8px auto 22px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.10);
+      filter: blur(2px);
+      animation: shadow 3.2s ease-in-out infinite;
+    }
+    .stage.dark .es-c .shadow { background: rgba(0,0,0,0.5); }
+    .es-c h3 {
+      font-family: var(--serif);
+      font-weight: 500;
+      font-size: 22px;
+      color: var(--fg);
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+    .es-c p {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    @keyframes bob {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-10px); }
+    }
+    @keyframes shadow {
+      0%, 100% { transform: scaleX(1);   opacity: 0.9; }
+      50%      { transform: scaleX(0.8); opacity: 0.5; }
+    }
+
+    /* ---- D · Instructional ---- */
+
+    .es-d {
+      width: 100%;
+      max-width: 340px;
+      position: relative;
+      z-index: 1;
+    }
+    .es-d h3 {
+      font-family: var(--serif);
+      font-weight: 500;
+      font-size: 22px;
+      color: var(--fg);
+      margin-bottom: 16px;
+      letter-spacing: -0.01em;
+    }
+    .es-d ol {
+      list-style: none;
+      counter-reset: step;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .es-d li {
+      counter-increment: step;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: var(--fg);
+    }
+    .es-d li::before {
+      content: counter(step);
+      font-family: var(--mono);
+      font-size: 11px;
+      flex: 0 0 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--oat);
+      color: var(--slate);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+    }
+    .stage.dark .es-d li::before { background: rgba(217,119,87,0.25); color: var(--clay); }
+    .es-d li span { color: var(--muted); display: block; font-size: 12px; margin-top: 2px; }
+  </style>
+</head>
+<body>
+
+  <div class="toolbar">
+    <div class="title">Acme · design exploration</div>
+    <div class="field">
+      <span>Background:</span>
+      <div class="seg" id="bg-seg">
+        <label><input type="radio" name="bg" value="light" checked><span>Light</span></label>
+        <label><input type="radio" name="bg" value="dark"><span>Dark</span></label>
+      </div>
+    </div>
+  </div>
+
+  <div class="page">
+
+    <header class="page-head">
+      <div class="eyebrow">Exploration · Empty states</div>
+      <h1>Four visual directions for the "no tasks yet" state</h1>
+      <div class="prompt-box">
+        <span class="label">Prompt</span>
+        Explore four visual directions for our empty-state component. Render each
+        live so we can compare tone, density, and how well they hold up on light
+        and dark surfaces.
+      </div>
+    </header>
+
+    <section class="board">
+
+      <!-- ================= A — Minimal ================= -->
+      <article class="artboard">
+        <span class="tag">A — Minimal</span>
+        <div class="stage">
+          <div class="es-a">
+            <h3>No tasks yet</h3>
+            <p>When you create a task it will show up here.</p>
+            <span class="btn">New task</span>
+          </div>
+        </div>
+        <p class="rationale">
+          Pure typography, single quiet action. Reads as calm and confident;
+          assumes the surrounding UI already carries enough personality.
+        </p>
+      </article>
+
+      <!-- ================= B — Illustrated ================= -->
+      <article class="artboard">
+        <span class="tag">B — Illustrated</span>
+        <div class="stage">
+          <div class="es-b">
+            <svg width="120" height="90" viewBox="0 0 120 90" aria-hidden="true">
+              <rect x="14" y="20" width="72" height="54" rx="8"
+                    fill="var(--panel)" stroke="var(--line)" stroke-width="1.5"/>
+              <rect x="34" y="10" width="72" height="54" rx="8"
+                    fill="var(--oat)"/>
+              <line x1="46" y1="26" x2="92" y2="26"
+                    stroke="var(--slate)" stroke-width="2" stroke-linecap="round"/>
+              <line x1="46" y1="38" x2="80" y2="38"
+                    stroke="var(--slate)" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+              <circle cx="98" cy="60" r="12" fill="var(--clay)"/>
+              <path d="M98 55 v10 M93 60 h10"
+                    stroke="white" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <h3>Start your first list</h3>
+            <p>Group related work and watch progress roll up automatically.</p>
+            <span class="btn">Create a task</span>
+          </div>
+        </div>
+        <p class="rationale">
+          A small geometric spot illustration anchors the eye and explains the
+          object model (lists contain tasks) without a wall of copy.
+        </p>
+      </article>
+
+      <!-- ================= C — Playful ================= -->
+      <article class="artboard">
+        <span class="tag">C — Playful</span>
+        <div class="stage">
+          <div class="es-c">
+            <div class="float">
+              <div class="card"></div>
+              <div class="card"></div>
+              <div class="card"></div>
+            </div>
+            <div class="shadow"></div>
+            <h3>Nothing on your plate</h3>
+            <p>Enjoy the quiet, or add something to get moving.</p>
+          </div>
+        </div>
+        <p class="rationale">
+          A gently bobbing stack adds life to an otherwise static screen. Motion
+          is subtle enough to loop indefinitely without drawing complaints.
+        </p>
+      </article>
+
+      <!-- ================= D — Instructional ================= -->
+      <article class="artboard">
+        <span class="tag">D — Instructional</span>
+        <div class="stage">
+          <div class="es-d">
+            <h3>Set up this project</h3>
+            <ol>
+              <li>
+                Create your first task
+                <span>Give it a name and an owner.</span>
+              </li>
+              <li>
+                Add a due date
+                <span>Acme will surface it on the timeline.</span>
+              </li>
+              <li>
+                Invite a teammate
+                <span>Shared projects stay in sync automatically.</span>
+              </li>
+            </ol>
+          </div>
+        </div>
+        <p class="rationale">
+          Treats the empty state as onboarding. Higher density, but every line is
+          actionable — best when the user is new to the product, not just the view.
+        </p>
+      </article>
+
+    </section>
+  </div>
+
+  <script>
+    const stages = document.querySelectorAll('.stage');
+    document.getElementById('bg-seg').addEventListener('change', (e) => {
+      const dark = e.target.value === 'dark';
+      stages.forEach((s) => s.classList.toggle('dark', dark));
+    });
+  </script>
+<script>
+(function(){var t=localStorage.getItem('gallery-theme');if(!t||t==='gallery')return;var c={dark:{'--ivory':'#1A1A20','--slate':'#E8E6E1','--clay':'#FF7A5C','--oat':'#3A3A42','--olive':'#7ABF6E','--rust':'#E87A4A','--sky':'#6BA3D6','--plum':'#C07AB8','--white':'#1A1A20','--gray-100':'#222228','--gray-200':'#2A2A30','--gray-300':'#3A3A42','--gray-500':'#8A8880','--gray-700':'#B0AEA6','--surface':'#222228','--surface-0':'#181820','--surface-1':'#1A1A20','--surface-2':'#222228','--surface-hover':'#2A2A32','--border':'#2E2E36','--border-subtle':'#262630','--border-focus':'#4A4A56'},terminal:{'--ivory':'#0A0E0A','--slate':'#33FF66','--clay':'#FF9933','--oat':'#1A331A','--olive':'#33FF66','--rust':'#FF6633','--sky':'#33CCFF','--plum':'#CC66FF','--white':'#111611','--gray-100':'#142814','--gray-200':'#1A331A','--gray-300':'#225522','--gray-500':'#1A9940','--gray-700':'#22CC55','--surface':'#0D140D','--surface-0':'#080C08','--surface-1':'#111611','--surface-2':'#0D140D','--surface-hover':'#152015','--border':'#1A331A','--border-subtle':'#142814','--border-focus':'#225522'},zen:{'--ivory':'#FEFEFE','--slate':'#2C2C2C','--clay':'#C88870','--oat':'#E8E8E0','--olive':'#8CB880','--rust':'#B89080','--sky':'#8898B0','--plum':'#A088A0','--white':'#FFFFFF','--gray-100':'#F6F6F6','--gray-200':'#EEEEEE','--gray-300':'#DDDDDD','--gray-500':'#8C8C8C','--gray-700':'#5C5C5C','--surface':'#F6F6F6','--surface-0':'#FEFEFE','--surface-1':'#FFFFFF','--surface-2':'#F6F6F6','--surface-hover':'#F0F0F0','--border':'#E0E0E0','--border-subtle':'#EBEBEB','--border-focus':'#CCCCCC'}};var s=document.documentElement.style;var m=c[t]||{};Object.keys(m).forEach(function(k){s.setProperty(k,m[k])});})();
+</script>
+</body>
+</html>

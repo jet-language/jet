@@ -139,15 +139,15 @@ pub const METHOD_CALL: &str = "call";
 /// argument shape, no second call-argument grammar.
 pub const METHOD_TAKE_PATTERN: &str = "take_pattern";
 
-/// D-BYTELIT1=B (ratified 2026-08-27, card #2265): byte text reuses the
-/// existing typed collection head `[U8]{ "..." }`. ASCII text contributes one
-/// byte per character; `\xNN` contributes the written byte. No `b` prefix is
-/// added.
+/// D-BYTELIT1=B (ratified 2026-08-27, card #2258): byte values use the `b"..."`
+/// literal. ASCII text contributes one byte per character; `\xNN` contributes
+/// the written byte. `[U8]{ "..." }` remains the explicit typed-list form.
+pub const BYTE_STRING_PREFIX: &str = "b";
 /// D-BINPAT1 / D-UNIFYLIT1=A: binary patterns use typed head `[U8]{"…"}`
 /// (byte-mode sibling of D-PARSESTR1 string patterns). Each `{name:U4}` hole
 /// reads a fixed-width bit field; an endian suffix (`be`/`le`) picks byte
 /// order on a multi-byte read; a final `{name:...}` captures remaining bytes.
-/// The retired `b"…"` lexer prefix is gone.
+/// The `b"…"` value literal is not a pattern head.
 /// D-BINPAT1: multi-byte big-endian read suffix — `{len:U16be}`.
 pub const BINPAT_ENDIAN_BIG: &str = "be";
 /// D-BINPAT1: multi-byte little-endian read suffix — `{len:U16le}`.

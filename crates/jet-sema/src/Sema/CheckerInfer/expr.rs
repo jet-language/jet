@@ -551,25 +551,6 @@ impl<'a> Checker<'a> {
                         }),
                     _ => None,
                 },
-                jet_foundation::Registry::FactRead::Maturity => match &**inner {
-                    Expr::Ident(function_name, _) => self
-                        .ct_funcs
-                        .get(function_name)
-                        .map(|function| {
-                            let maturity = function
-                                .maturity
-                                .unwrap_or(crate::AST::MaturityTag::Experimental);
-                            (
-                                Type::Named("MaturityInfo".to_string()),
-                                crate::Comptime::build_maturity_info(maturity),
-                            )
-                        })
-                        .or_else(|| {
-                            crate::Comptime::registered_fact_value(read, function_name, self.items)
-                                .map(|value| (value.jet_type(), value))
-                        }),
-                    _ => None,
-                },
                 read @ jet_foundation::Registry::FactRead::RegisteredPlane(_) => match &**inner {
                     Expr::Ident(subject_name, _) => {
                         crate::Comptime::registered_fact_value(read, subject_name, self.items)
@@ -588,7 +569,8 @@ impl<'a> Checker<'a> {
                 | jet_foundation::Registry::FactRead::BuildStampGit
                 | jet_foundation::Registry::FactRead::BuildStampDirty
                 | jet_foundation::Registry::FactRead::BuildStampToolchain
-                | jet_foundation::Registry::FactRead::BuildStampAt => None,
+                | jet_foundation::Registry::FactRead::BuildStampAt
+                | jet_foundation::Registry::FactRead::Maturity => None,
                 jet_foundation::Registry::FactRead::Layout
                 | jet_foundation::Registry::FactRead::Name
                 | jet_foundation::Registry::FactRead::Fields => unreachable!("handled above"),
@@ -1271,47 +1253,11 @@ impl<'a> Checker<'a> {
         Some(Type::Named(Syntax::TYPE_REGEX.to_string()))
     }
 
-    fn can_prewrap_auto_propagation(&self, e: &Expr) -> bool {
-        if self.compiler_generated || self.failure_auto_depth != 0 {
-            return false;
-        }
-        if self.expected_type.as_ref().is_some_and(|expected| {
-            matches!(
-                expected,
-                Type::Result { err, .. }
-                    if !matches!(err.as_ref(), Type::Named(name) if name == Syntax::TYPE_NEVER)
-            )
-        }) {
-            return false;
-        }
-        let Expr::Call(call) = e.without_parens() else {
-            return false;
-        };
-        self.funcs
-            .get(&call.name)
-            .is_some_and(|sig| matches!(sig.effective_return_type(), Type::Result { .. }))
-    }
-
-    fn prewrap_auto_propagation(&mut self, e: &mut Expr) -> bool {
-        if !self.can_prewrap_auto_propagation(e) {
-            return false;
-        }
-        let span = e.span();
-        let inner = std::mem::replace(e, Expr::Absent(span));
-        *e = Expr::Try(Box::new(inner), span, TryConvert::None, None);
-        true
-    }
-
     /// Statement inference has a special direct-call path for valueless
-    /// functions. Put a known fallible direct call through the existing
-    /// `Try` checker before that path checks it, so automatic propagation does
-    /// not walk the same arguments a second time.
+    /// functions. Keep that path shared with ordinary expression propagation.
     pub(crate) fn infer_statement_expr(&mut self, expr: &mut Expr) -> Option<Type> {
         self.normalize_imported_core_expr(expr);
         self.normalize_prelude_expr(expr);
-        if self.prewrap_auto_propagation(expr) {
-            return self.infer(expr);
-        }
         self.infer_fallible_stmt(expr)
     }
 
@@ -1332,7 +1278,6 @@ impl<'a> Checker<'a> {
         result: Option<Type>,
     ) -> Option<Type> {
         if self.compiler_generated
-            || self.failure_auto_depth != 0
             || !matches!(
                 e.without_parens(),
                 Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
@@ -1356,10 +1301,7 @@ impl<'a> Checker<'a> {
         let mut wrapped = Expr::Try(Box::new(inner), span, TryConvert::None, None);
         let result = match &mut wrapped {
             Expr::Try(inner, try_span, convert, note) => {
-                self.failure_auto_depth += 1;
-                let result = self.infer_try(inner, *try_span, convert, note);
-                self.failure_auto_depth -= 1;
-                result
+                self.infer_try(inner, *try_span, convert, note)
             }
             _ => unreachable!("automatic failure propagation builds a Try node"),
         };
@@ -1368,6 +1310,14 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn infer(&mut self, e: &mut Expr) -> Option<Type> {
+        let suppress_auto = self.failure_auto_root_suppression > 0;
+        // Grouping is semantically transparent. Keep the one-shot token alive
+        // until it reaches the carrier-owned expression beneath any number of
+        // parentheses; otherwise `(fallible())` would acquire a second `Try`
+        // while the unparenthesized form did not.
+        if suppress_auto && !matches!(e, Expr::Paren(..)) {
+            self.failure_auto_root_suppression -= 1;
+        }
         if !self.enter_source_nesting(e.span()) {
             return None;
         }
@@ -1402,11 +1352,14 @@ impl<'a> Checker<'a> {
         let result = if let Some(result) = self.fold_reflect_call(e) {
             result
         } else {
-            self.prewrap_auto_propagation(e);
             self.infer_checked(e)
         };
         self.expected_type = saved_expected;
-        let result = self.auto_propagate_call(e, result);
+        let result = if suppress_auto {
+            result
+        } else {
+            self.auto_propagate_call(e, result)
+        };
         if result
             .as_ref()
             .is_some_and(crate::Sema::type_uses_default_int)
@@ -1414,6 +1367,21 @@ impl<'a> Checker<'a> {
             self.uses_exact_int = true;
         }
         self.leave_source_nesting();
+        result
+    }
+
+    /// Infer one carrier-owned root while leaving child expressions eligible
+    /// for the same automatic propagation rule.
+    pub(crate) fn infer_without_auto_propagation(&mut self, e: &mut Expr) -> Option<Type> {
+        let previous = self.failure_auto_root_suppression;
+        self.failure_auto_root_suppression += 1;
+        let result = self.infer(e);
+        // A nesting-limit failure can return before the token reaches the
+        // expression below transparent grouping. Do not let that failed root
+        // suppress a later, unrelated expression.
+        if self.failure_auto_root_suppression > previous {
+            self.failure_auto_root_suppression = previous;
+        }
         result
     }
 
@@ -2647,6 +2615,30 @@ impl<'a> Checker<'a> {
                     crate::Syntax::InterpolationSelectorKind::Hex,
                 )
                 .name;
+                let sci_selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::Sci,
+                )
+                .name;
+                let percent_selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::Percent,
+                )
+                .name;
+                let bin_selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::Bin,
+                )
+                .name;
+                let oct_selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::Oct,
+                )
+                .name;
+                let pad_selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::Pad,
+                )
+                .name;
+                let pad_left_selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::PadLeft,
+                )
+                .name;
                 let unit_selector = crate::Syntax::interpolation_selector_for_kind(
                     crate::Syntax::InterpolationSelectorKind::Unit,
                 )
@@ -2799,16 +2791,16 @@ impl<'a> Checker<'a> {
                                     }
                                 }
                                 crate::AST::StrFormat::Fixed(_) => {
-                                    if t != Type::Float {
+                                    if !matches!(t, Type::Float | Type::Int) {
                                         self.diags.push(Diagnostic::error(
                                             "E0112",
                                             format!(
                                                 "{} can't use `:{fixed_selector}(n)`",
                                                 t.show()
                                             ),
-                                            "fixed interpolation uses `core.text.fmt.decimal`, which formats `Float` values"
+                                            "fixed interpolation uses `core.text.fmt.decimal`, which formats `Float` or exact `Int` values"
                                                 .to_string(),
-                                            "pass a `Float`, or use bare interpolation for this value"
+                                            "pass a `Float` or exact `Int`, or use bare interpolation for this value"
                                                 .to_string(),
                                             Some(inner.span()),
                                         ));
@@ -2825,6 +2817,90 @@ impl<'a> Checker<'a> {
                                             "hex interpolation uses `core.text.fmt.hex`, which formats `Int` values"
                                                 .to_string(),
                                             "pass an `Int`, or use bare interpolation for this value"
+                                                .to_string(),
+                                            Some(inner.span()),
+                                        ));
+                                    }
+                                }
+                                crate::AST::StrFormat::Sci(_) => {
+                                    if t != Type::Float {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0112",
+                                            format!(
+                                                "{} can't use `:{sci_selector}(n)`",
+                                                t.show()
+                                            ),
+                                            "scientific interpolation formats Float values"
+                                                .to_string(),
+                                            "pass a `Float`, or use bare interpolation for this value"
+                                                .to_string(),
+                                            Some(inner.span()),
+                                        ));
+                                    }
+                                }
+                                crate::AST::StrFormat::Percent(_) => {
+                                    if t != Type::Float {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0112",
+                                            format!(
+                                                "{} can't use `:{percent_selector}(n)`",
+                                                t.show()
+                                            ),
+                                            "percent interpolation formats Float values".to_string(),
+                                            "pass a `Float`, or use bare interpolation for this value"
+                                                .to_string(),
+                                            Some(inner.span()),
+                                        ));
+                                    }
+                                }
+                                crate::AST::StrFormat::Bin => {
+                                    if t != Type::Int {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0112",
+                                            format!(
+                                                "{} can't use `:{bin_selector}`",
+                                                t.show()
+                                            ),
+                                            "binary interpolation formats exact Int values"
+                                                .to_string(),
+                                            "pass an exact `Int`, or use bare interpolation for this value"
+                                                .to_string(),
+                                            Some(inner.span()),
+                                        ));
+                                    }
+                                }
+                                crate::AST::StrFormat::Oct => {
+                                    if t != Type::Int {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0112",
+                                            format!(
+                                                "{} can't use `:{oct_selector}`",
+                                                t.show()
+                                            ),
+                                            "octal interpolation formats exact Int values"
+                                                .to_string(),
+                                            "pass an exact `Int`, or use bare interpolation for this value"
+                                                .to_string(),
+                                            Some(inner.span()),
+                                        ));
+                                    }
+                                }
+                                crate::AST::StrFormat::Pad { .. }
+                                | crate::AST::StrFormat::PadLeft { .. } => {
+                                    if t != Type::String {
+                                        let selector = if matches!(fmt, crate::AST::StrFormat::Pad { .. }) {
+                                            pad_selector
+                                        } else {
+                                            pad_left_selector
+                                        };
+                                        self.diags.push(Diagnostic::error(
+                                            "E0112",
+                                            format!(
+                                                "{} can't use `:{selector}(n)`",
+                                                t.show()
+                                            ),
+                                            "padding interpolation formats String values".to_string(),
+                                            "pass a `String`, or use bare interpolation for this value"
                                                 .to_string(),
                                             Some(inner.span()),
                                         ));

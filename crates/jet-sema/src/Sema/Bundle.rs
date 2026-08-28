@@ -2215,12 +2215,19 @@ pub fn build_entry_signature_is_valid(func: &Func) -> bool {
 /// The removal belongs to the front end, so it happens exactly once for every
 /// consumer: AOT emit, the Cranelift JIT, and the interpreter all receive the
 /// same runtime program instead of each engine having to know that one function
-/// is not theirs (I9).
+/// or build-only error conversion is not theirs (I9).
 pub fn strip_build_only_entries(bundle: &mut ProgramBundle) {
     for module in &mut bundle.modules {
-        module
-            .items
-            .retain(|item| !matches!(item, Item::Func(func) if is_build_entry(func)));
+        module.items.retain(|item| match item {
+            Item::Func(func) => !is_build_entry(func),
+            // `BuildError` exists only in the compiler-host build interpreter.
+            // Its Prelude conversion is needed while `fn build` runs, but the
+            // conversion has no runtime source type after that entry is gone.
+            Item::ErrorConv(conversion) => {
+                conversion.from_ty != "BuildError" && conversion.to_ty != "BuildError"
+            }
+            _ => true,
+        });
     }
 }
 

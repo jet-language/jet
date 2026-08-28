@@ -711,6 +711,18 @@ fn emit_plain_core_call(
     if !row.aot_direct {
         return None;
     }
+    // D-FMT-INTERP3=B: `fmt.decimal` keeps one public method for Float and
+    // exact Int. The AOT wrappers marshal the packed Int carrier to the same
+    // Prelude kernel without converting it through f64.
+    if module == "core.text.fmt"
+        && method == "decimal"
+        && args.first().is_some_and(|value| value.ty == Type::Int)
+    {
+        return Some(emit_symbol_call(
+            &helper("jet_fmt_decimal_int_aot"),
+            &format!("{}, {}", arg(0), arg(1)),
+        ));
+    }
     let rendered: Vec<String> = row
         .signature
         .borrow_mask
@@ -859,10 +871,31 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             )),
             "checked_add" | "checked_sub" | "checked_mul" | "saturating_add" | "saturating_sub"
-            | "saturating_mul" | "wrapping_add" | "wrapping_sub" | "wrapping_mul" => Some(format!(
+            | "saturating_mul" => Some(format!(
                 "{}jet_std::jet_int_{}({}, {})",
                 cx.root_prefix,
                 method,
+                arg(0),
+                arg(1)
+            )),
+            // D-INTBIG1: exact Int has no finite width, so its former
+            // wrapping aliases were removed. Keep the public core.math
+            // spelling as exact arithmetic during migration.
+            "wrapping_add" => Some(format!(
+                "{}jet_std::jet_int_add({}, {})",
+                cx.root_prefix,
+                arg(0),
+                arg(1)
+            )),
+            "wrapping_sub" => Some(format!(
+                "{}jet_std::jet_int_sub({}, {})",
+                cx.root_prefix,
+                arg(0),
+                arg(1)
+            )),
+            "wrapping_mul" => Some(format!(
+                "{}jet_std::jet_int_mul({}, {})",
+                cx.root_prefix,
                 arg(0),
                 arg(1)
             )),
@@ -3376,6 +3409,9 @@ pub(crate) fn emit_tir_core_call(
                 arg(0),
                 arg(1),
             )
+        }
+        ("core.process", "run") => {
+            format!("{}jet_std_process_run(&({}))", cx.root_prefix, arg(0))
         }
         ("core.plugin", "load") if args.len() == 2 => {
             format!(

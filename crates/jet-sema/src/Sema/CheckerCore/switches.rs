@@ -620,7 +620,11 @@ impl<'a> Checker<'a> {
         if preserve_result_carrier {
             self.failure_auto_depth += 1;
         }
-        let subj_ty = self.infer(&mut subj);
+        let subj_ty = if preserve_result_carrier {
+            self.infer_without_auto_propagation(&mut subj)
+        } else {
+            self.infer(&mut subj)
+        };
         if preserve_result_carrier {
             self.failure_auto_depth -= 1;
         }

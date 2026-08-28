@@ -672,6 +672,20 @@ fn jet_iter_string_split(s: &String, sep: &str) -> JetIter<String> {
     })))
 }
 
+/// Run a synchronous consumer over `String.split` pieces. This is the direct
+/// Prelude seam for AOT loops whose body does not escape the loop callback:
+/// it keeps the source string borrowed, avoids a boxed `JetIter`, and preserves
+/// the exact `str::split` piece order and empty-separator behavior.
+#[inline(always)]
+fn jet_string_split_for_each<F>(s: &String, sep: &str, mut f: F)
+where
+    F: FnMut(String),
+{
+    for part in s.split(sep) {
+        f(part.to_string());
+    }
+}
+
 /// Lazy `String.rsplit` — same left-to-right part order as Python `str.rsplit`
 /// without a limit (Rust's `rsplit` yields right-to-left; reverse after collect).
 fn jet_iter_string_rsplit(s: &String, sep: &str) -> JetIter<String> {

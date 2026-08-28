@@ -155,7 +155,7 @@ impl<'a> Checker<'a> {
         // The explicit operator owns this call. Do not let the default
         // callable rule insert a second `Try` around its operand.
         self.failure_auto_depth += 1;
-        let inner_ty = self.infer(inner);
+        let inner_ty = self.infer_without_auto_propagation(inner);
         self.failure_auto_depth -= 1;
         let inner_ty = inner_ty?;
         match inner_ty {
@@ -575,7 +575,11 @@ impl<'a> Checker<'a> {
         if suppress_auto {
             self.failure_auto_depth += 1;
         }
-        let val_ty = self.infer(value);
+        let val_ty = if suppress_auto {
+            self.infer_without_auto_propagation(value)
+        } else {
+            self.infer(value)
+        };
         if suppress_auto {
             self.failure_auto_depth -= 1;
         }

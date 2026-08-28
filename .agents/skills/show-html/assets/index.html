@@ -1,0 +1,1210 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Unreasonable Effectiveness of HTML — A Curated Gallery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* ── Design Tokens ────────────────────────── */
+  :root {
+    --bg:        #FAF9F5;
+    --paper:     #FFFFFF;
+    --ink:       #1A1A18;
+    --ink-mid:   #3D3D3A;
+    --ink-light: #6B6B66;
+    --faint:     #9A9A94;
+
+    --accent-terracotta: #C4593A;
+    --accent-sage:       #5E7E52;
+    --accent-navy:       #2E4A6E;
+    --accent-amber:      #B8860B;
+    --accent-plum:       #7A4A6E;
+    --accent-teal:       #2A7A7A;
+    --accent-rust:       #A0522D;
+    --accent-slate:      #4A5A6A;
+    --accent-forest:     #3A6B4A;
+    --accent-wine:       #8B3A4A;
+    --accent-copper:     #B87333;
+    --accent-indigo:     #4A4A8A;
+
+    --rule:      #D8D5CC;
+    --rule-light:#E8E6DF;
+    --surface:   #F3F1EB;
+    --surface-hover: #EDEADF;
+
+    --serif:  'Playfair Display', Georgia, 'Times New Roman', serif;
+    --sans:   'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono:   'IBM Plex Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+    --radius-sm:  6px;
+    --radius-md:  10px;
+    --radius-lg:  14px;
+    --shadow-card: 0 1px 3px rgba(26,26,24,0.04), 0 4px 12px rgba(26,26,24,0.03);
+    --shadow-hover: 0 8px 30px rgba(26,26,24,0.10), 0 2px 8px rgba(26,26,24,0.06);
+
+    --grid-gap: 24px;
+    --card-accent-opacity: 1;
+  }
+
+  /* ── Theme: Dark Exhibition ─────────────── */
+  [data-theme="dark"] {
+    --bg:        #0F0F12;
+    --paper:     #1A1A20;
+    --ink:       #E8E6E1;
+    --ink-mid:   #B0AEA6;
+    --ink-light: #8A8880;
+    --faint:     #5A5955;
+
+    --accent-terracotta: #FF7A5C;
+    --accent-sage:       #7ABF6E;
+    --accent-navy:       #6BA3D6;
+    --accent-amber:      #FFBE42;
+    --accent-plum:       #C07AB8;
+    --accent-teal:       #4CC8C8;
+    --accent-rust:       #E87A4A;
+    --accent-slate:      #8AA0B8;
+    --accent-forest:     #5EBF7A;
+    --accent-wine:       #E85A6E;
+    --accent-copper:     #E8A050;
+    --accent-indigo:     #7A7AE8;
+
+    --rule:      #2A2A30;
+    --rule-light:#222228;
+    --surface:   #222228;
+    --surface-hover: #2A2A32;
+
+    --radius-lg: 12px;
+    --shadow-card: 0 2px 8px rgba(0,0,0,0.3), 0 0 1px rgba(255,255,255,0.05);
+    --shadow-hover: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08);
+  }
+
+  /* ── Theme: Terminal ────────────────────── */
+  [data-theme="terminal"] {
+    --bg:        #0A0E0A;
+    --paper:     #111611;
+    --ink:       #33FF66;
+    --ink-mid:   #22CC55;
+    --ink-light: #1A9940;
+    --faint:     #0F6628;
+
+    --accent-terracotta: #FF9933;
+    --accent-sage:       #33FF66;
+    --accent-navy:       #33CCFF;
+    --accent-amber:      #FFCC00;
+    --accent-plum:       #CC66FF;
+    --accent-teal:       #00FFCC;
+    --accent-rust:       #FF6633;
+    --accent-slate:      #66BBCC;
+    --accent-forest:     #44FF88;
+    --accent-wine:       #FF4466;
+    --accent-copper:     #FFAA44;
+    --accent-indigo:     #6688FF;
+
+    --rule:      #1A331A;
+    --rule-light:#142814;
+    --surface:   #0D140D;
+    --surface-hover: #152015;
+
+    --serif:  'Space Mono', 'Courier New', monospace;
+    --sans:   'Space Mono', 'Courier New', monospace;
+    --mono:   'Space Mono', 'JetBrains Mono', 'Courier New', monospace;
+
+    --radius-sm:  2px;
+    --radius-md:  2px;
+    --radius-lg:  2px;
+    --shadow-card: 0 0 0 1px #1A331A;
+    --shadow-hover: 0 0 12px rgba(51,255,102,0.15), 0 0 0 1px #33FF66;
+  }
+  [data-theme="terminal"] .hero h1 em { text-shadow: 0 0 20px rgba(51,255,102,0.3); }
+  [data-theme="terminal"] .card:hover { transform: none; }
+  [data-theme="terminal"] .card-icon svg { stroke-width: 1; }
+  [data-theme="terminal"] .section-number::after { box-shadow: 0 0 6px currentColor; }
+
+  /* ── Theme: Zen ─────────────────────────── */
+  [data-theme="zen"] {
+    --bg:        #FEFEFE;
+    --paper:     #FFFFFF;
+    --ink:       #2C2C2C;
+    --ink-mid:   #5C5C5C;
+    --ink-light: #8C8C8C;
+    --faint:     #BCBCBC;
+
+    --accent-terracotta: #C88870;
+    --accent-sage:       #8CB880;
+    --accent-navy:       #8898B0;
+    --accent-amber:      #C8A870;
+    --accent-plum:       #A088A0;
+    --accent-teal:       #80B0B0;
+    --accent-rust:       #B89080;
+    --accent-slate:      #909898;
+    --accent-forest:     #88A888;
+    --accent-wine:       #B08888;
+    --accent-copper:     #B89878;
+    --accent-indigo:     #8888B0;
+
+    --rule:      #E8E8E8;
+    --rule-light:#F0F0F0;
+    --surface:   #F6F6F6;
+    --surface-hover: #F0F0F0;
+
+    --serif:  Georgia, 'Noto Serif JP', serif;
+    --sans:   system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono:   'IBM Plex Mono', ui-monospace, monospace;
+
+    --radius-sm:  2px;
+    --radius-md:  4px;
+    --radius-lg:  4px;
+    --shadow-card: none;
+    --shadow-hover: none;
+    --card-accent-opacity: 0.3;
+  }
+  [data-theme="zen"] .card:hover { transform: none; }
+  [data-theme="zen"] .card-accent { height: 1px; }
+  [data-theme="zen"] .section-header::before {
+    content: "〇"; position: absolute; left: -28px; top: -2px;
+    font-size: 10px; color: var(--faint); opacity: 0.5;
+  }
+  [data-theme="zen"] .toc a { border-radius: 2px; }
+  [data-theme="zen"] .card { border-width: 0.5px; }
+  [data-theme="zen"] .card:hover { border-color: var(--ink-light); }
+
+  /* ── Theme Switcher ─────────────────────── */
+  .theme-switcher {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    gap: 6px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 100px;
+    padding: 6px 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+    z-index: 100;
+    transition: background 200ms, border-color 200ms;
+  }
+  .theme-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid var(--rule);
+    cursor: pointer;
+    transition: transform 150ms, border-color 150ms, box-shadow 150ms;
+    position: relative;
+  }
+  .theme-btn:hover { transform: scale(1.15); }
+  .theme-btn.active {
+    border-color: var(--ink);
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ink);
+  }
+  .theme-btn[data-theme-val="gallery"]   { background: linear-gradient(135deg, #FAF9F5 50%, #C4593A 50%); }
+  .theme-btn[data-theme-val="dark"]      { background: linear-gradient(135deg, #0F0F12 50%, #FF7A5C 50%); }
+  .theme-btn[data-theme-val="terminal"]  { background: linear-gradient(135deg, #0A0E0A 50%, #33FF66 50%); }
+  .theme-btn[data-theme-val="zen"]       { background: linear-gradient(135deg, #FEFEFE 50%, #909898 50%); }
+  .theme-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    display: flex;
+    align-items: center;
+    padding: 0 4px;
+    letter-spacing: 0.04em;
+  }
+
+  /* ── Reset & Base ─────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  a { color: inherit; text-decoration: none; }
+  img, svg { display: block; }
+
+  /* ── Page Container ───────────────────────── */
+  .page {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 0 40px 100px;
+  }
+  @media (max-width: 640px) {
+    .page { padding: 0 20px 60px; }
+  }
+
+  /* ── Hero ─────────────────────────────────── */
+  .hero {
+    padding: 80px 0 60px;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 64px;
+    position: relative;
+  }
+  @media (max-width: 640px) {
+    .hero { padding: 48px 0 40px; margin-bottom: 40px; }
+  }
+
+  .hero-eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .hero-eyebrow::before {
+    content: "";
+    display: block;
+    width: 32px;
+    height: 1px;
+    background: var(--accent-terracotta);
+  }
+
+  .hero h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(36px, 5.5vw, 68px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    max-width: 16ch;
+    margin-bottom: 16px;
+  }
+  .hero h1 em {
+    font-style: italic;
+    color: var(--accent-terracotta);
+    font-weight: 500;
+  }
+
+  .hero-subtitle {
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.65;
+    color: var(--ink-mid);
+    max-width: 560px;
+    font-weight: 400;
+  }
+  .hero-subtitle a {
+    color: var(--accent-terracotta);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: var(--rule);
+    transition: text-decoration-color 150ms;
+  }
+  .hero-subtitle a:hover {
+    text-decoration-color: var(--accent-terracotta);
+  }
+
+  .hero-meta {
+    margin-top: 32px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--faint);
+  }
+  .hero-meta .dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--rule);
+  }
+
+  /* ── Table of Contents ────────────────────── */
+  .toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 28px;
+  }
+  .toc a {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 14px;
+    border: 1px solid var(--rule);
+    border-radius: 100px;
+    color: var(--ink-mid);
+    background: var(--paper);
+    transition: all 150ms ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .toc a .toc-count {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--faint);
+    font-weight: 400;
+  }
+  .toc a:hover {
+    border-color: var(--ink);
+    color: var(--ink);
+    background: var(--surface);
+  }
+  .toc a:hover .toc-count { color: var(--accent-terracotta); }
+
+  /* ── Section ──────────────────────────────── */
+  .section {
+    margin-bottom: 72px;
+    scroll-margin-top: 32px;
+  }
+  @media (max-width: 640px) {
+    .section { margin-bottom: 48px; }
+  }
+
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0;
+    margin-bottom: 28px;
+    position: relative;
+  }
+  .section-number {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--section-accent, var(--accent-terracotta));
+    min-width: 28px;
+    padding-right: 16px;
+    position: relative;
+  }
+  .section-number::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--section-accent, var(--accent-terracotta));
+    opacity: 0.5;
+  }
+  .section-title {
+    font-family: var(--serif);
+    font-size: 28px;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+    color: var(--ink);
+    line-height: 1.2;
+    padding-left: 20px;
+  }
+  .section-desc {
+    font-size: 14.5px;
+    color: var(--ink-light);
+    line-height: 1.6;
+    max-width: 640px;
+    margin: -12px 0 28px 48px;
+  }
+  @media (max-width: 640px) {
+    .section-desc { margin-left: 0; margin-top: -4px; }
+  }
+
+  /* ── Card Grid ────────────────────────────── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--grid-gap);
+  }
+  @media (max-width: 960px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 600px) {
+    .grid { grid-template-columns: 1fr; gap: 16px; }
+  }
+
+  /* ── Card ─────────────────────────────────── */
+  .card {
+    display: flex;
+    flex-direction: column;
+    background: var(--paper);
+    border: 1px solid var(--rule-light);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    transition: transform 200ms cubic-bezier(0.22, 0.61, 0.36, 1),
+                box-shadow 200ms cubic-bezier(0.22, 0.61, 0.36, 1),
+                border-color 200ms ease;
+    box-shadow: var(--shadow-card);
+    text-decoration: none;
+    color: inherit;
+    position: relative;
+  }
+  .card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-hover);
+    border-color: var(--section-accent, var(--ink));
+  }
+
+  /* accent bar */
+  .card-accent {
+    height: 4px;
+    background: var(--section-accent, var(--accent-terracotta));
+    opacity: var(--card-accent-opacity);
+    flex-shrink: 0;
+  }
+
+  .card-body {
+    padding: 24px 24px 20px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    position: relative;
+  }
+  @media (max-width: 640px) {
+    .card-body { padding: 20px 18px 16px; }
+  }
+
+  .card-icon {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.45;
+    transition: opacity 200ms ease, background 200ms ease, transform 200ms ease;
+  }
+  .card:hover .card-icon {
+    opacity: 1;
+    background: var(--surface-hover);
+    transform: scale(1.05);
+  }
+  .card-icon svg {
+    width: 22px;
+    height: 22px;
+    stroke: var(--section-accent, var(--accent-terracotta));
+    fill: none;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .card-icon svg .filled {
+    fill: var(--section-accent, var(--accent-terracotta));
+    stroke: none;
+  }
+
+  .card-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--section-accent, var(--accent-terracotta));
+    margin-bottom: 8px;
+    opacity: 0.7;
+  }
+
+  .card-title {
+    font-family: var(--serif);
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin-bottom: 10px;
+  }
+
+  .card-desc {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--ink-light);
+    flex: 1;
+    margin-bottom: 16px;
+  }
+
+  .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid var(--rule-light);
+    padding-top: 14px;
+  }
+  .card-file {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .card-arrow {
+    font-family: var(--sans);
+    font-size: 16px;
+    color: var(--rule);
+    transition: transform 200ms ease, color 200ms ease;
+    flex-shrink: 0;
+    margin-left: 12px;
+  }
+  .card:hover .card-file { color: var(--ink-light); }
+  .card:hover .card-arrow {
+    transform: translateX(4px);
+    color: var(--section-accent, var(--accent-terracotta));
+  }
+
+  /* ── Section Accent Variants ──────────────── */
+  .sec-exploration   { --section-accent: var(--accent-terracotta); }
+  .sec-review        { --section-accent: var(--accent-navy); }
+  .sec-design        { --section-accent: var(--accent-sage); }
+  .sec-prototyping   { --section-accent: var(--accent-amber); }
+  .sec-presentations { --section-accent: var(--accent-plum); }
+  .sec-reports       { --section-accent: var(--accent-teal); }
+  .sec-diagrams      { --section-accent: var(--accent-rust); }
+  .sec-research      { --section-accent: var(--accent-forest); }
+  .sec-planning      { --section-accent: var(--accent-slate); }
+  .sec-pr            { --section-accent: var(--accent-wine); }
+  .sec-editors       { --section-accent: var(--accent-copper); }
+  .sec-data          { --section-accent: var(--accent-indigo); }
+
+  /* ── Footer ───────────────────────────────── */
+  .footer {
+    margin-top: 80px;
+    padding-top: 40px;
+    border-top: 1px solid var(--rule);
+  }
+  .footer-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .footer-quote {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 16px;
+    color: var(--ink-mid);
+    line-height: 1.5;
+  }
+  .footer-quote code {
+    font-family: var(--mono);
+    font-style: normal;
+    font-size: 13px;
+    background: var(--surface);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .footer-meta {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    color: var(--faint);
+    line-height: 1.6;
+    text-align: right;
+  }
+  .footer-meta a {
+    color: var(--accent-terracotta);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: var(--rule);
+  }
+  .footer-meta a:hover { text-decoration-color: var(--accent-terracotta); }
+  .footer-license {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--faint);
+    margin-top: 24px;
+    opacity: 0.7;
+  }
+  @media (max-width: 640px) {
+    .footer-inner { flex-direction: column; }
+    .footer-meta { text-align: left; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- ── Hero ─────────────────────────────────── -->
+  <header class="hero">
+    <div class="hero-eyebrow">A Curated Collection</div>
+    <h1>The Unreasonable <em>Effectiveness</em> of HTML</h1>
+    <p class="hero-subtitle">
+      Twenty-four self-contained <code>.html</code> files that an agent produced instead of a wall of markdown.
+      Each one trades a document you would skim for one you would actually read.
+      Open any of them directly in a browser.
+    </p>
+    <div class="hero-meta">
+      <span>24 Examples</span>
+      <span class="dot"></span>
+      <span>12 Categories</span>
+      <span class="dot"></span>
+      <span>Zero Dependencies</span>
+    </div>
+    <nav class="toc">
+      <a href="#exploration">Code Exploration <span class="toc-count">2</span></a>
+      <a href="#review">Code Review <span class="toc-count">2</span></a>
+      <a href="#design">Design System <span class="toc-count">2</span></a>
+      <a href="#prototyping">Prototyping <span class="toc-count">2</span></a>
+      <a href="#presentations">Presentations <span class="toc-count">2</span></a>
+      <a href="#reports">Reports <span class="toc-count">2</span></a>
+      <a href="#diagrams">Diagrams <span class="toc-count">1</span></a>
+      <a href="#research">Research <span class="toc-count">2</span></a>
+      <a href="#planning">Planning <span class="toc-count">1</span></a>
+      <a href="#pr">PR &amp; Communication <span class="toc-count">1</span></a>
+      <a href="#editors">Editor Tools <span class="toc-count">3</span></a>
+      <a href="#data">Data &amp; Visualization <span class="toc-count">4</span></a>
+    </nav>
+  </header>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Section 1 — Code Exploration
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section sec-exploration" id="exploration">
+    <div class="section-header">
+      <span class="section-number">01</span>
+      <h2 class="section-title">Code Exploration</h2>
+    </div>
+    <p class="section-desc">
+      When you are not sure what you want yet. Ask the agent to fan out across several directions and lay them next to each other so you can point at one — instead of reading three sequential walls of text.
+    </p>
+    <div class="grid">
+      <a class="card" href="01-exploration-code-approaches.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><path d="M1.5 1.5h5v5h-5z"/><path d="M9.5 1.5h5v5h-5z"/><path d="M1.5 9.5h5v5h-5z"/><path d="M9.5 9.5h5v5h-5z"/></svg></div>
+          <div class="card-num">No. 01</div>
+          <div class="card-title">Three Code Approaches</div>
+          <div class="card-desc">Side-by-side comparison of three ways to solve the same problem, with trade-offs called out inline.</div>
+          <div class="card-footer">
+            <span class="card-file">01-exploration-code-approaches.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+      <a class="card" href="02-exploration-visual-designs.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><circle cx="8" cy="8" r="6.5"/></svg></div>
+          <div class="card-num">No. 02</div>
+          <div class="card-title">Visual Design Directions</div>
+          <div class="card-desc">A handful of layout and palette options rendered live so you can react to them, not imagine them.</div>
+          <div class="card-footer">
+            <span class="card-file">02-exploration-visual-designs.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Section 2 — Code Review
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section sec-review" id="review">
+    <div class="section-header">
+      <span class="section-number">02</span>
+      <h2 class="section-title">Code Review</h2>
+    </div>
+    <p class="section-desc">
+      Diffs and call-graphs are spatial information; markdown flattens them. Let the agent render the change as an annotated diff or draw the module as boxes and arrows — so the shape of the code is visible at a glance.
+    </p>
+    <div class="grid">
+      <a class="card" href="03-code-review-pr.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><path d="M2 3h12M2 6h8M2 9h10M2 12h6"/></svg></div>
+          <div class="card-num">No. 03</div>
+          <div class="card-title">Annotated Pull Request</div>
+          <div class="card-desc">A diff rendered with margin notes, severity tags and jump links — easier to scan than scrolling a terminal.</div>
+          <div class="card-footer">
+            <span class="card-file">03-code-review-pr.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+      <a class="card" href="04-code-understanding.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><rect x="1" y="1" width="5" height="4" rx="1"/><rect x="10" y="1" width="5" height="4" rx="1"/><rect x="5.5" y="10" width="5" height="4" rx="1"/><path d="M3.5 5v2.5h9V10"/></svg></div>
+          <div class="card-num">No. 04</div>
+          <div class="card-title">Module Map</div>
+          <div class="card-desc">An unfamiliar package drawn as boxes and arrows, with the hot path highlighted and entry points listed.</div>
+          <div class="card-footer">
+            <span class="card-file">04-code-understanding.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Section 3 — Design System
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section sec-design" id="design">
+    <div class="section-header">
+      <span class="section-number">03</span>
+      <h2 class="section-title">Design System</h2>
+    </div>
+    <p class="section-desc">
+      HTML is the medium your design system ships in, so it is the natural format for talking about it. Tokens become swatches, components become contact sheets.
+    </p>
+    <div class="grid">
+      <a class="card" href="05-design-system.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><circle cx="4" cy="4" r="2.5"/><circle cx="12" cy="4" r="2.5"/><circle cx="4" cy="12" r="2.5"/><circle cx="12" cy="12" r="2.5"/></svg></div>
+          <div class="card-num">No. 05</div>
+          <div class="card-title">Living Design System</div>
+          <div class="card-desc">Colors, type scale and spacing tokens pulled from a repo and rendered as swatches you can copy from.</div>
+          <div class="card-footer">
+            <span class="card-file">05-design-system.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+      <a class="card" href="06-component-variants.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><rect x="1" y="3" width="6" height="10" rx="1.5"/><rect x="9" y="3" width="6" height="6" rx="1.5"/></svg></div>
+          <div class="card-num">No. 06</div>
+          <div class="card-title">Component Variants</div>
+          <div class="card-desc">Every size, state and intent of one component laid out on a single sheet for review.</div>
+          <div class="card-footer">
+            <span class="card-file">06-component-variants.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Section 4 — Prototyping
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section sec-prototyping" id="prototyping">
+    <div class="section-header">
+      <span class="section-number">04</span>
+      <h2 class="section-title">Prototyping</h2>
+    </div>
+    <p class="section-desc">
+      Motion and interaction cannot be described, only felt. A throwaway page with the real easing curve or the real click-through tells you in five seconds what a paragraph of prose never could.
+    </p>
+    <div class="grid">
+      <a class="card" href="07-prototype-animation.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="4" r="1.5"/><circle cx="13" cy="8" r="1.5"/><path d="M4.5 8h3M9.5 8h3"/></svg></div>
+          <div class="card-num">No. 07</div>
+          <div class="card-title">Animation Sandbox</div>
+          <div class="card-desc">The transition in isolation with sliders for duration and easing, so you can tune it before wiring it in.</div>
+          <div class="card-footer">
+            <span class="card-file">07-prototype-animation.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+      <a class="card" href="08-prototype-interaction.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><path d="M2 2h12v12H2z"/><path d="M5 5h6M5 8h4"/></svg></div>
+          <div class="card-num">No. 08</div>
+          <div class="card-title">Clickable Flow</div>
+          <div class="card-desc">Four screens linked together — enough fidelity to feel whether the interaction is right.</div>
+          <div class="card-footer">
+            <span class="card-file">08-prototype-interaction.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Section 5 — Presentations
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section sec-presentations" id="presentations">
+    <div class="section-header">
+      <span class="section-number">05</span>
+      <h2 class="section-title">Presentations</h2>
+    </div>
+    <p class="section-desc">
+      A handful of section tags and twenty lines of JS is a slide deck. Point the agent at a Slack thread or a design doc and get something you can arrow-key through in a meeting.
+    </p>
+    <div class="grid">
+      <a class="card" href="09-slide-deck.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><rect x="1" y="3" width="14" height="10" rx="1.5"/><path d="M5 8l2 2 4-4"/></svg></div>
+          <div class="card-num">No. 09</div>
+          <div class="card-title">Arrow-Key Slide Deck</div>
+          <div class="card-desc">A short presentation as one HTML file. Left and right to navigate, no build step.</div>
+          <div class="card-footer">
+            <span class="card-file">09-slide-deck.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+      <a class="card" href="10-svg-illustrations.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><path d="M2 14l3-8 4 5 2-3 3 6z"/><circle cx="11" cy="4" r="2"/></svg></div>
+          <div class="card-num">No. 10</div>
+          <div class="card-title">SVG Figure Sheet</div>
+          <div class="card-desc">The diagrams for a blog post, drawn inline so they can be tweaked and copied out one by one.</div>
+          <div class="card-footer">
+            <span class="card-file">10-svg-illustrations.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Section 6 — Reports
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section sec-reports" id="reports">
+    <div class="section-header">
+      <span class="section-number">06</span>
+      <h2 class="section-title">Reports</h2>
+    </div>
+    <p class="section-desc">
+      Recurring documents — status updates, post-mortems — benefit most from a bit of structure and color. A small chart and a colored timeline turn something people skim into something they actually read.
+    </p>
+    <div class="grid">
+      <a class="card" href="11-status-report.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><path d="M2 14V7h3v7M6 14V4h3v10M10 14V9h3v5"/></svg></div>
+          <div class="card-num">No. 11</div>
+          <div class="card-title">Weekly Status</div>
+          <div class="card-desc">What shipped, what slipped, and a small chart — formatted for a quick skim on Monday morning.</div>
+          <div class="card-footer">
+            <span class="card-file">11-status-report.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+      <a class="card" href="12-incident-report.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><path d="M8 1l7 13H1z"/><path d="M8 6v4M8 12.5v.5"/></svg></div>
+          <div class="card-num">No. 12</div>
+          <div class="card-title">Incident Timeline</div>
+          <div class="card-desc">A post-mortem with a minute-by-minute timeline, log excerpts and the follow-up checklist.</div>
+          <div class="card-footer">
+            <span class="card-file">12-incident-report.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Section 7 — Diagrams & Flowcharts
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section sec-diagrams" id="diagrams">
+    <div class="section-header">
+      <span class="section-number">07</span>
+      <h2 class="section-title">Diagrams &amp; Flowcharts</h2>
+    </div>
+    <p class="section-desc">
+      Inline SVG gives the agent a real pen. Ask for the figures for a post or a flowchart of a process and get vector art you can tweak by hand or paste straight into the final document.
+    </p>
+    <div class="grid">
+      <a class="card" href="13-flowchart-diagram.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><path d="M3 3h4v4H3z"/><path d="M7 5h4"/><path d="M11 3h3v4h-3z"/><path d="M5 7v4h3"/></svg></div>
+          <div class="card-num">No. 13</div>
+          <div class="card-title">Annotated Flowchart</div>
+          <div class="card-desc">A deploy pipeline drawn as a real flowchart — click any step to see what runs, timings, and failure paths.</div>
+          <div class="card-footer">
+            <span class="card-file">13-flowchart-diagram.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Section 8 — Research & Explainers
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section sec-research" id="research">
+    <div class="section-header">
+      <span class="section-number">08</span>
+      <h2 class="section-title">Research &amp; Explainers</h2>
+    </div>
+    <p class="section-desc">
+      An explainer with collapsible sections, tabbed code samples and a glossary in the margin reads very differently from the same words dumped linearly. The agent can build the scaffolding that makes a new topic navigable.
+    </p>
+    <div class="grid">
+      <a class="card" href="14-research-feature-explainer.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><path d="M3 1h7l4 4v9a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z"/><path d="M5 7h6M5 10h4"/></svg></div>
+          <div class="card-num">No. 14</div>
+          <div class="card-title">How a Feature Works</div>
+          <div class="card-desc">TL;DR box, collapsible request-path steps, tabbed config snippets, and an FAQ — the explainer format that actually works.</div>
+          <div class="card-footer">
+            <span class="card-file">14-research-feature-explainer.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+      <a class="card" href="15-research-concept-explainer.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="3"/><circle cx="8" cy="8" r="0.5" class="filled"/></svg></div>
+          <div class="card-num">No. 15</div>
+          <div class="card-title">Concept Explainer</div>
+          <div class="card-desc">Consistent hashing taught with a live ring you can add/remove nodes from, a comparison table, and a hover-linked glossary.</div>
+          <div class="card-footer">
+            <span class="card-file">15-research-concept-explainer.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Section 9 — Planning
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section sec-planning" id="planning">
+    <div class="section-header">
+      <span class="section-number">09</span>
+      <h2 class="section-title">Planning</h2>
+    </div>
+    <p class="section-desc">
+      Turn a direction into a plan the implementer can actually read. Milestones on a timeline, data-flow diagrams, inline mockups, the risky code, and a risk table.
+    </p>
+    <div class="grid">
+      <a class="card" href="16-implementation-plan.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><path d="M2 8h12"/><circle cx="5" cy="8" r="2"/><circle cx="11" cy="8" r="2"/><path d="M5 6V3M11 6V3M5 10v3M11 10v3"/></svg></div>
+          <div class="card-num">No. 16</div>
+          <div class="card-title">Implementation Plan</div>
+          <div class="card-desc">Milestones on a timeline, a data-flow diagram, inline mockups, the risky code, and a risk table — the plan you hand off.</div>
+          <div class="card-footer">
+            <span class="card-file">16-implementation-plan.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Section 10 — PR & Communication
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section sec-pr" id="pr">
+    <div class="section-header">
+      <span class="section-number">10</span>
+      <h2 class="section-title">PR &amp; Communication</h2>
+    </div>
+    <p class="section-desc">
+      The author's side: motivation, before/after, a file-by-file tour with the why, and where to focus the review. Write the PR description your reviewers actually want.
+    </p>
+    <div class="grid">
+      <a class="card" href="17-pr-writeup.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><path d="M4 1l8 7-8 7z"/></svg></div>
+          <div class="card-num">No. 17</div>
+          <div class="card-title">PR Writeup for Reviewers</div>
+          <div class="card-desc">The author's side: motivation, before/after, a file-by-file tour with the why, and where to focus the review.</div>
+          <div class="card-footer">
+            <span class="card-file">17-pr-writeup.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Section 11 — Editor Tools
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section sec-editors" id="editors">
+    <div class="section-header">
+      <span class="section-number">11</span>
+      <h2 class="section-title">Editor Tools</h2>
+    </div>
+    <p class="section-desc">
+      Ask for a throwaway editor for the exact thing you are working on — and always end with an export button that turns whatever you did in the UI back into something you can paste into the agent or commit.
+    </p>
+    <div class="grid">
+      <a class="card" href="18-editor-triage-board.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><rect x="1" y="1" width="4" height="14" rx="1"/><rect x="6" y="4" width="4" height="11" rx="1"/><rect x="11" y="7" width="4" height="8" rx="1"/></svg></div>
+          <div class="card-num">No. 18</div>
+          <div class="card-title">Ticket Triage Board</div>
+          <div class="card-desc">Drag thirty tickets across Now / Next / Later / Cut, then copy the final ordering out as markdown.</div>
+          <div class="card-footer">
+            <span class="card-file">18-editor-triage-board.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+      <a class="card" href="19-editor-feature-flags.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><rect x="1" y="4" width="14" height="8" rx="4"/><circle cx="10" cy="8" r="2.5"/></svg></div>
+          <div class="card-num">No. 19</div>
+          <div class="card-title">Feature Flag Editor</div>
+          <div class="card-desc">Toggles grouped by area, dependency warnings when a prerequisite is off, and a copy-diff button for just the changed keys.</div>
+          <div class="card-footer">
+            <span class="card-file">19-editor-feature-flags.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+      <a class="card" href="20-editor-prompt-tuner.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><path d="M2 3h12v10H2z"/><path d="M2 6h12"/><path d="M5 9h3"/><path d="M5 11h5"/></svg></div>
+          <div class="card-num">No. 20</div>
+          <div class="card-title">Prompt Tuner</div>
+          <div class="card-desc">Editable template on the left with variable slots highlighted; three sample inputs on the right re-render live as you type.</div>
+          <div class="card-footer">
+            <span class="card-file">20-editor-prompt-tuner.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       Section 12 — Data & Visualization
+       ═══════════════════════════════════════════════════════════════ -->
+  <section class="section sec-data" id="data">
+    <div class="section-header">
+      <span class="section-number">12</span>
+      <h2 class="section-title">Data &amp; Visualization</h2>
+    </div>
+    <p class="section-desc">
+      Numbers tell a story when they have shape and color. A dashboard of metric cards, a sortable table, a service topology, or a gantt chart — all possible with nothing more than CSS Grid, inline SVG, and a few lines of vanilla JavaScript.
+    </p>
+    <div class="grid">
+      <a class="card" href="21-dashboard.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><rect x="1" y="1" width="6" height="4" rx="1"/><rect x="9" y="1" width="6" height="4" rx="1"/><rect x="1" y="7" width="6" height="4" rx="1"/><rect x="9" y="7" width="6" height="4" rx="1"/></svg></div>
+          <div class="card-num">No. 21</div>
+          <div class="card-title">Metrics Dashboard</div>
+          <div class="card-desc">KPI cards, bar chart, donut chart, sparklines, and a service health table — one page, zero dependencies.</div>
+          <div class="card-footer">
+            <span class="card-file">21-dashboard.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+      <a class="card" href="22-interactive-table.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="12" rx="1"/><path d="M1 5h14M1 8h14M1 11h14M5 2v12M10 2v12"/></svg></div>
+          <div class="card-num">No. 22</div>
+          <div class="card-title">Sortable, Filterable Table</div>
+          <div class="card-desc">Search box, role filters, clickable column headers for sort — all in vanilla JS with avatar initials and role badges.</div>
+          <div class="card-footer">
+            <span class="card-file">22-interactive-table.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+      <a class="card" href="23-system-architecture.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><rect x="1" y="1" width="5" height="4" rx="1"/><rect x="10" y="1" width="5" height="4" rx="1"/><rect x="5.5" y="9" width="5" height="4" rx="1"/><path d="M3.5 5v2.5h9V9"/></svg></div>
+          <div class="card-num">No. 23</div>
+          <div class="card-title">System Architecture</div>
+          <div class="card-desc">Layered service topology — clients, gateway, core services, data stores, external dependencies — with SVG connector arrows and a legend.</div>
+          <div class="card-footer">
+            <span class="card-file">23-system-architecture.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+      <a class="card" href="24-timeline-gantt.html">
+        <div class="card-accent"></div>
+        <div class="card-body">
+          <div class="card-icon"><svg viewBox="0 0 16 16"><path d="M1 4h6v2H1z"/><path d="M5 7h8v2H5z"/><path d="M3 10h5v2H3z"/><path d="M2 1v14M14 1v14"/></svg></div>
+          <div class="card-num">No. 24</div>
+          <div class="card-title">Project Timeline / Gantt</div>
+          <div class="card-desc">CSS Grid gantt chart with grouped tasks, progress bars, milestone diamonds, and a today marker — no chart library needed.</div>
+          <div class="card-footer">
+            <span class="card-file">24-timeline-gantt.html</span>
+            <span class="card-arrow">&rarr;</span>
+          </div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ── Footer ───────────────────────────────── -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-quote">
+        Everything on this page is itself a single <code>.html</code> file.
+      </div>
+      <div class="footer-meta">
+        Inspired by <a href="https://thariqs.github.io/html-effectiveness/">thariqs.github.io/html-effectiveness</a><br>
+        Examples 21-24 are original additions
+      </div>
+    </div>
+    <div class="footer-license">
+      Copyright 2026 Anthropic PBC &middot; SPDX-License-Identifier: Apache-2.0
+    </div>
+  </footer>
+
+</div>
+
+<!-- Theme Switcher -->
+<div class="theme-switcher">
+  <span class="theme-label">Theme</span>
+  <button class="theme-btn active" data-theme-val="gallery" title="Gallery"></button>
+  <button class="theme-btn" data-theme-val="dark" title="Dark Exhibition"></button>
+  <button class="theme-btn" data-theme-val="terminal" title="Terminal"></button>
+  <button class="theme-btn" data-theme-val="zen" title="Zen"></button>
+</div>
+
+<script>
+(function() {
+  var root = document.documentElement;
+  var saved = localStorage.getItem('gallery-theme');
+  if (saved) applyTheme(saved);
+
+  document.querySelectorAll('.theme-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      applyTheme(btn.dataset.themeVal);
+    });
+  });
+
+  function applyTheme(name) {
+    if (name === 'gallery') root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', name);
+    localStorage.setItem('gallery-theme', name);
+    document.querySelectorAll('.theme-btn').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.themeVal === name);
+    });
+  }
+})();
+</script>
+
+</body>
+</html>

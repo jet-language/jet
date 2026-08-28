@@ -560,7 +560,7 @@ pub fn main(args: Vec<String>) -> i32 {
         return drift_code;
     }
 
-    match verb.as_str() {
+    let code = match verb.as_str() {
         "doctor" => cmd_doctor(&theme, &parsed),
         "env" => cmd_env(&theme, &parsed),
         "use" => cmd_use(&theme, &parsed),
@@ -608,7 +608,11 @@ pub fn main(args: Vec<String>) -> i32 {
             );
             2
         }
+    };
+    if let Some(report) = crate::Store::seal_census_report() {
+        eprint!("{report}");
     }
+    code
 }
 
 fn retired_hangar_route(verb: &str) -> Option<&'static str> {

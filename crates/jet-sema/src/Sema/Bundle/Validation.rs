@@ -2074,6 +2074,7 @@ fn check_func_body_bundle_scoped(
         no_prelude,
         in_pre_clause: false,
         fallback_has_err: None,
+        failure_auto_root_suppression: 0,
         failure_auto_depth: 0,
         fallback_is_shape_miss: false,
         in_comptime: false,

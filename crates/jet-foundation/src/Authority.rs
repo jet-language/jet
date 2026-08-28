@@ -298,10 +298,16 @@ impl ApplicationAuthority {
     }
 
     /// Required effects with no policy verdict at the application boundary.
+    /// `Panic` is an internal deny-only stop row, not a positive authority
+    /// request. An explicit `Panic` denial is still reported below.
     pub fn undecided_effects(&self) -> Holds {
         self.required_effects
             .iter()
-            .filter(|effect| answer(&self.granted_effects, &self.denied_effects, effect) == Verdict::Missing)
+            .filter(|effect| {
+                root(effect) != Effect::Panic.name()
+                    && answer(&self.granted_effects, &self.denied_effects, effect)
+                        == Verdict::Missing
+            })
             .cloned()
             .collect()
     }
@@ -794,6 +800,25 @@ mod tests {
         };
         let diagnostic = authority.policy_diagnostic().expect("E1803");
         assert!(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"));
+    }
+
+    #[test]
+    fn application_authority_does_not_request_a_positive_panic_grant() {
+        let mut authority = ApplicationAuthority {
+            required_effects: Holds::from(["IO".to_string(), "Panic".to_string()]),
+            granted_effects: Holds::from(["IO".to_string()]),
+            denied_effects: Holds::new(),
+            authority: "application default".to_string(),
+        };
+        assert!(authority.undecided_effects().is_empty());
+        assert!(authority.is_allowed());
+        assert!(authority.policy_diagnostic().is_none());
+
+        authority.denied_effects.insert("Panic".to_string());
+        let diagnostic = authority.policy_diagnostic().expect("E1803");
+        assert!(diagnostic.what.contains("Panic"));
+        assert!(diagnostic.fix.contains("adjust the denial"));
+        assert!(!diagnostic.fix.contains("allow: [Panic]"));
     }
 
     #[test]

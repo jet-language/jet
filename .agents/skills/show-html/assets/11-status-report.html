@@ -1,0 +1,594 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Acme — Engineering Status — Week 11</title>
+<style>
+  :root {
+    --ivory: #FAF9F5;
+    --slate: #141413;
+    --clay:  #D97757;
+    --oat:   #E3DACC;
+    --olive: #788C5D;
+    --rust:  #B04A3F;
+    --sky:   #6B9DAD;
+    --gray-100: #F0EEE6;
+    --gray-300: #D1CFC5;
+    --gray-500: #87867F;
+    --gray-700: #3D3D3A;
+    --white: #FFFFFF;
+
+    --serif: ui-serif, Georgia, "Noto Serif", serif;
+    --sans:  system-ui, -apple-system, sans-serif;
+    --mono:  ui-monospace, "SF Mono", Menlo, monospace;
+
+    --radius-panel: 14px;
+    --radius-row: 10px;
+    --border: 1px solid var(--gray-300);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--ivory);
+    color: var(--slate);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    padding: 64px 0 48px;
+    border-bottom: 1px solid var(--gray-300);
+    margin-bottom: 48px;
+  }
+  .header-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 42px;
+    letter-spacing: -0.025em;
+    margin: 0;
+    line-height: 1.1;
+  }
+  .auto-pill {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--gray-500);
+    background: var(--white);
+    border: var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+    white-space: nowrap;
+    margin-top: 6px;
+  }
+  .date-range {
+    color: var(--gray-500);
+    font-size: 14px;
+    font-family: var(--mono);
+    letter-spacing: 0.02em;
+  }
+  .date-range .repo {
+    color: var(--gray-700);
+  }
+
+  /* ---------- Sections ---------- */
+  section {
+    margin-bottom: 56px;
+  }
+  h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 22px;
+    letter-spacing: -0.015em;
+    margin: 0 0 4px;
+  }
+  .section-rule {
+    border: none;
+    border-top: 2px solid var(--slate);
+    margin: 0 0 28px;
+    width: 32px;
+  }
+
+  /* ---------- Summary band — executive metric cards ---------- */
+  .summary-band {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 720px) {
+    .summary-band { grid-template-columns: repeat(2, 1fr); }
+  }
+  .stat-card {
+    background: var(--white);
+    border: var(--border);
+    border-radius: var(--radius-panel);
+    padding: 24px 24px 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .stat-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--gray-300);
+  }
+  .stat-card.warn::before {
+    background: var(--clay);
+  }
+  .stat-card.success::before {
+    background: var(--olive);
+  }
+  .stat-card.info::before {
+    background: var(--sky);
+  }
+  .stat-num {
+    font-family: var(--serif);
+    font-size: 48px;
+    font-weight: 400;
+    line-height: 1;
+    color: var(--slate);
+    margin-bottom: 10px;
+    letter-spacing: -0.03em;
+  }
+  .stat-label {
+    font-family: var(--sans);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--gray-500);
+    font-weight: 500;
+  }
+  .stat-delta {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    margin-top: 8px;
+  }
+  .stat-delta.up { color: var(--olive); }
+  .stat-delta.flat { color: var(--gray-500); }
+
+  /* ---------- Highlights ---------- */
+  .highlights {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .highlights li {
+    position: relative;
+    padding: 0 0 18px 28px;
+    font-size: 15px;
+    line-height: 1.65;
+    color: var(--gray-700);
+  }
+  .highlights li::before {
+    content: "";
+    position: absolute;
+    left: 6px;
+    top: 10px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--clay);
+  }
+  .highlights li strong {
+    color: var(--slate);
+    font-weight: 600;
+  }
+
+  /* ---------- Shipped table ---------- */
+  table.shipped {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--white);
+    border: var(--border);
+    border-radius: var(--radius-panel);
+    overflow: hidden;
+  }
+  table.shipped thead th {
+    text-align: left;
+    font-family: var(--sans);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--gray-500);
+    background: var(--gray-100);
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--gray-300);
+  }
+  table.shipped tbody td {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--gray-100);
+    font-size: 14px;
+    vertical-align: middle;
+  }
+  table.shipped tbody tr:last-child td {
+    border-bottom: none;
+  }
+  table.shipped tbody tr:hover {
+    background: rgba(240, 238, 230, 0.5);
+  }
+  .pr-link {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--clay);
+    text-decoration: none;
+    letter-spacing: 0.02em;
+    border-bottom: 1px dotted transparent;
+    transition: border-color 0.15s ease;
+  }
+  .pr-link:hover {
+    border-bottom-color: var(--clay);
+  }
+  .author {
+    color: var(--gray-700);
+    font-size: 13px;
+  }
+  .risk {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .risk-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .risk-dot.low { background: var(--olive); }
+  .risk-dot.med { background: var(--clay); }
+  .risk-dot.high { background: var(--rust); }
+
+  /* ---------- Velocity chart ---------- */
+  .chart-panel {
+    background: var(--white);
+    border: var(--border);
+    border-radius: var(--radius-panel);
+    padding: 28px 28px 22px;
+  }
+  .chart-panel svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .chart-caption {
+    font-size: 12px;
+    color: var(--gray-500);
+    margin-top: 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+  }
+
+  /* ---------- Carryover ---------- */
+  .carryover {
+    background: var(--white);
+    border: var(--border);
+    border-radius: var(--radius-panel);
+    padding: 4px 0;
+    overflow: hidden;
+  }
+  .carry-item {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 22px;
+    border-bottom: 1px solid var(--gray-100);
+  }
+  .carry-item:last-child {
+    border-bottom: none;
+  }
+  .carry-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 5px 10px;
+    flex-shrink: 0;
+    min-width: 72px;
+    text-align: center;
+  }
+  .carry-tag.review {
+    color: var(--sky);
+    background: rgba(107, 157, 173, 0.1);
+    border: 1px solid rgba(107, 157, 173, 0.2);
+  }
+  .carry-tag.blocked {
+    color: var(--clay);
+    background: rgba(217, 119, 87, 0.08);
+    border: 1px solid rgba(217, 119, 87, 0.2);
+  }
+  .carry-tag.slipped {
+    color: var(--gray-500);
+    background: var(--gray-100);
+    border: 1px solid var(--gray-300);
+  }
+  .carry-body {
+    font-size: 14px;
+    color: var(--gray-700);
+    flex: 1;
+  }
+  .carry-body .who {
+    color: var(--gray-500);
+    font-size: 12px;
+    font-family: var(--mono);
+  }
+
+  /* ---------- Footer ---------- */
+  footer {
+    margin-top: 72px;
+    padding: 24px 0 64px;
+    border-top: 1px solid var(--gray-300);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--gray-500);
+    letter-spacing: 0.02em;
+  }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 640px) {
+    h1 { font-size: 32px; }
+    .stat-num { font-size: 36px; }
+    .carry-item { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+
+    <header>
+      <div class="header-top">
+        <h1>Engineering Status &mdash; Week 11</h1>
+        <span class="auto-pill">auto-generated</span>
+      </div>
+      <div class="date-range">
+        Mar 10 &ndash; Mar 16, 2025 &nbsp;&middot;&nbsp;
+        <span class="repo">acme/app @ main</span>
+      </div>
+    </header>
+
+    <!-- Summary band -->
+    <section>
+      <div class="summary-band">
+        <div class="stat-card success">
+          <div class="stat-num">14</div>
+          <div class="stat-label">PRs merged</div>
+          <div class="stat-delta up">+3 vs wk10</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num">6</div>
+          <div class="stat-label">Deploys</div>
+          <div class="stat-delta flat">&plusmn;0</div>
+        </div>
+        <div class="stat-card warn">
+          <div class="stat-num">1</div>
+          <div class="stat-label">Incidents</div>
+          <div class="stat-delta flat">SEV-2 &middot; 47m</div>
+        </div>
+        <div class="stat-card info">
+          <div class="stat-num">3</div>
+          <div class="stat-label">Flaky tests fixed</div>
+          <div class="stat-delta up">suite now 99.1%</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Highlights -->
+    <section>
+      <h2>Highlights</h2>
+      <hr class="section-rule">
+      <ul class="highlights">
+        <li>
+          <strong>Bulk task editing shipped to 100%.</strong> The multi-select
+          toolbar landed behind a flag on Monday and ramped to all workspaces by
+          Thursday with no error-rate regression.
+        </li>
+        <li>
+          <strong>Sync API p95 down 38%.</strong> Replacing per-task auth checks
+          with a scoped batch lookup cut the hot path from 410ms to 255ms on the
+          staging load test.
+        </li>
+        <li>
+          <strong>One SEV-2 on Wednesday</strong> &mdash; a config rollout pushed
+          a bad connection-pool limit to the sync workers. Mitigated in 47 minutes;
+          full postmortem linked below.
+        </li>
+      </ul>
+    </section>
+
+    <!-- Shipped -->
+    <section>
+      <h2>Shipped</h2>
+      <hr class="section-rule">
+      <table class="shipped">
+        <thead>
+          <tr>
+            <th style="width: 90px;">PR</th>
+            <th>Title</th>
+            <th style="width: 140px;">Author</th>
+            <th style="width: 100px;">Risk</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a class="pr-link" href="#">#4871</a></td>
+            <td>Bulk edit toolbar: selection model + keyboard shortcuts</td>
+            <td class="author">Mira Okafor</td>
+            <td><span class="risk"><span class="risk-dot med"></span>Med</span></td>
+          </tr>
+          <tr>
+            <td><a class="pr-link" href="#">#4874</a></td>
+            <td>Batch auth lookup for <code style="font-family:var(--mono);font-size:13px;background:var(--gray-100);padding:1px 5px;border-radius:3px;">/v2/sync</code> hot path</td>
+            <td class="author">Devon Park</td>
+            <td><span class="risk"><span class="risk-dot med"></span>Med</span></td>
+          </tr>
+          <tr>
+            <td><a class="pr-link" href="#">#4878</a></td>
+            <td>Fix race in attachment uploader retry loop</td>
+            <td class="author">Sam Reyes</td>
+            <td><span class="risk"><span class="risk-dot low"></span>Low</span></td>
+          </tr>
+          <tr>
+            <td><a class="pr-link" href="#">#4879</a></td>
+            <td>Migrate reminder scheduler to idempotent job keys</td>
+            <td class="author">Priya Anand</td>
+            <td><span class="risk"><span class="risk-dot high"></span>High</span></td>
+          </tr>
+          <tr>
+            <td><a class="pr-link" href="#">#4882</a></td>
+            <td>Board view: collapse empty swimlanes by default</td>
+            <td class="author">Mira Okafor</td>
+            <td><span class="risk"><span class="risk-dot low"></span>Low</span></td>
+          </tr>
+          <tr>
+            <td><a class="pr-link" href="#">#4885</a></td>
+            <td>Quarantine 3 flaky webhook integration tests</td>
+            <td class="author">Jules Tan</td>
+            <td><span class="risk"><span class="risk-dot low"></span>Low</span></td>
+          </tr>
+          <tr>
+            <td><a class="pr-link" href="#">#4888</a></td>
+            <td>Connection pool limits configurable per worker tier</td>
+            <td class="author">Devon Park</td>
+            <td><span class="risk"><span class="risk-dot med"></span>Med</span></td>
+          </tr>
+          <tr>
+            <td><a class="pr-link" href="#">#4891</a></td>
+            <td>Dark mode pass on settings &amp; billing panels</td>
+            <td class="author">Noor Halabi</td>
+            <td><span class="risk"><span class="risk-dot low"></span>Low</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Velocity -->
+    <section>
+      <h2>Velocity</h2>
+      <hr class="section-rule">
+      <div class="chart-panel">
+        <svg viewBox="0 0 640 180" role="img" aria-label="PRs merged per day">
+          <!-- gridlines -->
+          <line x1="48" y1="20"  x2="620" y2="20"  stroke="#F0EEE6" stroke-width="1"/>
+          <line x1="48" y1="60"  x2="620" y2="60"  stroke="#F0EEE6" stroke-width="1"/>
+          <line x1="48" y1="100" x2="620" y2="100" stroke="#F0EEE6" stroke-width="1"/>
+          <line x1="48" y1="140" x2="620" y2="140" stroke="#D1CFC5" stroke-width="1"/>
+
+          <!-- y-axis labels -->
+          <text x="40" y="144" text-anchor="end" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#87867F">0</text>
+          <text x="40" y="104" text-anchor="end" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#87867F">1</text>
+          <text x="40" y="64"  text-anchor="end" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#87867F">2</text>
+          <text x="40" y="24"  text-anchor="end" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#87867F">3</text>
+
+          <!-- bars: 7 days, values 2,3,1,4,2,1,1 (sum 14)
+               baseline y=140, unit=40px, bar width=56, gap=24, start x=64 -->
+          <!-- Mon: 2 -->
+          <rect x="64"  y="60"  width="56" height="80"  rx="4" fill="#E3DACC"/>
+          <!-- Tue: 3 -->
+          <rect x="144" y="20"  width="56" height="120" rx="4" fill="#E3DACC"/>
+          <!-- Wed: 1 -->
+          <rect x="224" y="100" width="56" height="40"  rx="4" fill="#E3DACC"/>
+          <!-- Thu: 4 (peak) -->
+          <rect x="304" y="0"   width="56" height="140" rx="4" fill="#D97757"/>
+          <!-- Fri: 2 -->
+          <rect x="384" y="60"  width="56" height="80"  rx="4" fill="#E3DACC"/>
+          <!-- Sat: 1 -->
+          <rect x="464" y="100" width="56" height="40"  rx="4" fill="#E3DACC"/>
+          <!-- Sun: 1 -->
+          <rect x="544" y="100" width="56" height="40"  rx="4" fill="#E3DACC"/>
+
+          <!-- value labels -->
+          <text x="92"  y="54"  text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#87867F">2</text>
+          <text x="172" y="14"  text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#87867F">3</text>
+          <text x="252" y="94"  text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#87867F">1</text>
+          <text x="332" y="14"  text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#3D3D3A" font-weight="600">4</text>
+          <text x="412" y="54"  text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#87867F">2</text>
+          <text x="492" y="94"  text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#87867F">1</text>
+          <text x="572" y="94"  text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#87867F">1</text>
+
+          <!-- x-axis labels -->
+          <text x="92"  y="158" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#87867F">Mon</text>
+          <text x="172" y="158" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#87867F">Tue</text>
+          <text x="252" y="158" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#87867F">Wed</text>
+          <text x="332" y="158" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#87867F">Thu</text>
+          <text x="412" y="158" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#87867F">Fri</text>
+          <text x="492" y="158" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#87867F">Sat</text>
+          <text x="572" y="158" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#87867F">Sun</text>
+        </svg>
+        <div class="chart-caption">
+          PRs merged per day. Thursday spike is the bulk-edit feature train (4 PRs landed together).
+        </div>
+      </div>
+    </section>
+
+    <!-- Carryover -->
+    <section>
+      <h2>Carryover</h2>
+      <hr class="section-rule">
+      <div class="carryover">
+        <div class="carry-item">
+          <span class="carry-tag review">In review</span>
+          <div class="carry-body">
+            Workspace export to CSV &mdash; waiting on pagination review.
+            <span class="who">&middot; Sam Reyes</span>
+          </div>
+        </div>
+        <div class="carry-item">
+          <span class="carry-tag blocked">Blocked</span>
+          <div class="carry-body">
+            SSO group mapping &mdash; blocked on staging IdP credentials from IT.
+            <span class="who">&middot; Priya Anand</span>
+          </div>
+        </div>
+        <div class="carry-item">
+          <span class="carry-tag slipped">Slipped</span>
+          <div class="carry-body">
+            Mobile push reliability dashboard &mdash; deprioritized for incident follow-up.
+            <span class="who">&middot; Devon Park</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      Sources: git log main..HEAD &middot; CI dashboard &middot; deploy log
+      &nbsp;&mdash;&nbsp; generated Mar 16 2025 18:02
+    </footer>
+
+  </div>
+<script>
+(function(){var t=localStorage.getItem('gallery-theme');if(!t||t==='gallery')return;var c={dark:{'--ivory':'#1A1A20','--slate':'#E8E6E1','--clay':'#FF7A5C','--oat':'#3A3A42','--olive':'#7ABF6E','--rust':'#E87A4A','--sky':'#6BA3D6','--plum':'#C07AB8','--white':'#1A1A20','--gray-100':'#222228','--gray-200':'#2A2A30','--gray-300':'#3A3A42','--gray-500':'#8A8880','--gray-700':'#B0AEA6','--surface':'#222228','--surface-0':'#181820','--surface-1':'#1A1A20','--surface-2':'#222228','--surface-hover':'#2A2A32','--border':'#2E2E36','--border-subtle':'#262630','--border-focus':'#4A4A56'},terminal:{'--ivory':'#0A0E0A','--slate':'#33FF66','--clay':'#FF9933','--oat':'#1A331A','--olive':'#33FF66','--rust':'#FF6633','--sky':'#33CCFF','--plum':'#CC66FF','--white':'#111611','--gray-100':'#142814','--gray-200':'#1A331A','--gray-300':'#225522','--gray-500':'#1A9940','--gray-700':'#22CC55','--surface':'#0D140D','--surface-0':'#080C08','--surface-1':'#111611','--surface-2':'#0D140D','--surface-hover':'#152015','--border':'#1A331A','--border-subtle':'#142814','--border-focus':'#225522'},zen:{'--ivory':'#FEFEFE','--slate':'#2C2C2C','--clay':'#C88870','--oat':'#E8E8E0','--olive':'#8CB880','--rust':'#B89080','--sky':'#8898B0','--plum':'#A088A0','--white':'#FFFFFF','--gray-100':'#F6F6F6','--gray-200':'#EEEEEE','--gray-300':'#DDDDDD','--gray-500':'#8C8C8C','--gray-700':'#5C5C5C','--surface':'#F6F6F6','--surface-0':'#FEFEFE','--surface-1':'#FFFFFF','--surface-2':'#F6F6F6','--surface-hover':'#F0F0F0','--border':'#E0E0E0','--border-subtle':'#EBEBEB','--border-focus':'#CCCCCC'}};var s=document.documentElement.style;var m=c[t]||{};Object.keys(m).forEach(function(k){s.setProperty(k,m[k])});})();
+</script>
+</body>
+</html>

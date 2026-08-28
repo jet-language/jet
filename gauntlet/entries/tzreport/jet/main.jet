@@ -1,58 +1,27 @@
 use core.files as files
 use core.process as process
-use core.sys as sys
 use core.time as time
 
+struct Meeting {
+    millis: Int
+    name: String
+    utc: String
+    weekday: String
+}
+
+fn parse_meeting(line: String) Meeting !IOError -> {
+    fields :: line.split("|").to_list()
+    local :: time.parse_rfc3339(fields.get(1) ?? panic("bad meeting")) ?? panic("bad timestamp")
+    return Meeting{millis: local.to_unix_ms(), name: fields.get(0) ?? panic("bad meeting"), utc: local.format_rfc3339(), weekday: ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][local.date().iso_weekday()]}
+}
+
 fn run() !IOError {
-    path :: process.argv().get(1) ?? "meetings.txt"
-    cwd :: sys.current_dir() ?? "."
-    text :: files.read(Path.from(cwd).join(path).to_string()) ?? panic("read meetings")
-    names := [String]{}
-    utc_texts := [String]{}
-    milliseconds := [Int]{}
-    weekdays := [Int]{}
-
-    loop line in text.split("\n") {
-        if line == "" -> next
-        fields :: line.split("|").to_list()
-        name :: fields.get(0) ?? panic("bad meeting")
-        raw :: fields.get(1) ?? panic("bad meeting")
-        local :: time.parse_rfc3339(raw) ?? panic("bad timestamp")
-        millis :: local.to_unix_ms()
-        utc :: time.from_unix_ms(millis)
-        names.push(name)
-        utc_texts.push(utc.format_rfc3339())
-        milliseconds.push(millis)
-        weekdays.push(utc.date().iso_weekday())
+    text :: files.read(process.argv().get(1) ?? "meetings.txt") ?? panic("read meetings")
+    meetings := text.lines().filter(line -> line != "").map(line -> parse_meeting(line))
+    meetings.sort_by(meeting -> meeting.millis)
+    loop position in 0..<meetings.len() {
+        gap :: if position == 0 -> "-" else -> "{(meetings[position].millis - meetings[position - 1].millis) /% 60000}"
+        print("{meetings[position].name} utc={meetings[position].utc} day={meetings[position].weekday} gap={gap}")
     }
-
-    order := [Int]{}
-    loop i in 0..<names.len() -> order.push(i)
-    loop i in 1..<order.len() {
-        key :: order[i]
-        j := i
-        loop j > 0 {
-            previous :: order[j - 1]
-            if milliseconds[previous] <= milliseconds[key] -> break
-            order[j] = previous
-            j -= 1
-        }
-        order[j] = key
-    }
-
-    day_names :: [String]{"", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
-    loop position in 0..<order.len() {
-        index :: order[position]
-        if {
-            position == 0 -> print("{names[index]} utc={utc_texts[index]} day={day_names[weekdays[index]]} gap=-")
-            else -> {
-                gap :: (milliseconds[index] - milliseconds[order[position - 1]]) /% 60000
-                print("{names[index]} utc={utc_texts[index]} day={day_names[weekdays[index]]} gap={gap}")
-            }
-        }
-    }
-    first :: order.get(0) ?? 0
-    last :: order.get(order.len() - 1) ?? 0
-    span :: if order.len() == 0 -> 0 else -> (milliseconds[last] - milliseconds[first]) /% 60000
-    print("span {span} minutes {order.len()}")
+    print("span {if meetings.len() == 0 -> 0 else -> (meetings[meetings.len() - 1].millis - meetings[0].millis) /% 60000} minutes {meetings.len()}")
 }

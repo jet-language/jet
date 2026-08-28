@@ -488,8 +488,20 @@ impl<'a> Lexer<'a> {
                 '>' if next == '>' => toks.push(simple(self, TokKind::Shr, 2)),
                 '>' if next == '=' => toks.push(simple(self, TokKind::Ge, 2)),
                 '>' => toks.push(simple(self, TokKind::Gt, 1)),
-                // D-UNIFYLIT1=A: `b"…"` retired — byte patterns use `[U8].{"…"}`.
-                // Bare `b` followed by `"` falls through to the identifier lexer.
+                // D-BYTELIT1=B: `b"…"` is a byte value. It shares the quoted
+                // body scanner so escapes and source spans stay identical to
+                // ordinary strings; the byte marker is retained in the parts.
+                'b' if next == '"' => {
+                    self.i += 1; // consume the byte-string prefix
+                    let tok = if self.at(self.i + 1) == '"' && self.at(self.i + 2) == '"' {
+                        self.triple_string(start, false, true, true)
+                    } else {
+                        self.string(start, false, true, true)
+                    };
+                    if let Some(tok) = tok {
+                        toks.push(tok);
+                    }
+                }
                 '"' => {
                     let raw_head = Self::starts_typed_head_body(&toks);
                     let byte_head = Self::starts_byte_typed_lit_body(&toks);
@@ -497,10 +509,10 @@ impl<'a> Lexer<'a> {
                         if Self::starts_inline_foreign_body(&toks) {
                             self.raw_foreign_string(start)
                         } else {
-                            self.triple_string(start, raw_head, byte_head)
+                            self.triple_string(start, raw_head, byte_head, false)
                         }
                     } else {
-                        self.string(start, raw_head, byte_head)
+                        self.string(start, raw_head, byte_head, false)
                     };
                     if let Some(tok) = tok {
                         toks.push(tok);

@@ -35,7 +35,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn mark_local_name_reference(&mut self, name: &str) {
+    pub(crate) fn mark_local_name_reference(&mut self, name: &str) {
         if let Some(def_span) = self.lookup(name).map(|info| info.def_span) {
             self.unused_binding_refs.insert(def_span);
         }

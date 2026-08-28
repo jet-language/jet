@@ -212,6 +212,24 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                     crate::AST::StrFormat::Hex(_) => {
                         unreachable!("Hex interpolation lowers to core.text.fmt.hex")
                     }
+                    crate::AST::StrFormat::Pad { .. } => {
+                        unreachable!("Pad interpolation lowers to core.text.fmt.pad")
+                    }
+                    crate::AST::StrFormat::PadLeft { .. } => {
+                        unreachable!("PadLeft interpolation lowers to core.text.fmt.pad_left")
+                    }
+                    crate::AST::StrFormat::Sci(_) => {
+                        unreachable!("Sci interpolation lowers to core.text.fmt.sci")
+                    }
+                    crate::AST::StrFormat::Percent(_) => {
+                        unreachable!("Percent interpolation lowers to core.text.fmt.percent")
+                    }
+                    crate::AST::StrFormat::Bin => {
+                        unreachable!("Bin interpolation lowers to core.text.fmt.bin")
+                    }
+                    crate::AST::StrFormat::Oct => {
+                        unreachable!("Oct interpolation lowers to core.text.fmt.oct")
+                    }
                     crate::AST::StrFormat::Unit(_) => {
                         unreachable!("Unit interpolation lowers to a String")
                     }

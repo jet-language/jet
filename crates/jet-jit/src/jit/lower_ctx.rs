@@ -10653,7 +10653,7 @@ impl LowerCtx<'_, '_> {
                             self.b.ins().call(push_ref, &[buf_id, text]);
                             continue;
                         }
-                        self.lower_named_str_interp(buf_id, e, type_name, *fmt)?;
+                        self.lower_named_str_interp(buf_id, e, type_name, fmt.clone())?;
                         continue;
                     }
                     if let Type::Apply { name, .. } = &push_ty {
@@ -16696,21 +16696,21 @@ impl LowerCtx<'_, '_> {
                                         ],
                                     )),
                                     "wrapping_add" => Some((
-                                        self.host.num.int_wrapping_add,
+                                        self.host.num.int_add,
                                         vec![
                                             self.lower_expr(&args[0])?,
                                             self.lower_expr(&args[1])?,
                                         ],
                                     )),
                                     "wrapping_sub" => Some((
-                                        self.host.num.int_wrapping_sub,
+                                        self.host.num.int_sub,
                                         vec![
                                             self.lower_expr(&args[0])?,
                                             self.lower_expr(&args[1])?,
                                         ],
                                     )),
                                     "wrapping_mul" => Some((
-                                        self.host.num.int_wrapping_mul,
+                                        self.host.num.int_mul,
                                         vec![
                                             self.lower_expr(&args[0])?,
                                             self.lower_expr(&args[1])?,
@@ -16808,10 +16808,6 @@ impl LowerCtx<'_, '_> {
                                 ),
                                 "saturating_add" if args.len() == 2 => (
                                     self.host.core.math_saturating_add,
-                                    vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                                ),
-                                "wrapping_add" if args.len() == 2 => (
-                                    self.host.core.math_wrapping_add,
                                     vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                                 ),
                                 "int_pow" if args.len() == 2 => (
@@ -17413,11 +17409,22 @@ impl LowerCtx<'_, '_> {
                                     };
                                     (host, vec![self.lower_expr(&args[0])?])
                                 }
-                                "decimal" | "percent" if args.len() == 2 => {
-                                    let host = if method == "decimal" {
-                                        self.host.fmt.decimal
+                                "bin" | "oct" if args.len() == 1 => {
+                                    let host = if method == "bin" {
+                                        self.host.fmt.bin
                                     } else {
-                                        self.host.fmt.percent
+                                        self.host.fmt.oct
+                                    };
+                                    (host, vec![self.lower_expr(&args[0])?])
+                                }
+                                "decimal" | "percent" | "sci" if args.len() == 2 => {
+                                    let host = match method.as_str() {
+                                        "decimal" if args[0].ty == Type::Int => {
+                                            self.host.fmt.decimal_int
+                                        }
+                                        "decimal" => self.host.fmt.decimal,
+                                        "sci" => self.host.fmt.sci,
+                                        _ => self.host.fmt.percent,
                                     };
                                     (
                                         host,
@@ -17434,16 +17441,11 @@ impl LowerCtx<'_, '_> {
                                         self.lower_expr(&args[1])?,
                                     ],
                                 ),
-                                "plural" if args.len() == 3 => (
-                                    self.host.fmt.plural,
-                                    vec![
-                                        self.lower_expr(&args[0])?,
-                                        self.lower_expr(&args[1])?,
-                                        self.lower_expr(&args[2])?,
-                                    ],
-                                ),
-                                "pad_left" | "pad_right" | "pad_center" if args.len() == 3 => {
+                                "pad" | "pad_left" | "pad_right" | "pad_center"
+                                    if args.len() == 3 =>
+                                {
                                     let host = match method.as_str() {
+                                        "pad" => self.host.fmt.pad,
                                         "pad_left" => self.host.fmt.pad_left,
                                         "pad_right" => self.host.fmt.pad_right,
                                         _ => self.host.fmt.pad_center,
@@ -17457,6 +17459,14 @@ impl LowerCtx<'_, '_> {
                                         ],
                                     )
                                 }
+                                "plural" if args.len() == 3 => (
+                                    self.host.fmt.plural,
+                                    vec![
+                                        self.lower_expr(&args[0])?,
+                                        self.lower_expr(&args[1])?,
+                                        self.lower_expr(&args[2])?,
+                                    ],
+                                ),
                                 _ => {
                                     return Err(format!(
                                         "jit core call unsupported: core.text.fmt.{method}"

@@ -433,7 +433,8 @@ pub struct WorkspaceIndex {
 }
 
 impl WorkspaceIndex {
-    /// An index with no members — every bare/path ref is then `UnknownMember`.
+    /// An index with no members — path refs remain unresolved, while bare
+    /// package refs fall through to the Jetpack catalog.
     pub fn empty() -> WorkspaceIndex {
         WorkspaceIndex::default()
     }
@@ -458,16 +459,14 @@ impl WorkspaceIndex {
         self.members.is_empty()
     }
 
-    /// Member names + paths, for did-you-mean suggestion lists.
-    fn candidate_labels(&self) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
-        for (name, path) in &self.members {
-            out.push(name.clone());
-            if path != name {
-                out.push(path.clone());
-            }
-        }
-        out
+    /// Labels for did-you-mean suggestions in the same address space as the
+    /// query: bare names for bare refs, normalized paths for path refs.
+    fn candidate_labels(&self, path_form: bool) -> Vec<String> {
+        self.members
+            .iter()
+            .map(|(name, path)| if path_form { path } else { name })
+            .cloned()
+            .collect()
     }
 
     /// Resolve a path-form ref (`infra/logging`) to the matching member path.
@@ -647,20 +646,24 @@ pub fn classify_with_workspace(
 ) -> Result<RefSpec, RefError> {
     let raw = raw.trim();
     if !raw.contains(Syntax::REF_PROVIDER_AT) && !is_bare_path(raw) && !index.is_empty() {
-        match resolve_in_index(raw, index) {
-            Ok(spec) => return Ok(spec),
-            Err(RefError::AmbiguousMember { .. }) => {
-                return resolve_in_index(raw, index);
+        // Preserve an explicitly declared `source.package` form before the
+        // source-less workspace lookup. A bare package's Jetpack default is
+        // deliberately deferred here so an unknown workspace member remains
+        // E1231; CLI callers can apply the default after this diagnostic path.
+        match classify_in(raw, table) {
+            Ok(spec) if !matches!(spec.source, Source::Jetpack) => return Ok(spec),
+            Err(error) if !matches!(error, RefError::MissingSeparator(_)) => {
+                return Err(error)
             }
-            Err(RefError::UnknownMember { .. }) => {}
-            Err(other) => return Err(other),
+            _ => {}
         }
+        return resolve_in_index(raw, index);
     }
     match classify_in(raw, table) {
         Ok(spec) => Ok(spec),
         // No source suffix. Consult the workspace index only when a workspace
-        // actually exists — outside a monorepo a bare/path ref is still just a
-        // missing-source error (D-JPK7), not an unknown-member error.
+        // actually exists — outside a monorepo a path ref is still a
+        // missing-source error, while a bare package uses Jetpack.
         Err(RefError::MissingSeparator(raw_owned)) => {
             if index.is_empty() {
                 Err(RefError::MissingSeparator(raw_owned))
@@ -692,7 +695,10 @@ fn resolve_in_index(raw: &str, index: &WorkspaceIndex) -> Result<RefSpec, RefErr
         }),
         0 => Err(RefError::UnknownMember {
             query: raw.to_string(),
-            suggestions: nearest(query, &index.candidate_labels()),
+            suggestions: nearest(
+                query,
+                &index.candidate_labels(query.contains('/')),
+            ),
         }),
         _ => Err(RefError::AmbiguousMember {
             query: raw.to_string(),
@@ -1316,11 +1322,10 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_separator() {
-        assert_eq!(
-            classify("fastfetch"),
-            Err(RefError::MissingSeparator("fastfetch".into()))
-        );
+    fn bare_package_defaults_to_jetpack() {
+        let spec = classify("fastfetch").unwrap();
+        assert_eq!(spec.source, Source::Jetpack);
+        assert_eq!(spec.package, "fastfetch");
     }
 
     #[test]
@@ -1333,11 +1338,10 @@ mod tests {
     }
 
     #[test]
-    fn selector_without_source_still_needs_resolution() {
-        assert!(matches!(
-            classify("fastfetch#latest"),
-            Err(RefError::MissingSeparator(_))
-        ));
+    fn bare_package_selector_uses_jetpack() {
+        let spec = classify("fastfetch#latest").unwrap();
+        assert_eq!(spec.source, Source::Jetpack);
+        assert_eq!(spec.package, "fastfetch#latest");
     }
 
     #[test]
@@ -1481,10 +1485,19 @@ mod tests {
         assert_eq!(err.code(), Some("E1231"));
         match err {
             RefError::UnknownMember { suggestions, .. } => {
-                assert!(
-                    suggestions.contains(&"logging".to_string()),
-                    "expected a did-you-mean for `logging`, got {suggestions:?}"
-                );
+                assert_eq!(suggestions, vec!["logging"]);
+            }
+            other => panic!("expected UnknownMember, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_path_member_suggests_paths_only() {
+        let err = classify_with_workspace("infra/loggin", &SourceTable::empty(), &ws_index())
+            .expect_err("typo must not resolve");
+        match err {
+            RefError::UnknownMember { suggestions, .. } => {
+                assert_eq!(suggestions, vec!["infra/logging"]);
             }
             other => panic!("expected UnknownMember, got {other:?}"),
         }
@@ -1520,17 +1533,12 @@ mod tests {
     }
 
     #[test]
-    fn empty_index_falls_through_to_missing_separator() {
-        // With no workspace, a bare ref is still a plain missing-source error —
-        // member resolution is a monorepo-only feature, never a surprise when
-        // there is no workspace at all.
-        let err =
+    fn empty_index_uses_jetpack_for_bare_package() {
+        let spec =
             classify_with_workspace("logging", &SourceTable::empty(), &WorkspaceIndex::empty())
-                .expect_err("no workspace → not a member");
-        assert!(
-            matches!(err, RefError::MissingSeparator(_)),
-            "expected MissingSeparator, got {err:?}"
-        );
+                .unwrap();
+        assert_eq!(spec.source, Source::Jetpack);
+        assert_eq!(spec.package, "logging");
     }
 
     // ── target@provider source refs (D-JPK-REF1=A; amends U6) ──

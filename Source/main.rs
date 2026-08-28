@@ -1797,6 +1797,8 @@ fn main() {
                 args.iter().skip(1).copied().collect()
             };
             let effective = effective_target("run", &resolved, cross_target.as_deref());
+            reject_native_web_run("run", effective.as_deref(), mode);
+            let effective = native_run_target("run", effective);
             run_native_execution(NativeExecutionRequest {
                 command: "run",
                 file: &resolved,
@@ -2983,6 +2985,8 @@ fn main() {
                                 }
                                 let effective =
                                     effective_target(cmd, &entry_str, cross_target.as_deref());
+                                reject_native_web_run(cmd, effective.as_deref(), mode);
+                                let effective = native_run_target(cmd, effective);
                                 run_native_execution(NativeExecutionRequest {
                                     command: cmd,
                                     file: &entry_str,
@@ -3286,6 +3290,8 @@ fn main() {
                 println!("jet {cmd}: using stock default");
             }
             let effective = effective_target(cmd, &resolved, cross_target.as_deref());
+            reject_native_web_run(cmd, effective.as_deref(), mode);
+            let effective = native_run_target(cmd, effective);
             run_native_execution(NativeExecutionRequest {
                 command: cmd,
                 file: &resolved,
@@ -3366,6 +3372,28 @@ fn effective_target(_cmd: &str, file: &str, explicit: Option<&str>) -> Option<St
     }
     let prog = jet::Parser::parse(&toks).ok()?;
     prog.default_target
+}
+
+/// D-WEBRUN1=A: native `jet run` has no web execution backend. Reject every
+/// web target after CLI/default resolution and before a native tier starts, so
+/// the failure is registered and cannot become an empty successful run.
+fn reject_native_web_run(command: &str, target: Option<&str>, mode: OutputMode) {
+    if command == "run" && target == Some(jet::Syntax::BUILD_TARGET_WEB) {
+        emit_cli_row("E-WEB-RUN", &[], mode.json);
+        exit(ExitCodes::USER_ERROR);
+    }
+}
+
+/// An explicit host target is a native execution choice, even when it
+/// overrides a file's web default. Keep the target override from being
+/// mistaken for a cross-compiled artifact that `jet run` must not spawn.
+fn native_run_target(command: &str, target: Option<String>) -> Option<String> {
+    let host = jet_foundation::Layout::TargetLayout::host_triple();
+    if command == "run" && target.as_deref() == Some(host.as_str()) {
+        None
+    } else {
+        target
+    }
 }
 
 /// c-devserver (owner-directed 2026-07-01): cheap lex+parse check (same style

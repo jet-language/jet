@@ -291,4 +291,16 @@ pub mod terminal_default;
 pub mod command_suite {
     include!("Prelude/CommandSuite.rs");
 }
+
+#[cfg(test)]
+#[test]
+fn unmatched_enum_match_fails_closed() {
+    let span = Diagnostics::Span::new(4, 12);
+    let diagnostic = Codegen::TIR::unmatched_enum_match_guard(true, span)
+        .expect_err("a sema-proved exhaustive match must not fall through");
+    assert_eq!(diagnostic.code, "E0956");
+    assert_eq!(diagnostic.span, Some(span));
+    assert!(diagnostic.what.contains("exhaustive match fallthrough"));
+    assert!(Codegen::TIR::unmatched_enum_match_guard(false, span).is_ok());
+}
 // Prelude/ contains include_str-embedded text files, not Rust modules.

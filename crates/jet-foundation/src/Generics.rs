@@ -525,6 +525,9 @@ pub fn e0914(selector: &str, span: Span) -> Diagnostic {
             | crate::Syntax::InterpolationSelectorArguments::Width => {
                 format!("`:{}(n)`", selector.name)
             }
+            crate::Syntax::InterpolationSelectorArguments::WidthFill => {
+                format!("`:{}(n[, \"fill\"])`", selector.name)
+            }
             crate::Syntax::InterpolationSelectorArguments::UnitStyle(styles) => {
                 format!("`:{}({})`", selector.name, styles.join("|"))
             }
@@ -540,6 +543,9 @@ pub fn e0914(selector: &str, span: Span) -> Diagnostic {
             crate::Syntax::InterpolationSelectorArguments::Precision
             | crate::Syntax::InterpolationSelectorArguments::Width => {
                 format!("`{{value:{}(2)}}`", selector.name)
+            }
+            crate::Syntax::InterpolationSelectorArguments::WidthFill => {
+                format!("`{{value:{}(2, \" \")}}`", selector.name)
             }
             crate::Syntax::InterpolationSelectorArguments::UnitStyle(styles) => styles
                 .iter()

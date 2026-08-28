@@ -245,9 +245,6 @@ fn jet_time_now_utc() -> JetDateTime {
 fn jet_time_today() -> JetDate {
     JetDate::today_utc()
 }
-fn jet_time_parse_rfc3339(s: &String) -> Result<JetDateTime, String> {
-    JetDateTime::parse_rfc3339(s)
-}
 fn jet_time_datetime(
     year: i64,
     month: i64,

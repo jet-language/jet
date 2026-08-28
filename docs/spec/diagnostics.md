@@ -609,6 +609,7 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | E-WEB-CROSS-PARTITION | sema | a function in one web bucket calls a function in another (D-WASM1) |
 | E-WEB-TARGET-BROWSER | sema | a Wasm-pinned function also carries the `Browser` effect (D-WASM1) |
 | E-WEB-TIR-UNSUPPORTED | driver | a web-targeted executable body is outside the checked TIR boundary (D-WEBTIR1) |
+| E-WEB-RUN | driver | native `jet run` cannot execute a web-targeted program (D-WEBRUN1=A) |
 | E-APP-TARGET-FEATURE | sema | an App feature is not available for the resolved target (D-APP-UNIFY1=B) |
 | E-OSTARGET-MIXED-AXIS | sema | a `#Target(OS.*)`-gated impl's file/module also carries a web-bucket ceiling (D-OSTARGET1) |
 | E-OSTARGET-UNMATCHED-CALL | sema | a function/method not gated to match takes or returns a value of a `#Target(OS.*)`-gated type (D-OSTARGET1) |
@@ -1799,6 +1800,7 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 | E-WEB-ABI-TYPE | `{type}` cannot cross the JS/WASM boundary {context}. | Web exports and imports only admit ABI-safe types: scalars, `String`, `List`/`Map` of ABI-safe values, and `#Codable` structs/enums whose fields are ABI-safe (D-JSBIND1). | Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or add `#Codable` to the struct/enum and keep every field ABI-safe. |
 | E-WEB-TARGET-BROWSER | `{fn}` is pinned to Wasm but uses the `Browser` effect. | A Wasm-pinned function cannot call browser/DOM APIs directly; the partition keeps view code in JS (D-WASM1). | Remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls (D-MARK-TARGET1). |
 | E-WEB-TIR-UNSUPPORTED | Web output cannot compile `{fn}` yet. | Web builds use the same checked executable body path as native builds; this function uses a construct the web output cannot lower today (D-WEBTIR1). | Move the unsupported work behind a Wasm export that uses covered Jet constructs, or simplify this function for the web target. |
+| E-WEB-RUN | `jet run` cannot execute a web-targeted program natively. | The web target produces browser artifacts, not a native console executable. | Use `jet dev <file.jet>` for the live browser loop, or `jet build --target=web <file.jet>` for web artifacts. |
 
 ## Native OS platform gating diagnostics (c134, D-OSTARGET1)
 

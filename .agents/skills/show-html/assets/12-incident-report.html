@@ -1,0 +1,719 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>INC-2025-0412 — Elevated 502s on task sync</title>
+<style>
+  :root {
+    --ivory: #FAF9F5;
+    --slate: #141413;
+    --clay:  #D97757;
+    --oat:   #E3DACC;
+    --olive: #788C5D;
+    --rust:  #B04A3F;
+    --sky:   #6B9DAD;
+    --amber: #D4943A;
+    --gray-100: #F0EEE6;
+    --gray-300: #D1CFC5;
+    --gray-500: #87867F;
+    --gray-700: #3D3D3A;
+    --white: #FFFFFF;
+
+    --serif: ui-serif, Georgia, "Noto Serif", serif;
+    --sans:  system-ui, -apple-system, sans-serif;
+    --mono:  ui-monospace, "SF Mono", Menlo, monospace;
+
+    --radius-panel: 14px;
+    --radius-row: 10px;
+    --border: 1px solid var(--gray-300);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--ivory);
+    color: var(--slate);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 840px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+
+  /* ---------- Severity banner ---------- */
+  .severity-banner {
+    background: var(--slate);
+    color: var(--ivory);
+    padding: 8px 0;
+    position: relative;
+    overflow: hidden;
+  }
+  .severity-banner::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--amber) 0%, var(--clay) 50%, var(--rust) 100%);
+  }
+  .banner-inner {
+    max-width: 840px;
+    margin: 0 auto;
+    padding: 12px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .banner-id {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: rgba(250, 249, 245, 0.5);
+  }
+  .banner-status {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .banner-sev {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--amber);
+  }
+  .banner-resolved {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--olive);
+    background: rgba(120, 140, 93, 0.15);
+    border-radius: 999px;
+    padding: 4px 14px;
+    text-transform: uppercase;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    padding: 48px 0 40px;
+    border-bottom: 1px solid var(--gray-300);
+    margin-bottom: 48px;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 40px;
+    letter-spacing: -0.025em;
+    margin: 0 0 20px;
+    line-height: 1.15;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 5px 14px;
+    line-height: 1;
+  }
+  .pill .k {
+    font-weight: 400;
+    opacity: 0.65;
+  }
+  .pill.resolved {
+    background: rgba(120, 140, 93, 0.1);
+    color: var(--olive);
+    border: 1px solid rgba(120, 140, 93, 0.2);
+  }
+  .pill.neutral {
+    background: var(--gray-100);
+    color: var(--gray-700);
+    border: var(--border);
+  }
+  .pill.neutral .v {
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  /* ---------- TL;DR ---------- */
+  .tldr {
+    background: var(--slate);
+    color: var(--ivory);
+    border-radius: var(--radius-panel);
+    padding: 28px 32px;
+    margin-bottom: 56px;
+    position: relative;
+    overflow: hidden;
+  }
+  .tldr::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 4px;
+    background: var(--amber);
+  }
+  .tldr-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--amber);
+    margin-bottom: 14px;
+    font-weight: 600;
+  }
+  .tldr p {
+    margin: 0;
+    font-size: 15.5px;
+    line-height: 1.7;
+  }
+  .tldr code {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: rgba(250, 249, 245, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  /* ---------- Sections ---------- */
+  section {
+    margin-bottom: 56px;
+    scroll-margin-top: 24px;
+  }
+  h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 24px;
+    letter-spacing: -0.015em;
+    margin: 0 0 4px;
+  }
+  .section-rule {
+    border: none;
+    border-top: 2px solid var(--slate);
+    margin: 0 0 28px;
+    width: 32px;
+  }
+  p { margin: 0 0 16px; }
+  code.inline {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--gray-100);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  /* ---------- Timeline ---------- */
+  .timeline {
+    position: relative;
+    padding: 4px 0 4px 0;
+  }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    left: 15px;
+    top: 12px;
+    bottom: 12px;
+    width: 2px;
+    background: var(--gray-300);
+  }
+  .tl-entry {
+    position: relative;
+    padding: 0 0 28px 52px;
+  }
+  .tl-entry:last-child {
+    padding-bottom: 0;
+  }
+  .tl-marker {
+    position: absolute;
+    left: 0;
+    top: 4px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--gray-100);
+    border: 2px solid var(--gray-300);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+  }
+  .tl-marker svg {
+    width: 14px;
+    height: 14px;
+  }
+  .tl-marker.impact {
+    background: rgba(217, 119, 87, 0.12);
+    border-color: var(--clay);
+  }
+  .tl-marker.mitigated {
+    background: rgba(120, 140, 93, 0.12);
+    border-color: var(--olive);
+  }
+  .tl-marker.alert {
+    background: rgba(212, 148, 58, 0.12);
+    border-color: var(--amber);
+  }
+  .tl-time {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--gray-700);
+    background: var(--white);
+    border: 1px solid var(--gray-300);
+    border-radius: 6px;
+    padding: 3px 10px;
+    margin-bottom: 8px;
+  }
+  .tl-body {
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--gray-700);
+  }
+  .tl-body strong {
+    color: var(--slate);
+    font-weight: 600;
+  }
+
+  /* ---------- Code diff ---------- */
+  .code-panel {
+    background: var(--slate);
+    color: var(--gray-100);
+    border-radius: var(--radius-panel);
+    padding: 20px 24px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.75;
+    overflow-x: auto;
+    margin: 12px 0 4px;
+    border: 1px solid rgba(250, 249, 245, 0.08);
+  }
+  .code-panel .path {
+    color: var(--gray-500);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    margin-bottom: 12px;
+    display: block;
+  }
+  .diff-line { white-space: pre; }
+  .diff-line.ctx { color: var(--gray-300); }
+  .diff-line.del { color: #E89B8E; }
+  .diff-line.add { color: #A8C08A; }
+
+  /* ---------- Impact table ---------- */
+  .impact-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--gray-300);
+    border: var(--border);
+    border-radius: var(--radius-panel);
+    overflow: hidden;
+    max-width: 520px;
+  }
+  .impact-cell {
+    background: var(--white);
+    padding: 16px 20px;
+  }
+  .impact-cell.dt {
+    font-size: 12px;
+    color: var(--gray-500);
+    font-weight: 500;
+  }
+  .impact-cell.dd {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--slate);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .impact-cell.dd.critical {
+    color: var(--rust);
+    font-weight: 700;
+  }
+
+  /* ---------- Action items ---------- */
+  .actions {
+    background: var(--white);
+    border: var(--border);
+    border-radius: var(--radius-panel);
+    overflow: hidden;
+  }
+  .ai-row {
+    display: grid;
+    grid-template-columns: 36px 36px 1fr 96px;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--gray-100);
+    transition: background 0.15s ease;
+  }
+  .ai-row:hover {
+    background: rgba(240, 238, 230, 0.4);
+  }
+  .ai-row:last-child { border-bottom: none; }
+  .ai-check {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--gray-300);
+    border-radius: 6px;
+    background: var(--white);
+    position: relative;
+  }
+  .ai-row.done .ai-check {
+    background: var(--olive);
+    border-color: var(--olive);
+  }
+  .ai-row.done .ai-check::after {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 1px;
+    width: 6px;
+    height: 10px;
+    border: solid var(--white);
+    border-width: 0 2px 2px 0;
+    transform: rotate(40deg);
+  }
+  .ai-row.done .ai-desc {
+    color: var(--gray-500);
+    text-decoration: line-through;
+    text-decoration-color: var(--gray-300);
+  }
+  .ai-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--oat);
+    color: var(--gray-700);
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    letter-spacing: 0.02em;
+    font-family: var(--mono);
+  }
+  .ai-desc {
+    font-size: 14px;
+    color: var(--slate);
+    line-height: 1.45;
+  }
+  .ai-due {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--gray-500);
+    text-align: right;
+    letter-spacing: 0.02em;
+  }
+
+  /* ---------- Fixed TOC ---------- */
+  .toc {
+    display: none;
+  }
+  @media (min-width: 1100px) {
+    .toc {
+      display: block;
+      position: fixed;
+      top: 72px;
+      right: max(24px, calc(50vw - 420px - 200px));
+      width: 170px;
+      font-size: 13px;
+    }
+    .toc-title {
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--gray-500);
+      margin-bottom: 14px;
+    }
+    .toc a {
+      display: block;
+      color: var(--gray-500);
+      text-decoration: none;
+      padding: 6px 0 6px 14px;
+      border-left: 2px solid var(--gray-300);
+      line-height: 1.3;
+      font-size: 13px;
+      transition: all 0.15s ease;
+    }
+    .toc a:hover {
+      color: var(--slate);
+      border-left-color: var(--clay);
+    }
+  }
+
+  footer {
+    margin-top: 72px;
+    padding: 24px 0 64px;
+    border-top: 1px solid var(--gray-300);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--gray-500);
+    letter-spacing: 0.02em;
+  }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 640px) {
+    h1 { font-size: 30px; }
+    .impact-grid { grid-template-columns: 1fr 1fr; max-width: 100%; }
+    .ai-row { grid-template-columns: 36px 1fr 80px; }
+    .ai-avatar { display: none; }
+    .banner-inner { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- Severity banner -->
+  <div class="severity-banner">
+    <div class="banner-inner">
+      <span class="banner-id">INC-2025-0412</span>
+      <div class="banner-status">
+        <span class="banner-sev">SEV-2</span>
+        <span class="banner-resolved">Resolved</span>
+      </div>
+    </div>
+  </div>
+
+  <nav class="toc">
+    <div class="toc-title">On this page</div>
+    <a href="#tldr">TL;DR</a>
+    <a href="#timeline">Timeline</a>
+    <a href="#root-cause">Root cause</a>
+    <a href="#impact">Impact</a>
+    <a href="#actions">Action items</a>
+  </nav>
+
+  <div class="page">
+
+    <header>
+      <h1>Elevated 502s on task sync</h1>
+      <div class="meta-row">
+        <span class="pill resolved">Resolved</span>
+        <span class="pill neutral"><span class="k">Duration</span> <span class="v">47 min</span></span>
+        <span class="pill neutral"><span class="k">Detected</span> <span class="v">Apr 12 &middot; 14:07</span></span>
+        <span class="pill neutral"><span class="k">Owner</span> <span class="v">Devon Park</span></span>
+      </div>
+    </header>
+
+    <div class="tldr" id="tldr">
+      <div class="tldr-label">TL;DR</div>
+      <p>
+        A config rollout lowered the database connection-pool limit on the
+        <code>sync-worker</code> tier from 64 to 8, exhausting connections under
+        normal afternoon load. The sync API returned 502s for roughly 21% of
+        requests over 47 minutes. We mitigated by reverting the config and
+        cycling the worker fleet; no data was lost.
+      </p>
+    </div>
+
+    <!-- Timeline -->
+    <section id="timeline">
+      <h2>Timeline</h2>
+      <hr class="section-rule">
+      <div class="timeline">
+
+        <div class="tl-entry">
+          <span class="tl-marker">
+            <svg viewBox="0 0 16 16" fill="none"><path d="M3 8h10M8 3v10" stroke="#87867F" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </span>
+          <span class="tl-time">14:02</span>
+          <div class="tl-body">
+            Config change <code class="inline">cfg-9a12</code> promoted to
+            production via the standard rollout pipeline.
+          </div>
+        </div>
+
+        <div class="tl-entry">
+          <span class="tl-marker impact">
+            <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="#D97757" stroke-width="2" stroke-linecap="round"/></svg>
+          </span>
+          <span class="tl-time">14:06</span>
+          <div class="tl-body">
+            <strong>Impact starts.</strong> Sync workers begin queueing on pool
+            checkout; p95 latency climbs past 4s and the load balancer starts
+            returning 502s.
+          </div>
+        </div>
+
+        <div class="tl-entry">
+          <span class="tl-marker alert">
+            <svg viewBox="0 0 16 16" fill="none"><path d="M8 4v5M8 11.5v1" stroke="#D4943A" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </span>
+          <span class="tl-time">14:07</span>
+          <div class="tl-body">
+            Alert fires: <code class="inline">sync_5xx_rate &gt; 2%</code> for 60s.
+            On-call (Devon) acknowledges.
+          </div>
+        </div>
+
+        <div class="tl-entry">
+          <span class="tl-marker">
+            <svg viewBox="0 0 16 16" fill="none"><path d="M3 8h10" stroke="#87867F" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </span>
+          <span class="tl-time">14:18</span>
+          <div class="tl-body">
+            Initial hypothesis is a bad deploy of the API service; last two
+            application deploys are rolled back with no effect.
+          </div>
+        </div>
+
+        <div class="tl-entry">
+          <span class="tl-marker">
+            <svg viewBox="0 0 16 16" fill="none"><path d="M3 8h10" stroke="#87867F" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </span>
+          <span class="tl-time">14:31</span>
+          <div class="tl-body">
+            Mira joins and notices pool-wait saturation in the worker dashboard.
+            Investigation pivots to infra config rather than app code.
+          </div>
+        </div>
+
+        <div class="tl-entry">
+          <span class="tl-marker mitigated">
+            <svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="#788C5D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="tl-time">14:44</span>
+          <div class="tl-body">
+            <strong>Mitigated.</strong> <code class="inline">cfg-9a12</code>
+            reverted; worker fleet cycled. 5xx rate drops below 0.2% within
+            three minutes.
+          </div>
+        </div>
+
+        <div class="tl-entry">
+          <span class="tl-marker mitigated">
+            <svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="#788C5D" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="tl-time">14:49</span>
+          <div class="tl-body">
+            Monitors green for 5 minutes. Incident declared resolved; status
+            page updated.
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Root cause -->
+    <section id="root-cause">
+      <h2>Root cause</h2>
+      <hr class="section-rule">
+      <p>
+        PR <code class="inline">#4888</code> made connection-pool limits
+        configurable per worker tier. The default for the new
+        <code class="inline">sync-worker</code> key was meant to inherit the
+        global value (64) but was hard-coded to 8 during a local test and
+        committed. The config linter only validates type, not magnitude, so the
+        change passed CI.
+      </p>
+      <p>
+        Because config rollouts and code deploys go through separate pipelines,
+        the on-call's first instinct &mdash; rolling back the most recent
+        application deploys &mdash; had no effect and cost roughly 13 minutes of
+        diagnosis time.
+      </p>
+
+      <div class="code-panel">
+        <span class="path">infra/config/workers.yaml</span>
+<div class="diff-line ctx">   pool:</div>
+<div class="diff-line ctx">     global_max_connections: 64</div>
+<div class="diff-line ctx">     tiers:</div>
+<div class="diff-line del">-      sync-worker: { max_connections: 64 }</div>
+<div class="diff-line add">+      sync-worker: { max_connections: 8 }   # debug value, do not ship</div>
+<div class="diff-line ctx">       webhook-worker: { max_connections: 32 }</div>
+      </div>
+    </section>
+
+    <!-- Impact -->
+    <section id="impact">
+      <h2>Impact</h2>
+      <hr class="section-rule">
+      <div class="impact-grid">
+        <div class="impact-cell dt">Requests failed (502)</div>
+        <div class="impact-cell dd critical">~41,200</div>
+        <div class="impact-cell dt">Peak error rate</div>
+        <div class="impact-cell dd critical">21.4%</div>
+        <div class="impact-cell dt">Users affected</div>
+        <div class="impact-cell dd">~2,300 workspaces</div>
+        <div class="impact-cell dt">Data loss</div>
+        <div class="impact-cell dd">None — clients retried</div>
+        <div class="impact-cell dt">SLA breach</div>
+        <div class="impact-cell dd">No (within budget)</div>
+      </div>
+    </section>
+
+    <!-- Action items -->
+    <section id="actions">
+      <h2>Action items</h2>
+      <hr class="section-rule">
+      <div class="actions">
+
+        <div class="ai-row done">
+          <span class="ai-check"></span>
+          <span class="ai-avatar" title="Devon Park">DP</span>
+          <span class="ai-desc">Revert cfg-9a12 and restore pool limit to 64</span>
+          <span class="ai-due">Apr 12</span>
+        </div>
+
+        <div class="ai-row">
+          <span class="ai-check"></span>
+          <span class="ai-avatar" title="Mira Okafor">MO</span>
+          <span class="ai-desc">Add config-linter range check for <code class="inline">max_connections</code> (warn &lt; 32)</span>
+          <span class="ai-due">Apr 18</span>
+        </div>
+
+        <div class="ai-row">
+          <span class="ai-check"></span>
+          <span class="ai-avatar" title="Sam Reyes">SR</span>
+          <span class="ai-desc">Surface &ldquo;recent config rollouts&rdquo; alongside deploys in the on-call dashboard</span>
+          <span class="ai-due">Apr 25</span>
+        </div>
+
+        <div class="ai-row">
+          <span class="ai-check"></span>
+          <span class="ai-avatar" title="Priya Anand">PA</span>
+          <span class="ai-desc">Canary config changes to one worker AZ for 10 min before fleet-wide promote</span>
+          <span class="ai-due">May 02</span>
+        </div>
+
+      </div>
+    </section>
+
+    <footer>
+      Authored from on-call notes + alert history &middot; reviewed by Devon Park, Mira Okafor
+    </footer>
+
+  </div>
+<script>
+(function(){var t=localStorage.getItem('gallery-theme');if(!t||t==='gallery')return;var c={dark:{'--ivory':'#1A1A20','--slate':'#E8E6E1','--clay':'#FF7A5C','--oat':'#3A3A42','--olive':'#7ABF6E','--rust':'#E87A4A','--sky':'#6BA3D6','--plum':'#C07AB8','--white':'#1A1A20','--gray-100':'#222228','--gray-200':'#2A2A30','--gray-300':'#3A3A42','--gray-500':'#8A8880','--gray-700':'#B0AEA6','--surface':'#222228','--surface-0':'#181820','--surface-1':'#1A1A20','--surface-2':'#222228','--surface-hover':'#2A2A32','--border':'#2E2E36','--border-subtle':'#262630','--border-focus':'#4A4A56'},terminal:{'--ivory':'#0A0E0A','--slate':'#33FF66','--clay':'#FF9933','--oat':'#1A331A','--olive':'#33FF66','--rust':'#FF6633','--sky':'#33CCFF','--plum':'#CC66FF','--white':'#111611','--gray-100':'#142814','--gray-200':'#1A331A','--gray-300':'#225522','--gray-500':'#1A9940','--gray-700':'#22CC55','--surface':'#0D140D','--surface-0':'#080C08','--surface-1':'#111611','--surface-2':'#0D140D','--surface-hover':'#152015','--border':'#1A331A','--border-subtle':'#142814','--border-focus':'#225522'},zen:{'--ivory':'#FEFEFE','--slate':'#2C2C2C','--clay':'#C88870','--oat':'#E8E8E0','--olive':'#8CB880','--rust':'#B89080','--sky':'#8898B0','--plum':'#A088A0','--white':'#FFFFFF','--gray-100':'#F6F6F6','--gray-200':'#EEEEEE','--gray-300':'#DDDDDD','--gray-500':'#8C8C8C','--gray-700':'#5C5C5C','--surface':'#F6F6F6','--surface-0':'#FEFEFE','--surface-1':'#FFFFFF','--surface-2':'#F6F6F6','--surface-hover':'#F0F0F0','--border':'#E0E0E0','--border-subtle':'#EBEBEB','--border-focus':'#CCCCCC'}};var s=document.documentElement.style;var m=c[t]||{};Object.keys(m).forEach(function(k){s.setProperty(k,m[k])});})();
+</script>
+</body>
+</html>

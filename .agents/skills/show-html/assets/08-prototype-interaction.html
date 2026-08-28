@@ -1,0 +1,824 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Acme — Sidebar drag-to-reorder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Libre+Franklin:wght@300;400;500;600;700&family=Source+Code+Pro:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ivory: #FAF9F5;
+    --slate: #141413;
+    --clay: #D97757;
+    --oat: #E3DACC;
+    --olive: #788C5D;
+    --sky: #5C7CA3;
+    --gray-50: #F6F5F1;
+    --gray-100: #F0EEE6;
+    --gray-200: #E0DED6;
+    --gray-300: #D1CFC5;
+    --gray-500: #87867F;
+    --gray-600: #5E5D58;
+    --gray-700: #3D3D3A;
+    --gray-800: #2A2A28;
+    --white: #ffffff;
+
+    --font-display: 'Libre Baskerville', ui-serif, Georgia, serif;
+    --font-body: 'Libre Franklin', system-ui, sans-serif;
+    --font-mono: 'Source Code Pro', ui-monospace, 'SF Mono', Menlo, monospace;
+
+    --ease: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html {
+    -webkit-font-smoothing: antialiased;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background: var(--gray-100);
+    color: var(--slate);
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1.55;
+    min-height: 100vh;
+  }
+
+  /* ===== PROTOTYPE SHELL ===== */
+  .proto-shell {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ===== HEADER BAR ===== */
+  .proto-header {
+    background: var(--white);
+    border-bottom: 1px solid var(--gray-200);
+    padding: 0 28px;
+    display: flex;
+    align-items: center;
+    height: 54px;
+    gap: 16px;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  .proto-logo {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--slate);
+    letter-spacing: -0.01em;
+  }
+  .proto-logo span {
+    font-weight: 400;
+    color: var(--clay);
+  }
+  .proto-divider {
+    width: 1px;
+    height: 22px;
+    background: var(--gray-200);
+  }
+  .proto-crumb {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--gray-500);
+  }
+  .proto-crumb strong {
+    color: var(--slate);
+    font-weight: 600;
+  }
+  .proto-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .proto-badge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 12px;
+    border-radius: 6px;
+    background: rgba(217,119,87,0.1);
+    color: var(--clay);
+  }
+  .proto-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--olive);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+  }
+
+  /* ===== MAIN LAYOUT ===== */
+  .proto-body {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 240px 1fr 320px;
+    min-height: 0;
+  }
+
+  /* ===== LEFT PANEL ===== */
+  .left-panel {
+    background: var(--white);
+    border-right: 1px solid var(--gray-200);
+    padding: 24px 0;
+    overflow-y: auto;
+  }
+  .lp-section {
+    margin-bottom: 28px;
+  }
+  .lp-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--gray-500);
+    padding: 0 20px;
+    margin-bottom: 8px;
+  }
+  .lp-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 20px;
+    font-size: 13px;
+    color: var(--gray-600);
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  .lp-item:hover {
+    background: var(--gray-50);
+    color: var(--slate);
+  }
+  .lp-item.active {
+    background: rgba(217,119,87,0.08);
+    color: var(--clay);
+    font-weight: 600;
+  }
+  .lp-item .lp-icon {
+    width: 6px;
+    height: 6px;
+    border-radius: 2px;
+    background: var(--gray-300);
+    flex-shrink: 0;
+  }
+  .lp-item.active .lp-icon {
+    background: var(--clay);
+  }
+
+  /* ===== CENTER: DEVICE FRAME ===== */
+  .center-stage {
+    background: var(--gray-100);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 32px;
+    position: relative;
+    overflow: auto;
+  }
+
+  /* subtle grid */
+  .center-stage::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,0,0,0.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,0,0,0.018) 1px, transparent 1px);
+    background-size: 20px 20px;
+    pointer-events: none;
+  }
+
+  .device-frame {
+    position: relative;
+    z-index: 1;
+    background: var(--white);
+    border-radius: 24px;
+    box-shadow:
+      0 0 0 1px var(--gray-200),
+      0 20px 60px rgba(20,20,19,0.12),
+      0 4px 16px rgba(20,20,19,0.06);
+    overflow: hidden;
+    width: 380px;
+    max-width: 100%;
+    animation: deviceIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  @keyframes deviceIn {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .device-notch {
+    height: 32px;
+    background: var(--slate);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .device-notch-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.15);
+  }
+
+  .device-titlebar {
+    padding: 14px 20px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .device-titlebar-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gray-500);
+  }
+  .device-titlebar-dots {
+    display: flex;
+    gap: 5px;
+  }
+  .device-titlebar-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--gray-200);
+  }
+
+  .device-content {
+    padding: 0 12px 16px;
+  }
+
+  /* ===== SIDEBAR MOCK (inside device) ===== */
+  .sidebar {
+    background: var(--white);
+    border-radius: 0;
+    padding: 0;
+  }
+  .sidebar-title {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gray-500);
+    padding: 4px 14px 10px;
+  }
+  .list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    margin: 1px 0;
+    border-radius: 10px;
+    background: var(--white);
+    cursor: grab;
+    user-select: none;
+    transition: background 0.12s ease, transform 0.12s ease-out, opacity 0.12s ease, box-shadow 0.12s ease;
+  }
+  .item:hover {
+    background: var(--gray-50);
+  }
+  .item:hover .grip i { background: var(--gray-600); }
+  .item.dragging {
+    opacity: 0.3;
+    transform: rotate(2deg);
+    background: var(--gray-50);
+    cursor: grabbing;
+  }
+  .item .label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--slate);
+  }
+  .item .count {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--gray-500);
+    background: var(--gray-50);
+    padding: 2px 8px;
+    border-radius: 6px;
+    min-width: 28px;
+    text-align: center;
+  }
+
+  /* grip dots */
+  .grip {
+    flex: none;
+    width: 10px;
+    height: 16px;
+    display: grid;
+    grid-template-columns: repeat(2, 3px);
+    grid-template-rows: repeat(3, 3px);
+    gap: 2px;
+    align-content: center;
+  }
+  .grip i {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: var(--gray-300);
+    transition: background 0.12s ease;
+  }
+
+  /* drop indicator */
+  .indicator {
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    height: 2.5px;
+    background: var(--clay);
+    border-radius: 2px;
+    pointer-events: none;
+    display: none;
+    box-shadow: 0 0 8px rgba(217,119,87,0.3);
+  }
+  .indicator::before {
+    content: "";
+    position: absolute;
+    left: -5px;
+    top: -3px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--clay);
+  }
+  .indicator.on { display: block; }
+
+  .device-footnote {
+    padding: 12px 14px 0;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--gray-500);
+    letter-spacing: 0.02em;
+    border-top: 1px solid var(--gray-100);
+    margin-top: 8px;
+  }
+
+  /* ===== RIGHT PANEL ===== */
+  .right-panel {
+    background: var(--white);
+    border-left: 1px solid var(--gray-200);
+    padding: 28px 24px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .rp-block {}
+  .rp-title {
+    font-family: var(--font-display);
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--slate);
+    margin-bottom: 4px;
+    padding-left: 14px;
+    border-left: 3px solid var(--clay);
+    line-height: 1.3;
+  }
+  .rp-lede {
+    font-size: 13px;
+    color: var(--gray-500);
+    margin-bottom: 16px;
+    padding-left: 17px;
+    line-height: 1.6;
+  }
+  .rp-list {
+    list-style: none;
+    padding: 0;
+  }
+  .rp-list li {
+    position: relative;
+    padding: 12px 0 12px 22px;
+    border-top: 1px solid var(--gray-100);
+    font-size: 13px;
+    color: var(--gray-600);
+    line-height: 1.6;
+  }
+  .rp-list li:first-child { border-top: none; }
+  .rp-list li::before {
+    content: "";
+    position: absolute;
+    left: 3px;
+    top: 18px;
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
+    background: var(--clay);
+    opacity: 0.6;
+  }
+  .rp-list li b {
+    color: var(--slate);
+    font-weight: 600;
+  }
+
+  /* Open questions */
+  .rp-questions {}
+  .rp-questions-title {
+    font-family: var(--font-display);
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--slate);
+    margin-bottom: 12px;
+    padding-left: 14px;
+    border-left: 3px solid var(--olive);
+    line-height: 1.3;
+  }
+  .rp-questions ol {
+    padding-left: 20px;
+    margin: 0;
+  }
+  .rp-questions li {
+    font-size: 13px;
+    color: var(--gray-600);
+    padding: 5px 0;
+    line-height: 1.6;
+  }
+  .rp-questions li b {
+    color: var(--slate);
+    font-weight: 600;
+  }
+  .rp-questions li::marker {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--olive);
+  }
+  code.inline {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--gray-700);
+  }
+
+  /* Comparison cards */
+  .rp-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 4px;
+  }
+  .compare-card {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  .compare-card h4 {
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0 0 8px;
+  }
+  .compare-card:first-child h4 { color: var(--clay); }
+  .compare-card:last-child h4 { color: var(--olive); }
+  .compare-card ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .compare-card li {
+    font-size: 12px;
+    color: var(--gray-500);
+    padding: 3px 0;
+    line-height: 1.5;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .compare-card li::before {
+    content: "";
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--gray-300);
+    flex-shrink: 0;
+    margin-top: 6px;
+  }
+  .compare-card:first-child li::before { background: var(--clay); opacity: 0.5; }
+  .compare-card:last-child li::before { background: var(--olive); opacity: 0.5; }
+
+  /* ===== FLOW CONNECTOR LINES (decorative) ===== */
+  .flow-label {
+    position: absolute;
+    z-index: 2;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--gray-500);
+    letter-spacing: 0.04em;
+    background: var(--gray-100);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px dashed var(--gray-300);
+  }
+  .flow-label-top {
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .flow-label-left {
+    top: 50%;
+    left: 8px;
+    transform: translateY(-50%) rotate(-90deg);
+    transform-origin: center;
+    white-space: nowrap;
+  }
+
+  /* ===== RESPONSIVE ===== */
+  @media (max-width: 1100px) {
+    .proto-body { grid-template-columns: 1fr; }
+    .left-panel { display: none; }
+    .right-panel { border-left: none; border-top: 1px solid var(--gray-200); }
+    .center-stage { min-height: 60vh; }
+  }
+  @media (max-width: 640px) {
+    .center-stage { padding: 24px 16px; }
+    .device-frame { width: 100%; border-radius: 16px; }
+    .proto-header { padding: 0 16px; }
+    .right-panel { padding: 20px 16px; }
+    .rp-compare { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="proto-shell">
+
+  <!-- ===== HEADER BAR ===== -->
+  <header class="proto-header">
+    <div class="proto-logo">Acme <span>Prototype</span></div>
+    <div class="proto-divider"></div>
+    <div class="proto-crumb">Interaction / <strong>drag-to-reorder</strong></div>
+    <div class="proto-actions">
+      <div class="proto-dot"></div>
+      <div class="proto-badge">interactive</div>
+    </div>
+  </header>
+
+  <!-- ===== MAIN ===== -->
+  <div class="proto-body">
+
+    <!-- ===== LEFT PANEL: Flow Steps ===== -->
+    <nav class="left-panel">
+      <div class="lp-section">
+        <div class="lp-label">Flow steps</div>
+        <div class="lp-item active">
+          <div class="lp-icon"></div>
+          Drag start
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          Drag over
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          Drop indicator
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          Drop complete
+        </div>
+      </div>
+
+      <div class="lp-section">
+        <div class="lp-label">Triggers</div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          On drag start
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          On drag over
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          On drop
+        </div>
+      </div>
+
+      <div class="lp-section">
+        <div class="lp-label">Properties</div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          Easing: ease-out
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          Duration: 120ms
+        </div>
+        <div class="lp-item">
+          <div class="lp-icon"></div>
+          Ghost opacity: 30%
+        </div>
+      </div>
+    </nav>
+
+    <!-- ===== CENTER: DEVICE FRAME ===== -->
+    <div class="center-stage">
+      <div class="flow-label flow-label-top">drag to reorder</div>
+
+      <div class="device-frame">
+        <div class="device-notch">
+          <div class="device-notch-dot"></div>
+          <div class="device-notch-dot"></div>
+          <div class="device-notch-dot"></div>
+        </div>
+        <div class="device-titlebar">
+          <div class="device-titlebar-label">Views</div>
+          <div class="device-titlebar-dots">
+            <div class="device-titlebar-dot"></div>
+            <div class="device-titlebar-dot"></div>
+          </div>
+        </div>
+        <div class="device-content">
+          <nav class="sidebar">
+            <ul class="list" id="list">
+              <li class="item" draggable="true">
+                <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="label">Inbox</span>
+                <span class="count">14</span>
+              </li>
+              <li class="item" draggable="true">
+                <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="label">Today</span>
+                <span class="count">3</span>
+              </li>
+              <li class="item" draggable="true">
+                <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="label">Upcoming</span>
+                <span class="count">21</span>
+              </li>
+              <li class="item" draggable="true">
+                <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="label">Projects</span>
+                <span class="count">8</span>
+              </li>
+              <li class="item" draggable="true">
+                <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="label">Archive</span>
+                <span class="count"></span>
+              </li>
+              <li class="item" draggable="true">
+                <span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="label">Trash</span>
+                <span class="count"></span>
+              </li>
+              <div class="indicator" id="indicator"></div>
+            </ul>
+          </nav>
+          <div class="device-footnote">Order persists in the DOM only. Refresh to reset.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== RIGHT PANEL: Annotations ===== -->
+    <aside class="right-panel">
+      <div class="rp-block">
+        <h2 class="rp-title">What you're feeling</h2>
+        <p class="rp-lede">Design decisions baked into this prototype, so you can push back on them.</p>
+        <ul class="rp-list">
+          <li>
+            <b>Drop indicator snaps to the nearest gap</b>, not the raw cursor Y.
+            It only moves when you cross a row's midpoint &mdash; feels more decisive,
+            less jittery.
+          </li>
+          <li>
+            <b>Dragged row stays in place at 30% opacity</b> with a 2&deg; tilt.
+            Keeping the ghost in the list preserves your sense of where you
+            started; the tilt reads as "lifted."
+          </li>
+          <li>
+            <b>Grip dots are the affordance, but the whole row is draggable.</b>
+            Dots darken on hover to teach the gesture without forcing a
+            tiny hit target.
+          </li>
+          <li>
+            <b>No auto-scroll, no drop animation.</b> Left out on purpose so the
+            core feel is easy to judge &mdash; say the word and we add them next.
+          </li>
+        </ul>
+      </div>
+
+      <div class="rp-questions">
+        <h2 class="rp-questions-title">Open questions</h2>
+        <ol>
+          <li>Should <b>Trash</b> (and maybe <b>Archive</b>) be pinned to the bottom and excluded from reordering?</li>
+          <li>Do we want rows to <b>slide</b> to their new slot on drop, or is the instant snap acceptable?</li>
+          <li>Keyboard path: is <code class="inline">Alt + Arrow</code> to move the focused row enough for the first ship?</li>
+        </ol>
+      </div>
+
+      <div class="rp-compare">
+        <div class="compare-card">
+          <h4>Current</h4>
+          <ul>
+            <li>Ghost stays at 30% opacity</li>
+            <li>2 degree tilt on drag</li>
+            <li>Instant snap on drop</li>
+            <li>No keyboard support</li>
+          </ul>
+        </div>
+        <div class="compare-card">
+          <h4>Proposed</h4>
+          <ul>
+            <li>Smooth slide on drop</li>
+            <li>Pin Trash/Archive to bottom</li>
+            <li>Alt+Arrow keyboard reorder</li>
+            <li>Haptic feedback on mobile</li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<script>
+  var list = document.getElementById('list');
+  var indicator = document.getElementById('indicator');
+  var dragging = null;
+  var dropBefore = null;
+
+  list.addEventListener('dragstart', function (e) {
+    var item = e.target.closest('.item');
+    if (!item) return;
+    dragging = item;
+    item.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+  });
+
+  list.addEventListener('dragover', function (e) {
+    if (!dragging) return;
+    e.preventDefault();
+    var siblings = Array.prototype.filter.call(
+      list.children,
+      function (el) { return el.classList && el.classList.contains('item'); }
+    );
+    dropBefore = null;
+    for (var i = 0; i < siblings.length; i++) {
+      var r = siblings[i].getBoundingClientRect();
+      if (e.clientY < r.top + r.height / 2) { dropBefore = siblings[i]; break; }
+    }
+    var listRect = list.getBoundingClientRect();
+    var edge = dropBefore
+      ? dropBefore.getBoundingClientRect().top
+      : siblings[siblings.length - 1].getBoundingClientRect().bottom;
+    indicator.style.top = (edge - listRect.top - 1) + 'px';
+    indicator.classList.add('on');
+  });
+
+  list.addEventListener('drop', function (e) {
+    e.preventDefault();
+    if (!dragging) return;
+    if (dropBefore) list.insertBefore(dragging, dropBefore);
+    else list.insertBefore(dragging, indicator);
+    cleanup();
+  });
+
+  list.addEventListener('dragleave', function (e) {
+    if (list.contains(e.relatedTarget)) return;
+    indicator.classList.remove('on');
+  });
+  document.addEventListener('dragend', cleanup);
+
+  function cleanup() {
+    if (dragging) dragging.classList.remove('dragging');
+    dragging = null;
+    dropBefore = null;
+    indicator.classList.remove('on');
+  }
+</script>
+<script>
+(function(){var t=localStorage.getItem('gallery-theme');if(!t||t==='gallery')return;var c={dark:{'--ivory':'#1A1A20','--slate':'#E8E6E1','--clay':'#FF7A5C','--oat':'#3A3A42','--olive':'#7ABF6E','--rust':'#E87A4A','--sky':'#6BA3D6','--plum':'#C07AB8','--white':'#1A1A20','--gray-100':'#222228','--gray-200':'#2A2A30','--gray-300':'#3A3A42','--gray-500':'#8A8880','--gray-700':'#B0AEA6','--surface':'#222228','--surface-0':'#181820','--surface-1':'#1A1A20','--surface-2':'#222228','--surface-hover':'#2A2A32','--border':'#2E2E36','--border-subtle':'#262630','--border-focus':'#4A4A56'},terminal:{'--ivory':'#0A0E0A','--slate':'#33FF66','--clay':'#FF9933','--oat':'#1A331A','--olive':'#33FF66','--rust':'#FF6633','--sky':'#33CCFF','--plum':'#CC66FF','--white':'#111611','--gray-100':'#142814','--gray-200':'#1A331A','--gray-300':'#225522','--gray-500':'#1A9940','--gray-700':'#22CC55','--surface':'#0D140D','--surface-0':'#080C08','--surface-1':'#111611','--surface-2':'#0D140D','--surface-hover':'#152015','--border':'#1A331A','--border-subtle':'#142814','--border-focus':'#225522'},zen:{'--ivory':'#FEFEFE','--slate':'#2C2C2C','--clay':'#C88870','--oat':'#E8E8E0','--olive':'#8CB880','--rust':'#B89080','--sky':'#8898B0','--plum':'#A088A0','--white':'#FFFFFF','--gray-100':'#F6F6F6','--gray-200':'#EEEEEE','--gray-300':'#DDDDDD','--gray-500':'#8C8C8C','--gray-700':'#5C5C5C','--surface':'#F6F6F6','--surface-0':'#FEFEFE','--surface-1':'#FFFFFF','--surface-2':'#F6F6F6','--surface-hover':'#F0F0F0','--border':'#E0E0E0','--border-subtle':'#EBEBEB','--border-focus':'#CCCCCC'}};var s=document.documentElement.style;var m=c[t]||{};Object.keys(m).forEach(function(k){s.setProperty(k,m[k])});})();
+</script>
+</body>
+</html>

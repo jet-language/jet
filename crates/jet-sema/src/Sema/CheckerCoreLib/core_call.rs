@@ -2135,6 +2135,37 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Type::String);
             }
+            // D-FMT-INTERP3=B: decimal accepts both machine Float and exact
+            // Int. The return stays String; the carrier-specific formatter is
+            // selected by each engine only after this sema fact is resolved.
+            ("core.text.fmt", "decimal") => {
+                if args.len() != 2 {
+                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                }
+                if let Some(arg) = args.get_mut(0) {
+                    self.borrow_ctx = true;
+                    let got = self.infer(&mut arg.expr);
+                    if !matches!(got.as_ref(), Some(Type::Float | Type::Int)) {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "{} can't use `core.text.fmt.decimal`",
+                                got.map_or_else(|| "this value".to_string(), |ty| ty.show())
+                            ),
+                            "decimal formatting accepts a Float or exact Int value".to_string(),
+                            "pass a Float or Int as the value".to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                    }
+                }
+                if let Some(arg) = args.get_mut(1) {
+                    self.expect_core_arg(name, 1, &Type::Int, arg);
+                }
+                for arg in args.iter_mut().skip(2) {
+                    self.infer(&mut arg.expr);
+                }
+                return Some(Type::String);
+            }
             (
                 "core.encoding.json" | "core.encoding.toml" | "core.encoding.yaml",
                 "to_string" | "to_string_pretty",

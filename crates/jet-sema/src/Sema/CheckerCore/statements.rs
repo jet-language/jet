@@ -574,7 +574,12 @@ impl<'a> Checker<'a> {
                                 let value = std::mem::replace(e, Expr::Absent(value_span));
                                 *e = Expr::Ok(Box::new(value), value_span);
                                 self.expected_type = Some(rt.clone());
-                                et = self.infer(e);
+                                // The payload was already inferred against the
+                                // carrier's success type above. The `Ok` node is
+                                // compiler-generated, so re-inferring it would
+                                // spend one extra source-nesting level at the
+                                // published boundary.
+                                et = Some(rt.clone());
                             }
                         }
                         self.report_lending_view_escape(e, "be returned");
@@ -2844,6 +2849,12 @@ impl<'a> Checker<'a> {
                         invalid: false,
                     },
                 );
+                // The group name is the lexical handle that owns this scope;
+                // `task` calls inside the body are rewritten to it even when
+                // the source never spells the handle again. Count that
+                // implicit ownership use so the label is not reported as an
+                // unused local.
+                self.mark_local_name_reference(name);
                 self.taskgroup_stack
                     .push(TaskGroupCtx::new(name.clone(), *name_span));
                 self.check_block(body, false);

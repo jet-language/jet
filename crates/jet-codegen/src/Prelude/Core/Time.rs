@@ -863,3 +863,10 @@ pub(crate) fn jet_time_format_pattern(
     }
     out
 }
+
+// The public Core call and every evaluator route use this one Prelude symbol.
+// Keeping the wrapper beside `JetDateTime` lets the evaluator reuse the exact
+// parser without importing the larger time-surface fragment.
+pub(crate) fn jet_time_parse_rfc3339(s: &String) -> Result<JetDateTime, String> {
+    JetDateTime::parse_rfc3339(s)
+}

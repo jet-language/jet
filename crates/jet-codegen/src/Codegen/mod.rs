@@ -1613,6 +1613,8 @@ fn push_corelib_prelude_body(
         // Prelude fragment for AOT and the interpreter ambient adapter.
         out.push_str(include_str!("../Prelude/Core/EnvConfig.rs"));
         out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
         // #1465: identity / release / POSIX control — after FSIoEnvOsTesting so
         // jet_std_os_pid / env helpers and jet_std_process_exit stay in scope.

@@ -1,0 +1,23 @@
+enum ParseError {
+    Empty
+    BadDigit(Int)
+}
+fn parse_age(raw: Int) Int !ParseError -> {
+    if raw == 0 {
+        return Err(ParseError.Empty)
+    }
+    if raw == 1 {
+        return Err(ParseError.BadDigit(raw))
+    }
+    return Ok((raw * 2))
+}
+fn load(raw: Int) Int !ParseError -> {
+    n :: parse_age(raw)
+    return Ok((n + 1))
+}
+fn run() {
+    a :: load(21) ?? 0
+    print(a)
+    b :: load(0) ?? 99
+    print(b)
+}

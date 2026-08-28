@@ -233,7 +233,7 @@ impl<'a> Parser<'a> {
         let parts = parts
             .into_iter()
             .map(|part| match part {
-                StrTokPart::Lit(text) => ByteTextPart::Lit(text),
+                StrTokPart::Lit(text) | StrTokPart::ByteText(text) => ByteTextPart::Lit(text),
                 StrTokPart::Byte(byte) => ByteTextPart::Byte(byte),
                 StrTokPart::Interp(_) => unreachable!("interpolation handled above"),
             })

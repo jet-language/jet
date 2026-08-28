@@ -103,8 +103,8 @@ Browse generated pages: [docs/reference/errors/](docs/reference/errors/) (e.g.
 
 **How is Jet different from Rust?**  
 Jet keeps ownership and safety but drops most of Rust's surface syntax and
-jargon. Errors are values with prefix roles such as `?Success !Error` and
-`!Error`, not exceptions. There is no macro
+jargon. Errors are values with prefix roles such as `?Success !NamedError` and
+`!NamedError`, not exceptions. There is no macro
 system, no `async`/`await`, and the compiler never speaks rustc's language to
 you. Expert unsafe is opt-in via `#Unsafe("reason") { … }`, not the default.
 
@@ -126,10 +126,10 @@ the next line starts with `.` or a binary operator. `jet fmt` handles layout.
 
 **Can I use this in production?**  
 The language, compiler, and core library are post-v1.0. Pin your toolchain with
-`edition:` in `pkg.jet` and read [versioning](docs/reference/versioning.md).
+`edition:` in `package.jet` and read [versioning](docs/reference/versioning.md).
 Registry delivery is available: `jet registry publish` atomically commits immutable
 metadata and source artifacts, and `jet fetch` verifies and installs them through
-the Hangar-backed lock path. `jet store gc` and `jet self doctor --online` remain
+the Hangar-backed lock path. `jetpack hangar clean` and `jet self doctor --online` remain
 separate package-manager work. HTTPS clients use rustls with
 system roots by default; `core.net.tls` provides advanced client TLS configuration.
 
@@ -143,8 +143,8 @@ system roots by default; `core.net.tls` provides advanced client TLS configurati
 | [docs/research/](docs/research/) | Exploratory notes & cross-language idea banks |
 | [docs/plans/](docs/plans/) | Project management: epoch plans, proposals, sidequests, ballots |
 | [examples/features/](examples/features/) | Executable spec — golden-tested feature programs |
+| [examples/suites/](examples/suites/) | User-story programs — golden-tested end-to-end workflows |
 | [examples/canon.jet](examples/canon.jet) | Compiling syntax showcase (golden-tested) |
-| [examples/features/](examples/features/) | Milestone feature programs (golden-tested) |
 | [editors/](editors/) | VS Code / Zed extensions + tree-sitter grammar |
 | [tests/ui/](tests/ui/) | Snapshot-pinned diagnostic fixtures |
 | [crates/](crates/) | Compiler seams, runtime, and developer-product crates |

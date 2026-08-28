@@ -52,8 +52,10 @@ pub(crate) use Producer::{
 mod Cache;
 pub use Cache::*;
 mod Seal;
-pub(crate) use Seal::{check as check_seal, object_digest_for_path, remove as remove_seal,
-    recover_unlocked as recover_seals, write as write_seal, SEALS_DIR};
+pub use Seal::arm_command_memo;
+pub(crate) use Seal::{census_report as seal_census_report, check as check_seal,
+    object_digest_for_path, recover_unlocked as recover_seals, remove as remove_seal,
+    write as write_seal, SEALS_DIR};
 mod Archive;
 pub use Archive::*;
 mod Nar;
@@ -112,8 +114,35 @@ pub(crate) fn current_progress() -> Option<ProgressHandle> {
     CURRENT_PROGRESS.with(|current| current.borrow().clone())
 }
 
+/// Process cache of the parsed, receipt-authenticated entry list, keyed by
+/// the same WAL identity stamp as the closure structure cache. One warm env
+/// command replayed and re-authenticated all metas ~30 times (37% of its CPU
+/// in SHA256, 25% in JSON parsing) before this cache; a mutation changes the
+/// journal, receipts, or entry-name set and therefore the stamp. Values may
+/// carry a stale `last_used_at` within one process, which only orders
+/// duplicate-reference winners.
+static ENTRY_LIST_CACHE: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, (String, Vec<StoreEntry>)>>,
+> = std::sync::LazyLock::new(Default::default);
+
 fn list_unlocked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
-    jet_pkg_model::Store::list_checked(roots)
+    let stamp = Closure::wal_state_stamp(roots)?;
+    let probe_disable = true;
+    if probe_disable {
+        return jet_pkg_model::Store::list_checked(roots);
+    }
+    if let Ok(cache) = ENTRY_LIST_CACHE.lock() {
+        if let Some((cached_stamp, entries)) = cache.get(&roots.root) {
+            if *cached_stamp == stamp {
+                return Ok(entries.clone());
+            }
+        }
+    }
+    let entries = jet_pkg_model::Store::list_checked(roots)?;
+    if let Ok(mut cache) = ENTRY_LIST_CACHE.lock() {
+        cache.insert(roots.root.clone(), (stamp, entries.clone()));
+    }
+    Ok(entries)
 }
 
 /// Inspect package projections without taking a lock or replaying journals.

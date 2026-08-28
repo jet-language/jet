@@ -603,7 +603,8 @@ fn project(v: &str) -> Result<String, BindError> {
     let out = v.replace('-', "_");
     if !ident(&out)
         || crate::Syntax::JET_KEYWORD_LIST.contains(&out.as_str())
-        || crate::Syntax::JET_TYPE_LIST.contains(&out.as_str())
+        || (crate::Syntax::JET_TYPE_LIST.contains(&out.as_str())
+            && out != crate::Syntax::TYPE_ERR)
     {
         return Err(BindError::Source(format!(
             "COM name `{v}` cannot be projected as a Jet identifier"

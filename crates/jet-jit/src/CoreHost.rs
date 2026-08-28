@@ -89,6 +89,32 @@ mod os_rt {
                     cause: Some(cause.to_string()),
                 })
             }
+
+        }
+
+        pub(crate) fn io_error_at(
+            operation: IOOperation,
+            path: &str,
+            error: std::io::Error,
+        ) -> IOError {
+            let context = IOContext {
+                operation,
+                resource: Some(path.to_string()),
+                os_code: error.raw_os_error().map(i64::from),
+                cause: Some(error.to_string()),
+            };
+            match error.kind() {
+                std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+                    IOError::InvalidInput(context)
+                }
+                std::io::ErrorKind::NotFound => IOError::NotFound(context),
+                std::io::ErrorKind::PermissionDenied => IOError::PermissionDenied(context),
+                std::io::ErrorKind::TimedOut => IOError::TimedOut(context),
+                std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => {
+                    IOError::Closed(context)
+                }
+                _ => IOError::Other(context),
+            }
         }
     }
 
@@ -195,6 +221,16 @@ mod os_rt {
         jet_std_os_umask, jet_std_os_uptime, jet_std_os_username, jet_std_os_utime,
         jet_std_os_version, jet_std_os_wait, jet_std_os_waitpid,
     };
+}
+
+// FSRuntimeOps.rs is the one policy-bearing filesystem fragment. The
+// resident host supplies only these raw kernels and its result marshaller.
+mod fs_prelude {
+    use super::fs_ops_kernel::{jet_fs_glob, jet_fs_rename};
+    use super::os_rt::jet_std;
+    use crate::fault_injection::jet_fault_should_fail;
+
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs");
 }
 
 // The resident JIT cannot hand a Rust `Rc` callback to the process signal
@@ -1621,13 +1657,7 @@ fn jet_jit_fs_walk(path: i64) -> i64 {
 fn jet_jit_fs_rename(from: i64, to: i64) -> i64 {
     let from = clone_string(from);
     let to = clone_string(to);
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return result_err_msg(&format!("fault injected: FS.Write for {to}"));
-    }
-    match fs_ops_kernel::jet_fs_rename(&from, &to) {
-        Ok(()) => result_ok(0),
-        Err(error) => result_err_msg(&format!("rename {from}: {error}")),
-    }
+    os_rt::marshal_result(fs_prelude::jet_std_fs_rename(&from, &to), |_| 0)
 }
 
 fn jet_jit_fs_walk_parallel(path: i64) -> i64 {
@@ -1664,22 +1694,16 @@ fn jet_jit_fs_walk_parallel(path: i64) -> i64 {
 
 fn jet_jit_fs_glob(pattern: i64) -> i64 {
     let pat = clone_string(pattern);
-    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {pat}"));
-    }
-    let matches = match fs_ops_kernel::jet_fs_glob(&pat) {
-        Ok(matches) => matches,
-        Err(error) => return result_err_msg(&format!("glob {pat}: {error}")),
-    };
-    let list = Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_empty_list();
-        for path in matches {
-            let sid = rt.heap.alloc_string(path);
-            let _ = rt.heap.list_push_int(list, sid);
-        }
-        list
-    });
-    result_ok(list as u64)
+    os_rt::marshal_result(fs_prelude::jet_std_fs_glob(&pat), |matches| {
+        Concurrency::with_runtime_mut(|rt| {
+            let list = rt.heap.alloc_empty_list();
+            for path in matches {
+                let sid = rt.heap.alloc_string(path);
+                let _ = rt.heap.list_push_int(list, sid);
+            }
+            list as u64
+        })
+    })
 }
 
 fn jet_jit_fs_symlink(from: i64, to: i64) -> i64 {
@@ -1887,10 +1911,6 @@ fn jet_jit_math_checked_add(a: i64, b: i64) -> i64 {
 fn jet_jit_math_saturating_add(a: i64, b: i64) -> i64 {
     a.saturating_add(b)
 }
-fn jet_jit_math_wrapping_add(a: i64, b: i64) -> i64 {
-    a.wrapping_add(b)
-}
-
 /// Mirrors `jet_std_math_int_pow`.
 fn jet_jit_math_int_pow(base: i64, exp: i64) -> i64 {
     if exp < 0 {
@@ -2342,7 +2362,6 @@ host_fns! {
     math_sign: "jet_jit_math_sign" => jet_jit_math_sign: sig_f64_i64;
     math_checked_add: "jet_jit_math_checked_add" => jet_jit_math_checked_add: sig_i64_i64_i64;
     math_saturating_add: "jet_jit_math_saturating_add" => jet_jit_math_saturating_add: sig_i64_i64_i64;
-    math_wrapping_add: "jet_jit_math_wrapping_add" => jet_jit_math_wrapping_add: sig_i64_i64_i64;
     math_int_pow: "jet_jit_math_int_pow" => jet_jit_math_int_pow: sig_i64_i64_i64;
     math_gcd: "jet_jit_math_gcd" => jet_jit_math_gcd: sig_i64_i64_i64;
     math_lcm: "jet_jit_math_lcm" => jet_jit_math_lcm: sig_i64_i64_i64;

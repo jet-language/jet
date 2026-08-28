@@ -16,7 +16,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "abs")
             | ("core.math", "min")
             | ("core.math", "max")
-            | ("core.text.fmt", "pretty")
+            | ("core.text.fmt", "pretty" | "decimal")
             | ("core.math", "clamp")
             // D-FLOATW1: sqrt/floor/ceil/pow are width-generic (Float→Float, F32→F32);
             // their return type is arg-type-dependent, so they use resolved_ret.
@@ -1899,7 +1899,7 @@ fn core_fixed_sig_impl(
         ("core.text.fmt", "number" | "bytes" | "duration" | "ordinal") => {
             Some((vec![(read, Type::Int)], Some(Type::String)))
         }
-        ("core.text.fmt", "decimal" | "percent") => Some((
+        ("core.text.fmt", "decimal" | "percent" | "sci") => Some((
             vec![(read, Type::Float), (read, Type::Int)],
             Some(Type::String),
         )),
@@ -1907,6 +1907,9 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int), (read, Type::Int)],
             Some(Type::String),
         )),
+        ("core.text.fmt", "bin" | "oct") => {
+            Some((vec![(read, Type::Int)], Some(Type::String)))
+        }
         ("core.text.fmt", "plural") => Some((
             vec![
                 (read, Type::Int),
@@ -1916,6 +1919,14 @@ fn core_fixed_sig_impl(
             Some(Type::String),
         )),
         ("core.text.fmt", "pad_left" | "pad_right" | "pad_center") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::String),
+            ],
+            Some(Type::String),
+        )),
+        ("core.text.fmt", "pad") => Some((
             vec![
                 (read, Type::String),
                 (read, Type::Int),

@@ -924,6 +924,7 @@ fn word_shaped_codes_are_registered_and_explainable() {
         "E-WEB-CROSS-PARTITION",
         "E-WEB-TARGET-BROWSER",
         "E-WEB-TIR-UNSUPPORTED",
+        "E-WEB-RUN",
         "E-APP-TARGET-FEATURE",
         "E-OSTARGET-MIXED-AXIS",
         "E-OSTARGET-UNMATCHED-CALL",

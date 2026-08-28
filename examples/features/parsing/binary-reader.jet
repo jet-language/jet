@@ -44,13 +44,19 @@ fn run() {
     f64 :: floats.read_f64_le() ?? return Err("bad Float")
     print("float_reads={f32}/{f64} remaining={floats.remaining()}")
 
+    magic_bytes :: Reader.over(b"JGB1").take(4) ?? return Err("short byte magic")
+    bytes_match :: magic_bytes == b"JGB1"
+    print("bytes_match={bytes_match}")
+
+    wrapped_u64 :: U64{18446744073709551615}.wrapping_add(U64{1})
+    fnv_step :: (U64{14695981039346656037} ~| U64{74}).wrapping_mul(U64{1099511628211})
+    print("u64_wrap={wrapped_u64} fnv_step={fnv_step}")
+
     // A bounds miss is an ordinary error value — `?`-composable, never a panic.
     short :: [U8]{0x01}
     r2 :: Reader.over(short)
-    if r2.read_u32_le() == {
-        .Ok(v) -> { print("unexpected ok: {v}") }
-        .Err(e) -> { print("expected error: {e}") }
-    }
+    short_value :: r2.read_u32_le() ?? 0
+    print("short read fallback={short_value}")
 
     // D-BINPAT1 (card #506 follow-up): `take_pattern([U8]{"…"})` — the byte-mode
     // sibling of `Cursor.take_pattern`, reusing the D-BINPAT1 pattern engine

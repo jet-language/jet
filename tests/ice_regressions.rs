@@ -257,8 +257,9 @@ fn run(args: Args) {
         let mut search_from = 0;
         while let Some(relative) = rust[search_from..].find(&marker) {
             let hit = search_from + relative;
+            // Generic impl headers are `impl<T...>`, so match the shared prefix.
             let start = rust[..hit]
-                .rfind("\nimpl ")
+                .rfind("\nimpl")
                 .map(|index| index + 1)
                 .unwrap_or(0);
             let block = &rust[start..];

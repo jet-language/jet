@@ -260,6 +260,9 @@ fn ui_snapshots() {
         // D-WEBTIR1=A: files marked `// @web_target` compile through the web
         // preflight so web-only executable-body diagnostics get UI snapshots.
         let web_target = src.lines().any(|l| l.trim() == "// @web_target");
+        // D-WEBRUN1=A: this fixture must cross the real native-run boundary;
+        // compiling it as a web fixture would miss the empty-success guard.
+        let web_run = src.lines().any(|l| l.trim() == "// @web_run");
         // D-WASISRV1=A: a target directive drives the real cross-target sema
         // path without requiring the UI snapshot process to invoke rustc.
         let cross_target = src
@@ -562,6 +565,8 @@ fn ui_snapshots() {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
+        } else if web_run {
+            run_web_run_cli_snapshot(&file_arg)
         } else if web_target {
             match jet::compile_web(&file_arg) {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
@@ -689,6 +694,23 @@ fn run_cli_e2101_snapshot() -> String {
     let mut rendered = String::from_utf8(output.stdout).expect("E2101 stdout is UTF-8");
     rendered.push_str(&String::from_utf8(output.stderr).expect("E2101 stderr is UTF-8"));
     rendered
+}
+
+fn run_web_run_cli_snapshot(file: &str) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", file, "--color=never"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run D-WEBRUN1 native-run fixture");
+    assert!(
+        !output.status.success(),
+        "native jet run of a web-targeted fixture must fail"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "a rejected web run must not execute user code"
+    );
+    String::from_utf8(output.stderr).expect("D-WEBRUN1 stderr is UTF-8")
 }
 
 fn run_complexity_cli_snapshot(file: &str, spec: &str) -> String {

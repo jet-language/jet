@@ -1,0 +1,1004 @@
+<!-- Copyright 2026 Anthropic PBC · SPDX-License-Identifier: Apache-2.0 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PR #312 — Move notification delivery onto a queue</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..700;1,8..60,300..700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    :root {
+      --ivory:    #FAF9F5;
+      --slate:    #141413;
+      --clay:     #D97757;
+      --clay-d:   #B85C3E;
+      --oat:      #E3DACC;
+      --olive:    #788C5D;
+      --olive-d:  #5C6F44;
+      --gray-50:  #F8F7F3;
+      --gray-100: #F0EEE6;
+      --gray-200: #D1CFC5;
+      --gray-300: #BBB9AF;
+      --gray-500: #87867F;
+      --gray-700: #3D3D3A;
+      --white:    #FFFFFF;
+      --sky:      #6B8FA3;
+      --sky-d:    #4A7088;
+
+      --serif: 'Source Serif 4', ui-serif, Georgia, 'Times New Roman', serif;
+      --sans:  system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --mono:  'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Monaco, monospace;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      font-family: var(--sans);
+      background: var(--ivory);
+      color: var(--gray-700);
+      line-height: 1.6;
+      padding: 0;
+    }
+
+    .page {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 64px 40px 140px;
+    }
+
+    /* ---------- header ---------- */
+
+    header.page-head {
+      margin-bottom: 56px;
+      max-width: 860px;
+      position: relative;
+    }
+
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--clay);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .eyebrow::before {
+      content: '';
+      width: 20px;
+      height: 2px;
+      background: var(--clay);
+      display: inline-block;
+    }
+
+    h1 {
+      font-family: var(--serif);
+      font-weight: 500;
+      font-size: 42px;
+      line-height: 1.12;
+      color: var(--slate);
+      margin-bottom: 14px;
+      letter-spacing: -0.025em;
+    }
+
+    .pr-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--gray-500);
+      margin-bottom: 24px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--gray-200);
+    }
+
+    .pr-meta .stat strong {
+      color: var(--slate);
+      font-weight: 600;
+    }
+
+    .pr-meta .add { color: var(--olive); font-weight: 600; }
+    .pr-meta .del { color: var(--clay); font-weight: 600; }
+
+    .prompt-box {
+      background: var(--white);
+      border: 1px solid var(--gray-200);
+      border-left: 3px solid var(--gray-300);
+      border-radius: 10px;
+      padding: 18px 22px;
+      font-size: 14.5px;
+      line-height: 1.65;
+      color: var(--gray-700);
+      position: relative;
+    }
+
+    .prompt-box::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -3px;
+      width: 3px;
+      height: 100%;
+      background: linear-gradient(180deg, var(--clay) 0%, var(--sky) 100%);
+      border-radius: 3px 0 0 3px;
+    }
+
+    .prompt-box .label {
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--gray-500);
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    /* ---------- layout ---------- */
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 220px;
+      gap: 56px;
+      align-items: start;
+    }
+
+    @media (max-width: 960px) {
+      .layout { grid-template-columns: 1fr; }
+      .toc { display: none; }
+      .page { padding: 40px 24px 100px; }
+      h1 { font-size: 32px; }
+    }
+
+    section {
+      margin-bottom: 64px;
+      scroll-margin-top: 32px;
+    }
+
+    h2 {
+      font-family: var(--serif);
+      font-weight: 500;
+      font-size: 28px;
+      color: var(--slate);
+      margin-bottom: 18px;
+      letter-spacing: -0.02em;
+      position: relative;
+      padding-left: 18px;
+    }
+
+    h2::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 6px;
+      bottom: 6px;
+      width: 3px;
+      background: var(--clay);
+      border-radius: 3px;
+    }
+
+    p.lede {
+      font-family: var(--serif);
+      font-size: 16px;
+      line-height: 1.7;
+      max-width: 700px;
+      margin-bottom: 16px;
+      color: var(--gray-700);
+    }
+
+    p + p.lede { margin-top: 14px; }
+
+    /* ---------- TOC ---------- */
+
+    .toc {
+      position: sticky;
+      top: 40px;
+      border-left: 1px solid var(--gray-200);
+      padding-left: 20px;
+    }
+
+    .toc .t-head {
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--gray-500);
+      margin-bottom: 14px;
+      font-weight: 500;
+    }
+
+    .toc a {
+      display: block;
+      color: var(--gray-500);
+      text-decoration: none;
+      padding: 5px 0;
+      font-size: 13.5px;
+      font-family: var(--serif);
+      transition: color 0.15s ease, transform 0.15s ease;
+      transform-origin: left;
+    }
+
+    .toc a:hover {
+      color: var(--clay);
+      transform: translateX(2px);
+    }
+
+    .toc .sub {
+      padding-left: 14px;
+      color: var(--gray-300);
+      font-size: 12.5px;
+    }
+
+    /* ---------- TL;DR ---------- */
+
+    .tldr {
+      background: var(--white);
+      border: 1px solid var(--gray-200);
+      border-radius: 14px;
+      padding: 24px 28px;
+      margin-bottom: 56px;
+      max-width: 780px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .tldr::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--clay), var(--olive));
+    }
+
+    .tldr .k {
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--clay);
+      margin-bottom: 10px;
+      font-weight: 600;
+    }
+
+    .tldr p {
+      font-family: var(--serif);
+      font-size: 15.5px;
+      line-height: 1.7;
+      color: var(--slate);
+    }
+
+    .tldr code {
+      font-family: var(--mono);
+      font-size: 13px;
+      background: var(--gray-100);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--clay-d);
+    }
+
+    /* ---------- before/after ---------- */
+
+    .ba {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin: 24px 0 8px;
+    }
+
+    @media (max-width: 740px) { .ba { grid-template-columns: 1fr; } }
+
+    .ba .panel {
+      background: var(--white);
+      border: 1px solid var(--gray-200);
+      border-radius: 14px;
+      padding: 22px 24px;
+      transition: border-color 0.2s ease;
+    }
+
+    .ba .panel:hover { border-color: var(--gray-300); }
+    .ba .panel.after {
+      border-color: var(--olive);
+      background: linear-gradient(135deg, var(--white) 0%, #F6F8F2 100%);
+    }
+
+    .ba .k {
+      font-family: var(--mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--gray-500);
+      margin-bottom: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .ba .k::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--gray-200);
+    }
+
+    .ba .after .k { color: var(--olive-d); }
+    .ba .after .k::after { background: var(--olive); opacity: 0.3; }
+
+    .ba ul {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .ba li {
+      padding-left: 18px;
+      position: relative;
+    }
+
+    .ba li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 8px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--gray-300);
+    }
+
+    .ba .after li::before {
+      background: var(--olive);
+    }
+
+    .ba code {
+      font-family: var(--mono);
+      font-size: 12px;
+      background: var(--gray-100);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    /* ---------- file tour ---------- */
+
+    .file-tour { display: flex; flex-direction: column; gap: 12px; }
+
+    .file {
+      background: var(--white);
+      border: 1px solid var(--gray-200);
+      border-radius: 12px;
+      overflow: hidden;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .file:hover {
+      border-color: var(--gray-300);
+    }
+
+    .file[open] {
+      box-shadow: 0 2px 12px rgba(20, 20, 19, 0.04);
+    }
+
+    .file summary {
+      padding: 14px 22px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      list-style: none;
+      background: var(--gray-50);
+      border-bottom: 1px solid transparent;
+      transition: background 0.15s ease;
+    }
+
+    .file[open] summary {
+      border-bottom-color: var(--gray-200);
+      background: var(--white);
+    }
+
+    .file:not([open]) summary { border-bottom: none; }
+    .file summary::-webkit-details-marker { display: none; }
+    .file summary::marker { display: none; content: ''; }
+
+    .file summary:hover { background: var(--gray-100); }
+
+    .file summary .chev {
+      width: 7px;
+      height: 7px;
+      border-right: 1.5px solid var(--gray-500);
+      border-bottom: 1.5px solid var(--gray-500);
+      transform: rotate(-45deg);
+      transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      flex-shrink: 0;
+    }
+
+    .file[open] summary .chev { transform: rotate(45deg); }
+
+    .file summary .path {
+      font-family: var(--mono);
+      font-size: 12.5px;
+      color: var(--slate);
+      flex: 1;
+      font-weight: 500;
+    }
+
+    .file summary .badge {
+      font-family: var(--mono);
+      font-size: 9.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 3px 9px;
+      border-radius: 5px;
+      font-weight: 600;
+    }
+
+    .badge.new {
+      background: #E4E9DC;
+      color: #4B5C39;
+    }
+
+    .badge.mod {
+      background: var(--oat);
+      color: var(--slate);
+    }
+
+    .badge.del {
+      background: #F3D9CC;
+      color: #8A3B1E;
+    }
+
+    .file summary .stat {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      font-weight: 500;
+    }
+
+    .file summary .stat .add { color: var(--olive); }
+    .file summary .stat .del { color: var(--clay); }
+
+    .file .file-body {
+      padding: 22px 24px 26px;
+    }
+
+    .file .why {
+      font-family: var(--serif);
+      font-size: 15px;
+      line-height: 1.7;
+      margin-bottom: 18px;
+      max-width: 700px;
+    }
+
+    .file .why strong { color: var(--slate); }
+    .file .why code {
+      font-family: var(--mono);
+      font-size: 12.5px;
+      background: var(--gray-100);
+      padding: 2px 5px;
+      border-radius: 3px;
+      color: var(--clay-d);
+    }
+
+    /* ---------- code ---------- */
+
+    .code {
+      background: #1A1A18;
+      border-radius: 12px;
+      padding: 20px 22px;
+      overflow-x: auto;
+      position: relative;
+    }
+
+    .code::before {
+      content: '';
+      position: absolute;
+      top: 12px;
+      left: 22px;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #3D3D3A;
+      box-shadow: 14px 0 0 #3D3D3A, 28px 0 0 #3D3D3A;
+    }
+
+    .code pre {
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.75;
+      color: #D4D2C8;
+      white-space: pre;
+      padding-top: 16px;
+    }
+
+    .code .kw  { color: #D97757; font-weight: 500; }
+    .code .str { color: #A8BF85; }
+    .code .cm  { color: #6B6A64; font-style: italic; }
+    .code .fn  { color: #C9B98A; }
+    .code .add {
+      background: rgba(120, 140, 93, 0.15);
+      display: inline-block;
+      width: 100%;
+      border-left: 2px solid rgba(120, 140, 93, 0.4);
+      padding-left: 10px;
+    }
+    .code .del {
+      background: rgba(217, 119, 87, 0.12);
+      display: inline-block;
+      width: 100%;
+      text-decoration: line-through;
+      text-decoration-color: rgba(217, 119, 87, 0.5);
+      border-left: 2px solid rgba(217, 119, 87, 0.3);
+      padding-left: 10px;
+    }
+
+    /* ---------- review focus ---------- */
+
+    .focus {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-width: 780px;
+    }
+
+    .focus .item {
+      background: var(--white);
+      border: 1px solid var(--gray-200);
+      border-radius: 12px;
+      padding: 20px 24px;
+      display: flex;
+      gap: 18px;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .focus .item:hover {
+      border-color: var(--gray-300);
+      box-shadow: 0 2px 8px rgba(20, 20, 19, 0.03);
+    }
+
+    .focus .n {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--white);
+      background: var(--slate);
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .focus .t {
+      font-family: var(--serif);
+      font-weight: 600;
+      color: var(--slate);
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+
+    .focus .d {
+      font-size: 14px;
+      color: var(--gray-500);
+      line-height: 1.6;
+    }
+
+    .focus .d code {
+      font-family: var(--mono);
+      font-size: 12px;
+      background: var(--gray-100);
+      padding: 2px 5px;
+      border-radius: 3px;
+      color: var(--clay-d);
+    }
+
+    /* ---------- test plan ---------- */
+
+    .tests {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: 780px;
+    }
+
+    .test {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      background: var(--white);
+      border: 1px solid var(--gray-200);
+      border-radius: 10px;
+      padding: 16px 20px;
+      font-size: 14px;
+      transition: border-color 0.15s ease;
+    }
+
+    .test:hover { border-color: var(--gray-300); }
+
+    .test .check {
+      width: 20px;
+      height: 20px;
+      border-radius: 6px;
+      flex-shrink: 0;
+      margin-top: 1px;
+      border: 1.5px solid var(--gray-300);
+      transition: background 0.2s ease, border-color 0.2s ease;
+    }
+
+    .test.done .check {
+      background: var(--olive);
+      border-color: var(--olive);
+      position: relative;
+    }
+
+    .test.done .check::after {
+      content: '';
+      position: absolute;
+      left: 6px;
+      top: 3px;
+      width: 5px;
+      height: 9px;
+      border-right: 2px solid var(--white);
+      border-bottom: 2px solid var(--white);
+      transform: rotate(40deg);
+    }
+
+    .test .label {
+      color: var(--slate);
+      font-weight: 500;
+      line-height: 1.5;
+    }
+
+    .test .note {
+      color: var(--gray-500);
+      font-size: 13px;
+      margin-top: 3px;
+      line-height: 1.5;
+    }
+
+    /* ---------- rollout ---------- */
+
+    .rollout-steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+      max-width: 800px;
+      position: relative;
+    }
+
+    .rollout-steps::before {
+      content: '';
+      position: absolute;
+      top: 32px;
+      left: 16.66%;
+      right: 16.66%;
+      height: 2px;
+      background: var(--gray-200);
+    }
+
+    @media (max-width: 740px) {
+      .rollout-steps {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .rollout-steps::before { display: none; }
+    }
+
+    .rollout-steps .step {
+      background: var(--white);
+      border: 1px solid var(--gray-200);
+      padding: 20px 20px 18px;
+      text-align: center;
+      position: relative;
+    }
+
+    .rollout-steps .step:first-child { border-radius: 14px 0 0 14px; }
+    .rollout-steps .step:last-child { border-radius: 0 14px 14px 0; }
+    .rollout-steps .step + .step { border-left: none; }
+
+    @media (max-width: 740px) {
+      .rollout-steps .step,
+      .rollout-steps .step:first-child,
+      .rollout-steps .step:last-child { border-radius: 12px; border: 1px solid var(--gray-200); }
+      .rollout-steps .step + .step { border-left: 1px solid var(--gray-200); }
+    }
+
+    .rollout-steps .step .pct {
+      font-family: var(--mono);
+      font-size: 24px;
+      font-weight: 600;
+      color: var(--clay);
+      margin-bottom: 8px;
+    }
+
+    .rollout-steps .step .d {
+      font-size: 13px;
+      color: var(--gray-500);
+      line-height: 1.5;
+    }
+
+    .rollout-steps .step .when {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--gray-500);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+      font-weight: 500;
+    }
+
+    /* ---------- utility ---------- */
+
+    code {
+      font-family: var(--mono);
+      font-size: 13px;
+      background: var(--gray-100);
+      padding: 2px 5px;
+      border-radius: 3px;
+    }
+
+    strong { font-weight: 600; }
+    em { font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="page">
+
+    <header class="page-head">
+      <div class="eyebrow">Pull request · Acme</div>
+      <h1>#312 — Move notification delivery onto a queue</h1>
+      <div class="pr-meta">
+        <span class="stat"><strong>9</strong> files</span>
+        <span class="stat"><span class="add">+418</span> / <span class="del">−190</span></span>
+        <span class="stat">branch <strong>notify-queue</strong> → <strong>main</strong></span>
+        <span class="stat">author <strong>@priya</strong></span>
+      </div>
+      <div class="prompt-box">
+        <span class="label">Prompt</span>
+        Write up PR #312 for my reviewers. Explain the motivation, walk them
+        through the change file by file with the <em>why</em> for each, show
+        before/after behavior, and tell them exactly where to focus. They
+        haven't touched the notification code in six months.
+      </div>
+    </header>
+
+    <div class="layout">
+      <main>
+
+        <div class="tldr">
+          <div class="k">TL;DR</div>
+          <p>Notification sends were happening inline in the request path. Under load they added 200–800&nbsp;ms to mutation latency and silently dropped emails when the SMTP pool was exhausted. This PR moves delivery onto the existing <code>pg-boss</code> queue so the API returns immediately and failed sends retry with backoff.</p>
+        </div>
+
+        <!-- ======================= WHY ======================= -->
+
+        <section id="why">
+          <h2>Why</h2>
+          <p class="lede">When we added @mentions in comments last quarter, every mention started triggering up to three sends (in-app, email, Slack) inside the same transaction that saved the comment. That was fine at launch. It is not fine now that a single task update can fan out to forty watchers.</p>
+
+          <div class="ba">
+            <div class="panel">
+              <div class="k">Before</div>
+              <ul>
+                <li>Sends run inline in the mutation handler</li>
+                <li>SMTP timeout = 500 error for the <em>comment</em></li>
+                <li>No retries — a dropped email is gone</li>
+                <li>p99 on <code>comments.create</code>: <strong>1.4&nbsp;s</strong></li>
+              </ul>
+            </div>
+            <div class="panel after">
+              <div class="k">After</div>
+              <ul>
+                <li>Handler enqueues one job per recipient, returns</li>
+                <li>Worker retries 3× with exponential backoff</li>
+                <li>Dead-letter table for inspection after exhaustion</li>
+                <li>p99 on <code>comments.create</code>: <strong>180&nbsp;ms</strong> (staging)</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- ======================= FILE TOUR ======================= -->
+
+        <section id="tour">
+          <h2>File-by-file</h2>
+          <p class="lede">Ordered for reading, not alphabetically. Start at the worker — it's the new thing — then the enqueue call site, then the plumbing.</p>
+
+          <div class="file-tour">
+
+            <details class="file" open>
+              <summary>
+                <span class="chev"></span>
+                <span class="path">packages/notify/src/worker.ts</span>
+                <span class="badge new">new</span>
+                <span class="stat"><span class="add">+126</span></span>
+              </summary>
+              <div class="file-body">
+                <p class="why"><strong>The heart of the PR.</strong> A <code>pg-boss</code> subscriber that pulls <code>notify.deliver</code> jobs, resolves the user's channel preferences, and calls the right adapter. Retries are configured per-channel — email gets three attempts, Slack gets one because its API is already idempotent on our side.</p>
+                <div class="code"><pre>boss.<span class="fn">work</span>(<span class="str">'notify.deliver'</span>, { batchSize: 20 }, <span class="kw">async</span> (jobs) =&gt; {
+  <span class="kw">for</span> (<span class="kw">const</span> job <span class="kw">of</span> jobs) {
+    <span class="kw">const</span> { userId, event, channel } = job.data;
+    <span class="kw">const</span> prefs = <span class="kw">await</span> <span class="fn">getPrefs</span>(userId);
+    <span class="kw">if</span> (!prefs[channel]) <span class="kw">return</span>;          <span class="cm">// user muted this channel</span>
+
+    <span class="kw">try</span> {
+      <span class="kw">await</span> adapters[channel].<span class="fn">send</span>(userId, event);
+    } <span class="kw">catch</span> (err) {
+      <span class="kw">if</span> (job.retryCount &gt;= MAX_RETRY[channel]) {
+        <span class="kw">await</span> <span class="fn">deadLetter</span>(job, err);         <span class="cm">// don't throw — ack &amp; park</span>
+        <span class="kw">return</span>;
+      }
+      <span class="kw">throw</span> err;                            <span class="cm">// pg-boss reschedules</span>
+    }
+  }
+});</pre></div>
+              </div>
+            </details>
+
+            <details class="file" open>
+              <summary>
+                <span class="chev"></span>
+                <span class="path">packages/api/src/routers/comments.ts</span>
+                <span class="badge mod">mod</span>
+                <span class="stat"><span class="add">+14</span> <span class="del">−62</span></span>
+              </summary>
+              <div class="file-body">
+                <p class="why"><strong>Where the win shows up.</strong> The mutation used to call <code>sendEmail</code>, <code>sendSlack</code>, and <code>createInApp</code> directly. Now it inserts the comment, computes recipients, and enqueues. The try/catch soup is gone.</p>
+                <div class="code"><pre>  <span class="kw">const</span> comment = <span class="kw">await</span> db.comments.<span class="fn">insert</span>(input);
+  <span class="kw">const</span> recipients = <span class="kw">await</span> <span class="fn">resolveWatchers</span>(input.taskId, input.mentions);
+
+<span class="del">  <span class="kw">for</span> (<span class="kw">const</span> r <span class="kw">of</span> recipients) {</span>
+<span class="del">    <span class="kw">await</span> <span class="fn">sendEmail</span>(r, comment);       <span class="cm">// blocked the response</span></span>
+<span class="del">    <span class="kw">await</span> <span class="fn">sendSlack</span>(r, comment);</span>
+<span class="del">  }</span>
+<span class="add">  <span class="kw">await</span> boss.<span class="fn">insert</span>(recipients.flatMap((r) =&gt;</span>
+<span class="add">    CHANNELS.map((ch) =&gt; ({</span>
+<span class="add">      name: <span class="str">'notify.deliver'</span>,</span>
+<span class="add">      data: { userId: r.id, channel: ch, event: toEvent(comment) },</span>
+<span class="add">      singletonKey: <span class="str">`${comment.id}:${r.id}:${ch}`</span>,  <span class="cm">// idempotent</span></span>
+<span class="add">    }))));</span>
+  <span class="kw">return</span> comment;</pre></div>
+              </div>
+            </details>
+
+            <details class="file">
+              <summary>
+                <span class="chev"></span>
+                <span class="path">packages/db/migrations/0051_dead_letter.sql</span>
+                <span class="badge new">new</span>
+                <span class="stat"><span class="add">+22</span></span>
+              </summary>
+              <div class="file-body">
+                <p class="why">Table for jobs that exhaust their retries. Deliberately <em>not</em> auto-pruned — we want to look at these weekly until we trust the new path. Has the full job payload and the last error string.</p>
+              </div>
+            </details>
+
+            <details class="file">
+              <summary>
+                <span class="chev"></span>
+                <span class="path">packages/notify/src/adapters/{email,slack,inapp}.ts</span>
+                <span class="badge mod">mod</span>
+                <span class="stat"><span class="add">+88</span> <span class="del">−74</span></span>
+              </summary>
+              <div class="file-body">
+                <p class="why">Mostly moves. Each adapter now implements a shared <code>Adapter</code> interface and throws a typed <code>RetryableError</code> or <code>PermanentError</code> so the worker knows whether to retry. The email adapter also drops its internal retry loop — the queue owns retries now, double-retrying was how we got duplicate emails in April.</p>
+              </div>
+            </details>
+
+            <details class="file">
+              <summary>
+                <span class="chev"></span>
+                <span class="path">apps/worker/src/index.ts, infra/fly.toml</span>
+                <span class="badge mod">mod</span>
+                <span class="stat"><span class="add">+31</span> <span class="del">−4</span></span>
+              </summary>
+              <div class="file-body">
+                <p class="why">Registers the new subscriber in the existing worker process and bumps its concurrency from 5 → 20. No new deploy unit.</p>
+              </div>
+            </details>
+
+            <details class="file">
+              <summary>
+                <span class="chev"></span>
+                <span class="path">packages/notify/src/__tests__/worker.test.ts</span>
+                <span class="badge new">new</span>
+                <span class="stat"><span class="add">+137</span></span>
+              </summary>
+              <div class="file-body">
+                <p class="why">Covers the retry boundary, the dead-letter path, channel muting, and the singleton key dedupe. Uses a real pg-boss against the test database — we got burned last quarter when mocked queue tests passed but prod ordering broke.</p>
+              </div>
+            </details>
+
+          </div>
+        </section>
+
+        <!-- ======================= FOCUS ======================= -->
+
+        <section id="focus">
+          <h2>Where to focus your review</h2>
+          <div class="focus">
+            <div class="item">
+              <div class="n">1</div>
+              <div>
+                <div class="t">The retry / dead-letter boundary</div>
+                <div class="d"><code>worker.ts:31–44</code>. I catch, check <code>retryCount</code>, and either park or rethrow. If this logic is wrong we either retry forever or drop messages — the two failure modes this PR exists to fix.</div>
+              </div>
+            </div>
+            <div class="item">
+              <div class="n">2</div>
+              <div>
+                <div class="t">The singleton key</div>
+                <div class="d"><code>comments.ts:28</code>. <code>${commentId}:${userId}:${channel}</code> should make re-enqueues idempotent if the API handler retries. Sanity-check that this can't collide across tasks.</div>
+              </div>
+            </div>
+            <div class="item">
+              <div class="n">3</div>
+              <div>
+                <div class="t">What I deliberately did not do</div>
+                <div class="d">No per-user digest batching, no delivery receipts, no priority lanes. All of those layer on top of this cleanly; bundling them would make this unreviewable.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ======================= TEST PLAN ======================= -->
+
+        <section id="tests">
+          <h2>Test plan</h2>
+          <div class="tests">
+            <div class="test done"><span class="check"></span><div><div class="label">Unit: retry → dead-letter path, channel mute, singleton dedupe</div><div class="note">packages/notify — 14 cases, real pg-boss on test db</div></div></div>
+            <div class="test done"><span class="check"></span><div><div class="label">Integration: create comment with 3 watchers, assert 9 jobs enqueued and drained</div></div></div>
+            <div class="test done"><span class="check"></span><div><div class="label">Staging load: 500 rps on comments.create for 10 min, p99 = 180 ms</div><div class="note">was 1.4 s before — dashboard linked in the PR description</div></div></div>
+            <div class="test"><span class="check"></span><div><div class="label">Manual: kill SMTP mid-burst, confirm jobs land in dead-letter and nothing 500s</div><div class="note">will do during the 10% ramp</div></div></div>
+          </div>
+        </section>
+
+        <!-- ======================= ROLLOUT ======================= -->
+
+        <section id="rollout">
+          <h2>Rollout</h2>
+          <p class="lede">Behind <code>notify_queue_v2</code>. The old inline path stays in the codebase, dead but dormant, for one release in case we need to flip back.</p>
+          <div class="rollout-steps">
+            <div class="step"><div class="when">Day 0</div><div class="pct">internal</div><div class="d">Acme team only. Watch dead-letter table + worker error rate.</div></div>
+            <div class="step"><div class="when">Day 2</div><div class="pct">10%</div><div class="d">Random sample. Alert if dead-letter rate &gt; 0.5% of sends.</div></div>
+            <div class="step"><div class="when">Day 4</div><div class="pct">100%</div><div class="d">Ramp fully, delete the inline path in a follow-up PR next week.</div></div>
+          </div>
+        </section>
+
+      </main>
+
+      <nav class="toc">
+        <div class="t-head">In this PR</div>
+        <a href="#why">Why</a>
+        <a href="#tour">File-by-file</a>
+        <a href="#tour" class="sub">worker.ts</a>
+        <a href="#tour" class="sub">comments.ts</a>
+        <a href="#tour" class="sub">adapters</a>
+        <a href="#focus">Where to focus</a>
+        <a href="#tests">Test plan</a>
+        <a href="#rollout">Rollout</a>
+      </nav>
+    </div>
+
+  </div>
+<script>
+(function(){var t=localStorage.getItem('gallery-theme');if(!t||t==='gallery')return;var c={dark:{'--ivory':'#1A1A20','--slate':'#E8E6E1','--clay':'#FF7A5C','--oat':'#3A3A42','--olive':'#7ABF6E','--rust':'#E87A4A','--sky':'#6BA3D6','--plum':'#C07AB8','--white':'#1A1A20','--gray-100':'#222228','--gray-200':'#2A2A30','--gray-300':'#3A3A42','--gray-500':'#8A8880','--gray-700':'#B0AEA6','--surface':'#222228','--surface-0':'#181820','--surface-1':'#1A1A20','--surface-2':'#222228','--surface-hover':'#2A2A32','--border':'#2E2E36','--border-subtle':'#262630','--border-focus':'#4A4A56'},terminal:{'--ivory':'#0A0E0A','--slate':'#33FF66','--clay':'#FF9933','--oat':'#1A331A','--olive':'#33FF66','--rust':'#FF6633','--sky':'#33CCFF','--plum':'#CC66FF','--white':'#111611','--gray-100':'#142814','--gray-200':'#1A331A','--gray-300':'#225522','--gray-500':'#1A9940','--gray-700':'#22CC55','--surface':'#0D140D','--surface-0':'#080C08','--surface-1':'#111611','--surface-2':'#0D140D','--surface-hover':'#152015','--border':'#1A331A','--border-subtle':'#142814','--border-focus':'#225522'},zen:{'--ivory':'#FEFEFE','--slate':'#2C2C2C','--clay':'#C88870','--oat':'#E8E8E0','--olive':'#8CB880','--rust':'#B89080','--sky':'#8898B0','--plum':'#A088A0','--white':'#FFFFFF','--gray-100':'#F6F6F6','--gray-200':'#EEEEEE','--gray-300':'#DDDDDD','--gray-500':'#8C8C8C','--gray-700':'#5C5C5C','--surface':'#F6F6F6','--surface-0':'#FEFEFE','--surface-1':'#FFFFFF','--surface-2':'#F6F6F6','--surface-hover':'#F0F0F0','--border':'#E0E0E0','--border-subtle':'#EBEBEB','--border-focus':'#CCCCCC'}};var s=document.documentElement.style;var m=c[t]||{};Object.keys(m).forEach(function(k){s.setProperty(k,m[k])});})();
+</script>
+</body>
+</html>

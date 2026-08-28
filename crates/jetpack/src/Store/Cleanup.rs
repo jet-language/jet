@@ -923,11 +923,7 @@ fn optimize_objects_cas_pool_plan(roots: &Roots) -> std::io::Result<CleanReport>
             }
             let bytes = fs::read(&file)?;
             let mode = permission_identity(&metadata) & !0o222;
-            let digest = format!(
-                "{}-{:08x}",
-                SHA256::sha256_hex(&bytes),
-                mode
-            );
+            let digest = Ingest::shared_cas_key(&SHA256::sha256_hex(&bytes), mode);
             let cas_file = cas.join(&digest);
             match fs::symlink_metadata(&cas_file) {
                 Ok(existing) if existing.file_type().is_symlink() || !existing.is_file() => {

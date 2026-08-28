@@ -529,7 +529,7 @@ export function makeButton(text, onClick, key) {
     kind: "button",
     label,
     width: Array.from(label).length + 4,
-    height: 36,
+    height: 1,
     role: "button",
     children: [],
     onClick: typeof onClick === "function" ? onClick : null,

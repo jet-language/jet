@@ -12,8 +12,7 @@ fn run() {
     reader :: Reader.over(data)
 
     magic :: reader.take(4) ?? return Err("short magic")
-    expected_magic :: [U8]{74, 71, 66, 49}
-    if magic != expected_magic -> return Err("bad magic")
+    if magic != b"JGB1" -> return Err("bad magic")
     count_u32 :: reader.read_u32_le() ?? return Err("short count")
     count :: Int.from_u32(count_u32)
 

@@ -2206,11 +2206,20 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     ),
     CoreCallRecord::new(
         "core.text.fmt",
+        "sci",
+        "jet_fmt_sci",
+        true,
+        &[false, false],
+    ),
+    CoreCallRecord::new(
+        "core.text.fmt",
         "percent",
         "jet_fmt_percent",
         true,
         &[false, false],
     ),
+    CoreCallRecord::new("core.text.fmt", "bin", "jet_fmt_bin", true, &[false]),
+    CoreCallRecord::new("core.text.fmt", "oct", "jet_fmt_oct", true, &[false]),
     CoreCallRecord::new("core.text.fmt", "bytes", "jet_fmt_bytes", true, &[false]),
     CoreCallRecord::new(
         "core.text.fmt",
@@ -2232,6 +2241,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_fmt_plural",
         true,
         &[false, true, true],
+    ),
+    CoreCallRecord::new(
+        "core.text.fmt",
+        "pad",
+        "jet_fmt_pad",
+        true,
+        &[true, false, true],
     ),
     CoreCallRecord::new(
         "core.text.fmt",

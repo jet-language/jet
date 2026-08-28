@@ -720,12 +720,22 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
             },
             _ => Type::Named(type_name.to_string()),
         };
-        lower_method_for_owner_inner(f, type_name, owner_ty, cx)
+        lower_method_for_owner_inner(f, type_name, owner_ty, cx, false)
     })
 }
 
-pub(crate) fn lower_method_for_owner(f: &Func, type_name: &str, owner_ty: Type, cx: &Cx) -> TFunc {
-    cx.time_tir(|| lower_method_for_owner_inner(f, type_name, owner_ty, cx))
+/// `raw_protocol_return` is supplied by the enclosing generated-trait
+/// provenance. Ordinary owner-specialized methods keep the fallible ABI.
+pub(crate) fn lower_method_for_owner(
+    f: &Func,
+    type_name: &str,
+    owner_ty: Type,
+    cx: &Cx,
+    raw_protocol_return: bool,
+) -> TFunc {
+    cx.time_tir(|| {
+        lower_method_for_owner_inner(f, type_name, owner_ty, cx, raw_protocol_return)
+    })
 }
 
 fn lower_method_for_owner_inner(
@@ -733,8 +743,20 @@ fn lower_method_for_owner_inner(
     type_name: &str,
     owner_ty: Type,
     cx: &Cx,
+    raw_protocol_return: bool,
 ) -> TFunc {
-    let return_type = resolve_self_ty(&f.effective_return_type(), type_name);
+    let declared_return_type = f.return_type.clone().unwrap_or_else(|| {
+        Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
+    });
+    let return_type = if raw_protocol_return {
+        debug_assert!(
+            f.compiler_generated && f.return_type.is_some(),
+            "compiler-generated trait protocols must declare their raw return type"
+        );
+        resolve_self_ty(&declared_return_type, type_name)
+    } else {
+        resolve_self_ty(&f.effective_return_type(), type_name)
+    };
     let previous_type_params = cx.current_type_params.borrow().clone();
     let mut method_type_params = previous_type_params.clone();
     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
@@ -873,8 +895,16 @@ fn lower_method_for_owner_inner(
 /// only its NAME is bridged. `Decode` is STATIC: the by-value `tree: Data` param
 /// binds as an owned local (a clone the emit prepends), so its place is the bare
 /// mangled name — no receiver, no `param_place` deref.
-pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name: &str) -> TFunc {
-    cx.time_tir(|| lower_trait_method_inner(f, type_name, cx, trait_name))
+pub(crate) fn lower_trait_method(
+    f: &Func,
+    type_name: &str,
+    cx: &Cx,
+    trait_name: &str,
+    raw_protocol_return: bool,
+) -> TFunc {
+    cx.time_tir(|| {
+        lower_trait_method_inner(f, type_name, cx, trait_name, raw_protocol_return)
+    })
 }
 
 fn lower_trait_method_inner(
@@ -882,18 +912,20 @@ fn lower_trait_method_inner(
     type_name: &str,
     cx: &Cx,
     trait_name: &str,
+    raw_protocol_return: bool,
 ) -> TFunc {
-    // D-FAILURE-FOUNDATION1: sema marks compiler-generated trait protocols as
-    // raw-return bodies. Their `Func` nodes are Jet-internal producers, not
-    // user-callable declarations, so projecting an omitted contract onto them
-    // would emit `Result<raw, Err>` and violate the Rust trait ABI. Ordinary
-    // user trait methods still use the implicit Error carrier.
+    // D-FAILURE-FOUNDATION1: the caller supplies parser-unforgeable generated-
+    // trait provenance for raw protocol bodies. Their `Func` nodes are
+    // Jet-internal producers, not user-callable declarations, so projecting an
+    // omitted contract onto them would emit `Result<raw, Err>` and violate the
+    // Rust trait ABI. Ordinary user trait methods still use the implicit Error
+    // carrier.
     let declared_return_type = f.return_type.clone().unwrap_or_else(|| {
         Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
     });
-    let return_type = if f.compiler_generated {
+    let return_type = if raw_protocol_return {
         debug_assert!(
-            f.return_type.is_some(),
+            f.compiler_generated && f.return_type.is_some(),
             "compiler-generated trait protocols must declare their raw return type"
         );
         resolve_self_ty(&declared_return_type, type_name)

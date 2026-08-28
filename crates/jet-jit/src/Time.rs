@@ -154,7 +154,8 @@ fn jet_jit_datetime_now() -> i64 {
 }
 
 fn jet_jit_time_parse_rfc3339(s: i64) -> i64 {
-    match time_rt::JetDateTime::parse_rfc3339(&clone_string(s)) {
+    let text = clone_string(s);
+    match time_rt::jet_time_parse_rfc3339(&text) {
         Ok(dt) => result_ok(push(TimeValue::DateTime(dt)) as u64),
         Err(e) => result_err(e),
     }

@@ -75,6 +75,11 @@ impl<'a> Parser<'a> {
                         out.push(part);
                     }
                 }
+                StrTokPart::ByteText(text) => {
+                    if let Some(part) = literal(text) {
+                        out.push(part);
+                    }
+                }
                 StrTokPart::Interp(toks) => {
                     if let Some(part) = hole(self, toks)? {
                         out.push(part);
@@ -258,7 +263,7 @@ impl<'a> Parser<'a> {
 
     /// D-SHIFT1 / D-UNIFYLIT1=A: parse the sole argument of `take_pattern(…)`.
     /// Accepts a bare `"…"` text pattern, `String{"…"}`, or `[U8]{"…"}`
-    /// (byte mode). The retired `b"…"` prefix is no longer lexed.
+    /// (byte mode). The `b"…"` value literal is not a pattern head.
     pub(super) fn parse_take_pattern_literal(&mut self) -> Result<Expr, Diagnostic> {
         if let Some(expr) = self.try_typed_pattern_literal_expr()? {
             return Ok(expr);

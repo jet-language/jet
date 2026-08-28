@@ -66,6 +66,14 @@ pub(crate) use lower::*;
 pub use subset::is_civil_time_method_name;
 pub(crate) use subset::*;
 
+#[cfg(test)]
+pub(crate) fn unmatched_enum_match_guard(
+    fallthrough: bool,
+    span: crate::Diagnostics::Span,
+) -> Result<(), crate::Diagnostics::Diagnostic> {
+    eval::unmatched_enum_match_guard(fallthrough, span)
+}
+
 use crate::Codegen::{mangle, mangle_generated, mangle_path};
 use crate::AST::{
     AccessConvention, BinOp, CtValue, Expr, Item, Pattern, ProgramBundle, Type, UnOp,
@@ -1143,12 +1151,24 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                 // trait-method ABI (`tree` only, no receiver).
                 if trait_name == crate::Generics::ENCODE && matches!(&owner_ty, Type::Apply { .. })
                 {
-                    lower_method_for_owner(&specialized, name, owner_ty.clone(), cx)
+                    lower_method_for_owner(
+                        &specialized,
+                        name,
+                        owner_ty.clone(),
+                        cx,
+                        generated_serde && specialized.compiler_generated,
+                    )
                 } else {
-                    lower_trait_method(&specialized, name, cx, trait_name)
+                    lower_trait_method(
+                        &specialized,
+                        name,
+                        cx,
+                        trait_name,
+                        generated_serde && specialized.compiler_generated,
+                    )
                 }
             } else {
-                lower_method_for_owner(&specialized, name, owner_ty.clone(), cx)
+                lower_method_for_owner(&specialized, name, owner_ty.clone(), cx, false)
             };
             cx.current_type_params.replace(previous_type_params);
             lowered.name = key.clone();
@@ -1388,7 +1408,13 @@ fn lower_imported_generated_codecs(bundle: &ProgramBundle, cx: &Cx, funcs: &mut 
                     if funcs.iter().any(|function| function.name == name) {
                         continue;
                     }
-                    let mut lowered = lower_trait_method(method, &qualified, cx, trait_name);
+                    let mut lowered = lower_trait_method(
+                        method,
+                        &qualified,
+                        cx,
+                        trait_name,
+                        implementation.is_generated_serde && method.compiler_generated,
+                    );
                     // `decode` declares `Result<Badge, [FieldError]>` with the
                     // declaring module's leaf; carry it to the same canonical
                     // identity the owner and the body already use.
@@ -1545,6 +1571,8 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     &s.name,
                                     &cx,
                                     &implementation.trait_name,
+                                    implementation.compiler_generated
+                                        && method.compiler_generated,
                                 );
                                 lowered.name = format!("{}::{}", s.name, method.name);
                                 funcs.push(lowered);
@@ -1585,6 +1613,8 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     &e.name,
                                     &cx,
                                     &implementation.trait_name,
+                                    implementation.compiler_generated
+                                        && method.compiler_generated,
                                 );
                                 lowered.name = format!("{}::{}", e.name, method.name);
                                 funcs.push(lowered);
@@ -1645,7 +1675,13 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 {
                                     continue;
                                 }
-                                lower_trait_method(&specialized, &imp.type_name, &cx, trait_name)
+                                lower_trait_method(
+                                    &specialized,
+                                    &imp.type_name,
+                                    &cx,
+                                    trait_name,
+                                    imp.is_generated_serde && specialized.compiler_generated,
+                                )
                             } else {
                                 if !tir_covers_method(&specialized, &imp.type_name, &cx) {
                                     continue;
@@ -1655,6 +1691,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     &imp.type_name,
                                     owner_ty.clone(),
                                     &cx,
+                                    false,
                                 )
                             };
                             lowered.name = format!("{}::{}", owner_ty.name(), method.name);
@@ -1714,7 +1751,13 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                         {
                                             continue;
                                         }
-                                        lower_trait_method(method, &type_name, &cx, trait_name)
+                                        lower_trait_method(
+                                            method,
+                                            &type_name,
+                                            &cx,
+                                            trait_name,
+                                            imp.is_generated_serde && method.compiler_generated,
+                                        )
                                     } else {
                                         if !tir_covers_method(method, &type_name, &cx) {
                                             continue;
@@ -1860,6 +1903,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     &qualified,
                                     Type::Named(qualified.clone()),
                                     &imported_cx,
+                                    false,
                                 );
                                 lowered.ret = lowered.ret.as_ref().map(|ty| {
                                     qualify_imported_type(bundle, module_idx, &owner, ty)
@@ -1890,6 +1934,8 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                         &qualified,
                                         &imported_cx,
                                         &implementation.trait_name,
+                                        implementation.compiler_generated
+                                            && method.compiler_generated,
                                     );
                                     lowered.ret = lowered.ret.as_ref().map(|ty| {
                                         qualify_imported_type(bundle, module_idx, &owner, ty)
@@ -1921,6 +1967,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 &implementation.type_name,
                                 &imported_cx,
                                 crate::Syntax::TRAIT_DISPLAY,
+                                false,
                             );
                             lowered.name = format!(
                                 "{}::{}::{}",

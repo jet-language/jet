@@ -42,17 +42,6 @@ fn jet_std_fs_hard_link(from: &String, to: &String) -> Result<(), jet_std::IOErr
     }
     std::fs::hard_link(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
 }
-fn jet_std_fs_rename(from: &String, to: &String) -> Result<(), jet_std::IOError> {
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Write,
-            Some(to.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    jet_fs_rename(from, to)
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, from, e))
-}
 fn jet_std_fs_stat(path: &String) -> Result<jet_std::Stat, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
@@ -179,17 +168,6 @@ fn jet_std_fs_walk_parallel(path: &String) -> Result<Vec<jet_std::WalkEntry>, je
     )?;
     out.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(out)
-}
-fn jet_std_fs_glob(pattern: &String) -> Result<Vec<String>, jet_std::IOError> {
-    if jet_fault_should_fail("FS.Read") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some(pattern.clone()),
-            "fault injected: FS.Read",
-        ));
-    }
-    jet_fs_glob(pattern)
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, pattern, e))
 }
 fn jet_std_fs_read_at(path: &String, offset: i64, len: i64) -> Result<Vec<u8>, jet_std::IOError> {
     use std::io::{Read, Seek, SeekFrom};

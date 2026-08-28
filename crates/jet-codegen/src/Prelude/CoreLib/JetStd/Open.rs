@@ -278,11 +278,18 @@ mod jet_std {
         outs: Vec<RegexPatch>,
     }
 
+    #[derive(Debug)]
+    struct RegexCaptureNode {
+        slot: usize,
+        pos: usize,
+        previous: Option<usize>,
+    }
+
     #[derive(Clone, Debug)]
     struct RegexThread {
         pc: usize,
         start: usize,
-        caps: Option<Vec<Option<usize>>>,
+        caps: Option<usize>,
     }
 
     #[derive(Debug)]
@@ -317,6 +324,7 @@ mod jet_std {
     struct RegexScratch {
         current: RegexState,
         next: RegexState,
+        capture_arena: Vec<RegexCaptureNode>,
     }
 
     impl RegexScratch {
@@ -324,6 +332,7 @@ mod jet_std {
             Self {
                 current: RegexState::new(inst_count),
                 next: RegexState::new(inst_count),
+                capture_arena: Vec::new(),
             }
         }
     }
@@ -1351,6 +1360,22 @@ mod jet_std {
             .collect()
     }
 
+    fn regex_capture_slots(
+        mut head: Option<usize>,
+        arena: &[RegexCaptureNode],
+        len: usize,
+    ) -> Vec<Option<usize>> {
+        let mut slots = vec![None; len];
+        while let Some(index) = head {
+            let Some(node) = arena.get(index) else { break };
+            if node.slot < len && slots[node.slot].is_none() {
+                slots[node.slot] = Some(node.pos);
+            }
+            head = node.previous;
+        }
+        slots
+    }
+
     struct RegexRun {
         span: (usize, usize),
         caps: Option<Vec<Option<usize>>>,
@@ -1418,6 +1443,8 @@ mod jet_std {
 
         let mut scratch = program.scratch.lock().unwrap();
         scratch.current.clear();
+        scratch.next.clear();
+        scratch.capture_arena.clear();
         let mut pos = start;
         let mut winner_start = None;
         let mut last_match = None;
@@ -1427,18 +1454,22 @@ mod jet_std {
                 || flags.multiline
                 || pos == 0;
             if winner_start.is_none() && can_start && (!anchored || pos == start) {
-                let caps = capture.then(|| vec![None; (groups + 1) * 2]);
+                let scratch_ref = &mut *scratch;
+                let (current, capture_arena) =
+                    (&mut scratch_ref.current, &mut scratch_ref.capture_arena);
                 regex_add_thread(
-                    &mut scratch.current,
+                    current,
                     program,
                     flags,
                     RegexThread {
                         pc: program.start,
                         start: pos,
-                        caps,
+                        caps: None,
                     },
                     pos,
                     text,
+                    capture,
+                    capture_arena,
                 );
             }
 
@@ -1458,8 +1489,12 @@ mod jet_std {
                         && matches!(program.insts[thread.pc], RegexInst::Match)
                 }) {
                     let caps = if capture {
-                        found.caps.as_ref().map(|source| {
-                            let mut caps = source.clone();
+                        found.caps.map(|head| {
+                            let mut caps = regex_capture_slots(
+                                Some(head),
+                                &scratch.capture_arena,
+                                (groups + 1) * 2,
+                            );
                             caps[0] = Some(found.start);
                             caps[1] = Some(pos);
                             caps
@@ -1498,7 +1533,11 @@ mod jet_std {
             };
             {
                 let scratch_ref = &mut *scratch;
-                let (current, next) = (&mut scratch_ref.current, &mut scratch_ref.next);
+                let (current, next, capture_arena) = (
+                    &mut scratch_ref.current,
+                    &mut scratch_ref.next,
+                    &mut scratch_ref.capture_arena,
+                );
                 next.clear();
                 for thread in &current.threads {
                     let RegexInst::Consume(matcher, Some(target)) = &program.insts[thread.pc]
@@ -1507,7 +1546,6 @@ mod jet_std {
                         continue;
                     };
                     if capture {
-                        let caps = thread.caps.clone();
                         regex_add_thread(
                             next,
                             program,
@@ -1515,10 +1553,12 @@ mod jet_std {
                             RegexThread {
                                 pc: *target,
                                 start: thread.start,
-                                caps,
+                                caps: thread.caps,
                             },
                             next_pos,
                             text,
+                            capture,
+                            capture_arena,
                         );
                     } else {
                         regex_add_thread(
@@ -1532,6 +1572,8 @@ mod jet_std {
                             },
                             next_pos,
                             text,
+                            capture,
+                            capture_arena,
                         );
                     }
                 }
@@ -1567,6 +1609,8 @@ mod jet_std {
         thread: RegexThread,
         pos: usize,
         text: &str,
+        capture: bool,
+        capture_arena: &mut Vec<RegexCaptureNode>,
     ) {
         state.stack.clear();
         state.stack.push(thread);
@@ -1577,10 +1621,14 @@ mod jet_std {
             state.seen[thread.pc] = state.epoch;
             match &program.insts[thread.pc] {
                 RegexInst::Save(slot, Some(next)) => {
-                    if let Some(caps) = thread.caps.as_mut() {
-                        if *slot < caps.len() {
-                            caps[*slot] = Some(pos);
-                        }
+                    if capture && *slot != usize::MAX {
+                        let index = capture_arena.len();
+                        capture_arena.push(RegexCaptureNode {
+                            slot: *slot,
+                            pos,
+                            previous: thread.caps,
+                        });
+                        thread.caps = Some(index);
                     }
                     thread.pc = *next;
                     state.stack.push(thread);

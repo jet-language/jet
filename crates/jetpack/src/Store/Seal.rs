@@ -8,7 +8,7 @@
 use super::OBJECTS_DIR;
 use std::fs;
 use std::io::{self, Write as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) const SEALS_DIR: &str = "seals";
@@ -54,10 +54,95 @@ impl RootKind {
     }
 }
 
+/// Optional per-process census of seal checks, enabled by
+/// `JETPACK_SEAL_CENSUS`. Diagnostic only: attributes warm-path stat storms
+/// to the objects that are re-walked, so call-shape regressions are visible.
+static CENSUS: std::sync::LazyLock<
+    Option<std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, u64>>>,
+> = std::sync::LazyLock::new(|| {
+    std::env::var_os("JETPACK_SEAL_CENSUS").map(|_| Default::default())
+});
+
+fn census_note(path: &Path) {
+    if let Some(census) = &*CENSUS {
+        if let Ok(mut census) = census.lock() {
+            *census.entry(path.to_path_buf()).or_insert(0) += 1;
+        }
+    }
+}
+
+/// Render the census when enabled: total checks, distinct objects, and the
+/// most re-walked objects. Returns `None` unless `JETPACK_SEAL_CENSUS` is set.
+pub fn census_report() -> Option<String> {
+    let census = (*CENSUS).as_ref()?;
+    let census = census.lock().ok()?;
+    let total: u64 = census.values().sum();
+    let mut rows: Vec<_> = census.iter().collect();
+    rows.sort_by(|left, right| right.1.cmp(left.1));
+    let mut out = format!(
+        "seal census: {total} checks across {} objects\n",
+        census.len()
+    );
+    for (path, count) in rows.into_iter().take(15) {
+        out.push_str(&format!("  {count:>6}  {}\n", path.display()));
+    }
+    Some(out)
+}
+
+
+thread_local! {
+    /// Per-command seal memo (D-JPK-VERIFYONCE1=A). One CLI command holds one
+    /// coherent view of the Hangar: an object whose seal matched once in this
+    /// command is trusted for the rest of it without re-walking its identity
+    /// tuples. The memo is thread-local and disarmed by default, so library
+    /// callers and every tamper-on-use test keep strict per-use semantics;
+    /// `hangar verify` never consults seals at all. Cost witness: a warm
+    /// `env --prep` performed 13,170 seal checks across 424 objects (~31
+    /// full tuple walks per object) before this memo existed.
+    static COMMAND_MEMO: std::cell::RefCell<
+        Option<std::collections::HashMap<PathBuf, String>>,
+    > = const { std::cell::RefCell::new(None) };
+}
+
+/// Arm the per-command seal memo for the current thread. CLI command
+/// entrypoints call this once; the memo lives until the process (= command)
+/// exits.
+pub fn arm_command_memo() {
+    COMMAND_MEMO.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        if memo.is_none() {
+            *memo = Some(Default::default());
+        }
+    });
+}
+
+fn memo_get(path: &Path) -> Option<String> {
+    COMMAND_MEMO.with(|memo| memo.borrow().as_ref()?.get(path).cloned())
+}
+
+fn memo_put(path: &Path, digest: &str) {
+    COMMAND_MEMO.with(|memo| {
+        if let Some(memo) = memo.borrow_mut().as_mut() {
+            memo.insert(path.to_path_buf(), digest.to_string());
+        }
+    });
+}
+
+fn memo_forget(path: &Path) {
+    COMMAND_MEMO.with(|memo| {
+        if let Some(memo) = memo.borrow_mut().as_mut() {
+            memo.remove(path);
+        }
+    });
+}
 
 /// Return the sealed digest when `path` is the direct canonical object named
 /// by its digest and every recorded filesystem tuple still matches.
 pub(crate) fn check(path: &Path, hangar: &Path) -> io::Result<Option<String>> {
+    census_note(path);
+    if let Some(digest) = memo_get(path) {
+        return Ok(Some(digest));
+    }
     let Some(digest) = object_digest_for_path(path, hangar) else {
         return Ok(None);
     };
@@ -80,8 +165,10 @@ pub(crate) fn check(path: &Path, hangar: &Path) -> io::Result<Option<String>> {
         Err(_) => return Ok(None),
     };
     if tuple_count == record.tuple_count && tuple_digest == record.tuple_digest {
+        memo_put(path, &record.digest);
         Ok(Some(record.digest))
     } else {
+        memo_forget(path);
         Ok(None)
     }
 }
@@ -141,11 +228,16 @@ pub(crate) fn write(path: &Path, hangar: &Path, digest: &str) -> io::Result<()> 
         let _ = fs::remove_file(&temporary);
     }
     result?;
-    super::sync_store_directory(&seals)
+    super::sync_store_directory(&seals)?;
+    // The caller just full-hashed this object under the Hangar lock; the
+    // fresh seal is the strongest verdict a command can hold.
+    memo_put(path, digest);
+    Ok(())
 }
 
 /// Remove a seal when its canonical object is rolled back or quarantined.
 pub(crate) fn remove(path: &Path, hangar: &Path) -> io::Result<()> {
+    memo_forget(path);
     let Some(digest) = object_digest_for_path(path, hangar) else {
         return Ok(());
     };

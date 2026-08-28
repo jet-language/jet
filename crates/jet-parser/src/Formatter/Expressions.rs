@@ -1128,7 +1128,7 @@ impl<'a> Fmt<'a> {
             Expr::StrMatchLit(parts, span) => {
                 self.fmt_str_match_parts(parts, self.is_typed_head_body(*span));
             }
-            // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")`'s
+            // D-BINPAT1 (card #506 follow-up): `reader.take_pattern([U8]{"…"})`'s
             // pattern-literal argument — same rendering as a
             // `Pattern::BinMatch` (byte-mode sibling of the arm above).
             Expr::BinMatchLit(parts, _) => {
@@ -1619,6 +1619,21 @@ impl<'a> Fmt<'a> {
                 self.write("}");
             }
             Expr::TypedLit { head, body, span } => {
+                if let crate::AST::TypedLitBody::ByteText(parts) = body {
+                    // D-BYTELIT1=B: the parser keeps the byte value's source
+                    // span, so fmt can retain the ratified `b"…"` spelling
+                    // without adding a second AST literal mechanism.
+                    if self
+                        .src
+                        .as_bytes()
+                        .get(span.start..)
+                        .is_some_and(|tail| tail.starts_with(b"b\""))
+                    {
+                        self.write(crate::Syntax::BYTE_STRING_PREFIX);
+                        self.fmt_byte_text_parts(parts, true);
+                        return;
+                    }
+                }
                 // D-DOTCTOR3: print the head (when present) and the body shape.
                 if let Some(head) = head {
                     self.fmt_type(head);
@@ -1727,7 +1742,7 @@ impl<'a> Fmt<'a> {
                         }
                     }
                     crate::AST::TypedLitBody::ByteText(parts) => {
-                        self.fmt_byte_text_parts(parts);
+                        self.fmt_byte_text_parts(parts, false);
                     }
                 }
                 if multiline {
@@ -2393,20 +2408,41 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    /// D-BYTELIT1=B: retain byte escapes in the canonical `[U8]{"..."}`
-    /// source form. Ordinary ASCII text uses the normal string escape table;
-    /// explicit bytes never pass through Unicode text formatting.
-    fn fmt_byte_text_parts(&mut self, parts: &[crate::AST::ByteTextPart]) {
+    /// D-BYTELIT1=B: retain byte escapes in the canonical byte-text source
+    /// form. Typed `[U8]{"..."}` bodies double literal braces for their
+    /// interpolation-aware scanner; `b"..."` bodies keep braces literal.
+    fn fmt_byte_text_parts(&mut self, parts: &[crate::AST::ByteTextPart], byte_literal: bool) {
         self.write("\"");
         for part in parts {
             match part {
-                crate::AST::ByteTextPart::Lit(text) => self.write(&escape_str_lit(text)),
+                crate::AST::ByteTextPart::Lit(text) => {
+                    if byte_literal {
+                        self.write(&Self::escape_byte_text_lit(text));
+                    } else {
+                        self.write(&escape_str_lit(text));
+                    }
+                }
                 crate::AST::ByteTextPart::Byte(byte) => {
                     self.write(&format!("\\x{byte:02X}"));
                 }
             }
         }
         self.write("\"");
+    }
+
+    fn escape_byte_text_lit(text: &str) -> String {
+        let mut out = String::new();
+        for ch in text.chars() {
+            match ch {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\t' => out.push_str("\\t"),
+                '\r' => out.push_str("\\r"),
+                ch => out.push(ch),
+            }
+        }
+        out
     }
 
     /// D-BINPAT1 / D-UNIFYLIT1=A: render a `BinMatchPart` list as `[U8]{"…"}`.
@@ -2724,7 +2760,7 @@ impl<'a> Fmt<'a> {
                     self.write("{");
                     self.fmt_expr(e, Prec::OrFallback);
                     self.write("=");
-                    self.fmt_str_format(*fmt);
+                    self.fmt_str_format(fmt);
                     self.write("}");
                     i += 3;
                     continue;
@@ -2735,7 +2771,7 @@ impl<'a> Fmt<'a> {
                 StrPart::Interp(e, fmt) => {
                     self.write("{");
                     self.fmt_expr(e, Prec::OrFallback);
-                    self.fmt_str_format(*fmt);
+                    self.fmt_str_format(fmt);
                     self.write("}");
                 }
             }
@@ -2769,7 +2805,7 @@ impl<'a> Fmt<'a> {
                     self.write("{");
                     self.fmt_expr(expr, Prec::OrFallback);
                     self.write("=");
-                    self.fmt_str_format(*fmt);
+                    self.fmt_str_format(fmt);
                     self.write("}");
                     i += 3;
                     continue;
@@ -2780,7 +2816,7 @@ impl<'a> Fmt<'a> {
                 StrPart::Interp(expr, fmt) => {
                     self.write("{");
                     self.fmt_expr(expr, Prec::OrFallback);
-                    self.fmt_str_format(*fmt);
+                    self.fmt_str_format(fmt);
                     self.write("}");
                 }
             }
@@ -2803,7 +2839,7 @@ impl<'a> Fmt<'a> {
                     self.write("{");
                     self.fmt_expr(expr, Prec::OrFallback);
                     self.write("=");
-                    self.fmt_str_format(*fmt);
+                    self.fmt_str_format(fmt);
                     self.write("}");
                     i += 3;
                     continue;
@@ -2821,7 +2857,7 @@ impl<'a> Fmt<'a> {
                 StrPart::Interp(expr, fmt) => {
                     self.write("{");
                     self.fmt_expr(expr, Prec::OrFallback);
-                    self.fmt_str_format(*fmt);
+                    self.fmt_str_format(fmt);
                     self.write("}");
                 }
             }
@@ -2831,7 +2867,7 @@ impl<'a> Fmt<'a> {
         self.write("\"\"\"");
     }
 
-    fn fmt_str_format(&mut self, fmt: crate::AST::StrFormat) {
+    fn fmt_str_format(&mut self, fmt: &crate::AST::StrFormat) {
         match fmt {
             crate::AST::StrFormat::Display => {}
             crate::AST::StrFormat::Debug => {
@@ -2876,6 +2912,82 @@ impl<'a> Fmt<'a> {
                 self.write(&width.to_string());
                 self.write(")");
             }
+            crate::AST::StrFormat::Pad { width, fill } => {
+                self.write(crate::Syntax::INTERPOLATION_SELECTOR_RAIL);
+                self.write(
+                    crate::Syntax::interpolation_selector_for_kind(
+                        crate::Syntax::InterpolationSelectorKind::Pad,
+                    )
+                    .name,
+                );
+                self.write("(");
+                self.write(&width.to_string());
+                if !fill.is_empty() {
+                    self.write(", \"");
+                    self.write(&escape_str_lit(fill));
+                    self.write("\"");
+                }
+                self.write(")");
+            }
+            crate::AST::StrFormat::PadLeft { width, fill } => {
+                self.write(crate::Syntax::INTERPOLATION_SELECTOR_RAIL);
+                self.write(
+                    crate::Syntax::interpolation_selector_for_kind(
+                        crate::Syntax::InterpolationSelectorKind::PadLeft,
+                    )
+                    .name,
+                );
+                self.write("(");
+                self.write(&width.to_string());
+                if !fill.is_empty() {
+                    self.write(", \"");
+                    self.write(&escape_str_lit(fill));
+                    self.write("\"");
+                }
+                self.write(")");
+            }
+            crate::AST::StrFormat::Sci(precision) => {
+                self.write(crate::Syntax::INTERPOLATION_SELECTOR_RAIL);
+                self.write(
+                    crate::Syntax::interpolation_selector_for_kind(
+                        crate::Syntax::InterpolationSelectorKind::Sci,
+                    )
+                    .name,
+                );
+                self.write("(");
+                self.write(&precision.to_string());
+                self.write(")");
+            }
+            crate::AST::StrFormat::Percent(precision) => {
+                self.write(crate::Syntax::INTERPOLATION_SELECTOR_RAIL);
+                self.write(
+                    crate::Syntax::interpolation_selector_for_kind(
+                        crate::Syntax::InterpolationSelectorKind::Percent,
+                    )
+                    .name,
+                );
+                self.write("(");
+                self.write(&precision.to_string());
+                self.write(")");
+            }
+            crate::AST::StrFormat::Bin => {
+                self.write(crate::Syntax::INTERPOLATION_SELECTOR_RAIL);
+                self.write(
+                    crate::Syntax::interpolation_selector_for_kind(
+                        crate::Syntax::InterpolationSelectorKind::Bin,
+                    )
+                    .name,
+                );
+            }
+            crate::AST::StrFormat::Oct => {
+                self.write(crate::Syntax::INTERPOLATION_SELECTOR_RAIL);
+                self.write(
+                    crate::Syntax::interpolation_selector_for_kind(
+                        crate::Syntax::InterpolationSelectorKind::Oct,
+                    )
+                    .name,
+                );
+            }
             crate::AST::StrFormat::Unit(style) => {
                 let selector = crate::Syntax::interpolation_selector_for_kind(
                     crate::Syntax::InterpolationSelectorKind::Unit,
@@ -2918,7 +3030,7 @@ impl<'a> Fmt<'a> {
                     self.write("{");
                     self.fmt_expr(e, Prec::OrFallback);
                     self.write("=");
-                    self.fmt_str_format(*fmt);
+                    self.fmt_str_format(fmt);
                     self.write("}");
                     i += 3;
                     continue;
@@ -2938,7 +3050,7 @@ impl<'a> Fmt<'a> {
                 StrPart::Interp(e, fmt) => {
                     self.write("{");
                     self.fmt_expr(e, Prec::OrFallback);
-                    self.fmt_str_format(*fmt);
+                    self.fmt_str_format(fmt);
                     self.write("}");
                 }
             }

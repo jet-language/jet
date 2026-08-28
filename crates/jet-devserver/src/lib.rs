@@ -268,12 +268,27 @@ fn has_windows_drive_prefix(path: &str) -> bool {
 }
 
 pub fn content_type_for(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js") => "application/javascript; charset=utf-8",
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    match extension.as_deref() {
+        Some("html" | "htm") => "text/html; charset=utf-8",
+        Some("js" | "mjs") => "application/javascript; charset=utf-8",
         Some("wasm") => "application/wasm",
-        Some("json") | Some("map") => "application/json; charset=utf-8",
+        Some("json" | "map") => "application/json; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("ico") => "image/x-icon",
+        Some("woff") => "font/woff",
+        Some("woff2") => "font/woff2",
+        Some("ttf") => "font/ttf",
+        Some("otf") => "font/otf",
+        Some("txt") => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
 }

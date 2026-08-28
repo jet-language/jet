@@ -686,7 +686,9 @@ fn jet_cli_infers_web_target_from_manifest() {
     );
     let run_stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
-        run_stderr.contains("E2102") && run_stderr.contains("jet dev"),
+        run_stderr.contains("E-WEB-RUN")
+            && run_stderr.contains("jet dev")
+            && run_stderr.contains("jet build --target=web"),
         "package web run should explain the native/web boundary: {run_stderr}"
     );
     let _ = fs::remove_dir_all(&dir);
@@ -728,12 +730,64 @@ fn jet_cli_rejects_native_run_for_web_marker() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("E2102"),
+        stderr.contains("E-WEB-RUN"),
         "expected the registered diagnostic: {stderr}"
     );
     assert!(
-        stderr.contains("jet dev"),
-        "diagnostic must teach the browser loop: {stderr}"
+        stderr.contains("jet dev") && stderr.contains("jet build --target=web"),
+        "diagnostic must teach both supported web paths: {stderr}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// D-WEBRUN1=A: an explicit host target overrides a file's web default and
+/// keeps the program on the native execution path.
+#[test]
+fn jet_cli_explicit_native_target_runs_web_default_natively() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping explicit-native-target web-default test");
+        return;
+    }
+    let host = String::from_utf8(
+        Command::new("rustc")
+            .args(["-vV"])
+            .output()
+            .expect("query rustc host target")
+            .stdout,
+    )
+    .expect("rustc version output is UTF-8")
+    .lines()
+    .find_map(|line| line.strip_prefix("host: "))
+    .expect("rustc -vV must report a host target")
+    .to_string();
+    let dir = std::env::temp_dir().join(format!(
+        "jet_web_target_explicit_native_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("app.jet"),
+        "#Target(Web)\nfn run() {\n    print(\"native\")\n}\n",
+    )
+    .unwrap();
+
+    let jet = jet_bin();
+    let out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["run", "--target", host.as_str(), "app.jet"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "explicit host target must run the web-default source natively:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).as_ref(),
+        "native\n",
+        "explicit native target must execute the program"
     );
     let _ = fs::remove_dir_all(&dir);
 }

@@ -1682,6 +1682,27 @@ where
     m.insert(k, v);
 }
 
+/// Update one map entry through the map's storage seam. The closure receives
+/// the existing value without cloning it, so a read/compute/insert update can
+/// perform one tree lookup and one key evaluation while retaining the same
+/// ordered-map and copy-on-write semantics as `jet_map_insert`.
+#[inline(always)]
+fn jet_map_update<M, K: Ord, V, F>(m: &mut M, k: K, f: F)
+where
+    M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
+    F: FnOnce(Option<&V>) -> V,
+{
+    match m.entry(k) {
+        std::collections::btree_map::Entry::Occupied(mut entry) => {
+            let value = f(Some(entry.get()));
+            entry.insert(value);
+        }
+        std::collections::btree_map::Entry::Vacant(entry) => {
+            entry.insert(f(None));
+        }
+    }
+}
+
 // BTreeMap has no stable fallible reservation API. Keep this representation
 // step at the map seam; the shared Prelude owns the AllocError projection.
 fn jet_map_try_insert_storage<K: Ord + Clone, V: Clone>(

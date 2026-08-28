@@ -42,6 +42,11 @@ pub(crate) fn with_shared_cas_lock<T>(
     super::super::RuntimePolicy::with_lock(&shared, "shared-cas", operation)
 }
 
+/// Build the one key format used by every shared-CAS writer and reader.
+pub(crate) fn shared_cas_key(digest_hex: &str, mode: u32) -> String {
+    format!("{digest_hex}-{:08x}", mode & !0o222)
+}
+
 /// Replace regular files in one immutable Hangar object with hardlinks into
 /// the shared payload pool. Directory entries and metadata stay root-local;
 /// file bytes have one physical copy across independent agent roots.
@@ -137,11 +142,7 @@ fn share_node(
     }
     let source_len = metadata.len();
     let mode = permission_identity(&metadata) & !0o222;
-    let key = format!(
-        "{}-{:08x}",
-        super::super::SHA256::sha256_file_hex(path)?,
-        mode
-    );
+    let key = shared_cas_key(&super::super::SHA256::sha256_file_hex(path)?, mode);
     // Preserve an existing hardlink topology. New ingest files are unlinked;
     // this guard protects objects already optimized by the local CAS pass.
     if file_link_count(&metadata) > 1 {
@@ -353,19 +354,34 @@ fn permission_identity(metadata: &fs::Metadata) -> u32 {
 }
 
 pub(crate) fn try_entry_output_hash(roots: &Roots, entry: &StoreEntry) -> Result<String, String> {
+    try_entry_output_hash_with_options(roots, entry, false)
+}
+
+pub(crate) fn try_entry_output_hash_with_options(
+    roots: &Roots,
+    entry: &StoreEntry,
+    force_full: bool,
+) -> Result<String, String> {
     let hangar = roots.hangar_dir();
     let canonical_hangar = fs::canonicalize(&hangar).unwrap_or_else(|_| hangar.clone());
     let out = Path::new(&entry.out);
     let hangar_root = (out.starts_with(&hangar) || out.starts_with(&canonical_hangar))
         .then_some(canonical_hangar.as_path());
-    verified_output_hash_persistent(out, hangar_root, !entry.platform_artifact_kind.is_empty())
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                format!("output `{}` does not exist", entry.out)
-            } else {
-                error.to_string()
-            }
-        })
+    verified_output_hash_with_options(
+        out,
+        hangar_root,
+        !entry.platform_artifact_kind.is_empty(),
+        force_full,
+        !force_full,
+    )
+    .map(|(digest, _)| digest)
+    .map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            format!("output `{}` does not exist", entry.out)
+        } else {
+            error.to_string()
+        }
+    })
 }
 
 pub(crate) fn verified_output_hash(
@@ -784,13 +800,18 @@ pub fn quarantine_invalid_entry(
         if proof.trusted() {
             return Ok(());
         }
-        // Quarantine unless a real hash confirms the recorded digest: a
-        // mismatch is proven drift, and an unverifiable output (for example a
-        // tampered file whose pool hardlink no longer matches its CAS key) is
-        // equally untrustworthy.
+        // Remove output bytes only on PROVEN drift: the forced real hash
+        // bypasses the process memo and the persistent seal and disagrees
+        // with the recorded digest. An unprovable read (for example an
+        // unreadable payload) is not proof of drift — fall back to the sealed
+        // identity verdict rather than destroy bytes a sibling entry may
+        // share; the record itself is quarantined either way.
         let quarantine_output = !current.envelope.output_hash.is_empty()
-            && !try_entry_output_hash(roots, &current)
-                .is_ok_and(|actual| actual.as_str() == current.envelope.output_hash.as_str());
+            && match try_entry_output_hash_with_options(roots, &current, true) {
+                Ok(actual) => actual.as_str() != current.envelope.output_hash.as_str(),
+                Err(_) => !try_entry_output_hash(roots, &current)
+                    .is_ok_and(|actual| actual.as_str() == current.envelope.output_hash.as_str()),
+            };
         let hangar = roots.hangar_dir();
         let mut permissions = MovePathPermissions::default();
         let operation = (|| {

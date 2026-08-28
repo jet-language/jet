@@ -13,6 +13,10 @@ pub enum StrTokPart {
     /// D-BYTELIT1=B: `\xNN` inside a `[U8]{ "..." }` body. Keep the byte
     /// before it becomes a Rust/Unicode string so values above ASCII survive.
     Byte(u8),
+    /// D-BYTELIT1=B: a literal text segment from a `b"..."` byte string.
+    /// Keeping the marker in the token stream lets the parser distinguish a
+    /// byte value from an ordinary quoted string without source lookups.
+    ByteText(String),
     Interp(Vec<Token>),
 }
 

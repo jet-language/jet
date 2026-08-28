@@ -5865,6 +5865,28 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                         "Hex interpolation lowers to core.text.fmt.hex"
                                     )
                                 }
+                                crate::AST::StrFormat::Pad { .. } => {
+                                    unreachable!("Pad interpolation lowers to core.text.fmt.pad")
+                                }
+                                crate::AST::StrFormat::PadLeft { .. } => {
+                                    unreachable!(
+                                        "PadLeft interpolation lowers to core.text.fmt.pad_left"
+                                    )
+                                }
+                                crate::AST::StrFormat::Sci(_) => {
+                                    unreachable!("Sci interpolation lowers to core.text.fmt.sci")
+                                }
+                                crate::AST::StrFormat::Percent(_) => {
+                                    unreachable!(
+                                        "Percent interpolation lowers to core.text.fmt.percent"
+                                    )
+                                }
+                                crate::AST::StrFormat::Bin => {
+                                    unreachable!("Bin interpolation lowers to core.text.fmt.bin")
+                                }
+                                crate::AST::StrFormat::Oct => {
+                                    unreachable!("Oct interpolation lowers to core.text.fmt.oct")
+                                }
                                 crate::AST::StrFormat::Unit(_) => {
                                     unreachable!("Unit interpolation lowers to a String")
                                 }
@@ -6140,8 +6162,20 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     }));
                 }
                 if let Type::IntN { signed, bits } = &lhs.ty {
-                    let a = as_int(&l, self.span())?;
-                    let b = as_int(&r, self.span())?;
+                    let fixed_operand = |value: &CtValue, ty: &Type| {
+                        let unsigned = crate::Comptime::MathLayout::integer_type_layout(ty)
+                            .is_some_and(|(signed, _)| !signed);
+                        if unsigned {
+                            match value {
+                                CtValue::BigInt(value) => Ok(value.wrapping_u64() as i64),
+                                _ => as_int(value, self.span()),
+                            }
+                        } else {
+                            as_int(value, self.span())
+                        }
+                    };
+                    let a = fixed_operand(&l, &lhs.ty)?;
+                    let b = fixed_operand(&r, &rhs.ty)?;
                     let right_signed = crate::Comptime::MathLayout::integer_type_layout(&rhs.ty)
                         .map(|(signed, _)| signed)
                         .unwrap_or(true);
@@ -9856,8 +9890,6 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             } => {
                 let l = self.eval_expr_child(lhs, scope)?;
                 let r = self.eval_expr_child(rhs, scope)?;
-                let a = as_int(&l, self.span())?;
-                let b = as_int(&r, self.span())?;
                 let width_ty = match &expr.ty {
                     Type::Option(inner) => inner.as_ref(),
                     other => other,
@@ -9886,6 +9918,25 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         _ => (true, 64),
                     },
                 };
+                // A fixed-width unsigned literal may arrive from the exact
+                // literal path as a spilled `CtBigInt` (not because its
+                // language type is exact `Int`, but because U64's positive
+                // range exceeds the signed evaluator carrier). Marshal its
+                // low 64 bits into the same i64 bit pattern used by AOT/JIT.
+                // Exact signed Int stays strict: it has no finite-width wrap.
+                let fixed_operand = |value: &CtValue, unsigned: bool| {
+                    if unsigned {
+                        match value {
+                            CtValue::BigInt(value) => Ok(value.wrapping_u64() as i64),
+                            _ => as_int(value, self.span()),
+                        }
+                    } else {
+                        as_int(value, self.span())
+                    }
+                };
+                let a = fixed_operand(&l, !signed)?;
+                let right_signed = !matches!(&rhs.ty, Type::IntN { signed: false, .. });
+                let b = fixed_operand(&r, !right_signed)?;
                 let bin = match *op {
                     "add" => crate::AST::BinOp::Add,
                     "sub" => crate::AST::BinOp::Sub,
@@ -9901,7 +9952,6 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         ));
                     }
                 };
-                let right_signed = !matches!(&rhs.ty, Type::IntN { signed: false, .. });
                 if *prefix == "checked_policy" {
                     return crate::Comptime::MathLayout::integer_binop(
                         bin,

@@ -1541,6 +1541,8 @@ fn configure_project_catalog(
 /// foreign `flake.nix`/`devenv.nix` fallback that uses Jetpack's bounded native
 /// projection instead of composing a second shell model.
 pub(super) fn cmd_env(theme: &Theme, parsed: &Parsed) -> i32 {
+    // D-JPK-VERIFYONCE1=A: one env command verifies each Hangar object once.
+    Store::arm_command_memo();
     let Some(module) = parsed.positional.first() else {
         return cmd_env_project(theme, parsed);
     };

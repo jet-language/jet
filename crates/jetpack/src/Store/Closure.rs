@@ -1519,7 +1519,7 @@ fn push_dir_stats(table: &mut Vec<u8>, dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn wal_state_stamp(roots: &Roots) -> std::io::Result<String> {
+pub(super) fn wal_state_stamp(roots: &Roots) -> std::io::Result<String> {
     let mut table = Vec::new();
     push_dir_stats(&mut table, &journal_dir(roots))?;
     push_dir_stats(&mut table, &roots.hangar_dir().join(RECEIPTS_DIR))?;
@@ -1630,6 +1630,9 @@ fn migrate_closure_graph_from_entries(
         }
     }
     if objects.is_empty() && records.is_empty() {
+        // Steady state is exactly where an overgrown journal must fold into
+        // one snapshot; skipping here meant a warm store never compacted.
+        compact_if_needed(roots)?;
         return Ok((0, graph));
     }
     let migrated = records.len();
@@ -2040,33 +2043,52 @@ pub(super) fn recover_closure_journal_unlocked(roots: &Roots) -> std::io::Result
     recover_closure_journal_graph_unlocked(roots).map(|(recovered, _)| recovered)
 }
 
+/// Return the cached closure graph when the WAL identity stamp still matches.
+/// A fresh stamp proves the journal bytes were already replayed and validated
+/// under the lock in this process; a crash artifact (partial txn, staging
+/// file) or any journal mutation changes the stamp. Projection repair is NOT
+/// covered by the stamp — meta content drifts without a stamp change — so
+/// callers must still run the repair loop.
+fn fresh_cached_graph(roots: &Roots) -> Option<ClosureGraph> {
+    let stamp = wal_state_stamp(roots).ok()?;
+    let cache = STRUCTURE_GRAPH_CACHE.lock().ok()?;
+    let (cached_stamp, graph) = cache.get(&roots.root)?;
+    (*cached_stamp == stamp).then(|| graph.clone())
+}
+
 fn recover_closure_journal_graph_unlocked(roots: &Roots) -> std::io::Result<(usize, ClosureGraph)> {
+    let fresh_graph = fresh_cached_graph(roots);
     let mut recovered = recover_receipt_staging(roots)?;
     let journal = journal_dir(roots);
     let Ok(entries) = fs::read_dir(&journal) else {
         return Ok((recovered, ClosureGraph::default()));
     };
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.ends_with(PARTIAL_SUFFIX) {
-            if path.is_dir() {
-                fs::remove_dir_all(&path)?;
-            } else {
-                fs::remove_file(&path)?;
+    if fresh_graph.is_none() {
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.ends_with(PARTIAL_SUFFIX) {
+                if path.is_dir() {
+                    fs::remove_dir_all(&path)?;
+                } else {
+                    fs::remove_file(&path)?;
+                }
+                recovered += 1;
+            } else if name.ends_with(TXN_SUFFIX) {
+                parse_entry(&fs::read_to_string(&path)?).map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("closure journal `{}`: {error}", path.display()),
+                    )
+                })?;
             }
-            recovered += 1;
-        } else if name.ends_with(TXN_SUFFIX) {
-            parse_entry(&fs::read_to_string(&path)?).map_err(|error| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("closure journal `{}`: {error}", path.display()),
-                )
-            })?;
         }
     }
-    let graph = load_graph_structure_mode(roots, true)?;
+    let graph = match fresh_graph {
+        Some(graph) => graph,
+        None => load_graph_structure_mode(roots, true)?,
+    };
     for record in graph
         .records
         .values()

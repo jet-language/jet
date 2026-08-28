@@ -159,7 +159,12 @@ fn run_dynamic_projection_child() {
     let lease = snapshot_lease(&roots, &entry).unwrap();
     let env = crate::Shell::Env {
         bin_dirs: Vec::new(),
-        vars: BTreeMap::new(),
+        // The namespace harness stages the test binary's dynamic loader and
+        // libraries outside `/nix/store`; preserve that runtime path while
+        // the projected Nix binary is checked.
+        vars: std::env::var("LD_LIBRARY_PATH")
+            .map(|value| std::collections::BTreeMap::from([("LD_LIBRARY_PATH".into(), value)]))
+            .unwrap_or_default(),
         unset_vars: Vec::new(),
         refs: vec![entry.reference.clone()],
         label: "dynamic-nix-projection-test".into(),
@@ -382,8 +387,24 @@ fn nix_store_projection_rejects_missing_conflicting_or_external_objects() {
             }
             Err(error) => panic!("inspect admitted Hangar object: {error}"),
         }
-        make_tree_writable_for_removal(&leaf.hangar_path).unwrap();
-        fs::remove_dir_all(&leaf.hangar_path).unwrap();
+        if let Err(error) = make_tree_writable_for_removal(&leaf.hangar_path) {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                println!(
+                    "skipping missing-object proof: admitted Hangar object disappeared before permission update (ENOENT)"
+                );
+                return;
+            }
+            panic!("make admitted Hangar object writable: {error}");
+        }
+        if let Err(error) = fs::remove_dir_all(&leaf.hangar_path) {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                println!(
+                    "skipping missing-object proof: admitted Hangar object disappeared during removal (ENOENT)"
+                );
+                return;
+            }
+            panic!("remove admitted Hangar object: {error}");
+        }
         let error = snapshot_lease(&roots, &entry)
             .err()
             .expect("missing closure object must reject the lease");

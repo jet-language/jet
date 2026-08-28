@@ -1972,7 +1972,8 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 if let Some(body) = else_body {
                     return self.exec_stmts(body, scope);
                 }
-                unmatched_enum_match(*fallthrough, self.span())
+                unmatched_enum_match(*fallthrough, self.span())?;
+                Ok(Flow::Normal)
             }
             TStmt::RangeSwitch {
                 subject,
@@ -3061,11 +3062,11 @@ pub(super) fn bind_match_pattern(
     }
 }
 
-fn unmatched_enum_match(fallthrough: bool, span: Span) -> Result<Flow, Diagnostic> {
+pub(super) fn unmatched_enum_match(fallthrough: bool, span: Span) -> Result<(), Diagnostic> {
     if fallthrough {
         Err(unsupported("exhaustive match fallthrough", span))
     } else {
-        Ok(Flow::Normal)
+        Ok(())
     }
 }
 
@@ -3101,7 +3102,7 @@ fn bind_slots(
 
 #[cfg(test)]
 mod tests {
-    use super::{unmatched_enum_match, Flow};
+    use super::unmatched_enum_match;
     use crate::Diagnostics::Span;
 
     #[test]
@@ -3112,9 +3113,6 @@ mod tests {
         assert_eq!(diagnostic.code, "E0956");
         assert_eq!(diagnostic.span, Some(span));
         assert!(diagnostic.what.contains("exhaustive match fallthrough"));
-        assert!(matches!(
-            unmatched_enum_match(false, span),
-            Ok(Flow::Normal)
-        ));
+        assert!(unmatched_enum_match(false, span).is_ok());
     }
 }

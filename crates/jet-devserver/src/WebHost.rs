@@ -26,19 +26,17 @@ use crate::{
     content_type_for, query_param, static_path, write_response, MAX_REQUEST_BODY_BYTES, Request,
 };
 
-/// Ports tried, in order, before giving up. 8080 is the conventional static-
-/// dev-server port; a small bounded scan upward covers "something else is
-/// already on 8080" without hunting indefinitely (judgment call — 10 ports is
-/// generous for a dev tool binding localhost).
-const PORT_RANGE: std::ops::RangeInclusive<u16> = 8080..=8089;
+/// Application preview ports tried, in order, before giving up. 8080 is the
+/// conventional static-dev-server port; a small bounded scan upward covers
+/// "something else is already on 8080" without hunting indefinitely.
+const APPLICATION_PORT_RANGE: std::ops::RangeInclusive<u16> = 8080..=8089;
 const CANVAS_SESSION_BYTES: usize = 32;
 const MAX_CONNECTION_THREADS: usize = 64;
 
-/// How often the live-reload script in the browser polls `/__jet_dev_version`
-/// The browser waits 750ms after each completed request before polling again.
-/// That keeps reload responsive while leaving a real network-idle window for
-/// user interactions and browser automation.
-const LIVE_RELOAD_POLL_MS: u64 = 750;
+/// How often the live-reload script in the browser polls `/__jet_dev_status`.
+/// The watcher and in-process rebuild already fit inside the warm budget; this
+/// short poll closes the remaining edit-to-visible gap without a refresh.
+const LIVE_RELOAD_POLL_MS: u64 = 40;
 const CLIENT_TTL_MS: u64 = LIVE_RELOAD_POLL_MS * 4;
 
 /// D-FE-DEVSRV1 outcome D (hybrid, owner-modified 2026-07-08: pinned parity
@@ -67,8 +65,11 @@ struct DevStatus {
     /// The file `jet dev` is watching — used in the `building` parity line
     /// and the `save <file> → …` verbose log lines.
     watched_file: String,
-    /// Set once, right after `bind_dev_server` — 0 until then.
+    /// Set once, right after the Canvas listener binds — 0 until then.
     port: AtomicU64,
+    /// Static generator previews use the application listener only and must
+    /// not advertise a Canvas URL that is not bound.
+    canvas_enabled: AtomicBool,
     /// `--verbose`/`-v`: opt-in request/rebuild log under the parity header
     /// (dashboard's depth, D-FE-DEVSRV1=D "on-demand depth").
     verbose: AtomicBool,
@@ -127,6 +128,7 @@ impl DevStatus {
             command_receipt: Mutex::new(None),
             watched_file: file.to_string(),
             port: AtomicU64::new(0),
+            canvas_enabled: AtomicBool::new(true),
             verbose: AtomicBool::new(verbose),
             active: AtomicBool::new(false),
             exit_code: AtomicU64::new(0),
@@ -142,6 +144,10 @@ impl DevStatus {
 
     fn set_port(&self, port: u16) {
         self.port.store(port as u64, Ordering::SeqCst);
+    }
+
+    fn set_canvas_enabled(&self, enabled: bool) {
+        self.canvas_enabled.store(enabled, Ordering::SeqCst);
     }
 
     fn port(&self) -> u16 {
@@ -174,11 +180,15 @@ impl DevStatus {
     }
 
     fn dashboard_detail_line(&self) -> String {
-        format!(
-            "         watching {} · Canvas http://localhost:{}/canvas · v verbose",
-            self.watched_file,
-            self.port()
-        )
+        if self.canvas_enabled.load(Ordering::SeqCst) {
+            format!(
+                "         watching {} · Canvas http://localhost:{}/canvas · v verbose",
+                self.watched_file,
+                self.port()
+            )
+        } else {
+            format!("         watching {} · v verbose", self.watched_file)
+        }
     }
 
     /// Recompute the parity words from current state and redraw the
@@ -567,17 +577,19 @@ pub struct WebHost {
     canvas_only: bool,
     bind_host: String,
     session_secret: String,
+    static_root: PathBuf,
+    source_asset_fallback: bool,
 }
 
 impl WebHost {
     pub fn bind(file: &str, verbose: bool, port: Option<u16>) -> Result<Self, String> {
-        let listener = bind_dev_server(port)?;
-        let bound_port = listener
+        let application_listener = bind_application_server(port)?;
+        let application_port = application_listener
             .local_addr()
             .map(|address| address.port())
-            .unwrap_or(*PORT_RANGE.start());
-        let application_listener = bind_application_server(None)?;
-        let application_port = application_listener
+            .unwrap_or(0);
+        let listener = bind_canvas_server("127.0.0.1", None)?;
+        let bound_port = listener
             .local_addr()
             .map(|address| address.port())
             .unwrap_or(0);
@@ -603,6 +615,57 @@ impl WebHost {
             canvas_only: false,
             bind_host: "127.0.0.1".to_string(),
             session_secret,
+            static_root: PathBuf::from("build"),
+            source_asset_fallback: true,
+        })
+    }
+
+    /// Bind the same application preview host for a generator's static output.
+    /// The output root is discovered by `jet dev`; this constructor keeps the
+    /// serving and live-reload mechanism shared with web development.
+    pub fn bind_static(
+        file: &str,
+        root: &Path,
+        verbose: bool,
+        port: Option<u16>,
+    ) -> Result<Self, String> {
+        let static_root = fs::canonicalize(root).map_err(|error| {
+            format!(
+                "error: couldn't open static output `{}`: {}",
+                root.display(),
+                error
+            )
+        })?;
+        let application_listener = bind_application_server(port)?;
+        let application_port = application_listener
+            .local_addr()
+            .map(|address| address.port())
+            .unwrap_or(0);
+        let status = Arc::new(DevStatus::new(file, verbose));
+        status.set_port(application_port);
+        status.set_canvas_enabled(false);
+        let session_secret = mint_session_secret()?;
+        Ok(Self {
+            listener: Mutex::new(None),
+            application_listener: Mutex::new(Some(application_listener)),
+            started: AtomicBool::new(false),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            server_threads: Mutex::new(Vec::new()),
+            poll_thread: Mutex::new(None),
+            terminal_thread: Mutex::new(None),
+            status,
+            debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
+            session: Arc::new(crate::ResidentDevSession::new(
+                file,
+                0,
+                application_port,
+            )),
+            canvas_file: file.to_string(),
+            canvas_only: false,
+            bind_host: "127.0.0.1".to_string(),
+            session_secret,
+            static_root,
+            source_asset_fallback: false,
         })
     }
 
@@ -660,6 +723,8 @@ impl WebHost {
             canvas_only: false,
             bind_host: host,
             session_secret,
+            static_root: PathBuf::from("build"),
+            source_asset_fallback: true,
         })
     }
 
@@ -696,6 +761,8 @@ impl WebHost {
             canvas_only: true,
             bind_host: host,
             session_secret,
+            static_root: PathBuf::from("build"),
+            source_asset_fallback: false,
         })
     }
 
@@ -723,6 +790,7 @@ impl WebHost {
         if self.started.swap(true, Ordering::SeqCst) {
             return;
         }
+        let has_canvas = self.listener.lock().unwrap().is_some();
         let listener = self.listener.lock().unwrap().take();
         if let Some(listener) = listener {
             let status = Arc::clone(&self.status);
@@ -732,6 +800,8 @@ impl WebHost {
             let canvas_only = self.canvas_only;
             let bind_host = self.bind_host.clone();
             let session_secret = self.session_secret.clone();
+            let static_root = self.static_root.clone();
+            let source_asset_fallback = self.source_asset_fallback;
             let shutdown = Arc::clone(&self.shutdown);
             let handle = thread::spawn(move || {
                 serve_forever(
@@ -745,6 +815,8 @@ impl WebHost {
                     bind_host,
                     session_secret,
                     shutdown,
+                    static_root,
+                    source_asset_fallback,
                 )
             });
             self.server_threads.lock().unwrap().push(handle);
@@ -754,6 +826,8 @@ impl WebHost {
             let debug_sessions = Arc::clone(&self.debug_sessions);
             let session = Arc::clone(&self.session);
             let canvas_file = self.canvas_file.clone();
+            let static_root = self.static_root.clone();
+            let source_asset_fallback = self.source_asset_fallback;
             let shutdown = Arc::clone(&self.shutdown);
             let handle = thread::spawn(move || {
                 serve_forever(
@@ -767,6 +841,8 @@ impl WebHost {
                     "127.0.0.1".to_string(),
                     String::new(),
                     shutdown,
+                    static_root,
+                    source_asset_fallback,
                 )
             });
             self.server_threads.lock().unwrap().push(handle);
@@ -782,21 +858,16 @@ impl WebHost {
             });
             *self.poll_thread.lock().unwrap() = Some(handle);
         }
-        if self.canvas_only || !terminal_controls {
-            println!("Canvas: {}", self.canvas_url());
-        } else if terminal_controls && !self.status.pin {
-            println!(
-                "serving Canvas http://localhost:{} — app preview http://localhost:{} — watching {} … (Ctrl-C to stop)",
-                self.status.port(),
-                self.session_application_port(),
-                self.canvas_file
-            );
-            println!("Canvas: {}", self.canvas_url());
+        if !self.canvas_only {
             println!(
                 "App preview: http://localhost:{}/",
                 self.session_application_port()
             );
         }
+        if has_canvas {
+            println!("Canvas: {}", self.canvas_url());
+        }
+        let _ = std::io::stdout().flush();
         if terminal_controls {
             if let Some(handle) =
                 start_terminal_controls(Arc::clone(&self.status), Arc::clone(&self.shutdown))
@@ -1144,10 +1215,10 @@ fn rename_with_retry(src: &Path, dst: &Path) -> std::io::Result<()> {
     Err(last_err.unwrap())
 }
 
-/// Bind the dev server's `TcpListener`. `Some(port)` (from `--port=<N>`)
+/// Bind the application preview listener. `Some(port)` (from `--port=<N>`)
 /// binds that exact port and fails loud if it's taken — an explicit choice
-/// isn't a hint. `None` scans `PORT_RANGE` for a free port.
-fn bind_dev_server(port: Option<u16>) -> Result<TcpListener, String> {
+/// isn't a hint. `None` scans the stable application range for a free port.
+fn bind_application_server(port: Option<u16>) -> Result<TcpListener, String> {
     if let Some(port) = port {
         return match TcpListener::bind(("127.0.0.1", port)) {
             Ok(listener) => Ok(listener),
@@ -1161,14 +1232,14 @@ fn bind_dev_server(port: Option<u16>) -> Result<TcpListener, String> {
                     String::new()
                 };
                 Err(format!(
-                    "error: couldn't bind to port {}: {}{}",
+                    "error: couldn't bind application preview to port {}: {}{}",
                     port, e, fix
                 ))
             }
         };
     }
     let mut last_err: Option<std::io::Error> = None;
-    for port in PORT_RANGE {
+    for port in APPLICATION_PORT_RANGE {
         match TcpListener::bind(("127.0.0.1", port)) {
             Ok(listener) => return Ok(listener),
             Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
@@ -1176,14 +1247,17 @@ fn bind_dev_server(port: Option<u16>) -> Result<TcpListener, String> {
                 continue;
             }
             Err(e) => {
-                return Err(format!("error: couldn't start the dev server: {}", e));
+                return Err(format!(
+                    "error: couldn't start the application preview: {}",
+                    e
+                ));
             }
         }
     }
     Err(format!(
-        "error: every port from {} to {} is already in use{}\n fix: free one of those ports, stop the other process using it, or pick one explicitly with --port=<N>",
-        PORT_RANGE.start(),
-        PORT_RANGE.end(),
+        "error: every application preview port from {} to {} is already in use{}\n fix: free one of those ports, stop the other process using it, or pick one explicitly with --port=<N>",
+        APPLICATION_PORT_RANGE.start(),
+        APPLICATION_PORT_RANGE.end(),
         last_err.map(|e| format!(" ({})", e)).unwrap_or_default()
     ))
 }
@@ -1465,18 +1539,6 @@ fn unauthorized(stream: &mut TcpStream) -> std::io::Result<()> {
     )
 }
 
-fn bind_application_server(port: Option<u16>) -> Result<TcpListener, String> {
-    let bind_port = port.unwrap_or(0);
-    TcpListener::bind(("127.0.0.1", bind_port)).map_err(|error| {
-        match port {
-            Some(port) => format!(
-                "error: couldn't bind the application listener on port {port}: {error}"
-            ),
-            None => format!("error: couldn't start the application listener: {error}"),
-        }
-    })
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ListenerKind {
     Canvas,
@@ -1496,6 +1558,8 @@ fn serve_forever(
     bind_host: String,
     session_secret: String,
     shutdown: Arc<AtomicBool>,
+    static_root: PathBuf,
+    source_asset_fallback: bool,
 ) {
     if listener.set_nonblocking(true).is_err() {
         return;
@@ -1514,9 +1578,10 @@ fn serve_forever(
                 let canvas_file = canvas_file.clone();
                 let bind_host = bind_host.clone();
                 let session_secret = session_secret.clone();
+                let static_root = static_root.clone();
                 let active_connections = Arc::clone(&active_connections);
                 thread::spawn(move || {
-                    let _ = handle_connection(
+                    let _ = handle_connection_with_root(
                         stream,
                         &status,
                         &debug_sessions,
@@ -1526,6 +1591,8 @@ fn serve_forever(
                         canvas_only,
                         &bind_host,
                         &session_secret,
+                        &static_root,
+                        source_asset_fallback,
                     );
                     active_connections.fetch_sub(1, Ordering::AcqRel);
                 });
@@ -1558,6 +1625,7 @@ fn try_acquire_connection(active: &AtomicUsize) -> bool {
 
 /// Parse one GET request line + headers (no keep-alive, no request body —
 /// this is a dev tool, not a production server) and serve a response.
+#[cfg(test)]
 fn handle_connection(
     stream: TcpStream,
     status: &DevStatus,
@@ -1568,6 +1636,34 @@ fn handle_connection(
     canvas_only: bool,
     bind_host: &str,
     session_secret: &str,
+) -> std::io::Result<()> {
+    handle_connection_with_root(
+        stream,
+        status,
+        debug_sessions,
+        session,
+        canvas_file,
+        listener_kind,
+        canvas_only,
+        bind_host,
+        session_secret,
+        Path::new("build"),
+        true,
+    )
+}
+
+fn handle_connection_with_root(
+    stream: TcpStream,
+    status: &DevStatus,
+    debug_sessions: &crate::Canvas::DebugSessions,
+    session: &crate::ResidentDevSession,
+    canvas_file: &str,
+    listener_kind: ListenerKind,
+    canvas_only: bool,
+    bind_host: &str,
+    session_secret: &str,
+    static_root: &Path,
+    source_asset_fallback: bool,
 ) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(Duration::from_secs(10)))?;
@@ -1612,7 +1708,14 @@ fn handle_connection(
             .as_ref()
             .map(|relay| relay.nonce().to_string())
             .unwrap_or_default();
-        let code = serve_static(&mut stream, path, &nonce)?;
+        let code = serve_static_from_root(
+            &mut stream,
+            static_root,
+            path,
+            &nonce,
+            canvas_file,
+            source_asset_fallback,
+        )?;
         status.log_request(method, path, code, started.elapsed());
         return Ok(());
     }
@@ -2124,7 +2227,14 @@ fn handle_connection(
         .as_ref()
         .map(|relay| relay.nonce().to_string())
         .unwrap_or_default();
-    let code = serve_static(&mut stream, path, &nonce)?;
+    let code = serve_static_from_root(
+        &mut stream,
+        static_root,
+        path,
+        &nonce,
+        canvas_file,
+        source_asset_fallback,
+    )?;
     status.log_request(method, path, code, started.elapsed());
     Ok(())
 }
@@ -2238,12 +2348,15 @@ fn current_revision_for_source_id(canvas_file: &str, source_id: Option<&str>) ->
         .unwrap_or_default()
 }
 
-/// Serve one file out of `build/`, injecting the live-reload script into
-/// `index.html` on the way out. GET-only, no directory listing, no range
-/// requests, no compression — a dev tool serving a few small files needs
-/// none of that.
-fn serve_static(stream: &mut TcpStream, path: &str, nonce: &str) -> std::io::Result<u16> {
-    let file_path = match static_path(Path::new("build"), path) {
+fn serve_static_from_root(
+    stream: &mut TcpStream,
+    root: &Path,
+    path: &str,
+    nonce: &str,
+    canvas_file: &str,
+    source_asset_fallback: bool,
+) -> std::io::Result<u16> {
+    let root_path = match static_path(root, path) {
         Ok(path) => path,
         Err(()) => {
             write_response(
@@ -2254,6 +2367,13 @@ fn serve_static(stream: &mut TcpStream, path: &str, nonce: &str) -> std::io::Res
             )?;
             return Ok(400);
         }
+    };
+    let file_path = if root_path.is_file() {
+        root_path
+    } else if source_asset_fallback {
+        source_asset_path(canvas_file, path).unwrap_or(root_path)
+    } else {
+        root_path
     };
     let bytes = match fs::read(&file_path) {
         Ok(b) => b,
@@ -2270,7 +2390,11 @@ fn serve_static(stream: &mut TcpStream, path: &str, nonce: &str) -> std::io::Res
     };
 
     let content_type = content_type_for(&file_path);
-    if file_path.file_name().and_then(|f| f.to_str()) == Some("index.html") {
+    let is_html = file_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("html"));
+    if is_html {
         let html = String::from_utf8_lossy(&bytes).into_owned();
         let injected = inject_live_reload(&html, nonce);
         write_response(stream, "200 OK", content_type, injected.as_bytes())?;
@@ -2278,6 +2402,59 @@ fn serve_static(stream: &mut TcpStream, path: &str, nonce: &str) -> std::io::Res
     }
     write_response(stream, "200 OK", content_type, &bytes)?;
     Ok(200)
+}
+
+fn source_asset_path(canvas_file: &str, request_path: &str) -> Option<PathBuf> {
+    let source = Path::new(canvas_file);
+    let source_dir = source
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut roots = vec![source_dir.to_path_buf()];
+    if let Ok(source_text) = fs::read_to_string(source) {
+        let mut offset = 0;
+        while let Some(relative) = source_text[offset..].find("HTML(") {
+            let start = offset + relative + "HTML(".len();
+            let Some(rest) = source_text.get(start..) else {
+                break;
+            };
+            let rest = rest.trim_start();
+            let quote = rest.as_bytes().first().copied();
+            if !matches!(quote, Some(b'\'' | b'"')) {
+                offset = start;
+                continue;
+            }
+            let rest = &rest[1..];
+            let Some(end) = rest.find(char::from(quote.unwrap())) else {
+                offset = start;
+                continue;
+            };
+            let shell = source_dir.join(&rest[..end]);
+            if let Some(shell_dir) = shell.parent() {
+                roots.push(shell_dir.to_path_buf());
+            }
+            offset = start;
+        }
+    }
+    roots.sort();
+    roots.dedup();
+    for root in roots {
+        let Ok(candidate) = static_path(&root, request_path) else {
+            continue;
+        };
+        if candidate == source
+            || candidate
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("jet"))
+        {
+            continue;
+        }
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /// Plain polling live-reload (no WebSocket/SSE — I6 + correct scoping for a
@@ -2458,8 +2635,9 @@ mod tests {
     use super::{
         canvas_api_path, canvas_request_authorized, constant_time_equal, format_build_time,
         format_line_colored, format_line_plain, frame_lines, header_words, host_header_allowed,
-        handle_connection, inject_canvas_session, inject_live_reload, mint_session_secret, origin_allowed,
-        stage_and_swap, CanvasHostOptions, DevStatus, ListenerKind, Ordering, WebHost,
+        handle_connection, inject_canvas_session, inject_live_reload, mint_session_secret,
+        origin_allowed, stage_and_swap, APPLICATION_PORT_RANGE, CanvasHostOptions, DevStatus,
+        ListenerKind, Ordering, WebHost, bind_application_server,
     };
     use crate::Request;
     use std::collections::HashMap;
@@ -2531,7 +2709,7 @@ mod tests {
         assert!(out.contains("recoveredConnection || v !== jetDevVersion"));
         assert!(out.contains("reconnecting · waiting for connection"));
         assert!(!out.contains("setInterval("));
-        assert!(out.contains("finally(function () { setTimeout(poll, 750); })"));
+        assert!(out.contains("finally(function () { setTimeout(poll, 40); })"));
         assert!(out.contains("position:fixed;left:12px;bottom:12px"));
         assert!(out.contains("display:none;align-items:flex-start"));
     }
@@ -2766,6 +2944,21 @@ mod tests {
         assert!(
             !address.ip().is_unspecified(),
             "default Canvas address: {address}"
+        );
+    }
+
+    #[test]
+    fn application_default_scans_stable_range_and_skips_held_port() {
+        let first = bind_application_server(None).expect("first application preview port");
+        let first_port = first.local_addr().unwrap().port();
+        let second = bind_application_server(None).expect("next application preview port");
+        let second_port = second.local_addr().unwrap().port();
+
+        assert!(APPLICATION_PORT_RANGE.contains(&first_port));
+        assert!(APPLICATION_PORT_RANGE.contains(&second_port));
+        assert!(
+            second_port > first_port,
+            "application port scan did not skip the held port: {first_port}, {second_port}"
         );
     }
 

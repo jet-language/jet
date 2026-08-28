@@ -450,21 +450,99 @@ fn nested_tir_program(
 fn run_tir_program(
     program: jet::Codegen::TIR::JitProgram,
 ) -> Result<jet::Comptime::CtValue, jet::Diagnostics::Diagnostic> {
+    run_tir_program_with_sink(program).0
+}
+
+fn run_tir_program_with_sink(
+    program: jet::Codegen::TIR::JitProgram,
+) -> (
+    Result<jet::Comptime::CtValue, jet::Diagnostics::Diagnostic>,
+    jet::Comptime::DevSink,
+) {
     std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
-            jet::Codegen::TIR::run_program(
+            let mut sink = jet::Comptime::DevSink::new();
+            let result = jet::Codegen::TIR::run_program(
                 &program,
                 std::path::Path::new("."),
-                &mut jet::Comptime::DevSink::new(),
+                &mut sink,
                 std::collections::HashMap::new(),
                 &std::collections::HashMap::new(),
                 jet::Policy::GateSet::default(),
-            )
+            );
+            (result, sink)
         })
         .expect("spawn TIR boundary evaluator")
         .join()
         .expect("TIR boundary evaluator must not panic")
+}
+
+#[test]
+fn tir_unmatched_enum_match_cannot_report_empty_success() {
+    use jet::AST::{Pattern, Type};
+    use jet::Codegen::TIR::{
+        TEnumPayload, TExpr, TExprKind, TMatchArm, TPattern, TStmt, TStrPart,
+    };
+
+    let source = "fn run() {\n    when Light.Blue { ... }\n    print(\"completed\")\n}\n";
+    let span = jet::Diagnostics::Span::new(0, source.len());
+    let mut program = nested_tir_program(0, span);
+    program.source_file = "unmatched-enum.jet".to_string();
+    program.source_text = source.to_string();
+    program.funcs = vec![tir_func(
+        "run",
+        vec![
+            TStmt::EnumMatch {
+                scrutinee: TExpr {
+                    ty: Type::Named("Light".to_string()),
+                    kind: TExprKind::EnumLit {
+                        enum_type: "Light".to_string(),
+                        variant: "Blue".to_string(),
+                        payload: TEnumPayload::Unit,
+                    },
+                },
+                clone_subject: false,
+                arms: vec![TMatchArm {
+                    pattern: TPattern::arm(
+                        Pattern::Variant {
+                            variant: "Red".to_string(),
+                            bindings: Vec::new(),
+                            leading_dot: false,
+                            span,
+                        },
+                        Some("Light".to_string()),
+                    ),
+                    body: Vec::new(),
+                }],
+                else_body: None,
+                fallthrough: true,
+            },
+            TStmt::ExprStmt(TExpr {
+                ty: Type::Named("Unit".to_string()),
+                kind: TExprKind::Print(Box::new(TExpr {
+                    ty: Type::String,
+                    kind: TExprKind::StrLit(vec![TStrPart::Lit("completed".to_string())]),
+                })),
+            }),
+        ],
+        span,
+    )];
+
+    let (result, sink) = run_tir_program_with_sink(program);
+    let diagnostic = result.expect_err(
+        "an unmatched sema-proved exhaustive match must not report successful completion",
+    );
+    assert_eq!(diagnostic.code, "E0956");
+    assert!(
+        diagnostic.what.contains("exhaustive match fallthrough"),
+        "wrong boundary diagnostic: {diagnostic:?}"
+    );
+    assert!(
+        sink.stdout.is_empty(),
+        "the post-match completion witness must not execute: {:?}",
+        sink.stdout
+    );
 }
 
 fn run_nested_tir(

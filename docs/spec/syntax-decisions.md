@@ -672,7 +672,13 @@ capture. Valid wherever string patterns are: `==` pattern tests,
 if-table arms (refutable — table needs `else`), and consume mode via
 `Reader.take_pattern([U8]{"…"})` (D-SHIFT1, prefix match + advance). Same
 non-greedy anchoring and E0147-class ambiguity law as text holes. The
-retired `b"…"` lexer prefix is gone.
+`b"…"` value literal is not a pattern head; byte patterns use this typed form.
+
+**D-BYTELIT1=B — byte-string values** *(ratified 2026-08-27, card #2258)*:
+`b"…"` is a byte value. ASCII text contributes one `U8` per character and
+`\xNN` contributes the written byte. Braces are literal text, not
+interpolation. The value has `[U8]` shape and compares directly with other
+byte lists. `[U8]{"…"}` remains the explicit typed-list and byte-pattern form.
 
 **S77 — Field punning**: in a struct literal, bare `name` ≡ `name: name` when
 a binding of that name is in scope; mixes freely with explicit fields.
@@ -1267,10 +1273,11 @@ surface is superseded by D-UNIFYLIT1=A).
 **D-UNIFYLIT1=A — unify domain text + pattern modes** *(ratified 2026-07-28,
 card #1265)*: one surface law — the head names the language; the body is that
 language's quoted recipe. Domain text: `SQL`/`HTML`/`Sh{"…"}` only (plus
-`.raw`). Byte patterns: `[U8]{"…"}` in pattern / `Reader.take_pattern`
-position (retires `b"…"`). Text patterns keep plain `"…"` convenience and
-optional `String{"…"}`. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes
-D-LITERAL-PREFIX1's prefix-first surface.
+`.raw`). Byte values: `b"…"` per D-BYTELIT1. Byte patterns:
+`[U8]{"…"}` in pattern / `Reader.take_pattern` position. Text patterns keep
+plain `"…"` convenience and optional `String{"…"}`. Amends
+D-TYPEDTEXT1/2 and D-BINPAT1; supersedes D-LITERAL-PREFIX1's prefix-first
+surface.
 
 **D-REGEX-LIT1=D — checked Regex literals** *(ratified 2026-07-28, card
 #1283)*: a regex pattern is always a typed literal. `Regex{"…"}` names a
@@ -1338,6 +1345,7 @@ trust surface exists. Grid cell: build / dependency.
 Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
 `r >> U32` punctuation — rejected). `Reader.over(bytes)` wraps a `[U8]` with a
 position: `read_u8`/`read_u16_le|be`/`read_u32_le|be`/`read_u64_le|be`,
+`read_f32_le`/`read_f64_le`,
 `take(n: Int)`, `remaining()`, `is_at_end()`; every read advances and is
 fallible (`T !String`) — a bounds miss is an ordinary error value.
 **D-BINREAD-LEN1=A** narrowly extends the `take` length slot to accept
@@ -6484,7 +6492,12 @@ ambiguous links. Implemented end to end on card #544.
 
 **2026-07-28 — D-TRAILBLOCK2=A** *(arrow spelling amended by D-ARROW-RESPELL1=A)*: code-as-argument uses explicit `() -> { … }` inside call parentheses (multiline bodies and multiple code args allowed); retires D-TRAILBLOCK1 trailing `{ }` sugar (`twice { … }` / `f() { … }`). E0335 teaches the `() ->` form. Card #1266.
 
-**2026-07-28 — D-UNIFYLIT1=A** *(head spelling amended by D-LIT-DOT1=B)*: typed heads only for domain text (`SQL{"…"}`/`HTML{"…"}`/`Sh{"…"}` + `.raw`); byte patterns `[U8]{"…"}`; retires `sql"`/`html"`/`sh"` prefixes, silent expected-type rewrite of bare quotes, and `b"…"`; text patterns keep plain `"…"` convenience. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes D-LITERAL-PREFIX1 prefix surface. Card #1265.
+**2026-07-28 — D-UNIFYLIT1=A** *(head spelling amended by D-LIT-DOT1=B)*: typed heads only for domain text (`SQL{"…"}`/`HTML{"…"}`/`Sh{"…"}` + `.raw`); byte values use `b"…"` per D-BYTELIT1 and byte patterns use `[U8]{"…"}`; retires `sql"`/`html"`/`sh"` prefixes and silent expected-type rewrite of bare quotes; text patterns keep plain `"…"` convenience. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes D-LITERAL-PREFIX1 prefix surface. Card #1265.
+
+**2026-08-27 — D-BYTELIT1=B**: `b"…"` is the byte-value literal. ASCII text
+contributes one `U8` per character, `\xNN` contributes the written byte, and
+braces are literal text. `[U8]{"…"}` remains the explicit typed-list and
+byte-pattern form. Card #2258.
 
 **2026-07-29 — D-FACTMODEL1=A**: tags, states, taint kinds, and effect leaves
 are compile-time enum facts. They share one registry, segment-aware

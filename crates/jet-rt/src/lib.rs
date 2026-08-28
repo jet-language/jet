@@ -1264,18 +1264,6 @@ impl JetArena {
         self.int_mul(left, right)
     }
 
-    pub fn int_wrapping_add(&mut self, left: i64, right: i64) -> i64 {
-        self.int_add(left, right)
-    }
-
-    pub fn int_wrapping_sub(&mut self, left: i64, right: i64) -> i64 {
-        self.int_sub(left, right)
-    }
-
-    pub fn int_wrapping_mul(&mut self, left: i64, right: i64) -> i64 {
-        self.int_mul(left, right)
-    }
-
     pub fn int_int_pow(&mut self, left: i64, right: i64) -> i64 {
         self.int_pow(left, right)
             .unwrap_or_else(|| self.int_from_i64(0))

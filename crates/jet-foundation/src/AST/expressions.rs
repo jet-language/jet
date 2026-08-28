@@ -308,7 +308,7 @@ pub enum UnitFormat {
 
 /// D-DISPLAYDBG2/D-FMT-INTERP1/D-FMT-INTERP3/D-QUANTITY-PRINT1: how an
 /// interpolated value is shown.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum StrFormat {
     /// Bare `{value}` — calls `Display` (D-DISPLAY-SHAPE).
     #[default]
@@ -321,6 +321,18 @@ pub enum StrFormat {
     Fixed(i64),
     /// `{value:Hex(n)}` — uses `core.text.fmt.hex(value, n)`.
     Hex(i64),
+    /// `{value:Pad(n[, "fill"])}` — uses `core.text.fmt.pad`.
+    Pad { width: i64, fill: String },
+    /// `{value:PadLeft(n[, "fill"])}` — uses `core.text.fmt.pad_left`.
+    PadLeft { width: i64, fill: String },
+    /// `{value:Sci(n)}` — uses `core.text.fmt.sci(value, n)`.
+    Sci(i64),
+    /// `{value:Percent(n)}` — uses `core.text.fmt.percent(value, n)`.
+    Percent(i64),
+    /// `{value:Bin}` — uses `core.text.fmt.bin(value)`.
+    Bin,
+    /// `{value:Oct}` — uses `core.text.fmt.oct(value)`.
+    Oct,
     /// `{value:Unit(name)}` / `{value:Unit(bare)}`.
     Unit(UnitFormat),
 }

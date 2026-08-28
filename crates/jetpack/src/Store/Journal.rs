@@ -7,6 +7,11 @@ use super::Receipt::render_receipt;
 
 const JOURNAL_DIR: &str = "journal";
 const COMPACT_AFTER: usize = 64;
+/// Compact on size as well as count: replay cost is bytes parsed, not file
+/// count. A 59-transaction journal reached 57 MiB and made every graph load
+/// re-parse and re-hash all of it (Nix avoids this class entirely by keeping
+/// current state in one indexed database; our snapshot is the analog).
+const COMPACT_AFTER_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_CLOSURE_OBJECTS: usize = 1_000_000;
 const MAX_CLOSURE_RECORDS: usize = 1_000_000;
 const MAX_CLOSURE_DELETIONS: usize = 1_000_000;
@@ -90,9 +95,25 @@ pub(crate) fn closure_graph_structure_read_only(roots: &Roots) -> std::io::Resul
     load_graph_structure_mode(roots, true)
 }
 
+/// Process cache of the cleanup/lifecycle inputs keyed by the WAL identity
+/// stamp. `auto_clean` recomputed this several times per command; each pass
+/// replayed the journal with proofs and re-hashed every transaction byte for
+/// the closure head.
+static LIFECYCLE_INPUTS_CACHE: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, (String, (BTreeSet<String>, String))>>,
+> = std::sync::LazyLock::new(Default::default);
+
 pub(super) fn lifecycle_inputs_unlocked(
     roots: &Roots,
 ) -> std::io::Result<(BTreeSet<String>, String)> {
+    let stamp = super::Closure::wal_state_stamp(roots)?;
+    if let Ok(cache) = LIFECYCLE_INPUTS_CACHE.lock() {
+        if let Some((cached_stamp, inputs)) = cache.get(&roots.root) {
+            if *cached_stamp == stamp {
+                return Ok(inputs.clone());
+            }
+        }
+    }
     recover_closure_journal_unlocked(roots)?;
     let graph = load_graph_mode(roots, true)?;
     let journal = journal_dir(roots);
@@ -110,10 +131,20 @@ pub(super) fn lifecycle_inputs_unlocked(
         canonical.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
         canonical.extend_from_slice(&bytes);
     }
-    Ok((
-        graph.objects.into_keys().collect(),
+    let inputs = (
+        graph
+            .objects
+            .into_keys()
+            .collect::<BTreeSet<String>>(),
         format!("sha256-{}", SHA256::sha256_hex(&canonical)),
-    ))
+    );
+    // Recovery above may have rewritten WAL state; stamp the result so the
+    // next caller in this command hits.
+    let stamp = super::Closure::wal_state_stamp(roots)?;
+    if let Ok(mut cache) = LIFECYCLE_INPUTS_CACHE.lock() {
+        cache.insert(roots.root.clone(), (stamp, inputs.clone()));
+    }
+    Ok(inputs)
 }
 
 pub(super) fn load_graph_mode(roots: &Roots, allow_legacy: bool) -> std::io::Result<ClosureGraph> {
@@ -725,7 +756,14 @@ pub(super) fn compact_if_needed(roots: &Roots) -> std::io::Result<()> {
     let journal = journal_dir(roots);
     let mut paths = transaction_paths(&journal)?;
     if paths.len() <= COMPACT_AFTER {
-        return Ok(());
+        let total_bytes: u64 = paths
+            .iter()
+            .filter_map(|path| fs::metadata(path).ok())
+            .map(|metadata| metadata.len())
+            .sum();
+        if paths.len() <= 1 || total_bytes <= COMPACT_AFTER_BYTES {
+            return Ok(());
+        }
     }
     let graph = load_graph_structure_mode(roots, false)?;
     let snapshot = JournalEntry {

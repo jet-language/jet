@@ -45,7 +45,7 @@
 //     caused it.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const REPO = "/home/nate/Projects/Github/jet";
@@ -83,6 +83,21 @@ const alive = (name) => {
   try { process.kill(pid, 0); return true; } catch { return false; }
 };
 
+const tailOf = (path, size, bytes = 1 << 20) => {
+  // Lanes can emit gigabyte transcripts (huge diffs); reading the whole file
+  // both allocates it and can exceed Node's string ceiling. The yield marker
+  // lives in the final report, so the tail is all we ever need.
+  const fd = openSync(path, "r");
+  try {
+    const take = Math.min(size, bytes);
+    const buf = Buffer.alloc(take);
+    readSync(fd, buf, 0, take, size - take);
+    return buf.toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+};
+
 const lanes = () => {
   if (!existsSync(DIR)) return [];
   return readdirSync(DIR)
@@ -90,7 +105,7 @@ const lanes = () => {
     .map((f) => {
       const name = f.replace(/\.out$/, "");
       const st = statSync(join(DIR, f));
-      const body = readFileSync(join(DIR, f), "utf8");
+      const body = tailOf(join(DIR, f), st.size);
       const running = alive(name);
       return {
         name,
@@ -247,7 +262,8 @@ function cmdHarvest() {
   const fresh = lanes().filter((l) => l.yielded && !seen.has(l.name));
   if (!fresh.length) return console.log("(nothing new)");
   for (const l of fresh) {
-    const s = readFileSync(join(DIR, `${l.name}.out`), "utf8").replace(/\u001b\[[0-9;]*m/g, "");
+    const path = join(DIR, `${l.name}.out`);
+    const s = tailOf(path, statSync(path).size).replace(/\u001b\[[0-9;]*m/g, "");
     const i = s.lastIndexOf("] codex");
     let tail = i < 0 ? s.slice(-1200) : s.slice(i);
     const c = tail.search(/CHECK (OK|FAILED)/);

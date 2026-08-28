@@ -1456,6 +1456,9 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     s = strip_vetted_module(&s, "jet_compute_cpu_simd");
     s = strip_vetted_module(&s, "jet_regex_cpu_simd_dispatch");
     s = strip_vetted_module(&s, "jet_regex_cpu_simd");
+    // D-SIMD1/2: native F64x4 AVX lane kernels and their dispatch callsite.
+    s = strip_vetted_module(&s, "jet_simd_x86");
+    s = strip_vetted_module(&s, "jet_simd_f64x4_avx");
     s = strip_vetted_module(&s, "ffi_reporter");
     s = strip_vetted_module(&s, "jet_program_allocator");
     s = strip_vetted_module(&s, "jet_mod_native");

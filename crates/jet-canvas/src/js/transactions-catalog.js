@@ -268,7 +268,9 @@
           const conflict = result.json && result.json.kind === "conflict";
           if (conflict) {
             const message = String(result.json.message || "Source changed while this Canvas edit was prepared");
-            const recovery = "Selection is stale; copy the current selection again. " + message + ". Canvas kept the current source; reload before retrying.";
+            const currentRevision = result.json.current_revision;
+            const revisionNote = currentRevision ? " Current revision: " + String(currentRevision).slice(0, 12) + "." : "";
+            const recovery = "Selection is stale; copy the current selection again. " + message + "." + revisionNote + " Canvas kept the current source; reload before retrying.";
             setCanvasState("stale", "Edit not applied", recovery, [
               { label: "Show Source", run: openSourceRecovery },
               { label: "Reload", primary: true, run: () => loadGraph() }

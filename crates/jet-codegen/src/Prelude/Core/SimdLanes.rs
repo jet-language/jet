@@ -187,6 +187,118 @@ pub(crate) fn jet_simd_div_array<T: JetSimdScalar, const N: usize>(
     jet_simd_binary_array(left, right, JetSimdBinaryOp::Div)
 }
 
+// I1: the native lane backend is a vetted Prelude implementation. Runtime
+// dispatch keeps cross-target binaries on the portable array path when AVX is
+// unavailable; the public lane types never expose target-dependent ABI facts.
+// JET_VETTED_UNSAFE_BEGIN: jet_simd_x86
+#[cfg(target_arch = "x86_64")]
+mod jet_simd_x86 {
+    use super::JetSimdBinaryOp;
+    use std::arch::x86_64::{
+        _mm256_add_pd, _mm256_div_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_storeu_pd,
+        _mm256_sub_pd,
+    };
+
+    #[target_feature(enable = "avx")]
+    pub(super) unsafe fn f64x4_binary(
+        left: &[f64; 4],
+        right: &[f64; 4],
+        op: JetSimdBinaryOp,
+    ) -> [f64; 4] {
+        let left = _mm256_loadu_pd(left.as_ptr());
+        let right = _mm256_loadu_pd(right.as_ptr());
+        let value = match op {
+            JetSimdBinaryOp::Add => _mm256_add_pd(left, right),
+            JetSimdBinaryOp::Sub => _mm256_sub_pd(left, right),
+            JetSimdBinaryOp::Mul => _mm256_mul_pd(left, right),
+            JetSimdBinaryOp::Div => _mm256_div_pd(left, right),
+        };
+        let mut out = [0.0; 4];
+        _mm256_storeu_pd(out.as_mut_ptr(), value);
+        out
+    }
+}
+// JET_VETTED_UNSAFE_END: jet_simd_x86
+
+// JET_VETTED_UNSAFE_BEGIN: jet_simd_x86
+
+#[cfg(target_arch = "x86")]
+mod jet_simd_x86 {
+    use super::JetSimdBinaryOp;
+    use std::arch::x86::{
+        _mm256_add_pd, _mm256_div_pd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_storeu_pd,
+        _mm256_sub_pd,
+    };
+
+    #[target_feature(enable = "avx")]
+    pub(super) unsafe fn f64x4_binary(
+        left: &[f64; 4],
+        right: &[f64; 4],
+        op: JetSimdBinaryOp,
+    ) -> [f64; 4] {
+        let left = _mm256_loadu_pd(left.as_ptr());
+        let right = _mm256_loadu_pd(right.as_ptr());
+        let value = match op {
+            JetSimdBinaryOp::Add => _mm256_add_pd(left, right),
+            JetSimdBinaryOp::Sub => _mm256_sub_pd(left, right),
+            JetSimdBinaryOp::Mul => _mm256_mul_pd(left, right),
+            JetSimdBinaryOp::Div => _mm256_div_pd(left, right),
+        };
+        let mut out = [0.0; 4];
+        _mm256_storeu_pd(out.as_mut_ptr(), value);
+        out
+    }
+}
+// JET_VETTED_UNSAFE_END: jet_simd_x86
+
+#[inline(always)]
+fn jet_simd_f64x4_binary(
+    left: &[f64; 4],
+    right: &[f64; 4],
+    op: JetSimdBinaryOp,
+) -> [f64; 4] {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    if is_x86_feature_detected!("avx") {
+        // JET_VETTED_UNSAFE_BEGIN: jet_simd_f64x4_avx
+        let value = unsafe { jet_simd_x86::f64x4_binary(left, right, op) };
+        // JET_VETTED_UNSAFE_END: jet_simd_f64x4_avx
+        return value;
+    }
+    jet_simd_binary_array(left, right, op)
+}
+
+#[inline(always)]
+pub(crate) fn jet_simd_f64x4_add_array(
+    left: &[f64; 4],
+    right: &[f64; 4],
+) -> [f64; 4] {
+    jet_simd_f64x4_binary(left, right, JetSimdBinaryOp::Add)
+}
+
+#[inline(always)]
+pub(crate) fn jet_simd_f64x4_sub_array(
+    left: &[f64; 4],
+    right: &[f64; 4],
+) -> [f64; 4] {
+    jet_simd_f64x4_binary(left, right, JetSimdBinaryOp::Sub)
+}
+
+#[inline(always)]
+pub(crate) fn jet_simd_f64x4_mul_array(
+    left: &[f64; 4],
+    right: &[f64; 4],
+) -> [f64; 4] {
+    jet_simd_f64x4_binary(left, right, JetSimdBinaryOp::Mul)
+}
+
+#[inline(always)]
+pub(crate) fn jet_simd_f64x4_div_array(
+    left: &[f64; 4],
+    right: &[f64; 4],
+) -> [f64; 4] {
+    jet_simd_f64x4_binary(left, right, JetSimdBinaryOp::Div)
+}
+
 #[inline(always)]
 pub(crate) fn jet_simd_binary_slice<T: JetSimdScalar>(
     left: &[T],

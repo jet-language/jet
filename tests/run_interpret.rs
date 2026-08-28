@@ -190,7 +190,7 @@ fn run_interpret_keeps_unused_c_member_lists_runnable() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"run_interpret_imports\"\nversion: \"0.1.0\"\ndeps: .{ c: c@system, m: c@system }\n",
+        "name: \"run_interpret_imports\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO] } }\ndeps: .{ c: c@system, m: c@system }\n",
     )
     .unwrap();
     fs::write(

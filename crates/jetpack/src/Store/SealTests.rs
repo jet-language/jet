@@ -218,3 +218,41 @@ fn hangar_verify_rehashes_despite_valid_seal_and_catches_content_corruption() {
     assert!(verify_hangar_object(&roots, &ingested.entry).is_err());
     assert_eq!(verified_digest_hash_count(&object), 1);
 }
+
+#[cfg(unix)]
+#[test]
+fn armed_command_memo_checks_identity_once_and_stays_thread_local() {
+    let (roots, _guard) = temp_roots();
+    let ingested = fixture(&roots, "memo");
+    let object = PathBuf::from(&ingested.entry.out);
+    let digest = ingested.entry.envelope.output_hash.clone();
+    let hangar = roots.hangar_dir();
+
+    // Run the armed command window on its own thread so the memo can never
+    // leak into sibling tests on this harness thread.
+    let armed = {
+        let object = object.clone();
+        let hangar = hangar.clone();
+        let digest = digest.clone();
+        std::thread::spawn(move || {
+            Seal::arm_command_memo();
+            assert_eq!(check_seal(&object, &hangar).unwrap(), Some(digest.clone()));
+            // Drift the tuple identity mid-command: one command holds one
+            // coherent verified view (D-JPK-VERIFYONCE1=A), so the memoized
+            // verdict stands without another identity walk.
+            let payload = object.join("payload");
+            let metadata = fs::metadata(&payload).unwrap();
+            let (seconds, nanos) = mtime(&metadata);
+            set_mtime(&payload, seconds + 7, nanos);
+            assert_eq!(check_seal(&object, &hangar).unwrap(), Some(digest.clone()));
+            // Forgetting the seal forgets the memo too.
+            Seal::remove(&object, &hangar).unwrap();
+            assert_eq!(check_seal(&object, &hangar).unwrap(), None);
+        })
+    };
+    armed.join().unwrap();
+
+    // A fresh (unarmed) thread keeps strict per-use drift detection: the seal
+    // was removed and the tuples drifted, so nothing is trusted.
+    assert_eq!(check_seal(&object, &hangar).unwrap(), None);
+}

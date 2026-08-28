@@ -1,3 +1,7 @@
+//! Deep Canvas edit transaction: JSON decode through atomic source commit.
+//!
+//! `apply_transaction_json` is the only sibling-facing seam.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -8,27 +12,368 @@ use jet_semindex::SourceSpan;
 
 use super::debug_source_git::canonical_path;
 use super::graph_helpers::{
-    diagnostics_error, edit, edit_conflict, edit_error, edit_ok, edit_ok_source,
-    function_signature_span, graph_id_name_span, indentation_at, line_after, line_start, snippet,
-    span_through_closing_parens,
+    canvas_action_preview_ok, diagnostics_error, edit, edit_conflict, edit_error, edit_ok,
+    edit_ok_source, function_signature_span, graph_id_name_span, indentation_at, line_after,
+    line_start, preview_ok, snippet, span_through_closing_parens,
 };
 use super::graph_json::{canvas_collapse_hints, func_source_span};
-use super::graph_projection::trait_method_signature;
+use super::graph_projection::{trait_method_signature, GraphEditAnchor, Projection};
 use super::project_scan::project_file;
 use super::query_actions::default_arg_for_type;
-use super::schema_api::source_revision;
-use super::source_model::{write_source_if_unchanged, SourceWriteError};
+use super::source_model::{source_revision, write_source_if_unchanged, SourceWriteError};
 use super::validation_json::{
     extract_params, find_comment_hint, find_hint_region, find_simple_helper, json_str,
-    normalize_bounds, parse_simple_call, quoted_attr, replace_ident, validate_comment_alpha,
-    validate_comment_color, validate_ident, wire_span_from_json_chunk,
+    json_string_array, json_string_field, json_usize_field, normalize_bounds, parse_simple_call,
+    quoted_attr, replace_ident, required_string, validate_comment_alpha, validate_comment_color,
+    validate_function_signature, validate_ident, validate_qualified_name,
+    validate_signature_fragment, validate_single_line_fragment, validate_type_fragment,
+    wire_span_from_json_chunk,
 };
 
-pub(super) fn apply_noop(path: &Path, _src: &str) -> Result<String, String> {
+pub const EDIT_SCHEMA_VERSION: u32 = 1;
+
+pub(super) fn apply_transaction_json(path: &Path, request: &str) -> Result<String, String> {
+    jet_driver::run_compiler_work(|| apply_transaction_json_on_compiler_stack(path, request))
+}
+
+fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Result<String, String> {
+    let src = fs::read_to_string(path).map_err(|e| edit_error("io", &e.to_string()))?;
+    let revision = required_string(request, "revision")?;
+    let current_revision = source_revision(&src);
+    if revision != current_revision {
+        return Err(edit_conflict(
+            "source changed since this Canvas graph was drawn",
+            &current_revision,
+        ));
+    }
+    let schema = json_usize_field(request, "schema_version").unwrap_or(0);
+    if schema != EDIT_SCHEMA_VERSION as usize {
+        return Err(edit_error("schema", "Canvas edit schema_version must be 1"));
+    }
+    let op = required_string(request, "op")?;
+    match op.as_str() {
+        "noop" => apply_noop(path, &src),
+        "rename_binding" => {
+            let from = required_string(request, "from")?;
+            let to = required_string(request, "to")?;
+            validate_ident(&from)?;
+            validate_ident(&to)?;
+            apply_rename(path, &src, &from, &to)
+        }
+        "rename_function" => {
+            let from = required_string(request, "from")?;
+            let to = required_string(request, "to")?;
+            validate_ident(&from)?;
+            validate_ident(&to)?;
+            apply_rename(path, &src, &from, &to)
+        }
+        "create_function" => {
+            let name = required_string(request, "name")?;
+            validate_ident(&name)?;
+            let params = json_string_field(request, "params").unwrap_or_default();
+            validate_signature_fragment(&params)?;
+            let ret_type =
+                json_string_field(request, "ret_type").unwrap_or_else(|| "Int".to_string());
+            validate_type_fragment(&ret_type)?;
+            apply_create_function(path, &src, &name, &params, &ret_type)
+        }
+        "edit_function_signature" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let signature = required_string(request, "signature")?;
+            validate_function_signature(&signature)?;
+            apply_edit_function_signature(path, &src, &graph_id, &signature)
+        }
+        "edit_inline_expr" => {
+            let inline_id = required_string(request, "inline_expr_id")?;
+            let new_expr = required_string(request, "new_expr")?;
+            apply_inline_edit(path, &src, &inline_id, &new_expr)
+        }
+        "promote_to_binding" => {
+            let inline_id = required_string(request, "inline_expr_id")?;
+            let name = required_string(request, "name")?;
+            validate_ident(&name)?;
+            apply_promote_inline(path, &src, &inline_id, &name)
+        }
+        "insert_visible_conversion" => {
+            let inline_id = required_string(request, "inline_expr_id")?;
+            let callee = required_string(request, "callee")?;
+            validate_qualified_name(&callee)?;
+            apply_visible_conversion(path, &src, &inline_id, &callee)
+        }
+        "break_link" => {
+            let wire_id = required_string(request, "wire_id")?;
+            apply_break_link(path, &src, &wire_id)
+        }
+        "move_link" => {
+            let wire_id = required_string(request, "wire_id")?;
+            let replacement = required_string(request, "replacement")?;
+            validate_qualified_name(&replacement)?;
+            apply_move_link(path, &src, &wire_id, &replacement)
+        }
+        "reorder_statements" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let moved = SourceSpan {
+                start: json_usize_field(request, "moved_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `moved_start`"))?,
+                end: json_usize_field(request, "moved_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `moved_end`"))?,
+            };
+            let anchor = SourceSpan {
+                start: json_usize_field(request, "anchor_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `anchor_start`"))?,
+                end: json_usize_field(request, "anchor_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `anchor_end`"))?,
+            };
+            let position = json_string_field(request, "position").unwrap_or_else(|| "after".into());
+            apply_reorder_statements(path, &src, &graph_id, moved, anchor, &position)
+        }
+        "add_pattern_arm" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let pattern = required_string(request, "pattern")?;
+            validate_single_line_fragment(&pattern, "pattern arm text must stay on one line")?;
+            let node = SourceSpan {
+                start: json_usize_field(request, "node_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_start`"))?,
+                end: json_usize_field(request, "node_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_end`"))?,
+            };
+            apply_add_pattern_arm(path, &src, &graph_id, node, &pattern)
+        }
+        "edit_pattern_arm" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let pattern = required_string(request, "pattern")?;
+            validate_single_line_fragment(&pattern, "pattern arm text must stay on one line")?;
+            let pattern_span = SourceSpan {
+                start: json_usize_field(request, "pattern_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `pattern_start`"))?,
+                end: json_usize_field(request, "pattern_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `pattern_end`"))?,
+            };
+            apply_edit_pattern_arm(path, &src, &graph_id, pattern_span, &pattern)
+        }
+        "remove_pattern_arm" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let pattern_span = SourceSpan {
+                start: json_usize_field(request, "pattern_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `pattern_start`"))?,
+                end: json_usize_field(request, "pattern_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `pattern_end`"))?,
+            };
+            apply_remove_pattern_arm(path, &src, &graph_id, pattern_span)
+        }
+        "toggle_switch_state" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let node_span = SourceSpan {
+                start: json_usize_field(request, "node_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_start`"))?,
+                end: json_usize_field(request, "node_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_end`"))?,
+            };
+            apply_toggle_switch_state(path, &src, &graph_id, node_span)
+        }
+        "append_multi_input" => {
+            let element = json_string_field(request, "element").unwrap_or_else(|| "1".to_string());
+            validate_single_line_fragment(&element, "multi-input element must stay on one line")?;
+            let node = SourceSpan {
+                start: json_usize_field(request, "node_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_start`"))?,
+                end: json_usize_field(request, "node_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_end`"))?,
+            };
+            apply_append_multi_input(path, &src, node, &element)
+        }
+        "remove_multi_input_element" => {
+            let node = SourceSpan {
+                start: json_usize_field(request, "node_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_start`"))?,
+                end: json_usize_field(request, "node_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `node_end`"))?,
+            };
+            let element = SourceSpan {
+                start: json_usize_field(request, "element_start")
+                    .ok_or_else(|| edit_error("bad_request", "missing `element_start`"))?,
+                end: json_usize_field(request, "element_end")
+                    .ok_or_else(|| edit_error("bad_request", "missing `element_end`"))?,
+            };
+            apply_remove_multi_input_element(path, &src, node, element)
+        }
+        "replace_source" => {
+            if json_string_field(request, "source_edit").as_deref() == Some("exec_convergence") {
+                let graph_id = required_string(request, "graph_id")?;
+                let from_pin_name = required_string(request, "from_pin_name")?;
+                let strategy = required_string(request, "strategy")?;
+                let function = required_string(request, "function")?;
+                let from_span = SourceSpan {
+                    start: json_usize_field(request, "from_start")
+                        .ok_or_else(|| edit_error("bad_request", "missing `from_start`"))?,
+                    end: json_usize_field(request, "from_end")
+                        .ok_or_else(|| edit_error("bad_request", "missing `from_end`"))?,
+                };
+                let target_span = SourceSpan {
+                    start: json_usize_field(request, "target_start")
+                        .ok_or_else(|| edit_error("bad_request", "missing `target_start`"))?,
+                    end: json_usize_field(request, "target_end")
+                        .ok_or_else(|| edit_error("bad_request", "missing `target_end`"))?,
+                };
+                return apply_exec_convergence(
+                    path,
+                    &src,
+                    &graph_id,
+                    from_span,
+                    target_span,
+                    &from_pin_name,
+                    &strategy,
+                    &function,
+                    json_string_field(request, "helper_name").as_deref(),
+                );
+            }
+            let source = required_string(request, "source")?;
+            if json_string_field(request, "undo_restore").is_some() {
+                write_checked_source(path, &src, &source)
+            } else {
+                write_checked_formatted(path, &src, &source)
+            }
+        }
+        "insert_branch" | "insert_switch" | "insert_loop" | "insert_fallible_rail" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let wire_origin_pin_id = json_string_field(request, "wire_origin_pin_id");
+            let wire_target_pin = json_string_field(request, "wire_target_pin");
+            apply_insert_structural(
+                path,
+                &src,
+                &graph_id,
+                op.as_str(),
+                wire_origin_pin_id.as_deref(),
+                wire_target_pin.as_deref(),
+            )
+        }
+        "create_comment_region" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let title = required_string(request, "title")?;
+            let color =
+                json_string_field(request, "color").unwrap_or_else(|| "#2563eb".to_string());
+            let alpha = json_string_field(request, "alpha").unwrap_or_else(|| "0.18".to_string());
+            let start = json_usize_field(request, "start").unwrap_or(0);
+            let end = json_usize_field(request, "end").unwrap_or(start);
+            let bounds =
+                json_string_field(request, "bounds").unwrap_or_else(|| "0,0,360,180".to_string());
+            apply_create_comment_region(
+                path, &src, &graph_id, start, end, &title, &color, &alpha, &bounds,
+            )
+        }
+        "edit_comment_region" | "move_comment_region" | "resize_comment_region" => {
+            let region_id = required_string(request, "region_id")?;
+            let title = json_string_field(request, "title");
+            let color = json_string_field(request, "color");
+            let alpha = json_string_field(request, "alpha");
+            let bounds = json_string_field(request, "bounds");
+            apply_update_comment_region(
+                path,
+                &src,
+                &region_id,
+                title.as_deref(),
+                color.as_deref(),
+                alpha.as_deref(),
+                bounds.as_deref(),
+            )
+        }
+        "delete_comment_region" => {
+            let region_id = required_string(request, "region_id")?;
+            apply_delete_comment_region(path, &src, &region_id)
+        }
+        "create_collapsed_region" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let title = required_string(request, "title")?;
+            let start = json_usize_field(request, "start").unwrap_or(0);
+            let end = json_usize_field(request, "end").unwrap_or(start);
+            apply_create_collapse_region(path, &src, &graph_id, start, end, &title)
+        }
+        "expand_collapsed_region" => {
+            let region_id = required_string(request, "region_id")?;
+            apply_delete_hint_region(path, &src, &region_id, "collapse")
+        }
+        "extract_inline_expr" | "preview_extract_inline_expr" => {
+            let inline_id = required_string(request, "inline_expr_id")?;
+            let function = required_string(request, "function")?;
+            validate_ident(&function)?;
+            let ret_type =
+                json_string_field(request, "ret_type").unwrap_or_else(|| "Int".to_string());
+            let candidate = extract_inline_candidate(path, &src, &inline_id, &function, &ret_type)?;
+            if op == "preview_extract_inline_expr" {
+                Ok(preview_ok(&src, &candidate))
+            } else {
+                write_checked_formatted(path, &src, &candidate)
+            }
+        }
+        "inline_helper_call" => {
+            let inline_id = json_string_field(request, "inline_expr_id");
+            let start = json_usize_field(request, "start");
+            let end = json_usize_field(request, "end");
+            let candidate = inline_helper_candidate(path, &src, inline_id.as_deref(), start, end)?;
+            write_checked_formatted(path, &src, &candidate)
+        }
+        "insert_call" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let callee = required_string(request, "callee")?;
+            validate_qualified_name(&callee)?;
+            let args = json_string_array(request, "args");
+            let bind = json_string_field(request, "bind");
+            let wire_inline_expr_id = json_string_field(request, "wire_inline_expr_id");
+            let wire_expr = json_string_field(request, "wire_expr");
+            let wire_origin_pin_id = json_string_field(request, "wire_origin_pin_id");
+            let wire_target_pin = json_string_field(request, "wire_target_pin");
+            let module_path = json_string_field(request, "module_path");
+            if let Some(name) = &bind {
+                validate_ident(name)?;
+            }
+            if let Some(expr) = &wire_expr {
+                validate_qualified_name(expr)?;
+            }
+            if let Some(module) = &module_path {
+                validate_qualified_name(module)?;
+            }
+            apply_insert_call(
+                path,
+                &src,
+                &graph_id,
+                &callee,
+                &args,
+                bind.as_deref(),
+                wire_inline_expr_id.as_deref(),
+                wire_expr.as_deref(),
+                wire_origin_pin_id.as_deref(),
+                wire_target_pin.as_deref(),
+                module_path.as_deref(),
+            )
+        }
+        "create_trait_impl" => {
+            let type_name = required_string(request, "type_name")?;
+            let trait_name = required_string(request, "trait_name")?;
+            validate_qualified_name(&type_name)?;
+            validate_qualified_name(&trait_name)?;
+            apply_create_trait_impl(path, &src, &type_name, &trait_name)
+        }
+        "preview_canvas_action" => {
+            let graph_id = required_string(request, "graph_id")?;
+            let action_id = required_string(request, "action_id")?;
+            let callee = required_string(request, "callee")?;
+            validate_qualified_name(&callee)?;
+            let args = json_string_array(request, "args");
+            let candidate =
+                canvas_action_candidate(path, &src, &graph_id, &action_id, &callee, &args)?;
+            Ok(canvas_action_preview_ok(
+                path, &src, &candidate, &action_id, &callee,
+            ))
+        }
+        _ => Err(edit_error("unsupported", "unknown Canvas edit operation")),
+    }
+}
+
+fn apply_noop(path: &Path, _src: &str) -> Result<String, String> {
     Ok(edit_ok(false, path))
 }
 
-pub(super) fn apply_rename(path: &Path, src: &str, from: &str, to: &str) -> Result<String, String> {
+fn apply_rename(path: &Path, src: &str, from: &str, to: &str) -> Result<String, String> {
     let idx = jet_semindex::open(path).map_err(|e| edit_error("check", &e.to_string()))?;
     let mut edits = Vec::new();
     for def in idx.definitions().iter().filter(|d| d.name == from) {
@@ -115,7 +460,7 @@ fn record_canvas_rename(
         .map_err(|error| edit_error("io", &format!("could not record semantic rename: {error}")))
 }
 
-pub(super) fn apply_create_function(
+fn apply_create_function(
     path: &Path,
     src: &str,
     name: &str,
@@ -138,7 +483,7 @@ pub(super) fn apply_create_function(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_create_trait_impl(
+fn apply_create_trait_impl(
     path: &Path,
     src: &str,
     type_name: &str,
@@ -394,7 +739,7 @@ fn find_trait_location<'a>(
     None
 }
 
-pub(super) fn apply_edit_function_signature(
+fn apply_edit_function_signature(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -412,7 +757,7 @@ pub(super) fn apply_edit_function_signature(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_inline_edit(
+fn apply_inline_edit(
     path: &Path,
     src: &str,
     inline_id: &str,
@@ -430,7 +775,7 @@ pub(super) fn apply_inline_edit(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_promote_inline(
+fn apply_promote_inline(
     path: &Path,
     src: &str,
     inline_id: &str,
@@ -462,7 +807,7 @@ pub(super) fn apply_promote_inline(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_visible_conversion(
+fn apply_visible_conversion(
     path: &Path,
     src: &str,
     inline_id: &str,
@@ -482,11 +827,11 @@ pub(super) fn apply_visible_conversion(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_break_link(path: &Path, src: &str, wire_id: &str) -> Result<String, String> {
+fn apply_break_link(path: &Path, src: &str, wire_id: &str) -> Result<String, String> {
     rewrite_wire_expr(path, src, wire_id, "#Todo")
 }
 
-pub(super) fn apply_move_link(
+fn apply_move_link(
     path: &Path,
     src: &str,
     wire_id: &str,
@@ -518,7 +863,7 @@ fn rewrite_wire_expr(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_insert_call(
+fn apply_insert_call(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -601,8 +946,8 @@ pub(super) fn apply_insert_call(
 fn call_insert_target(
     src: &str,
     graph_id: &str,
-    projection: &super::schema_api::Projection,
-    anchor: &super::schema_api::GraphEditAnchor,
+    projection: &Projection,
+    anchor: &GraphEditAnchor,
     wire_origin_pin_id: Option<&str>,
     _wire_target_pin: Option<&str>,
 ) -> Result<(usize, String), String> {
@@ -900,7 +1245,7 @@ fn core_call_is_fallible(module: &str, member: &str) -> bool {
     jet_driver::Sema::core_call_is_fallible(module, member)
 }
 
-pub(super) fn canvas_action_candidate(
+fn canvas_action_candidate(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -990,7 +1335,7 @@ fn write_canvas_check_file(path: &Path, source: &str) -> std::io::Result<PathBuf
     Ok(tmp)
 }
 
-pub(super) fn apply_insert_structural(
+fn apply_insert_structural(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -1049,8 +1394,8 @@ pub(super) fn apply_insert_structural(
 fn structural_insert_target(
     src: &str,
     graph_id: &str,
-    projection: &super::schema_api::Projection,
-    anchor: &super::schema_api::GraphEditAnchor,
+    projection: &Projection,
+    anchor: &GraphEditAnchor,
     wire_origin_pin_id: Option<&str>,
     wire_target_pin: Option<&str>,
 ) -> Result<(usize, String), String> {
@@ -1127,7 +1472,7 @@ fn structural_insert_target(
     Ok((insert, indent))
 }
 
-pub(super) fn apply_create_comment_region(
+fn apply_create_comment_region(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -1175,7 +1520,7 @@ pub(super) fn apply_create_comment_region(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_update_comment_region(
+fn apply_update_comment_region(
     path: &Path,
     src: &str,
     region_id: &str,
@@ -1215,7 +1560,7 @@ pub(super) fn apply_update_comment_region(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_delete_comment_region(
+fn apply_delete_comment_region(
     path: &Path,
     src: &str,
     region_id: &str,
@@ -1223,7 +1568,7 @@ pub(super) fn apply_delete_comment_region(
     apply_delete_hint_region(path, src, region_id, "comment")
 }
 
-pub(super) fn apply_delete_hint_region(
+fn apply_delete_hint_region(
     path: &Path,
     src: &str,
     region_id: &str,
@@ -1245,7 +1590,7 @@ pub(super) fn apply_delete_hint_region(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_create_collapse_region(
+fn apply_create_collapse_region(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -1383,7 +1728,7 @@ fn validated_collapse_selection(
     })
 }
 
-pub(super) fn extract_inline_candidate(
+fn extract_inline_candidate(
     path: &Path,
     src: &str,
     inline_id: &str,
@@ -1427,7 +1772,7 @@ pub(super) fn extract_inline_candidate(
     .map_err(|_| edit_error("overlap", "Canvas extract edits overlapped"))
 }
 
-pub(super) fn inline_helper_candidate(
+fn inline_helper_candidate(
     path: &Path,
     src: &str,
     inline_id: Option<&str>,
@@ -1488,7 +1833,7 @@ struct StatementLoc {
     guard_span: Option<SourceSpan>,
 }
 
-pub(super) fn apply_reorder_statements(
+fn apply_reorder_statements(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -1590,7 +1935,7 @@ pub(super) fn apply_reorder_statements(
 /// construction: this function resolves both pins against the checked AST,
 /// creates the ordinary Jet helper/call text, and sends the result through the
 /// same formatter, sema check, and atomic writer as every other Canvas edit.
-pub(super) fn apply_exec_convergence(
+fn apply_exec_convergence(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -2454,7 +2799,7 @@ fn function_name_exists(bundle: &AST::ProgramBundle, name: &str) -> bool {
         .any(|module| in_items(&module.items, name))
 }
 
-pub(super) fn apply_add_pattern_arm(
+fn apply_add_pattern_arm(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -2516,7 +2861,7 @@ pub(super) fn apply_add_pattern_arm(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_edit_pattern_arm(
+fn apply_edit_pattern_arm(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -2539,7 +2884,7 @@ pub(super) fn apply_edit_pattern_arm(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_remove_pattern_arm(
+fn apply_remove_pattern_arm(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -2565,7 +2910,7 @@ pub(super) fn apply_remove_pattern_arm(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_toggle_switch_state(
+fn apply_toggle_switch_state(
     path: &Path,
     src: &str,
     graph_id: &str,
@@ -2696,7 +3041,7 @@ fn statement_contains_span(stmts: &[Stmt], node_span: SourceSpan) -> bool {
         .any(|stmt| span_within(node_span, stmt.span().into()))
 }
 
-pub(super) fn apply_append_multi_input(
+fn apply_append_multi_input(
     path: &Path,
     src: &str,
     node_span: SourceSpan,
@@ -2740,7 +3085,7 @@ pub(super) fn apply_append_multi_input(
     write_checked_formatted(path, src, &changed)
 }
 
-pub(super) fn apply_remove_multi_input_element(
+fn apply_remove_multi_input_element(
     path: &Path,
     src: &str,
     node_span: SourceSpan,
@@ -3828,7 +4173,7 @@ fn same_span(a: SourceSpan, b: SourceSpan) -> bool {
     a.start == b.start && a.end == b.end
 }
 
-pub(super) fn write_checked_formatted(
+fn write_checked_formatted(
     path: &Path,
     before: &str,
     candidate: &str,
@@ -3838,7 +4183,7 @@ pub(super) fn write_checked_formatted(
     write_checked_candidate(path, before, &formatted)
 }
 
-pub(super) fn write_checked_source(
+fn write_checked_source(
     path: &Path,
     before: &str,
     candidate: &str,

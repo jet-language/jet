@@ -16,6 +16,17 @@ mod stmts;
 mod stream;
 mod webapp;
 
+/// Test seam for the fail-closed exhaustive-match boundary. Keep the
+/// production helper private to the evaluator statement module while exposing
+/// only its diagnostic-shaped result to the exact crate-level regression test.
+#[cfg(test)]
+pub(crate) fn unmatched_enum_match_guard(
+    fallthrough: bool,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    stmts::unmatched_enum_match(fallthrough, span)
+}
+
 mod jet_mem {
     pub(super) use jet_foundation::MemSentry::{jet_memory_ledger_record, MemoryLedgerWitness};
 }
@@ -4829,10 +4840,22 @@ fn eval_expr_hook(
                                     TIR::lower_method(f, owner, &cx)
                                 }
                                 Some((owner, "encode")) => {
-                                    TIR::lower_trait_method(f, owner, &cx, crate::Generics::ENCODE)
+                                    TIR::lower_trait_method(
+                                        f,
+                                        owner,
+                                        &cx,
+                                        crate::Generics::ENCODE,
+                                        f.compiler_generated,
+                                    )
                                 }
                                 Some((owner, "decode")) => {
-                                    TIR::lower_trait_method(f, owner, &cx, crate::Generics::DECODE)
+                                    TIR::lower_trait_method(
+                                        f,
+                                        owner,
+                                        &cx,
+                                        crate::Generics::DECODE,
+                                        f.compiler_generated,
+                                    )
                                 }
                                 _ => TIR::lower_func(f, &cx),
                             };

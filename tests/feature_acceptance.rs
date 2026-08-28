@@ -58,7 +58,9 @@ fn token_stream_has_executable_drop(tokens: &[jet::Lexer::Token]) -> bool {
     here || tokens.iter().any(|token| match &token.kind {
         jet::Lexer::TokKind::Str(parts) => parts.iter().any(|part| match part {
             jet::Lexer::StrTokPart::Interp(inner) => token_stream_has_executable_drop(inner),
-            jet::Lexer::StrTokPart::Lit(_) | jet::Lexer::StrTokPart::Byte(_) => false,
+            jet::Lexer::StrTokPart::Lit(_)
+            | jet::Lexer::StrTokPart::Byte(_)
+            | jet::Lexer::StrTokPart::ByteText(_) => false,
         }),
         _ => false,
     })
@@ -85,7 +87,9 @@ fn token_stream_has_active_suppress(tokens: &[jet::Lexer::Token]) -> bool {
     here || tokens.iter().any(|token| match &token.kind {
         jet::Lexer::TokKind::Str(parts) => parts.iter().any(|part| match part {
             jet::Lexer::StrTokPart::Interp(inner) => token_stream_has_active_suppress(inner),
-            jet::Lexer::StrTokPart::Lit(_) | jet::Lexer::StrTokPart::Byte(_) => false,
+            jet::Lexer::StrTokPart::Lit(_)
+            | jet::Lexer::StrTokPart::Byte(_)
+            | jet::Lexer::StrTokPart::ByteText(_) => false,
         }),
         _ => false,
     })
@@ -581,15 +585,15 @@ fn static_guarantees_shared_engine() {
 Die :: distinct Int(1..6)
 
 #[Pre(n >= 0, "n non-negative"), Post(result >= 0, "result non-negative")]
-fn absish(n: Int) Int {
+fn absish(n: Int) Int -> {
     return n
 }
 
-#Scrub(Input) fn clean(raw: #Input String) String {
+#Scrub(Input) fn clean(raw: #Input String) String -> {
     return raw
 }
 
-#Replayable fn add(a: Int, b: Int) Int {
+#Replayable fn add(a: Int, b: Int) Int -> {
     return a + b
 }
 
@@ -597,7 +601,7 @@ fn stamp(path: String) String -[FS]> {
     return path
 }
 
-fn pick(faces: [String#6], roll: Die) String {
+fn pick(faces: [String#6], roll: Die) String -> {
     return faces[roll.raw() - 1]
 }
 

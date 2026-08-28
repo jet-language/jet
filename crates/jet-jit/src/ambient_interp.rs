@@ -30,6 +30,29 @@ mod fs_ops_kernel {
     include!("../../jet-codegen/src/Prelude/Core/FSOps.rs");
 }
 
+// The interpreter supplies only the handle carriers and raw filesystem
+// kernels. File-stream policy, fault injection, and OS-error classification
+// come from the same Prelude fragments emitted by AOT and included by the
+// resident host (I9).
+mod fs_prelude {
+    use super::fs_ops_kernel::{jet_fs_glob, jet_fs_open, jet_fs_rename};
+    use super::process_prelude::jet_std;
+    use crate::fault_injection::jet_fault_should_fail;
+
+    pub(crate) struct JetFileReader {
+        pub(crate) inner: std::io::BufReader<std::fs::File>,
+        pub(crate) path: String,
+    }
+
+    pub(crate) struct JetFileWriter {
+        pub(crate) inner: std::io::BufWriter<std::fs::File>,
+        pub(crate) path: String,
+    }
+
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs");
+}
+
 mod env_config_prelude {
     include!("../../jet-codegen/src/Prelude/Core/EnvConfig.rs");
 }
@@ -363,17 +386,12 @@ fn ambient_env_config(args: &[CtValue], span: Span) -> Result<CtValue, Diagnosti
 /// sorted entry list; only the traversal strategy differs, and the shared
 /// kernel owns that. One arm serves both so the interpreter cannot answer a
 /// different set than AOT or the resident host (I9).
-struct InterpFileReader {
-    inner: std::io::BufReader<std::fs::File>,
-    path: String,
-}
-
 struct InterpStdinReader {
     inner: std::io::BufReader<std::io::Stdin>,
 }
 
 thread_local! {
-    static INTERP_FILE_READERS: RefCell<Vec<InterpFileReader>> = RefCell::new(Vec::new());
+    static INTERP_FILE_READERS: RefCell<Vec<fs_prelude::JetFileReader>> = RefCell::new(Vec::new());
     static INTERP_STDIN_READERS: RefCell<Vec<InterpStdinReader>> = RefCell::new(Vec::new());
 }
 
@@ -381,35 +399,10 @@ fn ambient_fs_open(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> 
     let Some(CtValue::Str(path)) = args.first() else {
         return Err(unsupported("core.files.open path", span));
     };
-    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return Ok(CtValue::failed(Box::new(io_error_at(
-            "Other",
-            "Read",
-            path,
-            "fault injected: FS.Read",
-        ))));
-    }
-    let reader = match fs_ops_kernel::jet_fs_open(path) {
-        Ok(file) => InterpFileReader {
-            inner: std::io::BufReader::new(file),
-            path: path.clone(),
-        },
+    let reader = match fs_prelude::jet_std_files_open(path) {
+        Ok(reader) => reader,
         Err(error) => {
-            return Ok(CtValue::failed(Box::new(io_error_at(
-                match error.kind() {
-                    std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
-                        "InvalidInput"
-                    }
-                    std::io::ErrorKind::NotFound => "NotFound",
-                    std::io::ErrorKind::PermissionDenied => "PermissionDenied",
-                    std::io::ErrorKind::TimedOut => "TimedOut",
-                    std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => "Closed",
-                    _ => "Other",
-                },
-                "Read",
-                path,
-                error.to_string(),
-            ))));
+            return Ok(CtValue::failed(Box::new(process_io_error(error))));
         }
     };
     let handle = INTERP_FILE_READERS.with(|readers| {
@@ -458,31 +451,12 @@ fn ambient_line_handle(
             let Some(reader) = readers.get_mut(handle) else {
                 return Err(unsupported("FileReader handle", span));
             };
-            if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-                return Ok(CtValue::failed(Box::new(io_error_at(
-                    "Other",
-                    "Read",
-                    &reader.path,
-                    "fault injected: FS.Read",
-                ))));
-            }
-            let mut line = String::new();
-            match std::io::BufRead::read_line(&mut reader.inner, &mut line) {
-                Ok(0) => Ok(CtValue::Present(Box::new(CtValue::absent(Type::String)))),
-                Ok(_) => {
-                    while line.ends_with('\n') || line.ends_with('\r') {
-                        line.pop();
-                    }
-                    Ok(CtValue::Present(Box::new(CtValue::Present(Box::new(
-                        CtValue::Str(line),
-                    )))))
-                }
-                Err(error) => Ok(CtValue::failed(Box::new(io_error_at(
-                    "Other",
-                    "Read",
-                    &reader.path,
-                    error.to_string(),
-                )))),
+            match fs_prelude::jet_std_file_reader_read_line(reader) {
+                Ok(None) => Ok(CtValue::Present(Box::new(CtValue::absent(Type::String)))),
+                Ok(Some(line)) => Ok(CtValue::Present(Box::new(CtValue::Present(Box::new(
+                    CtValue::Str(line),
+                ))))),
+                Err(error) => Ok(CtValue::failed(Box::new(process_io_error(error)))),
             }
         });
         return Some(result);
@@ -586,31 +560,9 @@ fn ambient_fs_rename(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic
     let (Some(CtValue::Str(from)), Some(CtValue::Str(to))) = (args.first(), args.get(1)) else {
         return Err(unsupported("core.files rename paths", span));
     };
-    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
-        return Ok(CtValue::failed(Box::new(io_error_at(
-            "Other",
-            "Write",
-            from,
-            "fault injected: FS.Write",
-        ))));
-    }
-    Ok(match fs_ops_kernel::jet_fs_rename(from, to) {
+    Ok(match fs_prelude::jet_std_fs_rename(from, to) {
         Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(io_error_at(
-            match error.kind() {
-                std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
-                    "InvalidInput"
-                }
-                std::io::ErrorKind::NotFound => "NotFound",
-                std::io::ErrorKind::PermissionDenied => "PermissionDenied",
-                std::io::ErrorKind::TimedOut => "TimedOut",
-                std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => "Closed",
-                _ => "Other",
-            },
-            "Write",
-            from,
-            error.to_string(),
-        ))),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
     })
 }
 
@@ -618,33 +570,11 @@ fn ambient_fs_glob(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> 
     let Some(CtValue::Str(pattern)) = args.first() else {
         return Err(unsupported("core.files glob pattern", span));
     };
-    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return Ok(CtValue::failed(Box::new(io_error_at(
-            "Other",
-            "Read",
-            pattern,
-            "fault injected: FS.Read",
-        ))));
-    }
-    Ok(match fs_ops_kernel::jet_fs_glob(pattern) {
+    Ok(match fs_prelude::jet_std_fs_glob(pattern) {
         Ok(paths) => CtValue::Present(Box::new(CtValue::List(
             paths.into_iter().map(CtValue::Str).collect(),
         ))),
-        Err(error) => CtValue::failed(Box::new(io_error_at(
-            match error.kind() {
-                std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
-                    "InvalidInput"
-                }
-                std::io::ErrorKind::NotFound => "NotFound",
-                std::io::ErrorKind::PermissionDenied => "PermissionDenied",
-                std::io::ErrorKind::TimedOut => "TimedOut",
-                std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => "Closed",
-                _ => "Other",
-            },
-            "Read",
-            pattern,
-            error.to_string(),
-        ))),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
     })
 }
 
@@ -840,6 +770,27 @@ pub(crate) mod process_prelude {
                     None,
                     Some(cause.to_string()),
                 ))
+            }
+        }
+
+        pub fn io_error_at(operation: IOOperation, path: &str, error: std::io::Error) -> IOError {
+            let context = IOContext::new(
+                operation,
+                Some(path.to_string()),
+                error.raw_os_error().map(i64::from),
+                Some(error.to_string()),
+            );
+            match error.kind() {
+                std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+                    IOError::InvalidInput(context)
+                }
+                std::io::ErrorKind::NotFound => IOError::NotFound(context),
+                std::io::ErrorKind::PermissionDenied => IOError::PermissionDenied(context),
+                std::io::ErrorKind::TimedOut => IOError::TimedOut(context),
+                std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => {
+                    IOError::Closed(context)
+                }
+                _ => IOError::Other(context),
             }
         }
 

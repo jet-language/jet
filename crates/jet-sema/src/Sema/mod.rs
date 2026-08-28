@@ -1738,9 +1738,14 @@ pub(crate) struct Checker<'a> {
     /// is a fallible fallback with an ambient `err`; `Some(false)` has no
     /// failure report and rejects the spelling with E0408 or E0409.
     pub(crate) fallback_has_err: Option<bool>,
-    /// D-FAILURE-FOUNDATION1=A: while non-fallback inference is checking the
-    /// source of an inserted propagation node, suppress another insertion.
-    /// This keeps the elaboration finite and leaves `??` as local handling.
+    /// D-FAILURE-FOUNDATION1=A: number of root inference calls that own their
+    /// carrier explicitly. The token is consumed by that one `infer` call;
+    /// recursive child expressions remain ordinary propagation sites.
+    pub(crate) failure_auto_root_suppression: usize,
+    /// D-FAILURE-FOUNDATION1=A: ambient carrier context retained for checks
+    /// that need to distinguish an explicit carrier probe from ordinary value
+    /// inference. Automatic propagation itself uses the root token above so
+    /// nested call arguments can still propagate.
     pub(crate) failure_auto_depth: usize,
     /// D-CHOOSE-TEST1=A: distinguishes a pure pattern miss from an absent
     /// Optional while `fallback_has_err == Some(false)`.

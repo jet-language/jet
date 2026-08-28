@@ -2426,7 +2426,7 @@ fn collect_close_impl(
     if !TIR::tir_covers_trait_method(method, type_name, cx, Syntax::TRAIT_CLOSE) {
         return;
     }
-    let tir = TIR::lower_trait_method(method, type_name, cx, Syntax::TRAIT_CLOSE);
+    let tir = TIR::lower_trait_method(method, type_name, cx, Syntax::TRAIT_CLOSE, false);
     out.push(CloseWeb {
         key: web_close_key_for_name(type_name),
         source_path: source_path.to_string(),
@@ -3620,6 +3620,7 @@ fn emit_wasm_checked_text_helpers(items: &[Item], cx: &Cx, out: &mut String) {
                         &implementation.type_name,
                         cx,
                         crate::Generics::CHECKED_TEXT,
+                        false,
                     );
                     tir.name = checked_text_helper_name(&implementation.type_name, method_name);
                     tir.kind = TIR::TFuncKind::TopLevel;
@@ -6075,14 +6076,14 @@ fn wasm_emit_raw_call(
             let TIR::TStmt::ExprStmt(last) = last else {
                 return Ok(None);
             };
-            let prefix_is_inline = prefix.is_empty() || web_inline_single_let(prefix).is_some();
-            if !prefix_is_inline {
-                return Ok(None);
-            }
             let Some(raw_last) = wasm_emit_raw_call(last, funcs, file_prefix, reconstructions)?
             else {
                 return Ok(None);
             };
+            // Keep the whole block carrier-valued. The surrounding `Try`
+            // owns propagation; rendering the prefix here must not force the
+            // final call through `wasm_emit_known_call`, which would unwrap
+            // the same carrier before the outer trace boundary sees it.
             let mut rendered = String::from("{\n");
             emit_wasm_body(
                 prefix,
@@ -6261,6 +6262,12 @@ fn wasm_emit_expr(
                             crate::AST::StrFormat::Pretty
                             | crate::AST::StrFormat::Fixed(_)
                             | crate::AST::StrFormat::Hex(_)
+                            | crate::AST::StrFormat::Pad { .. }
+                            | crate::AST::StrFormat::PadLeft { .. }
+                            | crate::AST::StrFormat::Sci(_)
+                            | crate::AST::StrFormat::Percent(_)
+                            | crate::AST::StrFormat::Bin
+                            | crate::AST::StrFormat::Oct
                             | crate::AST::StrFormat::Unit(_) => return Err(()),
                         }
                     }
