@@ -9,15 +9,19 @@ struct Meeting {
     weekday: String
 }
 
-fn parse_meeting(line: String) Meeting !IOError -> {
+fn parse_meeting(line: String) Meeting -> {
     fields :: line.split("|").to_list()
     local :: time.parse_rfc3339(fields.get(1) ?? panic("bad meeting")) ?? panic("bad timestamp")
     return Meeting{millis: local.to_unix_ms(), name: fields.get(0) ?? panic("bad meeting"), utc: local.format_rfc3339(), weekday: ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][local.date().iso_weekday()]}
 }
 
-fn run() !IOError {
+fn run() {
     text :: files.read(process.argv().get(1) ?? "meetings.txt") ?? panic("read meetings")
-    meetings := text.lines().filter(line -> line != "").map(line -> parse_meeting(line))
+    // Loop form until #2266 c6 lands (fallible callee in a map closure AOT-leaks).
+    meetings := [Meeting]{}
+    loop line in text.lines() {
+        if line != "" -> meetings.push(parse_meeting(line))
+    }
     meetings.sort_by(meeting -> meeting.millis)
     loop position in 0..<meetings.len() {
         gap :: if position == 0 -> "-" else -> "{(meetings[position].millis - meetings[position - 1].millis) /% 60000}"

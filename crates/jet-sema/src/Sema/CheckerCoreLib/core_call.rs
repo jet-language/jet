@@ -775,7 +775,14 @@ impl<'a> Checker<'a> {
                     Some(span),
                 ));
         }
+        // D-FAIL-IMPLICIT: a function value's return is carrier-shaped by
+        // default. The transform differentiates the SUCCESS value; the
+        // carrier is the caller's concern, not a storage-law violation.
         let output = ret.map(|ret| *ret).unwrap_or_else(unit_ty);
+        let output = match output {
+            Type::Result { ok, .. } => *ok,
+            other => other,
+        };
         let gradient_output = name == "gradient" && compute_gradient_value_type(&output).is_some();
         if !is_compute_tensor(&output) && !gradient_output {
             self.diags.push(Diagnostic::error(
