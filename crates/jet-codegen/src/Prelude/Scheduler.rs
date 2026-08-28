@@ -109,7 +109,7 @@ fn jet_scheduler_converted_unwind(payload: &(dyn std::any::Any + Send)) -> bool 
 /// Whether the hook must stay quiet for this panic. A live catch frame is only
 /// half the answer: the flag says a frame exists, not that this panic reaches
 /// it. A non-unwinding panic — `panic_cannot_unwind` at an `extern "C"` edge, a
-/// panic in cleanup, a violated unsafe precondition — runs the hook and then
+/// panic in cleanup, a violated runtime precondition — runs the hook and then
 /// aborts the process before unwinding starts, so no catch frame can ever
 /// convert it and its hook line is the only evidence anyone gets. Std exposes
 /// no stable `PanicHookInfo::can_unwind`, so the payload answers instead: quiet

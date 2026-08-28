@@ -5,9 +5,9 @@ pub fn is_math_type(name: &str) -> bool {
     is_simd_lane_type(name) || is_linalg_type(name)
 }
 
-/// D-SIMD2: a portable SIMD lane type (`F32x4`/`F64x2`).
+/// D-SIMD1/D-SIMD2/D-SIMD3: a named portable SIMD lane type.
 pub fn is_simd_lane_type(name: &str) -> bool {
-    matches!(name, "F32x4" | "F64x2")
+    crate::Syntax::is_simd_lane_type(name)
 }
 
 /// D-LINALG1: a linear-algebra value type (vectors + square matrices).
@@ -16,12 +16,44 @@ pub(crate) fn is_linalg_type(name: &str) -> bool {
 }
 
 /// The scalar component type of a math value type. SIMD lanes carry their named
-/// float width (`F32x4` → `F32`/`Float32`, `F64x2` → `Float`); linalg types are
-/// all `F64`/`Float`.
+/// D-SIMD3: the scalar component type of a lane. Linalg types are all
+/// `F64`/`Float`.
 pub fn math_scalar_ty(name: &str) -> Type {
-    match name {
-        "F32x4" => Type::Float32,
-        _ => Type::Float,
+    match crate::Syntax::simd_lane_layout(name).map(|(kind, _)| kind) {
+        Some(crate::Syntax::SimdLaneKind::F32) => Type::Float32,
+        Some(crate::Syntax::SimdLaneKind::I8) => Type::IntN {
+            signed: true,
+            bits: 8,
+        },
+        Some(crate::Syntax::SimdLaneKind::I16) => Type::IntN {
+            signed: true,
+            bits: 16,
+        },
+        Some(crate::Syntax::SimdLaneKind::I32) => Type::IntN {
+            signed: true,
+            bits: 32,
+        },
+        Some(crate::Syntax::SimdLaneKind::I64) => Type::IntN {
+            signed: true,
+            bits: 64,
+        },
+        Some(crate::Syntax::SimdLaneKind::U8) => Type::IntN {
+            signed: false,
+            bits: 8,
+        },
+        Some(crate::Syntax::SimdLaneKind::U16) => Type::IntN {
+            signed: false,
+            bits: 16,
+        },
+        Some(crate::Syntax::SimdLaneKind::U32) => Type::IntN {
+            signed: false,
+            bits: 32,
+        },
+        Some(crate::Syntax::SimdLaneKind::U64) => Type::IntN {
+            signed: false,
+            bits: 64,
+        },
+        Some(crate::Syntax::SimdLaneKind::F64) | None => Type::Float,
     }
 }
 
@@ -43,6 +75,9 @@ fn registered_lane_arity(name: &str) -> Option<usize> {
 /// The number of scalar slots in the positional constructor / `from_array` bridge.
 /// Lanes: the registered measure. Vectors: dimension. Matrices: N*N (column-major flat).
 pub(crate) fn math_arity(name: &str) -> usize {
+    if let Some(arity) = crate::Syntax::simd_lane_arity(name) {
+        return arity;
+    }
     if let Some(arity) = registered_lane_arity(name) {
         return arity;
     }

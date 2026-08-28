@@ -90,6 +90,10 @@ pub mod Variant;
 pub mod Recipe;
 pub mod RefSpec;
 pub mod ScriptDeps;
+// D-JPK-VERIFYONCE1=A: the sealed-manifest stat walk. Same reasoning as
+// Envelope's canonical-archive walker: the walk dominates once hashing is
+// fast, so it lives in this opt-level=3 crate.
+pub mod SealWalk;
 pub mod Store;
 // Card #367 slice 5: pure overlay policy data + parse/strip, workspace plan
 // types, and lock read API — moved here from `jetpack` so Canvas / devserver

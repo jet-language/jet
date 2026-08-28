@@ -284,6 +284,7 @@ fn string_literal_value(parts: &[StrTokPart]) -> Result<String, Diagnostic> {
     }
     match &parts[0] {
         StrTokPart::Lit(s) => Ok(s.clone()),
+        StrTokPart::Byte(byte) => Ok(char::from(*byte).to_string()),
         StrTokPart::Interp(_) => Err(Diagnostic::error(
             "E0003",
             "an import path can't contain `{ }` interpolation".to_string(),

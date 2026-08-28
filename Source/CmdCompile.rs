@@ -1,7 +1,7 @@
 //! check / build / run / test / new / fmt / fix subcommand handlers + the
 //! rustc bridge.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -449,23 +449,26 @@ fn resolve_run_authority_before_execution(
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let mut projection = jet::EffectBudget::project_program_effects(
+    let (mut projection, delegations) = native_effect_projection(
         &checked.bundle,
         &checked.facts.summaries,
-        jet::Codegen::ENTRY_FN,
         package_manifest.as_ref().map(|(_, manifest)| manifest),
     );
-    let delegations = checked
-        .facts
-        .summaries
-        .values()
-        .flat_map(|summary| summary.authority_delegations.iter().cloned())
-        .collect::<Vec<_>>();
-    resolve_application_authority(
+    let lints = crate::CmdDevTools::visible_lints(&checked.diagnostics);
+    let entries = jet::EffectBudget::compute_package_effects(
+        &checked.bundle,
+        &checked.facts.solved,
+        &checked.facts.summaries,
+    );
+    apply_native_effect_policy(
         "run",
         file,
         src,
         mode,
+        false,
+        &lints,
+        &entries,
+        &checked.facts.fact_registry,
         &mut projection,
         package_manifest,
         &delegations,
@@ -664,6 +667,93 @@ fn resolve_application_authority(
     (scope == "invocation").then(|| projection.application_authority())
 }
 
+/// Apply the complete application effect policy before any native adapter can
+/// execute. This is shared by AOT, JIT, and interpreter paths; the only tier
+/// input is the checked semantic effect view.
+fn apply_native_effect_policy(
+    cmd: &str,
+    file: &str,
+    src: &str,
+    mode: OutputMode,
+    is_plugin: bool,
+    lints: &[jet::Diagnostics::Diagnostic],
+    entries: &[jet::EffectBudget::PackageEffects],
+    fact_registry: &jet_foundation::Facts::FactRegistry,
+    projection: &mut jet::EffectBudget::EffectProjection,
+    package_manifest: &mut Option<(PathBuf, jet::Package::PackageFacts)>,
+    delegations: &[jet::Sema::AuthorityDelegation],
+) -> Option<jet_foundation::Authority::ApplicationAuthority> {
+    // D-PLUGIN1=B (c81): a plugin is deny-by-default. Guest memory allocation
+    // is the only permitted root effect; every other effect fails before the
+    // backend is asked to write or instantiate a component.
+    if is_plugin {
+        if let Some(root) = entries.iter().find(|package| package.name == "root") {
+            let mut forbidden = root.effects.clone();
+            forbidden.retain(|effect| jet::Sema::effect_root(effect) != "Mem");
+            if !forbidden.is_empty() {
+                let diagnostic = jet::Manifest::e1258(&jet::Sema::show_set(&forbidden));
+                report_problems(mode, file, src, &[diagnostic]);
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
+    }
+
+    let authority = resolve_application_authority(
+        cmd,
+        file,
+        src,
+        mode,
+        projection,
+        package_manifest,
+        delegations,
+    );
+    if let Some((root, manifest)) = package_manifest.as_ref() {
+        let lint_violations = jet::LintPolicy::enforce(lints, manifest);
+        if !lint_violations.is_empty() {
+            report_problems(mode, file, src, &lint_violations);
+            exit(ExitCodes::USER_ERROR);
+        }
+        let configured_names = manifest
+            .authority
+            .holds
+            .allow
+            .iter()
+            .flatten()
+            .chain(manifest.authority.holds.deny.iter().flatten())
+            .chain(
+                manifest
+                    .authority
+                    .grants
+                    .iter()
+                    .flat_map(|(_, names)| names),
+            );
+        let mut violations = Vec::new();
+        for name in configured_names {
+            if jet::Sema::parse_effect_name(name).is_some() {
+                if let Err(suggestion) = jet::Sema::resolve_effect_name(name, fact_registry) {
+                    violations.push(jet::Sema::undeclared_effect(
+                        name,
+                        suggestion.as_deref(),
+                        None,
+                    ));
+                }
+            }
+        }
+        violations.extend(jet::EffectBudget::enforce(entries, manifest));
+        if !violations.is_empty() {
+            report_problems(mode, file, src, &violations);
+            exit(ExitCodes::USER_ERROR);
+        }
+        // `jet fetch` owns creating the lockfile. Native execution only adds
+        // the effect provenance and grants when a lock already exists.
+        if let Some(mut lock) = jet::Lock::load(root) {
+            jet::EffectBudget::update_lock_provenance(&mut lock, entries, manifest);
+            let _ = fs::write(jet::PkgStore::lock_path(root), jet::Lock::write(&lock));
+        }
+    }
+    authority
+}
+
 /// D-BUILDPROFILE1: load Package build profiles from the project root of `source_file`.
 fn load_pkg_profiles(source_file: &str) -> Option<Vec<jet::Package::BuildProfileDef>> {
     let src_path = std::path::Path::new(source_file);
@@ -821,68 +911,528 @@ fn same_environment_root(left: &Path, right: &Path) -> bool {
     }
 }
 
-/// Refuse an env-backed `jet` verb unless the caller is already inside the
-/// realized project environment. This check is intentionally before any
-/// profile, source, lock, or toolchain work so `jet` cannot acquire anything.
-pub(crate) fn require_project_environment(cmd: &str, start: &Path, mode: OutputMode) {
-    let Some((root, environment)) = declared_project_environment(start) else {
-        return;
+/// Build the one application-boundary effect view used by every native tier.
+/// Engines receive the resulting authority only; they do not project policy
+/// or decide what an effect means.
+fn native_effect_projection(
+    bundle: &jet::AST::ProgramBundle,
+    summaries: &HashMap<String, jet::Sema::EffectSummary>,
+    package_manifest: Option<&jet::Package::PackageFacts>,
+) -> (
+    jet::EffectBudget::EffectProjection,
+    Vec<jet::Sema::AuthorityDelegation>,
+) {
+    let projection = jet::EffectBudget::project_program_effects(
+        bundle,
+        summaries,
+        jet::Codegen::ENTRY_FN,
+        package_manifest,
+    );
+    let delegations = summaries
+        .values()
+        .flat_map(|summary| summary.authority_delegations.iter().cloned())
+        .collect::<Vec<_>>();
+    (projection, delegations)
+}
+
+/// Return the first import in the program graph that names a package declared
+/// by the nearest `package.jet`. Local modules stay in Jet's source graph and
+/// Core imports stay in the embedded toolchain; neither one needs an active
+/// project environment.
+fn package_import_name(
+    import: &jet::AST::ImportDecl,
+    dependencies: &BTreeSet<String>,
+    allow_inline: bool,
+) -> Option<String> {
+    match &import.kind {
+        jet::AST::ImportKind::Module(name, _) => {
+            if allow_inline {
+                if let Some(version) = &import.inline_version {
+                    return Some(format!("{name}#{}", version.text));
+                }
+            }
+            if import.core_module_path().is_some() {
+                return None;
+            }
+            dependencies
+                .contains(name.split('.').next().unwrap_or(name))
+                .then(|| name.clone())
+        }
+        jet::AST::ImportKind::Unqualified {
+            module_alias,
+            items,
+            ..
+        } => {
+            if jet::AST::core_list_prefix(module_alias).is_some() {
+                return None;
+            }
+            if !dependencies.contains(module_alias.split('.').next().unwrap_or(module_alias)) {
+                return None;
+            }
+            let item = items
+                .first()
+                .map(|(name, _)| format!(".{name}"))
+                .unwrap_or_default();
+            Some(format!("{module_alias}{item}"))
+        }
+        jet::AST::ImportKind::File(_, _) => None,
+    }
+}
+
+/// Find one source file behind a local module or file import so the gate sees
+/// a package dependency reached through a local module too. Ambiguous or
+/// malformed imports are left to the normal loader diagnostics.
+fn local_import_target(
+    importing: &Path,
+    import: &jet::AST::ImportDecl,
+    project_root: &Path,
+    source_files: &[PathBuf],
+) -> Option<PathBuf> {
+    match &import.kind {
+        jet::AST::ImportKind::File(path, _) => {
+            if path.contains("..") {
+                return None;
+            }
+            let mut target = importing.parent().unwrap_or(Path::new(".")).to_path_buf();
+            for part in path.split('/') {
+                if !part.is_empty() && part != "." {
+                    target.push(part);
+                }
+            }
+            target.set_extension(jet::Syntax::FILE_EXT);
+            let target = fs::canonicalize(target).ok()?;
+            let root =
+                fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+            target.starts_with(root).then_some(target)
+        }
+        jet::AST::ImportKind::Module(name, _) => {
+            if import.core_module_path().is_some() {
+                return None;
+            }
+            let direct_name = format!("{name}.{}", jet::Syntax::FILE_EXT);
+            let mut matches = source_files
+                .iter()
+                .filter(|file| {
+                    let Some(file_name) = file.file_name().and_then(|name| name.to_str()) else {
+                        return false;
+                    };
+                    file_name == direct_name
+                        || (file_name == jet::Syntax::DEFAULT_ENTRY_FILE
+                            && file
+                                .parent()
+                                .and_then(|parent| parent.file_name())
+                                .and_then(|name| name.to_str())
+                                == Some(name))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            (matches.len() == 1).then(|| matches.remove(0))
+        }
+        jet::AST::ImportKind::Unqualified { .. } => None,
+    }
+}
+
+/// Inspect only source and package facts. This never evaluates `env.jet`,
+/// resolves a package, or creates project state.
+fn project_package_import(start: &Path, environment_root: &Path) -> Option<String> {
+    let entry = if start.is_dir() {
+        let project_root = jet::Loader::find_manifest_root(start)
+            .unwrap_or_else(|| environment_root.to_path_buf());
+        crate::find_project_entry(&project_root)
+    } else {
+        start.to_path_buf()
     };
+
+    let manifest = load_pkg_manifest(&entry.to_string_lossy());
+    let (project_root, dependencies, allow_inline) = match manifest {
+        Some((root, facts)) => (
+            root,
+            facts.deps.keys().cloned().collect::<BTreeSet<_>>(),
+            false,
+        ),
+        None => (environment_root.to_path_buf(), BTreeSet::new(), true),
+    };
+    let source_files = jet::ProjectParts::source_files(&project_root);
+    let mut pending = vec![entry];
+    if start.is_dir() {
+        pending.extend(source_files.iter().cloned());
+        let test_override = project_root.join(jet::Syntax::COMMAND_FILE_TEST);
+        if test_override.is_file() {
+            pending.push(test_override);
+        }
+    }
+    let mut visited = BTreeSet::new();
+
+    while let Some(file) = pending.pop() {
+        let identity = fs::canonicalize(&file).unwrap_or_else(|_| file.clone());
+        if !visited.insert(identity) {
+            continue;
+        }
+        let Ok(source) = fs::read_to_string(&file) else {
+            continue;
+        };
+        let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
+        if !lex_diagnostics.is_empty() {
+            continue;
+        }
+        let Ok(program) = jet::Parser::parse(&tokens) else {
+            continue;
+        };
+        for import in &program.imports {
+            if let Some(name) = package_import_name(import, &dependencies, allow_inline) {
+                return Some(name);
+            }
+        }
+        for import in &program.imports {
+            if let Some(target) = local_import_target(&file, import, &project_root, &source_files) {
+                pending.push(target);
+            }
+        }
+    }
+    None
+}
+
+/// Return the inactive environment requirement for a program that actually
+/// consumes a declared package. Core-only and local-module programs return
+/// `None`, even when an `env.jet` is nearby.
+pub(crate) fn project_environment_requirement(start: &Path) -> Option<(String, String)> {
+    let (root, environment) = declared_project_environment(start)?;
+    let import = project_package_import(start, &root)?;
     let active = std::env::var_os(jet::Syntax::JETPACK_ENV_MARKER)
         .is_some_and(|value| !value.is_empty() && value != "0")
         && std::env::var_os(jet::Syntax::ENV_HOOK_ACTIVE_DIR_VAR)
             .is_none_or(|active| same_environment_root(&root, Path::new(&active)));
-    if active {
-        return;
-    }
+    (!active).then_some((environment, import))
+}
 
-    crate::emit_cli_row(
+/// Refuse an env-backed `jet` verb unless the caller is already inside the
+/// realized project environment. This check is intentionally before any
+/// compilation, profile, lock, or toolchain work so `jet` cannot acquire anything.
+pub(crate) fn require_project_environment(cmd: &str, start: &Path, mode: OutputMode) {
+    let Some((environment, import)) = project_environment_requirement(start) else {
+        return;
+    };
+
+    crate::emit_cli_row_with_detail(
         "E1355",
         &[("environment", environment.as_str()), ("verb", cmd)],
+        format!(" Import: `use {import}` is the package import that requires this environment.\n"),
         mode.json,
     );
     exit(ExitCodes::USER_ERROR);
 }
 
-pub(crate) fn run_compile_cmd(
-    cmd: &str,
+/// All command-side inputs for one native compile/run request. The CLI parses
+/// argv; this seam owns compatibility, profile, tier selection, and the
+/// execution lifecycle. Engines receive only the selected execution payload.
+pub(crate) struct NativeExecutionRequest<'a> {
+    pub(crate) command: &'a str,
+    pub(crate) file: &'a str,
+    pub(crate) emit_rust: bool,
+    pub(crate) emit_generated: bool,
+    pub(crate) library: bool,
+    pub(crate) small: bool,
+    pub(crate) freestanding: bool,
+    pub(crate) gates: jet::Policy::GateSet,
+    pub(crate) build_grants: &'a [String],
+    pub(crate) remote_builder: Option<&'a str>,
+    pub(crate) locked: bool,
+    pub(crate) target: Option<&'a str>,
+    pub(crate) explain_partition: bool,
+    pub(crate) verbose: bool,
+    pub(crate) sbom: bool,
+    pub(crate) release: bool,
+    pub(crate) profile: Option<&'a str>,
+    pub(crate) setting_overrides: &'a BTreeMap<String, String>,
+    pub(crate) output: Option<&'a str>,
+    pub(crate) program_args: &'a [&'a String],
+    pub(crate) mode: OutputMode,
+    pub(crate) record: Option<&'a str>,
+    pub(crate) interpret: bool,
+    pub(crate) package_scope: bool,
+    pub(crate) build_override: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeTier {
+    Interpreter,
+    Jit,
+    Aot,
+}
+
+enum NativeRunResult {
+    Engine(jet::Interpreter::RunOutcome),
+    Child(std::process::ExitStatus),
+    Exit(i32),
+    LaunchError(String),
+}
+
+fn select_native_profile(
+    command: &str,
     file: &str,
-    emit_rust: bool,
-    emit_generated: bool,
-    library_flag: bool,
-    small: bool,
     freestanding: bool,
-    gates: jet::Policy::GateSet,
-    build_grants: &[String],
-    remote_builder: Option<&str>,
-    locked: bool,
-    cross_target: Option<&str>,
-    explain_partition: bool,
-    verbose: bool,
-    sbom: bool,
-    named_profile: Option<&str>,
-    setting_overrides: &BTreeMap<String, String>,
-    output_name: Option<&str>,
-    program_args: &[&String],
+    small: bool,
+    release: bool,
+    profile_name: Option<&str>,
     mode: OutputMode,
-    record_name: Option<&str>,
-    package_scope: bool,
-    build_override: bool,
-) {
-    require_project_environment(cmd, Path::new(file), mode);
+) -> BuildProfile {
     // D-BUILD-DEFAULT1/D-BUILDPROFILE1: profile selection. Precedence:
     // --freestanding > --small > --release/--profile=<name> > command default.
-    // `run` uses Fast; `build` keeps Default (optimized). Named profiles are
-    // resolved against package.jet's `build {}` block; unknown names emit E1219.
-    let profile = if freestanding {
+    let named_profile = if release {
+        Some(jet::Syntax::BUILD_PROFILE_RELEASE)
+    } else {
+        profile_name
+    };
+    if freestanding {
         BuildProfile::Freestanding
     } else if small {
         BuildProfile::Small
     } else if let Some(name) = resolve_profile_name(named_profile) {
         resolve_named_profile(&name, file, mode)
     } else {
-        BuildProfile::default_for_command(cmd)
+        BuildProfile::default_for_command(command)
+    }
+}
+
+fn select_native_tier(
+    command: &str,
+    file: &str,
+    mode: OutputMode,
+    interpret: bool,
+    target: Option<&str>,
+    output: Option<&str>,
+    remote_builder: Option<&str>,
+    emit_rust: bool,
+    emit_generated: bool,
+    small: bool,
+    freestanding: bool,
+    build_grants: &[String],
+    sbom: bool,
+    profile_requested: bool,
+    profile: &BuildProfile,
+    selects_build_entry: bool,
+    is_web: bool,
+    is_plugin: bool,
+    src: &str,
+) -> NativeTier {
+    if command != "run" {
+        return NativeTier::Aot;
+    }
+    if interpret {
+        let incompatible = target.is_some()
+            || output.is_some()
+            || remote_builder.is_some()
+            || emit_rust
+            || emit_generated
+            || small
+            || freestanding
+            || !build_grants.is_empty()
+            || sbom
+            || profile_requested;
+        if incompatible {
+            let diagnostic = jet::Diagnostics::Diagnostic::error(
+                "E2102",
+                "`--interpret` cannot be combined with build or artifact flags".to_string(),
+                "`--interpret` selects the tier-0 interpreter for a one-shot native run"
+                    .to_string(),
+                "run `jet run --interpret <file.jet>` without build or artifact flags".to_string(),
+                None,
+            );
+            report_problems(mode, file, src, &[diagnostic]);
+            exit(ExitCodes::USAGE);
+        }
+        return NativeTier::Interpreter;
+    }
+    if matches!(profile, BuildProfile::Fast)
+        && target.is_none()
+        && output.is_none()
+        && !emit_rust
+        && !small
+        && !freestanding
+        && build_grants.is_empty()
+        && !sbom
+        && !is_web
+        && !is_plugin
+        && !selects_build_entry
+    {
+        NativeTier::Jit
+    } else {
+        NativeTier::Aot
+    }
+}
+
+fn render_native_lints(
+    file: &str,
+    src: &str,
+    mode: OutputMode,
+    lints: &[jet::Diagnostics::Diagnostic],
+) {
+    let lints = crate::CmdDevTools::visible_lints(lints);
+    if !lints.is_empty() {
+        report_problems(mode, file, src, &lints);
+    }
+}
+
+fn finish_native_run(
+    file: &str,
+    src: &str,
+    mode: OutputMode,
+    record: Option<&crate::ProveReplay::NamedCapture>,
+    lints: &[jet::Diagnostics::Diagnostic],
+    result: NativeRunResult,
+) -> ! {
+    render_native_lints(file, src, mode, lints);
+    match result {
+        NativeRunResult::Engine(jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        }) => {
+            emit_run_output(&stdout, &stderr);
+            if let Some(capture) = record {
+                crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
+                    .unwrap_or_else(|status| exit(status));
+            }
+            exit(exit_code);
+        }
+        NativeRunResult::Engine(jet::Interpreter::RunOutcome::Problems(diags)) => {
+            exit_if_internal_fault(&diags);
+            report_problems(mode, file, src, &diags);
+            if let Some(capture) = record {
+                crate::ProveReplay::finish_named_capture(capture, ExitCodes::USER_ERROR, mode.json)
+                    .unwrap_or_else(|status| exit(status));
+            }
+            exit(ExitCodes::USER_ERROR);
+        }
+        NativeRunResult::Child(status) => {
+            let exit_code = child_exit_code(status);
+            if let Some(capture) = record {
+                crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
+                    .unwrap_or_else(|status| exit(status));
+            }
+            exit(exit_code);
+        }
+        NativeRunResult::Exit(exit_code) => {
+            if let Some(capture) = record {
+                crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
+                    .unwrap_or_else(|status| exit(status));
+            }
+            exit(exit_code);
+        }
+        NativeRunResult::LaunchError(error) => {
+            if let Some(capture) = record {
+                crate::ProveReplay::finish_named_capture(capture, ExitCodes::USER_ERROR, mode.json)
+                    .unwrap_or_else(|status| exit(status));
+            }
+            crate::cli_error!("E2105", "couldn't run the built program: {}", error);
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+}
+
+fn run_native_lens(
+    tier: NativeTier,
+    file: &str,
+    src: &str,
+    gates: jet::Policy::GateSet,
+    setting_overrides: &BTreeMap<String, String>,
+    profile: &BuildProfile,
+    program_args: &[&String],
+    mode: OutputMode,
+    record: Option<&crate::ProveReplay::NamedCapture>,
+    package_manifest: &mut Option<(PathBuf, jet::Package::PackageFacts)>,
+) -> ! {
+    let application_authority = resolve_run_authority_before_execution(
+        file,
+        src,
+        mode,
+        profile.budget_name(),
+        setting_overrides,
+        package_manifest,
+    );
+
+    if program_args.is_empty() {
+        if let Some(capture) = record {
+            try_recorded_run(file, capture, mode);
+        }
+    }
+
+    // The adapters marshal checked facts and runtime arguments. The workflow
+    // above owns authority; the completion seam below owns all output, lint,
+    // diagnostic, and capture handling.
+    jet_jit::set_program_owns_streams();
+    let args = program_args
+        .iter()
+        .map(|arg| arg.as_str())
+        .collect::<Vec<_>>();
+    let run = match tier {
+        NativeTier::Interpreter => jet::Interpreter::run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_and_authority(
+            file,
+            &args,
+            gates,
+            profile.budget_name(),
+            setting_overrides,
+            application_authority.as_ref(),
+        ),
+        NativeTier::Jit => jet::Interpreter::run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority(
+            file,
+            &args,
+            mode.json,
+            gates,
+            setting_overrides,
+            application_authority.as_ref(),
+        ),
+        NativeTier::Aot => unreachable!("AOT does not use the engine lens"),
     };
+    let lints = run.lints;
+    finish_native_run(
+        file,
+        src,
+        mode,
+        record,
+        &lints,
+        NativeRunResult::Engine(run.outcome),
+    )
+}
+
+pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
+    let NativeExecutionRequest {
+        command: cmd,
+        file,
+        emit_rust,
+        emit_generated,
+        library: library_flag,
+        small,
+        freestanding,
+        gates,
+        build_grants,
+        remote_builder,
+        locked,
+        target: cross_target,
+        explain_partition,
+        verbose,
+        sbom,
+        release,
+        profile: profile_name,
+        setting_overrides,
+        output: output_name,
+        program_args,
+        mode,
+        record: record_name,
+        interpret: force_interpreter,
+        package_scope,
+        build_override,
+    } = request;
+    require_project_environment(cmd, Path::new(file), mode);
+    let profile = select_native_profile(
+        cmd,
+        file,
+        freestanding,
+        small,
+        release,
+        profile_name,
+        mode,
+    );
     let release_profile = profile.is_release();
     let progress = BuildProgress::new(cmd, emit_rust, verbose, mode);
     progress.major("Reading", file);
@@ -916,6 +1466,18 @@ pub(crate) fn run_compile_cmd(
         }
     };
     progress.minor("source", &format!("{} bytes", src.len()));
+
+    if cmd == "run" && cross_target == Some(jet::Syntax::BUILD_TARGET_WEB) {
+        let diagnostic = jet::Diagnostics::Diagnostic::error(
+            "E2102",
+            "`jet run` cannot execute a web-targeted program natively".to_string(),
+            "the web target produces browser artifacts, not a native console executable".to_string(),
+            "use `jet dev <file.jet>` for the browser development loop, or `jet build --target=web <file.jet>` for web artifacts".to_string(),
+            None,
+        );
+        report_problems(mode, file, &src, &[diagnostic]);
+        exit(ExitCodes::USER_ERROR);
+    }
 
     let record = if cmd == "run" {
         record_name.map(|name| {
@@ -1043,166 +1605,43 @@ pub(crate) fn run_compile_cmd(
             package_manifest.as_ref().map(|(root, _)| root.as_path()),
         );
 
-    // D-ONCE-TIER1=A: `jet run --interpret` selects tier 0 without entering the
-    // watch engine. Keep artifact/build controls explicit instead of ignoring them.
-    let force_interpreter = cmd == "run" && cli_requests_interpreter();
-    if force_interpreter {
-        let incompatible = cross_target.is_some()
-            || output_name.is_some()
-            || remote_builder.is_some()
-            || emit_rust
-            || emit_generated
-            || small
-            || freestanding
-            || !build_grants.is_empty()
-            || sbom;
-        if incompatible {
-            let diagnostic = jet::Diagnostics::Diagnostic::error(
-                "E2102",
-                "`--interpret` cannot be combined with build or artifact flags".to_string(),
-                "`--interpret` selects the tier-0 interpreter for a one-shot native run"
-                    .to_string(),
-                "run `jet run --interpret <file.jet>` without build or artifact flags".to_string(),
-                None,
-            );
-            report_problems(mode, file, &src, &[diagnostic]);
-            exit(ExitCodes::USAGE);
-        }
-
-        let application_authority = resolve_run_authority_before_execution(
+    // D-ONCE-TIER1=A / D-LENS-RUN1: native runs choose one adapter here. The
+    // interpreter and strict Cranelift adapters share authority and completion
+    // through `run_native_lens`; all other requests continue to the AOT path.
+    let tier = select_native_tier(
+        cmd,
+        file,
+        mode,
+        force_interpreter,
+        cross_target,
+        output_name,
+        remote_builder,
+        emit_rust,
+        emit_generated,
+        small,
+        freestanding,
+        build_grants,
+        sbom,
+        release || profile_name.is_some(),
+        &profile,
+        selects_build_entry,
+        is_web,
+        is_plugin,
+        &src,
+    );
+    if !matches!(tier, NativeTier::Aot) {
+        run_native_lens(
+            tier,
             file,
             &src,
-            mode,
-            profile.budget_name(),
-            setting_overrides,
-            &mut package_manifest,
-        );
-
-        if program_args.is_empty() {
-            if let Some(capture) = record.as_ref() {
-                try_recorded_run(file, capture, mode);
-            }
-        }
-
-        // The program's output is the program's, not data this verb reads back:
-        // stream it as it is produced, exactly as an AOT build of the same
-        // source does. `emit_run_output` below stays the embedder path.
-        jet_jit::set_program_owns_streams();
-        let args = program_args
-            .iter()
-            .map(|arg| arg.as_str())
-            .collect::<Vec<_>>();
-        let run = jet::Interpreter::run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints_and_authority(
-            file,
-            &args,
-            gates,
-            profile.budget_name(),
-            setting_overrides,
-            application_authority.as_ref(),
-        );
-        crate::CmdDevTools::render_lints(file, mode, &run.lints);
-        match run.outcome {
-            jet::Interpreter::RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code,
-            } => {
-                emit_run_output(&stdout, &stderr);
-                if let Some(capture) = record.as_ref() {
-                    crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
-                        .unwrap_or_else(|status| exit(status));
-                }
-                exit(exit_code);
-            }
-            jet::Interpreter::RunOutcome::Problems(diags) => {
-                exit_if_internal_fault(&diags);
-                report_problems(mode, file, &src, &diags);
-                if let Some(capture) = record.as_ref() {
-                    crate::ProveReplay::finish_named_capture(
-                        capture,
-                        ExitCodes::USER_ERROR,
-                        mode.json,
-                    )
-                    .unwrap_or_else(|status| exit(status));
-                }
-                exit(ExitCodes::USER_ERROR);
-            }
-        }
-    }
-
-    // D-LENS-RUN1: default native `jet run` is strict Cranelift. Explicit
-    // profiles and artifact-oriented flags keep the AOT escape hatch, and a
-    // selected `fn build` is one of them: this lens cannot stage a build entry.
-    if cmd == "run"
-        && matches!(profile, BuildProfile::Fast)
-        && cross_target.is_none()
-        && output_name.is_none()
-        && !emit_rust
-        && !small
-        && !freestanding
-        && build_grants.is_empty()
-        && !sbom
-        && !is_web
-        && !is_plugin
-        && !selects_build_entry
-    {
-        let application_authority = resolve_run_authority_before_execution(
-            file,
-            &src,
-            mode,
-            profile.budget_name(),
-            setting_overrides,
-            &mut package_manifest,
-        );
-
-        if program_args.is_empty() {
-            if let Some(capture) = record.as_ref() {
-                try_recorded_run(file, capture, mode);
-            }
-        }
-
-        // Same one-shot contract as the `--interpret` path above.
-        jet_jit::set_program_owns_streams();
-        let args = program_args
-            .iter()
-            .map(|arg| arg.as_str())
-            .collect::<Vec<_>>();
-        let run = jet::Interpreter::run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority(
-            file,
-            &args,
-            mode.json,
             gates,
             setting_overrides,
-            application_authority.as_ref(),
+            &profile,
+            program_args,
+            mode,
+            record.as_ref(),
+            &mut package_manifest,
         );
-        crate::CmdDevTools::render_lints(file, mode, &run.lints);
-        match run.outcome {
-            jet::Interpreter::RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code,
-            } => {
-                emit_run_output(&stdout, &stderr);
-                if let Some(capture) = record.as_ref() {
-                    crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
-                        .unwrap_or_else(|status| exit(status));
-                }
-                exit(exit_code);
-            }
-            jet::Interpreter::RunOutcome::Problems(diags) => {
-                exit_if_internal_fault(&diags);
-                report_problems(mode, file, &src, &diags);
-                if let Some(capture) = record.as_ref() {
-                    crate::ProveReplay::finish_named_capture(
-                        capture,
-                        ExitCodes::USER_ERROR,
-                        mode.json,
-                    )
-                    .unwrap_or_else(|status| exit(status));
-                }
-                exit(ExitCodes::USER_ERROR);
-            }
-        }
     }
 
     // D-BUILDNORM1=A (Tower #85): compute the content-cache key from the
@@ -1218,7 +1657,10 @@ pub(crate) fn run_compile_cmd(
     } else {
         "run"
     };
-    let cache_profile_tag = format!("{profile_tag};{}", setting_overrides_tag(setting_overrides));
+    let cache_profile_tag = format!(
+        "{profile_tag};{};aot-target=native",
+        setting_overrides_tag(setting_overrides)
+    );
     // `jet run` needs its key *before* the front end: a hit below replays the
     // cached binary without loading the program at all. `jet build` stays on
     // the full path (its effect + authority summaries must print), so #2083
@@ -1263,18 +1705,25 @@ pub(crate) fn run_compile_cmd(
                 for arg in program_args {
                     run_cmd.arg(arg.as_str());
                 }
-                let status = run_cmd.status().unwrap_or_else(|e| {
-                    crate::cli_error!("E2105", "couldn't run the built program: {}", e);
-                    exit(ExitCodes::USER_ERROR);
-                });
-                // A signal has no numeric exit code. Treat it as a failed
-                // child so a crashed program cannot make `jet run` green.
-                let exit_code = child_exit_code(status);
-                if let Some(capture) = record.as_ref() {
-                    crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
-                        .unwrap_or_else(|status| exit(status));
-                }
-                exit(exit_code);
+                let status = match run_cmd.status() {
+                    Ok(status) => status,
+                    Err(error) => finish_native_run(
+                        file,
+                        &src,
+                        mode,
+                        record.as_ref(),
+                        &[],
+                        NativeRunResult::LaunchError(error.to_string()),
+                    ),
+                };
+                finish_native_run(
+                    file,
+                    &src,
+                    mode,
+                    record.as_ref(),
+                    &[],
+                    NativeRunResult::Child(status),
+                );
             }
         }
     }
@@ -1381,6 +1830,11 @@ pub(crate) fn run_compile_cmd(
     let reused_package_effects = build_front_end.as_ref().and_then(|prepared| {
         let program = prepared.emitted_program()?;
         let facts = prepared.effect_facts();
+        let (projection, delegations) = native_effect_projection(
+            program,
+            &facts.summaries,
+            package_manifest.as_ref().map(|(_, manifest)| manifest),
+        );
         Some((
             jet::EffectBudget::compute_package_effects(program, &facts.solved, &facts.summaries),
             facts.fact_registry.clone(),
@@ -1396,17 +1850,8 @@ pub(crate) fn run_compile_cmd(
                 jet::Codegen::ENTRY_FN,
                 package_manifest.as_ref().map(|(_, manifest)| manifest),
             ),
-            jet::EffectBudget::project_program_effects(
-                program,
-                &facts.summaries,
-                jet::Codegen::ENTRY_FN,
-                package_manifest.as_ref().map(|(_, manifest)| manifest),
-            ),
-            facts
-                .summaries
-                .values()
-                .flat_map(|summary| summary.authority_delegations.iter().cloned())
-                .collect::<Vec<_>>(),
+            projection,
+            delegations,
         ))
     });
     // S59: same story for the C link flags — resolve them from the one loaded
@@ -1452,6 +1897,7 @@ pub(crate) fn run_compile_cmd(
     // `package.jet` manifest.
     #[allow(unused_assignments)]
     let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
+    let execution_lints: Vec<jet::Diagnostics::Diagnostic>;
     progress.major("Generating", "native code");
 
     let compile_result = if is_library {
@@ -1563,26 +2009,10 @@ pub(crate) fn run_compile_cmd(
                 .as_ref()
                 .map(|(_, manifest)| jet::LintPolicy::non_denied(&lints, manifest))
                 .unwrap_or_else(|| lints.clone());
-            if !warning_lints.is_empty() {
-                if mode.json {
-                    let machine_file = crate::machine_report_path_for_process(file);
-                    eprint!(
-                        "{}",
-                        jet::render_all_json(&machine_file, &src, &warning_lints)
-                    );
-                } else {
-                    eprint!(
-                        "{}",
-                        jet::render_all_colored(file, &src, &warning_lints, mode.color_stderr(),)
-                    );
-                    let n = warning_lints.len();
-                    eprintln!(
-                        "\n{} warning{} emitted (compilation continues)",
-                        n,
-                        if n == 1 { "" } else { "s" }
-                    );
-                }
+            if cmd == "build" {
+                render_native_lints(file, &src, mode, &warning_lints);
             }
+            execution_lints = warning_lints;
             // S59 (E2-M14): resolve native C link flags at build time; E3201
             // (unresolved C lib) surfaces here, not during front-end checking.
             let clinks = match reused_clinks
@@ -1643,38 +2073,35 @@ pub(crate) fn run_compile_cmd(
                     ),
                 };
                 match projection {
-                    Ok(checked) => Some((
-                        jet::EffectBudget::compute_package_effects(
-                            &checked.bundle,
-                            &checked.facts.solved,
-                            &checked.facts.summaries,
-                        ),
-                        checked.facts.fact_registry.clone(),
-                        jet::EffectBudget::summary_line_for_program_with_authority(
+                    Ok(checked) => {
+                        let (projection, delegations) = native_effect_projection(
                             &checked.bundle,
                             &checked.facts.summaries,
-                            jet::Codegen::ENTRY_FN,
                             package_manifest.as_ref().map(|(_, manifest)| manifest),
-                        ),
-                        jet::EffectBudget::summary_json_for_program_with_authority(
-                            &checked.bundle,
-                            &checked.facts.summaries,
-                            jet::Codegen::ENTRY_FN,
-                            package_manifest.as_ref().map(|(_, manifest)| manifest),
-                        ),
-                        jet::EffectBudget::project_program_effects(
-                            &checked.bundle,
-                            &checked.facts.summaries,
-                            jet::Codegen::ENTRY_FN,
-                            package_manifest.as_ref().map(|(_, manifest)| manifest),
-                        ),
-                        checked
-                            .facts
-                            .summaries
-                            .values()
-                            .flat_map(|summary| summary.authority_delegations.iter().cloned())
-                            .collect::<Vec<_>>(),
-                    )),
+                        );
+                        Some((
+                            jet::EffectBudget::compute_package_effects(
+                                &checked.bundle,
+                                &checked.facts.solved,
+                                &checked.facts.summaries,
+                            ),
+                            checked.facts.fact_registry.clone(),
+                            jet::EffectBudget::summary_line_for_program_with_authority(
+                                &checked.bundle,
+                                &checked.facts.summaries,
+                                jet::Codegen::ENTRY_FN,
+                                package_manifest.as_ref().map(|(_, manifest)| manifest),
+                            ),
+                            jet::EffectBudget::summary_json_for_program_with_authority(
+                                &checked.bundle,
+                                &checked.facts.summaries,
+                                jet::Codegen::ENTRY_FN,
+                                package_manifest.as_ref().map(|(_, manifest)| manifest),
+                            ),
+                            projection,
+                            delegations,
+                        ))
+                    }
                     Err(_) => None,
                 }
             }
@@ -1688,28 +2115,15 @@ pub(crate) fn run_compile_cmd(
             delegations,
         )) = effect_view
         {
-            // D-PLUGIN1=B (c81): a plugin is deny-by-default — the wasmtime
-            // host registers zero host imports, so any host effect used by the
-            // plugin's own code would fail to instantiate at load time. Guest
-            // memory allocation is not a host import; Component Model Text
-            // exports require it. Catch every other effect here, at build time,
-            // with a clean diagnostic (E1258).
-            if is_plugin {
-                if let Some(root) = entries.iter().find(|p| p.name == "root") {
-                    let mut forbidden = root.effects.clone();
-                    forbidden.retain(|effect| jet::Sema::effect_root(effect) != "Mem");
-                    if !forbidden.is_empty() {
-                        let diag = jet::Manifest::e1258(&jet::Sema::show_set(&forbidden));
-                        report_problems(mode, file, &src, &[diag]);
-                        exit(ExitCodes::USER_ERROR);
-                    }
-                }
-            }
-            resolve_application_authority(
+            let _application_authority = apply_native_effect_policy(
                 cmd,
                 file,
                 &src,
                 mode,
+                is_plugin,
+                &visible_lints,
+                &entries,
+                &fact_registry,
                 &mut projection,
                 &mut package_manifest,
                 &delegations,
@@ -1725,61 +2139,8 @@ pub(crate) fn run_compile_cmd(
                     eprintln!("{effect_summary}");
                 }
             }
-            if let Some((root, manifest)) = package_manifest.as_ref() {
-                let configured_names = manifest
-                    .authority
-                    .holds
-                    .allow
-                    .iter()
-                    .flatten()
-                    .chain(manifest.authority.holds.deny.iter().flatten())
-                    .chain(
-                        manifest
-                            .authority
-                            .grants
-                            .iter()
-                            .flat_map(|(_, names)| names),
-                    );
-                let mut violations = Vec::new();
-                for name in configured_names {
-                    if jet::Sema::parse_effect_name(name).is_some() {
-                        if let Err(suggestion) =
-                            jet::Sema::resolve_effect_name(name, &fact_registry)
-                        {
-                            violations.push(jet::Sema::undeclared_effect(
-                                name,
-                                suggestion.as_deref(),
-                                None,
-                            ));
-                        }
-                    }
-                }
-                violations.extend(jet::EffectBudget::enforce(&entries, manifest));
-                if !violations.is_empty() {
-                    report_problems(mode, file, &src, &violations);
-                    exit(ExitCodes::USER_ERROR);
-                }
-                // Record per-dependency effect provenance + grants in the
-                // lockfile, when one already exists (`jet fetch` owns
-                // creating it).
-                if let Some(mut lock) = jet::Lock::load(root) {
-                    jet::EffectBudget::update_lock_provenance(&mut lock, &entries, manifest);
-                    let _ = fs::write(jet::PkgStore::lock_path(root), jet::Lock::write(&lock));
-                }
-            }
         }
 
-        // D-LINTPOLICY1=A: denied findings were withheld from the warning
-        // stream above and must surface exactly once as E1293. Keep this gate
-        // outside effect-fact availability; lint policy does not depend on a
-        // solved effect graph.
-        if let Some((_, manifest)) = package_manifest.as_ref() {
-            let lint_violations = jet::LintPolicy::enforce(&visible_lints, manifest);
-            if !lint_violations.is_empty() {
-                report_problems(mode, file, &src, &lint_violations);
-                exit(ExitCodes::USER_ERROR);
-            }
-        }
     }
 
     match cmd {
@@ -1916,6 +2277,11 @@ pub(crate) fn run_compile_cmd(
         }
         "run" => {
             let out = bin_path(file);
+            // AOT children inherit stdout/stderr. Render their lints before
+            // building/spawning so diagnostics keep the same order as the
+            // program's streams; the completion seam receives no lints for
+            // this branch and therefore does not print them twice.
+            render_native_lints(file, &src, mode, &execution_lints);
             build(
                 file,
                 &rust_code,
@@ -1934,24 +2300,38 @@ pub(crate) fn run_compile_cmd(
             print_release_job_summary(&src, release_profile, mode);
             if cross_target.is_some() {
                 eprintln!("note: cross-compiled binary cannot run on this host — use emulation (see docs/embedded.md)");
-                exit(ExitCodes::OK);
+                finish_native_run(
+                    file,
+                    &src,
+                    mode,
+                    record.as_ref(),
+                    &[],
+                    NativeRunResult::Exit(ExitCodes::OK),
+                );
             }
             let mut run_cmd = Command::new(&out);
             for arg in program_args {
                 run_cmd.arg(arg.as_str());
             }
-            let status = run_cmd.status().unwrap_or_else(|e| {
-                crate::cli_error!("E2105", "couldn't run the built program: {}", e);
-                exit(ExitCodes::USER_ERROR);
-            });
-            // A signal has no numeric exit code. Treat it as a failed child
-            // so a crashed program cannot make `jet run` green.
-            let exit_code = child_exit_code(status);
-            if let Some(capture) = record.as_ref() {
-                crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
-                    .unwrap_or_else(|status| exit(status));
-            }
-            exit(exit_code);
+            let status = match run_cmd.status() {
+                Ok(status) => status,
+                Err(error) => finish_native_run(
+                    file,
+                    &src,
+                    mode,
+                    record.as_ref(),
+                    &[],
+                    NativeRunResult::LaunchError(error.to_string()),
+                ),
+            };
+            finish_native_run(
+                file,
+                &src,
+                mode,
+                record.as_ref(),
+                &[],
+                NativeRunResult::Child(status),
+            );
         }
         other => {
             crate::cli_error!(
@@ -1964,13 +2344,6 @@ pub(crate) fn run_compile_cmd(
             exit(ExitCodes::USAGE);
         }
     }
-}
-
-fn cli_requests_interpreter() -> bool {
-    std::env::args()
-        .skip(1)
-        .take_while(|arg| arg != "--")
-        .any(|arg| arg == "--interpret")
 }
 
 /// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when `file`
@@ -2709,7 +3082,7 @@ fn edition_2027_encoding_audit(before: &str, after: &str) -> Vec<String> {
     notes
 }
 
-pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
+pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) {
     if name.is_empty() || name.contains('/') || name.contains('\\') {
         crate::cli_error!(@fix "E2104", "project name must be a simple folder name", format!("try: {} new my_app", jet::Syntax::BINARY_NAME));
         exit(ExitCodes::USER_ERROR);
@@ -2727,7 +3100,16 @@ pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
         crate::cli_error!("E2105", "couldn't create `{}`/.jet: {}", name, e);
         exit(ExitCodes::USER_ERROR);
     });
-    let manifest_text = jet::Manifest::new_template(name, annotated);
+    let mut manifest_text = jet::Manifest::new_template(name, annotated);
+    if web {
+        // The web starter uses `core.ui`, whose Browser effect must be visible
+        // in the generated package authority before `jet dev` builds it.
+        manifest_text = jet::Manifest::add_authority_hold(&manifest_text, "Browser");
+    } else {
+        // The native starter reads argv, so its package authority must carry
+        // the same Exec effect as the generated source.
+        manifest_text = jet::Manifest::add_authority_hold(&manifest_text, "Exec");
+    }
     fs::write(dir.join(jet::Syntax::PACKAGE_FILE), manifest_text).unwrap_or_else(|e| {
         crate::cli_error!(
             "E2105",
@@ -2737,7 +3119,11 @@ pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
         );
         exit(ExitCodes::USER_ERROR);
     });
-    let run_src = "fn greeting() String -> \"hello, world\"\n\nfn run() {\n    print(greeting())\n}\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(), \"hello, world\")\n}\n";
+    let run_src = if web {
+        "// Start the live browser app: `jet dev`\n// Run the scaffold test: `jet test`\n// Build static browser files: `jet build --target web`\nuse core.ui as ui\nuse core.reactive as reactive\n#Target(Web)\n\nfn run() {\n    count :: reactive.signal(0)\n    ui.reactive_render(() -> {\n        n := count.get()\n        tree :: ui.box([\n            ui.node_color(\"Clicks: {n}\", 240.0, 40.0, \"#3366ff\"),\n            ui.button(\"Add one\", on_click: () -> {\n                count.set(count.get() + 1)\n            })\n        ])\n        backend :: ui.null_backend()\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 120.0))\n    })\n}\n\n#Test(\"the counter increments\") {\n    count :: reactive.signal(0)\n    count.set(count.get() + 1)\n    assert_eq(count.get(), 1)\n}\n"
+    } else {
+        "use core.process as process\n\nfn greeting() String -> \"hello, world\"\n\nfn run() {\n    args :: process.argv()\n    print(args.get(1) ?? greeting())\n}\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(), \"hello, world\")\n}\n"
+    };
     fs::write(dir.join(jet::Syntax::DEFAULT_ENTRY_FILE), run_src).unwrap_or_else(|e| {
         crate::cli_error!(
             "E2105",
@@ -2789,7 +3175,8 @@ pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
             println!("  {file}");
         }
         println!("  .gitignore");
-        println!("next: cd {} && {} run", name, jet::Syntax::BINARY_NAME);
+        let next = if web { "dev" } else { "run" };
+        println!("next: cd {} && {} {}", name, jet::Syntax::BINARY_NAME, next);
     }
 }
 
@@ -3025,7 +3412,7 @@ fn run_test_target(
     } else {
         BuildProfile::Default
     };
-    let profile_tag = profile.cache_tag();
+    let profile_tag = format!("{};aot-target=native", profile.cache_tag());
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -5524,7 +5911,7 @@ pub(crate) fn run_dev_web(
         }
     };
     loop {
-        thread::sleep(Duration::from_millis(120));
+        thread::sleep(Duration::from_millis(30));
         if let Some(code) = host.exit_code() {
             exit(code);
         }
@@ -6133,7 +6520,7 @@ fn library_rustc(
     if profile.is_release() {
         command.arg("--cfg").arg("jet_release");
     }
-    command.args(config.rustc_args(false));
+    command.args(config.rustc_args_for_target(false, true));
     let linker = crate::NativeLinker::for_target(None);
     command.args(linker.rustc_args());
     if verbose {
@@ -6504,7 +6891,7 @@ pub(crate) fn build(
         rustc_flags.push("--cfg".to_string());
         rustc_flags.push("jet_release".to_string());
     }
-    rustc_flags.extend(config.rustc_args(ffi_present));
+    rustc_flags.extend(config.rustc_args_for_target(ffi_present, cross_target.is_none()));
     let linker = crate::NativeLinker::for_target(cross_target);
     rustc_flags.extend(linker.rustc_args());
     if verbose {

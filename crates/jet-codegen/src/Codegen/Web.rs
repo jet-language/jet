@@ -466,6 +466,11 @@ fn validate_web_func_tir(
         }
         cx.current_type_params.borrow_mut().clear();
     } else {
+        eprintln!(
+            "[probe-web-coverage] {}: {}",
+            f.name,
+            TIR::refusal::describe(cx)
+        );
         cx.current_type_params.borrow_mut().clear();
     }
     diags.push(WebTirUnsupported {
@@ -557,6 +562,9 @@ fn web_if_cond_supported(cond: &TIR::TIfCond) -> bool {
         TIR::TIfCond::IfLet { pattern, subj } | TIR::TIfCond::Matches { pattern, subj } => {
             web_match_pattern_supported(pattern) && web_expr_supported(subj)
         }
+        TIR::TIfCond::WithPrelude { prelude, cond } => {
+            web_stmts_supported(prelude) && web_if_cond_supported(cond)
+        }
     }
 }
 
@@ -580,6 +588,10 @@ fn web_wasm_if_cond_supported(
         TIR::TIfCond::IfLet { pattern, subj } | TIR::TIfCond::Matches { pattern, subj } => {
             web_match_pattern_supported(pattern)
                 && web_wasm_expr_supported(subj, bundle, file_prefix, reconstructions)
+        }
+        TIR::TIfCond::WithPrelude { prelude, cond } => {
+            web_wasm_stmts_supported(prelude, bundle, file_prefix, reconstructions)
+                && web_wasm_if_cond_supported(cond, bundle, file_prefix, reconstructions)
         }
     }
 }
@@ -3735,8 +3747,10 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         );
     }
     // I9: Wasm receives the same generated active-runtime-row projection as
-    // native standalone AOT. The adapter owns no diagnostic table.
-    super::push_embedded_outcome(&mut out);
+    // native standalone AOT. Walk the complete fixed Prelude dependency
+    // closure once for the module; export return shape must not choose which
+    // Outcome dependency happens to be present.
+    super::push_prelude_dependency_closure(&mut out, &["outcome"]);
     if super::core_usage_matches(&bundle.used_core, &["core.math"]) {
         // I9: Wasm calls the same scalar math Prelude as AOT, JIT, and the
         // interpreter. This is an adapter inclusion, not a second kernel.
@@ -3756,6 +3770,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
     if need_packed_abi(&is_string_like)
         || need_packed_abi(&is_list_default_int)
         || need_packed_abi(&is_list_fixed_int)
+        || need_packed_abi(&is_list_string)
         || need_packed_abi(&is_map_string_int)
     {
         // D-JSBIND1: a packed pointer is only an ownership token after it
@@ -4201,7 +4216,7 @@ fn emit_wasm_fn(
     let map_ret = f.return_type.as_ref().is_some_and(is_map_string_int);
     let flat = flattened_web_params(&f.tir);
     let edge_run =
-        export && f.key == "run" && matches!(f.return_type.as_ref(), Some(Type::Result { .. }));
+        export && f.key == "run" && matches!(f.tir.ret.as_ref(), Some(Type::Result { .. }));
     // String / [Int] / [String] / [String:Int] cannot be bare `extern "C"` —
     // the packed return/argument shapes below remain the ABI contract.
     let export_wrapper = export && !edge_run;
@@ -4339,38 +4354,44 @@ fn emit_wasm_fn(
             .join(", ");
         if int_ret {
             out.push_str(&format!(
-                "    return jet_abi_int_ret(jet_wasm_{}({args}));\n",
+                "    return jet_wasm_export(|| jet_wasm_{}({args}), |value| jet_abi_int_ret(value));\n",
                 f.key
             ));
         } else if string_ret {
             out.push_str(&format!(
-                "    return jet_abi_string_ret(jet_wasm_{}({args}));\n",
+                "    return jet_wasm_export(|| jet_wasm_{}({args}), |value| jet_abi_string_ret(value));\n",
                 f.key
             ));
         } else if list_default_ret {
             out.push_str(&format!(
-                "    return jet_abi_list_int_ret(jet_wasm_{}({args}));\n",
+                "    return jet_wasm_export(|| jet_wasm_{}({args}), |value| jet_abi_list_int_ret(value));\n",
                 f.key
             ));
         } else if list_fixed_ret {
             out.push_str(&format!(
-                "    return jet_abi_list_i64_ret(jet_wasm_{}({args}));\n",
+                "    return jet_wasm_export(|| jet_wasm_{}({args}), |value| jet_abi_list_i64_ret(value));\n",
                 f.key
             ));
         } else if list_string_ret {
             out.push_str(&format!(
-                "    return jet_abi_list_string_ret(jet_wasm_{}({args}));\n",
+                "    return jet_wasm_export(|| jet_wasm_{}({args}), |value| jet_abi_list_string_ret(value));\n",
                 f.key
             ));
         } else if map_ret {
             out.push_str(&format!(
-                "    return jet_abi_map_string_int_ret(jet_wasm_{}({args}));\n",
+                "    return jet_wasm_export(|| jet_wasm_{}({args}), |value| jet_abi_map_string_int_ret(value));\n",
                 f.key
             ));
         } else if f.return_type.is_some() {
-            out.push_str(&format!("    return jet_wasm_{}({args});\n", f.key));
+            out.push_str(&format!(
+                "    return jet_wasm_export(|| jet_wasm_{}({args}), |value| value);\n",
+                f.key
+            ));
         } else {
-            out.push_str(&format!("    jet_wasm_{}({args});\n", f.key));
+            out.push_str(&format!(
+                "    jet_wasm_export(|| jet_wasm_{}({args}), |_| ());\n",
+                f.key
+            ));
         }
         out.push_str("    })\n}\n\n");
     }
@@ -5025,6 +5046,7 @@ fn emit_wasm_if_head(
                 wasm_match_arm_pattern(pattern)?
             )
         }
+        TIR::TIfCond::WithPrelude { .. } => return Err(()),
         TIR::TIfCond::And { .. } => return Err(()),
     };
     out.push_str(&format!("{pad}{head}\n"));
@@ -5080,6 +5102,19 @@ fn emit_wasm_if(
     reconstructions: &[TIR::TWebParamReconstruction],
 ) -> Result<(), ()> {
     let pad = "    ".repeat(indent);
+    if let TIR::TIfCond::WithPrelude { prelude, cond } = cond {
+        emit_wasm_body(prelude, out, indent, funcs, file_prefix, reconstructions)?;
+        return emit_wasm_if(
+            cond,
+            then_body,
+            else_body,
+            out,
+            indent,
+            funcs,
+            file_prefix,
+            reconstructions,
+        );
+    }
     if let TIR::TIfCond::And { left, right } = cond {
         emit_wasm_if_head(left, out, indent, funcs, file_prefix, reconstructions)?;
         emit_wasm_if(
@@ -5173,13 +5208,17 @@ fn emit_wasm_contract_scope(
     }
     let pad = "    ".repeat(indent);
     let result = mangle_generated("result");
-    out.push_str(&format!("{pad}let {result} = (|| {{\n"));
+    let result_carrier = mangle_generated("result_carrier");
+    out.push_str(&format!("{pad}let {result_carrier} = (|| {{\n"));
     emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
     out.push_str(&format!("{pad}}})();\n"));
+    out.push_str(&format!(
+        "{pad}let {result} = match &{result_carrier} {{ Ok(value) => value.clone(), Err(_) => return {result_carrier} }};\n"
+    ));
     for contract in post {
         emit_wasm_contract_check(contract, out, indent, funcs, file_prefix, reconstructions)?;
     }
-    out.push_str(&format!("{pad}{result}\n"));
+    out.push_str(&format!("{pad}{result_carrier}\n"));
     Ok(())
 }
 
@@ -5202,11 +5241,20 @@ fn emit_wasm_body(
                 "{pad}{};\n",
                 wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?
             )),
-            TIR::TStmt::Let { name, init, .. } => out.push_str(&format!(
-                "{pad}let mut {} = {};\n",
-                mangle(name),
-                wasm_emit_expr(init, funcs, file_prefix, reconstructions)?
-            )),
+            TIR::TStmt::Let { name, init, .. } => {
+                if name == "value" {
+                    eprintln!(
+                        "[probe-wasm-let] value ty={:?} kind={}",
+                        init.ty,
+                        web_tir_expr_kind_name(&init.kind)
+                    );
+                }
+                out.push_str(&format!(
+                    "{pad}let mut {} = {};\n",
+                    mangle(name),
+                    wasm_emit_expr(init, funcs, file_prefix, reconstructions)?
+                ))
+            }
             TIR::TStmt::Assign {
                 place,
                 op,
@@ -5667,6 +5715,21 @@ fn emit_wasm_if_value(
     reconstructions: &[TIR::TWebParamReconstruction],
 ) -> Result<(), ()> {
     let pad = "    ".repeat(indent);
+    if let TIR::TIfCond::WithPrelude { prelude, cond } = cond {
+        emit_wasm_body(prelude, out, indent, funcs, file_prefix, reconstructions)?;
+        return emit_wasm_if_value(
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            out,
+            indent,
+            funcs,
+            file_prefix,
+            reconstructions,
+        );
+    }
     if let TIR::TIfCond::And { left, right } = cond {
         emit_wasm_if_head(left, out, indent, funcs, file_prefix, reconstructions)?;
         emit_wasm_if_value(
@@ -5964,6 +6027,117 @@ fn wasm_emit_inline_direct_call(
     )
 }
 
+/// Web functions return the shared `Result` carrier internally. Most calls
+/// already carry that fact in TIR and must stay carrier-valued (for example a
+/// `match` over `.Ok`/`.Err`). Imported module calls can instead retain their
+/// source success type, even though their emitted callee still returns the
+/// carrier. Keep the one adapter at this boundary so arithmetic and printing
+/// never see a carrier by accident.
+fn wasm_callee_returns_outcome(key: &str, funcs: &[FuncWeb]) -> Result<bool, ()> {
+    let mut callees = funcs
+        .iter()
+        .filter(|f| f.key == key && f.bucket == WebBucket::Wasm);
+    let Some(callee) = callees.next() else {
+        return Err(());
+    };
+    if callees.next().is_some() {
+        return Err(());
+    }
+    Ok(matches!(callee.tir.ret.as_ref(), Some(Type::Result { .. })))
+}
+
+fn wasm_emit_known_call(
+    expr_ty: &Type,
+    key: &str,
+    call: String,
+    funcs: &[FuncWeb],
+) -> Result<String, ()> {
+    if wasm_callee_returns_outcome(key, funcs)?
+        && !matches!(expr_ty, Type::Result { .. })
+    {
+        Ok(format!("({call})?"))
+    } else {
+        Ok(call)
+    }
+}
+
+fn wasm_emit_raw_call(
+    expr: &TIR::TExpr,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<Option<String>, ()> {
+    let wrapped = match &expr.kind {
+        TIR::TExprKind::InlineBlock(stmts) => {
+            let Some((last, prefix)) = stmts.split_last() else {
+                return Ok(None);
+            };
+            let TIR::TStmt::ExprStmt(last) = last else {
+                return Ok(None);
+            };
+            let prefix_is_inline = prefix.is_empty() || web_inline_single_let(prefix).is_some();
+            if !prefix_is_inline {
+                return Ok(None);
+            }
+            let Some(raw_last) = wasm_emit_raw_call(last, funcs, file_prefix, reconstructions)?
+            else {
+                return Ok(None);
+            };
+            let mut rendered = String::from("{\n");
+            emit_wasm_body(
+                prefix,
+                &mut rendered,
+                1,
+                funcs,
+                file_prefix,
+                reconstructions,
+            )?;
+            rendered.push_str(&format!("    {raw_last}\n}}"));
+            Some(rendered)
+        }
+        TIR::TExprKind::Clone(inner) | TIR::TExprKind::ExplicitCopy(inner) => {
+            wasm_emit_raw_call(inner, funcs, file_prefix, reconstructions)?.map(|value| {
+                format!("({value}).clone()")
+            })
+        }
+        TIR::TExprKind::DistinctRaw(inner) => {
+            wasm_emit_raw_call(inner, funcs, file_prefix, reconstructions)?
+        }
+        TIR::TExprKind::MaterializeView(inner) => {
+            wasm_emit_raw_call(inner, funcs, file_prefix, reconstructions)?.map(|value| {
+                let symbol = TIR::view_copy_symbol(&inner.ty);
+                format!("{symbol}({value})")
+            })
+        }
+        _ => None,
+    };
+    if wrapped.is_some() {
+        return Ok(wrapped);
+    }
+    let (key, args) = match &expr.kind {
+        TIR::TExprKind::Call { name, args, .. } => {
+            (local_web_key(file_prefix, name), args)
+        }
+        TIR::TExprKind::ModuleCall { form, args, .. } => {
+            let key = match form {
+                TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
+                    qualified_web_key(rust_mod, rust_fn)
+                }
+                TIR::TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
+            };
+            (key, args)
+        }
+        _ => return Ok(None),
+    };
+    let args = args
+        .iter()
+        .map(|arg| wasm_emit_call_arg(arg, funcs, file_prefix, reconstructions))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(", ");
+    let _ = wasm_callee_returns_outcome(&key, funcs)?;
+    Ok(Some(format!("jet_wasm_{key}({args})")))
+}
+
 fn wasm_emit_direct_call(
     expr: &TIR::TExpr,
     temp_name: &str,
@@ -5976,13 +6150,7 @@ fn wasm_emit_direct_call(
         if args.len() != 1 || !web_inline_local_is(&args[0].value, temp_name) {
             return Ok(None);
         }
-        let mut callees = funcs
-            .iter()
-            .filter(|f| f.key == key && f.bucket == WebBucket::Wasm);
-        callees.next().ok_or(())?;
-        if callees.next().is_some() {
-            return Err(());
-        }
+        let _ = wasm_callee_returns_outcome(&key, funcs)?;
         let value = match (&init.kind, &init.ty) {
             // The inline temporary normally carries the clone needed by the
             // call argument. If lowering did not mark the argument, the local
@@ -5997,7 +6165,13 @@ fn wasm_emit_direct_call(
             _ => wasm_emit_expr(init, funcs, file_prefix, reconstructions)?,
         };
         let value = wasm_emit_call_arg_value(&args[0], value)?;
-        Ok(Some(format!("jet_wasm_{key}({value})")))
+        wasm_emit_known_call(
+            &expr.ty,
+            &key,
+            format!("jet_wasm_{key}({value})"),
+            funcs,
+        )
+        .map(Some)
     };
     match &expr.kind {
         TIR::TExprKind::Call { name, args, .. } => {
@@ -6086,6 +6260,7 @@ fn wasm_emit_expr(
                             )),
                             crate::AST::StrFormat::Pretty
                             | crate::AST::StrFormat::Fixed(_)
+                            | crate::AST::StrFormat::Hex(_)
                             | crate::AST::StrFormat::Unit(_) => return Err(()),
                         }
                     }
@@ -6554,7 +6729,25 @@ fn wasm_emit_expr(
             line,
             fn_name,
         } => {
-            let value = wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?;
+            if fn_name.contains("converge") || fn_name.contains("recurse") || fn_name.contains("run") {
+                let detail = match &inner.kind {
+                    TIR::TExprKind::InlineBlock(stmts) => stmts
+                        .last()
+                        .map(|stmt| match stmt {
+                            TIR::TStmt::ExprStmt(expr) | TIR::TStmt::Return(Some(expr)) => {
+                                web_tir_expr_kind_name(&expr.kind)
+                            }
+                            _ => "stmt",
+                        })
+                        .unwrap_or("empty"),
+                    _ => web_tir_expr_kind_name(&inner.kind),
+                };
+                eprintln!("[probe-wasm-try] fn={fn_name} inner={} last={detail}", web_tir_expr_kind_name(&inner.kind));
+            }
+            let value = match wasm_emit_raw_call(inner, funcs, file_prefix, reconstructions)? {
+                Some(value) => value,
+                None => wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?,
+            };
             let context_helper = if note.is_some()
                 && crate::Codegen::TIR::try_target_is_default_error(inner, convert)
             {
@@ -6592,7 +6785,7 @@ fn wasm_emit_expr(
                     format!("({value}).map_err(|e| {}::{tag}(e))", mangle_path(enum_name))
                 }
                 TIR::TTryConvert::None => format!("({value})"),
-                TIR::TTryConvert::Never => unreachable!("Never try conversion handled above"),
+                TIR::TTryConvert::Never => return Err(()),
             };
             match note {
                 Some(note) => format!(
@@ -6819,13 +7012,17 @@ fn wasm_emit_expr(
         }
         TIR::TExprKind::Call { name, args, .. } => {
             let key = local_web_key(file_prefix, name);
-            let mut callees = funcs.iter().filter(|f| f.key == key && f.bucket == WebBucket::Wasm);
-            callees.next().ok_or(())?;
-            if callees.next().is_some() {
-                return Err(());
-            }
-            let symbol = format!("jet_wasm_{key}");
-            format!("{symbol}({})", args.iter().map(|a| wasm_emit_call_arg(a, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
+            let rendered_args = args
+                .iter()
+                .map(|a| wasm_emit_call_arg(a, funcs, file_prefix, reconstructions))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            wasm_emit_known_call(
+                &expr.ty,
+                &key,
+                format!("jet_wasm_{key}({rendered_args})"),
+                funcs,
+            )?
         }
         TIR::TExprKind::StaticCall {
             owner: TIR::TStaticOwner::User(type_name),
@@ -6906,10 +7103,17 @@ fn wasm_emit_expr(
                 }
                 TIR::TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
             };
-            let mut callees = funcs.iter().filter(|f| f.key == key && f.bucket == WebBucket::Wasm);
-            callees.next().ok_or(())?;
-            if callees.next().is_some() { return Err(()); }
-            format!("jet_wasm_{key}({})", args.iter().map(|a| wasm_emit_call_arg(a, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
+            let rendered_args = args
+                .iter()
+                .map(|a| wasm_emit_call_arg(a, funcs, file_prefix, reconstructions))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ");
+            wasm_emit_known_call(
+                &expr.ty,
+                &key,
+                format!("jet_wasm_{key}({rendered_args})"),
+                funcs,
+            )?
         }
         TIR::TExprKind::CoreCall {
             module,
@@ -7222,7 +7426,7 @@ fn emit_js_app(
                 main_fn.tir.line,
                 json_quote("run"),
             ));
-            let fallible_main = matches!(main_fn.return_type.as_ref(), Some(Type::Result { .. }));
+            let fallible_main = matches!(main_fn.tir.ret.as_ref(), Some(Type::Result { .. }));
             if fallible_main {
                 out.push_str(&jet_name_format!(
                     "    const {name_prefix}edge_result = await (async () => {{\n"
@@ -7422,7 +7626,7 @@ fn emit_js_fn(
         json_quote(&f.key),
     ));
     out.push_str(&bind_inline_handler_symbols(&body, f, handlers));
-    if matches!(f.return_type.as_ref(), Some(Type::Result { .. })) {
+    if matches!(f.tir.ret.as_ref(), Some(Type::Result { .. })) {
         out.push_str("  } catch (error) {\n");
         out.push_str("    if (error instanceof JetWebPropagation) return { tag: \"Err\", values: [{ wire: error.wire, journey: error.journey, frame: error.frame, hops: error.hops }] };\n");
         out.push_str("    throw error;\n");
@@ -7586,7 +7790,8 @@ fn web_name(name: &str) -> &str {
 }
 
 fn web_error_conversion_pair(name: &str) -> Option<(&str, &str)> {
-    name.strip_prefix("__jet_errconv_")?.split_once("_to_")
+    name.strip_prefix(&mangle_generated("errconv_"))?
+        .split_once("_to_")
 }
 
 fn qualified_web_key(rust_mod: &str, rust_fn: &str) -> String {
@@ -7776,6 +7981,7 @@ fn emit_js_if_head(
             ));
             Ok(1)
         }
+        TIR::TIfCond::WithPrelude { .. } => return Err(()),
         TIR::TIfCond::And { .. } => return Err(()),
     }
 }
@@ -7790,6 +7996,18 @@ fn emit_js_if(
     indent: usize,
 ) -> Result<(), ()> {
     let pad = "  ".repeat(indent);
+    if let TIR::TIfCond::WithPrelude { prelude, cond } = cond {
+        emit_tir_js_body(prelude, out, funcs, file_prefix, indent)?;
+        return emit_js_if(
+            cond,
+            then_body,
+            else_body,
+            out,
+            funcs,
+            file_prefix,
+            indent,
+        );
+    }
     if let TIR::TIfCond::And { left, right } = cond {
         let extra = emit_js_if_head(left, out, funcs, file_prefix, indent)?;
         let head_indent = indent + extra;
@@ -7840,6 +8058,20 @@ fn emit_js_if_value(
     indent: usize,
 ) -> Result<(), ()> {
     let pad = "  ".repeat(indent);
+    if let TIR::TIfCond::WithPrelude { prelude, cond } = cond {
+        emit_tir_js_body(prelude, out, funcs, file_prefix, indent)?;
+        return emit_js_if_value(
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            out,
+            funcs,
+            file_prefix,
+            indent,
+        );
+    }
     if let TIR::TIfCond::And { left, right } = cond {
         let extra = emit_js_if_head(left, out, funcs, file_prefix, indent)?;
         let head_indent = indent + extra;
@@ -7939,18 +8171,24 @@ fn emit_js_contract_scope(
     let mut nested = String::new();
     emit_tir_js_body(body, &mut nested, funcs, file_prefix, indent + 1)?;
     let pad = "  ".repeat(indent);
-    let result = mangle_generated("result");
+    let result_carrier_mangled = mangle_generated("result_carrier");
+    let result_carrier = web_name(&result_carrier_mangled);
     if nested.contains("await ") {
-        out.push_str(&format!("{pad}const {result} = await (async () => {{\n"));
+        out.push_str(&format!("{pad}const {result_carrier} = await (async () => {{\n"));
     } else {
-        out.push_str(&format!("{pad}const {result} = (() => {{\n"));
+        out.push_str(&format!("{pad}const {result_carrier} = (() => {{\n"));
     }
     out.push_str(&nested);
     out.push_str(&format!("{pad}}})();\n"));
+    let result_mangled = mangle_generated("result");
+    let result = web_name(&result_mangled);
+    out.push_str(&format!(
+        "{pad}if (!{result_carrier} || {result_carrier}.tag !== \"Ok\") return {result_carrier};\n{pad}const {result} = \"value\" in {result_carrier} ? {result_carrier}.value : {result_carrier}.values?.[0];\n",
+    ));
     for contract in post {
         emit_js_contract_check(contract, out, funcs, file_prefix, indent)?;
     }
-    out.push_str(&format!("{pad}return {result};\n"));
+    out.push_str(&format!("{pad}return {result_carrier};\n"));
     Ok(())
 }
 
@@ -9153,16 +9391,30 @@ fn tir_js_expr(
                 ),
                 TIR::TTryConvert::None | TIR::TTryConvert::Never => "null".to_string(),
             };
-            format!(
+            let value = match js_emit_raw_call(inner, funcs, file_prefix)? {
+                Some(value) => value,
+                None => tir_js_expr(inner, funcs, file_prefix)?,
+            };
+            let thunk = if value.contains("await") {
+                format!("async () => ({value})")
+            } else {
+                format!("() => ({value})")
+            };
+            let tried = format!(
                 "jet_web_try({}, {}, {}, {}, {}, {}, {})",
-                tir_js_expr(inner, funcs, file_prefix)?,
+                thunk,
                 file,
                 line,
                 fn_name,
                 note,
                 converter,
                 crate::Codegen::TIR::try_target_is_default_error(inner, convert)
-            )
+            );
+            if value.contains("await") {
+                format!("await {tried}")
+            } else {
+                tried
+            }
         }
         E::OptionLift2 { f, a, b } => format!(
             "jet_option_lift2({}, {}, () => ({}))",
@@ -9242,7 +9494,12 @@ fn tir_js_expr(
             } else if is_wasm_export(&name, funcs) {
                 format!("await bridge_{name}({args})")
             } else {
-                format!("{name}({args})")
+                js_emit_known_call(
+                    &expr.ty,
+                    &name,
+                    format!("{name}({args})"),
+                    funcs,
+                )?
             }
         }
         E::ModuleCall { form, args, .. } => {
@@ -9256,7 +9513,12 @@ fn tir_js_expr(
             if is_wasm_export(&key, funcs) {
                 format!("await bridge_{key}({args})")
             } else {
-                format!("{key}({args})")
+                js_emit_known_call(
+                    &expr.ty,
+                    &key,
+                    format!("{key}({args})"),
+                    funcs,
+                )?
             }
         }
         E::Print(value) => {
@@ -9762,7 +10024,12 @@ fn tir_js_direct_call(
         } else if is_wasm_export(&key, funcs) {
             format!("await bridge_{key}({value})")
         } else {
-            format!("{key}({value})")
+            js_emit_known_call(
+                &expr.ty,
+                &key,
+                format!("{key}({value})"),
+                funcs,
+            )?
         }))
     };
     match &expr.kind {
@@ -10147,6 +10414,70 @@ fn is_wasm_export(name: &str, funcs: &[FuncWeb]) -> bool {
         .any(|f| f.key == name && f.marker == Some(WebPartitionMarker::WasmExport))
 }
 
+fn js_callee_returns_outcome(key: &str, funcs: &[FuncWeb]) -> Result<bool, ()> {
+    let mut callees = funcs.iter().filter(|f| f.key == key);
+    let Some(callee) = callees.next() else {
+        return Err(());
+    };
+    if callees.next().is_some() {
+        return Err(());
+    }
+    Ok(matches!(callee.tir.ret.as_ref(), Some(Type::Result { .. })))
+}
+
+fn js_emit_known_call(
+    expr_ty: &Type,
+    key: &str,
+    call: String,
+    funcs: &[FuncWeb],
+) -> Result<String, ()> {
+    if js_callee_returns_outcome(key, funcs)?
+        && !matches!(expr_ty, Type::Result { .. })
+    {
+        Ok(format!(
+            "jet_web_try({}, {}, 0, {}, null, null, false)",
+            if call.contains("await") {
+                format!("async () => ({call})")
+            } else {
+                format!("() => ({call})")
+            },
+            mangle_generated("source_file"),
+            mangle_generated("source_fn"),
+        ))
+    } else {
+        Ok(call)
+    }
+}
+
+fn js_emit_raw_call(
+    expr: &TIR::TExpr,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+) -> Result<Option<String>, ()> {
+    let (key, args) = match &expr.kind {
+        TIR::TExprKind::Call { name, args, .. } => {
+            (local_web_key(file_prefix, name), args)
+        }
+        TIR::TExprKind::ModuleCall { form, args, .. } => {
+            let key = match form {
+                TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
+                    qualified_web_key(rust_mod, rust_fn)
+                }
+                TIR::TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
+            };
+            (key, args)
+        }
+        _ => return Ok(None),
+    };
+    let args = tir_call_args(args, funcs, file_prefix)?;
+    if is_wasm_export(&key, funcs) {
+        Ok(Some(format!("await bridge_{key}({args})")))
+    } else {
+        let _ = js_callee_returns_outcome(&key, funcs)?;
+        Ok(Some(format!("{key}({args})")))
+    }
+}
+
 /// D-EXPOP1=A / D-EXPSEM1=A / D-FLOORDIV1=A: the wasm module runs the same
 /// arithmetic source as the native Prelude — the very same files, included
 /// verbatim. The adapter doors below marshal one tagged error wire into the
@@ -10326,6 +10657,13 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "            }\n",
     "            T::default()\n",
     "        }\n",
+    "    }\n",
+    "}\n\n",
+    "fn jet_wasm_export<T, R>(run: impl FnOnce() -> JetOutcome<T, JetErr>, success: impl FnOnce(T) -> R) -> R\n",
+    "where R: Default {\n",
+    "    match run() {\n",
+    "        Ok(value) => success(value),\n",
+    "        Err(error) => { jet_wasm_store_error(&error); R::default() }\n",
     "    }\n",
     "}\n\n",
     "fn jet_wasm_call_status(run: impl FnOnce() -> i32) -> i32 {\n",

@@ -26,6 +26,10 @@ mod fs_walk_kernel {
     include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
 }
 
+mod fs_ops_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/FSOps.rs");
+}
+
 mod env_config_prelude {
     include!("../../jet-codegen/src/Prelude/Core/EnvConfig.rs");
 }
@@ -359,6 +363,174 @@ fn ambient_env_config(args: &[CtValue], span: Span) -> Result<CtValue, Diagnosti
 /// sorted entry list; only the traversal strategy differs, and the shared
 /// kernel owns that. One arm serves both so the interpreter cannot answer a
 /// different set than AOT or the resident host (I9).
+struct InterpFileReader {
+    inner: std::io::BufReader<std::fs::File>,
+    path: String,
+}
+
+struct InterpStdinReader {
+    inner: std::io::BufReader<std::io::Stdin>,
+}
+
+thread_local! {
+    static INTERP_FILE_READERS: RefCell<Vec<InterpFileReader>> = RefCell::new(Vec::new());
+    static INTERP_STDIN_READERS: RefCell<Vec<InterpStdinReader>> = RefCell::new(Vec::new());
+}
+
+fn ambient_fs_open(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let Some(CtValue::Str(path)) = args.first() else {
+        return Err(unsupported("core.files.open path", span));
+    };
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return Ok(CtValue::failed(Box::new(io_error_at(
+            "Other",
+            "Read",
+            path,
+            "fault injected: FS.Read",
+        ))));
+    }
+    let reader = match fs_ops_kernel::jet_fs_open(path) {
+        Ok(file) => InterpFileReader {
+            inner: std::io::BufReader::new(file),
+            path: path.clone(),
+        },
+        Err(error) => {
+            return Ok(CtValue::failed(Box::new(io_error_at(
+                match error.kind() {
+                    std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+                        "InvalidInput"
+                    }
+                    std::io::ErrorKind::NotFound => "NotFound",
+                    std::io::ErrorKind::PermissionDenied => "PermissionDenied",
+                    std::io::ErrorKind::TimedOut => "TimedOut",
+                    std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => "Closed",
+                    _ => "Other",
+                },
+                "Read",
+                path,
+                error.to_string(),
+            ))));
+        }
+    };
+    let handle = INTERP_FILE_READERS.with(|readers| {
+        let mut readers = readers.borrow_mut();
+        let handle = readers.len() as i64;
+        readers.push(reader);
+        handle
+    });
+    Ok(CtValue::Present(Box::new(CtValue::Struct {
+        type_name: "FileReader".to_string(),
+        fields: vec![("handle".to_string(), CtValue::Int(handle))],
+    })))
+}
+
+fn ambient_stdin() -> CtValue {
+    let handle = INTERP_STDIN_READERS.with(|readers| {
+        let mut readers = readers.borrow_mut();
+        let handle = readers.len() as i64;
+        readers.push(InterpStdinReader {
+            inner: std::io::BufReader::new(std::io::stdin()),
+        });
+        handle
+    });
+    CtValue::Struct {
+        type_name: "StdinHandle".to_string(),
+        fields: vec![("handle".to_string(), CtValue::Int(handle))],
+    }
+}
+
+fn ambient_line_handle(
+    op: &str,
+    recv: &mut CtValue,
+    _args: &mut [CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if op == "FileReaderReadLine" {
+        let handle = process_field(recv, "handle").and_then(|value| match value {
+            CtValue::Int(value) if *value >= 0 => usize::try_from(*value).ok(),
+            _ => None,
+        });
+        let result = INTERP_FILE_READERS.with(|readers| {
+            let mut readers = readers.borrow_mut();
+            let Some(handle) = handle else {
+                return Err(unsupported("FileReader receiver", span));
+            };
+            let Some(reader) = readers.get_mut(handle) else {
+                return Err(unsupported("FileReader handle", span));
+            };
+            if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+                return Ok(CtValue::failed(Box::new(io_error_at(
+                    "Other",
+                    "Read",
+                    &reader.path,
+                    "fault injected: FS.Read",
+                ))));
+            }
+            let mut line = String::new();
+            match std::io::BufRead::read_line(&mut reader.inner, &mut line) {
+                Ok(0) => Ok(CtValue::Present(Box::new(CtValue::absent(Type::String)))),
+                Ok(_) => {
+                    while line.ends_with('\n') || line.ends_with('\r') {
+                        line.pop();
+                    }
+                    Ok(CtValue::Present(Box::new(CtValue::Present(Box::new(
+                        CtValue::Str(line),
+                    )))))
+                }
+                Err(error) => Ok(CtValue::failed(Box::new(io_error_at(
+                    "Other",
+                    "Read",
+                    &reader.path,
+                    error.to_string(),
+                )))),
+            }
+        });
+        return Some(result);
+    }
+    if op != "StdinReadLine" {
+        return None;
+    }
+    let handle = process_field(recv, "handle").and_then(|value| match value {
+        CtValue::Int(value) if *value >= 0 => usize::try_from(*value).ok(),
+        _ => None,
+    });
+    Some(INTERP_STDIN_READERS.with(|readers| {
+        let mut readers = readers.borrow_mut();
+        let Some(handle) = handle else {
+            return Err(unsupported("StdinHandle receiver", span));
+        };
+        let Some(reader) = readers.get_mut(handle) else {
+            return Err(unsupported("StdinHandle handle", span));
+        };
+        if crate::fault_injection::jet_fault_should_fail("IO.Read") {
+            return Ok(CtValue::failed(Box::new(io_error_at(
+                "Other",
+                "Read",
+                "stdin",
+                "fault injected: IO.Read",
+            ))));
+        }
+        let mut line = String::new();
+        match std::io::BufRead::read_line(&mut reader.inner, &mut line) {
+            Ok(0) => Ok(CtValue::Present(Box::new(CtValue::absent(Type::String)))),
+            Ok(_) => {
+                while line.ends_with('\n') || line.ends_with('\r') {
+                    line.pop();
+                }
+                Ok(CtValue::Present(Box::new(CtValue::Present(Box::new(
+                    CtValue::Str(line),
+                )))))
+            }
+            Err(error) => Ok(CtValue::failed(Box::new(io_error_at(
+                "Other",
+                "Read",
+                "stdin",
+                error.to_string(),
+            )))),
+        }
+    }))
+}
+
 fn ambient_fs_walk(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     let Some(CtValue::Str(path)) = args.first() else {
         return Err(unsupported("core.files walk path", span));
@@ -408,6 +580,72 @@ fn ambient_fs_walk(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> 
         }
         Err(error) => Ok(CtValue::failed(Box::new(error.clone()))),
     }
+}
+
+fn ambient_fs_rename(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let (Some(CtValue::Str(from)), Some(CtValue::Str(to))) = (args.first(), args.get(1)) else {
+        return Err(unsupported("core.files rename paths", span));
+    };
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return Ok(CtValue::failed(Box::new(io_error_at(
+            "Other",
+            "Write",
+            from,
+            "fault injected: FS.Write",
+        ))));
+    }
+    Ok(match fs_ops_kernel::jet_fs_rename(from, to) {
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(error) => CtValue::failed(Box::new(io_error_at(
+            match error.kind() {
+                std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+                    "InvalidInput"
+                }
+                std::io::ErrorKind::NotFound => "NotFound",
+                std::io::ErrorKind::PermissionDenied => "PermissionDenied",
+                std::io::ErrorKind::TimedOut => "TimedOut",
+                std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => "Closed",
+                _ => "Other",
+            },
+            "Write",
+            from,
+            error.to_string(),
+        ))),
+    })
+}
+
+fn ambient_fs_glob(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let Some(CtValue::Str(pattern)) = args.first() else {
+        return Err(unsupported("core.files glob pattern", span));
+    };
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return Ok(CtValue::failed(Box::new(io_error_at(
+            "Other",
+            "Read",
+            pattern,
+            "fault injected: FS.Read",
+        ))));
+    }
+    Ok(match fs_ops_kernel::jet_fs_glob(pattern) {
+        Ok(paths) => CtValue::Present(Box::new(CtValue::List(
+            paths.into_iter().map(CtValue::Str).collect(),
+        ))),
+        Err(error) => CtValue::failed(Box::new(io_error_at(
+            match error.kind() {
+                std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
+                    "InvalidInput"
+                }
+                std::io::ErrorKind::NotFound => "NotFound",
+                std::io::ErrorKind::PermissionDenied => "PermissionDenied",
+                std::io::ErrorKind::TimedOut => "TimedOut",
+                std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => "Closed",
+                _ => "Other",
+            },
+            "Read",
+            pattern,
+            error.to_string(),
+        ))),
+    })
 }
 
 /// D-MEM-SENTRY1: the ambient tier is a CtValue adapter only. Raw memory is
@@ -1751,6 +1989,18 @@ fn process_unit_outcome(result: Result<(), process_prelude::IOError>) -> CtValue
     }
 }
 
+fn process_line_outcome(
+    result: Result<Option<String>, process_prelude::IOError>,
+) -> CtValue {
+    match result {
+        Ok(Some(line)) => CtValue::Present(Box::new(CtValue::Present(Box::new(
+            CtValue::Str(line),
+        )))),
+        Ok(None) => CtValue::Present(Box::new(CtValue::absent(Type::String))),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
+    }
+}
+
 thread_local! {
     static INTERP_PROCESS_CHILDREN: RefCell<Vec<process_prelude::ProcessChild>> = RefCell::new(Vec::new());
 }
@@ -2036,7 +2286,14 @@ fn ambient_process_child_handle(
     let method = op.strip_prefix("ProcessChild:")?;
     if !matches!(
         method,
-        "id" | "wait" | "exited" | "kill" | "terminate" | "interrupt"
+        "id"
+            | "wait"
+            | "exited"
+            | "kill"
+            | "terminate"
+            | "interrupt"
+            | "stdout_line"
+            | "stderr_line"
     ) {
         return None;
     }
@@ -2065,6 +2322,14 @@ fn ambient_process_child_handle(
             process_unit_outcome(process_prelude::child_interrupt(child))
         })
         .ok_or_else(|| unsupported("ProcessChild receiver", span)),
+        "stdout_line" => with_process_child(recv, |child| {
+            process_line_outcome(process_prelude::stream_next_line(&child.stdout))
+        })
+        .ok_or_else(|| unsupported("ProcessChild stream receiver", span)),
+        "stderr_line" => with_process_child(recv, |child| {
+            process_line_outcome(process_prelude::stream_next_line(&child.stderr))
+        })
+        .ok_or_else(|| unsupported("ProcessChild stream receiver", span)),
         _ => unreachable!(),
     };
     Some(result)
@@ -3662,6 +3927,23 @@ pub fn ambient_core_call(
                 span,
             )));
         }
+        let Some(row) = jet_foundation::Syntax::core_call(module, method) else {
+            unreachable!("Core-call row disappeared during ambient projection")
+        };
+        match row.interpreter_route {
+            jet_foundation::Syntax::CoreCallInterpreterRoute::None => {
+                return Some(Err(unsupported(
+                    &format!("{}.{}(): no interpreter route is declared", module, method),
+                    span,
+                )));
+            }
+            // Pure and typed-intrinsic rows are dispatched by the shared
+            // evaluator. Keeping them out of this hook prevents a module
+            // string arm from becoming a second semantic route.
+            jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(_)
+            | jet_foundation::Syntax::CoreCallInterpreterRoute::TypedIntrinsic => return None,
+            jet_foundation::Syntax::CoreCallInterpreterRoute::Ambient => {}
+        }
     }
     if module == "core.log" {
         return Some(ambient_log_call(method, &args, span));
@@ -3673,8 +3955,17 @@ pub fn ambient_core_call(
         let value = args.first().cloned().unwrap_or(CtValue::Unit);
         return Some(Ok(keep_kernel::jet_keep(value)));
     }
-    if module == "core.files" && matches!(method, "walk" | "walk_parallel") {
-        return Some(ambient_fs_walk(&args, span));
+    if module == "core.files" {
+        match method {
+            "open" => return Some(ambient_fs_open(&args, span)),
+            "rename" => return Some(ambient_fs_rename(&args, span)),
+            "glob" => return Some(ambient_fs_glob(&args, span)),
+            "walk" | "walk_parallel" => return Some(ambient_fs_walk(&args, span)),
+            _ => {}
+        }
+    }
+    if module == "core.term" && method == "stdin" {
+        return Some(Ok(ambient_stdin()));
     }
     if module == "core.mem" {
         if let Some(result) =
@@ -5137,6 +5428,208 @@ fn interp_web_callback(
     receive.recv().unwrap_or(CtValue::Unit)
 }
 
+/// Native HTTP workers cannot call a Jet closure directly. They enqueue the
+/// request on this pump, and the evaluator calls the closure on its own stack
+/// before replying. The native HTTP Prelude still owns dispatch and response
+/// framing; this is only the host callback marshaller.
+struct InterpHttpCallbackPump {
+    sender: mpsc::Sender<InterpWebCallback>,
+    requests: Mutex<mpsc::Receiver<InterpWebCallback>>,
+    replies: Mutex<HashMap<i64, mpsc::SyncSender<CtValue>>>,
+}
+
+struct InterpHttpJob {
+    pump: Arc<InterpHttpCallbackPump>,
+    result: Mutex<mpsc::Receiver<Result<(), String>>>,
+}
+
+thread_local! {
+    static INTERP_HTTP_PUMP: RefCell<Option<Arc<InterpHttpCallbackPump>>> = const { RefCell::new(None) };
+}
+
+static INTERP_HTTP_JOBS: OnceLock<Mutex<Vec<Arc<InterpHttpJob>>>> = OnceLock::new();
+
+fn interp_http_pump() -> Arc<InterpHttpCallbackPump> {
+    INTERP_HTTP_PUMP.with(|slot| {
+        if let Some(pump) = slot.borrow().as_ref() {
+            return Arc::clone(pump);
+        }
+        let (sender, requests) = mpsc::channel();
+        let pump = Arc::new(InterpHttpCallbackPump {
+            sender,
+            requests: Mutex::new(requests),
+            replies: Mutex::new(HashMap::new()),
+        });
+        *slot.borrow_mut() = Some(Arc::clone(&pump));
+        pump
+    })
+}
+
+fn interp_http_jobs() -> &'static Mutex<Vec<Arc<InterpHttpJob>>> {
+    INTERP_HTTP_JOBS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn interp_http_job_value(index: usize) -> CtValue {
+    CtValue::Struct {
+        type_name: "__JetInterpHttpJob".to_string(),
+        fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+    }
+}
+
+fn interp_http_job(value: &CtValue) -> Option<Arc<InterpHttpJob>> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "__JetInterpHttpJob" {
+        return None;
+    }
+    let index = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+        _ => None,
+    })?;
+    interp_http_jobs().lock().ok()?.get(index).cloned()
+}
+
+fn interp_http_callback(
+    pump: &Arc<InterpHttpCallbackPump>,
+    callable: CtValue,
+    args: Vec<CtValue>,
+) -> CtValue {
+    let id = INTERP_WEB_CALLBACK_ID.fetch_add(1, Ordering::Relaxed);
+    let (reply, receive) = mpsc::sync_channel(1);
+    if pump
+        .sender
+        .send(InterpWebCallback {
+            id,
+            callable,
+            args,
+            reply,
+        })
+        .is_err()
+    {
+        return CtValue::Unit;
+    }
+    receive.recv().unwrap_or(CtValue::Unit)
+}
+
+fn start_interp_http_job(
+    run: impl FnOnce() -> Result<(), String> + Send + 'static,
+) -> CtValue {
+    let pump = interp_http_pump();
+    let (result_sender, result_receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = result_sender.send(run());
+    });
+    let job = Arc::new(InterpHttpJob {
+        pump,
+        result: Mutex::new(result_receiver),
+    });
+    let mut jobs = interp_http_jobs()
+        .lock()
+        .expect("interpreter HTTP job registry poisoned");
+    let index = jobs.len();
+    jobs.push(job);
+    interp_http_job_value(index)
+}
+
+fn interp_http_job_next(job: &Arc<InterpHttpJob>) -> CtValue {
+    let request = job
+        .pump
+        .requests
+        .lock()
+        .expect("interpreter HTTP request queue poisoned")
+        .recv_timeout(std::time::Duration::from_millis(5));
+    match request {
+        Ok(InterpWebCallback {
+            id,
+            callable,
+            args,
+            reply,
+        }) => {
+            job.pump
+                .replies
+                .lock()
+                .expect("interpreter HTTP reply queue poisoned")
+                .insert(id, reply);
+            return CtValue::Struct {
+                type_name: "__JetInterpHttpCallback".to_string(),
+                fields: vec![
+                    ("id".to_string(), CtValue::Int(id)),
+                    ("callable".to_string(), callable),
+                    ("args".to_string(), CtValue::List(args)),
+                ],
+            };
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            return CtValue::Struct {
+                type_name: "__JetInterpHttpDone".to_string(),
+                fields: vec![
+                    ("ok".to_string(), CtValue::Bool(false)),
+                    (
+                        "error".to_string(),
+                        CtValue::Str("HTTP callback queue closed".to_string()),
+                    ),
+                ],
+            }
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+    }
+    match job
+        .result
+        .lock()
+        .expect("interpreter HTTP job result poisoned")
+        .try_recv()
+    {
+        Ok(Ok(())) => CtValue::Struct {
+            type_name: "__JetInterpHttpDone".to_string(),
+            fields: vec![
+                ("ok".to_string(), CtValue::Bool(true)),
+                ("error".to_string(), CtValue::Str(String::new())),
+            ],
+        },
+        Ok(Err(error)) => CtValue::Struct {
+            type_name: "__JetInterpHttpDone".to_string(),
+            fields: vec![
+                ("ok".to_string(), CtValue::Bool(false)),
+                ("error".to_string(), CtValue::Str(error)),
+            ],
+        },
+        Err(mpsc::TryRecvError::Disconnected) => CtValue::Struct {
+            type_name: "__JetInterpHttpDone".to_string(),
+            fields: vec![
+                ("ok".to_string(), CtValue::Bool(false)),
+                (
+                    "error".to_string(),
+                    CtValue::Str("HTTP host job closed".to_string()),
+                ),
+            ],
+        },
+        Err(mpsc::TryRecvError::Empty) => CtValue::Unit,
+    }
+}
+
+fn interp_http_job_reply(
+    job: &Arc<InterpHttpJob>,
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let Some(CtValue::Int(id)) = args.first() else {
+        return Err(unsupported("HTTP callback id", span));
+    };
+    let value = args.get(1).cloned().unwrap_or(CtValue::Unit);
+    let reply = job
+        .pump
+        .replies
+        .lock()
+        .expect("interpreter HTTP reply queue poisoned")
+        .remove(id)
+        .ok_or_else(|| unsupported("HTTP callback reply id", span))?;
+    reply
+        .send(value)
+        .map(|_| CtValue::Unit)
+        .map_err(|_| unsupported("HTTP callback reply", span))
+}
+
 fn interp_web_page(value: CtValue) -> crate::Web::web_rt::JetWebPage {
     let CtValue::Struct { type_name, fields } = value else {
         return crate::Web::web_rt::jet_web_page(String::new(), String::new());
@@ -5350,6 +5843,9 @@ pub fn ambient_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(result) = ambient_line_handle(op, recv, args, span) {
+        return Some(result);
+    }
     if let Some(result) = jet_codegen::Comptime::EmailAdapter::ambient_handle(op, recv, args, span)
     {
         return Some(result);
@@ -6492,10 +6988,97 @@ fn ambient_http_server_call(
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
     match method {
+        "serve_once_listener" if args.len() == 2 => {
+            let listener = http_handle_id(
+                args.first()
+                    .ok_or_else(|| unsupported("core.http.server listener", span))?,
+                "TcpListener",
+            )
+            .ok_or_else(|| unsupported("core.http.server listener handle", span))?;
+            let mux = http_handle_id(
+                args.get(1)
+                    .ok_or_else(|| unsupported("core.http.server mux", span))?,
+                "HTTPMux",
+            )
+            .ok_or_else(|| unsupported("core.http.server mux handle", span))?;
+            Ok(start_interp_http_job(move || {
+                crate::net_http_rt::runtime_http_serve_once_listener(listener, mux)
+            }))
+        }
+        "serve_once" if args.len() == 2 => {
+            let address = match args.first() {
+                Some(CtValue::Str(address)) => address.clone(),
+                _ => return Err(unsupported("core.http.server serve_once address", span)),
+            };
+            let mux = http_handle_id(
+                args.get(1)
+                    .ok_or_else(|| unsupported("core.http.server mux", span))?,
+                "HTTPMux",
+            )
+            .ok_or_else(|| unsupported("core.http.server mux handle", span))?;
+            Ok(start_interp_http_job(move || {
+                crate::net_http_rt::runtime_http_serve_once(address, mux)
+            }))
+        }
+        "serve" if args.len() == 2 => {
+            let address = match args.first() {
+                Some(CtValue::Str(address)) => address.clone(),
+                _ => return Err(unsupported("core.http.server serve address", span)),
+            };
+            let mux = http_handle_id(
+                args.get(1)
+                    .ok_or_else(|| unsupported("core.http.server mux", span))?,
+                "HTTPMux",
+            )
+            .ok_or_else(|| unsupported("core.http.server mux handle", span))?;
+            Ok(start_interp_http_job(move || {
+                crate::net_http_rt::runtime_http_serve(address, mux)
+            }))
+        }
+        "bind" if args.len() == 2 => {
+            let address = match args.first() {
+                Some(CtValue::Str(address)) => address.clone(),
+                _ => return Err(unsupported("core.http.server bind address", span)),
+            };
+            let mux = http_handle_id(
+                args.get(1)
+                    .ok_or_else(|| unsupported("core.http.server mux", span))?,
+                "HTTPMux",
+            )
+            .ok_or_else(|| unsupported("core.http.server mux handle", span))?;
+            Ok(match crate::net_http_rt::runtime_http_server_bind(address, mux) {
+                Ok(handle) => CtValue::Present(Box::new(http_handle_value("HTTPServer", handle))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            })
+        }
         "mux" if args.is_empty() => Ok(http_handle_value(
             "HTTPMux",
             crate::net_http_rt::runtime_http_mux(),
         )),
+        "response" if args.len() == 2 => {
+            let status = match args.first() {
+                Some(CtValue::Int(status)) => *status,
+                _ => return Err(unsupported("core.http.server.response status", span)),
+            };
+            let body = match args.get(1) {
+                Some(CtValue::Str(body)) => body.clone(),
+                _ => return Err(unsupported("core.http.server.response body", span)),
+            };
+            Ok(http_handle_value(
+                "HTTPResponse",
+                crate::net_http_rt::runtime_http_response(status, body),
+            ))
+        }
+        "sse" if args.len() == 1 => {
+            let body = match args.first() {
+                Some(CtValue::Str(body)) => body.clone(),
+                _ => return Err(unsupported("core.http.server.sse body", span)),
+            };
+            Ok(http_handle_value(
+                "HTTPResponse",
+                crate::net_http_rt::runtime_http_sse(body),
+            ))
+        }
         "json" => {
             let status = match args.first() {
                 Some(CtValue::Int(n)) => *n,
@@ -6614,6 +7197,18 @@ fn ambient_http_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if op == "HTTPJobNext" {
+        let Some(job) = interp_http_job(recv) else {
+            return Some(Err(unsupported("HTTP interpreter job", span)));
+        };
+        return Some(Ok(interp_http_job_next(&job)));
+    }
+    if op == "HTTPJobReply" {
+        let Some(job) = interp_http_job(recv) else {
+            return Some(Err(unsupported("HTTP interpreter job", span)));
+        };
+        return Some(interp_http_job_reply(&job, args, span));
+    }
     if let Some(static_call) = op.strip_prefix("HTTPStatic:") {
         let Some((path, method)) = static_call.rsplit_once(':') else {
             return Some(Err(unsupported("HTTP nominal static adapter", span)));
@@ -6663,6 +7258,40 @@ fn ambient_http_handle(
             "HTTP client construction requires a host HTTP carrier marshaller",
             span,
         )));
+    }
+    if let Some(method) = op.strip_prefix("HTTPServer:HTTPMux:") {
+        if args.len() != 2 {
+            return Some(Err(unsupported(
+                "HTTPMux route requires path and callback",
+                span,
+            )));
+        }
+        let Some(CtValue::Str(pattern)) = args.first() else {
+            return Some(Err(unsupported("HTTPMux route path", span)));
+        };
+        let callable = args[1].clone();
+        let pump = interp_http_pump();
+        let callback: Arc<dyn Fn(CtValue) -> Result<CtValue, String> + Send + Sync> =
+            Arc::new(move |request| {
+                Ok(interp_http_callback(
+                    &pump,
+                    callable.clone(),
+                    vec![request],
+                ))
+            });
+        let Some(mux) = http_handle_id(recv, "HTTPMux") else {
+            return Some(Err(unsupported("HTTPMux route receiver", span)));
+        };
+        return Some(
+            crate::net_http_rt::runtime_http_mux_add_callback(
+                mux,
+                method.to_ascii_uppercase(),
+                pattern.clone(),
+                callback,
+            )
+            .map(|_| CtValue::Unit)
+            .map_err(|error| unsupported(&error, span)),
+        );
     }
     if !(op.starts_with("HTTPClient:") || op.starts_with("HTTPServer:")) {
         return None;
@@ -6874,6 +7503,23 @@ fn ambient_http_projection(
                 .map(|body| http_handle_value("HTTPBody", body))
                 .map_err(|error| unsupported(&error, span))
         }),
+        "HTTPServer:HTTPResponse:header" if args.len() == 2 => {
+            let Some(CtValue::Str(name)) = args.first() else {
+                return Some(Err(unsupported("HTTPResponse.header name", span)));
+            };
+            let Some(CtValue::Str(value)) = args.get(1) else {
+                return Some(Err(unsupported("HTTPResponse.header value", span)));
+            };
+            handle("HTTPResponse", "HTTPResponse.header receiver").and_then(|response| {
+                crate::net_http_rt::runtime_http_server_response_header(
+                    response,
+                    name.clone(),
+                    value.clone(),
+                )
+                .map(|response| http_handle_value("HTTPResponse", response))
+                .map_err(|error| unsupported(&error, span))
+            })
+        }
         "HTTPClient:HTTPResponse:header" if args.len() == 1 => {
             let Some(CtValue::Str(name)) = args.first() else {
                 return Some(Err(unsupported("HTTPResponse.header name", span)));
@@ -6957,9 +7603,8 @@ fn ambient_http_projection(
                     })
             })
         }
-        op if op.starts_with("HTTPServer:HTTPMux:")
-            || op.starts_with("HTTPServer:HTTPRouterRegister:") => Err(unsupported(
-            "HTTP server callback registration requires a host callback marshaller; interpreter cannot pass a Jet closure to the native server",
+        op if op.starts_with("HTTPServer:HTTPRouterRegister:") => Err(unsupported(
+            "HTTP router callback registration requires a host callback marshaller",
             span,
         )),
         op if op.starts_with("HTTPServer:Ws") || op.starts_with("HTTPClient:Ws") => Err(

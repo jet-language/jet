@@ -1554,15 +1554,11 @@ impl Type {
                         KnowledgeFact::Exactness(Exactness::Exact),
                     );
                 }
-                let lanes = match name.as_str() {
-                    "F32x4" => Some(4),
-                    "F64x2" => Some(2),
-                    _ => None,
-                };
+                let lanes = crate::Syntax::simd_lane_arity(name);
                 if let Some(lanes) = lanes {
                     vector.push(
                         crate::Registry::type_plane("Measure"),
-                        KnowledgeFact::Measure(Measure::literal("lane", lanes)),
+                        KnowledgeFact::Measure(Measure::literal("lane", lanes as u64)),
                     );
                 }
             }

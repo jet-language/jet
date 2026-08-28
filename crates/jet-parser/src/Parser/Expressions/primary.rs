@@ -5,6 +5,9 @@ use super::super::{
 
 impl<'a> Parser<'a> {
     pub(super) fn expr_primary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        if let Some(result) = self.simple_primary(allow_struct_lit) {
+            return result;
+        }
         match self.peek().kind.clone() {
             // D-SUBJECT-CALL1=A: keep the bare lower-case member atom in
             // the primary path so the ordinary postfix loop parses the
@@ -21,10 +24,6 @@ impl<'a> Parser<'a> {
                 ))
             }
             TokKind::KwLoop => self.yielding_loop_expr(),
-            TokKind::KwIt => {
-                let span = self.bump().span;
-                Ok(Expr::Ident(Syntax::KW_IT.to_string(), span))
-            }
             TokKind::Ident(name)
                 if name == Syntax::LIT_VALUE
                     && matches!(
@@ -48,17 +47,6 @@ impl<'a> Parser<'a> {
                     leading_dot: false,
                     span: full,
                 })
-            }
-            TokKind::KwNull => {
-                let span = self.bump().span;
-                return Ok(Expr::EnumLit {
-                    type_name: String::new(),
-                    variant: Syntax::LIT_NULL.to_string(),
-                    variant_span: Some(span),
-                    args: Vec::new(),
-                    leading_dot: false,
-                    span,
-                });
             }
             // D-VERDICT-1455-1: one marker read at expression position. The
             // shared reader takes the name — any name, open vocabulary
@@ -272,65 +260,9 @@ impl<'a> Parser<'a> {
                 ));
                 return self.expr_primary(allow_struct_lit);
             }
-            TokKind::Str(parts) => {
-                let span = self.bump().span;
-                self.str_expr_from_parts(parts, span)
-            }
-            TokKind::Int(n, raw) => {
-                let span = self.bump().span;
-                Ok(Expr::Int(n, span, None, Some(raw)))
-            }
-            TokKind::Float(v, raw) => {
-                let span = self.bump().span;
-                Ok(Expr::Float(v, span, false, Some(raw)))
-            }
-            // D-UNITLIT1: `500ms`, `12.50usd` — a numeric literal with a unit
-            // suffix. The lexer already separated the exponent form; anything
-            // reaching here as `UnitNumber` genuinely carries a suffix.
-            TokKind::UnitNumber { .. } => {
-                let tok = self.bump();
-                let TokKind::UnitNumber {
-                    raw,
-                    int,
-                    float,
-                    suffix,
-                } = tok.kind
-                else {
-                    unreachable!("guarded by the outer match above")
-                };
-                let span = tok.span;
-                // The suffix sits at the tail of the token's span (no space
-                // between the digits and the suffix — the lexer requires that).
-                let suffix_span = Span::new(span.end - suffix.len(), span.end);
-                Ok(Expr::UnitLit {
-                    raw,
-                    int,
-                    float,
-                    suffix,
-                    suffix_span,
-                    span,
-                })
-            }
-            TokKind::Char(ch) => {
-                let span = self.bump().span;
-                Ok(Expr::Char(ch, span))
-            }
-            TokKind::LBracket => self.list_or_map_lit(allow_struct_lit),
             TokKind::LBrace if allow_struct_lit && self.brace_starts_inferred_literal() => {
                 let start = self.peek().span.start;
                 self.struct_lit_inferred(start)
-            }
-            TokKind::KwTrue => {
-                let span = self.bump().span;
-                Ok(Expr::Bool(true, span))
-            }
-            TokKind::KwFalse => {
-                let span = self.bump().span;
-                Ok(Expr::Bool(false, span))
-            }
-            TokKind::KwSelf => {
-                let span = self.bump().span;
-                Ok(Expr::Ident(Syntax::KW_SELF.to_string(), span))
             }
             // S68 (D-SG2): `if` used as a value. Statement-position `if` is
             // handled earlier in `stmt`, so reaching here means expression use.
@@ -642,6 +574,78 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn simple_primary(&mut self, allow_struct_lit: bool) -> Option<Result<Expr, Diagnostic>> {
+        match self.peek().kind.clone() {
+            TokKind::LBracket => Some(self.list_or_map_lit(allow_struct_lit)),
+            TokKind::KwIt => {
+                let span = self.bump().span;
+                Some(Ok(Expr::Ident(Syntax::KW_IT.to_string(), span)))
+            }
+            TokKind::KwNull => {
+                let span = self.bump().span;
+                Some(Ok(Expr::EnumLit {
+                    type_name: String::new(),
+                    variant: Syntax::LIT_NULL.to_string(),
+                    variant_span: Some(span),
+                    args: Vec::new(),
+                    leading_dot: false,
+                    span,
+                }))
+            }
+            TokKind::Str(parts) => {
+                let span = self.bump().span;
+                Some(self.str_expr_from_parts(parts, span))
+            }
+            TokKind::Int(n, raw) => {
+                let span = self.bump().span;
+                Some(Ok(Expr::Int(n, span, None, Some(raw))))
+            }
+            TokKind::Float(v, raw) => {
+                let span = self.bump().span;
+                Some(Ok(Expr::Float(v, span, false, Some(raw))))
+            }
+            TokKind::UnitNumber { .. } => {
+                let tok = self.bump();
+                let TokKind::UnitNumber {
+                    raw,
+                    int,
+                    float,
+                    suffix,
+                } = tok.kind
+                else {
+                    unreachable!("guarded by the outer match above")
+                };
+                let span = tok.span;
+                let suffix_span = Span::new(span.end - suffix.len(), span.end);
+                Some(Ok(Expr::UnitLit {
+                    raw,
+                    int,
+                    float,
+                    suffix,
+                    suffix_span,
+                    span,
+                }))
+            }
+            TokKind::Char(ch) => {
+                let span = self.bump().span;
+                Some(Ok(Expr::Char(ch, span)))
+            }
+            TokKind::KwTrue => {
+                let span = self.bump().span;
+                Some(Ok(Expr::Bool(true, span)))
+            }
+            TokKind::KwFalse => {
+                let span = self.bump().span;
+                Some(Ok(Expr::Bool(false, span)))
+            }
+            TokKind::KwSelf => {
+                let span = self.bump().span;
+                Some(Ok(Expr::Ident(Syntax::KW_SELF.to_string(), span)))
+            }
+            _ => None,
+        }
+    }
+
     fn at_literal_head_path(&self) -> bool {
         let mut index = self.pos;
         while matches!(
@@ -916,6 +920,7 @@ impl<'a> Parser<'a> {
         for part in parts {
             match part {
                 StrTokPart::Lit(s) => out.push(StrPart::Lit(s)),
+                StrTokPart::Byte(byte) => out.push(StrPart::Lit(char::from(byte).to_string())),
                 StrTokPart::Interp(toks) => {
                     let mut sub = Parser {
                         toks: &toks,
@@ -1083,6 +1088,9 @@ impl<'a> Parser<'a> {
                                     sub.expect(TokKind::RParen, &after_precision)?;
                                     format = crate::AST::StrFormat::Fixed(precision);
                                 }
+                                crate::Syntax::InterpolationSelectorKind::Hex => {
+                                    format = Self::parse_hex_selector(&mut sub, &selector_head)?;
+                                }
                                 crate::Syntax::InterpolationSelectorKind::Unit => {
                                     let after_selector =
                                         format!("after `{selector_head}` in interpolation");
@@ -1166,5 +1174,33 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(Expr::Str(out, span))
+    }
+
+    fn parse_hex_selector(
+        sub: &mut Parser<'_>,
+        selector_head: &str,
+    ) -> Result<crate::AST::StrFormat, Diagnostic> {
+        let after_selector = format!("after `{selector_head}` in interpolation");
+        sub.expect(TokKind::LParen, &after_selector)?;
+        let width = match sub.bump() {
+            crate::Lexer::Token {
+                kind: TokKind::Int(value, _),
+                ..
+            } => value,
+            token => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected width inside `{selector_head}( )`"),
+                    format!(
+                        "`{selector_head}(n)` takes one nonnegative integer literal"
+                    ),
+                    format!("write a width such as `{selector_head}(16)`"),
+                    Some(token.span),
+                ));
+            }
+        };
+        let after_width = format!("after the width in `{selector_head}(n)`");
+        sub.expect(TokKind::RParen, &after_width)?;
+        Ok(crate::AST::StrFormat::Hex(width))
     }
 }

@@ -312,6 +312,7 @@ fn collect_interrupt_callback_scan(
                     crate::AST::TypedLitBody::Value(value) => {
                         work.push(InterruptScanTask::Expr(value));
                     }
+                    crate::AST::TypedLitBody::ByteText(_) => {}
                     crate::AST::TypedLitBody::Empty => {}
                 },
                 Expr::EnumLit { args, .. } => {
@@ -2404,7 +2405,19 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                     .unwrap_or(Type::Int);
                             let init = TExpr {
                                 ty: init_ty,
-                                kind: lower_comptime_scalar(b.ct.as_ref(), b.ty.as_ref())
+                                // A folded member value in an anonymous union has a
+                                // scalar `CtValue` (for example `Str`), but its runtime
+                                // carrier is the generated union enum. Do not let the
+                                // scalar shortcut erase that injection; bake the typed
+                                // enum fact below instead.
+                                kind: (!matches!(
+                                    b.ty.as_ref().map(Type::without_user_tags),
+                                    Some(Type::Union(_))
+                                ))
+                                    .then(|| {
+                                        lower_comptime_scalar(b.ct.as_ref(), b.ty.as_ref())
+                                    })
+                                    .flatten()
                                     .unwrap_or_else(|| {
                                         b.ct.as_ref()
                                             .map(|v| {

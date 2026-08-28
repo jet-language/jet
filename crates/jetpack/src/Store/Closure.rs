@@ -1,23 +1,16 @@
 use super::*;
-use jet_codegen::development_receipt::{
-    is_content_address, jet_development_receipt_render, JetDevelopmentReceipt,
-    JetDevelopmentReceiptInput,
+use super::Journal::{
+    append_entry, apply_entry, canonical_action_projection, closure_graph_structure_read_only,
+    compact_if_needed, journal_dir, load_graph, load_graph_structure_mode,
+    materialize_package_record, parse_entry, remove_package_record, store_entry_from_meta,
+    validate_graph_store_proofs, validate_graph_structure_mode, validate_record_store_proof,
+    JournalEntry, JournalKind, PARTIAL_SUFFIX, TXN_SUFFIX,
 };
-use std::io::Write as _;
-use std::sync::atomic::{AtomicU64, Ordering};
+use super::Receipt::{materialize_receipt, prepare_entry_receipt, recover_receipt_staging};
+#[cfg(test)]
+use super::Journal::{hex, sync_dir, transaction_paths, DB_DIR};
 
-const DB_DIR: &str = "closure-db";
-const JOURNAL_DIR: &str = "journal";
-const PARTIAL_SUFFIX: &str = ".partial";
-const TXN_SUFFIX: &str = ".txn";
-const COMPACT_AFTER: usize = 64;
 pub(crate) const RECEIPTS_DIR: &str = "receipts";
-const RECEIPT_PARTIAL_SUFFIX: &str = ".partial";
-const MAX_CLOSURE_OBJECTS: usize = 1_000_000;
-const MAX_CLOSURE_RECORDS: usize = 1_000_000;
-const MAX_CLOSURE_DELETIONS: usize = 1_000_000;
-const MAX_CLOSURE_TRANSACTIONS: usize = 100_000;
-static RECEIPT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DuEntry {
@@ -1069,7 +1062,10 @@ pub(super) fn validate_universe_references<'a>(
     Ok(())
 }
 
-fn validate_universe_isolation(graph: &ClosureGraph, allow_legacy: bool) -> Result<(), String> {
+pub(super) fn validate_universe_isolation(
+    graph: &ClosureGraph,
+    allow_legacy: bool,
+) -> Result<(), String> {
     for record in graph.records.values() {
         if allow_legacy && record.producer_record.is_empty() {
             continue;
@@ -1088,9 +1084,9 @@ fn validate_universe_isolation(graph: &ClosureGraph, allow_legacy: bool) -> Resu
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct CanonicalActionRecord {
-    outputs: BTreeMap<String, String>,
-    references: BTreeSet<String>,
+pub(super) struct CanonicalActionRecord {
+    pub(super) outputs: BTreeMap<String, String>,
+    pub(super) references: BTreeSet<String>,
 }
 
 impl ClosureGraph {
@@ -1219,20 +1215,6 @@ impl ClosureGraph {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum JournalKind {
-    Delta,
-    Snapshot,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct JournalEntry {
-    kind: JournalKind,
-    objects: Vec<ClosureObject>,
-    records: Vec<ClosureRecord>,
-    deleted_records: Vec<String>,
-}
-
 pub fn closure_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
     super::super::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         let (_, graph) = migrate_closure_graph_unlocked(roots)?;
@@ -1293,7 +1275,42 @@ pub(super) fn entry_closure_store_proof(
         .all(|digest| closure_object_rehashes(roots, graph, &digest))
 }
 
+
+/// Closure members already proven against their seals in this process. A
+/// 28-package env shares one toolchain closure; without this each package
+/// re-stat-walks every shared member (~28× the whole hangar). Entry-level
+/// verification (`try_entry_output_hash`) never consults this memo, so the
+/// sealed drift law for package outputs is unchanged; member drift is caught
+/// by the next command — the same trust window D-JPK-VERIFYONCE1=A ratified
+/// for stat-identical content. The set is keyed by (hangar root, digest), so
+/// a member replaced under a different digest never hits.
+static PROVEN_MEMBERS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashSet<(PathBuf, String)>>,
+> = std::sync::LazyLock::new(Default::default);
+
+pub(super) fn invalidate_proven_member(hangar: &Path, digest: &str) {
+    if let Ok(mut proven) = PROVEN_MEMBERS.lock() {
+        proven.remove(&(hangar.to_path_buf(), digest.to_string()));
+    }
+}
+
 fn closure_object_rehashes(roots: &Roots, graph: &ClosureGraph, digest: &str) -> bool {
+    let key = (roots.hangar_dir(), digest.to_string());
+    if let Ok(proven) = PROVEN_MEMBERS.lock() {
+        if proven.contains(&key) {
+            return true;
+        }
+    }
+    let ok = closure_object_rehashes_uncached(roots, graph, digest);
+    if ok {
+        if let Ok(mut proven) = PROVEN_MEMBERS.lock() {
+            proven.insert(key);
+        }
+    }
+    ok
+}
+
+fn closure_object_rehashes_uncached(roots: &Roots, graph: &ClosureGraph, digest: &str) -> bool {
     let Some(object) = graph.objects.get(digest) else {
         return false;
     };
@@ -1307,8 +1324,16 @@ fn closure_object_rehashes(roots: &Roots, graph: &ClosureGraph, digest: &str) ->
         let Some(meta) = parse_meta(&record.package_meta) else {
             return false;
         };
-        if !Ingest::try_entry_output_hash(roots, &store_entry_from_meta(&record.id, &meta))
-            .is_ok_and(|actual| actual == digest)
+        // Hash the owned object itself, not the owner's primary output: a
+        // multi-output record (`bashInteractive` man/doc, `util-linux` bin)
+        // owns members whose digests are not its primary hash.
+        let owner_entry = store_entry_from_meta(&record.id, &meta);
+        if !Ingest::verified_output_hash_persistent(
+            Path::new(&object.path),
+            Some(&roots.hangar_dir()),
+            !owner_entry.platform_artifact_kind.is_empty(),
+        )
+        .is_ok_and(|actual| actual == digest)
         {
             return false;
         }
@@ -1316,14 +1341,17 @@ fn closure_object_rehashes(roots: &Roots, graph: &ClosureGraph, digest: &str) ->
     if found_owner {
         return true;
     }
-    let path = Path::new(&object.path);
-    if fs::symlink_metadata(path)
-        .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
-    {
-        return Ingest::verified_file_hash(path).is_ok_and(|actual| actual == digest);
-    }
-    Ingest::verified_output_hash_persistent(path, Some(&roots.hangar_dir()), false)
-        .is_ok_and(|actual| actual == digest)
+    // Every admitted object — directory, regular-file, or symlink root — is
+    // named by its canonical output hash and sealed at admission. The old
+    // plain-bytes fast path predates file-root admission and returned a
+    // different digest for file roots, poisoning every closure that contains
+    // one (`jetpack env` re-substituted such packages on every run).
+    Ingest::verified_output_hash_persistent(
+        Path::new(&object.path),
+        Some(&roots.hangar_dir()),
+        false,
+    )
+    .is_ok_and(|actual| actual == digest)
 }
 
 pub fn direct_references_of(roots: &Roots, digest: &str) -> std::io::Result<Vec<String>> {
@@ -1437,13 +1465,110 @@ pub fn migrate_closure_graph(roots: &Roots) -> std::io::Result<usize> {
     })
 }
 
+/// Process-local cache of the structure-validated closure graph.
+///
+/// One `jetpack env` run loads the graph once per package per verification
+/// pass; each uncached load re-parses every journal transaction and
+/// re-verifies every signed receipt (measured: ~23 CPU-minutes for a
+/// 28-package env). The cache key is the complete on-disk WAL identity —
+/// every journal, receipt, and entry-meta (name, size, mtime) tuple — so a
+/// mutation from THIS process or any concurrent jetpack instance changes the
+/// stamp and forces a fresh load. Callers hold the hangar lock, so a stamp
+/// computed here cannot race a writer.
+static STRUCTURE_GRAPH_CACHE: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, (String, ClosureGraph)>>,
+> = std::sync::LazyLock::new(Default::default);
+
+fn stamp_mtime_ns(metadata: &fs::Metadata) -> i128 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        return i128::from(metadata.mtime()) * 1_000_000_000 + i128::from(metadata.mtime_nsec());
+    }
+    #[cfg(not(unix))]
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| {
+            i128::from(duration.as_secs()) * 1_000_000_000 + i128::from(duration.subsec_nanos())
+        })
+        .unwrap_or_default()
+}
+
+fn push_stat(table: &mut Vec<u8>, name: &std::ffi::OsStr, metadata: &fs::Metadata) {
+    table.extend_from_slice(name.as_encoded_bytes());
+    table.extend_from_slice(
+        format!("\t{}\t{}\n", metadata.len(), stamp_mtime_ns(metadata)).as_bytes(),
+    );
+}
+
+fn push_dir_stats(table: &mut Vec<u8>, dir: &Path) -> std::io::Result<()> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        push_stat(table, &entry.file_name(), &metadata);
+    }
+    Ok(())
+}
+
+fn wal_state_stamp(roots: &Roots) -> std::io::Result<String> {
+    let mut table = Vec::new();
+    push_dir_stats(&mut table, &journal_dir(roots))?;
+    push_dir_stats(&mut table, &roots.hangar_dir().join(RECEIPTS_DIR))?;
+    // Entry set: a new or deleted entry must invalidate, but the entry NAME
+    // alone is enough — meta content is authenticated against its immutable
+    // receipt on every load, and warm runs bump `last_used_at` (meta mtime)
+    // on every cached use, which would otherwise evict the cache mid-run.
+    let hangar = roots.hangar_dir();
+    if let Ok(entries) = fs::read_dir(&hangar) {
+        let mut names = Vec::new();
+        for entry in entries.flatten() {
+            if entry.path().join("meta.json").exists() {
+                names.push(entry.file_name());
+            }
+        }
+        names.sort();
+        for name in names {
+            table.extend_from_slice(name.as_encoded_bytes());
+            table.push(b'\n');
+        }
+    }
+    Ok(super::super::SHA256::sha256_hex(&table))
+}
+
 pub(super) fn migrate_closure_graph_unlocked(
     roots: &Roots,
 ) -> std::io::Result<(usize, ClosureGraph)> {
+    let stamp = wal_state_stamp(roots)?;
+    let cache = &*STRUCTURE_GRAPH_CACHE;
+    if let Ok(cache) = cache.lock() {
+        if let Some((cached_stamp, graph)) = cache.get(&roots.root) {
+            if *cached_stamp == stamp {
+                // The migration already ran and persisted; a cached load does
+                // no new work, so it reports zero migrated projections.
+                return Ok((0, graph.clone()));
+            }
+        }
+    }
     let (_, graph) = recover_closure_journal_graph_unlocked(roots)?;
     let mut entries = list_unlocked(roots)?;
     entries.sort_by(|left, right| left.id.cmp(&right.id));
-    migrate_closure_graph_from_entries(roots, graph, entries)
+    let (migrated, graph) = migrate_closure_graph_from_entries(roots, graph, entries)?;
+    // Recovery or migration may have rewritten WAL state; stamp the result so
+    // the next caller hits.
+    let stamp = wal_state_stamp(roots)?;
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(roots.root.clone(), (stamp, graph.clone()));
+    }
+    Ok((migrated, graph))
 }
 
 fn migrate_closure_graph_unlocked_ignoring(
@@ -1966,231 +2091,6 @@ fn recover_closure_journal_graph_unlocked(roots: &Roots) -> std::io::Result<(usi
     Ok((recovered, graph))
 }
 
-/// Prepare the immutable receipt before the closure WAL becomes authoritative.
-/// The caller keeps the returned digest in the package projection, so the
-/// in-memory result, `meta.json`, closure record, and project lock all name the
-/// same object.
-pub(super) fn prepare_entry_receipt(roots: &Roots, entry: &mut StoreEntry) -> std::io::Result<()> {
-    let (digest, _) = materialize_receipt(roots, entry)?;
-    entry.receipt = digest;
-    Ok(())
-}
-
-/// Prepare the package receipt and report whether this call published a new
-/// receipt file. The admission transaction uses the status for rollback;
-/// ordinary callers keep the simpler `prepare_entry_receipt` API.
-pub(super) fn prepare_entry_receipt_with_status(
-    roots: &Roots,
-    entry: &mut StoreEntry,
-) -> std::io::Result<bool> {
-    let (digest, wrote) = materialize_receipt(roots, entry)?;
-    entry.receipt = digest;
-    Ok(wrote)
-}
-
-/// Returns the receipt digest and whether this call actually wrote it. The
-/// recovery counter needs the second half: an already-present receipt is not a
-/// recovery, and the digest alone cannot tell the two apart.
-fn materialize_receipt(roots: &Roots, entry: &StoreEntry) -> std::io::Result<(String, bool)> {
-    let bytes = render_receipt(entry).into_bytes();
-    let digest = format!("sha256-{}", SHA256::sha256_hex(&bytes));
-    if !entry.receipt.is_empty() && entry.receipt != digest {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "Hangar receipt projection for `{}` names `{}`, expected `{}`",
-                entry.id, entry.receipt, digest
-            ),
-        ));
-    }
-    let receipts = roots.hangar_dir().join(RECEIPTS_DIR);
-    super::Ingest::ensure_real_directory(&receipts, "Hangar receipt directory")?;
-    let path = receipts.join(&digest);
-    match fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Hangar receipt `{digest}` is not a regular file; repair the receipt object"
-                ),
-            ));
-        }
-        Ok(_) => {
-            let actual = fs::read(&path)?;
-            if actual != bytes {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "Hangar receipt `{digest}` is corrupt; restore the exact object or remove the unreferenced receipt"
-                    ),
-                ));
-            }
-            return Ok((digest, false));
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-
-    let sequence = RECEIPT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let partial = receipts.join(format!(
-        ".{digest}-{}-{sequence}{RECEIPT_PARTIAL_SUFFIX}",
-        std::process::id()
-    ));
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&partial)?;
-    if let Err(error) = file.write_all(&bytes).and_then(|()| file.sync_all()) {
-        let _ = fs::remove_file(&partial);
-        return Err(error);
-    }
-    match fs::rename(&partial, &path) {
-        Ok(()) => {
-            sync_dir(&receipts)?;
-            Ok((digest, true))
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            let _ = fs::remove_file(&partial);
-            let actual = fs::read(&path)?;
-            if actual != bytes {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("Hangar receipt `{digest}` changed during publication"),
-                ));
-            }
-            Ok((digest, false))
-        }
-        Err(error) => {
-            let _ = fs::remove_file(&partial);
-            Err(error)
-        }
-    }
-}
-
-fn recover_receipt_staging(roots: &Roots) -> std::io::Result<usize> {
-    let receipts = roots.hangar_dir().join(RECEIPTS_DIR);
-    let Ok(metadata) = fs::symlink_metadata(&receipts) else {
-        return Ok(0);
-    };
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Hangar receipt directory is not a real directory; repair the path before recovery",
-        ));
-    }
-    let mut recovered = 0;
-    for item in fs::read_dir(&receipts)? {
-        let path = item?.path();
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-        if !name.starts_with('.') || !name.ends_with(RECEIPT_PARTIAL_SUFFIX) {
-            continue;
-        }
-        let metadata = fs::symlink_metadata(&path)?;
-        if metadata.file_type().is_symlink() || metadata.is_file() {
-            fs::remove_file(&path)?;
-        } else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Hangar receipt staging path `{}` is not removable",
-                    path.display()
-                ),
-            ));
-        }
-        recovered += 1;
-    }
-    if recovered > 0 {
-        sync_dir(&receipts)?;
-    }
-    Ok(recovered)
-}
-
-fn render_receipt(entry: &StoreEntry) -> String {
-    let mut inputs = vec![
-        receipt_input("package-name", &entry.name),
-        receipt_input("package-version", &entry.version),
-        receipt_input("reference", &entry.reference),
-        receipt_input(
-            "source-fingerprint",
-            &entry.cache_identity.source_fingerprint,
-        ),
-        receipt_input(
-            "recipe-fingerprint",
-            &entry.cache_identity.recipe_fingerprint,
-        ),
-        receipt_input(
-            "policy-fingerprint",
-            &entry.cache_identity.policy_fingerprint,
-        ),
-        receipt_input("platform", &entry.cache_identity.platform),
-        receipt_input("platform-artifact-kind", &entry.platform_artifact_kind),
-        receipt_input("producer-record", &entry.producer_record),
-    ];
-    if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
-        for (name, key) in [
-            ("catalog-tier", "nix.index.tier"),
-            ("catalog-trust", "nix.index.trust"),
-            ("signature-chain", "nix.index.signature-chain"),
-            ("fallback-provenance", "nix.fallback.provenance"),
-            ("fallback-request", "nix.fallback.request"),
-            ("fallback-policy", "nix.fallback.policy.receipt"),
-            ("fallback-graph", "nix.fallback.graph"),
-            ("fallback-losses", "nix.fallback.losses"),
-            ("fallback-proof", "nix.fallback.proof"),
-        ] {
-            if let Some(value) = producer.facts.get(key) {
-                inputs.push(receipt_input(name, value));
-            }
-        }
-    }
-    let references = entry.references.iter().collect::<BTreeSet<_>>();
-    for reference in references {
-        inputs.push(receipt_input("closure", reference));
-    }
-    let action = entry_action_key(entry);
-    let mut outputs = entry.named_outputs.clone();
-    outputs.insert("out".to_string(), entry.envelope.output_hash.clone());
-    let outputs = outputs
-        .into_iter()
-        .map(|(name, digest)| receipt_input(&name, &digest))
-        .collect();
-    let receipt = JetDevelopmentReceipt {
-        act: "package-realization".into(),
-        locked_closure: action.clone(),
-        inputs,
-        planned_action: action,
-        outputs,
-        activation_proof: String::new(),
-        parent_generation: String::new(),
-        witness: receipt_witness(),
-        outcome: "passed".into(),
-        failure_path: None,
-    };
-    jet_development_receipt_render(&receipt)
-}
-
-fn receipt_input(name: &str, value: &str) -> JetDevelopmentReceiptInput {
-    let digest = if is_content_address(value) {
-        value.to_owned()
-    } else {
-        format!("sha256-{}", SHA256::sha256_hex(value.as_bytes()))
-    };
-    JetDevelopmentReceiptInput {
-        name: name.to_owned(),
-        digest,
-    }
-}
-
-fn receipt_witness() -> String {
-    std::env::var("JET_RECEIPT_WITNESS")
-        .ok()
-        .filter(|witness| !witness.is_empty())
-        .unwrap_or_else(|| "jetpack".into())
-}
-
 fn descriptor_for_entry(
     roots: &Roots,
     entry: &StoreEntry,
@@ -2343,1237 +2243,4 @@ fn normalize_legacy_entry(mut entry: StoreEntry) -> std::io::Result<StoreEntry> 
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     entry.producer_record = producer.encode();
     Ok(entry)
-}
-
-fn load_graph(roots: &Roots) -> std::io::Result<ClosureGraph> {
-    load_graph_mode(roots, false)
-}
-
-/// Validate committed closure state without locking, replaying, compacting, or
-/// repairing its package projection.
-pub(crate) fn closure_graph_read_only(roots: &Roots) -> std::io::Result<ClosureGraph> {
-    let journal = journal_dir(roots);
-    match fs::read_dir(&journal) {
-        Ok(entries) => {
-            for entry in entries {
-                let entry = entry?;
-                if entry
-                    .file_name()
-                    .to_string_lossy()
-                    .ends_with(PARTIAL_SUFFIX)
-                {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "closure journal contains an incomplete transaction",
-                    ));
-                }
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(ClosureGraph::default());
-        }
-        Err(error) => return Err(error),
-    }
-    load_graph_mode(roots, true)
-}
-
-/// Read the closure structure without taking a lock or replaying a journal.
-/// Store proofs may be unavailable, but an explanation must never repair the
-/// projection merely to describe that loss.
-pub(crate) fn closure_graph_structure_read_only(roots: &Roots) -> std::io::Result<ClosureGraph> {
-    let journal = journal_dir(roots);
-    match fs::read_dir(&journal) {
-        Ok(entries) => {
-            for entry in entries {
-                let entry = entry?;
-                if entry
-                    .file_name()
-                    .to_string_lossy()
-                    .ends_with(PARTIAL_SUFFIX)
-                {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "closure journal contains an incomplete transaction",
-                    ));
-                }
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(ClosureGraph::default());
-        }
-        Err(error) => return Err(error),
-    }
-    load_graph_structure_mode(roots, true)
-}
-
-pub(super) fn lifecycle_inputs_unlocked(
-    roots: &Roots,
-) -> std::io::Result<(BTreeSet<String>, String)> {
-    recover_closure_journal_unlocked(roots)?;
-    let graph = load_graph_mode(roots, true)?;
-    let journal = journal_dir(roots);
-    let mut paths = transaction_paths(&journal)?;
-    paths.sort();
-    let mut canonical = b"jet-closure-head-v1\0".to_vec();
-    for path in paths {
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| std::io::Error::other("closure journal has a non-UTF-8 name"))?;
-        let bytes = fs::read(&path)?;
-        canonical.extend_from_slice(&(name.len() as u64).to_be_bytes());
-        canonical.extend_from_slice(name.as_bytes());
-        canonical.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
-        canonical.extend_from_slice(&bytes);
-    }
-    Ok((
-        graph.objects.into_keys().collect(),
-        format!("sha256-{}", SHA256::sha256_hex(&canonical)),
-    ))
-}
-
-fn load_graph_mode(roots: &Roots, allow_legacy: bool) -> std::io::Result<ClosureGraph> {
-    load_graph_mode_with_proofs(roots, allow_legacy, true)
-}
-
-fn load_graph_structure_mode(roots: &Roots, allow_legacy: bool) -> std::io::Result<ClosureGraph> {
-    load_graph_mode_with_proofs(roots, allow_legacy, false)
-}
-
-fn load_graph_mode_with_proofs(
-    roots: &Roots,
-    allow_legacy: bool,
-    validate_store_proofs: bool,
-) -> std::io::Result<ClosureGraph> {
-    let journal = journal_dir(roots);
-    let Ok(entries) = fs::read_dir(&journal) else {
-        return Ok(ClosureGraph::default());
-    };
-    let mut paths = Vec::new();
-    for entry in entries {
-        let path = entry?.path();
-        if path.extension().and_then(|ext| ext.to_str()) == Some("txn") {
-            if paths.len() >= MAX_CLOSURE_TRANSACTIONS {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("closure journal exceeds {MAX_CLOSURE_TRANSACTIONS} transactions"),
-                ));
-            }
-            paths.push(path);
-        }
-    }
-    paths.sort();
-    let mut graph = ClosureGraph::default();
-    for path in paths {
-        let entry = parse_entry(&fs::read_to_string(&path)?).map_err(|error| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("closure journal `{}`: {error}", path.display()),
-            )
-        })?;
-        let applied = entry.clone();
-        apply_entry(&mut graph, entry)
-            .and_then(|()| validate_applied_entry(roots, &graph, &applied, allow_legacy))
-            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    }
-    validate_graph_structure_mode(roots, &graph, allow_legacy)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    if validate_store_proofs {
-        validate_graph_store_proofs(roots, &graph, allow_legacy)
-            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    }
-    Ok(graph)
-}
-
-fn apply_entry(graph: &mut ClosureGraph, entry: JournalEntry) -> Result<(), String> {
-    if entry.objects.len() > MAX_CLOSURE_OBJECTS {
-        return Err(format!(
-            "closure transaction exceeds {MAX_CLOSURE_OBJECTS} objects"
-        ));
-    }
-    if entry.records.len() > MAX_CLOSURE_RECORDS {
-        return Err(format!(
-            "closure transaction exceeds {MAX_CLOSURE_RECORDS} records"
-        ));
-    }
-    if entry.deleted_records.len() > MAX_CLOSURE_DELETIONS {
-        return Err(format!(
-            "closure transaction exceeds {MAX_CLOSURE_DELETIONS} deleted records"
-        ));
-    }
-    if entry.kind != JournalKind::Snapshot {
-        let new_objects = entry
-            .objects
-            .iter()
-            .filter(|object| !graph.objects.contains_key(&object.digest))
-            .count();
-        if graph.objects.len().saturating_add(new_objects) > MAX_CLOSURE_OBJECTS {
-            return Err(format!(
-                "closure graph exceeds {MAX_CLOSURE_OBJECTS} objects"
-            ));
-        }
-        let deleted_records = entry
-            .deleted_records
-            .iter()
-            .filter(|id| graph.records.contains_key(*id))
-            .count();
-        let deleted_record_ids = entry
-            .deleted_records
-            .iter()
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        let mut record_count = graph.records.len().saturating_sub(deleted_records);
-        for record in &entry.records {
-            if !graph.records.contains_key(&record.id)
-                || deleted_record_ids.contains(record.id.as_str())
-            {
-                record_count = record_count.saturating_add(1);
-            }
-        }
-        if record_count > MAX_CLOSURE_RECORDS {
-            return Err(format!(
-                "closure graph exceeds {MAX_CLOSURE_RECORDS} records"
-            ));
-        }
-        if graph
-            .deleted_records
-            .len()
-            .saturating_add(entry.deleted_records.len())
-            > MAX_CLOSURE_DELETIONS
-        {
-            return Err(format!(
-                "closure graph exceeds {MAX_CLOSURE_DELETIONS} deleted records"
-            ));
-        }
-    }
-    if entry.kind == JournalKind::Snapshot {
-        *graph = ClosureGraph::default();
-    }
-    for id in entry.deleted_records {
-        graph.records.remove(&id);
-        graph.deleted_records.insert(id);
-    }
-    for object in entry.objects {
-        if let Some(existing) = graph.objects.get(&object.digest) {
-            if existing != &object {
-                return Err(format!(
-                    "closure object `{}` changed immutable descriptor",
-                    object.digest
-                ));
-            }
-        } else {
-            graph.objects.insert(object.digest.clone(), object);
-        }
-    }
-    let mut actions = BTreeMap::new();
-    for record in graph.records.values() {
-        merge_action_record(&mut actions, record)?;
-    }
-    for record in entry.records {
-        merge_action_record(&mut actions, &record)?;
-        graph.deleted_records.remove(&record.id);
-        graph.records.insert(record.id.clone(), record);
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-fn validate_graph(roots: &Roots, graph: &ClosureGraph) -> Result<(), String> {
-    validate_graph_mode(roots, graph, false)
-}
-
-#[cfg(test)]
-fn validate_graph_mode(
-    roots: &Roots,
-    graph: &ClosureGraph,
-    allow_legacy: bool,
-) -> Result<(), String> {
-    validate_graph_structure_mode(roots, graph, allow_legacy)?;
-    validate_graph_store_proofs(roots, graph, allow_legacy)
-}
-
-fn validate_graph_structure_mode(
-    roots: &Roots,
-    graph: &ClosureGraph,
-    allow_legacy: bool,
-) -> Result<(), String> {
-    let hangar = roots.hangar_dir();
-    for (digest, object) in &graph.objects {
-        if digest.is_empty() || digest != &object.digest || object.path.is_empty() {
-            return Err(format!("invalid closure object descriptor `{digest}`"));
-        }
-        let path = Path::new(&object.path);
-        if path
-            .components()
-            .any(|component| component == std::path::Component::ParentDir)
-        {
-            return Err(format!(
-                "closure object `{digest}` path contains parent traversal"
-            ));
-        }
-        let expected_external = !path.starts_with(&hangar);
-        if object.external != expected_external {
-            return Err(format!(
-                "closure object `{digest}` has invalid external marker"
-            ));
-        }
-    }
-    if let Some(id) = graph
-        .deleted_records
-        .iter()
-        .find(|id| id.is_empty() || graph.records.contains_key(*id))
-    {
-        return Err(format!("invalid deleted closure record `{id}`"));
-    }
-    let mut actions = BTreeMap::new();
-    for (id, record) in &graph.records {
-        if id.is_empty() || id != &record.id || record.action_key.is_empty() {
-            return Err(format!("invalid closure record `{id}`"));
-        }
-        if record.outputs.get("out") != Some(&record.primary) {
-            return Err(format!(
-                "closure record `{id}` primary is not its `out` output"
-            ));
-        }
-        for (name, digest) in &record.outputs {
-            if !valid_output_name(name) {
-                return Err(format!(
-                    "closure record `{id}` has invalid output name `{name}`"
-                ));
-            }
-            if !graph.objects.contains_key(digest) {
-                return Err(format!(
-                    "closure record `{id}` output `{name}` references missing object `{digest}`"
-                ));
-            }
-        }
-        if let Some(missing) = record
-            .references
-            .iter()
-            .find(|digest| !graph.objects.contains_key(*digest))
-        {
-            return Err(format!(
-                "closure record `{id}` references missing object `{missing}`"
-            ));
-        }
-        let legacy = record.producer_record.is_empty() && record.package_meta.is_empty();
-        if !allow_legacy || !legacy {
-            ProducerRecord::decode(&record.producer_record).map_err(|error| {
-                format!("closure record `{id}` has invalid producer record: {error}")
-            })?;
-            let meta = parse_meta(&record.package_meta)
-                .ok_or_else(|| format!("closure record `{id}` has invalid package metadata"))?;
-            validate_receipt_projection(roots, id, &meta, allow_legacy)?;
-            if record.action_key != entry_action_key(&store_entry_from_meta(id, &meta)) {
-                return Err(format!(
-                    "closure record `{id}` action key disagrees with package metadata"
-                ));
-            }
-            if meta.producer_record != record.producer_record {
-                return Err(format!(
-                    "closure record `{id}` package metadata disagrees with producer record"
-                ));
-            }
-            if meta.envelope.output_hash != record.primary || meta.named_outputs != record.outputs {
-                return Err(format!(
-                    "closure record `{id}` package metadata disagrees with outputs"
-                ));
-            }
-        }
-        merge_action_record(&mut actions, record)?;
-    }
-    validate_universe_isolation(graph, allow_legacy)?;
-    Ok(())
-}
-
-fn validate_applied_entry(
-    roots: &Roots,
-    graph: &ClosureGraph,
-    entry: &JournalEntry,
-    allow_legacy: bool,
-) -> Result<(), String> {
-    if entry.kind == JournalKind::Snapshot {
-        return validate_graph_structure_mode(roots, graph, allow_legacy);
-    }
-    let hangar = roots.hangar_dir();
-    for id in &entry.deleted_records {
-        if id.is_empty() || graph.records.contains_key(id) || !graph.deleted_records.contains(id) {
-            return Err(format!("invalid deleted closure record `{id}`"));
-        }
-    }
-    for object in &entry.objects {
-        let digest = &object.digest;
-        if digest.is_empty() || object.path.is_empty() {
-            return Err(format!("invalid closure object descriptor `{digest}`"));
-        }
-        let path = Path::new(&object.path);
-        if path
-            .components()
-            .any(|component| component == std::path::Component::ParentDir)
-        {
-            return Err(format!(
-                "closure object `{digest}` path contains parent traversal"
-            ));
-        }
-        if object.external != !path.starts_with(&hangar) {
-            return Err(format!(
-                "closure object `{digest}` has invalid external marker"
-            ));
-        }
-    }
-    for record in &entry.records {
-        let id = &record.id;
-        if id.is_empty() || record.action_key.is_empty() {
-            return Err(format!("invalid closure record `{id}`"));
-        }
-        if record.outputs.get("out") != Some(&record.primary) {
-            return Err(format!(
-                "closure record `{id}` primary is not its `out` output"
-            ));
-        }
-        for (name, digest) in &record.outputs {
-            if !valid_output_name(name) {
-                return Err(format!(
-                    "closure record `{id}` has invalid output name `{name}`"
-                ));
-            }
-            if !graph.objects.contains_key(digest) {
-                return Err(format!(
-                    "closure record `{id}` output `{name}` references missing object `{digest}`"
-                ));
-            }
-        }
-        if let Some(missing) = record
-            .references
-            .iter()
-            .find(|digest| !graph.objects.contains_key(*digest))
-        {
-            return Err(format!(
-                "closure record `{id}` references missing object `{missing}`"
-            ));
-        }
-        let legacy = record.producer_record.is_empty() && record.package_meta.is_empty();
-        if !allow_legacy || !legacy {
-            ProducerRecord::decode(&record.producer_record).map_err(|error| {
-                format!("closure record `{id}` has invalid producer record: {error}")
-            })?;
-            let meta = parse_meta(&record.package_meta)
-                .ok_or_else(|| format!("closure record `{id}` has invalid package metadata"))?;
-            validate_receipt_projection(roots, id, &meta, allow_legacy)?;
-            if record.action_key != entry_action_key(&store_entry_from_meta(id, &meta)) {
-                return Err(format!(
-                    "closure record `{id}` action key disagrees with package metadata"
-                ));
-            }
-            if meta.producer_record != record.producer_record {
-                return Err(format!(
-                    "closure record `{id}` package metadata disagrees with producer record"
-                ));
-            }
-            if meta.envelope.output_hash != record.primary || meta.named_outputs != record.outputs {
-                return Err(format!(
-                    "closure record `{id}` package metadata disagrees with outputs"
-                ));
-            }
-        }
-        canonical_action_projection(record)?;
-    }
-    Ok(())
-}
-
-fn validate_graph_store_proofs(
-    roots: &Roots,
-    graph: &ClosureGraph,
-    allow_legacy: bool,
-) -> Result<(), String> {
-    for record in graph.records.values() {
-        if !record.package_meta.is_empty() {
-            let meta = parse_meta(&record.package_meta).ok_or_else(|| {
-                format!(
-                    "closure record `{}` has invalid package metadata",
-                    record.id
-                )
-            })?;
-            validate_receipt_projection(roots, &record.id, &meta, allow_legacy)?;
-        }
-        validate_record_store_proof(roots, record, allow_legacy)?;
-    }
-    Ok(())
-}
-
-fn validate_receipt_projection(
-    roots: &Roots,
-    id: &str,
-    meta: &ParsedMeta,
-    allow_legacy: bool,
-) -> Result<(), String> {
-    if meta.receipt.is_empty() {
-        if allow_legacy {
-            return Ok(());
-        }
-        return Err(format!("closure record `{id}` has no Hangar receipt"));
-    }
-    if !valid_receipt_digest(&meta.receipt) {
-        return Err(format!(
-            "closure record `{id}` has an invalid Hangar receipt digest `{}`",
-            meta.receipt
-        ));
-    }
-    let entry = store_entry_from_meta(id, meta);
-    let expected_bytes = render_receipt(&entry).into_bytes();
-    let expected = format!("sha256-{}", SHA256::sha256_hex(&expected_bytes));
-    if meta.receipt != expected {
-        return Err(format!(
-            "closure record `{id}` receipt digest `{}` disagrees with `{expected}`",
-            meta.receipt
-        ));
-    }
-    let path = roots.hangar_dir().join(RECEIPTS_DIR).join(&meta.receipt);
-    let bytes = match fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound && allow_legacy => {
-            // Locked recovery materializes a missing immutable object from the
-            // authoritative closure record immediately after graph loading.
-            return Ok(());
-        }
-        Err(error) => {
-            return Err(format!(
-                "closure record `{id}` cannot read Hangar receipt `{}`: {error}",
-                path.display()
-            ));
-        }
-    };
-    if bytes != expected_bytes {
-        return Err(format!("closure record `{id}` Hangar receipt is corrupt"));
-    }
-    Ok(())
-}
-
-fn validate_record_store_proof(
-    roots: &Roots,
-    record: &ClosureRecord,
-    allow_legacy: bool,
-) -> Result<(), String> {
-    let legacy = record.producer_record.is_empty() && record.package_meta.is_empty();
-    if allow_legacy && legacy || !record.references.is_empty() {
-        return Ok(());
-    }
-    let producer = ProducerRecord::decode(&record.producer_record).map_err(|error| {
-        format!(
-            "closure record `{}` has invalid producer record: {error}",
-            record.id
-        )
-    })?;
-    let meta = parse_meta(&record.package_meta).ok_or_else(|| {
-        format!(
-            "closure record `{}` has invalid package metadata",
-            record.id
-        )
-    })?;
-    if store_validates_complete_closure(roots, record, &meta, &producer) {
-        Ok(())
-    } else {
-        Err(format!(
-            "closure record `{}` has no dependency references or store-validated closure proof",
-            record.id
-        ))
-    }
-}
-
-fn valid_output_name(name: &str) -> bool {
-    if name.bytes().any(|byte| matches!(byte, b'/' | b'\\')) {
-        return false;
-    }
-    let mut components = Path::new(name).components();
-    matches!(components.next(), Some(std::path::Component::Normal(_)))
-        && components.next().is_none()
-}
-
-fn merge_action_record(
-    actions: &mut BTreeMap<String, CanonicalActionRecord>,
-    record: &ClosureRecord,
-) -> Result<(), String> {
-    let projection = canonical_action_projection(record)?;
-    if let Some(action) = actions.get_mut(&record.action_key) {
-        merge_action_projection(action, &projection, &record.action_key)?;
-    } else {
-        actions.insert(record.action_key.clone(), projection);
-    }
-    Ok(())
-}
-
-fn canonical_action_projection(record: &ClosureRecord) -> Result<CanonicalActionRecord, String> {
-    if record.producer_record.is_empty() {
-        return Ok(CanonicalActionRecord {
-            outputs: record.outputs.clone(),
-            references: record.references.clone(),
-        });
-    }
-    let producer = ProducerRecord::decode(&record.producer_record).map_err(|error| {
-        format!(
-            "closure record `{}` has invalid producer record: {error}",
-            record.id
-        )
-    })?;
-    let outputs: BTreeMap<String, String> = if producer.provider == "nix" {
-        producer
-            .facts
-            .keys()
-            .filter_map(|key| key.strip_prefix("nix.output."))
-            .filter_map(|name| {
-                record
-                    .outputs
-                    .get(name)
-                    .map(|digest| (name.to_string(), digest.clone()))
-            })
-            .collect()
-    } else {
-        record.outputs.clone()
-    };
-    if outputs.is_empty() {
-        return Err(format!(
-            "closure record `{}` has no canonical action output projection",
-            record.id
-        ));
-    }
-    Ok(CanonicalActionRecord {
-        outputs,
-        references: record.references.clone(),
-    })
-}
-
-fn merge_action_projection(
-    action: &mut CanonicalActionRecord,
-    projection: &CanonicalActionRecord,
-    action_key: &str,
-) -> Result<(), String> {
-    if action.references != projection.references {
-        return Err(format!(
-            "action `{action_key}` has conflicting dependency references"
-        ));
-    }
-    for (name, digest) in &projection.outputs {
-        if let Some(existing) = action.outputs.get(name) {
-            if existing != digest {
-                return Err(format!(
-                    "action `{action_key}` output `{name}` maps to conflicting bytes `{existing}` and `{digest}`"
-                ));
-            }
-        } else {
-            action.outputs.insert(name.clone(), digest.clone());
-        }
-    }
-    Ok(())
-}
-
-fn store_validates_complete_closure(
-    roots: &Roots,
-    record: &ClosureRecord,
-    meta: &ParsedMeta,
-    producer: &ProducerRecord,
-) -> bool {
-    let output = Path::new(&meta.out);
-    let local = roots.hangar_dir().join(OBJECTS_DIR).join(&record.primary);
-    let authority = producer.facts.get("closure.authority").map(String::as_str);
-    match producer.provider.as_str() {
-        "core" => rehashes_as_recorded(roots, meta, record),
-        "adapter" | "cran" | "luarocks" if output == local => {
-            rehashes_as_recorded(roots, meta, record)
-        }
-        "hangar-ingest" if output == local && authority == Some("hangar-cas") => {
-            rehashes_as_recorded(roots, meta, record)
-        }
-        "store-record" if authority == Some("hangar-cas") => {
-            rehashes_as_recorded(roots, meta, record)
-        }
-        // A jetpackage release artifact is a complete native output with no
-        // dependency edges. Store registration has already canonicalized it
-        // into Hangar, so the same byte proof used by Core applies here.
-        "jetpackage" if output == local => rehashes_as_recorded(roots, meta, record),
-        "nix" if output == local => rehashes_as_recorded(roots, meta, record),
-        "nix" if output.starts_with("/nix/store") => {
-            let root = roots.hangar_dir().join(&record.id).join("nix-gc-root");
-            root.exists() && std::fs::canonicalize(root).ok() == std::fs::canonicalize(output).ok()
-        }
-        _ => false,
-    }
-}
-
-fn rehashes_as_recorded(roots: &Roots, meta: &ParsedMeta, record: &ClosureRecord) -> bool {
-    Ingest::try_entry_output_hash(roots, &store_entry_from_meta(&record.id, meta))
-        .is_ok_and(|actual| actual == record.primary)
-}
-
-fn store_entry_from_meta(id: &str, meta: &ParsedMeta) -> StoreEntry {
-    StoreEntry {
-        id: id.to_string(),
-        name: meta.name.clone(),
-        version: meta.version.clone(),
-        reference: meta.reference.clone(),
-        out: meta.out.clone(),
-        bin: meta.bin.clone(),
-        rlib: meta.rlib.clone(),
-        envelope: meta.envelope.clone(),
-        cache_identity: meta.cache_identity.clone(),
-        references: meta.references.clone(),
-        named_outputs: meta.named_outputs.clone(),
-        platform_artifact_kind: meta.platform_artifact_kind.clone(),
-        producer_record: meta.producer_record.clone(),
-        receipt: meta.receipt.clone(),
-        realized_at: meta.realized_at.unwrap_or(0),
-        last_used_at: meta.last_used_at.unwrap_or(0),
-    }
-}
-
-fn append_entry(roots: &Roots, entry: &JournalEntry) -> std::io::Result<PathBuf> {
-    let journal = journal_dir(roots);
-    ensure_directory_durable(&journal)?;
-    let sequence = next_sequence(&journal)?;
-    write_entry(&journal, sequence, entry)
-}
-
-fn compact_if_needed(roots: &Roots) -> std::io::Result<()> {
-    let journal = journal_dir(roots);
-    let mut paths = transaction_paths(&journal)?;
-    if paths.len() <= COMPACT_AFTER {
-        return Ok(());
-    }
-    let graph = load_graph_structure_mode(roots, false)?;
-    let snapshot = JournalEntry {
-        kind: JournalKind::Snapshot,
-        objects: graph.objects.into_values().collect(),
-        records: graph.records.into_values().collect(),
-        deleted_records: graph.deleted_records.into_iter().collect(),
-    };
-    let sequence = next_sequence(&journal)?;
-    write_entry(&journal, sequence, &snapshot)?;
-    paths.sort();
-    for path in paths {
-        fs::remove_file(path)?;
-    }
-    sync_dir(&journal)
-}
-
-fn write_entry(journal: &Path, sequence: u64, entry: &JournalEntry) -> std::io::Result<PathBuf> {
-    let text = render_entry(entry);
-    let checksum = SHA256::sha256_hex(text.as_bytes());
-    let final_path = journal.join(format!("{sequence:020}-{}.txn", &checksum[..16]));
-    let partial = journal.join(format!("{sequence:020}-{}.partial", &checksum[..16]));
-    fs::write(&partial, format!("{text}checksum\t{checksum}\n"))?;
-    fs::File::open(&partial)?.sync_all()?;
-    fs::rename(&partial, &final_path)?;
-    sync_dir(journal)?;
-    Ok(final_path)
-}
-
-fn materialize_package_record(roots: &Roots, record: &ClosureRecord) -> std::io::Result<bool> {
-    let dir = roots.hangar_dir().join(&record.id);
-    fs::create_dir_all(&dir)?;
-    let path = dir.join("meta.json");
-    if fs::read_to_string(&path).ok().as_deref() == Some(record.package_meta.as_str()) {
-        return Ok(false);
-    }
-    let tmp = dir.join(format!("meta.json.{}.partial", std::process::id()));
-    fs::write(&tmp, &record.package_meta)?;
-    fs::File::open(&tmp)?.sync_all()?;
-    #[cfg(windows)]
-    if path.exists() {
-        // std rename does not replace on Windows. The committed WAL remains
-        // authoritative if a crash lands between removal and publication;
-        // the next recovery recreates the exact projection.
-        fs::remove_file(&path)?;
-        sync_dir(&dir)?;
-    }
-    fs::rename(&tmp, &path)?;
-    sync_dir(&dir)?;
-    Ok(true)
-}
-
-fn remove_package_record(roots: &Roots, id: &str) -> std::io::Result<bool> {
-    let dir = roots.hangar_dir().join(id);
-    let path = dir.join("meta.json");
-    if !path.exists() {
-        return Ok(false);
-    }
-    fs::remove_file(path)?;
-    sync_dir(&dir)?;
-    Ok(true)
-}
-
-fn render_entry(entry: &JournalEntry) -> String {
-    let mut out = String::from("jet-closure-journal-v1\n");
-    out.push_str(match entry.kind {
-        JournalKind::Delta => "kind\tdelta\n",
-        JournalKind::Snapshot => "kind\tsnapshot\n",
-    });
-    let mut objects = entry.objects.clone();
-    objects.sort_by(|left, right| left.digest.cmp(&right.digest));
-    for object in objects {
-        out.push_str(&format!(
-            "object\t{}\t{}\t{}\n",
-            hex(&object.digest),
-            hex(&object.path),
-            u8::from(object.external),
-        ));
-    }
-    let mut records = entry.records.clone();
-    records.sort_by(|left, right| left.id.cmp(&right.id));
-    for record in records {
-        out.push_str(&format!(
-            "record\t{}\t{}\t{}\t{}\t{}\n",
-            hex(&record.id),
-            hex(&record.primary),
-            hex(&record.action_key),
-            hex(&record.producer_record),
-            hex(&record.package_meta),
-        ));
-        for (name, digest) in record.outputs {
-            out.push_str(&format!(
-                "output\t{}\t{}\t{}\n",
-                hex(&record.id),
-                hex(&name),
-                hex(&digest),
-            ));
-        }
-        for reference in record.references {
-            out.push_str(&format!(
-                "reference\t{}\t{}\n",
-                hex(&record.id),
-                hex(&reference),
-            ));
-        }
-    }
-    let mut deleted = entry.deleted_records.clone();
-    deleted.sort();
-    for id in deleted {
-        out.push_str(&format!("delete\t{}\n", hex(&id)));
-    }
-    out
-}
-
-fn parse_entry(raw: &str) -> Result<JournalEntry, String> {
-    let Some((body, checksum_line)) = raw.rsplit_once("checksum\t") else {
-        return Err("missing checksum".to_string());
-    };
-    let checksum = checksum_line
-        .strip_suffix('\n')
-        .ok_or_else(|| "truncated checksum frame".to_string())?;
-    if checksum.len() != 64
-        || !checksum
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
-    {
-        return Err("invalid checksum frame".to_string());
-    }
-    if SHA256::sha256_hex(body.as_bytes()) != checksum {
-        return Err("checksum mismatch".to_string());
-    }
-    let mut lines = body.lines();
-    if lines.next() != Some("jet-closure-journal-v1") {
-        return Err("unsupported journal version".to_string());
-    }
-    let kind = match lines.next() {
-        Some("kind\tdelta") => JournalKind::Delta,
-        Some("kind\tsnapshot") => JournalKind::Snapshot,
-        _ => return Err("missing journal kind".to_string()),
-    };
-    let mut objects = Vec::new();
-    let mut records: BTreeMap<String, ClosureRecord> = BTreeMap::new();
-    let mut deleted_records = Vec::new();
-    for line in lines {
-        let fields = line.split('\t').collect::<Vec<_>>();
-        match fields.as_slice() {
-            ["object", digest, path, external @ ("0" | "1")] => {
-                if objects.len() >= MAX_CLOSURE_OBJECTS {
-                    return Err(format!(
-                        "closure transaction exceeds {MAX_CLOSURE_OBJECTS} objects"
-                    ));
-                }
-                objects.push(ClosureObject {
-                    digest: unhex(digest)?,
-                    path: unhex(path)?,
-                    external: *external == "1",
-                });
-            }
-            ["record", id, primary, action_key, producer_record, package_meta] => {
-                let id = unhex(id)?;
-                if records.contains_key(&id) {
-                    return Err(format!("duplicate closure record `{id}`"));
-                }
-                if records.len() >= MAX_CLOSURE_RECORDS {
-                    return Err(format!(
-                        "closure transaction exceeds {MAX_CLOSURE_RECORDS} records"
-                    ));
-                }
-                records.insert(
-                    id.clone(),
-                    ClosureRecord {
-                        id,
-                        primary: unhex(primary)?,
-                        action_key: unhex(action_key)?,
-                        outputs: BTreeMap::new(),
-                        references: BTreeSet::new(),
-                        producer_record: unhex(producer_record)?,
-                        package_meta: unhex(package_meta)?,
-                    },
-                );
-            }
-            ["record", id, primary, action_key] => {
-                let id = unhex(id)?;
-                if records.contains_key(&id) {
-                    return Err(format!("duplicate closure record `{id}`"));
-                }
-                if records.len() >= MAX_CLOSURE_RECORDS {
-                    return Err(format!(
-                        "closure transaction exceeds {MAX_CLOSURE_RECORDS} records"
-                    ));
-                }
-                records.insert(
-                    id.clone(),
-                    ClosureRecord {
-                        id,
-                        primary: unhex(primary)?,
-                        action_key: unhex(action_key)?,
-                        outputs: BTreeMap::new(),
-                        references: BTreeSet::new(),
-                        producer_record: String::new(),
-                        package_meta: String::new(),
-                    },
-                );
-            }
-            ["output", id, name, digest] => {
-                let id = unhex(id)?;
-                let record = records
-                    .get_mut(&id)
-                    .ok_or_else(|| format!("output precedes record `{id}`"))?;
-                let name = unhex(name)?;
-                if record.outputs.contains_key(&name) {
-                    return Err(format!(
-                        "duplicate output `{name}` in closure record `{id}`"
-                    ));
-                }
-                record.outputs.insert(name, unhex(digest)?);
-            }
-            ["reference", id, digest] => {
-                let id = unhex(id)?;
-                let record = records
-                    .get_mut(&id)
-                    .ok_or_else(|| format!("reference precedes record `{id}`"))?;
-                record.references.insert(unhex(digest)?);
-            }
-            ["delete", id] => {
-                if deleted_records.len() >= MAX_CLOSURE_DELETIONS {
-                    return Err(format!(
-                        "closure transaction exceeds {MAX_CLOSURE_DELETIONS} deleted records"
-                    ));
-                }
-                deleted_records.push(unhex(id)?);
-            }
-            _ => return Err(format!("invalid journal line `{line}`")),
-        }
-    }
-    Ok(JournalEntry {
-        kind,
-        objects,
-        records: records.into_values().collect(),
-        deleted_records,
-    })
-}
-
-fn next_sequence(journal: &Path) -> std::io::Result<u64> {
-    Ok(transaction_paths(journal)?
-        .iter()
-        .filter_map(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .and_then(|name| name.get(..20))
-                .and_then(|sequence| sequence.parse::<u64>().ok())
-        })
-        .max()
-        .unwrap_or(0)
-        + 1)
-}
-
-fn transaction_paths(journal: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let Ok(entries) = fs::read_dir(journal) else {
-        return Ok(Vec::new());
-    };
-    let mut paths = Vec::new();
-    for entry in entries {
-        let path = entry?.path();
-        if path.extension().and_then(|ext| ext.to_str()) == Some("txn") {
-            if paths.len() >= MAX_CLOSURE_TRANSACTIONS {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("closure journal exceeds {MAX_CLOSURE_TRANSACTIONS} transactions"),
-                ));
-            }
-            paths.push(path);
-        }
-    }
-    Ok(paths)
-}
-
-fn journal_dir(roots: &Roots) -> PathBuf {
-    roots.hangar_dir().join(DB_DIR).join(JOURNAL_DIR)
-}
-
-fn sync_dir(path: &Path) -> std::io::Result<()> {
-    super::sync_store_directory(path)
-}
-
-fn ensure_directory_durable(path: &Path) -> std::io::Result<()> {
-    if path.is_dir() {
-        return Ok(());
-    }
-    let parent = path
-        .parent()
-        .ok_or_else(|| std::io::Error::other("closure database path has no parent"))?;
-    ensure_directory_durable(parent)?;
-    match fs::create_dir(path) {
-        Ok(()) => {
-            sync_dir(path)?;
-            sync_dir(parent)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-fn hex(value: &str) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(value.len() * 2);
-    for byte in value.as_bytes() {
-        out.push(DIGITS[(byte >> 4) as usize] as char);
-        out.push(DIGITS[(byte & 0x0f) as usize] as char);
-    }
-    out
-}
-
-fn valid_receipt_digest(value: &str) -> bool {
-    let Some(hex) = value.strip_prefix("sha256-") else {
-        return false;
-    };
-    hex.len() == 64
-        && hex
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
-}
-
-fn unhex(value: &str) -> Result<String, String> {
-    if !value.len().is_multiple_of(2) {
-        return Err("odd hex field".to_string());
-    }
-    let mut bytes = Vec::with_capacity(value.len() / 2);
-    for pair in value.as_bytes().chunks_exact(2) {
-        let high = nibble(pair[0])?;
-        let low = nibble(pair[1])?;
-        bytes.push((high << 4) | low);
-    }
-    String::from_utf8(bytes).map_err(|_| "journal field is not UTF-8".to_string())
-}
-
-fn nibble(byte: u8) -> Result<u8, String> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        _ => Err("invalid hex field".to_string()),
-    }
-}
-
-#[cfg(test)]
-mod integrity_tests {
-    use super::*;
-
-    fn checked(body: String) -> String {
-        let checksum = SHA256::sha256_hex(body.as_bytes());
-        format!("{body}checksum\t{checksum}\n")
-    }
-
-    fn nix_projection_record(
-        id: &str,
-        output_name: &str,
-        digest: &str,
-        reference: &str,
-    ) -> ClosureRecord {
-        let drv = "/nix/store/canonical-action.drv";
-        let output_path = format!("/nix/store/{digest}");
-        let producer = ProducerRecord::new(
-            "nix",
-            drv,
-            SHA256::sha256_hex(drv.as_bytes()),
-            crate::Comptime::Build::BuildPlanReplay::from_facts(BTreeMap::from([
-                ("nix.drv_path".into(), drv.into()),
-                ("nix.reference".into(), reference.into()),
-                (format!("nix.output.{output_name}"), output_path.clone()),
-            ]))
-            .unwrap(),
-            format!("nix-derivation:{drv}"),
-            "policy=test\nplatform=test",
-            BTreeMap::from([
-                ("nix.drv_path".into(), drv.into()),
-                (format!("nix.output.{output_name}"), output_path),
-            ]),
-        )
-        .unwrap()
-        .encode();
-        ClosureRecord {
-            id: id.into(),
-            primary: digest.into(),
-            action_key: "sha256-same-action".into(),
-            outputs: BTreeMap::from([
-                ("out".into(), digest.into()),
-                (output_name.into(), digest.into()),
-            ]),
-            references: BTreeSet::new(),
-            producer_record: producer,
-            package_meta: String::new(),
-        }
-    }
-
-    #[test]
-    fn canonical_action_merges_multi_output_alias_projections_and_rejects_conflicting_bytes() {
-        let out = nix_projection_record("alias-out", "out", "sha256-out", "pkg@nixpkgs");
-        let dev = nix_projection_record("alias-dev", "dev", "sha256-dev", "pkg.dev@stable");
-        let objects = ["sha256-out", "sha256-dev"]
-            .into_iter()
-            .map(|digest| ClosureObject {
-                digest: digest.into(),
-                path: format!("/nix/store/{digest}"),
-                external: true,
-            })
-            .collect();
-        let mut graph = ClosureGraph::default();
-        apply_entry(
-            &mut graph,
-            JournalEntry {
-                kind: JournalKind::Delta,
-                objects,
-                records: vec![out, dev],
-                deleted_records: Vec::new(),
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            graph.action_outputs("sha256-same-action"),
-            BTreeMap::from([
-                ("dev".into(), "sha256-dev".into()),
-                ("out".into(), "sha256-out".into()),
-            ])
-        );
-
-        let conflict = nix_projection_record(
-            "alias-dev-conflict",
-            "dev",
-            "sha256-other-dev",
-            "other:pkg.dev",
-        );
-        let mut actions = BTreeMap::new();
-        for record in graph.records.values() {
-            merge_action_record(&mut actions, record).unwrap();
-        }
-        assert!(merge_action_record(&mut actions, &conflict)
-            .unwrap_err()
-            .contains("conflicting bytes"));
-    }
-
-    #[test]
-    fn parser_rejects_duplicate_record_ids_and_output_names() {
-        let id = hex("record");
-        let primary = hex("sha256-primary");
-        let action = hex("sha256-action");
-        let duplicate_record = checked(format!(
-            "jet-closure-journal-v1\nkind\tdelta\nrecord\t{id}\t{primary}\t{action}\nrecord\t{id}\t{primary}\t{action}\n"
-        ));
-        assert!(parse_entry(&duplicate_record)
-            .unwrap_err()
-            .contains("duplicate closure record"));
-
-        let out = hex("out");
-        let duplicate_output = checked(format!(
-            "jet-closure-journal-v1\nkind\tdelta\nrecord\t{id}\t{primary}\t{action}\noutput\t{id}\t{out}\t{primary}\noutput\t{id}\t{out}\t{primary}\n"
-        ));
-        assert!(parse_entry(&duplicate_output)
-            .unwrap_err()
-            .contains("duplicate output"));
-    }
-
-    #[test]
-    fn parser_requires_exact_checksum_framing() {
-        let valid = checked("jet-closure-journal-v1\nkind\tdelta\n".to_string());
-        assert!(parse_entry(&valid).is_ok());
-        assert!(parse_entry(valid.trim_end())
-            .unwrap_err()
-            .contains("truncated"));
-
-        let mut trailing = valid.clone();
-        trailing.push('\n');
-        assert!(parse_entry(&trailing)
-            .unwrap_err()
-            .contains("invalid checksum frame"));
-
-        let upper = valid
-            .rsplit_once("checksum\t")
-            .unwrap()
-            .1
-            .to_ascii_uppercase();
-        let body = valid.rsplit_once("checksum\t").unwrap().0;
-        assert!(parse_entry(&format!("{body}checksum\t{upper}"))
-            .unwrap_err()
-            .contains("invalid checksum frame"));
-    }
-
-    #[test]
-    fn graph_validation_rejects_external_and_relation_inconsistency() {
-        let roots = Roots {
-            root: std::env::temp_dir()
-                .join(format!("jet-closure-integrity-{}", std::process::id())),
-            dev_mode: true,
-        };
-        let digest = "sha256-primary".to_string();
-        let object = ClosureObject {
-            digest: digest.clone(),
-            path: roots
-                .hangar_dir()
-                .join(OBJECTS_DIR)
-                .join(&digest)
-                .to_string_lossy()
-                .into_owned(),
-            external: true,
-        };
-        let record = ClosureRecord {
-            id: "record".to_string(),
-            primary: digest.clone(),
-            action_key: "sha256-action".to_string(),
-            outputs: BTreeMap::from([("out".to_string(), digest.clone())]),
-            references: BTreeSet::new(),
-            producer_record: String::new(),
-            package_meta: String::new(),
-        };
-        let mut graph = ClosureGraph {
-            objects: BTreeMap::from([(digest.clone(), object)]),
-            records: BTreeMap::from([(record.id.clone(), record)]),
-            deleted_records: BTreeSet::new(),
-        };
-        assert!(validate_graph(&roots, &graph)
-            .unwrap_err()
-            .contains("invalid external marker"));
-
-        graph.objects.get_mut(&digest).unwrap().external = false;
-        graph.records.get_mut("record").unwrap().primary = "sha256-other".to_string();
-        assert!(validate_graph(&roots, &graph)
-            .unwrap_err()
-            .contains("primary is not its `out` output"));
-
-        graph.records.get_mut("record").unwrap().primary = digest.clone();
-        graph
-            .records
-            .get_mut("record")
-            .unwrap()
-            .references
-            .insert("sha256-missing".to_string());
-        assert!(validate_graph(&roots, &graph)
-            .unwrap_err()
-            .contains("references missing object"));
-    }
 }

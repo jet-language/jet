@@ -9,6 +9,59 @@ pub(crate) fn jet_fmt_decimal(value: f64, precision: i64) -> String {
     comma_decimal(format!("{:.*}", precision, value))
 }
 
+/// D-FMT-INTERP3=B: convert an exact decimal integer spelling to lowercase
+/// hexadecimal, then zero-pad its digits to the requested width. The caller
+/// supplies the carrier's decimal spelling so the same kernel handles native
+/// small and spilled `Int` values.
+pub(crate) fn jet_fmt_hex_decimal(value: &str, width: i64) -> String {
+    let value = value.trim();
+    let (negative, digits) = if let Some(rest) = value.strip_prefix('-') {
+        (true, rest)
+    } else if let Some(rest) = value.strip_prefix('+') {
+        (false, rest)
+    } else {
+        (false, value)
+    };
+    let mut decimal = digits
+        .bytes()
+        .map(|digit| digit.wrapping_sub(b'0'))
+        .collect::<Vec<_>>();
+    if decimal.is_empty() || decimal.iter().any(|digit| *digit > 9) {
+        return value.to_string();
+    }
+    while decimal.len() > 1 && decimal[0] == 0 {
+        decimal.remove(0);
+    }
+
+    let mut hexadecimal = Vec::new();
+    while decimal.iter().any(|digit| *digit != 0) {
+        let mut carry = 0u16;
+        let mut quotient = Vec::with_capacity(decimal.len());
+        for digit in decimal {
+            let current = carry * 10 + u16::from(digit);
+            let next = current / 16;
+            carry = current % 16;
+            if !quotient.is_empty() || next != 0 {
+                quotient.push(next as u8);
+            }
+        }
+        hexadecimal.push(b"0123456789abcdef"[carry as usize] as char);
+        decimal = quotient;
+    }
+    if hexadecimal.is_empty() {
+        hexadecimal.push('0');
+    } else {
+        hexadecimal.reverse();
+    }
+    let hexadecimal = hexadecimal.into_iter().collect::<String>();
+    let padding = "0".repeat((width.max(0) as usize).saturating_sub(hexadecimal.len()));
+    if negative && hexadecimal != "0" {
+        format!("-{padding}{hexadecimal}")
+    } else {
+        format!("{padding}{hexadecimal}")
+    }
+}
+
 /// D-FMT-PRETTY1=A: expand canonical Debug text without inspecting terminal
 /// width. Strings are skipped while scanning, so braces in a string value do
 /// not become structure. The canonical Debug renderer already owns field

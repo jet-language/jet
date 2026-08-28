@@ -4,12 +4,15 @@
 use crate::Diagnostics::Span;
 use crate::Syntax;
 
-/// One piece of a string literal: literal text (escapes already decoded)
-/// or an interpolated expression, pre-lexed into its own token stream
-/// with spans into the original source (S8).
+/// One piece of a string literal: literal text (escapes already decoded), an
+/// explicit byte escape, or an interpolated expression pre-lexed into its own
+/// token stream with spans into the original source (S8).
 #[derive(Debug, Clone, PartialEq)]
 pub enum StrTokPart {
     Lit(String),
+    /// D-BYTELIT1=B: `\xNN` inside a `[U8]{ "..." }` body. Keep the byte
+    /// before it becomes a Rust/Unicode string so values above ASCII survive.
+    Byte(u8),
     Interp(Vec<Token>),
 }
 

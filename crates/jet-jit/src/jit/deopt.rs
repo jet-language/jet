@@ -446,11 +446,20 @@ fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
         },
     );
     let ms = started.elapsed().as_secs_f64() * 1000.0;
+    // Preserve the first lowering gap that caused the tier transition. A
+    // whole-program interpreter run is a consequence of that gap, not its
+    // diagnosis; replacing it here made corpus trace evidence unactionable.
+    let gap_reason = plan
+        .gap
+        .as_ref()
+        .map(|gap| gap.reason.as_str())
+        .filter(|reason| !reason.is_empty())
+        .unwrap_or("whole-program deopt");
     let mut rows = plan.rows.clone();
     for row in &mut rows {
         row.tier = Tier::Interp;
         if row.reason.is_empty() {
-            row.reason = "whole-program deopt".into();
+            row.reason = gap_reason.into();
         }
         row.millis = ms;
     }
@@ -466,7 +475,8 @@ fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
                 .gap
                 .as_ref()
                 .map(|g| g.reason.clone())
-                .unwrap_or_else(|| "whole-program deopt".into()),
+                .filter(|reason| !reason.is_empty())
+                .unwrap_or_else(|| gap_reason.into()),
             millis: ms,
         });
     }

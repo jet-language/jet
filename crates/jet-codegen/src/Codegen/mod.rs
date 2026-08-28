@@ -275,6 +275,56 @@ const OUTCOME_SOURCE: &str = include_str!("../../../jet-foundation/src/Outcome.r
 const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
 const HOST_RUNTIME_STOP_END: &str = "// JET_HOST_RUNTIME_STOP_END";
 
+/// Embedded Prelude parts are a dependency graph, not a list of incidental
+/// imports. A root part pulls in every transitive part it names before its own
+/// source. Web and native emission use the same closure for the fixed
+/// Outcome/report seam, so a boundary signature cannot strand a dependency.
+enum EmbeddedPreludePartSource {
+    Static(&'static str),
+    Outcome,
+}
+
+struct EmbeddedPreludePart {
+    name: &'static str,
+    dependencies: &'static [&'static str],
+    source: EmbeddedPreludePartSource,
+}
+
+const EMBEDDED_PRELUDE_PARTS: &[EmbeddedPreludePart] = &[
+    EmbeddedPreludePart {
+        name: "encoding_errors",
+        dependencies: &[],
+        source: EmbeddedPreludePartSource::Static(concat!(
+            "\nmod jet_encoding_errors {\n",
+            include_str!("../../../jet-foundation/src/EncodingErrors.rs"),
+            "\n}\n"
+        )),
+    },
+    EmbeddedPreludePart {
+        name: "json_number",
+        dependencies: &[],
+        source: EmbeddedPreludePartSource::Static(concat!(
+            "\nmod jet_json_number {\n",
+            include_str!("../../../jet-foundation/src/JSONNumber.rs"),
+            "\n}\n"
+        )),
+    },
+    EmbeddedPreludePart {
+        name: "encoding_json",
+        dependencies: &["encoding_errors", "json_number"],
+        source: EmbeddedPreludePartSource::Static(concat!(
+            "\nmod jet_encoding_json {\n",
+            include_str!("../../../jet-foundation/src/EncodingJson.rs"),
+            "\n}\n\n#[allow(non_snake_case)]\nmod EncodingJson { pub use crate::jet_encoding_json::*; }\n"
+        )),
+    },
+    EmbeddedPreludePart {
+        name: "outcome",
+        dependencies: &["encoding_json"],
+        source: EmbeddedPreludePartSource::Outcome,
+    },
+];
+
 /// Native builders split this exact block into the content-addressed runtime
 /// rlib. Keep the markers stable: emitted Rust remains a complete standalone
 /// program, while the AOT link seam can replace the block with one `--extern`.
@@ -290,6 +340,30 @@ fn push_prelude(out: &mut String) {
         } else {
             out.push_str(part);
         }
+    }
+}
+
+fn push_prelude_dependency_closure(out: &mut String, roots: &[&str]) {
+    let mut emitted = HashSet::new();
+    for root in roots {
+        push_prelude_part(out, root, &mut emitted);
+    }
+}
+
+fn push_prelude_part(out: &mut String, name: &str, emitted: &mut HashSet<&'static str>) {
+    let part = EMBEDDED_PRELUDE_PARTS
+        .iter()
+        .find(|part| part.name == name)
+        .unwrap_or_else(|| panic!("unknown embedded Prelude part `{name}`"));
+    if !emitted.insert(part.name) {
+        return;
+    }
+    for dependency in part.dependencies {
+        push_prelude_part(out, dependency, emitted);
+    }
+    match &part.source {
+        EmbeddedPreludePartSource::Static(source) => out.push_str(source),
+        EmbeddedPreludePartSource::Outcome => push_embedded_outcome(out),
     }
 }
 
@@ -452,20 +526,7 @@ fn push_cached_runtime_body(out: &mut String, link: Option<&FfiLink>) {
     // `Outcome::from_json` is fixed-runtime code. Keep its parser and error
     // vocabulary in the same cached rlib instead of the optional Core closure;
     // the latter is a separate crate when native runtime reuse is active.
-    out.push_str("\nmod jet_encoding_errors {\n");
-    out.push_str(include_str!(
-        "../../../jet-foundation/src/EncodingErrors.rs"
-    ));
-    out.push_str("\n}\n");
-    out.push_str("\nmod jet_json_number {\n");
-    out.push_str(include_str!("../../../jet-foundation/src/JSONNumber.rs"));
-    out.push_str("\n}\n");
-    out.push_str("\nmod jet_encoding_json {\n");
-    out.push_str(include_str!("../../../jet-foundation/src/EncodingJson.rs"));
-    out.push_str("\n}\n");
-    out.push_str(
-        "\n#[allow(non_snake_case)]\nmod EncodingJson { pub use crate::jet_encoding_json::*; }\n",
-    );
+    push_prelude_dependency_closure(out, &["encoding_json"]);
     push_prelude(out);
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(out);
@@ -1204,6 +1265,11 @@ fn push_corelib_prelude_body(
     used_core: &std::collections::HashSet<String>,
     omit_testing_shared: bool,
 ) {
+    // D-SIMD1/D-SIMD2/D-SIMD3 / I9: MathTaskMem's fixed-array lane values
+    // call this root-level kernel. JIT and TIR/comptime include the same
+    // source directly and marshal their resident carriers into its slice API.
+    out.push_str(include_str!("../Prelude/Core/SimdLanes.rs"));
+    out.push('\n');
     // JetStd Open/CommonTypes + EncodingStream/Codecs name these foundation
     // modules unconditionally — always emit them with the Core kernel.
     out.push_str("\nmod jet_xml_pull {\n");
@@ -1546,6 +1612,7 @@ fn push_corelib_prelude_body(
         // D-CONFIG-ENV1 / I9: source overlay and dotenv parsing are one
         // Prelude fragment for AOT and the interpreter ambient adapter.
         out.push_str(include_str!("../Prelude/Core/EnvConfig.rs"));
+        out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
         // #1465: identity / release / POSIX control — after FSIoEnvOsTesting so
         // jet_std_os_pid / env helpers and jet_std_process_exit stay in scope.
@@ -1574,6 +1641,7 @@ fn push_corelib_prelude_body(
     }
     if needs_fmt {
         out.push_str(include_str!("../Prelude/Core/Fmt.rs"));
+        out.push_str(include_str!("../Prelude/Core/FmtAot.rs"));
     }
     if needs_data_fmt {
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));

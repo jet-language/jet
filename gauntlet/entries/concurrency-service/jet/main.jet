@@ -1,0 +1,52 @@
+use core.net as net
+use core.process as process
+use core.time as time
+
+fn work(value: Int) Int -> {
+    time.sleep(1ms)
+    return value * value
+}
+
+fn run_batch(count: Int) Int -> {
+    (sender, receiver) :: channel<Int>()
+    total := 0
+    task.group _workers(limit: 4) {
+        loop value in 1..count {
+            job :: value + 0
+            tx :: ~sender
+            handle :: task { tx.send(work(job)) }
+            handle.detach()
+        }
+        loop _ in 0..<count -> total += receiver.receive() ?? 0
+    }
+    sender.close()
+    return total
+}
+
+fn response(command: String) String -> {
+    if command == "ready" -> return "ready"
+    if command == "shutdown" -> return "bye"
+    if command.starts_with("batch ") {
+        count :: Int.parse(command.after("batch ")) ?? 0
+        if count > 0 && count <= 32 -> return "batch {count} total {run_batch(count)}"
+    }
+    return "error"
+}
+
+fn run() {
+    port :: process.argv().get(1) ?? "18080"
+    listener :: net.tcp_listen("127.0.0.1:{port}")
+    stopping := false
+    loop {
+        stream :: listener.accept()
+        request :: stream.read_text(1024)
+        command_view :: request.trim()
+        command :: "{command_view}"
+        should_stop :: command == "shutdown"
+        reply :: response(command)
+        stream.write_text("{reply}\n")
+        stream.close()
+        if should_stop -> stopping = true
+        if stopping -> break
+    }
+}

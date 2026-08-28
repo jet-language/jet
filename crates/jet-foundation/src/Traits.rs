@@ -2179,6 +2179,13 @@ impl TraitRegistry {
             self.auto_equatable.insert(ty.to_string());
             self.auto_debug.insert(ty.to_string());
         }
+        // D-SIMD3: every named lane is a first-party value with the same
+        // display and debug floor as the original lane pair. Equality uses
+        // the closed math operator path; these floats cannot promise Rust Eq.
+        for ty in crate::Syntax::SIMD_LANE_TYPE_NAMES {
+            self.auto_printable.insert((*ty).to_string());
+            self.auto_debug.insert((*ty).to_string());
+        }
     }
 
     /// D-SHAPE-RESOURCE2=A: one nominal consuming cleanup protocol. The
@@ -3043,8 +3050,21 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
         Type::Bool => "bool".to_string(),
         Type::String => "String".to_string(),
         Type::Char => "char".to_string(),
+        Type::IntN { signed, bits } => format!("{}{}", if *signed { 'i' } else { 'u' }, bits),
+        Type::Float32 => "f32".to_string(),
         Type::List(inner) => format!("Vec<{}>", rust_type_name_assoc(inner, assoc)),
+        Type::FixedList { elem, len, .. } => {
+            format!("[{}; {len}]", rust_type_name_assoc(elem, assoc))
+        }
+        Type::Result { ok, err } => format!(
+            "JetOutcome<{}, {}>",
+            rust_type_name_assoc(ok, assoc),
+            rust_type_name_assoc(err, assoc)
+        ),
         Type::Named(n) if n.is_empty() => "Self".to_string(),
+        Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE => "()".to_string(),
+        Type::Named(n) if n == Syntax::TYPE_ERR => "JetErr".to_string(),
+        Type::Named(n) if n == Syntax::TYPE_NEVER => "std::convert::Infallible".to_string(),
         Type::Named(n) if assoc.contains(n) => format!("Self::{n}"),
         Type::Named(n) => crate::Names::mangle_path(n),
         Type::Apply { name, args } if name == "View" && args.len() == 1 => {
@@ -3074,7 +3094,10 @@ pub fn rust_type_name_assoc(ty: &Type, assoc: &HashSet<String>) -> String {
                 .collect::<Vec<_>>()
                 .join(" + ")
         ),
-        Type::Option(inner) => format!("Option<{}>", rust_type_name_assoc(inner, assoc)),
+        Type::Option(inner) => format!(
+            "JetOutcome<{}, JetAbsent>",
+            rust_type_name_assoc(inner, assoc)
+        ),
         Type::Map { key, value, .. } => format!(
             "std::collections::BTreeMap<{}, {}>",
             rust_type_name_assoc(key, assoc),
@@ -3122,10 +3145,12 @@ pub fn emit_trait_def(
                     .any(|source| matches!(source.source, crate::AST::ViewSource::Receiver))
             })
         });
-        let ret = m
-            .return_type
-            .as_ref()
-            .map(|ty| {
+        // A trait declaration is a callable contract. Ordinary Jet returns
+        // use the shared failure carrier just like the impl body and call
+        // site; compiler-generated Rust protocols are emitted by their
+        // dedicated synthetic paths and never come through this function.
+        let ret = m.return_type.as_ref().map(|_| m.effective_return_type());
+        let ret = ret.as_ref().map(|ty| {
                 if has_view_return {
                     render_view_return(ty, &assoc)
                 } else {

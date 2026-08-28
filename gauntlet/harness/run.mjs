@@ -205,15 +205,55 @@ function httpProbe(port, probe, timeoutMs = 5000) {
   });
 }
 
-async function probeSequence(port, probes) {
+function lineProbe(port, probe, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    const started = performance.now();
+    const chunks = [];
+    let finished = false;
+    const socket = net.createConnection({ host: "127.0.0.1", port });
+    const done = (result) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      socket.destroy();
+      resolve({ ...result, latencyMs: performance.now() - started });
+    };
+    const timeout = setTimeout(() => done({ ok: false, error: "line probe timeout" }), timeoutMs);
+    socket.once("connect", () => socket.end(String(probe.send ?? "")));
+    socket.on("data", (chunk) => {
+      chunks.push(chunk);
+      const body = Buffer.concat(chunks).toString("utf8");
+      const newline = body.indexOf("\n");
+      if (newline >= 0) done({ ok: true, body: body.slice(0, newline + 1) });
+    });
+    socket.once("end", () => done({ ok: true, body: Buffer.concat(chunks).toString("utf8") }));
+    socket.once("error", (error) => done({ ok: false, error: error.message }));
+  });
+}
+
+function serviceProbe(port, probe, protocol) {
+  return protocol === "line" ? lineProbe(port, probe) : httpProbe(port, probe);
+}
+
+function probeMatches(probe, result, protocol) {
+  if (!result.ok) return false;
+  if (protocol === "line") return result.body === probe.expect;
+  return (probe.expectStatus === undefined || result.status === probe.expectStatus) &&
+    (probe.expectBody === undefined || result.body === probe.expectBody);
+}
+
+function probeMismatch(probe, result, protocol) {
+  if (!result.ok) return result.error;
+  if (protocol === "line") return `body ${JSON.stringify(result.body)}, expected ${JSON.stringify(probe.expect)}`;
+  if (probe.expectStatus !== undefined && result.status !== probe.expectStatus) return `status ${result.status}, expected ${probe.expectStatus}`;
+  return `body ${JSON.stringify(result.body)}, expected ${JSON.stringify(probe.expectBody)}`;
+}
+
+async function probeSequence(port, probes, protocol = "http") {
   for (let index = 0; index < probes.length; index += 1) {
     const probe = probes[index];
-    const result = await httpProbe(port, probe);
-    const statusMismatch = probe.expectStatus !== undefined && result.status !== probe.expectStatus;
-    const bodyMismatch = probe.expectBody !== undefined && result.body !== probe.expectBody;
-    if (!result.ok || statusMismatch || bodyMismatch) {
-      return { ok: false, index, result, reason: !result.ok ? result.error : statusMismatch ? `status ${result.status}, expected ${probe.expectStatus}` : `body ${JSON.stringify(result.body)}, expected ${JSON.stringify(probe.expectBody)}` };
-    }
+    const result = await serviceProbe(port, probe, protocol);
+    if (!probeMatches(probe, result, protocol)) return { ok: false, index, result, reason: probeMismatch(probe, result, protocol) };
   }
   return { ok: true };
 }
@@ -416,20 +456,28 @@ async function freePort() {
   });
 }
 
-async function waitForReady(child, port, readyPath) {
+async function waitForReady(child, port, service) {
+  const protocol = service.protocol ?? "http";
   const started = performance.now();
   while (performance.now() - started < 10000) {
     if (child.exitCode !== null) throw new Error(`service exited ${child.exitCode}${child.stderrText() ? `: ${child.stderrText()}` : ""}`);
-    const result = await httpProbe(port, { method: "GET", path: readyPath }, 500);
-    if (result.ok) return { seconds: (performance.now() - started) / 1000, result };
+    if (protocol === "line") {
+      const ready = service.ready ?? { send: "ready\n", expect: "ready\n" };
+      const result = await lineProbe(port, ready, 500);
+      if (result.ok && result.body === ready.expect) return { seconds: (performance.now() - started) / 1000, result };
+    } else {
+      const result = await httpProbe(port, { method: "GET", path: service.readyPath }, 500);
+      if (result.ok) return { seconds: (performance.now() - started) / 1000, result };
+    }
   }
-  throw new Error(`service did not answer ${readyPath}`);
+  throw new Error(`service did not answer ${protocol === "line" ? "line readiness probe" : service.readyPath}`);
 }
 
 async function runService(language, sourceDir, artifact, entry) {
   const service = entry.spec?.service ?? entry.service ?? {};
+  const protocol = service.protocol ?? "http";
   const probes = service.probe ?? [];
-  if (!service.readyPath || !service.portArg || probes.length === 0) return { failure: "service requires portArg, readyPath, and probe" };
+  if (!service.portArg || probes.length === 0 || !["http", "line"].includes(protocol) || (protocol === "http" && !service.readyPath) || (protocol === "line" && !service.ready)) return { failure: "service requires portArg, readiness, and probe" };
   const commandFor = (port) => runCommand(language, sourceDir, artifact, [String(port)]);
   let child = null;
   let startupSeconds = null;
@@ -437,8 +485,8 @@ async function runService(language, sourceDir, artifact, entry) {
   try {
     const port = await freePort();
     child = startProcess(sourceDir, commandFor(port), { full: entry.spec?.fullShell === true });
-    startupSeconds = (await waitForReady(child, port, service.readyPath)).seconds;
-    const verification = await probeSequence(port, probes);
+    startupSeconds = (await waitForReady(child, port, service)).seconds;
+    const verification = await probeSequence(port, probes, protocol);
     if (!verification.ok) failure = `probe ${verification.index} failed: ${verification.reason}`;
     const firstExit = await waitForExit(child, 1000);
     if (firstExit.code !== 0 && !failure) failure = `verification service exit ${firstExit.code ?? firstExit.signal}`;
@@ -457,7 +505,7 @@ async function runService(language, sourceDir, artifact, entry) {
   child = startProcess(sourceDir, commandFor(port), { full: entry.spec?.fullShell === true });
   let ready;
   try {
-    ready = await waitForReady(child, port, service.readyPath);
+    ready = await waitForReady(child, port, service);
   } catch (error) {
     stopProcess(child);
     await waitForExit(child);
@@ -470,18 +518,18 @@ async function runService(language, sourceDir, artifact, entry) {
   let measurementFailure = null;
   for (let repeat = 0; repeat < 50 && !measurementFailure; repeat += 1) {
     for (const probe of repeatProbes) {
-      const result = await httpProbe(port, probe);
+      const result = await serviceProbe(port, probe, protocol);
       latencies.push(result.latencyMs);
-      if (!result.ok || (probe.expectStatus !== undefined && result.status !== probe.expectStatus) || (probe.expectBody !== undefined && result.body !== probe.expectBody)) {
-        measurementFailure = `probe failed during measurement: ${result.error ?? `status/body mismatch at ${probe.path}`}`;
+      if (!probeMatches(probe, result, protocol)) {
+        measurementFailure = `probe failed during measurement: ${result.error ?? "response mismatch"}`;
         break;
       }
     }
   }
   if (!measurementFailure) {
-    const shutdown = await httpProbe(port, probes[probes.length - 1]);
+    const shutdown = await serviceProbe(port, probes[probes.length - 1], protocol);
     latencies.push(shutdown.latencyMs);
-    if (!shutdown.ok || (probes.at(-1).expectStatus !== undefined && shutdown.status !== probes.at(-1).expectStatus) || (probes.at(-1).expectBody !== undefined && shutdown.body !== probes.at(-1).expectBody)) measurementFailure = `shutdown probe failed: ${shutdown.error ?? "status/body mismatch"}`;
+    if (!probeMatches(probes.at(-1), shutdown, protocol)) measurementFailure = `shutdown probe failed: ${shutdown.error ?? "response mismatch"}`;
   }
   clearInterval(rssTimer);
   rssKb = Math.max(rssKb, await readRssKb(child.pid));

@@ -2805,6 +2805,128 @@ pub(crate) fn runtime_json_response(status: i64, body: String) -> i64 {
     )))
 }
 
+pub(crate) fn runtime_http_response(status: i64, body: String) -> i64 {
+    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_response(
+        status, &body,
+    )))
+}
+
+pub(crate) fn runtime_http_sse(body: String) -> i64 {
+    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_sse(&body)))
+}
+
+pub(crate) fn runtime_http_server_response_header(
+    response: i64,
+    name: String,
+    value: String,
+) -> Result<i64, String> {
+    let response = take_handle(response).ok_or_else(|| "invalid HTTPResponse".to_string())?;
+    let NetHttpHandle::HTTPResponse(response) = response else {
+        return Err("invalid HTTPResponse".to_string());
+    };
+    Ok(push_handle(NetHttpHandle::HTTPResponse(
+        jet_http_srv_response_header(response, &name, &value),
+    )))
+}
+
+/// Install an evaluator callback in the same Prelude mux used by AOT and the
+/// resident JIT. The callback only marshals CtValue request/response carriers;
+/// routing, matching, middleware, and response policy remain in HTTPServer.rs.
+pub(crate) fn runtime_http_mux_add_callback(
+    mux: i64,
+    method: String,
+    pattern: String,
+    callback: Arc<dyn Fn(CtValue) -> Result<CtValue, String> + Send + Sync>,
+) -> Result<(), String> {
+    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
+    let handler: JetHTTPHandler = Arc::new(move |request: JetHTTPRequest| {
+        let request_handle = push_handle(NetHttpHandle::HTTPRequest(request));
+        let callback_result = callback(http_ct_handle("HTTPRequest", request_handle));
+        let _ = take_handle(request_handle);
+        let value = callback_result.map_err(|operation| JetHTTPError::IO { operation })?;
+        let value = match value {
+            CtValue::Present(value) => *value,
+            CtValue::Failed(_) => {
+                return Err(JetHTTPError::IO {
+                    operation: "handler returned an error".to_string(),
+                })
+            }
+            _ => value,
+        };
+        let handle = match value {
+            CtValue::Struct { type_name, fields } if type_name == "HTTPResponse" => fields
+                .iter()
+                .find_map(|(name, value)| match (name.as_str(), value) {
+                    ("handle", CtValue::Int(handle)) if *handle > 0 => Some(*handle),
+                    _ => None,
+                })
+                .ok_or_else(|| JetHTTPError::IO {
+                    operation: "handler response handle".to_string(),
+                })?,
+            _ => {
+                return Err(JetHTTPError::IO {
+                    operation: "handler did not return HTTPResponse".to_string(),
+                })
+            }
+        };
+        match take_handle(handle) {
+            Some(NetHttpHandle::HTTPResponse(response)) => Ok(response),
+            Some(other) => {
+                let _ = push_handle(other);
+                Err(JetHTTPError::IO {
+                    operation: "handler response handle".to_string(),
+                })
+            }
+            None => Err(JetHTTPError::IO {
+                operation: "handler response handle".to_string(),
+            }),
+        }
+    });
+    jet_http_mux_add_handler(&mux, &method, &pattern, handler);
+    Ok(())
+}
+
+pub(crate) fn runtime_http_serve_once_listener(
+    listener: i64,
+    mux: i64,
+) -> Result<(), String> {
+    let listener = tcp_listener(listener).ok_or_else(|| "invalid TcpListener".to_string())?;
+    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
+    jet_http_mux_serve_once_listener(&listener, &mux)
+}
+
+pub(crate) fn runtime_http_serve_once(addr: String, mux: i64) -> Result<(), String> {
+    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
+    jet_http_mux_serve_once(&addr, (*mux).clone())
+}
+
+pub(crate) fn runtime_http_serve(addr: String, mux: i64) -> Result<(), String> {
+    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
+    jet_http_mux_serve(&addr, (*mux).clone())
+}
+
+pub(crate) fn runtime_http_server_bind(addr: String, mux: i64) -> Result<i64, String> {
+    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
+    let server = jet_http_server_bind(&addr, (*mux).clone())?;
+    Ok(push_handle(NetHttpHandle::HTTPServer(Arc::new(server))))
+}
+
+pub(crate) fn runtime_http_server_serve(server: i64) -> Result<(), String> {
+    let server = http_server(server).ok_or_else(|| "invalid HTTPServer".to_string())?;
+    jet_http_server_serve(&server).map(|_| ())
+}
+
+pub(crate) fn runtime_http_server_shutdown(
+    server: i64,
+    grace_ms: i64,
+) -> Result<(), String> {
+    let server = http_server(server).ok_or_else(|| "invalid HTTPServer".to_string())?;
+    let grace = jet_std::Duration {
+        ns: grace_ms.saturating_mul(1_000_000),
+    };
+    jet_http_server_shutdown(&server, &grace).map(|_| ())
+}
+
 pub(crate) fn runtime_http_mux() -> i64 {
     push_handle(NetHttpHandle::HTTPMux(Arc::new(jet_http_mux_new())))
 }

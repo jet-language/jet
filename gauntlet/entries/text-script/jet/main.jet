@@ -1,0 +1,18 @@
+use core.files as fs
+use core.process as process
+use core.sys as sys
+
+fn run() {
+    cwd :: sys.current_dir() ?? "."
+    path :: Path.from(cwd).join(process.argv().get(1) ?? "notes.txt").to_string()
+    input :: fs.read(path) ?? panic("read failed")
+    lines := [String]{}
+    loop line in input.lines() {
+        trimmed :: line.trim()
+        clean :: "{trimmed}"
+        if clean.len() > 0 -> lines.push(clean)
+    }
+    lines.sort()
+    print("lines {lines.len()}")
+    loop line in lines -> print(line)
+}

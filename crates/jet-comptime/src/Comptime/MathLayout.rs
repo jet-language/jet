@@ -12,6 +12,10 @@ mod fixed_arithmetic {
     include!("../../../jet-codegen/src/Prelude/Core/FixedArithmetic.rs");
 }
 
+mod simd_lanes {
+    include!("../../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
+}
+
 fn fixed_op(op: BinOp) -> Option<i64> {
     Some(match op {
         BinOp::Add => fixed_arithmetic::JET_FIXED_OP_ADD,
@@ -265,14 +269,17 @@ const MATH_TYPES: &[&str] = &[
 ];
 
 pub(super) fn is_math_type(name: &str) -> bool {
-    MATH_TYPES.contains(&name)
+    Syntax::is_simd_lane_type(name) || MATH_TYPES.contains(&name)
 }
 
 pub(super) fn arity(name: &str) -> Option<usize> {
+    if let Some((_, lanes)) = Syntax::simd_lane_layout(name) {
+        return Some(lanes);
+    }
     match name {
-        Syntax::SIMD_F64X2_TYPE | Syntax::LINALG_VEC2_TYPE => Some(2),
+        Syntax::LINALG_VEC2_TYPE => Some(2),
         Syntax::LINALG_VEC3_TYPE => Some(3),
-        Syntax::SIMD_F32X4_TYPE | Syntax::LINALG_VEC4_TYPE => Some(4),
+        Syntax::LINALG_VEC4_TYPE => Some(4),
         Syntax::LINALG_MAT3_TYPE => Some(9),
         Syntax::LINALG_MAT4_TYPE => Some(16),
         _ => None,
@@ -280,10 +287,30 @@ pub(super) fn arity(name: &str) -> Option<usize> {
 }
 
 fn is_f32_lanes(name: &str) -> bool {
-    name == Syntax::SIMD_F32X4_TYPE
+    matches!(
+        Syntax::simd_lane_layout(name),
+        Some((Syntax::SimdLaneKind::F32, _))
+    )
 }
 
-fn float_value(name: &str, n: f64) -> CtValue {
+fn integer_lane_layout(name: &str) -> Option<(bool, u8)> {
+    Some(match Syntax::simd_lane_layout(name)?.0 {
+        Syntax::SimdLaneKind::I8 => (true, 8),
+        Syntax::SimdLaneKind::I16 => (true, 16),
+        Syntax::SimdLaneKind::I32 => (true, 32),
+        Syntax::SimdLaneKind::I64 => (true, 64),
+        Syntax::SimdLaneKind::U8 => (false, 8),
+        Syntax::SimdLaneKind::U16 => (false, 16),
+        Syntax::SimdLaneKind::U32 => (false, 32),
+        Syntax::SimdLaneKind::U64 => (false, 64),
+        Syntax::SimdLaneKind::F32 | Syntax::SimdLaneKind::F64 => return None,
+    })
+}
+
+fn lane_value(name: &str, n: f64) -> CtValue {
+    if let Some((signed, bits)) = integer_lane_layout(name) {
+        return CtValue::Int(integer_narrow(n as i128, signed, bits));
+    }
     if is_f32_lanes(name) {
         CtValue::Float(CtFloat::f32(n as f32))
     } else {
@@ -303,7 +330,25 @@ pub(super) fn from_lanes(type_name: &str, lanes: &[f64]) -> CtValue {
     let fields = lanes
         .iter()
         .enumerate()
-        .map(|(i, n)| (field_name(type_name, i), float_value(type_name, *n)))
+        .map(|(i, n)| (field_name(type_name, i), lane_value(type_name, *n)))
+        .collect();
+    CtValue::Struct {
+        type_name: type_name.to_string(),
+        fields,
+    }
+}
+
+fn from_int_lanes(type_name: &str, lanes: &[i64]) -> CtValue {
+    let (signed, bits) = integer_lane_layout(type_name).expect("integer SIMD lane");
+    let fields = lanes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            (
+                field_name(type_name, i),
+                CtValue::Int(integer_narrow(integer_widen(*n, signed), signed, bits)),
+            )
+        })
         .collect();
     CtValue::Struct {
         type_name: type_name.to_string(),
@@ -346,6 +391,35 @@ pub(super) fn lanes(value: &CtValue) -> Option<(&str, Vec<f64>)> {
     Some((type_name.as_str(), out))
 }
 
+fn integer_lanes(value: &CtValue) -> Option<(&str, Vec<i64>)> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    let (signed, bits) = integer_lane_layout(type_name)?;
+    let n = arity(type_name)?;
+    if fields.len() != n {
+        return None;
+    }
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let key = field_name(type_name, i);
+        let (_, value) = fields.iter().find(|(name, _)| name == &key)?;
+        let CtValue::Int(value) = value else {
+            return None;
+        };
+        out.push(integer_narrow(integer_widen(*value, signed), signed, bits));
+    }
+    Some((type_name.as_str(), out))
+}
+
+fn as_int_lane(value: &CtValue, name: &str, span: Span) -> Result<i64, Diagnostic> {
+    let (signed, bits) = integer_lane_layout(name).expect("integer SIMD lane");
+    match value {
+        CtValue::Int(value) => Ok(integer_narrow(integer_widen(*value, signed), signed, bits)),
+        _ => Err(unsupported("math component must be an integer", span)),
+    }
+}
+
 pub(super) fn construct(name: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     let n = arity(name).ok_or_else(|| unsupported(&format!("`{name}`"), span))?;
     if args.len() != n {
@@ -354,33 +428,76 @@ pub(super) fn construct(name: &str, args: &[CtValue], span: Span) -> Result<CtVa
             span,
         ));
     }
+    if integer_lane_layout(name).is_some() {
+        let lanes = args
+            .iter()
+            .map(|arg| as_int_lane(arg, name, span))
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(from_int_lanes(name, &lanes));
+    }
     let mut lanes = Vec::with_capacity(n);
     for arg in args {
         let mut v = as_lane(arg, span)?;
-        if is_f32_lanes(name) {
-            v = (v as f32) as f64;
-        }
+        v = narrow_lane(name, v);
         lanes.push(v);
     }
     Ok(from_lanes(name, &lanes))
 }
 
-fn zip_op(op: BinOp, a: &[f64], b: &[f64], f32_lanes: bool) -> Option<Vec<f64>> {
-    if a.len() != b.len() {
-        return None;
+fn narrow_lane(name: &str, n: f64) -> f64 {
+    if let Some((signed, bits)) = integer_lane_layout(name) {
+        return integer_narrow(n as i128, signed, bits) as f64;
     }
-    let mut out = Vec::with_capacity(a.len());
-    for (l, r) in a.iter().zip(b.iter()) {
-        let n = match op {
-            BinOp::Add => l + r,
-            BinOp::Sub => l - r,
-            BinOp::Mul => l * r,
-            BinOp::Div => l / r,
-            _ => return None,
-        };
-        out.push(if f32_lanes { (n as f32) as f64 } else { n });
+    if is_f32_lanes(name) {
+        (n as f32) as f64
+    } else {
+        n
     }
-    Some(out)
+}
+
+fn simd_binary_op(op: BinOp) -> Option<simd_lanes::JetSimdBinaryOp> {
+    Some(match op {
+        BinOp::Add => simd_lanes::JetSimdBinaryOp::Add,
+        BinOp::Sub => simd_lanes::JetSimdBinaryOp::Sub,
+        BinOp::Mul => simd_lanes::JetSimdBinaryOp::Mul,
+        BinOp::Div => simd_lanes::JetSimdBinaryOp::Div,
+        _ => return None,
+    })
+}
+
+fn simd_reduce_op(op: &str) -> Option<simd_lanes::JetSimdReduceOp> {
+    Some(match op {
+        "Add" | "sum" => simd_lanes::JetSimdReduceOp::Add,
+        "Mul" | "product" => simd_lanes::JetSimdReduceOp::Mul,
+        "Min" => simd_lanes::JetSimdReduceOp::Min,
+        "Max" => simd_lanes::JetSimdReduceOp::Max,
+        "Avg" => simd_lanes::JetSimdReduceOp::Avg,
+        _ => return None,
+    })
+}
+
+fn zip_op(op: BinOp, a: &[f64], b: &[f64], name: &str) -> Option<Vec<f64>> {
+    let op = simd_binary_op(op)?;
+    if is_f32_lanes(name) {
+        let left = a.iter().map(|value| *value as f32).collect::<Vec<_>>();
+        let right = b.iter().map(|value| *value as f32).collect::<Vec<_>>();
+        return simd_lanes::jet_simd_binary_slice(&left, &right, op)
+            .map(|values| values.into_iter().map(f64::from).collect());
+    }
+    simd_lanes::jet_simd_binary_slice(a, b, op)
+}
+
+fn zip_int_op(
+    op: BinOp,
+    a: &[i64],
+    b: &[i64],
+    name: &str,
+    span: Span,
+) -> Result<Vec<i64>, Diagnostic> {
+    let (signed, bits) = integer_lane_layout(name).expect("integer SIMD lane");
+    let op = simd_binary_op(op).ok_or_else(|| unsupported("this math operator", span))?;
+    simd_lanes::jet_simd_integer_binary(a, b, op, signed, bits)
+        .ok_or_else(|| unsupported("this math operator", span))
 }
 
 fn mat_mul(n: usize, a: &[f64], b: &[f64]) -> Vec<f64> {
@@ -418,6 +535,15 @@ pub(super) fn eval_binop(
     let (Some((ln, ll)), Some((rn, rl))) = (lanes(left), lanes(right)) else {
         return None;
     };
+    if ln == rn && integer_lane_layout(ln).is_some() {
+        let Some((_, left)) = integer_lanes(left) else {
+            return Some(Err(unsupported("integer math lanes", span)));
+        };
+        let Some((_, right)) = integer_lanes(right) else {
+            return Some(Err(unsupported("integer math lanes", span)));
+        };
+        return Some(zip_int_op(op, &left, &right, ln, span).map(|out| from_int_lanes(ln, &out)));
+    }
     if ln != rn {
         // MatN * VecN transform.
         if matches!(op, BinOp::Mul) {
@@ -436,7 +562,7 @@ pub(super) fn eval_binop(
         let n = if ln == Syntax::LINALG_MAT3_TYPE { 3 } else { 4 };
         mat_mul(n, &ll, &rl)
     } else {
-        match zip_op(op, &ll, &rl, is_f32_lanes(ln)) {
+        match zip_op(op, &ll, &rl, ln) {
             Some(v) => v,
             None => return Some(Err(unsupported("this math operator", span))),
         }
@@ -458,6 +584,27 @@ fn list_to_lanes(args: &[CtValue], n: usize, span: Span) -> Result<Vec<f64>, Dia
     list.iter().map(|v| as_lane(v, span)).collect()
 }
 
+fn list_to_int_lanes(
+    args: &[CtValue],
+    n: usize,
+    name: &str,
+    span: Span,
+) -> Result<Vec<i64>, Diagnostic> {
+    let list = match args.first() {
+        Some(CtValue::List(items)) => items,
+        _ => return Err(unsupported("from_array expects a fixed list", span)),
+    };
+    if list.len() != n {
+        return Err(unsupported(
+            &format!("from_array expects {n} elements"),
+            span,
+        ));
+    }
+    list.iter()
+        .map(|value| as_int_lane(value, name, span))
+        .collect()
+}
+
 pub(super) fn apply_static(
     type_name: &str,
     method: &str,
@@ -476,17 +623,18 @@ pub(super) fn apply_static(
                     span,
                 )));
             }
-            list_to_lanes(&args, n, span).map(|lanes| {
-                let lanes = if is_f32_lanes(type_name) {
-                    lanes
+            if integer_lane_layout(type_name).is_some() {
+                list_to_int_lanes(&args, n, type_name, span)
+                    .map(|lanes| from_int_lanes(type_name, &lanes))
+            } else {
+                list_to_lanes(&args, n, span).map(|lanes| {
+                    let lanes = lanes
                         .into_iter()
-                        .map(|v| (v as f32) as f64)
-                        .collect::<Vec<_>>()
-                } else {
-                    lanes
-                };
-                from_lanes(type_name, &lanes)
-            })
+                        .map(|v| narrow_lane(type_name, v))
+                        .collect::<Vec<_>>();
+                    from_lanes(type_name, &lanes)
+                })
+            }
         }
         "splat" => {
             let Some(arg) = args.first() else {
@@ -495,51 +643,86 @@ pub(super) fn apply_static(
                     span,
                 )));
             };
-            match as_lane(arg, span) {
-                Ok(v) => {
-                    let v = if is_f32_lanes(type_name) {
-                        (v as f32) as f64
-                    } else {
-                        v
-                    };
-                    Ok(from_lanes(type_name, &vec![v; n]))
+            if integer_lane_layout(type_name).is_some() {
+                match as_int_lane(arg, type_name, span) {
+                    Ok(v) => Ok(from_int_lanes(
+                        type_name,
+                        &simd_lanes::jet_simd_splat_slice(v, n),
+                    )),
+                    Err(e) => Err(e),
                 }
-                Err(e) => Err(e),
+            } else {
+                match as_lane(arg, span) {
+                    Ok(v) => {
+                        let v = narrow_lane(type_name, v);
+                        Ok(from_lanes(
+                            type_name,
+                            &simd_lanes::jet_simd_splat_slice(v, n),
+                        ))
+                    }
+                    Err(e) => Err(e),
+                }
             }
         }
-        "from_array" => list_to_lanes(&args, n, span).map(|lanes| {
-            let lanes = if is_f32_lanes(type_name) {
-                lanes
-                    .into_iter()
-                    .map(|v| (v as f32) as f64)
-                    .collect::<Vec<_>>()
+        "from_array" => {
+            if integer_lane_layout(type_name).is_some() {
+                list_to_int_lanes(&args, n, type_name, span)
+                    .map(|lanes| from_int_lanes(type_name, &lanes))
             } else {
-                lanes
-            };
-            from_lanes(type_name, &lanes)
-        }),
+                list_to_lanes(&args, n, span).map(|lanes| {
+                    let lanes = lanes
+                        .into_iter()
+                        .map(|v| narrow_lane(type_name, v))
+                        .collect::<Vec<_>>();
+                    from_lanes(type_name, &lanes)
+                })
+            }
+        }
         _ => Err(unsupported(&format!("`{type_name}.{method}`"), span)),
     })
 }
 
 fn to_array_list(type_name: &str, lanes: &[f64]) -> CtValue {
-    CtValue::List(lanes.iter().map(|n| float_value(type_name, *n)).collect())
+    CtValue::List(lanes.iter().map(|n| lane_value(type_name, *n)).collect())
+}
+
+fn to_int_array_list(type_name: &str, lanes: &[i64]) -> CtValue {
+    let (signed, bits) = integer_lane_layout(type_name).expect("integer SIMD lane");
+    CtValue::List(
+        lanes
+            .iter()
+            .map(|n| CtValue::Int(integer_narrow(integer_widen(*n, signed), signed, bits)))
+            .collect(),
+    )
 }
 
 fn reduce_op(name: &str, lanes: &[f64], op: &str) -> Option<f64> {
-    if lanes.is_empty() {
-        return None;
+    let op = simd_reduce_op(op)?;
+    if is_f32_lanes(name) {
+        let lanes = lanes
+            .iter()
+            .map(|value| *value as f32)
+            .collect::<Vec<_>>();
+        return simd_lanes::jet_simd_reduce_slice(&lanes, op).map(f64::from);
     }
-    let f32 = is_f32_lanes(name);
-    let acc = match op {
-        "Add" | "sum" => lanes.iter().sum(),
-        "Mul" | "product" => lanes.iter().copied().product(),
-        "Min" => lanes.iter().copied().fold(f64::INFINITY, f64::min),
-        "Max" => lanes.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-        "Avg" => lanes.iter().sum::<f64>() / lanes.len() as f64,
-        _ => return None,
-    };
-    Some(if f32 { (acc as f32) as f64 } else { acc })
+    simd_lanes::jet_simd_reduce_slice(lanes, op)
+}
+
+fn reduce_int_op(name: &str, lanes: &[i64], op: &str) -> Option<i64> {
+    let (signed, bits) = integer_lane_layout(name)?;
+    simd_lanes::jet_simd_integer_reduce(lanes, simd_reduce_op(op)?, signed, bits)
+}
+
+fn reduce_value(
+    name: &str,
+    lanes: &[f64],
+    int_lanes: Option<&[i64]>,
+    op: &str,
+) -> Option<CtValue> {
+    if let Some(int_lanes) = int_lanes {
+        return reduce_int_op(name, int_lanes, op).map(CtValue::Int);
+    }
+    reduce_op(name, lanes, op).map(|value| lane_value(name, value))
 }
 
 pub(super) fn apply_method(
@@ -549,26 +732,21 @@ pub(super) fn apply_method(
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
     let (name, vals) = lanes(recv)?;
+    let int_vals = integer_lanes(recv).map(|(_, values)| values);
     Some(match (method, args.len()) {
-        ("to_array", 0) => Ok(to_array_list(name, &vals)),
-        ("sum", 0) => Ok(float_value(
-            name,
-            reduce_op(name, &vals, "sum").unwrap_or(0.0),
-        )),
+        ("to_array", 0) => Ok(int_vals
+            .as_deref()
+            .map_or_else(|| to_array_list(name, &vals), |values| to_int_array_list(name, values))),
+        ("sum", 0) => Ok(reduce_value(name, &vals, int_vals.as_deref(), "sum")
+            .unwrap_or_else(|| lane_value(name, 0.0))),
         // AOT exposes product/min/max as named methods; same reduce_op as
         // `reduce(.Mul/.Min/.Max/.Avg)` so comptime/REPL stay byte-identical.
-        ("product", 0) => Ok(float_value(
-            name,
-            reduce_op(name, &vals, "product").unwrap_or(0.0),
-        )),
-        ("min", 0) => Ok(float_value(
-            name,
-            reduce_op(name, &vals, "Min").unwrap_or(0.0),
-        )),
-        ("max", 0) => Ok(float_value(
-            name,
-            reduce_op(name, &vals, "Max").unwrap_or(0.0),
-        )),
+        ("product", 0) => Ok(reduce_value(name, &vals, int_vals.as_deref(), "product")
+            .unwrap_or_else(|| lane_value(name, 0.0))),
+        ("min", 0) => Ok(reduce_value(name, &vals, int_vals.as_deref(), "Min")
+            .unwrap_or_else(|| lane_value(name, 0.0))),
+        ("max", 0) => Ok(reduce_value(name, &vals, int_vals.as_deref(), "Max")
+            .unwrap_or_else(|| lane_value(name, 0.0))),
         ("reduce", 1) => {
             let op = match &args[0] {
                 CtValue::Enum { variant, .. } => variant.as_str(),
@@ -580,8 +758,8 @@ pub(super) fn apply_method(
                     )))
                 }
             };
-            match reduce_op(name, &vals, op) {
-                Some(n) => Ok(float_value(name, n)),
+            match reduce_value(name, &vals, int_vals.as_deref(), op) {
+                Some(value) => Ok(value),
                 None => Err(unsupported(&format!("reduce({op})"), span)),
             }
         }
@@ -684,23 +862,26 @@ pub(super) fn apply_method(
 
 pub fn lane_at(recv: &CtValue, index: i64, span: Span) -> Option<Result<CtValue, Diagnostic>> {
     let (name, vals) = lanes(recv)?;
-    if !matches!(
-        name,
-        Syntax::SIMD_F32X4_TYPE
-            | Syntax::SIMD_F64X2_TYPE
-            | Syntax::LINALG_VEC2_TYPE
-            | Syntax::LINALG_VEC3_TYPE
-            | Syntax::LINALG_VEC4_TYPE
-    ) {
+    if !(Syntax::is_simd_lane_type(name)
+        || matches!(
+            name,
+            Syntax::LINALG_VEC2_TYPE
+                | Syntax::LINALG_VEC3_TYPE
+                | Syntax::LINALG_VEC4_TYPE
+        ))
+    {
         return None;
     }
-    Some(if index < 0 || index as usize >= vals.len() {
-        Err(unsupported(
-            &format!("lane index {index} out of range for {name}"),
-            span,
-        ))
-    } else {
-        Ok(float_value(name, vals[index as usize]))
+    let index = match simd_lanes::jet_simd_lane_index(index, name, vals.len()) {
+        Ok(index) => index,
+        Err(message) => return Some(Err(unsupported(&message, span))),
+    };
+    Some({
+        if let Some((_, int_vals)) = integer_lanes(recv) {
+            Ok(CtValue::Int(int_vals[index]))
+        } else {
+            Ok(lane_value(name, vals[index]))
+        }
     })
 }
 

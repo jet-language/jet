@@ -916,7 +916,25 @@ pub(crate) fn collect_core_expr(
         }
         Expr::Str(parts, _) => {
             for part in parts {
-                if let StrPart::Interp(e, _) = part {
+                if let StrPart::Interp(e, format) = part {
+                    // D-FMT-INTERP1 / D-FMT-PRETTY1 / D-FMT-INTERP3: selector
+                    // lowering creates a Core formatter call even when the
+                    // source has no `use core.text.fmt` import. Record that
+                    // reachability from the parsed selector so pay-for-use
+                    // AOT emission includes the shared Prelude kernel.
+                    if matches!(
+                        format,
+                        crate::AST::StrFormat::Pretty
+                            | crate::AST::StrFormat::Fixed(_)
+                            | crate::AST::StrFormat::Hex(_)
+                    ) {
+                        note_core_usage(
+                            used,
+                            spans,
+                            "core.text.fmt::interpolation",
+                            Some(e.span()),
+                        );
+                    }
                     collect_core_expr(e, imports, used, spans, ffi_cb);
                 }
             }

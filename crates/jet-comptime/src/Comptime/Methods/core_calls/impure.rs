@@ -49,19 +49,29 @@ pub fn apply_impure_core_call_with_type(
         jet_foundation::Syntax::CoreCallCoverage::COMPTIME,
         span,
     )?;
-    // Runtime ambient carriers must reach their host marshaller before the
-    // pure projection. Pure comptime has no ambient hook, so it still uses
-    // CorePureParity below.
+    super::validate_interpreter_route(module, method, span)?;
+    // The registry route selects the adapter. Ambient rows cross the host
+    // boundary; pure and typed-intrinsic rows stay on their shared evaluator
+    // paths. Unknown rows retain the legacy ambient hook.
     let mut sink = sink;
-    if let Some(result) = crate::Comptime::try_core_call_typed_with_sink(
-        module,
-        method,
-        args.clone(),
-        span,
-        resolved_ret.cloned(),
-        sink.as_deref_mut(),
-    ) {
-        return result;
+    let route = jet_foundation::Syntax::core_call(module, method)
+        .map(|row| row.interpreter_route);
+    if route.is_none()
+        || matches!(
+            route,
+            Some(jet_foundation::Syntax::CoreCallInterpreterRoute::Ambient)
+        )
+    {
+        if let Some(result) = crate::Comptime::try_core_call_typed_with_sink(
+            module,
+            method,
+            args.clone(),
+            span,
+            resolved_ret.cloned(),
+            sink.as_deref_mut(),
+        ) {
+            return result;
+        }
     }
     // Pure CorePureParity surfaces (crypto.expert, net.socket_*, datetime, …)
     // must still resolve under ambient impure depth — same as apply_core_call.
@@ -95,7 +105,7 @@ pub fn apply_impure_core_call_with_type(
             "core.files",
             "read" | "read_bytes" | "write" | "append_all" | "exists" | "is_dir"
             | "create_dir" | "create_dir_all" | "remove" | "remove_dir" | "remove_all"
-            | "list_dir" | "copy" | "copy_dir" | "walk_parallel",
+            | "list_dir" | "copy" | "copy_dir" | "rename" | "glob" | "walk" | "walk_parallel",
         ) => {
             let resolve = |value: &CtValue| -> Result<String, Diagnostic> {
                 Ok(base_dir
@@ -129,6 +139,26 @@ pub fn apply_impure_core_call_with_type(
                 "remove_all" => unit(files_kernel::fs_remove_all(&path)),
                 "copy" => unit(files_kernel::fs_copy(&path, &resolve(one(1)?)?)),
                 "copy_dir" => unit(files_kernel::fs_copy_dir(&path, &resolve(one(1)?)?)),
+                "rename" => unit(files_kernel::fs_rename(&path, &resolve(one(1)?)?)),
+                "glob" => present(files_kernel::fs_glob(&path).map(|paths| {
+                    CtValue::List(paths.into_iter().map(CtValue::Str).collect())
+                })),
+                "walk" => present(files_kernel::fs_walk_parallel(&path).map(|entries| {
+                    CtValue::List(
+                        entries
+                            .into_iter()
+                            .map(|(path, relative, is_dir, depth)| CtValue::Struct {
+                                type_name: "WalkEntry".to_string(),
+                                fields: vec![
+                                    ("path".to_string(), CtValue::Str(path)),
+                                    ("relative".to_string(), CtValue::Str(relative)),
+                                    ("is_dir".to_string(), CtValue::Bool(is_dir)),
+                                    ("depth".to_string(), CtValue::Int(depth)),
+                                ],
+                            })
+                            .collect(),
+                    )
+                })),
                 "walk_parallel" => present(files_kernel::fs_walk_parallel(&path).map(|entries| {
                     CtValue::List(
                         entries

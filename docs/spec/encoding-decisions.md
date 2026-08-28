@@ -94,9 +94,9 @@ Common parser/security law: XML 1.0 Fifth Edition plus Namespaces in XML 1.0 is 
 
 Predefined and numeric references validate and decode. Declared general references default to Preserve. Reject refuses them. Resolve(values: [String:String]) expands only names present in the explicit in-memory map as character data. Replacement strings are never reparsed as XML markup: `<`, `>`, `&`, quotes, and entity-looking text remain characters and render escaped. Internal declaration replacement text remains inert preservation data. Parameter entities, external parsed entities, and replacement-text markup expansion are Unsupported in v1, not silently normalized; cycles and limits still reject. External identifiers remain inert data. xml.XMLParseOptions owns entity policy and xml.XMLLimits pins max_depth, max_nodes, max_attributes_per_element, max_name_bytes, max_text_bytes, max_entity_declarations, max_entity_depth, and max_entity_replacement_bytes; safe() supplies versioned defaults. Exceeding any limit is an error, never truncation.
 
-Names use XMLName.{ raw, prefix, local, namespace_uri }. Namespace declarations are ordered XMLNamespace.{ prefix, namespace_uri, quote, lexical }. Default namespaces apply to elements, never unprefixed attributes. xml/xmlns bindings and duplicate expanded attributes are validated. Clark keys are local for no namespace and {namespace_uri}local otherwise. Codable projection uses child Clark keys and attribute keys prefixed @. An element is simple-content exactly when every child is text, CDATA, or a resolved entity_ref; their decoded character values concatenate into `$text` (empty children produce `$text: ""`) and `$content` is absent. Otherwise it is mixed-content: `$text` is absent and `$content` is exactly a DataTree.Array containing every tagged child node in encounter order, including text-like nodes. Repeated child Clark keys become arrays in encounter order only in ordinary child-key projection; `$content` is never regrouped. XML names cannot begin @, $, or {, so control keys do not collide. Existing #Rename("key") and #DenyUnknownFields apply.
+Names use XMLName{ raw, prefix, local, namespace_uri }. Namespace declarations are ordered XMLNamespace{ prefix, namespace_uri, quote, lexical }. Default namespaces apply to elements, never unprefixed attributes. xml/xmlns bindings and duplicate expanded attributes are validated. Clark keys are local for no namespace and {namespace_uri}local otherwise. Codable projection uses child Clark keys and attribute keys prefixed @. An element is simple-content exactly when every child is text, CDATA, or a resolved entity_ref; their decoded character values concatenate into `$text` (empty children produce `$text: ""`) and `$content` is absent. Otherwise it is mixed-content: `$text` is absent and `$content` is exactly a DataTree.Array containing every tagged child node in encounter order, including text-like nodes. Repeated child Clark keys become arrays in encounter order only in ordinary child-key projection; `$content` is never regrouped. XML names cannot begin @, $, or {, so control keys do not collide. Existing #Rename("key") and #DenyUnknownFields apply.
 
-XMLError is exactly XMLError.{ kind: XMLReason, byte_offset: ?Int, line: ?Int, column: ?Int, path: String, reason: String }. XMLReason is the closed enum InvalidEncoding, Malformed, MismatchedTag, InvalidName, Namespace, DuplicateAttribute, Entity, EntityCycle, Limit, Canonicalization, Shape, Unsupported. For source-backed errors byte_offset is Val(zero-based original bytes for parse_bytes or UTF-8 bytes for parse), and line/column are Val(one-based Unicode-scalar positions). Constructed/source-less validation, shape, rendering, and canonicalization errors use None for all three locations, never a colliding numeric sentinel. path remains the best-known Clark-name/index path. parse, parse_bytes, parse_with, canonical, decode, and event folding return Result; they do not emit diagnostics or partial trees. Diagnostic codes and CLI rendering are downstream gates.
+XMLError is exactly XMLError{ kind: XMLReason, byte_offset: ?Int, line: ?Int, column: ?Int, path: String, reason: String }. XMLReason is the closed enum InvalidEncoding, Malformed, MismatchedTag, InvalidName, Namespace, DuplicateAttribute, Entity, EntityCycle, Limit, Canonicalization, Shape, Unsupported. For source-backed errors byte_offset is Val(zero-based original bytes for parse_bytes or UTF-8 bytes for parse), and line/column are Val(one-based Unicode-scalar positions). Constructed/source-less validation, shape, rendering, and canonicalization errors use None for all three locations, never a colliding numeric sentinel. path remains the best-known Clark-name/index path. parse, parse_bytes, parse_with, canonical, decode, and event folding return Result; they do not emit diagnostics or partial trees. Diagnostic codes and CLI rendering are downstream gates.
 
 Raw invalidation law for lossless options: lexical evidence is token-local, never a buffered subtree. XMLLexical is the ordinary DataTree Object {raw_text: Text|Null, raw_bytes: Array<Int>|Null, semantic: DataTree}; every raw_bytes Int is validated in 0..255; exactly one raw field is non-Null for parsed input and both are Null for constructed tokens. Its semantic snapshot is the lexical-free semantic value of that one token. Element nodes carry open_lexical and close_lexical separately; empty-element syntax has open_lexical and close_lexical Null. Document-whitespace, Text, CDATA, comment, PI, declaration, doctype, entity-ref, attribute, and namespace nodes each carry only their own token lexical. A token slice is valid only when its current lexical-free token value deeply equals semantic. Editing a token invalidates only that token; parent elements have no subtree raw slice. to_string may concatenate valid raw_text tokens with recursively rendered Unicode children. to_bytes may reuse each valid raw_bytes token independently whenever selected output encoding/BOM matches the source; an invalid/changed token is rendered in that same encoding while neighboring valid tokens remain reusable. If selected encoding/BOM differs, all tokens render/transcode and none reuse raw bytes. A reader element_start can therefore emit complete opening-tag evidence immediately and element_end complete closing-tag evidence without subtree buffering. False snapshots/raw slices are ignored, never trusted; untouched parse-render identity remains exact.
 
@@ -310,17 +310,17 @@ struct Packet { id: Int, payload: [U8] }
 struct Header { id: Int }
 
 fn run() {
-    packet := Packet.{ id: 7, payload: [222, 173] }
+    packet := Packet{ id: 7, payload: [222, 173] }
     bytes := cbor.to_bytes(packet)
-    copy: Packet := cbor.decode(bytes)
+    copy := cbor.decode(bytes)
     stable := cbor.to_bytes_canonical(packet)
-    data := cbor.parse(cbor.to_bytes(Header.{ id: 7 }))
+    data := cbor.parse(cbor.to_bytes(Header{ id: 7 }))
 
-    malformed: [U8] := [0xA2, 0x62, 0x69, 0x64, 0x07, 0x67, 0x70, 0x61, 0x79, 0x6C, 0x6F, 0x61, 0x64, 0x42, 0xDE]
+    malformed := [0xA2, 0x62, 0x69, 0x64, 0x07, 0x67, 0x70, 0x61, 0x79, 0x6C, 0x6F, 0x61, 0x64, 0x42, 0xDE]
     failed := cbor.decode<Packet>(malformed)
 }
 
-// Err([FieldError.{ path: "[\"payload\"]", reason: "CBOR Truncated at byte 15: CBOR byte string declares 2 bytes but input ended after 1" }])
+// Err([FieldError{ path: "[\"payload\"]", reason: "CBOR Truncated at byte 15: CBOR byte string declares 2 bytes but input ended after 1" }])
 ```
 
 ## D-ENCBASE-STRICT1=A — Canonical RFC 4648 decoder policy
@@ -351,16 +351,16 @@ use core.encoding.base32 as base32
 // base64.decode(text: String, allow_whitespace: Bool{false}, allow_missing_padding: Bool{false}) [U8] !String
 // base64.decode_url(text: String, allow_whitespace: Bool{false}, allow_padding: Bool{false}) [U8] !String
 // base32.decode(text: String, allow_whitespace: Bool{false}, allow_missing_padding: Bool{false}, allow_lowercase: Bool{false}) [U8] !String
-raw: [U8] := base64.decode("Zg==")             // [102]
+raw := base64.decode("Zg==")             // [102]
 bad := base64.decode("Zg==\n")
 // Err("invalid base64 at byte 4: ASCII whitespace is not allowed")
 
-mime: [U8] := base64.decode(body, allow_whitespace: true)
-url: [U8] := base64.decode_url(token, allow_padding: true)
-legacy_id: [U8] := base32.decode(text, allow_lowercase: true, allow_missing_padding: true)
+mime := base64.decode(body, allow_whitespace: true)
+url := base64.decode_url(token, allow_padding: true)
+legacy_id := base32.decode(text, allow_lowercase: true, allow_missing_padding: true)
 
 // `jet fix --edition 2027` preserves named relaxations, then audits forms no allowance can preserve.
-bytes: [U8] := base32.decode(text, allow_whitespace: true, allow_missing_padding: true, allow_lowercase: true)
+bytes := base32.decode(text, allow_whitespace: true, allow_missing_padding: true, allow_lowercase: true)
 ```
 
 ## Shipped status (edition 2026 vs 2027)

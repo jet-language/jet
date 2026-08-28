@@ -29,7 +29,7 @@
 //!     files, which is already a complete, useful shape.
 
 use crate::AST::ProgramBundle;
-use jet_foundation::Names::mangle;
+use jet_foundation::Names::{mangle, mangle_generated};
 
 /// Plugin compatibility name for the shared embedding scalar table.
 pub use super::Embedding::ExportScalar as PluginScalar;
@@ -116,6 +116,9 @@ pub fn emit_plugin(
     let mut wit_lines = Vec::new();
     let mut wrapper_fns = String::new();
     let mut has_text_export = false;
+    let plugin_read_text = mangle_generated("plugin_read_text");
+    let plugin_return_text = mangle_generated("plugin_return_text");
+    let plugin_post_text = mangle_generated("plugin_post_text");
 
     for export in &exports {
         let scalar = export.scalar;
@@ -148,7 +151,9 @@ pub fn emit_plugin(
                     let mutable = matches!(convention, crate::AST::AccessConvention::Write)
                         .then_some("mut ")
                         .unwrap_or_default();
-                    format!("let {mutable}p{i} = __jet_plugin_read_text(p{i}_ptr, p{i}_len);")
+                    format!(
+                        "let {mutable}p{i} = {plugin_read_text}(p{i}_ptr, p{i}_len);"
+                    )
                 })
                 .collect();
             let call_args: Vec<String> = export
@@ -162,13 +167,15 @@ pub fn emit_plugin(
                 })
                 .collect();
             wrapper_fns.push_str(&format!(
-                "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> i32 {{ {locals} __jet_plugin_return_text({callee}({call_args})) }}\n#[export_name = \"cabi_post_{kebab}\"]\npub extern \"C\" fn {post_name}(ret_ptr: i32) {{ __jet_plugin_post_text(ret_ptr) }}\n",
+                "#[export_name = \"{kebab}\"]\npub extern \"C\" fn {wrapper_name}({rust_params}) -> i32 {{ {locals} {plugin_return_text}({callee}({call_args})) }}\n#[export_name = \"cabi_post_{kebab}\"]\npub extern \"C\" fn {post_name}(ret_ptr: i32) {{ {plugin_post_text}(ret_ptr) }}\n",
                 wrapper_name = wrapper_name,
                 rust_params = rust_params.join(", "),
                 locals = locals.join(" "),
                 callee = mangle(&export.name),
                 call_args = call_args.join(", "),
                 post_name = mangle(&format!("plugin_post_{}", export.name)),
+                plugin_return_text = plugin_return_text,
+                plugin_post_text = plugin_post_text,
             ));
         } else {
             let rust_params: Vec<String> = export
@@ -217,9 +224,36 @@ pub fn emit_plugin(
         "\n// c81 / D-PLUGIN-EXPORT1=A: generated export wrappers (jet-codegen/Plugin.rs).\n",
     );
     if has_text_export {
-        guest_rust.push_str(
-            r#"
-fn __jet_plugin_cabi_realloc_impl(
+        guest_rust.push_str(&plugin_text_helpers());
+    }
+    guest_rust.push_str(&wrapper_fns);
+
+    PluginArtifacts {
+        wit,
+        guest_rust,
+        world_name: WORLD_NAME.to_string(),
+        export_name: sanitized,
+        exported_fns: exports.iter().map(|export| export.name.clone()).collect(),
+        exports,
+    }
+}
+
+fn plugin_text_helpers() -> String {
+    let cabi_realloc_impl = mangle_generated("plugin_cabi_realloc_impl");
+    let cabi_realloc = mangle_generated("plugin_cabi_realloc");
+    let read_text = mangle_generated("plugin_read_text");
+    let return_text = mangle_generated("plugin_return_text");
+    let post_text = mangle_generated("plugin_post_text");
+    PLUGIN_TEXT_HELPERS
+        .replace("JET_PLUGIN_CABI_REALLOC_IMPL", &cabi_realloc_impl)
+        .replace("JET_PLUGIN_CABI_REALLOC", &cabi_realloc)
+        .replace("JET_PLUGIN_READ_TEXT", &read_text)
+        .replace("JET_PLUGIN_RETURN_TEXT", &return_text)
+        .replace("JET_PLUGIN_POST_TEXT", &post_text)
+}
+
+const PLUGIN_TEXT_HELPERS: &str = r#"
+fn JET_PLUGIN_CABI_REALLOC_IMPL(
     old_ptr: i32,
     old_len: i32,
     align: i32,
@@ -251,16 +285,16 @@ fn __jet_plugin_cabi_realloc_impl(
 }
 
 #[export_name = "cabi_realloc"]
-pub extern "C" fn __jet_plugin_cabi_realloc(
+pub extern "C" fn JET_PLUGIN_CABI_REALLOC(
     old_ptr: i32,
     old_len: i32,
     align: i32,
     new_len: i32,
 ) -> i32 {
-    __jet_plugin_cabi_realloc_impl(old_ptr, old_len, align, new_len)
+    JET_PLUGIN_CABI_REALLOC_IMPL(old_ptr, old_len, align, new_len)
 }
 
-fn __jet_plugin_read_text(ptr: i32, len: i32) -> String {
+fn JET_PLUGIN_READ_TEXT(ptr: i32, len: i32) -> String {
     if ptr == 0 || len == 0 {
         return String::new();
     }
@@ -270,16 +304,16 @@ fn __jet_plugin_read_text(ptr: i32, len: i32) -> String {
     }
 }
 
-fn __jet_plugin_return_text(value: String) -> i32 {
+fn JET_PLUGIN_RETURN_TEXT(value: String) -> i32 {
     let bytes = value.into_bytes();
     let len = bytes.len();
-    let ptr = __jet_plugin_cabi_realloc_impl(0, 0, 1, len as i32) as *mut u8;
+    let ptr = JET_PLUGIN_CABI_REALLOC_IMPL(0, 0, 1, len as i32) as *mut u8;
     if ptr.is_null() && len != 0 {
         return 0;
     }
     unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, len) };
     std::mem::forget(bytes);
-    let result = __jet_plugin_cabi_realloc_impl(0, 0, 4, 8) as *mut i32;
+    let result = JET_PLUGIN_CABI_REALLOC_IMPL(0, 0, 4, 8) as *mut i32;
     if result.is_null() {
         if !ptr.is_null() && len != 0 {
             if let Ok(layout) = std::alloc::Layout::from_size_align(len, 1) {
@@ -295,7 +329,7 @@ fn __jet_plugin_return_text(value: String) -> i32 {
     result as i32
 }
 
-fn __jet_plugin_post_text(ret_ptr: i32) {
+fn JET_PLUGIN_POST_TEXT(ret_ptr: i32) {
     if ret_ptr == 0 {
         return;
     }
@@ -312,17 +346,4 @@ fn __jet_plugin_post_text(ret_ptr: i32) {
         unsafe { std::alloc::dealloc(ret_ptr as *mut u8, layout) };
     }
 }
-"#,
-        );
-    }
-    guest_rust.push_str(&wrapper_fns);
-
-    PluginArtifacts {
-        wit,
-        guest_rust,
-        world_name: WORLD_NAME.to_string(),
-        export_name: sanitized,
-        exported_fns: exports.iter().map(|export| export.name.clone()).collect(),
-        exports,
-    }
-}
+"#;

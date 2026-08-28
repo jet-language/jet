@@ -128,7 +128,7 @@ name = expr             // reassignment of an existing := binding
 ```
 
 Types never ride the binding name. Put the type on the value
-(`U8.{ 250 }`, `Color.{ r: 64, g: 128, b: 200 }`) or on signatures and fields
+(`U8{ 250 }`, `Color{ r: 64, g: 128, b: 200 }`) or on signatures and fields
 (`name: Type`). The retired forms `name: Type :: expr` and `name: Type := expr`
 are ordinary parse errors (D-BIND-BARE1; amends D-BIND4).
 
@@ -869,7 +869,7 @@ formula over the struct's current field values (siblings, data or computed,
 are readable by bare name inside `expr`). `#Memo` is the explicit retained
 form: the first read keeps its answer, and a write to any stored sibling in
 its dependency graph drops that answer. Both forms are unsettable: the field
-is absent from a `Type.{ … }` literal's required/allowed field list (E0339 if
+is absent from a `Type{ … }` literal's required/allowed field list (E0339 if
 provided), and direct assignment (`s.field = v`, `s.field++`) is also E0339. A
 cycle among computed-field formulas, including self-reference, is E0338.
 Codegen: not a Rust struct member — a synthesized inherent getter method
@@ -884,7 +884,7 @@ inexact, noncommensurable, or explicit-only cross-unit mixing reuses E0127;
 exact same-dimension conversion follows D-QUANTITY-CONVERT1. **D-UNITLIT1 —
 unit literals**: `500ms`, `12.50usd` resolve against in-scope family members
 (E0134 unknown suffix); `e`+digits reserved for float exponents.
-Dot-construction `px.{100}` also valid.
+Typed construction `px{100}` also valid.
 
 **D-SHAPE-QUANTITY1=A — Jet understands physical dimensions** *(ratified
 2026-07-15; amended by D-DIMENSION-OPEN1=D)*: length divided by time is speed,
@@ -1044,8 +1044,9 @@ fn fits(depth: Meter) Bool -> { depth > 0meter }
 fits(3000millimeter)
 // argument converts exactly to 3meter
 
-alt_km: Kilometer = 1500meter
-// error: 1500 meter is not an exact number of kilometer
+fn accepts_kilometers(value: Kilometer) Bool -> { true }
+accepts_kilometers(1500meter)
+// error: 1500 meter is not an exact number of kilometer at this argument boundary
 // fix: Kilometer.from_meter_rounded(1500meter, .NearestEven, digits: 0)
 
 # package.jet
@@ -1281,7 +1282,7 @@ A bare `String` is E0152. Runtime text remains fallible through
 `core.regex.compile` or `compile_with`.
 
 **D-BOUND-HEAD1=A — checked URL, Path, and DateTime heads** *(ratified
-2026-08-07)*: `URL.{"…"}`, `Path.{"…"}`, and `DateTime.{"…"}` are checked
+2026-08-07)*: `URL{"…"}`, `Path{"…"}`, and `DateTime{"…"}` are checked
 typed values, not fallible runtime constructors. Sema validates the complete
 literal skeleton and emits E0155 for an invalid head. A URL hole is percent
 encoded; a Path hole is one encoded component, including `.` and `..`; a
@@ -2011,7 +2012,7 @@ policy:   .{ unsafe: .Forbid }
 effects:  .{ deny: [Mem.Alloc, Mem.Rc] }
 
 # Source/sensor.jet — a function writes the memory denial on its signature
-fn sensor() :[!Mem.Alloc(above: 2048)]> { }
+fn sensor() -[!Mem.Alloc(above: 2048)]> { }
 
 # Package policy may only tighten safety, never authorize it:
 policy: .{ unsafe: .Allow }
@@ -2054,7 +2055,7 @@ D-TRACK-ORIGIN1=A)**: `#Track` may prefix a binding:
 
 ```jet
 #Track speed :: compute_speed()
-#Track correction: Float := 0.0
+#Track correction := 0.0
 ```
 
 The marker records provenance for that binding without changing its type. The
@@ -2901,6 +2902,17 @@ the old argument-position markers fix to dot values. `[F32#4]` bridges via
 (E2510/E2511). Raw intrinsics behind `#Unsafe`. Operator overloading exists
 **only** on built-in lane/linalg types.
 
+**D-SIMD3=B — Native SIMD acceleration** *(ratified 2026-08-27, card #2261)*:
+native AOT builds enable host-CPU code generation by default so fixed-width
+lane operations can be auto-vectorized; `#Scalar` on a function or method is
+the explicit scalar codegen boundary. The portable lane family includes the
+existing `F32x4`/`F64x2`, `F32x8`/`F64x4`, and signed/unsigned `I8`/`I16`/`I32`/
+`I64` lane types at 128-bit and 256-bit widths. Constructors, splats,
+indexing, element-wise arithmetic, reductions, and fixed-list bridges use one
+Prelude-backed mechanism on every applicable tier. Reductions keep their
+left-to-right scalar fold order for bit-identical results; raw target
+intrinsics remain behind `#Unsafe`.
+
 **D-JIT1 / D-JIT2 / D-JITDEP1 — JIT tier**: production is AOT; the Cranelift
 JIT is the dev-loop tier-1 over the interpreter tier-0, behind the
 `JitBackend` seam, in its own `jet-jit/` crate (`Source/` stays std-only).
@@ -3157,7 +3169,7 @@ the D-FFI-PY1 precedent):**
   (same engine, I8): each `{hole}` becomes exactly one argv item, never
   word-split or glob-expanded; `core.process.run(cmd: Sh)` executes
   without a shell parsing user data; `Sh.raw("…")` is the sole audited
-  escape; spelling `Sh.{"…"}` per D-UNIFYLIT1=A (former `sh"…"` prefix
+  escape; spelling `Sh{"…"}` per D-UNIFYLIT1=A (former `sh"…"` prefix
   retired).
 - **Phase 5 (ratified by owner 2026-07-12, card #507)**:
   **D-FFI-COM1=A** — `com.*` Windows COM/IDispatch automation root,
@@ -3358,7 +3370,7 @@ handler is active.
 
 **D-EVENT2=A — Typed async events (scheduler tranche)** *(ratified 2026-07-11,
 card #286)*: `Event<T>` and `Hook<T,R>` stay synchronous. `core.event`
-`async_result<T,E>(AsyncPolicy.{ capacity, overflow }, FailurePolicy)` creates
+`async_result<T,E>(AsyncPolicy{ capacity, overflow }, FailurePolicy)` creates
 one `AsyncEvent<T,E>` queue; capacity must be positive. Overflow is exactly
 `Block`, `DropNewest`, or `DropOldest`. `emit_async` returns
 `Task<DispatchReport<E>>`. Capacity counts Queued only; Running and Pending do
@@ -3898,7 +3910,7 @@ aliases or whole-buffer facades.
 
 **D-API-CONTAINS1=B — membership is `has`** *(ratified by owner 2026-07-12, card #513; owner picked B over the rec)*: the membership word is `has` everywhere — `Set`/`Rank`/`Bits` `contains` respells to `has(value)`, map/`Cache` `contains_key` respells to `has_key(key)`, `Tally.has` is already law. `contains`/`contains_key` leave the surface as ordinary no-such-method errors. Amends the D-COLLBREADTH1/D-ITER method lists.
 
-**D-API-CTOR1=A — constructor-idiom law** *(ratified by owner 2026-07-12, card #513)*: the four shipped idioms become written rubric law — bare `Type(…)` when the arguments ARE the value's components (fallible where narrowing); `.new(…)` for fresh stateful containers; `.over(…)` for non-owning views over existing data; `.from_*(…)` for conversions. `Type.{ }` stays the literal for plain data records. Nothing shipped changes; new construction shapes need a ballot.
+**D-API-CTOR1=A — constructor-idiom law** *(ratified by owner 2026-07-12, card #513)*: the four shipped idioms become written rubric law — bare `Type(…)` when the arguments ARE the value's components (fallible where narrowing); `.new(…)` for fresh stateful containers; `.over(…)` for non-owning views over existing data; `.from_*(…)` for conversions. `Type{ }` stays the literal for plain data records. Nothing shipped changes; new construction shapes need a ballot.
 
 **D-SHAPE-CTORVERB1=C — one fresh-value completion stem** *(ratified by
 owner 2026-07-23, card #736)*: deterministic fresh values use type-owned
@@ -4102,7 +4114,7 @@ UI-tree spelling (`.Button.{ label: "OK" }`) is ratified but unbuilt. The shippe
 `ui.*` surface is the callable `core.ui` API, including `ui.text`, `ui.button`,
 `ui.box`, and `ui.mount`; it does not include that spelling. The spelling decision
 reopens with card #1588's architecture result. `Style` is one flat record; motion
-uses the injectable `Clock`; constraint layout is `name :: Layout.{ … }` (D-DOTCTOR3
+uses the injectable `Clock`; constraint layout is `name :: Layout{ … }` (D-DOTCTOR3
 element body of `Constraint` handles; D-LAYOUT-CTOR1) with a first-party
 simplex solver (E2932–E2936).
 Components distribute copy-in-and-own: `jetpack add <Component>` copies
@@ -4177,9 +4189,9 @@ fn-level `#Target(OS.*)` gating (option A) rejected.
 ```jet
 fn run() {
     @if @build.os == {
-        .Linux   -> { b :: LinuxBackend.{ name: "gtk" }    print(b.label()) }
-        .MacOS   -> { b :: MacOSBackend.{ name: "appkit" } print(b.label()) }
-        .Windows -> { b :: WinBackend.{ name: "win32" }    print(b.label()) }
+        .Linux   -> { b :: LinuxBackend{ name: "gtk" }    print(b.label()) }
+        .MacOS   -> { b :: MacOSBackend{ name: "appkit" } print(b.label()) }
+        .Windows -> { b :: WinBackend{ name: "win32" }    print(b.label()) }
     }
 }
 ```
@@ -4261,13 +4273,13 @@ The exact view may pin those same role types without changing meaning:
 greeter: Package :: .{
     name: "greeter"
     version: "1.0.0"
-    sources: Package.Sources.{ roots: ["Source"] }
+    sources: Package.Sources{ roots: ["Source"] }
 }
 ```
 
 There is no package-only identity wrapper and no untyped, dotless identity
 record. This decision reuses ordinary `.{ ... }` and
-`Type.{ ... }` construction; it adds no `Syntax.rs` entry, token, parser
+`Type{ ... }` construction; it adds no `Syntax.rs` entry, token, parser
 production, formatter form, editor grammar, snapshot, or executable example.
 
 #560 owns all runtime enforcement and acceptance work: parser, sema, TIR,
@@ -4299,7 +4311,7 @@ choices and are not implied by D-SHAPE5b.
 **D-ECO-DECL1=A — Ecosystem entries are normal named typed values**
 *(ratified 2026-07-15, card #615)*: each package, environment, check, service,
 image, fleet, and system is an ordinary named field whose value uses the
-existing D-DOTCTOR1 `Type.{ field: value }` constructor. The root value has
+existing D-DOTCTOR1 `Type{ field: value }` constructor. The root value has
 typed sections; section-qualified names such as `packages.api`,
 `services.web`, and `images.server` are stable references within that root.
 The root type is `Package` (D-ECO-ROOTNAME1=I).
@@ -4307,19 +4319,19 @@ The root type is `Package` (D-ECO-ROOTNAME1=I).
 ```text
 root: <Root> :: <Root>.{
     packages: {
-        api: Package.{ source: "apps/api" }
+        api: Package{ source: "apps/api" }
     }
     checks: {
-        unit: Check.{ run: packages.api.tests }
+        unit: Check{ run: packages.api.tests }
     }
     services: {
-        web: Service.{ run: packages.api }
+        web: Service{ run: packages.api }
     }
     images: {
-        server: Image.{ services: [services.web] }
+        server: Image{ services: [services.web] }
     }
     systems: {
-        home: System.{ image: images.server }
+        home: System{ image: images.server }
     }
 }
 ```
@@ -4609,7 +4621,7 @@ defined, else the batteries pipeline. Build code is tiered: Tier 1
 pure+locked by default; Tier 2 needs `#Impure("reason")` + explicit
 permission + provenance; deps never get Tier 2 implicitly. Generated source
 lands under `.jet/generated/`, never committed; lock records source+output
-hashes. Profiles: `Build.{optimize, debug_info, small, panic, settings}`,
+hashes. Profiles: `Build{optimize, debug_info, small, panic, settings}`,
 selected by explicit flag (`--release`/`--profile=<name>`), never ambient env.
 
 D-BUILDTARGET1=A: build targets are registered once with `b.add_executable`,
@@ -4794,7 +4806,7 @@ or publication.
 `jet env` uses one hybrid prompt engine. Default prompt shows the env label and
 compact path; `Ctrl-G` pulls the same status words the optional always-on strip
 shows. Shorthand remains `prompt: "web-api"`. Expert config is
-`prompt: Prompt.{ label: "web-api", path: .Short, strip: .On }`
+`prompt: Prompt{ label: "web-api", path: .Short, strip: .On }`
 (`path: .Full` and `strip: .Off` also valid). Shell state is only a renderer;
 source truth stays in `env.jet`.
 
@@ -5099,7 +5111,7 @@ local UI cache ratified by D-JOS-STUDIO-STATE1.
   stable module IDs.
 - **D-JOS-PRIORITY-SURFACE2=A**: an ordinary option contribution stays a plain
   value. Expert precedence wraps only that contribution as
-  `OptionValue.{ value, priority }`, where priority is `.Default`, `.Force`, or
+  `OptionValue{ value, priority }`, where priority is `.Default`, `.Force`, or
   `.Priority(n)`. The distinct record cannot collide with a real dotted option
   key such as `filesystem.swap.fast.priority`. Explain output retains wrapper
   metadata and every contender; the option consumer receives only `value`.
@@ -5386,7 +5398,7 @@ D-PERFBUDGET-GRAMMAR1=A / D-PERFBUDGET-REPORT1=A /
 D-PERFBUDGET-OUTPUT1=A / D-PERFBUDGET-BENCHMIGRATE1=B /
 D-PERFBUDGET-GAMEMIGRATE1=A / D-PERFBUDGET-PROVIDER1=A /
 D-PERFBUDGET-INTEGRATION1=A / D-PERFBUDGET-COMPILE1=C**: performance budgets use typed
-`module perf.<role> { budgets: [Budget.{ ... }] }` declarations, pinned
+`module perf.<role> { budgets: [Budget{ ... }] }` declarations, pinned
 statistical baselines, one canonical `BudgetReport`, and exact `jet budget
 check` / plan-first `jet budget update` projections. Full closed grammar,
 inference, arithmetic, collision, report, baseline, storage, output,
@@ -5715,7 +5727,7 @@ policy, which can never be weakened by source. Exceptions require id, exact
 package-edge scope, reason, and expiry. `jet policy draft` writes reviewable
 source diffs only.
 The package manifest spelling is
-`policy: { exceptions: [PolicyException.{ id: "…", scope: "package#version", reason: "…", expires: … }] }`;
+`policy: { exceptions: [PolicyException{ id: "…", scope: "package#version", reason: "…", expires: … }] }`;
 the exact target is required and ranges/wildcards are rejected.
 
 **D-JPK-CACHECONFIG1=D — role-bound cache configuration**: workspace policy
@@ -6457,7 +6469,7 @@ documenting form; union↔named-enum crossings stay explicit match conversions.
 D-ANY-JAI1 stays intact — no Any or cast escape. Implemented on card #744.
 
 **2026-07-24 — D-UNINIT-SENTINEL2=A**: `uninit` is legal only as the whole
-body of a typed literal — `name := Type.{ uninit }`. Amends D-UNINIT-SENTINEL1
+body of a typed literal — `name := Type{ uninit }`. Amends D-UNINIT-SENTINEL1
 (retires `name: Type := uninit`). Flow proof E0420/E0423/E0424 and
 `use core.mem` unchanged. Implemented on card #782.
 
@@ -6662,7 +6674,7 @@ non-negative, where the two agree. Spellings live in Syntax.rs (`OP_PERCENT`,
 On a whole number it is the bitwise complement — the missing partner of `&`,
 `|`, and `~|` — and the width comes back unchanged. On the default `Int`, which
 carries no fixed width, turning over every bit is the same as `-x - 1`; on a
-sized type the exact bits of that width flip, so `!U8.{5}` is 250. Clearing
+sized type the exact bits of that width flip, so `!U8{5}` is 250. Clearing
 bits is the everyday use: `flags & !mask` keeps everything except the bits the
 mask names. No new sigil — `!` already existed, and this widens what it accepts,
 so E0109 now says `!` needs a Bool or a whole number
@@ -6882,8 +6894,8 @@ Amends: none.
 **2026-08-06 — D-AUTHORITY-MODEL1=A / D-AUTHORITY-ROOTS1=A /
 D-AUTHORITY-MEM1=B / D-AUTHORITY-NAME1=A / D-AUTHORITY-SCOPE1=A /
 D-AUTHORITY-MANIFEST1=A / D-AUTHORITY-GATE1=A / D-AUTHORITY-WORD1=A /
-D-AUTHORITY-MEM2=A** *(card #1500, proposal
-`docs/proposals/authority-one-model.md`)*. The authority slate records one
+D-AUTHORITY-MEM2=A** *(card #1500; proposal record folded into this slate)*. The
+authority slate records one
 relation: a scope holds rights, nested scopes only shrink them, and every
 widening is written and audited.
 
@@ -6909,13 +6921,13 @@ widening is written and audited.
   parent. This is the honoring amendment for D-FFI-PY1 and
   D-FFI-OCTAVE1.
 - **D-AUTHORITY-MEM1=B**: memory floors leave `#Policy` and become effect
-  denials such as `:[!Mem.Alloc]>` and manifest
+  denials such as `-[!Mem.Alloc]>` and manifest
   `authority: .{ holds: { deny: [Mem.Alloc] } }`. `#Policy` keeps non-memory arguments.
   This amends D-MEM-FACTS1 and D-POLICY-WORD1. The retired floor words are
   tombstones whose replacement is the matching `!Mem.*` denial. Implementation:
   #1568.
 - **D-AUTHORITY-MEM2=A**: denial rows accept an optional `above: Bytes`
-  argument, for example `:[!Mem.Alloc(above: 65536)]>` and manifest
+  argument, for example `-[!Mem.Alloc(above: 65536)]>` and manifest
   `authority: .{ holds: { deny: [Mem.Alloc(above: 65536)] } }`. Record-only outcome; it
   closes the bounded-arena gate in #1568 criterion 4.
 - **D-AUTHORITY-NAME1=A**: `Authority` is the one nameable rights value at
@@ -7032,7 +7044,7 @@ tiers see one folded program.
 `settings:` block. Optimization bundles and the command line contribute
 values by the contribution law. `@if` can fold on a setting, and a fact read is a
 constant. Undeclared settings are compile errors. `--set key=value` is the CLI
-spelling. `features:` and `env:` are deleted from `Build.{}`. This amends
+spelling. `features:` and `env:` are deleted from `Build{}`. This amends
 D-BUILDPROFILE1. The setting value set is Bool, Int, Char, String, and
 fieldless enum, as ratified by D-GENMOD-VALUE1.
 
@@ -7239,7 +7251,7 @@ names one associated check error, one pure `check(String)` function for the
 complete text, and one pure generic `encode_hole(value)` function. Sema resolves
 the implementation through the ordinary trait registry. Known literals run the
 same checker at comptime; `Type.from(text)` runs it at runtime through the
-implicit `Error` route. `Type.raw(text)` is available only inside a reasoned
+implicit `Err` route. `Type.raw(text)` is available only inside a reasoned
 `#Unsafe` region and records the escape. This supersedes the marker contract in
 D-BOUND-SINK1=A; `TextHeadContract`, compiler-owned head lists, special wrapper
 calls, and parallel checkers are retired.
@@ -7301,7 +7313,7 @@ bytes.
 
 **2026-08-07 — the compiler-facts slate: D-FACT-LAW1=B, D-FACT-WORD1=A,
 D-FACT-GATE1=A, D-FACT-READ1=A, D-FACT-HOME1=A, D-FACT-OWN1=A,
-D-FACT-FLOW1=A** *(card #1620, proposal `docs/proposals/compiler-facts-one-law.md`)*.
+D-FACT-FLOW1=A** *(card #1620; proposal record folded into this slate)*.
 The capstone over four ratified rethinks — type v2 knowledge, authority rights,
 concurrency state/duty/reach, and memory v5 ownership. It amends none of their
 decisions; it names the one law they each drew a corner of. The law itself is
@@ -7458,8 +7470,8 @@ windows; `.row(i)` and `.col(j)` name whole axes, a scalar index drops its axis,
 and a range keeps it. `.solve(y)` answers square systems and
 `.least_squares(y)` answers tall systems. Types, literals, indexing, transpose,
 `+ - *`, and reductions need no import; solving, determinants, decompositions,
-and transforms use `core.linalg`. The proposal and all illustrative examples
-live in `docs/proposals/matrix-surface.md`; implementation is a later card.
+and transforms use `core.linalg`. The ratified matrix surface and its
+illustrative examples are recorded here; implementation is a later card.
 
 **2026-08-05 -- D-CALLVALUE1=B** *(card 1427)*: returned function call results
 use `.call(...)`; direct named, method, field, index, and lambda calls keep their
@@ -7546,8 +7558,8 @@ Owner rulings recorded without ballots: the strategy-attachment unification was 
 
 **2026-08-07 — the one-tree name slate: D-NAME-TREE1=A, D-NAME-FILES1=C,
 D-NAME-ALIAS1=A, D-NAME-FENCE1=A, D-NAME-WALK1=A, D-NAME-ROLEMOD1=A,
-D-NAME-REFLECT1=A, D-NAME-SIGIL1=A** *(card #1625, proposal
-`docs/proposals/names-one-tree.md`)*.
+D-NAME-REFLECT1=A, D-NAME-SIGIL1=A** *(card #1625; proposal record folded into
+this slate)*.
 
 - **D-NAME-FILES1=C** — manual named imports stay: every cross-file name keeps
   an explicit import line, and no invisible auto-import of project files
@@ -7581,8 +7593,8 @@ D-NAME-REFLECT1=A, D-NAME-SIGIL1=A** *(card #1625, proposal
   starts with `__jet`.
 
 **2026-08-08 — the choosing slate: D-CHOOSE-PAT1=A, D-CHOOSE-TEST1=A,
-D-CHOOSE-HEADS1=A, D-CHOOSE-FNBODY1=A** *(card #1651, proposal
-`docs/proposals/choosing-one-table.md`)*. D-CHOOSE-FIND1=A already records the
+D-CHOOSE-HEADS1=A, D-CHOOSE-FNBODY1=A** *(card #1651; proposal record folded into
+this slate)*. D-CHOOSE-FIND1=A already records the
 finite-source finding form above. This section records the other outcomes.
 
 - **D-CHOOSE-PAT1=A** — arm heads and `==` tests accept list and tuple shapes.
@@ -7597,23 +7609,25 @@ finite-source finding form above. This section records the other outcomes.
   overlap: E0307 reports a hole, and the unreachable-arm lint reports a
   shadowed head. The surface does not change. A named follow-up owns any later
   table-sugar choice.
-- **D-CHOOSE-FNBODY1=A** — a one-line function body uses `::`. Defining a
-  named thing uses `::`; filling a slot inside a definition uses `=`.
+- **D-CHOOSE-FNBODY1=A** *(historical body spelling; superseded by
+  D-CALLABLE-ONE1=A)* — a one-line function body used `::`. Defining a named
+  thing uses `::`; filling a slot inside a definition uses `=`.
   Reassignment, extern slot fills, and enum discriminants keep `=`;
   parameter and field declaration defaults use `{…}`.
 
 **D-ONELINE-BODY1=B — one body rule** *(ratified 2026-08-13, cards #1453 and
-#1454; reconciles D-CHOOSE-FNBODY1=A)*: ordinary and multi-head function
-one-liners put `::` after the return type. Callable heads use `:>`. An
+#1454; reconciles D-CHOOSE-FNBODY1=A; amended by D-CALLABLE-ONE1=A)*: ordinary
+and multi-head function one-liners use `->` after a non-unit return type.
+Callable heads use `->`. An
 effect-only `if` or `loop` may put `->` before one adjacent statement; braces
 are required for multiple statements and scoped marker blocks. Function-body
-`=` retires with a teaching fix to `::`; `=` remains for slot-filling forms
+`=` retires with a teaching fix to `->`; `=` remains for slot-filling forms
 such as extern bindings, reassignment, and enum discriminants. Declaration
 defaults ride the type as `{…}`. Marker-scoped blocks retain their own braces.
 
 **D-LOOP-STMT-ARROW1=C — arrow loop bodies in statement position** *(ratified
-2026-08-13, card #1453; arrow spelling amended by D-ARROW-UNIFY1=B)*: every statement-position loop header — finite source,
-condition-only, bare infinite, and mutable state — accepts `:> statement`. The
+2026-08-13, card #1453; arrow spelling amended by D-ARROW-RESPELL1=A)*: every statement-position loop header — finite source,
+condition-only, bare infinite, and mutable state — accepts `-> statement`. The
 statement runs for its effect and its value is discarded. A non-unit value gets
 a lint that names the value form `name :: loop … -> value` for collection, or
 the write-capability form `loop item in &values -> item *= 2` for in-place edits.
@@ -7626,7 +7640,7 @@ Prelude owns deterministic fail-nth schedules; AOT and JIT adapters marshal
 the same operation labels. Unknown roots reuse E0119 with a UI snapshot.
 
 **2026-08-14 — D-NOPANIC1=D** *(card #1925)*. `Panic` is a deny-only effect
-row. A function or package may deny it with `:[!Panic]>` or
+row. A function or package may deny it with `-[!Panic]>` or
 `effects: { deny: [Panic] }`; the existing prohibition and manifest-budget
 machinery enforce the denial across the whole reachable dependency graph.
 Expected failure returns `T !E`. A programmer-error stop is admissible only
@@ -7637,8 +7651,8 @@ does not add a runtime effect mechanism or an execution-tier exception.
 
 **2026-08-20 — D-PANICROOT1=A** *(card #1567)*. `Panic` stays in the effect
   vocabulary only as a deny-only row: no positive signature, `#Abilities`, or grant
-may name it. Positive naming is E0751 (`Panic can't be granted, only denied`);
-`:[!Panic]>`, manifest denial, E0749, and `#Pre`/refinement discharge remain
+  may name it. Positive naming is E0751 (`Panic can't be granted, only denied`);
+  `-[!Panic]>`, manifest denial, E0749, and `#Pre`/refinement discharge remain
 valid. `check_panic_call` contributes the existing reachability sentinel, and
 the shared effect projection exposes its `Panic` row for denial without making
 it an ordinary grantable root.
@@ -7813,8 +7827,8 @@ backslash handling and leaves D-REGEX-LIT1 untouched, PROV1 amends
 D-AUTHORITY-MANIFEST1's trust block, and TAINT1 names its off-switch spelling.
 
 - **D-BOUND-LAW1=A — one crossing law** *(implementation #1813, `c03jh01p`)*: nothing foreign becomes Jet silently. Every comptime, build, link, and run crossing names its schema and leaves its fact. The five-column grid — time, schema, checker, evolution, fact — is spec law. A new boundary feature names one cell or waits for an owner ruling; the ratified literal, manifest, dependency, link, wire, validation, migration, fact, and trust rules are recorded instances of that grid, not separate mechanisms.
-- **D-BOUND-HEAD1=A — checked URL, Path, and DateTime heads** *(implementation #1814, `c0igyd1l`)*: `URL.{"…"}`, `Path.{"…"}`, and `DateTime.{"…"}` are checked typed values, not fallible runtime constructors; an invalid head is E0155. A URL hole is percent-encoded, a Path hole is one encoded component, and a DateTime head takes no hole. Runtime strings keep their existing `parse`/`from` constructors. No amendment: the forms ride D-UNIFYLIT1, D-DOTCTOR3, and D-CORE-PATH1.
-- **D-BOUND-RAW1=A — typed head bodies own their escapes** *(implementation #1815, `c0wji8qh`)*: inside any `Type.{"…"}` body a backslash is literal text owned by that head's grammar, so a checked pattern reads as written. **Amendment**: this narrows D-UNIFYLIT1's head-body lexing, and backslash handling only — quote, brace, multiline-closing, and hole rules do not move, and D-REGEX-LIT1 stays untouched, so Regex still refuses interpolation. Plain strings keep the four-entry escape table.
+- **D-BOUND-HEAD1=A — checked URL, Path, and DateTime heads** *(implementation #1814, `c0igyd1l`)*: `URL{"…"}`, `Path{"…"}`, and `DateTime{"…"}` are checked typed values, not fallible runtime constructors; an invalid head is E0155. A URL hole is percent-encoded, a Path hole is one encoded component, and a DateTime head takes no hole. Runtime strings keep their existing `parse`/`from` constructors. No amendment: the forms ride D-UNIFYLIT1, D-DOTCTOR3, and D-CORE-PATH1.
+- **D-BOUND-RAW1=A — typed head bodies own their escapes** *(implementation #1815, `c0wji8qh`)*: inside any `Type{"…"}` body a backslash is literal text owned by that head's grammar, so a checked pattern reads as written. **Amendment**: this narrows D-UNIFYLIT1's head-body lexing, and backslash handling only — quote, brace, multiline-closing, and hole rules do not move, and D-REGEX-LIT1 stays untouched, so Regex still refuses interpolation. Plain strings keep the four-entry escape table.
 - **D-BOUND-SINK1=A — retired marker contract** *(implementation #1816; superseded by D-TEXTHEAD-TYPE1=A, card #2185)*: the former `marker Name on [.Text] { check … hole … }` route is decision history only. The ordinary nominal type and `CheckedText` implementation now own the checked-text sink; the planned sink registry remains deleted.
 - **D-BOUND-TAINT1=A — origin facts clear on typed decode** *(implementation #1817, `c0oolhyo`)*: `net.*`, `fs.read*`, `env.*`, process output, and FFI marshalling seed a `$origin.*` fact in the one ratified flow store. The fact spreads with no ceremony and clears on a successful typed decode or typed construction, because a value that just proved a schema is not raw attacker text. `SQL.raw`, `HTML.raw`, and `Sh.raw` refuse origin-marked text with E0721; `#Scrub` stays the word for a hand-written sanitizer, and `jet inspect gates` lists every gate. The fact is sema-only and is erased before every execution tier. **Off-switch**: one typed settings row on the D-CONF rail refuses seeding project-wide; the proposed spelling is `settings: { origin_facts: off }`, the final key is the owner's, and the row stays unbuilt until that spelling is ratified (I7).
 - **D-BOUND-EVOLVE1=A — published schemas keep unknown wire fields** *(implementation #1818, `c02qrwab`)*: a `#PublishedSchema` codec keeps the fields it does not recognize and re-emits them in their original relative order, so an old binary cannot eat a new field during a rolling deploy. Plain `#Codable` keeps today's drop and `#DenyUnknownFields` keeps its refusal with E2412 — refuse, drop, preserve, one word each. This extends the D-MIGRATE1/D-MIGRATE4 bookkeeping and changes no known-field decoding, marker behaviour, or FieldError shape.
@@ -7840,6 +7854,13 @@ rides the existing interpolation selector rail beside `:Debug`, expands canonica
 Debug text with two-space indentation and one field or element per line, and keeps
 output deterministic and width-independent. The selector and `core.text.fmt.pretty`
 call share one Prelude formatter.
+
+**2026-08-27 — D-FMT-INTERP3=B** *(card #2257; ratified 2026-08-27)*: the closed
+interpolation selector family grows with `:Hex(n)` and the ratified width/padding,
+scientific, percent, binary, and octal selector rows. Each selector maps one-to-one
+to a `core.text.fmt` function. `:Hex(n)` accepts an `Int`, emits lowercase
+hexadecimal, and zero-pads to the requested width through `core.text.fmt.hex`; all
+execution tiers must preserve the same output.
 
 **2026-08-19 — D-ERR-DECON1=A** *(card #2041; ratified 2026-08-19)*: a `??`
 fallback block ends with one bare value or one real diverging tail, so
@@ -7870,7 +7891,7 @@ uniqueness.
 constructor drops the dot before its braces. A named head writes `Point{x: 1}`
 and `[Int]{1, 2, 3, 4}`. An enum payload writes `.Password{username: u}`. An
 anonymous record writes `{port: 8080, on: true}`. This amends every
-`Type.{ body }` row — D-DOTCTOR3=A's universal head, D-UNIFYLIT1=A's domain-text
+`Type{ body }` row — D-DOTCTOR3=A's universal head, D-UNIFYLIT1=A's domain-text
 and byte-pattern heads, D-REGEX-LIT1=D, D-BOUND-HEAD1=A, D-BINPAT1=A,
 D-UNINIT-SENTINEL2=A, and the `[T].{}` / `[K:V].{}` empty forms — to the
 dotless spelling. The dotted form is retired: E0320's class teaches the dotless
@@ -7892,13 +7913,14 @@ expected-type static shorthand. This adds no token or second loop mechanism.
 
 **2026-08-20 — D-SUBJECT-CALL1=A** *(card #1418; ratified 2026-08-20)*: a
 lower-case `.member[.method(args)]*` argument in a known one-parameter callable
-position means `(subject: T) :> subject.member…`. Sema lowers it to the ordinary
+position means `(subject: T) -> subject.member…`. Sema lowers it to the ordinary
 lambda AST; no new token or runtime path exists. Multi-parameter, non-callable,
 unknown, operator, and literal contexts require the full lambda.
 
-**2026-08-20 — D-ARROW-UNIFY1=B** *(card #2081; ratified 2026-08-20)*: one arrow,
-`:>`, in every arrow position — a callable result, a dispatch arm, a loop body,
-and a lambda. The effect ceiling becomes `:[IO]>`. This retires the split that
+**2026-08-20 — D-ARROW-UNIFY1=B** *(card #2081; ratified 2026-08-20; superseded by
+D-ARROW-RESPELL1=A)*: one arrow, `:>` (the historical spelling), in every arrow
+position — a callable result, a dispatch arm, a loop body, and a lambda. The
+effect ceiling becomes `:[IO]>` (historical spelling). This retires the split that
 D-ARROW-CONTROL1=A introduced (`=>` for a result, `->` for control) along with
 D-LOOP-STMT-ARROW1 and D-BODY-ARROW1, and it amends D-SHAPE8=A's `=[Effects]=>`
 row to `:[Effects]>`. Map types, generic argument lists, and dispatch arms must
@@ -7974,42 +7996,42 @@ same law applies to value arm tables and fallback blocks; engines lower the
 checked value through the existing TIR return path.
 
 **2026-08-20 — D-SIG-SHAPE1=B** *(card #2125)*: the return type sits bare after
-the parameter list, and `:>` becomes the one body arrow across the whole
+the parameter list, and `->` becomes the one body arrow across the whole
 language.
 
 ```
-fn double(n: Int) Int :> n * 2
-fn origin() Point :> {x: 0, y: 0}
+fn double(n: Int) Int -> n * 2
+fn origin() Point -> {x: 0, y: 0}
 fn run() { print(double(21)) }
 
-fn load(path: String) String :[IO]> {
+fn load(path: String) String -[IO]> {
     text :: files.read(path)?
     text.trim()
 }
 
 fn name_of(n: Int) String {
     if n == {
-        0 :> "zero"
-        1 :> "one"
-        else :> "many"
+        0 -> "zero"
+        1 -> "one"
+        else -> "many"
     }
 }
 ```
 
-Three consequences. `:>` has exactly one meaning everywhere — the body follows —
+Three consequences. `->` has exactly one meaning everywhere — the body follows —
 instead of carrying a type in a signature and a value in an arm. The effect
-ceiling takes the body-arrow position as `:[IO]>`, which is where it belongs,
+ceiling takes the body-arrow position as `-[IO]>`, which is where it belongs,
 because the ceiling bounds what the body may do. And `::` retires as a body
 form, returning to its single meaning: bind a name to a value.
 
-Uniformity here is not one body form. It is the same two forms everywhere: `:>`
+Uniformity here is not one body form. It is the same two forms everywhere: `->`
 for one expression, braces for many, with the trailing expression as the value.
 Arms, control bodies and lambdas already read that way and do not change, so a
 pattern table is untouched.
 
 Measured before ratification over 600 shipped examples: 427 signatures declared
 a return type, 34 carried an effect ceiling, 641 declared nothing, 230 functions
-used the `::` body, and 387 arm, lambda and control sites already read `:>` as
+used the `::` body, and 387 arm, lambda and control sites already read `->` as
 the body marker. The migration is 461 signatures and 230 bodies, performed by
 `jet fmt`.
 
@@ -8073,7 +8095,7 @@ are retired and teach the suffix form.
 
 ## The reading-first slate (ratified 2026-08-21, card #2144)
 
-Priority order for surface design, owner-stated: the ability to reason about code comes first, reading second, writing third. Proposal: `docs/proposals/one-callable-one-arrow.md`. Eight outcomes; the entries below are the operative wording.
+Priority order for surface design, owner-stated: the ability to reason about code comes first, reading second, writing third. The eight outcomes below are the operative wording.
 
 **2026-08-21 — D-ARROW-RESPELL1=A** *(card #2144)*: the one arrow respells from
 `:>` to `->` in every arrow position — callable bodies, dispatch arms, loop
@@ -8086,7 +8108,7 @@ diagnostics with no alias.
 **2026-08-21 — D-EFFECT-ROW2=B** *(card #2144; owner acceptance term)*: the
 effect row stays fused and splits the new arrow: `-[Effect]>`, pure form
 `-[]>` (owner: "It should split the arrow like this: -[Effect]>"). This
-carries D-SHAPE8=A onto the `->` glyph; the standalone `:[E]` row is rejected.
+carries D-SHAPE8=A onto the `->` glyph; a standalone effect row is rejected.
 
 **2026-08-21 — D-CALLABLE-ONE1=A** *(card #2144)*: one callable shape,
 `[fn name] ( params ) [Return facts] [-[Effects]>|->] body`. The plain arrow is
@@ -8112,12 +8134,12 @@ D-UNIONTYPE1=A (the union takes explicit parens under the suffix), and
 D-FAIL-UNIT1=A's spelling. `?` still means absence only.
 
 **2026-08-26 — D-FAILURE-FOUNDATION1=A** *(paired cutover cards #2172/#2182)*:
-failure contracts use prefix roles: `?Success !Error`, `Success !Error`,
-`!Error`, and `!(E1 | E2)`. A callable that omits its error contract is
+failure contracts use prefix roles: `?Success !NamedError`, `Success !NamedError`,
+`!NamedError`, and `!(E1 | E2)`. A callable that omits its error contract is
 implicitly fallible with the default `Err`; bare `!` is not a source spelling.
 Plain fallible calls propagate automatically. The only postfix journey form is
 `?(text)`, which adds lazy context while preserving the typed carrier, cause,
-and prior frames. Bare declaration `!`, suffix `Error!`, infix failure forms,
+and prior frames. Bare declaration `!`, suffix `NamedError!`, infix failure forms,
 and bare call `?` remain diagnostic-only spellings with canonical fixes; the
 parser, formatter, completion surfaces, grammars, and highlighting emit only
 the prefix law.
@@ -8157,7 +8179,7 @@ D-LOOP-STMT-ARROW1=C, and the stride rule of S19/S22 are untouched, as are
 infinite, conditional, bindingless-subject, and explicit-state loops. `in` is
 a reserved keyword (I7). The retired comma join is a teaching diagnostic.
 Expression-position membership `x in xs` is a teaching diagnostic pointing at
-`.contains(x)`; no membership operator ships (I8).
+`.has(x)`; no membership operator ships (I8).
 
 ## Ratified decision index
 
@@ -8467,6 +8489,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-FLOORDIV1` | A | `c04513m9` |
 | `D-FMT-INTERP1` | A | `c0s24t6f` |
 | `D-FMT-INTERP2` | A | `c067mxf7` |
+| `D-FMT-INTERP3` | B | `card #2257` |
 | `D-FMT-PRETTY1` | A | `c0wfwj5u` |
 | `D-FMT-SIMPLIFY1` | A | `c0vh9xhx` |
 | `D-FMTCOLLAPSE1` | B | `c01pcsdb` |

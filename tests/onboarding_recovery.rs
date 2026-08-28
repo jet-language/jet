@@ -52,9 +52,11 @@ fn first_hour_scaffold_edit_check_test_and_run_recover() {
     }
     let manifest = fs::read_to_string(project.join("package.jet")).unwrap();
     assert!(
-        manifest.contains("authority: .{ holds: { allow: [IO] } }"),
-        "scaffold must grant the IO used by its generated run.jet:\n{manifest}"
+        manifest.contains("authority: .{ holds: { allow: [IO, Mem.Alloc, Exec] } }"),
+        "scaffold must grant the effects used by its generated run.jet:\n{manifest}"
     );
+    let source = fs::read_to_string(project.join("run.jet")).unwrap();
+    assert!(source.contains("process.argv()"), "native scaffold must read argv");
 
     let first_run = jet(&["run"], &project);
     assert!(
@@ -72,6 +74,14 @@ fn first_hour_scaffold_edit_check_test_and_run_recover() {
     );
     assert_eq!(stdout(&explicit_run), "hello, world\n");
 
+    let argv_run = jet(&["run", "run.jet", "--", "from-argv"], &project);
+    assert!(
+        argv_run.status.success(),
+        "argv scaffold run failed:\n{}",
+        stderr(&argv_run)
+    );
+    assert_eq!(stdout(&argv_run), "from-argv\n");
+
     let checked = jet(&["check", "run.jet"], &project);
     assert!(
         checked.status.success(),
@@ -83,7 +93,6 @@ fn first_hour_scaffold_edit_check_test_and_run_recover() {
     assert!(test.status.success(), "jet test failed:\n{}", stderr(&test));
 
     let source_path = project.join("run.jet");
-    let source = fs::read_to_string(&source_path).unwrap();
     let edited = source.replace("hello, world", "hello from Jet");
     fs::write(&source_path, &edited).unwrap();
     let edited_run = jet(&["run"], &project);

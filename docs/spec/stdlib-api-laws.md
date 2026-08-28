@@ -26,11 +26,12 @@ Smith video and its three linked sources.
 - `List.remove(value)` removes the first equal value by default; pass `.Slot` for
   positional removal (D-LISTREMOVE1=F). Do not add parallel `remove_value` or
   `remove_at` spellings.
-- Boolean predicates are verb-prefixed: `is_empty`, `has_prefix`, `contains`.
+- Boolean predicates are verb-prefixed: `is_empty`, `has_prefix`, and
+  `contains` when the job is content search.
 - Failure-returning variants add no suffix; the `?` return type signals failure.
 - Constructor idioms (D-API-CTOR1=A): bare `Type(args)` when the args are the value's
   components; `Type.new(…)` for fresh stateful containers; `Type.over(x)` for non-owning
-  views over existing data; `Type.from_*(x)` for conversions. `Type.{ }` stays the
+  views over existing data; `Type.from_*(x)` for conversions. `Type{ }` stays the
   literal for plain data records (D-DOTCTOR1). New construction shapes need a ballot.
 - Standard acronyms stay fully capitalized per S66 (`JSONDecoder`, `HTTPClient`,
   `IOError`, `UTF8Error`). Do not add PascalCase aliases.
@@ -45,6 +46,10 @@ future API reviews render this row; they do not create a second verb list.
 | remove and return | `pop()` | `pop(key)` | `pop(value)` | `pop_front()` / `pop_back()` | `pop()` |
 | swap at an index | `replace(index, value)` | — | — | — | — |
 | store or upsert | — | `add(key, value)` | `add(value)` | — | — |
+| membership | — | `has_key(key)` | `has(value)` | — | — |
+| content search | — | `contains_value(value)` | — | `contains(value)` | — |
+
+Text and Bytes also use `contains` for content search.
 
 Conversion naming follows the same law: bare `.from(source)` is the generic
 conversion form; a source-qualified conversion names its source, such as
@@ -234,8 +239,8 @@ through both doors.
 
 **2026-08-06 — the core-library slate: D-CORE-DOCTRINE1=A,
 D-CORE-EAGER1=A, D-CORE-PATH1=A, D-CORE-PRELUDE1=A, D-CORE-PRELUDE2=B,
-D-CORE-TREE1=A, D-CORE-USELIST1=A** *(card #1495, proposal
-`docs/proposals/corelib-overhaul.md`)*. The tree migration itself lands with
+D-CORE-TREE1=A, D-CORE-USELIST1=A** *(card #1495; proposal record folded into
+this law)*. The tree migration itself lands with
 card #1574. The reference doc restructure rides that cutover.
 
 - **D-CORE-DOCTRINE1=A** — all Part A rules become law. Every new or changed
@@ -390,7 +395,7 @@ option.
 |---|---|---|
 | `files.read(path)` / `files.write(path, text)` | Whole-value UTF-8 file operation; write is safe for the normal path. | `open`, `create`, `append_all`, or labeled write mode. |
 | `http.get(url)` | One-shot HTTPS request with the safe client defaults: bounded redirects, safe stale-connection retry, environment proxy use, and no HTTPS-to-HTTP downgrade. | `http.client` for timeout, redirect, retry, proxy, and transport policy. |
-| `http.client` | Follow at most 10 redirects, keep same-origin credentials, use safe retries, use the environment proxy, and deny HTTPS-to-HTTP downgrade; cookies stay opt-in. | `.redirects(.Follow.{ max:, same_origin_credentials: })`, `.retries(.Safe/.Idempotent/.None)`, `.proxy(HTTPProxy)`, `.allow_http_downgrade(Bool)`, and `.cookies(.Memory)`; current Boolean controls remain D4 drift. |
+| `http.client` | Follow at most 10 redirects, keep same-origin credentials, use safe retries, use the environment proxy, and deny HTTPS-to-HTTP downgrade; cookies stay opt-in. | `.redirects(.Follow{ max:, same_origin_credentials: })`, `.retries(.Safe/.Idempotent/.None)`, `.proxy(HTTPProxy)`, `.allow_http_downgrade(Bool)`, and `.cookies(.Memory)`; current Boolean controls remain D4 drift. |
 | `http.server.static_files(mux, prefix, root)` | Normalize the root, refuse escapes, hide dot-files, refuse escaping links, and serve `index.html` for a directory request. | `index`, `dotfiles`, and `follow_links`; current Boolean controls remain D4 drift. |
 | `http.server.cors_policy(origins)` | No CORS header exists until a policy is installed; the safe constructor rejects an unsafe origin/credential combination. | `methods`, `headers`, `credentials`, and `max_age`; `credentials` remains D4 drift. |
 | `encoding.*.reader` / `encoding.*.writer` | `EncodingLimits.safe()` bounds the codec; JSON writing is non-canonical unless requested. | `limits: …` and JSON `canonical: …`; the current Boolean canonical control remains D4 drift. |

@@ -21,7 +21,9 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Package::PackageFacts;
 use crate::Sema::{effect_set_has_root, Effect, EffectSet, EffectSummary};
 use crate::AST::{ImportKind, Item, ProgramBundle};
-use jet_foundation::Authority::{answer, parse_right, root as effect_root, Holds, Verdict};
+use jet_foundation::Authority::{
+    answer, parse_right, root as effect_root, ApplicationAuthority, Holds, Verdict,
+};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// The application-boundary view of one checked program.
@@ -39,11 +41,12 @@ pub struct EffectProjection {
 
 impl Default for EffectProjection {
     fn default() -> Self {
+        let authority = ApplicationAuthority::ambient_basics();
         Self {
             required_effects: EffectSet::new(),
-            granted_effects: EffectSet::new(),
-            denied_effects: EffectSet::new(),
-            authority: "application default".to_string(),
+            granted_effects: authority.granted_effects,
+            denied_effects: authority.denied_effects,
+            authority: authority.authority,
         }
     }
 }
@@ -94,18 +97,19 @@ fn policy_effects(names: impl IntoIterator<Item = String>) -> EffectSet {
 /// Project the application policy without changing the sema effect fact.
 ///
 /// The package manifest is optional for single-file programs. Such programs
-/// retain an explicit `application default` authority identity so JSON and
-/// inspect consumers can distinguish absent policy from an empty grant.
+/// receive D-AUTH-AMBIENT1's beginner basics; an explicit package manifest
+/// replaces that default with its own holds.
 pub fn project_application_effects(
     required_effects: &EffectSet,
     manifest: Option<&PackageFacts>,
 ) -> EffectProjection {
     let Some(manifest) = manifest else {
+        let authority = ApplicationAuthority::ambient_basics();
         return EffectProjection {
             required_effects: required_effects.clone(),
-            granted_effects: EffectSet::new(),
-            denied_effects: EffectSet::new(),
-            authority: "application default".to_string(),
+            granted_effects: authority.granted_effects,
+            denied_effects: authority.denied_effects,
+            authority: authority.authority,
         };
     };
 
@@ -166,6 +170,7 @@ pub fn application_policy_diagnostic(
     let required_text = crate::Sema::show_set(&projection.required_effects);
     let granted_text = crate::Sema::show_set(&projection.granted_effects);
     let denied_policy_text = crate::Sema::show_set(&projection.denied_effects);
+    let fix = projection.application_authority().policy_fix();
     Diagnostic::error(
         "E1803",
         if denied.is_empty() {
@@ -177,7 +182,7 @@ pub fn application_policy_diagnostic(
             "required_effects={required_text}; granted_effects={granted_text}; denied_effects={denied_policy_text}; denied_required_effects={denied_text}; undecided_effects={missing_text}; authority={}",
             projection.authority,
         ),
-        "declare the effect in `authority.holds.allow`, deny it deliberately, or approve it once or for the project in an interactive terminal".to_string(),
+        fix,
         None,
     )
 }
@@ -875,6 +880,45 @@ mod tests {
         ] {
             assert!(json.contains(&format!("\"{field}\"")), "missing {field}: {json}");
         }
+    }
+
+    #[test]
+    fn manifestless_projection_grants_beginner_basics() {
+        let required = EffectSet::from([
+            "IO".to_string(),
+            "Mem.Alloc".to_string(),
+            "Exec".to_string(),
+        ]);
+        let projection = project_application_effects(&required, None);
+
+        assert_eq!(projection.required_effects, required);
+        assert_eq!(
+            projection.granted_effects,
+            EffectSet::from([
+                "IO".to_string(),
+                "Mem.Alloc".to_string(),
+                "Exec".to_string(),
+            ])
+        );
+        assert!(projection.undecided().is_empty());
+        assert_eq!(projection.authority, "application default");
+    }
+
+    #[test]
+    fn application_policy_diagnostic_fix_lists_the_complete_missing_set() {
+        let projection = EffectProjection {
+            required_effects: EffectSet::from([
+                "IO".to_string(),
+                "Mem.Alloc".to_string(),
+                "Exec".to_string(),
+            ]),
+            granted_effects: EffectSet::new(),
+            denied_effects: EffectSet::new(),
+            authority: "package.jet authority.holds".to_string(),
+        };
+
+        let diagnostic = application_policy_diagnostic(&projection, &EffectSet::new());
+        assert!(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"));
     }
 
     #[test]

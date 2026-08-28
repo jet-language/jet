@@ -5684,8 +5684,9 @@ fn lower_method_call_impl(
     // (`static_method_call_in_subset`) proved the receiver is a covered type-name
     // ident and `method` is a registered static method. Mirror the AST path
     // (Expression.rs ~L1644): `__jet_<Type>::__jet_<method>(args)`.
-    if let Some(type_name) = static_call_type_name_lower(receiver, env) {
-        return in_own_frame(|| {
+    if recv_type.is_none() {
+        if let Some(type_name) = static_call_type_name_lower(receiver, env) {
+            return in_own_frame(|| {
             // D-TEXTHEAD-TYPE1=A: the source-facing constructors are ordinary
             // inherent facades over the ordinary CheckedText implementation.
             // Their Rust names stay bare; only actual Jet methods use the
@@ -6875,7 +6876,8 @@ fn lower_method_call_impl(
                     args: targs,
                 },
             };
-        });
+            });
+        }
     }
     // c109 Phase 30: DYNAMIC dispatch on a TRAIT-OBJECT receiver (`s.name()`/`s.area()`,
     // `s: Box<dyn __jet_Shape>`). The gate proved `recv_type == Some(<trait>)` with the

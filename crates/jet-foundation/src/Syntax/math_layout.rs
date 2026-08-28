@@ -1,12 +1,90 @@
-/// D-SIMD1/D-SIMD2 (ratified 2026-06-24): the built-in portable SIMD lane types.
-/// `F32x4` is four `F32` lanes, `F64x2` is two `F64` lanes. Constructor
-/// `F32x4(a,b,c,d)`, splat `F32x4.splat(x)`, lane index `v[i]`, element-wise
-/// `+`/`-`/`*`/`/`, reduce `v.sum()` / `v.reduce(.Max)`, and the `[F32#4]` bridge
-/// `from_array`/`to_array`. A closed compiler-provided family (no user `+`); ops
-/// lower to a scalar-array fallback (the pinned stable rustc has no `std::simd`),
-/// memory-safe by construction (I1) — no `std::simd`-feature gate, no intrinsics.
+/// D-SIMD1/D-SIMD2/D-SIMD3 (ratified 2026-06-24/2026-08-27): the built-in
+/// portable SIMD lane types. The family is named by scalar width and lane
+/// count: `F32x4`/`F64x2` are the existing 128-bit forms and
+/// `F32x8`/`F64x4` are the 256-bit forms. Integer lanes cover signed and
+/// unsigned 8/16/32/64-bit scalars at both widths. Constructors, splats,
+/// indexing, element-wise arithmetic, reductions, and fixed-list bridges all
+/// use the same closed compiler-provided family. AOT native builds enable the
+/// host CPU by default; `#Scalar` is the explicit function/method opt-out.
 pub const SIMD_F32X4_TYPE: &str = "F32x4";
 pub const SIMD_F64X2_TYPE: &str = "F64x2";
+pub const SIMD_F32X8_TYPE: &str = "F32x8";
+pub const SIMD_F64X4_TYPE: &str = "F64x4";
+
+/// Scalar kind carried by one portable SIMD lane family member.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SimdLaneKind {
+    F32,
+    F64,
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+}
+
+/// The complete named lane family. Keep this list beside the layout decoder;
+/// sema, protocol registration, and codegen all consume this one source.
+pub const SIMD_LANE_TYPE_NAMES: &[&str] = &[
+    SIMD_F32X4_TYPE,
+    SIMD_F64X2_TYPE,
+    SIMD_F32X8_TYPE,
+    SIMD_F64X4_TYPE,
+    "I8x16",
+    "I16x8",
+    "I32x4",
+    "I64x2",
+    "U8x16",
+    "U16x8",
+    "U32x4",
+    "U64x2",
+    "I8x32",
+    "I16x16",
+    "I32x8",
+    "I64x4",
+    "U8x32",
+    "U16x16",
+    "U32x8",
+    "U64x4",
+];
+
+/// Return the scalar kind and lane count for one named lane type.
+pub fn simd_lane_layout(name: &str) -> Option<(SimdLaneKind, usize)> {
+    Some(match name {
+        SIMD_F32X4_TYPE => (SimdLaneKind::F32, 4),
+        SIMD_F64X2_TYPE => (SimdLaneKind::F64, 2),
+        SIMD_F32X8_TYPE => (SimdLaneKind::F32, 8),
+        SIMD_F64X4_TYPE => (SimdLaneKind::F64, 4),
+        "I8x16" => (SimdLaneKind::I8, 16),
+        "I16x8" => (SimdLaneKind::I16, 8),
+        "I32x4" => (SimdLaneKind::I32, 4),
+        "I64x2" => (SimdLaneKind::I64, 2),
+        "U8x16" => (SimdLaneKind::U8, 16),
+        "U16x8" => (SimdLaneKind::U16, 8),
+        "U32x4" => (SimdLaneKind::U32, 4),
+        "U64x2" => (SimdLaneKind::U64, 2),
+        "I8x32" => (SimdLaneKind::I8, 32),
+        "I16x16" => (SimdLaneKind::I16, 16),
+        "I32x8" => (SimdLaneKind::I32, 8),
+        "I64x4" => (SimdLaneKind::I64, 4),
+        "U8x32" => (SimdLaneKind::U8, 32),
+        "U16x16" => (SimdLaneKind::U16, 16),
+        "U32x8" => (SimdLaneKind::U32, 8),
+        "U64x4" => (SimdLaneKind::U64, 4),
+        _ => return None,
+    })
+}
+
+pub fn is_simd_lane_type(name: &str) -> bool {
+    simd_lane_layout(name).is_some()
+}
+
+pub fn simd_lane_arity(name: &str) -> Option<usize> {
+    simd_lane_layout(name).map(|(_, lanes)| lanes)
+}
 
 /// D-SWIZZLE1 (ratified 2026-06-27): named lane swizzles on vector/SIMD types.
 /// Members `x`/`y`/`z`/`w` name lanes 0..3; patterns like `v.xyz`, `v.yx`, and

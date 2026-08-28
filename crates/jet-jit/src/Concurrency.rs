@@ -894,6 +894,7 @@ where
     let rt_addr = rt_ptr as usize;
     let inherited_deadline = jet_ctx_deadline_ms();
     let deopt_state = super::deopt::capture_deopt_state();
+    let runtime_argv = jet_codegen::Comptime::runtime_argv();
     let control = JetTaskControl::new();
     // Register the handle before the child can enter deopt. Otherwise the
     // child can own RUNTIME_ACCESS while `store_task` is assigning its slot;
@@ -919,7 +920,13 @@ where
             clear_task_trap();
             let _deadline = inherited_deadline.map(jet_ctx_push_deadline);
             let _ = take_pending_shield_exit();
-            let out = f();
+            // Task bodies may call `process.argv()` directly or deopt into the
+            // interpreter. Carry the one invocation carrier across this worker
+            // hop; the task runtime must not grow a second argv store.
+            let out = match runtime_argv.as_deref() {
+                Some(args) => jet_codegen::Comptime::with_runtime_argv(args, f),
+                None => f(),
+            };
             let child_deadline = take_pending_child_deadline();
             // A native task owns its trap until the shared join/combinator
             // result is observed; a sibling must not inherit it at its next

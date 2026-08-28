@@ -619,7 +619,8 @@ pub struct ProgramBundle {
     pub dep_roots: std::collections::HashMap<String, std::path::PathBuf>,
     /// D-MEM-GUARANTEE1: the package-only guarantee dial carried from the
     /// checked package seam into every execution tier. Single-file bundles
-    /// use the empty default; engines never rediscover package.jet.
+    /// use the ambient beginner authority default; engines never rediscover
+    /// package.jet.
     pub package_guarantees: PackageGuarantees,
     /// D-ALLOC-PROGRAM1=A: the canonical package allocator fact projected by
     /// Loader. Engines marshal this value into the shared Prelude kernel and

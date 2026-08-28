@@ -911,14 +911,14 @@ fn entry_projection(entry: &StoreEntry) -> ExplainEntry {
 }
 
 fn load_graph(roots: &Roots, reports: &mut Vec<ExplainReport>) -> Option<ClosureGraph> {
-    match super::Closure::closure_graph_read_only(roots) {
+    match super::Journal::closure_graph_read_only(roots) {
         Ok(graph) => Some(graph),
         Err(error) => {
             reports.push(ExplainReport {
                 kind: "loss".to_string(),
                 message: format!("closure proof is unavailable: {error}"),
             });
-            match super::Closure::closure_graph_structure_read_only(roots) {
+            match super::Journal::closure_graph_structure_read_only(roots) {
                 Ok(graph) => Some(graph),
                 Err(error) => {
                     reports.push(ExplainReport {

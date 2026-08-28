@@ -942,13 +942,7 @@ impl<'a> Interp<'a> {
             return Ok(crate::Comptime::ComplexParity::from_parts(real, imaginary));
         }
         // D-SIMD2 / D-LINALG1: `Vec3(…)` / `F32x4(…)` / `Mat3(…)` constructors.
-        if (name == crate::Syntax::LINALG_VEC2_TYPE
-            || name == crate::Syntax::LINALG_VEC3_TYPE
-            || name == crate::Syntax::LINALG_VEC4_TYPE
-            || name == crate::Syntax::LINALG_MAT3_TYPE
-            || name == crate::Syntax::LINALG_MAT4_TYPE
-            || name == crate::Syntax::SIMD_F32X4_TYPE
-            || name == crate::Syntax::SIMD_F64X2_TYPE)
+        if super::super::MathLayout::is_math_type(name)
             && self.funcs.get(name).is_none()
             && !scope.contains_key(name)
         {

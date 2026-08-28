@@ -1,28 +1,8 @@
 use core.files as fs
 use core.process as process
 use core.sys as sys
-use core.math as math
-use core.text.fmt as fmt
 use core.encoding.hex as hex
-
-fn float_from_bits(bits: Int) Float -> {
-    sign :: if (bits >> 63) == 0 -> Float{1.0} else -> Float{-1.0}
-    exponent :: (bits >> 52) & 2047
-    fraction :: bits & 4503599627370495
-    if exponent == 0 -> return sign * Float.from_int(fraction) / math.pow(Float{2.0}, Float{1074.0})
-    mantissa :: Float{1.0} + Float.from_int(fraction) / Float{4503599627370496.0}
-    return sign * mantissa * math.pow(Float{2.0}, Float.from_int(exponent - 1023))
-}
-
-fn fixed_six(value: Float) String -> {
-    scaled :: math.round(value * Float{1000000.0})
-    negative :: scaled < 0
-    magnitude :: if negative -> -scaled else -> scaled
-    whole :: magnitude /% 1000000
-    fraction :: fmt.pad_left("{magnitude % 1000000}", 6, "0")
-    if negative -> return "-{whole}.{fraction}"
-    return "{whole}.{fraction}"
-}
+use core.regex as re
 
 fn run() {
     args :: process.argv()
@@ -31,43 +11,40 @@ fn run() {
     data :: fs.read_bytes(Path.from(path)) ?? return Err("cannot read input")
     reader :: Reader.over(data)
 
-    if (reader.read_u8() ?? return Err("short magic")) != 74 { return Err("bad magic") }
-    if (reader.read_u8() ?? return Err("short magic")) != 71 { return Err("bad magic") }
-    if (reader.read_u8() ?? return Err("short magic")) != 66 { return Err("bad magic") }
-    if (reader.read_u8() ?? return Err("short magic")) != 49 { return Err("bad magic") }
+    magic :: reader.take(4) ?? return Err("short magic")
+    expected_magic :: [U8]{74, 71, 66, 49}
+    if magic != expected_magic -> return Err("bad magic")
     count_u32 :: reader.read_u32_le() ?? return Err("short count")
     count :: Int.from_u32(count_u32)
 
     sum := Float{0.0}
-    hash := Int{14695981039346656037}
-    prime :: 1099511628211
-    modulus :: 18446744073709551616
+    hash := U64{14695981039346656037}
+    prime :: U64{1099511628211}
     loop _ in 0..<count {
         id_u32 :: reader.read_u32_le() ?? return Err("short id")
         id :: Int.from_u32(id_u32)
-        value_low :: Int.from_u32(reader.read_u32_le() ?? return Err("short value"))
-        value_high :: Int.from_u32(reader.read_u32_le() ?? return Err("short value"))
-        value :: float_from_bits(value_high * 4294967296 + value_low)
+        value :: reader.read_f64_le() ?? return Err("short value")
         name_len_u16 :: reader.read_u16_le() ?? return Err("short name length")
         name_len :: Int.from_u16(name_len_u16)
         if id % 7 == 0 -> sum += value
         loop _ in 0..<name_len {
             byte :: reader.read_u8() ?? return Err("short name")
-            hash = ((hash ~| Int.from_u8(byte)) * prime) % modulus
+            hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
         }
     }
 
     hash_bytes :: [U8]{
-        U8.from_int((hash >> 56) & 255) ?? 0,
-        U8.from_int((hash >> 48) & 255) ?? 0,
-        U8.from_int((hash >> 40) & 255) ?? 0,
-        U8.from_int((hash >> 32) & 255) ?? 0,
-        U8.from_int((hash >> 24) & 255) ?? 0,
-        U8.from_int((hash >> 16) & 255) ?? 0,
-        U8.from_int((hash >> 8) & 255) ?? 0,
-        U8.from_int(hash & 255) ?? 0
+        U8.from_u64((hash >> 56) & U64{255}) ?? U8{0},
+        U8.from_u64((hash >> 48) & U64{255}) ?? U8{0},
+        U8.from_u64((hash >> 40) & U64{255}) ?? U8{0},
+        U8.from_u64((hash >> 32) & U64{255}) ?? U8{0},
+        U8.from_u64((hash >> 24) & U64{255}) ?? U8{0},
+        U8.from_u64((hash >> 16) & U64{255}) ?? U8{0},
+        U8.from_u64((hash >> 8) & U64{255}) ?? U8{0},
+        U8.from_u64(hash & U64{255}) ?? U8{0}
     }
     print("records {count}")
-    print("sum7 {fixed_six(sum)}")
+    sum_text :: re.replace_all(Regex{","}, "", "{sum:Fixed(6)}")
+    print("sum7 {sum_text}")
     print("fnv {hex.encode(hash_bytes)}")
 }

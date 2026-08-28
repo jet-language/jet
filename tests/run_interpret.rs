@@ -52,6 +52,137 @@ fn run_interpret_forces_tier_zero_without_watch() {
 }
 
 #[test]
+fn run_interpret_rejects_release_profile() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let output = Command::new(jet())
+        .args([
+            "run",
+            "--interpret",
+            "--release",
+            "examples/features/errors/result_handler.jet",
+        ])
+        .current_dir(root)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E2102"), "{stderr}");
+    assert!(stderr.contains("--interpret"), "{stderr}");
+}
+
+/// Card #2250 / I9: one invocation argv must survive every native execution
+/// adapter. The first item is the tier's program identity, so the observable
+/// comparison covers the forwarded program arguments while the same source
+/// proves flags, filenames, Unicode, an empty value, and a bare -- survive
+/// the CLI split unchanged.
+#[test]
+fn argv_agrees_on_every_native_tier() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_run_interpret_argv_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"run_interpret_argv\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [Exec, IO, Mem.Alloc] } }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("main.jet"),
+        "use core.process as process\n\nfn run() {\n    args :: process.argv()\n    print(args.len())\n    loop arg in args.skip(1) {\n        print(\"<{arg}>\")\n    }\n}\n",
+    )
+    .unwrap();
+
+    let program_args = ["--flag", "--port=50000", "report file.jet", "Δ", "", "--"];
+    let cache = dir.join("cache");
+    let run = |label: &str, args: &[&str]| {
+        let output = Command::new(jet())
+            .args(args)
+            .current_dir(&dir)
+            .env("JET_RUN_CACHE_DIR", cache.join(label).join("run"))
+            .env("JET_CACHE_DIR", cache.join(label).join("build"))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap_or_else(|error| panic!("{label} should start: {error}"));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{label} failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.stderr.is_empty(),
+            "{label} wrote stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+
+    let invocation = |label: &str, command: &str, extra: &[&str]| {
+        let mut args = vec![command];
+        args.extend_from_slice(extra);
+        args.push("main.jet");
+        args.push("--");
+        args.extend_from_slice(&program_args);
+        run(label, &args)
+    };
+    let default = invocation("default", "run", &[]);
+    let interpret = invocation("interpret", "run", &["--interpret"]);
+    let release = invocation("release", "run", &["--release"]);
+    let dev = {
+        let mut args = vec!["dev", "--watch=off", "main.jet", "--"];
+        args.extend_from_slice(&program_args);
+        run("dev", &args)
+    };
+
+    let build = Command::new(jet())
+        .args(["build", "main.jet", "--quiet"])
+        .current_dir(&dir)
+        .env("JET_CACHE_DIR", cache.join("aot-build"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        build.status.code(),
+        Some(0),
+        "AOT build failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let aot = Command::new(dir.join("build/main"))
+        .args(program_args)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        aot.status.code(),
+        Some(0),
+        "AOT binary failed:\n{}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+
+    for (label, output) in [
+        ("interpret", interpret),
+        ("release", release),
+        ("dev", dev),
+        ("AOT", aot.stdout),
+    ] {
+        assert_eq!(output, default, "{label} argv output diverged");
+    }
+    let expected = "7\n<--flag>\n<--port=50000>\n<report file.jet>\n<Δ>\n<>\n<-->\n";
+    assert_eq!(
+        default.as_slice(),
+        expected.as_bytes(),
+        "forwarded argv was not preserved"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn run_interpret_keeps_unused_c_member_lists_runnable() {
     let dir =
         std::env::temp_dir().join(format!("jet_run_interpret_imports_{}", std::process::id()));

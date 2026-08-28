@@ -1,7 +1,8 @@
 use super::super::{
-    leading_dot_variant, Diagnostic, EnumLitArg, Expr, Parser, Pattern, Span, Syntax, TokKind,
-    Token, Type, TypedLitBody,
+    leading_dot_variant, Diagnostic, EnumLitArg, Expr, Parser, Pattern, Span, StrTokPart, Syntax,
+    TokKind, Token, Type, TypedLitBody,
 };
+use crate::AST::ByteTextPart;
 
 /// D-DOTCTOR3: does the brace body start like record fields / field punning?
 /// `pos` points at the first token inside `{ … }` (not at `{`).
@@ -46,8 +47,8 @@ impl<'a> Parser<'a> {
     /// D-DOTCTOR3: `[T]{ … }` / `[T#N]{ … }` / `[K:V]{ … }` is a typed-
     /// literal head, not a list value whose first element is a type name.
     pub(super) fn list_or_map_lit(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-        if allow_struct_lit {
-            if let Some(lit) = self.try_typed_lit_from_bracket()? {
+        if allow_struct_lit && self.bracket_starts_typed_lit() {
+            if let Some(lit) = self.parse_typed_lit_from_bracket()? {
                 return Ok(lit);
             }
         }
@@ -88,13 +89,52 @@ impl<'a> Parser<'a> {
         Ok(Expr::ListLit(elems, Span::new(open.start, close.end)))
     }
 
-    /// D-DOTCTOR3: probe `[Type]{` / `[Type#N]{` / `[K:V]{`.
-    fn try_typed_lit_from_bracket(&mut self) -> Result<Option<Expr>, Diagnostic> {
+    /// D-DOTCTOR3: find the closing `]` of a potential typed-literal head
+    /// without entering the recursive type parser. Ordinary list values take
+    /// this small lexical path; the larger typed-literal parser is called only
+    /// after a constructor body is actually present.
+    fn bracket_starts_typed_lit(&self) -> bool {
+        if !matches!(self.peek().kind, TokKind::LBracket) {
+            return false;
+        }
+        // Do not recursively parse a type for every ordinary list. Apart from
+        // wasting work, that speculative descent sits on the expression
+        // descent for forms such as `[call([value])]` and can exhaust a small
+        // embedder stack before the actual list parser gets a chance to run.
+        // A typed collection head is the only bracketed type followed by a
+        // constructor body (`{` or the retired `.` form), so find that closing
+        // bracket with a flat token scan first.
+        let mut nested = 0;
+        let mut index = self.pos + 1;
+        while let Some(token) = self.toks.get(index) {
+            match &token.kind {
+                TokKind::LBracket => nested += 1,
+                TokKind::RBracket if nested == 0 => {
+                    return self.toks.get(index + 1).is_some_and(|next| {
+                        matches!(&next.kind, TokKind::LBrace)
+                            || matches!(&next.kind, TokKind::Dot)
+                                && self
+                                    .toks
+                                    .get(index + 2)
+                                    .is_some_and(|after_dot| {
+                                        matches!(&after_dot.kind, TokKind::LBrace)
+                                    })
+                    });
+                }
+                TokKind::RBracket => nested -= 1,
+                TokKind::Eof => return false,
+                _ => {}
+            }
+            index += 1;
+        }
+        false
+    }
+
+    /// D-DOTCTOR3: parse `[Type]{` / `[Type#N]{` / `[K:V]{` after the
+    /// lightweight head probe has confirmed a constructor body.
+    fn parse_typed_lit_from_bracket(&mut self) -> Result<Option<Expr>, Diagnostic> {
         let save = self.pos;
         let save_diags = self.diags.len();
-        if !matches!(self.peek().kind, TokKind::LBracket) {
-            return Ok(None);
-        }
         // Parse the whole collection type (`[T]`, `[T#N]`, `[K:V]`), not the
         // element alone — bumping `[` then `type_()` would see `U8` as a scalar.
         let parsed = self.type_();
@@ -152,6 +192,13 @@ impl<'a> Parser<'a> {
         }
         match head {
             Type::Map { .. } => self.finish_typed_lit_entries(),
+            Type::List(_) | Type::FixedList { .. }
+                if super::patterns::is_byte_list_head(head)
+                    && matches!(self.peek().kind, TokKind::Str(_))
+                    && matches!(self.peek2().kind, TokKind::RBrace) =>
+            {
+                self.finish_byte_text()
+            }
             Type::List(_) | Type::FixedList { .. } => self.finish_typed_lit_elements(),
             // D-LAYOUT-CTOR1: `Layout.{ … }` is an element body of
             // `Constraint`s — same comma/semi separators as `[T].{ … }`.
@@ -168,6 +215,31 @@ impl<'a> Parser<'a> {
                 Ok(TypedLitBody::Value(Box::new(value)))
             }
         }
+    }
+
+    fn finish_byte_text(&mut self) -> Result<TypedLitBody, Diagnostic> {
+        let token = self.bump();
+        let TokKind::Str(parts) = token.kind else {
+            unreachable!("byte typed literal body starts with a string token");
+        };
+        if parts
+            .iter()
+            .any(|part| matches!(part, StrTokPart::Interp(_)))
+        {
+            let value = self.str_expr_from_parts(parts, token.span)?;
+            self.expect(TokKind::RBrace, "to close a typed literal")?;
+            return Ok(TypedLitBody::Value(Box::new(value)));
+        }
+        let parts = parts
+            .into_iter()
+            .map(|part| match part {
+                StrTokPart::Lit(text) => ByteTextPart::Lit(text),
+                StrTokPart::Byte(byte) => ByteTextPart::Byte(byte),
+                StrTokPart::Interp(_) => unreachable!("interpolation handled above"),
+            })
+            .collect();
+        self.expect(TokKind::RBrace, "to close a typed literal")?;
+        Ok(TypedLitBody::ByteText(parts))
     }
 
     fn finish_typed_lit_elements(&mut self) -> Result<TypedLitBody, Diagnostic> {

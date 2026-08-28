@@ -328,6 +328,7 @@ fn desugar_expr(expr: &mut Expr) {
                 }
             }
             TypedLitBody::Value(inner) => desugar_expr(inner),
+            TypedLitBody::ByteText(_) => {}
             TypedLitBody::Empty => {}
         },
         Expr::EnumLit { args, .. } => {

@@ -178,7 +178,9 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // is only ever `true` here once sema has confirmed the function can actually
     // inline (E0917/E0918/E0919 would have failed the build otherwise) — I3:
     // sema decides, codegen just emits.
-    let inline_attr = if tir.is_inline_always {
+    let inline_attr = if tir.is_scalar {
+        "#[inline(never)]\n"
+    } else if tir.is_inline_always {
         "#[inline(always)]\n"
     } else if tir.is_inline {
         "#[inline]\n"
@@ -511,7 +513,9 @@ pub(crate) fn emit_tir_method(
     // D-METHODMACRO1=A: `#Inline`/`#Inline(Always)` on a method — same attribute,
     // indented to the method's own line (see `emit_tir_toplevel` for the free-
     // function form).
-    let inline_attr = if tir.is_inline_always {
+    let inline_attr = if tir.is_scalar {
+        format!("{pad}#[inline(never)]\n")
+    } else if tir.is_inline_always {
         format!("{pad}#[inline(always)]\n")
     } else if tir.is_inline {
         format!("{pad}#[inline]\n")
@@ -676,10 +680,15 @@ pub(crate) fn emit_tir_trait_method(
         params.push(format!("{rust_name}: {rust}"));
     }
     let unsafe_kw = if is_unsafe { "unsafe " } else { "" };
+    let scalar_attr = if tir.is_scalar {
+        format!("{pad}#[inline(never)]\n")
+    } else {
+        String::new()
+    };
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{pad}{unsafe_kw}fn {name}{generics}{view_generic}({params}){ret} {{\n",
+        "{scalar_attr}{pad}{unsafe_kw}fn {name}{generics}{view_generic}({params}){ret} {{\n",
         name = tir.name,
         generics = tir.generics,
         view_generic = if has_view_return {
@@ -733,10 +742,16 @@ pub(crate) fn emit_tir_serde_method_named(
 ) {
     let indent = 1;
     let pad = "    ".repeat(indent);
+    let scalar_attr = if tir.is_scalar {
+        format!("{pad}#[inline(never)]\n")
+    } else {
+        String::new()
+    };
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     match codec {
         SerdeCodec::Encode => {
+            out.push_str(&scalar_attr);
             out.push_str(&format!("{pad}fn {name}(&self) -> jet_std::DataTree {{\n"));
             emit_stack_guard(tir, cx, out, indent + 1);
             emit_sentry_gate(tir, cx, out, indent + 1);
@@ -759,6 +774,7 @@ pub(crate) fn emit_tir_serde_method_named(
                 Some(t) => rust_return_type(cx, t),
                 None => "Result<Self, Vec<jet_std::FieldError>>".to_string(),
             };
+            out.push_str(&scalar_attr);
             out.push_str(&format!(
                 "{pad}fn {name}({tree}: &jet_std::DataTree) -> {ret} {{\n"
             ));

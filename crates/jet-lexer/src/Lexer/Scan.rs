@@ -98,6 +98,37 @@ impl<'a> Lexer<'a> {
             }
     }
 
+    /// D-BYTELIT1=B: `[U8]{ "..." }` and `[U8#N]{ "..." }` use the same
+    /// quoted token as ordinary text, but their body grammar owns `\xNN`.
+    fn starts_byte_typed_lit_body(toks: &[Token]) -> bool {
+        let significant = toks
+            .iter()
+            .filter(|token| {
+                !matches!(
+                    token.kind,
+                    TokKind::LineComment(_) | TokKind::BlockComment(_)
+                )
+            })
+            .collect::<Vec<_>>();
+        let len = significant.len();
+        if len < 4
+            || !matches!(significant[len - 1].kind, TokKind::LBrace)
+            || !matches!(significant[len - 2].kind, TokKind::RBracket)
+        {
+            return false;
+        }
+        let is_u8 =
+            |token: &Token| matches!(&token.kind, TokKind::Ident(name) if name == Syntax::TYPE_U8);
+        let base = len - 4;
+        if matches!(significant[base].kind, TokKind::LBracket) && is_u8(significant[base + 1]) {
+            return true;
+        }
+        len >= 6
+            && matches!(significant[len - 6].kind, TokKind::LBracket)
+            && is_u8(significant[len - 5])
+            && matches!(significant[len - 4].kind, TokKind::Hash)
+    }
+
     fn starts_inline_foreign_body(toks: &[Token]) -> bool {
         if !matches!(toks.last().map(|t| &t.kind), Some(TokKind::LBrace)) {
             return false;
@@ -461,14 +492,15 @@ impl<'a> Lexer<'a> {
                 // Bare `b` followed by `"` falls through to the identifier lexer.
                 '"' => {
                     let raw_head = Self::starts_typed_head_body(&toks);
+                    let byte_head = Self::starts_byte_typed_lit_body(&toks);
                     let tok = if next == '"' && next2 == '"' {
                         if Self::starts_inline_foreign_body(&toks) {
                             self.raw_foreign_string(start)
                         } else {
-                            self.triple_string(start, raw_head)
+                            self.triple_string(start, raw_head, byte_head)
                         }
                     } else {
-                        self.string(start, raw_head)
+                        self.string(start, raw_head, byte_head)
                     };
                     if let Some(tok) = tok {
                         toks.push(tok);

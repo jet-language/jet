@@ -63,17 +63,25 @@ pub(crate) fn share_tree_files_unlocked(
     root: &Path,
     allow_semantic_xattrs: bool,
 ) -> std::io::Result<()> {
+    share_tree_files_unlocked_with_report(roots, root, allow_semantic_xattrs).map(|_| ())
+}
+
+pub(crate) fn share_tree_files_unlocked_with_report(
+    roots: &Roots,
+    root: &Path,
+    allow_semantic_xattrs: bool,
+) -> std::io::Result<(usize, u64)> {
     if allow_semantic_xattrs {
-        return Ok(());
+        return Ok((0, 0));
     }
     if fs::symlink_metadata(root)?.file_type().is_symlink() {
-        return Ok(());
+        return Ok((0, 0));
     }
     let hangar = roots.hangar_dir();
     let canonical_hangar = fs::canonicalize(&hangar).unwrap_or(hangar);
     let canonical_root = fs::canonicalize(root)?;
     if !canonical_root.starts_with(&canonical_hangar) {
-        return Ok(());
+        return Ok((0, 0));
     }
     let shared = roots.shared_cas_dir();
     if shared == canonical_root || shared.starts_with(&canonical_root) {
@@ -85,12 +93,27 @@ pub(crate) fn share_tree_files_unlocked(
     ensure_real_directory(&shared, "shared CAS pool")?;
     make_tree_writable_for_removal(&canonical_root)?;
     let mut used = BTreeSet::new();
-    share_node(&canonical_root, &shared, &mut used)?;
+    let mut optimized_files = 0;
+    let mut optimized_bytes = 0;
+    share_node(
+        &canonical_root,
+        &shared,
+        &mut used,
+        &mut optimized_files,
+        &mut optimized_bytes,
+    )?;
     seal_node(&canonical_root)?;
-    fsync_tree(&canonical_root)
+    fsync_tree(&canonical_root)?;
+    Ok((optimized_files, optimized_bytes))
 }
 
-fn share_node(path: &Path, shared: &Path, used: &mut BTreeSet<String>) -> std::io::Result<()> {
+fn share_node(
+    path: &Path,
+    shared: &Path,
+    used: &mut BTreeSet<String>,
+    optimized_files: &mut usize,
+    optimized_bytes: &mut u64,
+) -> std::io::Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         return Ok(());
@@ -99,7 +122,13 @@ fn share_node(path: &Path, shared: &Path, used: &mut BTreeSet<String>) -> std::i
         let mut entries = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
         entries.sort_by_key(|entry| entry.file_name());
         for entry in entries {
-            share_node(&entry.path(), shared, used)?;
+            share_node(
+                &entry.path(),
+                shared,
+                used,
+                optimized_files,
+                optimized_bytes,
+            )?;
         }
         return Ok(());
     }
@@ -131,6 +160,8 @@ fn share_node(path: &Path, shared: &Path, used: &mut BTreeSet<String>) -> std::i
         return Ok(());
     }
     if replace_with_shared_link(path, &shared_file).is_ok() {
+        *optimized_files += 1;
+        *optimized_bytes += source_len;
         return Ok(());
     }
     if created

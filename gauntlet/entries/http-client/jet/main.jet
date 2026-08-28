@@ -7,23 +7,26 @@ fn run() !(HTTPError | JSONError | [FieldError]) {
     list_body :: list_response.body().text(1048576)
     list :: json.parse(list_body)
     items :: list.field("items")
-    print("items 6")
+    if items == .Array(values) {
+        print("items {values.len()}")
 
-    loop id in [2, 5, 99] {
-        response :: http_client.request("GET", "{base}/items/{id}").send()
-        if {
-            response.status() == 404 -> print("item {id} missing")
-            else -> {
-                body :: response.body().text(1048576)
-                item :: json.parse(body)
-                item_id :: item.field("id").int()
-                name :: item.field("name").text()
-                qty :: item.field("qty").int()
-                print("item {item_id} {name} qty={qty}")
+        loop id in [2, 5, 99] {
+            response :: http_client.request("GET", "{base}/items/{id}").send()
+            if {
+                response.status() == 404 -> print("item {id} missing")
+                else -> {
+                    body :: response.body().text(1048576)
+                    item :: json.parse(body)
+                    item_id :: item.field("id").int()
+                    name :: item.field("name").text()
+                    qty :: item.field("qty").int()
+                    print("item {item_id} {name} qty={qty}")
+                }
             }
         }
-    }
 
-    total :: items.at(0).field("qty").int() + items.at(1).field("qty").int() + items.at(2).field("qty").int() + items.at(3).field("qty").int() + items.at(4).field("qty").int() + items.at(5).field("qty").int()
-    print("total-qty {total}")
+        total := 0
+        loop item in values -> total += item.field("qty").int()
+        print("total-qty {total}")
+    }
 }

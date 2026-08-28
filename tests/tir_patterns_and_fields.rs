@@ -112,6 +112,48 @@ fn run() {
     assert_tiers_agree("tir_generated_name_patterns", src, "7\n6\nok:7:7:6\n");
 }
 
+/// D-FAILURE-FOUNDATION1: generated equality, ordering, and codec protocol
+/// methods keep their raw bridge ABI on every hosted execution tier.
+#[test]
+fn generated_trait_protocols_match_every_tier() {
+    let src = r#"
+use core.encoding.json as json
+
+struct Pair {
+    left: Int
+    right: Int
+}
+
+enum Mark {
+    Low
+    High
+}
+
+#Codable
+struct Envelope<T> {
+    value: T
+}
+
+fn run() {
+    pair :: Pair{left: 1, right: 2}
+    same :: Pair{left: 1, right: 2}
+    larger :: Pair{left: 2, right: 3}
+    print(pair == same)
+    print(pair < larger)
+    print(larger > pair)
+    print(Mark.Low == Mark.Low)
+    wire :: json.to_string(Envelope<Int>{value: 7})
+    decoded :: json.decode<Envelope<Int>>(wire) ?? panic("decode")
+    print(decoded.value)
+}
+"#;
+    assert_tiers_agree(
+        "tir_generated_trait_protocols",
+        src,
+        "true\ntrue\ntrue\ntrue\n7\n",
+    );
+}
+
 #[test]
 fn binary_pattern_width_classes_match_all_tiers() {
     let src = r#"
@@ -185,10 +227,10 @@ fn user_method_shadowing_builtin_name() {
 struct Crate {
     items: [Int]
 
-    fn get(self) Int {
+    fn get(self) Int -> {
         return 42
     }
-    fn len(self) Int {
+    fn len(self) Int -> {
         return 7
     }
 }
@@ -316,14 +358,14 @@ struct Tree {
     value: Int
     child: ?Tree
 }
-fn sum(t: Tree) Int {
+fn sum(t: Tree) Int -> {
     total := t.value
 kid ::  t.child 
     if kid == {
-        Val(c) -> {
+        .Val(c) -> {
             total = total + sum(c)
         }
-        None -> {}
+        .None -> {}
     }
     return total
 }
@@ -358,7 +400,7 @@ fn borrowed_struct_lit_field_value_cloned() {
 struct Person {
     name: String
 }
-fn make(n: String) Person {
+fn make(n: String) Person -> {
     return Person{ name: n }
 }
 fn run() {
@@ -405,7 +447,7 @@ struct Incident {
     title: String
     retries: Int
 }
-fn route(i: Incident) String {
+fn route(i: Incident) String -> {
     if i == {
         { kind: \"page\", title, .. } -> { return title }
         { kind: \"ticket\", title, .. } -> { return title }
@@ -435,7 +477,7 @@ fn user_enum_variant_if_let_condition() {
     }
     let src = "\
 enum Msg { Ping(Int) Pong }
-fn f(m: Msg) Int {
+fn f(m: Msg) Int -> {
     if m == .Ping(n) {
         return n
     } else {
@@ -460,11 +502,11 @@ fn fixed_size_list_param_and_field() {
         return;
     }
     let src = "\
-fn double(n: Int) Int {
+fn double(n: Int) Int -> {
     return (n * 2)
 }
 struct Grid { row: [Int#3] }
-fn firstof(xs: [Int#3]) Int {
+fn firstof(xs: [Int#3]) Int -> {
     return xs[0]
 }
 fn run() {
@@ -486,7 +528,7 @@ fn inferred_fixed_list_widens_at_call() {
         return;
     }
     let src = "\
-fn total(xs: [Int]) Int {
+fn total(xs: [Int]) Int -> {
     return xs[0] + xs[1] + xs[2]
 }
 fn run() {
@@ -533,9 +575,9 @@ fn mixed_switch_non_ident_subject_binds_payload() {
     }
     let src = "\
 struct Holder { val: ?Int }
-fn f(h: Holder) Int {
+fn f(h: Holder) Int -> {
     if h.val == {
-        Val(c) -> { return c }
+        .Val(c) -> { return c }
         else -> { return 0 }
     }
 }
@@ -562,10 +604,10 @@ fn mixed_switch_non_ident_subject_qualifies_variants() {
     }
     let src = "\
 enum Light { Red Green Yellow }
-fn pick() Light {
+fn pick() Light -> {
     return Light.Red
 }
-fn classify() Int {
+fn classify() Int -> {
     if pick() == {
         .Red -> { return 1 }
         .Green -> { return 2 }
@@ -592,7 +634,7 @@ fn comptime_local_is_literal_data() {
         return;
     }
     let src = "\
-fn build() [Int] {
+fn build() [Int] -> {
     xs := [Int]{}
     loop i in 1..3 {
         xs.push(i * 10)
@@ -1003,7 +1045,7 @@ struct Holder {
 }
 
 impl Vec2.Add {
-    fn add(self, rhs: Vec2) Vec2 {
+    fn add(self, rhs: Vec2) Vec2 -> {
         return Vec2{ x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }

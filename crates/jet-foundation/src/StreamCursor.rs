@@ -29,6 +29,8 @@ pub fn jet_reader_over(bytes: &Vec<u8>) -> JetReader {
     }
 }
 
+#[cold]
+#[inline(never)]
 pub fn jet_reader_bounds_error(method: &str, need: usize, r: &JetReader) -> String {
     format!(
         "Reader.{}: needed {} byte{} at position {}, only {} remain",
@@ -49,28 +51,117 @@ pub fn jet_reader_take_fixed(r: &mut JetReader, n: usize, method: &str) -> Resul
     Ok(out)
 }
 
+#[inline(always)]
 pub fn jet_reader_read_u8(r: &mut JetReader) -> Result<u8, String> {
-    jet_reader_take_fixed(r, 1, "read_u8").map(|b| b[0])
+    if r.buf.len().saturating_sub(r.pos) < 1 {
+        return Err(jet_reader_bounds_error("read_u8", 1, r));
+    }
+    let pos = r.pos;
+    let value = r.buf[pos];
+    r.pos = pos + 1;
+    Ok(value)
 }
+
+#[inline(always)]
 pub fn jet_reader_read_u16_le(r: &mut JetReader) -> Result<u16, String> {
-    jet_reader_take_fixed(r, 2, "read_u16_le").map(|b| u16::from_le_bytes([b[0], b[1]]))
+    if r.buf.len().saturating_sub(r.pos) < 2 {
+        return Err(jet_reader_bounds_error("read_u16_le", 2, r));
+    }
+    let pos = r.pos;
+    let value = u16::from_le_bytes([r.buf[pos], r.buf[pos + 1]]);
+    r.pos = pos + 2;
+    Ok(value)
 }
+
+#[inline(always)]
 pub fn jet_reader_read_u16_be(r: &mut JetReader) -> Result<u16, String> {
-    jet_reader_take_fixed(r, 2, "read_u16_be").map(|b| u16::from_be_bytes([b[0], b[1]]))
+    if r.buf.len().saturating_sub(r.pos) < 2 {
+        return Err(jet_reader_bounds_error("read_u16_be", 2, r));
+    }
+    let pos = r.pos;
+    let value = u16::from_be_bytes([r.buf[pos], r.buf[pos + 1]]);
+    r.pos = pos + 2;
+    Ok(value)
 }
+
+#[inline(always)]
 pub fn jet_reader_read_u32_le(r: &mut JetReader) -> Result<u32, String> {
-    jet_reader_take_fixed(r, 4, "read_u32_le").map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    if r.buf.len().saturating_sub(r.pos) < 4 {
+        return Err(jet_reader_bounds_error("read_u32_le", 4, r));
+    }
+    let pos = r.pos;
+    let value = u32::from_le_bytes([
+        r.buf[pos],
+        r.buf[pos + 1],
+        r.buf[pos + 2],
+        r.buf[pos + 3],
+    ]);
+    r.pos = pos + 4;
+    Ok(value)
 }
+
+#[inline(always)]
 pub fn jet_reader_read_u32_be(r: &mut JetReader) -> Result<u32, String> {
-    jet_reader_take_fixed(r, 4, "read_u32_be").map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    if r.buf.len().saturating_sub(r.pos) < 4 {
+        return Err(jet_reader_bounds_error("read_u32_be", 4, r));
+    }
+    let pos = r.pos;
+    let value = u32::from_be_bytes([
+        r.buf[pos],
+        r.buf[pos + 1],
+        r.buf[pos + 2],
+        r.buf[pos + 3],
+    ]);
+    r.pos = pos + 4;
+    Ok(value)
 }
+
+#[inline(always)]
 pub fn jet_reader_read_u64_le(r: &mut JetReader) -> Result<u64, String> {
-    jet_reader_take_fixed(r, 8, "read_u64_le")
-        .map(|b| u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+    if r.buf.len().saturating_sub(r.pos) < 8 {
+        return Err(jet_reader_bounds_error("read_u64_le", 8, r));
+    }
+    let pos = r.pos;
+    let value = u64::from_le_bytes([
+        r.buf[pos],
+        r.buf[pos + 1],
+        r.buf[pos + 2],
+        r.buf[pos + 3],
+        r.buf[pos + 4],
+        r.buf[pos + 5],
+        r.buf[pos + 6],
+        r.buf[pos + 7],
+    ]);
+    r.pos = pos + 8;
+    Ok(value)
 }
+
+#[inline(always)]
 pub fn jet_reader_read_u64_be(r: &mut JetReader) -> Result<u64, String> {
-    jet_reader_take_fixed(r, 8, "read_u64_be")
-        .map(|b| u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+    if r.buf.len().saturating_sub(r.pos) < 8 {
+        return Err(jet_reader_bounds_error("read_u64_be", 8, r));
+    }
+    let pos = r.pos;
+    let value = u64::from_be_bytes([
+        r.buf[pos],
+        r.buf[pos + 1],
+        r.buf[pos + 2],
+        r.buf[pos + 3],
+        r.buf[pos + 4],
+        r.buf[pos + 5],
+        r.buf[pos + 6],
+        r.buf[pos + 7],
+    ]);
+    r.pos = pos + 8;
+    Ok(value)
+}
+pub fn jet_reader_read_f32_le(r: &mut JetReader) -> Result<f32, String> {
+    jet_reader_take_fixed(r, 4, "read_f32_le")
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+pub fn jet_reader_read_f64_le(r: &mut JetReader) -> Result<f64, String> {
+    jet_reader_take_fixed(r, 8, "read_f64_le")
+        .map(|b| f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
 }
 
 pub fn jet_reader_take(r: &mut JetReader, n: i64) -> Result<Vec<u8>, String> {
@@ -173,6 +264,16 @@ mod stream_cursor_tests {
             jet_reader_take(&mut r, -1),
             Err("Reader.take: length must not be negative, got -1".to_string())
         );
+    }
+
+    #[test]
+    fn reads_little_endian_floats() {
+        let mut r = jet_reader_over(&vec![
+            0x00, 0x00, 0xc0, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x40,
+        ]);
+        assert_eq!(jet_reader_read_f32_le(&mut r), Ok(1.5));
+        assert_eq!(jet_reader_read_f64_le(&mut r), Ok(2.5));
+        assert!(jet_reader_at_end(&r));
     }
 
     #[test]

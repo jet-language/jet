@@ -208,7 +208,12 @@ smallest offending source span:
 | non-Result receiver or Result-pattern type mismatch | E0305 | the `.Ok`/`.Err` pattern test |
 | success/failure branch value mismatch | E0124 | the complete handler expression |
 
-## Error code registry
+## Error code index (projection)
+
+This compact index keeps navigation and coverage checks. It is not a second
+message home: What, Why, Fix, and structured-fix templates live only in the
+typed rows at `crates/jet-codegen/src/Prelude/Diagnostics.jet` and their
+generated projection in `docs/spec/diagnostic-rows.md`.
 
 | Code  | Stage | Meaning                                  |
 |-------|-------|------------------------------------------|
@@ -722,7 +727,7 @@ smallest offending source span:
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
 | E0912 | sema  | *retired by D-MEM1/S2* (was: frozen public API signature drift under `library { api: stable/explicit }`, D-CAP8/c129; the `api:` field and API freeze are gone — `ApiFreeze`'s snapshot survives as unconditional pub-fn semver diffing, E1218/E2601) |
 | E0913 | sema  | trait impl missing associated type (D-LIB2) |
-| E0914 | parse | unknown interpolation selector after `:` (D-DISPLAYDBG2/D-FMT-INTERP1/D-QUANTITY-PRINT1) |
+| E0914 | parse | unknown interpolation selector after `:` (D-DISPLAYDBG2/D-FMT-INTERP1/D-FMT-INTERP3/D-QUANTITY-PRINT1) |
 | E0915 | sema  | bare `{value}` on a type without `Display` (D-DISPLAY-SHAPE) |
 | E0916 | sema  | auto-derived `Debug` blocked by a non-debuggable field (D-DEBUG-REDACT) — *defined, not yet emitted* |
 | E0917 | sema  | `#Inline(Always) fn` calls itself — inlining a recursive call has no fixed expansion (D-METHODMACRO1) |
@@ -850,6 +855,7 @@ smallest offending source span:
 | E1202 | jet   | lock file out of date (M12.1) |
 | E1203 | jet   | `git` not installed (M12.1) |
 | E1204 | jet   | store entry tree-hash mismatch / tamper (M12.1) |
+| E1205 | jet   | unified lock file is corrupt or unsafe to read |
 | E1206 | jet   | manifest syntax/shape error (M12.1) |
 | E1207 | jet   | registry dependency cannot be resolved or its source artifact failed verification |
 | E1208 | jet   | toolchain `jet:` field in `package.jet` incompatible (M12.1) |
@@ -1382,11 +1388,8 @@ output is machine-parseable with `--json`.
 | E2610 | `{source}` was rejected: `{detail}`. | Advisory policy is security-sensitive; Jet will not use unsigned, stale, rolled-back, forked, or downgraded evidence. | Refresh the signed offline feed and trust root, or repair the lock provenance before retrying. |
 | E2611 | `jet inspect audit` needs `{input}`. | An audit without its lock or advisory database could report a false clean result. | `{fix}` |
 | L2608 | registry package name `{name}` is suspicious: {reason} | A name in the warning band is close enough to an existing registry name to confuse package selection, but this publish remains non-blocking while the owner policy allows it. | Choose a distinct package name instead of `{reference}` before publishing; the closer block band and reserved suffix rules reject stronger matches. |
-| E1217 | `{dep}` is in `package.jet` but has no locked revision. | A `--locked` build (and `jet registry publish`) requires every dependency to be pinned in the lockfile to a resolved version, so the build is reproducible. The dep is declared but not pinned. | Run `jet fetch` to resolve and pin `{dep}`, then commit the lockfile. |
-| E1218 | Publishing `{new}` after `{old}` is a {bump} bump but breaks the public API item `{item}`. | A {bump} bump promises callers no breaking changes under SemVer, but the public API changed since `{old}`. This is the local publish-time gate; the registry re-checks live with E2601 on receipt. | Bump to `{next_major}.0.0` (a major release), or restore `{item}` (a deprecated shim counts). Use `--force` to publish anyway with an explicit warning banner. |
-| E1219 | `--profile={name}` is not a defined build profile. | Blessed profiles `release`, `debug`, and `ci` have built-in defaults. Any other name must be declared in your `package.jet` `build { }` block as `{name}: Build{ optimize: … }`. | Use `--release` for the release profile, `--profile=debug` for debug, `--profile=ci` for CI, or add `{name}: Build{ optimize: full }` (or `none`/`basic`) to the `build { }` block in `package.jet`. |
-| E1220 | `{dep}` uses the `{effect}` effect, which this package's budget doesn't allow. | An `authority.holds` budget fails the build when any dependency reaches an effect you didn't list; a denied `Panic` row names the stop site. | For an ordinary effect, add `{effect}` to `authority.holds.allow` or grant it to `{dep}` in `authority.grants`; for deny-only `Panic`, return a fallible result or add facts/`#Pre`/refinement proof. |
-| E1221 | `package.jet` has a malformed `authority:` block. | `authority: .{ holds: { allow: […], deny: […] }, grants: { "dep": […] }, trust: { … }, providers: { … } }` is the one package authority block; rights use the thirteen grantable roots, the `FFI` parent and its language leaves including `FFI.Go`, `FFI.Py`, and `FFI.Octave`, and deny-only `Panic`/`Mem`. | Fix the authority field or right name; see docs/spec/syntax-decisions.md D-AUTHORITY-MANIFEST1. |
+The E1217–E1221 package rows are rendered by the typed-row projection above;
+this chapter does not repeat their templates.
 
 ## First-party ring library diagnostics (E2-M9, D-LR1–4)
 
@@ -1561,7 +1564,7 @@ blank field.
 
 ## Layout constraint diagnostics (D-LAYOUT1 / D-LAYOUT-GATES1 / D-LAYOUT-CTOR1)
 
-`name :: Layout.{ … }` (D-LAYOUT-CTOR1) is a Cassowary-style linear constraint
+`name :: Layout{ … }` (D-LAYOUT-CTOR1) is a Cassowary-style linear constraint
 typed literal (D-DOTCTOR3 element body of `Constraint`s). GATE 1 lets
 `>=`/`<=`/`==` between the closed layout types (`HVar`/`VVar`/`LengthVar`)
 produce a `Constraint` instead of `Bool`; GATE 2 puts those types (plus
@@ -1983,7 +1986,7 @@ REPL step number in place of a file span (`<repl:N>`).
 |------|------|-----|-----|
 | E1801 | This snippet ran more than `{N}` interpreter steps without finishing. | The REPL interpreter caps each input to avoid hanging your session; this almost always means a loop that never ends. | Check any loops for a condition that never becomes false. Use `:run` to allow unbounded execution (compiles and runs instead of interpreting). |
 | E1802 | The REPL interpreter can't run `{feature}`. | The REPL is an interpreter for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler. | Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler. |
-| E1803 | Application authority is undecided or denies a required effect; the report names `required_effects`, `granted_effects`, `denied_effects`, and `authority` separately. | The effect projection distinguishes sema requirements from policy grants, denials, and the policy identity; execution stops before host state changes. | Declare the effect in `authority.holds.allow`, deny it deliberately, or approve the exact operation once or for the project in an interactive terminal. |
+| E1803 | Application authority is undecided or denies a required effect; the report names `required_effects`, `granted_effects`, `denied_effects`, and `authority` separately. | The effect projection distinguishes sema requirements from policy grants, denials, and the policy identity; execution stops before host state changes. | Add `allow: [IO, Mem.Alloc, Exec]` under `authority.holds` in `package.jet` (use every value in this report's `undecided_effects` list); otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal. |
 
 ## Source import diagnostics (D-JPK-IMPORTTODO1, D-MIGRATE-SRC1)
 
@@ -2341,11 +2344,11 @@ diagnostic.
 | `reorder` (D-MIGRATE2F) | `reorder` isn't a migration verb — field order isn't a breaking change. | A `#PublishedSchema` record is keyed by field name, so reordering is safe. | Delete the `reorder` line; write the fields in any order. |
 | other | `{op}` isn't a known migration verb. | A migration block contains `rename`, `add`, `remove`, or `change` operations. | Use one of those four verbs. |
 
-### E0914 — Unknown interpolation selector (D-DISPLAYDBG2/D-FMT-INTERP1/D-QUANTITY-PRINT1)
+### E0914 — Unknown interpolation selector (D-DISPLAYDBG2/D-FMT-INTERP1/D-FMT-INTERP3/D-QUANTITY-PRINT1)
 
 | What | Why | Fix |
 |------|-----|-----|
-| Unknown interpolation selector `:…`. | String interpolation supports a closed selector set: `:Debug`, `:Pretty`, `:Fixed(n)`, `:Unit(name)`, and `:Unit(bare)`. | Write `{value:Debug}`, `{value:Pretty}`, `{value:Fixed(2)}`, `{value:Unit(name)}`, `{value:Unit(bare)}`, or `{value}`. |
+| Unknown interpolation selector `:…`. | String interpolation supports a closed selector set: `:Debug`, `:Pretty`, `:Fixed(n)`, `:Hex(n)`, `:Unit(name)`, and `:Unit(bare)`. | Write `{value:Debug}`, `{value:Pretty}`, `{value:Fixed(2)}`, `{value:Hex(16)}`, `{value:Unit(name)}`, `{value:Unit(bare)}`, or `{value}`. |
 
 ### E0915 — No Display implementation (D-DISPLAY-SHAPE)
 

@@ -1414,7 +1414,20 @@ fn snapshot_lease_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result
         let _ = make_tree_writable_for_removal(&lease_root);
         let _ = fs::remove_dir_all(&lease_root);
     }
-    result
+    // Product copy: a raw OS error out of the lease names nothing. Every
+    // lease failure is about materializing this entry's snapshot or its
+    // recorded Hangar objects, so say so once here; already-specific
+    // messages pass through unchanged.
+    result.map_err(|error| {
+        if error.to_string().contains("Hangar") {
+            error
+        } else {
+            std::io::Error::other(format!(
+                "cache lease for `{}`: a Hangar object or snapshot resource is unavailable: {error}",
+                entry.id
+            ))
+        }
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -1428,7 +1441,12 @@ fn open_nix_projection_sources(
     let mut stable = Vec::with_capacity(projections.len());
     let mut bindings = Vec::with_capacity(projections.len());
     for projection in projections {
-        let path_metadata = fs::symlink_metadata(&projection.source)?;
+        let path_metadata = fs::symlink_metadata(&projection.source).map_err(|error| {
+            std::io::Error::other(format!(
+                "Nix output `{}` Hangar object `{}` is unavailable: {error}",
+                projection.logical, projection.digest
+            ))
+        })?;
         if !path_metadata.file_type().is_symlink()
             && !path_metadata.is_dir()
             && !path_metadata.is_file()
@@ -1441,7 +1459,12 @@ fn open_nix_projection_sources(
         if path_metadata.file_type().is_symlink() {
             // Symlink-root objects project as the symlink itself; there is no
             // fd to pin, so the lease re-reads the target for stability.
-            let target = fs::read_link(&projection.source)?;
+            let target = fs::read_link(&projection.source).map_err(|error| {
+                std::io::Error::other(format!(
+                    "Nix output `{}` Hangar object `{}` is unavailable: {error}",
+                    projection.logical, projection.digest
+                ))
+            })?;
             stable.push((projection.logical.clone(), projection.source.clone()));
             bindings.push(NixProjectionBinding {
                 logical: projection.logical,
@@ -1457,7 +1480,12 @@ fn open_nix_projection_sources(
         options
             .read(true)
             .custom_flags(crate::Envelope::nofollow_open_flag().map_err(std::io::Error::other)?);
-        let handle = options.open(&projection.source)?;
+        let handle = options.open(&projection.source).map_err(|error| {
+            std::io::Error::other(format!(
+                "Nix output `{}` Hangar object `{}` is unavailable: {error}",
+                projection.logical, projection.digest
+            ))
+        })?;
         let opened_metadata = handle.metadata()?;
         if path_metadata.dev() != opened_metadata.dev()
             || path_metadata.ino() != opened_metadata.ino()
@@ -1530,7 +1558,12 @@ pub(crate) fn nix_store_projection_for_entry(
         )));
     }
 
-    let graph = Closure::closure_graph_structure_unlocked(roots)?;
+    let graph = Closure::closure_graph_structure_unlocked(roots).map_err(|error| {
+        std::io::Error::other(format!(
+            "Nix cache entry `{}`: a Hangar object in its recorded closure is unavailable: {error}",
+            entry.id
+        ))
+    })?;
     let mut closure_digests = BTreeSet::new();
     if let Some(record) = graph.records.get(&entry.id) {
         let mut expected_outputs = entry.named_outputs.clone();

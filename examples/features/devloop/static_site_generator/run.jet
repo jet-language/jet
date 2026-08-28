@@ -1,0 +1,19 @@
+// D-DEVSTATIC1: `jet dev` runs a generator, serves its output, and reloads it
+// when the generator or one of its filesystem inputs changes.
+use core.files as fs
+
+fn run() {
+    headline := "hello from the static generator"
+    if fs.exists("content.txt") {
+        headline = fs.read("content.txt") ?? return Err("could not read content.txt")
+    }
+
+    fs.create_dir_all("dist") ?? return Err("could not create dist")
+    page :: "<!doctype html><html><body><h1>{headline}</h1></body></html>"
+    fs.write("dist/index.html", page) ?? return Err("could not write dist/index.html")
+    if fs.exists("widget.wasm") {
+        fs.copy("widget.wasm", "dist/widget.wasm")
+            ?? return Err("could not copy dist/widget.wasm")
+    }
+    print("generated: {headline}")
+}

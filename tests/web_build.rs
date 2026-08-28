@@ -223,8 +223,8 @@ fn run() {
     print(evens[1])
     print(lazy_evens[0])
     print(lazy_evens[1])
-}
-"#;
+    }
+    "#;
     let dir = build_web_fixture(
         "eager_collection_adapters",
         src,
@@ -596,6 +596,11 @@ fn jet_cli_infers_web_target_from_file_marker() {
         "#Target(Web)\nuse core.ui as ui\nfn run() {\n    b :: ui.null_backend()\n    n :: ui.node_color(\"hi\", 10.0, 5.0, \"#3366ff\")\n    c :: ui.constraint(0.0, 0.0, 50.0, 20.0)\n    s :: b.measure(n, c)\n    f :: ui.rect(0.0, 0.0, s.width, s.height)\n    b.layout(n, f)\n    b.paint(n)\n}\n",
     )
     .unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"webproj\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [Browser] } }\n",
+    )
+    .unwrap();
 
     let jet = jet_bin();
     let out = Command::new(&jet)
@@ -635,7 +640,7 @@ fn jet_cli_infers_web_target_from_manifest() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"webproj\"\nversion: \"0.1.0\"\ntarget: \"web\"\n",
+        "name: \"webproj\"\nversion: \"0.1.0\"\ntarget: \"web\"\nauthority: .{ holds: { allow: [Browser] } }\n",
     )
     .unwrap();
     fs::write(
@@ -664,21 +669,36 @@ fn jet_cli_infers_web_target_from_manifest() {
         dir.join("build/app.wasm").is_file(),
         "no build/app.wasm — web backend wasn't inferred from package.jet"
     );
+    let run = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["run", "main.jet"])
+        .output()
+        .unwrap();
+    assert!(
+        !run.status.success(),
+        "jet run must reject a package web default:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(
+        run.stdout.is_empty(),
+        "a rejected package web run must not execute user code"
+    );
+    let run_stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        run_stderr.contains("E2102") && run_stderr.contains("jet dev"),
+        "package web run should explain the native/web boundary: {run_stderr}"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `jet run` never infers the web backend from
-/// `#Target(Web)`, even with no `--target=` flag — "run" means "execute and
-/// show console output," which a web build can't satisfy (there's no runtime
-/// to run a `.wasm`+`.js` bundle as a console program). This is a real
-/// regression that was caught while dogfooding the marker on 196/197: the
-/// first cut of D-WEBDEFAULT1 inferred web for every command including
-/// `run`, which made `jet run <file-with-#Target(Web)>` fail trying to exec
-/// the wrong artifact as a native binary. `build`/`dev`/`check` still infer.
+/// D-WEBRUN1=A: an implicit web target is rejected at the native `jet run`
+/// boundary with a teaching diagnostic. Use `jet dev` for the browser loop or
+/// `jet build --target=web` for web artifacts.
 #[test]
-fn jet_cli_run_never_infers_web_target_from_marker() {
+fn jet_cli_rejects_native_run_for_web_marker() {
     let dir = std::env::temp_dir().join(format!(
-        "jet_web_target_run_never_infers_{}",
+        "jet_web_target_run_rejects_{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
@@ -692,19 +712,28 @@ fn jet_cli_run_never_infers_web_target_from_marker() {
     let jet = jet_bin();
     let out = Command::new(&jet)
         .current_dir(&dir)
-        .args(["run", "app.jet"]) // no --target= — must stay native despite the marker
+        .args(["run", "app.jet"]) // no --target= — the marker still selects web
         .output()
         .unwrap();
     assert!(
-        out.status.success(),
-        "jet run should stay native for #Target(Web) (never infer for `run`):\nstdout: {}\nstderr: {}",
+        !out.status.success(),
+        "jet run must reject #Target(Web) before native execution:\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
     assert_eq!(
-        String::from_utf8_lossy(&out.stdout).trim(),
-        "native",
-        "expected native program output, not a web-build side effect"
+        String::from_utf8_lossy(&out.stdout).as_ref(),
+        "",
+        "a rejected native run must not execute the web program"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("E2102"),
+        "expected the registered diagnostic: {stderr}"
+    );
+    assert!(
+        stderr.contains("jet dev"),
+        "diagnostic must teach the browser loop: {stderr}"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1133,9 +1162,9 @@ fn wasm_void_body_and_internal_helper_are_emitted_from_tir() {
 fn tick() {}
 #WasmExport
 fn ping() { tick() }
-fn twice(n: Int) Int -[]> { return n * 2 }
+fn twice(n: Int) Int -> { return n * 2 }
 #WasmExport
-fn compute(n: Int) Int -[]> { return twice(n) }
+fn compute(n: Int) Int -> { return twice(n) }
 fn run() {}
 "#;
     let out = jet::compile_web_with_path(src, "tests/fixtures/web_wasm_helpers.jet")
@@ -1143,12 +1172,14 @@ fn run() {}
     let wasm = &out.web.expect("web artifacts").wasm_rust;
     assert!(wasm.contains("fn jet_wasm_tick()"));
     assert!(
-        wasm.contains("jet_wasm_tick();"),
+        wasm.contains("jet_wasm_tick()"),
         "void body side effect was dropped:\n{wasm}"
     );
-    assert!(wasm.contains("fn jet_wasm_twice(__jet_n: JetWasmInt) -> JetWasmInt"));
+    assert!(wasm.contains(
+        "fn jet_wasm_twice(__jet_n: JetWasmInt) -> JetOutcome<JetWasmInt, JetErr>"
+    ));
     assert!(
-        wasm.contains("jet_wasm_twice(__jet_n)"),
+        wasm.contains("jet_wasm_twice("),
         "export did not call internal helper:\n{wasm}"
     );
 }
@@ -1159,7 +1190,7 @@ fn web_value_and_range_arm_tables_emit_on_js_and_wasm() {
     let src = r#"#Target(Web)
 
 #Target(JS)
-fn digit(n: Int) String -[]> {
+fn digit(n: Int) String -> {
     if n == {
         0 -> { "0" }
         1 -> { "1" }
@@ -1167,14 +1198,14 @@ fn digit(n: Int) String -[]> {
     }
 }
 #Target(JS)
-fn band(n: Int) String -[]> {
+fn band(n: Int) String -> {
     if n == {
         0..9 -> { "low" }
         else -> { "high" }
     }
 }
 #WasmExport
-fn wasm_digit(n: Int) String -[]> {
+fn wasm_digit(n: Int) String -> {
     if n == {
         0 -> { "0" }
         1 -> { "1" }
@@ -1182,7 +1213,7 @@ fn wasm_digit(n: Int) String -[]> {
     }
 }
 #WasmExport
-fn wasm_band(n: Int) String -[]> {
+fn wasm_band(n: Int) String -> {
     if n == {
         0..9 -> { "low" }
         10..19 -> { "mid" }
@@ -1215,7 +1246,8 @@ fn run() {}
         web.wasm_rust
     );
     assert!(
-        web.wasm_rust.contains(">= 0") && web.wasm_rust.contains("<= 9"),
+        web.wasm_rust.contains(">= JetWasmInt::from_i64(0)")
+            && web.wasm_rust.contains("<= JetWasmInt::from_i64(9)"),
         "Wasm RangeSwitch must emit inclusive range tests:\n{}",
         web.wasm_rust
     );
@@ -1350,74 +1382,72 @@ fn web_fallible_match_and_option_if_emit_on_js_and_wasm() {
 enum Toggle { On Off }
 
 #Target(JS)
-fn make_result(flag: Bool) Int !String -[]> {
-    if flag -> return .Ok(7)
-    return .Err("x")
+fn make_result(flag: Bool) Int !Err -> {
+    if flag -> return Ok(7)
+    return Err("x")
 }
 #Target(JS)
-fn make_opt(flag: Bool) ?Int -[]> {
+fn make_opt(flag: Bool) ?Int -> {
     if flag -> return .Val(3)
     return .None
 }
 #Target(JS)
-fn classify(flag: Bool) Int -[]> {
-    r :: make_result(flag)
-    if r == {
+fn classify(flag: Bool) Int -> {
+    if make_result(flag) == {
         .Ok(n) -> return n
         .Err(_) -> return -1
     }
 }
 #Target(JS)
-fn maybe(flag: Bool) Int -[]> {
+fn maybe(flag: Bool) Int -> {
     x :: make_opt(flag)
     if x == .None { return 0 }
     if x == .Val(n) { return n }
     return -1
 }
 #Target(JS)
-fn js_make_toggle(flag: Bool) Toggle -[]> {
+fn js_make_toggle(flag: Bool) Toggle -> {
     if flag { return .On }
     return .Off
 }
 #Target(JS)
-fn js_matches_and(flag: Bool) Int -[]> {
+fn js_matches_and(flag: Bool) Int -> {
     x :: make_opt(flag)
     toggle :: js_make_toggle(flag)
     if x == .Val(n) && toggle == .On && flag { return n }
     return 0
 }
 #Target(Wasm)
-fn wasm_make_result(flag: Bool) Int !String -[]> {
-    if flag -> return .Ok(7)
-    return .Err("x")
+fn wasm_make_result(flag: Bool) Int !Err -> {
+    if flag -> return Ok(7)
+    return Err("x")
 }
 #Target(Wasm)
-fn wasm_make_opt(flag: Bool) ?Int -[]> {
+fn wasm_make_opt(flag: Bool) ?Int -> {
     if flag -> return .Val(3)
     return .None
 }
 #WasmExport
-fn wasm_classify(flag: Bool) Int -[]> {
-    r :: wasm_make_result(flag)
-    if r == {
+fn wasm_classify(flag: Bool) Int -> {
+    if wasm_make_result(flag) == {
         .Ok(n) -> return n
         .Err(_) -> return -1
     }
 }
 #WasmExport
-fn wasm_maybe(flag: Bool) Int -[]> {
+fn wasm_maybe(flag: Bool) Int -> {
     x :: wasm_make_opt(flag)
     if x == .None { return 0 }
     if x == .Val(n) { return n }
     return -1
 }
 #Target(Wasm)
-fn wasm_make_toggle(flag: Bool) Toggle -[]> {
+fn wasm_make_toggle(flag: Bool) Toggle -> {
     if flag { return .On }
     return .Off
 }
 #WasmExport
-fn wasm_matches_and(flag: Bool) Int -[]> {
+fn wasm_matches_and(flag: Bool) Int -> {
     x :: wasm_make_opt(flag)
     toggle :: wasm_make_toggle(flag)
     if x == .Val(n) && toggle == .On && flag { return n }
@@ -1465,25 +1495,25 @@ fn run() {}
 #[test]
 fn web_declared_default_error_conversion_builds() {
     let src = r#"#Target(Web)
+#Error
 enum StoreErr { Missing }
 
 impl StoreErr -> Err {
     return Err("store unavailable")
 }
 
-fn read_store() Int !StoreErr -[]> {
+fn read_store() Int !StoreErr -> {
     return Err(StoreErr.Missing)
 }
 
-fn get_user() Int -[]> {
+fn get_user() Int !Err -> {
     value :: read_store()
     return Ok(value)
 }
 
 #Target(Wasm)
 fn run() {
-    result :: get_user()
-    if result == {
+    if get_user() == {
         .Ok(value) -> { print(value) }
         .Err(error) -> { print(error.message) }
         else -> {}
@@ -1684,8 +1714,8 @@ fn run() {
         "missing Jet source location:\n{stderr}"
     );
     assert!(
-        stderr.contains("Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data.")
-            && stderr.contains("Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome."),
+        stderr.contains("Why: the operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data.")
+            && stderr.contains("Fix: check the operands or bounds before the operation, or use a checked operation that returns an outcome."),
         "missing shared why/fix:\n{stderr}"
     );
     assert!(
@@ -1747,7 +1777,7 @@ fn web_e3001_context_matches_on_js_and_wasm() {
         (
             "e3001_js_context",
             r#"#Target(JS)
-fn missing() ?Int -[]> {
+fn missing() ?Int -> {
     return None
 }
 
@@ -1760,7 +1790,7 @@ fn run() {
         (
             "e3001_wasm_context",
             r#"#Target(Wasm)
-fn missing() ?Int -[]> {
+fn missing() ?Int -> {
     return None
 }
 
@@ -1800,8 +1830,8 @@ try {
             "{stem} lost source-line context:\n{stdout}"
         );
         assert!(
-            stdout.contains("Why: The program hit a `panic`")
-                && stdout.contains("Fix: Fix the logic that led to the failure"),
+            stdout.contains("Why: the program hit a `panic`")
+                && stdout.contains("Fix: fix the logic that led to the failure"),
             "{stem} lost canonical E3001 policy:\n{stdout}"
         );
         let _ = fs::remove_dir_all(&dir);
@@ -1818,7 +1848,7 @@ fn web_e3012_context_matches_on_js_and_wasm() {
         (
             "e3012_js_context",
             r#"#Target(JS)
-fn recurse(n: Int) Int -[]> {
+fn recurse(n: Int) Int -> {
     return recurse(n + 1)
 }
 
@@ -1831,7 +1861,7 @@ fn run() {
         (
             "e3012_wasm_context",
             r#"#Target(Wasm)
-fn recurse(n: Int) Int -[]> {
+fn recurse(n: Int) Int -> {
     return recurse(n + 1)
 }
 
@@ -1871,8 +1901,8 @@ try {
             "{stem} lost source-line context:\n{stdout}"
         );
         assert!(
-            stdout.contains("Why: The call stack kept growing without reaching a safe return.")
-                && stdout.contains("Fix: End the recursion or make progress toward a base case."),
+            stdout.contains("Why: the call stack kept growing without reaching a safe return.")
+                && stdout.contains("Fix: end the recursion or make progress toward a base case."),
             "{stem} lost canonical E3012 policy:\n{stdout}"
         );
         let _ = fs::remove_dir_all(&dir);
@@ -1889,7 +1919,7 @@ fn web_todo_runs_through_shared_stop_on_js_and_wasm() {
         (
             "todo_js",
             r#"#Target(JS)
-fn missing() Int -[]> {
+fn missing() Int -> {
     return #Todo
 }
 
@@ -1902,7 +1932,7 @@ fn run() {
         (
             "todo_wasm",
             r#"#Target(Wasm)
-fn missing() Int -[]> {
+fn missing() Int -> {
     return #Todo
 }
 
@@ -1939,8 +1969,8 @@ try {
         );
         assert!(
             stdout.contains(
-                "Why: This code is deliberately incomplete and reached a running program."
-            ) && stdout.contains("Fix: Implement the missing code before running the program."),
+                "Why: this code is deliberately incomplete and reached a running program."
+            ) && stdout.contains("Fix: implement the missing code before running the program."),
             "{stem} lost the canonical Todo why/fix:\n{stdout}"
         );
         let _ = fs::remove_dir_all(&dir);
@@ -1957,7 +1987,7 @@ fn web_contracts_execute_with_canonical_e3005_on_js_and_wasm() {
         (
             "contract_js",
             r#"#[Target(JS), Pre(value > 0, "positive"), Post(result > value, "grows")]
-fn checked(value: Int) Int -[]> {
+fn checked(value: Int) Int -> {
     return value
 }
 
@@ -1973,7 +2003,7 @@ fn run() {
         (
             "contract_wasm",
             r#"#[Target(Wasm), Pre(value > 0, "positive"), Post(result > value, "grows")]
-fn checked(value: Int) Int -[]> {
+fn checked(value: Int) Int -> {
     return value
 }
 
@@ -2017,7 +2047,7 @@ try {
         );
         assert!(
             stdout.contains("Why: A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime.")
-                && stdout.contains("Fix: Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result)."),
+                && stdout.contains("Fix: fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result)."),
             "{stem} lost the canonical contract why/fix:\n{stdout}"
         );
         let _ = fs::remove_dir_all(&dir);
@@ -2442,12 +2472,12 @@ fn web_js_try_reaches_typed_edge() {
         return;
     }
     let source = r#"#Target(JS)
-fn load() Int -[]> {
+fn load() Int -> {
     return Err("try failed", code: "TRYFAIL")
 }
 
 #Target(JS)
-fn read() Int -[]> {
+fn read() Int -> {
     value :: load()
     return Ok(value)
 }
@@ -2513,12 +2543,12 @@ fn web_wasm_try_returns_typed_journey() {
         return;
     }
     let source = r#"#Target(Wasm)
-fn load() Int -[]> {
+fn load() Int -> {
     return Err("try failed", code: "TRYFAIL")
 }
 
 #Target(Wasm)
-fn read() Int -[]> {
+fn read() Int -> {
     value :: load()
     return Ok(value)
 }
@@ -2911,11 +2941,11 @@ fn web_inline_modules_keep_qualified_function_identity() {
     let src = r#"#Target(Web)
 module left {
     #Target(JS)
-    pub fn value() Int -[]> { return 1 }
+    pub fn value() Int -> { return 1 }
 }
 module right {
     #Target(JS)
-    pub fn value() Int -[]> { return 2 }
+    pub fn value() Int -> { return 2 }
 }
 #Target(JS)
 fn run() { print(left.value() + right.value()) }
@@ -2945,10 +2975,10 @@ fn web_wasm_inline_modules_emit_distinct_qualified_calls() {
         return;
     }
     let src = r#"#Target(Web)
-module left { pub fn value() Int -[]> { return 1 } }
-module right { pub fn value() Int -[]> { return 2 } }
+module left { pub fn value() Int -> { return 1 } }
+module right { pub fn value() Int -> { return 2 } }
 #WasmExport
-fn total() Int -[]> { return left.value() + right.value() }
+fn total() Int -> { return left.value() + right.value() }
 #Target(JS)
 fn run() { print(total()) }
 "#;
@@ -2959,11 +2989,15 @@ fn run() { print(total()) }
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("fn jet_wasm___jet_left__value() -> JetWasmInt"),
+        wasm.contains(
+            "fn jet_wasm___jet_left__value() -> JetOutcome<JetWasmInt, JetErr>"
+        ),
         "left Wasm identity was dropped:\n{wasm}"
     );
     assert!(
-        wasm.contains("fn jet_wasm___jet_right__value() -> JetWasmInt"),
+        wasm.contains(
+            "fn jet_wasm___jet_right__value() -> JetOutcome<JetWasmInt, JetErr>"
+        ),
         "right Wasm identity was dropped:\n{wasm}"
     );
     assert!(
@@ -2993,11 +3027,11 @@ fn web_file_modules_keep_qualified_js_function_identity() {
             ),
             (
                 "left.jet",
-                "#Target(JS)\npub fn value() Int -[]> { return 1 }\n",
+                "#Target(JS)\npub fn value() Int -> { return 1 }\n",
             ),
             (
                 "right.jet",
-                "#Target(JS)\npub fn value() Int -[]> { return 2 }\n",
+                "#Target(JS)\npub fn value() Int -> { return 2 }\n",
             ),
         ],
     );
@@ -3025,19 +3059,23 @@ fn web_file_modules_emit_distinct_qualified_wasm_calls() {
         &[
             (
                 "main.jet",
-                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#WasmExport\nfn total() Int -[]> { return left.value() + right.value() }\n#Target(JS)\nfn run() { print(total()) }\n",
+                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#WasmExport\nfn total() Int -> { return left.value() + right.value() }\n#Target(JS)\nfn run() { print(total()) }\n",
             ),
-            ("left.jet", "pub fn value() Int -[]> { return 1 }\n"),
-            ("right.jet", "pub fn value() Int -[]> { return 2 }\n"),
+            ("left.jet", "pub fn value() Int -> { return 1 }\n"),
+            ("right.jet", "pub fn value() Int -> { return 2 }\n"),
         ],
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("fn jet_wasm___jet_left__value() -> JetWasmInt"),
+        wasm.contains(
+            "fn jet_wasm___jet_left__value() -> JetOutcome<JetWasmInt, JetErr>"
+        ),
         "left identity was dropped:\n{wasm}"
     );
     assert!(
-        wasm.contains("fn jet_wasm___jet_right__value() -> JetWasmInt"),
+        wasm.contains(
+            "fn jet_wasm___jet_right__value() -> JetOutcome<JetWasmInt, JetErr>"
+        ),
         "right identity was dropped:\n{wasm}"
     );
     assert!(
@@ -3252,7 +3290,7 @@ fn dev() {
     server.serve()
 }
 module tools {
-    fn dev() Int -[]> { return 7 }
+    fn dev() Int -> { return 7 }
 }
 fn run() { print("hello, web") }
 "#;
@@ -3261,7 +3299,7 @@ fn run() { print("hello, web") }
     let web = out.web.expect("web artifacts");
     let wasm = &web.wasm_rust;
     assert!(
-        wasm.contains("fn jet_wasm___jet_tools__dev() -> JetWasmInt"),
+        wasm.contains("fn jet_wasm___jet_tools__dev() -> JetOutcome<JetWasmInt, JetErr>"),
         "module tools.dev was not emitted:\n{wasm}"
     );
     assert!(
@@ -3306,7 +3344,12 @@ fn dev() {
 }
 fn run() { print("host") }
 "#;
-    let compiled = jet::compile_with_path(src, "tests/fixtures/web_embedded_devserver.jet")
+    let source_path = std::env::temp_dir().join(format!(
+        "jet_web_embedded_devserver_{}.jet",
+        std::process::id()
+    ));
+    fs::write(&source_path, src).unwrap();
+    let compiled = jet::compile_with_path(src, &source_path.to_string_lossy())
         .expect("embedded devserver must compile");
     assert!(
         compiled
@@ -3319,6 +3362,7 @@ fn run() { print("host") }
             && compiled.rust.contains("windows_drive_prefix"),
         "generated devserver must reject Windows drive and rooted paths"
     );
+    let _ = fs::remove_file(source_path);
 }
 
 #[test]
@@ -3660,6 +3704,34 @@ fn web_compute_wasm_bridge_roundtrip() {
 }
 
 #[test]
+fn web_wasm_int_export_reachability_golden() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm Int export (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_int_export.jet");
+    let dir = build_web_fixture(
+        "wasm_int_export",
+        src,
+        "examples/features/web/web_wasm_int_export.jet",
+    );
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("mod jet_encoding_json") && wasm.contains("mod EncodingJson"),
+        "all transitive Outcome Prelude parts must reach a scalar export:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_wasm_export(|| jet_wasm_triangular(")
+            && !wasm.contains("jet_abi_int_ret(jet_wasm_triangular("),
+        "scalar export must unwrap its shared Outcome before the ABI helper:\n{wasm}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_int_export.out");
+    assert_eq!(stdout, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn web_compute_webgpu_calls_use_the_browser_prelude() {
     let source = include_str!("../examples/features/web/web_compute_webgpu.jet");
     let dir = build_web_fixture(
@@ -3927,7 +3999,8 @@ fn web_wasm_string_export_hostile_roundtrip() {
     );
     assert!(
         wasm.contains("-> u64 ")
-            && wasm.contains("jet_abi_string_ret(jet_wasm_")
+            && wasm.contains("jet_wasm_export(|| jet_wasm_")
+            && wasm.contains("|value| jet_abi_string_ret(value)")
             && wasm.contains("pub extern \"C\" fn jet_export_"),
         "export must pack String as u64:\n{wasm}"
     );
@@ -4039,7 +4112,7 @@ mustTrap(
 const raw = instance.exports.jet_export_echo_str(
   (BigInt(ptr >>> 0) << 32n) | 1n,
 );
-if (unmarshalAbi(raw, "string", instance) !== "x") {
+if (unmarshalAbi(raw, "string", instance.exports) !== "x") {
   throw new Error("valid registered string allocation did not round-trip");
 }
 console.log("ok");
@@ -4093,7 +4166,9 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
         "export wrapper must unpack [Int] param:\n{wasm}"
     );
     assert!(
-        wasm.contains("jet_abi_list_int_ret(jet_wasm_") && wasm.contains("-> u64 "),
+        wasm.contains("jet_wasm_export(|| jet_wasm_")
+            && wasm.contains("|value| jet_abi_list_int_ret(value)")
+            && wasm.contains("-> u64 "),
         "export must pack [Int] return as u64:\n{wasm}"
     );
     assert!(
@@ -4146,7 +4221,7 @@ fn echo_fixed(xs: [I64]) [I64] -> ~xs
 
 #Target(JS)
 fn run() {
-    print(echo_fixed([1, -2, 3]))
+    print(echo_fixed([I64]{1, -2, 3}))
 }
 "#;
     let dir = build_web_fixture("wasm_list_i64", src, "wasm_list_i64.jet");
@@ -4190,7 +4265,7 @@ mustTrap(
 const raw = instance.exports.jet_export_echo_fixed(
   (BigInt(ptr >>> 0) << 32n) | 2n,
 );
-const out = unmarshalAbi(raw, "list-i64", instance);
+const out = unmarshalAbi(raw, "list-i64", instance.exports);
 if (out.length !== 2 || out[0] !== 7 || out[1] !== -8) {
   throw new Error(`valid fixed-list allocation did not round-trip: ${out}`);
 }
@@ -4245,7 +4320,9 @@ fn web_wasm_list_string_export_hostile_roundtrip() {
         "export wrapper must unpack [String] param:\n{wasm}"
     );
     assert!(
-        wasm.contains("jet_abi_list_string_ret(jet_wasm_") && wasm.contains("-> u64 "),
+        wasm.contains("jet_wasm_export(|| jet_wasm_")
+            && wasm.contains("|value| jet_abi_list_string_ret(value)")
+            && wasm.contains("-> u64 "),
         "export must pack [String] return as u64:\n{wasm}"
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
@@ -4307,7 +4384,8 @@ fn web_wasm_map_string_int_export_hostile_roundtrip() {
         "map-string-int ownership boundary must reject untrusted pointers:\n{wasm}"
     );
     assert!(
-        wasm.contains("jet_abi_map_string_int_ret(jet_wasm_")
+        wasm.contains("jet_wasm_export(|| jet_wasm_")
+            && wasm.contains("|value| jet_abi_map_string_int_ret(value)")
             && wasm.contains("jet_abi_map_string_int_arg("),
         "export wrappers must pack/unpack [String:Int]:\n{wasm}"
     );

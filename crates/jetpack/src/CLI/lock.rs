@@ -350,7 +350,7 @@ mod tests {
         assert!(rendered.contains("~ alpha 1.0.0 → 1.1.0"));
         assert!(rendered.contains("+ beta 2.0.0"));
         assert!(rendered.contains("1 added, 0 removed, 1 updated"));
-        assert!(rendered.contains("net download +1.5 MB · net disk -2 MB"));
+        assert!(rendered.contains("net download +1.5 MB · net disk -2.0 MB"));
         assert!(rendered.contains("trust alpha: signed → unverified-mapping"));
     }
 }

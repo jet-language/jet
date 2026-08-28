@@ -26,6 +26,24 @@ fn run() {
     payload32 :: counted32.take(length32) ?? return Err("bad U32 payload")
     print("sized payloads={payload8.len()}/{payload.len()}/{payload32.len()}")
 
+    floats :: Reader.over([U8]{
+        0x00,
+        0x00,
+        0xC0,
+        0x3F,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x04,
+        0x40
+    })
+    f32 :: floats.read_f32_le() ?? return Err("bad F32")
+    f64 :: floats.read_f64_le() ?? return Err("bad Float")
+    print("float_reads={f32}/{f64} remaining={floats.remaining()}")
+
     // A bounds miss is an ordinary error value — `?`-composable, never a panic.
     short :: [U8]{0x01}
     r2 :: Reader.over(short)

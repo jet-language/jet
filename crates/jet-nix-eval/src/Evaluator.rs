@@ -1695,6 +1695,25 @@ fn resolve_shell(
     output: &str,
     arena: &Rc<EvaluationArena>,
 ) -> Result<Value, Error> {
+    // `shell.nix` and `default.nix` conventionally evaluate directly to a
+    // `mkShell` value (often behind a `{ pkgs ? ... }:` function).  Project
+    // that bounded direct form before trying the flake output paths.  A flake
+    // root still falls through because its top-level `packages` field is an
+    // attribute set, not a package list.
+    if let Value::Function(function) = &root {
+        if accepts_direct_shell_arguments(&function.pattern) {
+            let direct = apply(
+                root.clone(),
+                Thunk::value(flake_arguments(system, arena)),
+                arena,
+            )?;
+            if is_direct_shell(&direct)? {
+                return Ok(direct);
+            }
+        }
+    } else if is_direct_shell(&root)? {
+        return Ok(root);
+    }
     let output_path = output
         .split('.')
         .map(|segment| {
@@ -1728,6 +1747,37 @@ fn resolve_shell(
     Err(Error::Unsupported(format!(
         "no supported `devShell` or `mkShell` output `{output}` was found"
     )))
+}
+
+fn accepts_direct_shell_arguments(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Name(_) => true,
+        Pattern::Attrs(fields) => fields.iter().all(|(name, default)| {
+            default.is_some()
+                || matches!(
+                    name.as_str(),
+                    "legacyPackages" | "nixpkgs" | "pkgs" | "self" | "system"
+                )
+        }),
+    }
+}
+
+fn is_direct_shell(value: &Value) -> Result<bool, Error> {
+    let Value::AttrSet(fields) = value else {
+        return Ok(false);
+    };
+    if fields.contains_key("shellHook") {
+        return Ok(true);
+    }
+    for field in ["packages", "buildInputs", "nativeBuildInputs"] {
+        let Some(value) = fields.get(field) else {
+            continue;
+        };
+        if matches!(value.force()?, Value::List(_)) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn resolve_path(
@@ -3386,20 +3436,15 @@ fn value_name(value: &Value) -> &'static str {
 fn flake_arguments(system: &str, arena: &Rc<EvaluationArena>) -> Value {
     let mut fields = BTreeMap::new();
     let _ = fields.insert("self".into(), Thunk::value(Value::AttrSet(BTreeMap::new())));
-    let _ = fields.insert(
-        "nixpkgs".into(),
-        Thunk::value(Value::PackageNamespace {
-            prefix: "".into(),
-            authority: arena.import_authority.clone(),
-        }),
-    );
-    let _ = fields.insert(
-        "legacyPackages".into(),
-        Thunk::value(Value::PackageNamespace {
-            prefix: "".into(),
-            authority: arena.import_authority.clone(),
-        }),
-    );
+    for name in ["nixpkgs", "legacyPackages", "pkgs"] {
+        let _ = fields.insert(
+            name.into(),
+            Thunk::value(Value::PackageNamespace {
+                prefix: "".into(),
+                authority: arena.import_authority.clone(),
+            }),
+        );
+    }
     let _ = fields.insert(
         "system".into(),
         Thunk::value(Value::String(system.to_string())),

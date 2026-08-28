@@ -2845,7 +2845,12 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                         && resident_safe_expr(subj, callees)
                 }
                 TIfCond::Matches { subj, .. } => resident_safe_expr(subj, callees),
-                TIfCond::IsNone { .. } | TIfCond::And { .. } => false,
+                TIfCond::IsNone { .. }
+                | TIfCond::And { .. } => false,
+                TIfCond::WithPrelude { prelude, cond } => {
+                    prelude.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                        && resident_safe_if_cond_leaf(cond, callees)
+                }
             };
             cond_ok
                 && then_body.iter().all(|s| resident_safe_stmt(s, callees))
@@ -4595,6 +4600,32 @@ fn resident_safe_builtin_op(
     }
 }
 
+fn resident_safe_if_cond_leaf(cond: &TIfCond, callees: &HashSet<String>) -> bool {
+    match cond {
+        TIfCond::Plain(expr) => {
+            matches!(&expr.ty, Type::Bool) && resident_safe_expr(expr, callees)
+        }
+        TIfCond::IfLet { pattern, subj } => {
+            matches!(
+                &pattern.pattern,
+                Pattern::Ok { .. }
+                    | Pattern::Err { .. }
+                    | Pattern::Present { .. }
+                    | Pattern::Variant { .. }
+            ) && resident_safe_expr(subj, callees)
+        }
+        TIfCond::Matches { subj, .. } => resident_safe_expr(subj, callees),
+        TIfCond::IsNone { subj } => {
+            matches!(&subj.ty, Type::Option(_)) && resident_safe_expr(subj, callees)
+        }
+        TIfCond::WithPrelude { prelude, cond } => {
+            prelude.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                && resident_safe_if_cond_leaf(cond, callees)
+        }
+        TIfCond::And { .. } => false,
+    }
+}
+
 pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
     match stmt {
         TStmt::Contract { contract } => {
@@ -4770,6 +4801,10 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     ) && resident_safe_expr(subj, callees)
                 }
                 TIfCond::Matches { subj, .. } => resident_safe_expr(subj, callees),
+                TIfCond::WithPrelude { prelude, cond } => {
+                    prelude.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                        && resident_safe_if_cond_leaf(cond, callees)
+                }
                 TIfCond::And { left, right } => {
                     // `if a == .V(x) && …` and similar dual conditions.
                     matches!(
@@ -4786,24 +4821,8 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                         ) if resident_safe_expr(e, callees) && resident_safe_expr(e2, callees)
                     ) || {
                         // Recurse for nested And / Plain bool.
-                        let left_ok = match left.as_ref() {
-                            TIfCond::Plain(e) => {
-                                matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees)
-                            }
-                            TIfCond::IfLet { subj, .. }
-                            | TIfCond::Matches { subj, .. }
-                            | TIfCond::IsNone { subj } => resident_safe_expr(subj, callees),
-                            TIfCond::And { .. } => false,
-                        };
-                        let right_ok = match right.as_ref() {
-                            TIfCond::Plain(e) => {
-                                matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees)
-                            }
-                            TIfCond::IfLet { subj, .. }
-                            | TIfCond::Matches { subj, .. }
-                            | TIfCond::IsNone { subj } => resident_safe_expr(subj, callees),
-                            TIfCond::And { .. } => false,
-                        };
+                        let left_ok = resident_safe_if_cond_leaf(left, callees);
+                        let right_ok = resident_safe_if_cond_leaf(right, callees);
                         left_ok && right_ok
                     }
                 }
@@ -5510,6 +5529,9 @@ fn if_cond_tag(cond: &TIfCond) -> String {
         TIfCond::And { left, right } => {
             format!("And({} , {})", if_cond_tag(left), if_cond_tag(right))
         }
+        TIfCond::WithPrelude { cond, .. } => {
+            format!("WithPrelude({})", if_cond_tag(cond))
+        }
     }
 }
 
@@ -6082,6 +6104,10 @@ fn count_spawn_sites_if_cond(cond: &TIfCond, n: &mut SpawnSiteTally) {
         TIfCond::And { left, right } => {
             count_spawn_sites_if_cond(left, n);
             count_spawn_sites_if_cond(right, n);
+        }
+        TIfCond::WithPrelude { prelude, cond } => {
+            count_spawn_sites_stmts(prelude, n);
+            count_spawn_sites_if_cond(cond, n);
         }
         TIfCond::IfLet { subj, .. } | TIfCond::IsNone { subj } | TIfCond::Matches { subj, .. } => {
             count_spawn_sites_expr(subj, n)
@@ -6802,6 +6828,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::ReaderReadU32Be
         | THandleOp::ReaderReadU64Le
         | THandleOp::ReaderReadU64Be
+        | THandleOp::ReaderReadF32Le
+        | THandleOp::ReaderReadF64Le
         | THandleOp::ReaderRemaining
         | THandleOp::ReaderAtEnd
         | THandleOp::CursorOver

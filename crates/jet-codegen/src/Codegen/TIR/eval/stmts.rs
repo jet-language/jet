@@ -191,6 +191,29 @@ fn owner_list_place(
     }
 }
 
+fn flatten_index_path<'a>(
+    expr: &'a TExpr,
+    indexes: &mut Vec<(&'a TExpr, bool, usize)>,
+) -> &'a TExpr {
+    match &expr.kind {
+        TExprKind::Index {
+            base,
+            index,
+            is_map,
+            line,
+            ..
+        } => {
+            let root = flatten_index_path(base, indexes);
+            indexes.push((index, *is_map, *line));
+            root
+        }
+        TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
+            flatten_index_path(place, indexes)
+        }
+        _ => expr,
+    }
+}
+
 impl<'a, 'debug> EvalCtx<'a, 'debug> {
     fn debug_at_stmt(
         &mut self,
@@ -224,6 +247,136 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         scope: &HashMap<String, CtValue>,
     ) -> Result<(), Diagnostic> {
         self.debug_at_stmt(span, scope)
+    }
+
+    fn eval_index_base_path(
+        &mut self,
+        base: &'a TExpr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(&'a TExpr, Vec<(bool, CtValue)>, Vec<CtValue>, CtValue), Diagnostic> {
+        let mut index_exprs = Vec::new();
+        let root = flatten_index_path(base, &mut index_exprs);
+        let mut current = match &root.kind {
+            TExprKind::Local(local) if local.uninit_fixed => scope
+                .get(&local.name)
+                .cloned()
+                .ok_or_else(|| unsupported(&format!("unbound `{}`", local.name), self.span()))?,
+            _ => self.eval_expr(root, scope)?,
+        };
+        let mut steps = Vec::with_capacity(index_exprs.len());
+        let mut parents = Vec::with_capacity(index_exprs.len());
+        for (index, is_map, line) in index_exprs {
+            parents.push(current.clone());
+            let index = self.eval_expr(index, scope)?;
+            current = self.eval_index_projection(current, index.clone(), is_map, line)?;
+            steps.push((is_map, index));
+        }
+        Ok((root, steps, parents, current))
+    }
+
+    fn eval_index_projection(
+        &mut self,
+        base: CtValue,
+        index: CtValue,
+        is_map: bool,
+        line: usize,
+    ) -> Result<CtValue, Diagnostic> {
+        let base = match base {
+            CtValue::Present(inner) => *inner,
+            other => other,
+        };
+        if is_map || matches!(&base, CtValue::Map(_)) {
+            let key = crate::AST::CtKey::from_value(index)
+                .ok_or_else(|| unsupported("map index key", self.span()))?;
+            return match base {
+                CtValue::Map(entries) => entries.get(&key).cloned().ok_or_else(|| {
+                    self.runtime_index_stop(
+                        "E3001",
+                        line as u32,
+                        &jet_foundation::Outcome::jet_missing_map_key_value(
+                            key.to_value().jet_show(),
+                        ),
+                    )
+                }),
+                _ => Err(unsupported("map index recv", self.span())),
+            };
+        }
+        let index = as_int(&index, self.span())?;
+        if index < 0 {
+            let length = match &base {
+                CtValue::List(items) => items.len(),
+                _ => 0,
+            };
+            return Err(self.runtime_index_stop(
+                "E3010",
+                line as u32,
+                &jet_foundation::Outcome::jet_list_bounds_message(length, index),
+            ));
+        }
+        match base {
+            CtValue::Struct { ref type_name, .. }
+                if type_name == super::UNINIT_FIXED_CARRIER => super::uninit_fixed_read(
+                &base,
+                usize::try_from(index)
+                    .map_err(|_| unsupported("negative uninit index", self.span()))?,
+            )
+            .ok_or_else(|| unsupported("uninit fixed-list index", self.span())),
+            CtValue::List(items) => {
+                if index as usize >= items.len() {
+                    Err(self.runtime_index_stop(
+                        "E3010",
+                        line as u32,
+                        &jet_foundation::Outcome::jet_list_bounds_message(items.len(), index),
+                    ))
+                } else {
+                    Ok(items[index as usize].clone())
+                }
+            }
+            _ => Err(unsupported("index recv", self.span())),
+        }
+    }
+
+    fn replace_indexed_value(
+        &mut self,
+        base: CtValue,
+        index: CtValue,
+        is_map: bool,
+        value: CtValue,
+        uninit: bool,
+    ) -> Result<CtValue, Diagnostic> {
+        if let CtValue::Present(inner) = base {
+            return self
+                .replace_indexed_value(*inner, index, is_map, value, uninit)
+                .map(|updated| CtValue::Present(Box::new(updated)));
+        }
+        if is_map || matches!(&base, CtValue::Map(_)) {
+            let CtValue::Map(mut entries) = base else {
+                return Err(unsupported("index assign map", self.span()));
+            };
+            let key = crate::AST::CtKey::from_value(index)
+                .ok_or_else(|| unsupported("index assign map key", self.span()))?;
+            entries.insert(key, value);
+            return Ok(CtValue::Map(entries));
+        }
+        let index = as_int(&index, self.span())?;
+        if index < 0 {
+            return Err(unsupported("negative index assign", self.span()));
+        }
+        let index = index as usize;
+        if uninit {
+            let mut carrier = base.clone();
+            if super::uninit_fixed_write(&mut carrier, index, value.clone()) {
+                return Ok(carrier);
+            }
+        }
+        let CtValue::List(mut items) = base else {
+            return Err(unsupported("index assign list", self.span()));
+        };
+        if index >= items.len() {
+            return Err(unsupported("index assign OOB", self.span()));
+        }
+        items[index] = value;
+        Ok(CtValue::List(items))
     }
 
     pub(super) fn exec_loop_value(
@@ -1442,6 +1595,81 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         return Ok(Flow::Normal);
                     }
                 }
+                if progress.is_none()
+                    && matches!(
+                        method_kind,
+                        Some(
+                            TForInMethod::LinesFile
+                                | TForInMethod::LinesStdin
+                                | TForInMethod::LinesProcessStream
+                        )
+                    )
+                {
+                    let op = match method_kind {
+                        Some(TForInMethod::LinesFile) => THandleOp::FileReaderReadLine,
+                        Some(TForInMethod::LinesStdin) => THandleOp::StdinReadLine,
+                        Some(TForInMethod::LinesProcessStream) => {
+                            let method = match &source.kind {
+                                TExprKind::Field { field, .. } if field == "stderr" => {
+                                    "stderr_line"
+                                }
+                                _ => "stdout_line",
+                            };
+                            THandleOp::ProcessChildMethod {
+                                method: method.to_string(),
+                            }
+                        }
+                        _ => unreachable!("line method guard changed"),
+                    };
+                    let stride = match step {
+                        Some(s) => as_int(&self.eval_expr(s, scope)?, self.span())?,
+                        None => 1,
+                    };
+                    if stride <= 0 {
+                        return Err(unsupported("for-in stride <= 0", self.span()));
+                    }
+                    let mut skipped = 0i64;
+                    loop {
+                        self.burn()?;
+                        let mut args = [];
+                        let next = super::handles::eval_handle_with_type_and_sink(
+                            &op,
+                            &mut coll,
+                            &mut args,
+                            self.span(),
+                            None,
+                            self.sink.as_ref(),
+                        )?;
+                        let item = match next {
+                            CtValue::Present(value) => match *value {
+                                CtValue::Present(item) => *item,
+                                CtValue::Failed(CtReport::Clean(_)) => break,
+                                _ => return Err(unsupported("line reader result", self.span())),
+                            },
+                            CtValue::Failed(CtReport::Clean(_)) => break,
+                            _ => return Err(unsupported("line reader result", self.span())),
+                        };
+                        if skipped != 0 {
+                            skipped -= 1;
+                            continue;
+                        }
+                        scope.insert(var.clone(), item);
+                        match self.exec_stmts(body, scope)? {
+                            Flow::Normal | Flow::Continue => {}
+                            Flow::Break => break,
+                            Flow::BreakLabel(ref name)
+                                if label.as_deref() == Some(name.as_str()) =>
+                            {
+                                break
+                            }
+                            Flow::ContinueLabel(ref name)
+                                if label.as_deref() == Some(name.as_str()) => {}
+                            other => return Ok(other),
+                        }
+                        skipped = stride - 1;
+                    }
+                    return Ok(Flow::Normal);
+                }
                 if progress.is_none() {
                     if let Some(TForInMethod::EncodingReader { reader_type }) = method_kind {
                         let op = match reader_type.as_str() {
@@ -1732,6 +1960,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 scrutinee,
                 arms,
                 else_body,
+                fallthrough,
                 ..
             } => {
                 let value = self.eval_expr(scrutinee, scope)?;
@@ -1743,7 +1972,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 if let Some(body) = else_body {
                     return self.exec_stmts(body, scope);
                 }
-                Ok(Flow::Normal)
+                unmatched_enum_match(*fallthrough, self.span())
             }
             TStmt::RangeSwitch {
                 subject,
@@ -1782,6 +2011,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 result
             }
             TStmt::IndexAssign {
+                uninit,
                 base,
                 index,
                 is_map,
@@ -1799,16 +2029,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 // sat unreached. Take the slot's own value instead: a carrier
                 // is never a `__JetViewMut`, so the probe answers the same and
                 // the write rule stays exactly where it belongs — on reads.
-                let base_value = match &base.kind {
-                    crate::Codegen::TIR::TExprKind::Local(local) if local.uninit_fixed => {
-                        scope.get(&local.name).cloned().ok_or_else(|| {
-                            unsupported(&format!("unbound `{}`", local.name), self.span())
-                        })?
-                    }
-                    _ => self.eval_expr(base, scope)?,
-                };
-                let idx_v = self.eval_expr(index, scope)?;
+                // Match the AOT/JIT assignment order. Capture the RHS first,
+                // then walk the base projections and their indexes once.
                 let rhs = self.eval_expr(value, scope)?;
+                let (root, steps, parents, base_value) = self.eval_index_base_path(base, scope)?;
+                let idx_v = self.eval_expr(index, scope)?;
                 // Mutable place-window write-through (`&xs[a..b]` → `__JetViewMut`).
                 if let CtValue::Struct { type_name, fields } = &base_value {
                     if type_name == "__JetViewMut" {
@@ -1851,41 +2076,25 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         return Ok(Flow::Normal);
                     }
                 }
-                let base_name = match &base.kind {
-                    crate::Codegen::TIR::TExprKind::Local(local) => local.name.clone(),
-                    _ => return Err(unsupported("index assign base", self.span())),
-                };
-                if *is_map {
-                    let Some(CtValue::Map(mut entries)) = scope.get(&base_name).cloned() else {
-                        return Err(unsupported("index assign map", self.span()));
-                    };
-                    let key = crate::AST::CtKey::from_value(idx_v)
-                        .ok_or_else(|| unsupported("index assign map key", self.span()))?;
-                    entries.insert(key, rhs);
-                    scope.insert(base_name, CtValue::Map(entries));
-                } else {
-                    let idx = as_int(&idx_v, self.span())?;
-                    if idx < 0 {
-                        return Err(unsupported("negative index assign", self.span()));
-                    }
-                    if let Some(mut carrier @ CtValue::Struct { .. }) =
-                        scope.get(&base_name).cloned()
-                    {
-                        if super::uninit_fixed_write(&mut carrier, idx as usize, rhs.clone()) {
-                            scope.insert(base_name, carrier);
-                            return Ok(Flow::Normal);
-                        }
-                    }
-                    let Some(CtValue::List(mut items)) = scope.get(&base_name).cloned() else {
-                        return Err(unsupported("index assign list", self.span()));
-                    };
-                    let i = idx as usize;
-                    if i >= items.len() {
-                        return Err(unsupported("index assign OOB", self.span()));
-                    }
-                    items[i] = rhs;
-                    scope.insert(base_name, CtValue::List(items));
+                let mut replacement = self.replace_indexed_value(
+                    base_value,
+                    idx_v,
+                    *is_map,
+                    rhs,
+                    *uninit,
+                )?;
+                for (step_index, (step_is_map, step_index_value)) in
+                    steps.iter().enumerate().rev()
+                {
+                    replacement = self.replace_indexed_value(
+                        parents[step_index].clone(),
+                        step_index_value.clone(),
+                        *step_is_map,
+                        replacement,
+                        false,
+                    )?;
                 }
+                self.write_back_place(root, replacement, scope)?;
                 Ok(Flow::Normal)
             }
             TStmt::IndexFieldAssign(assign) => {
@@ -2390,6 +2599,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 parent: &'b TIfCond,
                 right: &'b TIfCond,
             },
+            AfterPrelude {
+                parent: &'b TIfCond,
+                cond: &'b TIfCond,
+            },
         }
 
         let mut work = vec![CondWork::Eval(cond)];
@@ -2404,6 +2617,25 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             right,
                         });
                         work.push(CondWork::Eval(left));
+                    }
+                    TIfCond::WithPrelude {
+                        prelude,
+                        cond: inner,
+                    } => {
+                        match self.exec_stmts_synthetic(prelude, scope)? {
+                            Flow::Normal => {}
+                            _ => {
+                                return Err(unsupported(
+                                    "control flow in if condition prelude",
+                                    self.span(),
+                                ))
+                            }
+                        }
+                        work.push(CondWork::AfterPrelude {
+                            parent: cond,
+                            cond: inner,
+                        });
+                        work.push(CondWork::Eval(inner));
                     }
                     TIfCond::Plain(expr)
                     | TIfCond::IsNone { subj: expr }
@@ -2436,6 +2668,14 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         .remove(&(right as *const TIfCond as usize))
                         .ok_or_else(|| unsupported("if condition result stack", self.span()))?;
                     results.insert(parent as *const TIfCond as usize, right);
+                }
+                CondWork::AfterPrelude { parent, cond } => {
+                    let value = results
+                        .remove(&(cond as *const TIfCond as usize))
+                        .ok_or_else(|| {
+                            unsupported("if condition prelude result stack", self.span())
+                        })?;
+                    results.insert(parent as *const TIfCond as usize, value);
                 }
             }
         }
@@ -2821,6 +3061,14 @@ pub(super) fn bind_match_pattern(
     }
 }
 
+fn unmatched_enum_match(fallthrough: bool, span: Span) -> Result<Flow, Diagnostic> {
+    if fallthrough {
+        Err(unsupported("exhaustive match fallthrough", span))
+    } else {
+        Ok(Flow::Normal)
+    }
+}
+
 fn bind_slots(
     slots: &[crate::AST::PatSlot],
     args: &[CtValue],
@@ -2849,4 +3097,24 @@ fn bind_slots(
         }
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{unmatched_enum_match, Flow};
+    use crate::Diagnostics::Span;
+
+    #[test]
+    fn unmatched_enum_match_fails_closed() {
+        let span = Span::new(4, 12);
+        let diagnostic = unmatched_enum_match(true, span)
+            .expect_err("a sema-proved exhaustive match must not fall through");
+        assert_eq!(diagnostic.code, "E0956");
+        assert_eq!(diagnostic.span, Some(span));
+        assert!(diagnostic.what.contains("exhaustive match fallthrough"));
+        assert!(matches!(
+            unmatched_enum_match(false, span),
+            Ok(Flow::Normal)
+        ));
+    }
 }

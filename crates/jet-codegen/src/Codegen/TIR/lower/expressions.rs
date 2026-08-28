@@ -398,6 +398,18 @@ pub(super) fn lower_or_fallback(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TExpr {
+    fn return_value(value: TExpr, env: &LowerEnv) -> TExpr {
+        let Some(return_ty) = env.ret_ty.clone() else {
+            return value;
+        };
+        let kind = match return_ty {
+            Type::Result { .. } => TExprKind::Ok(Box::new(value)),
+            Type::Option(_) => TExprKind::Present(Box::new(value)),
+            _ => return value,
+        };
+        TExpr { ty: return_ty, kind }
+    }
+
     let value_t = lower_expr(value, cx, env);
     let result_ty = match &value_t.ty {
         Type::Option(inner) => (**inner).clone(),
@@ -453,9 +465,10 @@ pub(super) fn lower_or_fallback(
                 TOrFallback::Return(None)
             }
         }
-        OrFallback::Return(Some(e), _) => {
-            TOrFallback::Return(Some(Box::new(lower_expr(e, cx, &mut fallback_env))))
-        }
+        OrFallback::Return(Some(e), _) => TOrFallback::Return(Some(Box::new(return_value(
+            lower_expr(e, cx, &mut fallback_env),
+            env,
+        )))),
         OrFallback::Panic { name_span, args } => {
             let (kind, loc) = lower_panic_stop(name_span, args, cx, &mut fallback_env);
             let TRequireKind::Panic { msg } = kind else {
@@ -1088,6 +1101,7 @@ fn plain_expr_children(expr: &Expr) -> Vec<&Expr> {
                     }
                 }
                 TypedLitBody::Value(value) => children.push(value),
+                TypedLitBody::ByteText(_) => {}
                 TypedLitBody::Empty => {}
             }
             children
@@ -1711,7 +1725,7 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 let term = state.terms[state.next];
                 let (lowered, binding, prefix) =
                     super::control_flow::lower_if_cond_atom_cached(term, cx, env);
-                if let Some((name, place, ty)) = binding {
+                for (name, place, ty) in binding {
                     env.bind(&name, place.clone(), ty.clone());
                     state.bindings.push((name, place, ty));
                 }
@@ -1953,6 +1967,18 @@ fn lower_boundary_typed_lit(
             holes,
         })),
     })
+}
+
+/// D-BYTELIT1=B: mirror sema's byte-text rewrite for raw comptime fragments
+/// that reach TIR before ordinary typed-literal elaboration.
+fn byte_text_exprs(parts: &[crate::AST::ByteTextPart], span: Span) -> Option<Vec<Expr>> {
+    let bytes = TypedLitBody::byte_text_bytes(parts)?;
+    Some(
+        bytes
+            .into_iter()
+            .map(|byte| Expr::Int(byte as i64, span, None, Some(byte.to_string())))
+            .collect(),
+    )
 }
 
 fn expr_tag(e: &Expr) -> &'static str {
@@ -2409,6 +2435,26 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     TExpr {
                                         ty: Type::Int,
                                         kind: TExprKind::IntLit(*precision, None),
+                                    },
+                                ],
+                                source_span,
+                                widen_to_vec: vec![false, false],
+                            },
+                        };
+                        TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
+                    }
+                    StrPart::Interp(e, crate::AST::StrFormat::Hex(width)) => {
+                        let source_span = e.span();
+                        let formatted = TExpr {
+                            ty: Type::String,
+                            kind: TExprKind::CoreCall {
+                                module: "core.text.fmt".to_string(),
+                                method: "hex".to_string(),
+                                args: vec![
+                                    lower_expr(e, cx, env),
+                                    TExpr {
+                                        ty: Type::Int,
+                                        kind: TExprKind::IntLit(*width, None),
                                     },
                                 ],
                                 source_span,
@@ -3270,6 +3316,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }),
         Expr::Call(call) => {
             in_own_frame(|| {
+                if call.name == "from_named" {
+                    eprintln!("[probe-lower-call] from_named resolved_ret={:?}", call.resolved_ret);
+                }
                 if let Some(lowered) = lower_raw_err_call(call, cx, env) {
                     return lowered;
                 }
@@ -4205,6 +4254,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     });
                 in_own_frame(|| {
                     let ret = call_return_type_with_args(cx, &call.name, &call.type_args, &args);
+                    if call.name == "from_named" {
+                        eprintln!("[probe-lower-call-ret] from_named ret={ret:?}");
+                    }
                     let mut lowered = TExpr {
                         ty: ret,
                         kind: TExprKind::Call {
@@ -5912,6 +5964,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         Expr::ListLit(Vec::new(), *span)
                     }
                     (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Elements(elems)) => {
+                        Expr::ListLit(elems, *span)
+                    }
+                    (Type::List(_) | Type::FixedList { .. }, TypedLitBody::ByteText(parts)) => {
+                        let Some(elems) = byte_text_exprs(&parts, *span) else {
+                            return TExpr {
+                                ty: Type::Int,
+                                kind: TExprKind::Todo {
+                                    line: 0,
+                                    expected_type: "invalid non-ASCII byte literal".to_string(),
+                                },
+                            };
+                        };
                         Expr::ListLit(elems, *span)
                     }
                     (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Value(inner)) => {

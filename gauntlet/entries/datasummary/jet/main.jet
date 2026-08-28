@@ -1,7 +1,6 @@
 use core.files as files
 use core.process as process
 use core.sys as sys
-use core.text.fmt as fmt
 use core.math as math
 
 fn mean(values: [Float]) Float -> {
@@ -12,7 +11,7 @@ fn mean(values: [Float]) Float -> {
 
 fn summary(values: [Float]) String -> {
     sorted := values.copy()
-    sorted.sort_by((value: Float) -> math.round(value * Float{1000.0}))
+    sorted.sort_by((left: Float, right: Float) -> if left < right -> Ordering.Less else if left > right -> Ordering.Greater else -> Ordering.Equal)
     n := sorted.len()
     avg :: mean(values)
     median :: sorted[(n - 1) /% 2]
@@ -23,7 +22,7 @@ fn summary(values: [Float]) String -> {
         squared += delta * delta
     }
     sd :: math.sqrt(squared / Float.from_int(n))
-    return "n={n} mean={fmt.decimal(avg, 2)} median={fmt.decimal(median, 2)} p95={fmt.decimal(p95, 2)} sd={fmt.decimal(sd, 2)}"
+    return "n={n} mean={avg:Fixed(2)} median={median:Fixed(2)} p95={p95:Fixed(2)} sd={sd:Fixed(2)}"
 }
 
 fn run() {
@@ -49,5 +48,5 @@ fn run() {
         loop value in values -> all.push(value)
         print("{name} {summary(values)}")
     }
-    print("overall n={all.len()} mean={fmt.decimal(mean(all), 2)}")
+    print("overall n={all.len()} mean={mean(all):Fixed(2)}")
 }

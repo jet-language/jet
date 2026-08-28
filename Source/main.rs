@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
@@ -65,10 +65,11 @@ mod ProveSolver;
 
 use CmdCodemod::run_codemod;
 use CmdCompile::{
-    require_project_environment, resolve_named_profile, run_build_query, run_compile_cmd,
-    run_compiler_api, run_debug_native, run_dev_entry, run_dev_web, run_external_fmt, run_fix,
-    run_fmt, run_fuzz, run_jobs, run_new, run_test_opts, run_test_package, run_web_app_dev_entry,
-    validate_target, FuzzRunOpts, TestRunOpts,
+    project_environment_requirement, require_project_environment, resolve_named_profile,
+    run_build_query, run_compiler_api, run_debug_native, run_dev_entry, run_dev_web,
+    run_external_fmt, run_fix, run_fmt, run_fuzz, run_jobs, run_native_execution, run_new,
+    run_test_opts, run_test_package, run_web_app_dev_entry, validate_target,
+    FuzzRunOpts, NativeExecutionRequest, TestRunOpts,
 };
 use CmdDevTools::{
     run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust, run_eval,
@@ -202,6 +203,16 @@ pub(crate) fn emit_cli_row(code: &str, holes: &[(&str, &str)], json: bool) {
     emit_cli_value(diagnostic, json);
 }
 
+pub(crate) fn emit_cli_row_with_detail(
+    code: &str,
+    holes: &[(&str, &str)],
+    detail: String,
+    json: bool,
+) {
+    let diagnostic = jet::Diagnostics::Diagnostic::from_row(code, holes, None).with_detail(detail);
+    emit_cli_value(diagnostic, json);
+}
+
 macro_rules! cli_error {
     (@fix $code:expr, $what:expr, $fix:expr) => {
         crate::emit_cli_diagnostic_with_fix($code, ($what).to_string(), ($fix).to_string())
@@ -220,6 +231,45 @@ macro_rules! cli_error {
     };
 }
 pub(crate) use cli_error;
+
+/// Offer the existing Jetpack environment boundary when an interactive
+/// `jet dev` would otherwise be refused. The child inherits stdio, so its
+/// resolver progress and any realization diagnostic stay in this terminal.
+fn offer_dev_environment(raw: &[String], file: &str, mode: OutputMode) {
+    let Some((environment, import)) = project_environment_requirement(Path::new(file)) else {
+        return;
+    };
+    if mode.json || !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        return;
+    }
+
+    eprintln!("jet dev needs {environment} for `use {import}`.\nRealize it now? [Y/n]");
+    let _ = std::io::stderr().flush();
+    let mut answer = String::new();
+    let Ok(read) = std::io::stdin().read_line(&mut answer) else {
+        return;
+    };
+    if read == 0
+        || (!answer.trim().is_empty()
+            && !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
+    {
+        return;
+    }
+
+    let Ok(jet_binary) = std::env::current_exe() else {
+        return;
+    };
+    let mut forwarded = Vec::with_capacity(raw.len() + 2);
+    forwarded.push("env".to_string());
+    forwarded.push("--".to_string());
+    forwarded.push(jet_binary.to_string_lossy().into_owned());
+    forwarded.extend(raw.iter().cloned());
+    exit(EngineDispatch::dispatch(
+        jet::Syntax::JETPACK_BINARY_NAME,
+        "env",
+        &forwarded,
+    ));
+}
 
 /// Parse `--color=auto|always|never` from raw argv (last one wins).
 fn parse_color(raw: &[String]) -> ColorChoice {
@@ -356,6 +406,13 @@ impl ProfileConfig {
     }
 
     pub(crate) fn rustc_args(&self, ffi: bool) -> Vec<String> {
+        self.rustc_args_for_target(ffi, false)
+    }
+
+    /// D-SIMD3=B: native AOT builds opt into the host CPU so LLVM can use its
+    /// available vector instructions. Cross-target builds keep the portable
+    /// baseline; `#Scalar` is the per-function opt-out boundary.
+    pub(crate) fn rustc_args_for_target(&self, ffi: bool, native: bool) -> Vec<String> {
         let mut args = Vec::new();
         if self.small {
             args.extend(
@@ -372,6 +429,9 @@ impl ProfileConfig {
             );
             if !ffi {
                 args.extend(["-C".to_string(), "lto=fat".to_string()]);
+            }
+            if native {
+                args.extend(["-C".to_string(), "target-cpu=native".to_string()]);
             }
             return args;
         }
@@ -404,6 +464,9 @@ impl ProfileConfig {
         }
         if !ffi && !matches!(self.optimize, OptimizeLevel::None) {
             args.extend(["-C".to_string(), "lto=thin".to_string()]);
+        }
+        if native {
+            args.extend(["-C".to_string(), "target-cpu=native".to_string()]);
         }
         args
     }
@@ -1442,6 +1505,7 @@ fn main() {
     let json = jet::CLI::machine_output_requested(jet_argv);
     reject_retired_gate_flags(jet_argv, json);
     let small = jet_argv.iter().any(|a| a == "--small");
+    let interpret = jet_argv.iter().any(|a| a == "--interpret");
     let library_flag = jet_argv.iter().any(|a| a == "--lib");
     let freestanding_flag = jet_argv.iter().any(|a| a == "--freestanding");
     let gates = parse_gate_flags(jet_argv, json);
@@ -1476,6 +1540,7 @@ fn main() {
             exit(ExitCodes::USAGE);
         }
     };
+    let web_scaffold = requested_target.as_deref() == Some(jet::Syntax::BUILD_TARGET_WEB);
     let selected_machine = requested_target
         .as_deref()
         .and_then(jet::Driver::target_machine_by_name);
@@ -1504,8 +1569,8 @@ fn main() {
                     .cloned()
             })
     });
-    // c134 Phase 7: `jet dev <file> --target=web --port=<N>` picks the dev
-    // server's port explicitly instead of scanning from 8080.
+    // c134 Phase 7: `jet dev <file> --target=web --port=<N>` picks the app
+    // preview port explicitly instead of scanning from 8080.
     let dev_port: Option<u16> = jet_argv
         .iter()
         .find_map(|a| a.strip_prefix("--port=").map(str::to_string))
@@ -1523,7 +1588,7 @@ fn main() {
     let explain_partition = jet_argv.iter().any(|a| a == "--explain-partition");
     // D-BUILDPROFILE1: `--release` is sugar for `--profile=release`.
     // `--profile=<name>` selects a named profile. Resolved against package.jet
-    // in run_compile_cmd; only the name is collected here.
+    // in the native execution workflow; only the name is collected here.
     let release_flag = jet_argv.iter().any(|a| a == "--release");
     let profile_flag: Option<String> = jet_argv
         .iter()
@@ -1731,31 +1796,34 @@ fn main() {
             } else {
                 args.iter().skip(1).copied().collect()
             };
-            run_compile_cmd(
-                "run",
-                &resolved,
+            let effective = effective_target("run", &resolved, cross_target.as_deref());
+            run_native_execution(NativeExecutionRequest {
+                command: "run",
+                file: &resolved,
                 emit_rust,
                 emit_generated,
-                library_flag,
+                library: library_flag,
                 small,
                 freestanding,
                 gates,
-                &build_grants,
-                remote_builder.as_deref(),
+                build_grants: &build_grants,
+                remote_builder: remote_builder.as_deref(),
                 locked,
-                cross_target.as_deref(),
+                target: effective.as_deref(),
                 explain_partition,
                 verbose,
                 sbom,
-                named_profile.as_deref(),
-                &setting_overrides,
-                output_name.as_deref(),
-                &program_args,
+                release: release_flag,
+                profile: named_profile.as_deref(),
+                setting_overrides: &setting_overrides,
+                output: output_name.as_deref(),
+                program_args: &program_args,
                 mode,
-                record_name.as_deref(),
-                true,
-                true,
-            );
+                record: record_name.as_deref(),
+                interpret,
+                package_scope: true,
+                build_override: true,
+            });
             return;
         }
         if let Some(bin) = find_external(cmd) {
@@ -1819,10 +1887,6 @@ fn main() {
     if cmd != "dev" && jet_argv.iter().any(|arg| arg == jet::CLI::CANVAS_FLAG) {
         crate::cli_error!(@fix "E2102", "`--canvas` is only valid with `jet dev`", "run `jet dev <file.jet> --canvas` to open the Canvas IDE");
         exit(ExitCodes::USAGE);
-    }
-    if cmd == "test" {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        require_project_environment("test", &cwd, mode);
     }
     if let Some(status) = jet::ReceiptStore::run_if_needed(&raw) {
         exit(status);
@@ -2575,6 +2639,8 @@ fn main() {
             if let Some(target) = cross_target.as_deref() {
                 validate_target(target, mode);
             }
+            offer_dev_environment(&raw, &file, mode);
+            require_project_environment("dev", Path::new(&file), mode);
             if jet_argv.iter().any(|arg| arg == "--show-default") {
                 println!("jet dev: using stock default");
             }
@@ -2917,33 +2983,35 @@ fn main() {
                                 }
                                 let effective =
                                     effective_target(cmd, &entry_str, cross_target.as_deref());
-                                run_compile_cmd(
-                                    cmd,
-                                    &entry_str,
+                                run_native_execution(NativeExecutionRequest {
+                                    command: cmd,
+                                    file: &entry_str,
                                     emit_rust,
                                     emit_generated,
-                                    library_flag,
+                                    library: library_flag,
                                     small,
                                     freestanding,
                                     gates,
-                                    &build_grants,
-                                    remote_builder.as_deref(),
+                                    build_grants: &build_grants,
+                                    remote_builder: remote_builder.as_deref(),
                                     locked,
-                                    effective.as_deref(),
+                                    target: effective.as_deref(),
                                     explain_partition,
                                     verbose,
                                     sbom,
-                                    named_profile.as_deref(),
-                                    &setting_overrides,
-                                    output_name.as_deref(),
-                                    &program_args,
+                                    release: release_flag,
+                                    profile: named_profile.as_deref(),
+                                    setting_overrides: &setting_overrides,
+                                    output: output_name.as_deref(),
+                                    program_args: &program_args,
                                     mode,
-                                    record_name.as_deref(),
-                                    cmd != "build"
+                                    record: record_name.as_deref(),
+                                    interpret,
+                                    package_scope: cmd != "build"
                                         || !jet_argv.iter().any(|arg| arg == "--show-default"),
-                                    cmd != "build"
+                                    build_override: cmd != "build"
                                         || !jet_argv.iter().any(|arg| arg == "--show-default"),
-                                );
+                                });
                                 return;
                             }
                         }
@@ -2976,7 +3044,7 @@ fn main() {
             let all = jet_argv.iter().any(|a| a == "--all");
             run_fix(target, dry_run, edition.as_deref(), all);
         }
-        "new" => run_new(target, annotated, mode),
+        "new" => run_new(target, annotated, web_scaffold, mode),
         "test" => {
             let update_snapshots = jet_argv
                 .iter()
@@ -3218,33 +3286,35 @@ fn main() {
                 println!("jet {cmd}: using stock default");
             }
             let effective = effective_target(cmd, &resolved, cross_target.as_deref());
-            run_compile_cmd(
-                cmd,
-                &resolved,
+            run_native_execution(NativeExecutionRequest {
+                command: cmd,
+                file: &resolved,
                 emit_rust,
                 emit_generated,
-                library_flag,
+                library: library_flag,
                 small,
                 freestanding,
                 gates,
-                &build_grants,
-                remote_builder.as_deref(),
+                build_grants: &build_grants,
+                remote_builder: remote_builder.as_deref(),
                 locked,
-                effective.as_deref(),
+                target: effective.as_deref(),
                 explain_partition,
                 verbose,
                 sbom,
-                named_profile.as_deref(),
-                &setting_overrides,
-                output_name.as_deref(),
-                &program_args,
+                release: release_flag,
+                profile: named_profile.as_deref(),
+                setting_overrides: &setting_overrides,
+                output: output_name.as_deref(),
+                program_args: &program_args,
                 mode,
-                record_name.as_deref(),
-                cmd != "build"
+                record: record_name.as_deref(),
+                interpret,
+                package_scope: cmd != "build"
                     || (Path::new(target).is_dir()
                         && !jet_argv.iter().any(|arg| arg == "--show-default")),
-                cmd != "build" || !jet_argv.iter().any(|arg| arg == "--show-default"),
-            );
+                build_override: cmd != "build" || !jet_argv.iter().any(|arg| arg == "--show-default"),
+            });
         }
     }
 }
@@ -3279,19 +3349,12 @@ fn run_wants_watch(raw: &[String]) -> bool {
 /// extra cheap lex+parse passes are negligible, and it keeps this CLI-only
 /// concern out of `ProgramBundle`/codegen entirely.
 ///
-/// `cmd == "run"` never infers: "run" means "execute this program and show
-/// me console output," a native-execution concept a web build can't satisfy
-/// (there's no runtime to run a `.wasm`+`.js` bundle as a console program —
-/// it just fails trying to exec the wrong artifact as a native binary). `jet
-/// run` on a web-targeted file still requires an explicit `--target=web`
-/// (which then hits the normal "can't run a cross-compiled binary" message,
-/// same as any other cross target) or, better, `jet dev`/`jet build`.
-fn effective_target(cmd: &str, file: &str, explicit: Option<&str>) -> Option<String> {
+/// `jet run` also resolves the package/file web default so the execution
+/// boundary can reject it with a teaching diagnostic before attempting a
+/// native build. `jet dev` and `jet build` keep the same default resolution.
+fn effective_target(_cmd: &str, file: &str, explicit: Option<&str>) -> Option<String> {
     if explicit.is_some() {
         return explicit.map(str::to_string);
-    }
-    if cmd == "run" {
-        return None;
     }
     if let Some(target) = manifest_default_target(file) {
         return Some(target);

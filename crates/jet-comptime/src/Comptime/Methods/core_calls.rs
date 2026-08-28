@@ -20,9 +20,31 @@ mod core_pure_parity;
 fn core_call_allows_pure_parity(row: &jet_foundation::Syntax::CoreCallRecord) -> bool {
     row.coverage
         .contains(jet_foundation::Syntax::CoreCallCoverage::COMPTIME)
+        && matches!(
+            row.interpreter_route,
+            jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(_)
+        )
         && row.pure_route != jet_foundation::Syntax::CoreCallPureRoute::None
         && !row.is_receiver()
         && row.effect().is_none()
+}
+
+fn validate_interpreter_route(
+    module: &str,
+    method: &str,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
+        if row.coverage.contains(jet_foundation::Syntax::CoreCallCoverage::INTERPRETER)
+            && !row.interpreter_route.is_executable()
+        {
+            return Err(unsupported(
+                &format!("{}.{}(): no interpreter route is declared", module, method),
+                span,
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_core_call_projection(
@@ -688,17 +710,28 @@ pub fn apply_core_call_with_type(
         jet_foundation::Syntax::CoreCallCoverage::COMPTIME,
         span,
     )?;
-    // Runtime ambient carriers must reach their host marshaller before the
-    // pure projection. Pure comptime has no ambient hook, so it still uses
-    // CorePureParity below.
-    if let Some(result) = crate::Comptime::try_ambient_core_call_typed(
-        module,
-        method,
-        args.clone(),
-        span,
-        resolved_ret.cloned(),
-    ) {
-        return result;
+    validate_interpreter_route(module, method, span)?;
+    // The row selects the interpreter adapter. Ambient rows cross the host
+    // boundary; pure rows stay in CorePureParity; typed-intrinsic rows use
+    // the existing typed evaluator below. Unknown rows retain the legacy
+    // ambient hook so newly surfaced host carriers still get one boundary.
+    let route = jet_foundation::Syntax::core_call(module, method)
+        .map(|row| row.interpreter_route);
+    if route.is_none()
+        || matches!(
+            route,
+            Some(jet_foundation::Syntax::CoreCallInterpreterRoute::Ambient)
+        )
+    {
+        if let Some(result) = crate::Comptime::try_ambient_core_call_typed(
+            module,
+            method,
+            args.clone(),
+            span,
+            resolved_ret.cloned(),
+        ) {
+            return result;
+        }
     }
     // The foundation row owns the effect classification for every plain
     // symbol call. Only effect-free rows may enter the pure parity evaluator;
@@ -1291,12 +1324,6 @@ pub fn apply_core_call_with_type(
         ("core.math", "is_inf") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_infinite())),
         ("core.math", "is_finite") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_finite())),
         ("core.math", "sign") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.sign())),
-        ("core.math", "to_bits") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.to_bits_i64())),
-        ("core.math", "from_bits") => {
-            Ok(CtValue::Float(CtFloat::f64(f64::from_bits(
-                as_int(one(0)?, span)? as u64,
-            ))))
-        }
         // --- core.text module implementation surface (card #392: `"core.string"` was a
         // dead key here — no import ever resolves to it, `core.text` is the
         // only ratified spelling (KNOWN_CORE_MODULES), so every arm below was
@@ -2018,6 +2045,20 @@ pub fn apply_core_call_with_type(
                 _ => return Err(unsupported("fmt.decimal precision must be Int", span)),
             };
             Ok(CtValue::Str(fmt_kernel::jet_fmt_decimal(value, precision)))
+        }
+        ("core.text.fmt", "hex") => {
+            let value = match one(0)? {
+                CtValue::Int(value) => value.to_string(),
+                CtValue::BigInt(value) => value.to_string_rep(),
+                _ => return Err(unsupported("fmt.hex expects an Int", span)),
+            };
+            let width = match one(1)? {
+                CtValue::Int(width) => *width,
+                _ => return Err(unsupported("fmt.hex width must be Int", span)),
+            };
+            Ok(CtValue::Str(fmt_kernel::jet_fmt_hex_decimal(
+                &value, width,
+            )))
         }
         ("core.text.fmt", "percent") => {
             let value = as_float(one(0)?, span)?;

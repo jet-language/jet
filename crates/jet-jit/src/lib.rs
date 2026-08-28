@@ -294,7 +294,6 @@ thread_local! {
     static RESIDENT_MODULE: RefCell<Option<ResidentModule>> = const { RefCell::new(None) };
     /// Live heap preserved across type-stable hot_swap; reset on restart.
     static RESIDENT_RUNTIME: RefCell<Option<JitRuntime>> = const { RefCell::new(None) };
-    static PROGRAM_ARGS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Serializes whole resident JIT runs across the process.
@@ -310,22 +309,11 @@ thread_local! {
 /// pointers. Until that state is made per-session, one run at a time.
 static RESIDENT_JIT_RUN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-struct ProgramArgsGuard(Vec<String>);
-
-impl Drop for ProgramArgsGuard {
-    fn drop(&mut self) {
-        PROGRAM_ARGS.with(|slot| {
-            *slot.borrow_mut() = std::mem::take(&mut self.0);
-        });
-    }
-}
-
 /// Install argv for one JIT run (`argv[0]` = entry path, then program args).
 pub fn with_program_args<R>(args: &[String], run: impl FnOnce() -> R) -> R {
-    let previous =
-        PROGRAM_ARGS.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), args.to_vec()));
-    let _guard = ProgramArgsGuard(previous);
-    // Keep impure `core.process.argv` in lockstep for interpreter deopt (#778).
+    // `Comptime::RUNTIME_ARGV` is the one invocation carrier for native JIT
+    // code and interpreter deopt (#778). Keep this adapter name for callers;
+    // storage belongs to the shared Prelude seam, not to a JIT tier.
     jet_codegen::Comptime::with_runtime_argv(args, run)
 }
 
@@ -350,10 +338,6 @@ pub fn bind_interpreter_ffi(
     Ffi::bind_bundle_ffi_for_interpreter(bundle)
 }
 
-pub(crate) fn program_args() -> Vec<String> {
-    PROGRAM_ARGS.with(|slot| slot.borrow().clone())
-}
-
 /// Run JIT work on Jet's canonical compiler worker.
 ///
 /// TIR lowering and Cranelift lowering are the same unbounded-depth recursive
@@ -369,7 +353,7 @@ pub(crate) fn program_args() -> Vec<String> {
 /// caller writes before the call or reads after it:
 ///
 /// * **in** — comptime ambient hooks and the TIR comptime bridge, program
-///   argv (`PROGRAM_ARGS` plus its `core.process.argv` twin), `--trace-tiers`.
+///   argv (`Comptime::RUNTIME_ARGV`), `--trace-tiers`.
 /// * **out** — the JIT/fallback/deopt trace flags, the `--trace-tiers` rows,
 ///   the `struct_new` counter, and the tier-1 cache artifact the run just
 ///   published.
@@ -406,7 +390,7 @@ pub fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     }
     let (ambient_core_call, ambient_handle, ambient_extern_call) =
         jet_codegen::Comptime::ambient_hooks();
-    let argv = program_args();
+    let argv = jet_codegen::Comptime::runtime_argv();
     let trace_tiers = tiers::trace_tiers_enabled();
     let fidelity = runtime_host::perf_fidelity_bits();
     let (out, flags, rows, struct_new, artifact, fidelity_out) =
@@ -420,13 +404,11 @@ pub fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
                     ambient_handle,
                     ambient_extern_call.or(Some(ambient_interp::ambient_extern_call)),
                     || {
-                        // Empty means the caller installed none: reinstalling an
-                        // empty argv is not the same as leaving it unset, because
-                        // `with_program_args` also publishes `core.process.argv`.
-                        if argv.is_empty() {
-                            work()
-                        } else {
-                            with_program_args(&argv, work)
+                        match argv {
+                            Some(args) => {
+                                jet_codegen::Comptime::with_runtime_argv(&args, work)
+                            }
+                            None => work(),
                         }
                     },
                 )

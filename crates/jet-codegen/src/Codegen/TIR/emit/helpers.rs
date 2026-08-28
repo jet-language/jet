@@ -209,6 +209,9 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                     crate::AST::StrFormat::Fixed(_) => {
                         unreachable!("Fixed interpolation lowers to core.text.fmt.decimal")
                     }
+                    crate::AST::StrFormat::Hex(_) => {
+                        unreachable!("Hex interpolation lowers to core.text.fmt.hex")
+                    }
                     crate::AST::StrFormat::Unit(_) => {
                         unreachable!("Unit interpolation lowers to a String")
                     }

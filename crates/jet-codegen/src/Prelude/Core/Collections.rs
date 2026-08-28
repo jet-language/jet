@@ -292,11 +292,15 @@ fn jet_list_try_reserve<T>(xs: &mut Vec<T>, additional: i64) -> JetOutcome<(), A
     Ok(())
 }
 
-fn jet_map_try_insert<K: Ord + Clone, V: Clone>(
-    map: &mut JetMap<K, V>,
+#[inline(always)]
+fn jet_map_try_insert<M, K: Ord + Clone, V: Clone>(
+    map: &mut M,
     key: K,
     value: V,
-) -> JetOutcome<Option<V>, AllocError> {
+) -> JetOutcome<Option<V>, AllocError>
+where
+    M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
+{
     if map.contains_key(&key) {
         return Ok(map.insert(key, value));
     }
@@ -304,8 +308,7 @@ fn jet_map_try_insert<K: Ord + Clone, V: Clone>(
     if jet_fault_should_fail_allocation() {
         return Err(jet_alloc_error(requested, "Map"));
     }
-    jet_map_try_insert_storage(map, key, value)
-        .map_err(|_| jet_alloc_error(requested, "Map"))
+    Ok(map.insert(key, value))
 }
 
 fn jet_string_try_push(text: &mut String, addition: &str) -> JetOutcome<(), AllocError> {
@@ -425,10 +428,13 @@ fn jet_map_contains_value_kernel<K: Ord, V: PartialEq>(
     m.values().any(|value| value == needle)
 }
 
-fn jet_map_pop_kernel<K: Ord + Clone, V: Clone>(
-    m: &mut JetMap<K, V>,
+fn jet_map_pop_kernel<M, K: Ord + Clone, V: Clone>(
+    m: &mut M,
     key: &K,
-) -> JetOutcome<V, JetAbsent> {
+) -> JetOutcome<V, JetAbsent>
+where
+    M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
+{
     jet_outcome_of(m.remove(key))
 }
 

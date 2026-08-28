@@ -179,7 +179,7 @@ pub(crate) fn inspect_leases(roots: &Roots) -> std::io::Result<LeaseInventory> {
 /// cleanup. A malformed object or committed closure cannot be omitted from a
 /// successful report.
 pub(crate) fn audit_read_only(roots: &Roots) -> std::io::Result<AuditSnapshot> {
-    let graph = Closure::closure_graph_read_only(roots)?;
+    let graph = Journal::closure_graph_read_only(roots)?;
     let entries = list_read_only_checked(roots)?;
     let known = entries
         .iter()
@@ -2077,6 +2077,17 @@ fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
     let Ok(canonical_out) = fs::canonicalize(out) else {
         return false;
     };
+    // `bin`/`rlib` members may live inside the primary output or inside any
+    // named output object of a multi-output Nix package (`util-linux.bin`).
+    let mut member_roots = vec![canonical_out];
+    member_roots.extend(
+        entry
+            .named_outputs
+            .values()
+            .filter_map(|digest| {
+                fs::canonicalize(roots.hangar_dir().join(OBJECTS_DIR).join(digest)).ok()
+            }),
+    );
     [&entry.bin, &entry.rlib].into_iter().all(|member| {
         if member.is_empty() {
             return true;
@@ -2085,7 +2096,9 @@ fn closure_is_reachable(roots: &Roots, entry: &StoreEntry) -> bool {
         let Ok(canonical_member) = fs::canonicalize(member) else {
             return false;
         };
-        canonical_member != canonical_out && canonical_member.starts_with(&canonical_out)
+        member_roots.iter().any(|root| {
+            canonical_member != *root && canonical_member.starts_with(root)
+        })
     })
 }
 
@@ -2281,257 +2294,6 @@ pub(crate) fn commit_external_consumer_root(
     Ok(())
 }
 
-fn live_roots_unlocked(roots: &Roots) -> std::io::Result<LiveRoots> {
-    let cwd = std::env::current_dir()?;
-    let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
-    live_roots_from_graph(roots, &cwd, &graph)
-}
-
-#[cfg(test)]
-fn live_roots_from(roots: &Roots, start: &Path) -> std::io::Result<LiveRoots> {
-    let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
-    live_roots_from_graph(roots, start, &graph)
-}
-
-fn live_roots_from_graph(
-    roots: &Roots,
-    start: &Path,
-    graph: &Closure::ClosureGraph,
-) -> std::io::Result<LiveRoots> {
-    let mut live = lock_roots_from(start)?;
-    let lifecycle = Lifecycle::protected_targets_unlocked(roots)?;
-    let mut targets = live.output_hashes.clone();
-    for (receipt, package) in &live.receipt_packages {
-        let mut known = false;
-        let mut matching = Vec::new();
-        for record in graph.records.values().filter(|record| {
-            parse_meta(&record.package_meta).is_some_and(|meta| meta.receipt == *receipt)
-        }) {
-            known = true;
-            let meta = parse_meta(&record.package_meta).ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "Hangar closure record `{}` has invalid package metadata for receipt `{receipt}`",
-                        record.id
-                    ),
-                )
-            })?;
-            if meta.name == package.name
-                && meta.version == package.version
-                && receipt_source_matches(package, &meta.reference)
-                && receipt_envelope_matches(package, &meta.envelope.output_hash)
-            {
-                matching.push((record, meta));
-            }
-        }
-        // A receipt this Hangar has never issued belongs to a project served
-        // by another root (multiple jetpack instances and hangars are the
-        // intended design); it protects nothing here and must not fail clean.
-        if !known {
-            continue;
-        }
-        if matching.is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "project lock receipt `{receipt}` disagrees with Hangar closure record: no matching package identity"
-                ),
-            ));
-        }
-        // A receipt is the lock's projection of the action root. Reachability
-        // follows the same graph closure as output and lifecycle roots.
-        for (record, _) in matching {
-            targets.insert(record.primary.clone());
-        }
-    }
-    for id in &live.ids {
-        if let Some(record) = graph.records.get(id) {
-            targets.insert(record.primary.clone());
-        }
-    }
-    for record in graph.records.values() {
-        let Some(meta) = parse_meta(&record.package_meta) else {
-            continue;
-        };
-        if live
-            .name_versions
-            .contains(&(meta.name.clone(), meta.version.clone()))
-        {
-            targets.insert(record.primary.clone());
-        }
-    }
-    targets.extend(lifecycle);
-    for target in targets {
-        live.output_hashes.extend(graph.closure(&target));
-    }
-    Ok(live)
-}
-
-fn current_project_root() -> std::io::Result<Option<PathBuf>> {
-    let cwd = std::env::current_dir()?;
-    let mut dir = Some(cwd.clone());
-    while let Some(current) = dir {
-        let managed = managed_dir(&current);
-        match fs::symlink_metadata(&managed) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "project managed directory `{}` is not a real directory",
-                        managed.display()
-                    ),
-                ));
-            }
-            Ok(_) => return Ok(Some(current)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                dir = current.parent().map(Path::to_path_buf);
-            }
-            Err(error) => return Err(error),
-        }
-    }
-    // A project can be preparing its first lock. Serialize that preparation
-    // against cleanup at the current root even before `.jet/lock` exists.
-    // Filesystem root is the neutral cwd used by no-project commands; never
-    // try to create `/.jet` there.
-    let is_below_filesystem_root = cwd
-        .parent()
-        .is_some_and(|parent| !parent.as_os_str().is_empty() && parent != cwd.as_path());
-    Ok(is_below_filesystem_root.then_some(cwd))
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct LiveRoots {
-    ids: BTreeSet<String>,
-    output_hashes: BTreeSet<String>,
-    name_versions: BTreeSet<(String, String)>,
-    receipts: BTreeSet<String>,
-    receipt_packages: Vec<(String, crate::Lock::LockedPackage)>,
-}
-
-fn lock_roots_from(start: &Path) -> std::io::Result<LiveRoots> {
-    let Some(lock_path) = nearest_lock_path(start)? else {
-        return Ok(LiveRoots::default());
-    };
-    let raw = fs::read_to_string(&lock_path).map_err(|error| {
-        std::io::Error::new(
-            error.kind(),
-            format!(
-                "could not read project lock `{}`: {error}",
-                lock_path.display()
-            ),
-        )
-    })?;
-    let lock = crate::Lock::parse(&raw).map_err(|error| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "could not parse project lock `{}`: {error}",
-                lock_path.display()
-            ),
-        )
-    })?;
-    let mut roots = LiveRoots::default();
-    for pkg in lock.packages {
-        roots
-            .name_versions
-            .insert((pkg.name.clone(), pkg.version.clone()));
-        if let Some(receipt) = pkg.receipt.clone() {
-            if !valid_receipt_digest(&receipt) {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "project lock `{}` contains an invalid Hangar receipt",
-                        lock_path.display()
-                    ),
-                ));
-            }
-            roots.receipts.insert(receipt.clone());
-            roots.receipt_packages.push((receipt, pkg.clone()));
-        }
-        if let Some(env) = pkg.envelope {
-            if !env.output_hash.is_empty() {
-                roots.output_hashes.insert(env.output_hash);
-            }
-        }
-    }
-    for toolchain in lock.toolchains {
-        roots.ids.insert(toolchain.id);
-        if !toolchain.envelope.output_hash.is_empty() {
-            roots.output_hashes.insert(toolchain.envelope.output_hash);
-        }
-    }
-    Ok(roots)
-}
-
-fn nearest_lock_path(start: &Path) -> std::io::Result<Option<PathBuf>> {
-    let mut dir = Some(start);
-    while let Some(current) = dir {
-        let managed = managed_dir(current);
-        match fs::symlink_metadata(&managed) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "project managed directory `{}` is a symlink; repair it before Hangar cleanup",
-                        managed.display()
-                    ),
-                ));
-            }
-            Ok(metadata) if !metadata.is_dir() => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "project managed directory `{}` is not a directory; repair it before Hangar cleanup",
-                        managed.display()
-                    ),
-                ));
-            }
-            Ok(_) => {
-                let lock = lock_path(current);
-                match fs::symlink_metadata(&lock) {
-                    Ok(metadata) if metadata.file_type().is_symlink() => {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!(
-                                "project lock `{}` is a symlink; repair it before Hangar cleanup",
-                                lock.display()
-                            ),
-                        ));
-                    }
-                    Ok(metadata) if metadata.is_file() => return Ok(Some(lock)),
-                    Ok(_) => {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!(
-                                "project lock `{}` is not a regular file; repair it before Hangar cleanup",
-                                lock.display()
-                            ),
-                        ));
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error),
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-        dir = current.parent();
-    }
-    Ok(None)
-}
-
-fn is_live(id: &str, meta: &ParsedMeta, roots: &LiveRoots) -> bool {
-    roots.receipts.contains(&meta.receipt)
-        || roots.ids.contains(id)
-        || (!meta.envelope.output_hash.is_empty()
-            && roots.output_hashes.contains(&meta.envelope.output_hash))
-        || (meta.envelope.output_hash.is_empty()
-            && roots
-                .name_versions
-                .contains(&(meta.name.clone(), meta.version.clone())))
-}
-
 // ── E4-JP1 Hangar Store v2: atomic staged ingest ─────────────────────────
 
 const STAGE_DIR: &str = ".stage";
@@ -2545,11 +2307,17 @@ pub use Reuse::*;
 
 mod Cleanup;
 pub use Cleanup::*;
+pub(crate) use Cleanup::{is_live, live_roots_unlocked, nearest_lock_path, LiveRoots};
+#[cfg(test)]
+pub(crate) use Cleanup::live_roots_from;
 
 mod Ingest;
 pub use Ingest::*;
 mod Closure;
 pub use Closure::*;
+mod Receipt;
+mod Journal;
+pub(crate) use Journal::closure_graph_read_only;
 mod Transaction;
 pub(crate) use Transaction::{AdmissionObject, AdmissionReceipt, AdmissionTransaction};
 #[cfg(test)]

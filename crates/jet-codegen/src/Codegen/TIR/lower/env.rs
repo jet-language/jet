@@ -322,6 +322,7 @@ fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
                     }
                 }
                 crate::AST::TypedLitBody::Value(value) => work.push(value),
+                crate::AST::TypedLitBody::ByteText(_) => {}
                 crate::AST::TypedLitBody::Empty => {}
             },
             Expr::TupleLit(fields, _, _) => {

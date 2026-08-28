@@ -227,6 +227,7 @@ pub(crate) fn run_dev(
     canvas: bool,
     canvas_options: Option<jet_devserver::WebHost::CanvasHostOptions>,
 ) {
+    crate::CmdCompile::require_project_environment("dev", Path::new(file), mode);
     let mut runtime_args = Vec::with_capacity(program_args.len() + 1);
     runtime_args.push(file.to_string());
     runtime_args.extend(program_args.iter().map(|arg| (*arg).clone()));
@@ -246,6 +247,51 @@ pub(crate) fn run_dev(
             canvas_options,
         );
     });
+}
+
+fn detect_static_output_root(file: &str) -> Option<PathBuf> {
+    let source_dir = Path::new(file)
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut candidates = ["dist", "public", "out", "build"]
+        .into_iter()
+        .map(|name| source_dir.join(name))
+        .collect::<Vec<_>>();
+    if let Ok(entries) = fs::read_dir(source_dir) {
+        let mut extras = entries
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>();
+        extras.sort();
+        candidates.extend(extras);
+    }
+    candidates.dedup();
+    candidates.into_iter().find_map(|path| {
+        let metadata = fs::symlink_metadata(&path).ok()?;
+        if metadata.file_type().is_symlink()
+            || !metadata.is_dir()
+            || !path.join("index.html").is_file()
+        {
+            return None;
+        }
+        fs::canonicalize(path).ok()
+    })
+}
+
+fn start_static_output_host(file: &str) -> Option<jet_devserver::WebHost::WebHost> {
+    let root = detect_static_output_root(file)?;
+    let host = match jet_devserver::WebHost::WebHost::bind_static(file, &root, false, None) {
+        Ok(host) => host,
+        Err(message) => {
+            eprintln!("{message}");
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    // `run_dev` owns the session keys; the shared host only serves HTTP and
+    // polls browser clients, as it does for the Canvas-backed native path.
+    host.start_canvas();
+    Some(host)
 }
 
 fn run_dev_inner(
@@ -341,6 +387,11 @@ fn run_dev_inner(
         profile,
         setting_overrides,
     );
+    let mut static_host = if canvas_host.is_none() && prev_bundle.is_some() {
+        start_static_output_host(file)
+    } else {
+        None
+    };
     let mut canvas_hint_printed = false;
     if let Some(host) = canvas_host.as_ref() {
         host.start_canvas();
@@ -354,7 +405,7 @@ fn run_dev_inner(
             );
         }
         open_canvas_browser(&host.canvas_url());
-    } else if prev_bundle.is_some() {
+    } else if static_host.is_none() && prev_bundle.is_some() {
         print_canvas_hint(file, mode, &mut canvas_hint_printed);
     }
     // #439 / E3-UL6: dependency-aware watch session shared with `jet run --watch`.
@@ -391,7 +442,7 @@ fn run_dev_inner(
             }
             match action {
                 DevSessionAction::Rerun => {
-                    if let Some(host) = canvas_host.as_ref() {
+                    if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                         host.mark_building();
                     }
                     prev_bundle = render_dev_iteration(
@@ -403,7 +454,10 @@ fn run_dev_inner(
                         profile,
                         setting_overrides,
                     );
-                    if let Some(host) = canvas_host.as_ref() {
+                    if prev_bundle.is_some() && canvas_host.is_none() && static_host.is_none() {
+                        static_host = start_static_output_host(file);
+                    }
+                    if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                         if prev_bundle.is_some() {
                             host.mark_ready(0, true);
                         } else {
@@ -414,12 +468,12 @@ fn run_dev_inner(
                             );
                         }
                     }
-                    if prev_bundle.is_some() {
+                    if static_host.is_none() && prev_bundle.is_some() {
                         print_canvas_hint(file, mode, &mut canvas_hint_printed);
                     }
                 }
                 DevSessionAction::RestartFresh => {
-                    if let Some(host) = canvas_host.as_ref() {
+                    if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                         host.mark_building();
                     }
                     session = jet_devserver::SessionSnapshot {
@@ -451,7 +505,10 @@ fn run_dev_inner(
                         profile,
                         setting_overrides,
                     );
-                    if let Some(host) = canvas_host.as_ref() {
+                    if prev_bundle.is_some() && canvas_host.is_none() && static_host.is_none() {
+                        static_host = start_static_output_host(file);
+                    }
+                    if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                         if prev_bundle.is_some() {
                             host.mark_ready(0, true);
                         } else {
@@ -462,7 +519,7 @@ fn run_dev_inner(
                             );
                         }
                     }
-                    if prev_bundle.is_some() {
+                    if static_host.is_none() && prev_bundle.is_some() {
                         print_canvas_hint(file, mode, &mut canvas_hint_printed);
                     }
                 }
@@ -496,7 +553,7 @@ fn run_dev_inner(
             if receipt.change_kinds.iter().all(|k| *k == "stale") {
                 continue;
             }
-            if let Some(host) = canvas_host.as_ref() {
+            if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                 host.mark_building();
             }
             let next = render_dev_change(
@@ -522,15 +579,20 @@ fn run_dev_inner(
                         Ok(snap) => {
                             session = snap;
                             session.persist = persist.clone();
-                            if let Some(host) = canvas_host.as_ref() {
+                            if canvas_host.is_none() && static_host.is_none() {
+                                static_host = start_static_output_host(file);
+                            }
+                            if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                                 host.mark_ready(0, true);
                             }
-                            print_canvas_hint(file, mode, &mut canvas_hint_printed);
+                            if static_host.is_none() {
+                                print_canvas_hint(file, mode, &mut canvas_hint_printed);
+                            }
                             prev_bundle = next;
                         }
                         Err((prior, reason)) => {
                             eprintln!("[hot-replace] {reason}");
-                            if let Some(host) = canvas_host.as_ref() {
+                            if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                                 host.mark_error(
                                     "E2105".to_string(),
                                     format!(
@@ -544,7 +606,7 @@ fn run_dev_inner(
                     }
                 }
                 None => {
-                    if let Some(host) = canvas_host.as_ref() {
+                    if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                         host.mark_error(
                             "E2105".to_string(),
                             format!(

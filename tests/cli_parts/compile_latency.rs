@@ -8,7 +8,7 @@ use super::*;
 /// three cache scenarios, and two commands (`budget update --bootstrap` for the
 /// baseline, `budget check` for the candidate) is 128 real child production
 /// lens invocations. The `cli` target measured 307 s of *other* work
-/// (docs/plans/epoch-3/suite-timing-inventory.md:75); hosting this proof there
+/// (docs/spec/roadmap.md:168); hosting this proof there
 /// spent the whole 900 s suite guard and aborted the binary, taking every
 /// unrelated `cli` case down with it. Splitting the target is the same remedy
 /// #2020 applied to the corpus batteries (tests/dev.rs:17): each heavy proof

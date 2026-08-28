@@ -507,6 +507,8 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Reader", "read_u32_be", 0) => THandleOp::ReaderReadU32Be,
         ("Reader", "read_u64_le", 0) => THandleOp::ReaderReadU64Le,
         ("Reader", "read_u64_be", 0) => THandleOp::ReaderReadU64Be,
+        ("Reader", "read_f32_le", 0) => THandleOp::ReaderReadF32Le,
+        ("Reader", "read_f64_le", 0) => THandleOp::ReaderReadF64Le,
         ("Reader", "take", 1) => THandleOp::ReaderTake,
         ("Reader", "remaining", 0) => THandleOp::ReaderRemaining,
         ("Reader", "is_at_end", 0) => THandleOp::ReaderAtEnd,

@@ -402,6 +402,21 @@ impl CtBigInt {
         Some(if self.negative { -magnitude } else { magnitude })
     }
 
+    /// Project the exact integer into the low 64 bits with the same
+    /// two's-complement wrap used by the runtime `from_bits` ABI.
+    pub fn wrapping_u64(&self) -> u64 {
+        let magnitude = self.limbs.iter().rev().fold(0_u64, |value, &limb| {
+            value
+                .wrapping_mul(CTBI_BASE)
+                .wrapping_add(limb as u64)
+        });
+        if self.negative {
+            0_u64.wrapping_sub(magnitude)
+        } else {
+            magnitude
+        }
+    }
+
     fn mul_small(&self, m: u32) -> Self {
         let mut carry = 0u64;
         let mut limbs = Vec::with_capacity(self.limbs.len() + 1);

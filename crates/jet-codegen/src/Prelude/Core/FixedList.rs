@@ -14,6 +14,7 @@ impl JetFixedListIndexError {
     }
 }
 
+#[inline(always)]
 pub fn jet_fixed_list_index<T, F>(len: usize, index: i64, get: F) -> Result<T, JetFixedListIndexError>
 where
     F: FnOnce(usize) -> T,

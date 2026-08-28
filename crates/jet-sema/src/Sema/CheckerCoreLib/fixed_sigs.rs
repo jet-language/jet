@@ -1903,6 +1903,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Float), (read, Type::Int)],
             Some(Type::String),
         )),
+        ("core.text.fmt", "hex") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(Type::String),
+        )),
         ("core.text.fmt", "plural") => Some((
             vec![
                 (read, Type::Int),

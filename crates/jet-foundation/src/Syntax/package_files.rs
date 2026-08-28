@@ -139,6 +139,10 @@ pub const METHOD_CALL: &str = "call";
 /// argument shape, no second call-argument grammar.
 pub const METHOD_TAKE_PATTERN: &str = "take_pattern";
 
+/// D-BYTELIT1=B (ratified 2026-08-27, card #2265): byte text reuses the
+/// existing typed collection head `[U8]{ "..." }`. ASCII text contributes one
+/// byte per character; `\xNN` contributes the written byte. No `b` prefix is
+/// added.
 /// D-BINPAT1 / D-UNIFYLIT1=A: binary patterns use typed head `[U8]{"…"}`
 /// (byte-mode sibling of D-PARSESTR1 string patterns). Each `{name:U4}` hole
 /// reads a fixed-width bit field; an endian suffix (`be`/`le`) picks byte

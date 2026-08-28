@@ -47,10 +47,16 @@ impl<'a> Lexer<'a> {
 
     /// Lex a string literal. Plain strings own the four-entry escape table
     /// (S20); a typed-head body leaves backslashes for its head grammar
-    /// (D-BOUND-RAW1). Both forms keep literal braces and `{expr}`
+    /// (D-BOUND-RAW1). D-BYTELIT1=B lets a `[U8]` body decode `\xNN` into a
+    /// byte part. Both forms keep literal braces and `{expr}`
     /// interpolation (S8). Interpolated expressions are lexed in place so
     /// their tokens carry real source spans.
-    pub(super) fn string(&mut self, start: usize, raw_head: bool) -> Option<Token> {
+    pub(super) fn string(
+        &mut self,
+        start: usize,
+        raw_head: bool,
+        byte_head: bool,
+    ) -> Option<Token> {
         self.i += 1; // opening quote
         let mut parts: Vec<StrTokPart> = Vec::new();
         let mut lit = String::new();
@@ -78,6 +84,22 @@ impl<'a> Lexer<'a> {
                         } else {
                             self.i += 1;
                         }
+                    } else if byte_head && self.at(self.i + 1) == 'x' {
+                        let Some(high) = hex_digit(self.at(self.i + 2)) else {
+                            self.invalid_byte_escape(self.i);
+                            self.i += 2;
+                            continue;
+                        };
+                        let Some(low) = hex_digit(self.at(self.i + 3)) else {
+                            self.invalid_byte_escape(self.i);
+                            self.i += 2;
+                            continue;
+                        };
+                        if !lit.is_empty() {
+                            parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
+                        }
+                        parts.push(StrTokPart::Byte((high << 4) | low));
+                        self.i += 4;
                     } else {
                         let esc = self.at(self.i + 1);
                         if let Some(&(_, decoded)) =
@@ -229,10 +251,16 @@ impl<'a> Lexer<'a> {
     /// opening `"""` is dropped, the line break before the closing `"""` is
     /// dropped, and the closing `"""`'s indentation is stripped from every line.
     /// Plain-string escapes (S20) and `{interp}` (S8) stay active. A typed-head
-    /// body leaves backslashes literal for its head grammar (D-BOUND-RAW1).
+    /// body leaves backslashes literal for its head grammar (D-BOUND-RAW1),
+    /// except that D-BYTELIT1=B decodes `\xNN` in a `[U8]` body.
     /// The processed text is stored as ordinary [`StrTokPart`]s;
     /// `jet fmt` re-derives the triple-quoted shape from the span.
-    pub(super) fn triple_string(&mut self, start: usize, raw_head: bool) -> Option<Token> {
+    pub(super) fn triple_string(
+        &mut self,
+        start: usize,
+        raw_head: bool,
+        byte_head: bool,
+    ) -> Option<Token> {
         let open_end = self.i + 3; // char index just past the opening `"""`
 
         // Pass 1: locate the closing `"""`, skipping `\`-escapes and the
@@ -359,6 +387,22 @@ impl<'a> Lexer<'a> {
                         } else {
                             k += 1;
                         }
+                    } else if byte_head && self.at(k + 1) == 'x' {
+                        let Some(high) = hex_digit(self.at(k + 2)) else {
+                            self.invalid_byte_escape(k);
+                            k += 2;
+                            continue;
+                        };
+                        let Some(low) = hex_digit(self.at(k + 3)) else {
+                            self.invalid_byte_escape(k);
+                            k += 2;
+                            continue;
+                        };
+                        if !lit.is_empty() {
+                            parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
+                        }
+                        parts.push(StrTokPart::Byte((high << 4) | low));
+                        k += 4;
                     } else {
                         let esc = self.at(k + 1);
                         if let Some(&(_, decoded)) =
@@ -488,5 +532,25 @@ impl<'a> Lexer<'a> {
             kind: TokKind::Str(parts),
             span: Span::new(start, self.pos(self.i)),
         })
+    }
+
+    fn invalid_byte_escape(&mut self, at: usize) {
+        self.diags.push(Diagnostic::error(
+            "E0001",
+            "`\\x` needs two hexadecimal digits".to_string(),
+            "a byte escape writes one byte as `\\xNN`, where both digits are hexadecimal"
+                .to_string(),
+            "write two hexadecimal digits after `\\x`, for example `\\x00`".to_string(),
+            Some(Span::new(self.pos(at), self.pos(at + 4))),
+        ));
+    }
+}
+
+fn hex_digit(ch: char) -> Option<u8> {
+    match ch {
+        '0'..='9' => Some(ch as u8 - b'0'),
+        'a'..='f' => Some(ch as u8 - b'a' + 10),
+        'A'..='F' => Some(ch as u8 - b'A' + 10),
+        _ => None,
     }
 }

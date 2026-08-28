@@ -530,15 +530,10 @@ impl<'a> Checker<'a> {
         }
         let is_generator =
             matches!(&f.return_type, Some(Type::Apply { name, .. }) if name == "Stream");
-        // D-FAILURE-FOUNDATION1: body checking uses the same effective carrier
-        // that call sites publish. Otherwise an omitted/default error contract
-        // reaches calls but `return Err(...)` is still checked as a plain value.
-        // Generated conversion helpers retain their Rust-shaped raw return.
-        let body_return = if f.name.starts_with("__errconv_") {
-            f.return_type.clone()
-        } else {
-            Some(f.effective_return_type())
-        };
+        // D-FAILURE-FOUNDATION1: body checking uses the same return projection
+        // that the bundle checker publishes. Raw compiler-generated trait
+        // protocol methods and conversion helpers retain their declared ABI.
+        let body_return = crate::Sema::checked_body_return_type(f, self.raw_protocol_return);
         let value_return = body_return
             .as_ref()
             .filter(|ty| !is_void_like_return(ty) && !is_generator)

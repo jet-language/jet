@@ -387,7 +387,7 @@ pub(crate) fn lower_if_cond_atom_cached(
     cond: &Expr,
     cx: &Cx,
     env: &mut LowerEnv,
-) -> (TIfCond, Option<(String, TLocal, Option<Type>)>, Vec<TStmt>) {
+) -> (TIfCond, Vec<IfBinding>, Vec<TStmt>) {
     lower_if_cond_atom(cond, cx, env, true)
 }
 
@@ -401,7 +401,7 @@ fn lower_if_cond_impl(
     flatten_and(cond, &mut terms);
     if terms.len() == 1 {
         let (cond, binding, prefix) = lower_if_cond_atom(cond, cx, env, cached);
-        return (cond, binding.into_iter().collect(), prefix);
+        return (cond, binding, prefix);
     }
 
     let mut cond_env = clone_env(env);
@@ -410,7 +410,7 @@ fn lower_if_cond_impl(
     let mut prefixes = Vec::new();
     for term in terms {
         let (term, binding, prefix) = lower_if_cond_atom(term, cx, &mut cond_env, cached);
-        if let Some((name, place, ty)) = binding {
+        for (name, place, ty) in binding {
             cond_env.bind(&name, place.clone(), ty.clone());
             bindings.push((name, place, ty));
         }
@@ -434,7 +434,7 @@ fn lower_if_cond_atom(
     cx: &Cx,
     env: &mut LowerEnv,
     cached: bool,
-) -> (TIfCond, Option<IfBinding>, Vec<TStmt>) {
+) -> (TIfCond, Vec<IfBinding>, Vec<TStmt>) {
     if let Expr::PatternTest {
         subject,
         pattern: Pattern::Absent(_),
@@ -442,7 +442,7 @@ fn lower_if_cond_atom(
     } = cond
     {
         let subj = lower_if_expr(subject, cx, env, cached);
-        return (TIfCond::IsNone { subj }, None, Vec::new());
+        return (TIfCond::IsNone { subj }, Vec::new(), Vec::new());
     }
     // D-ENC-DYN1=A+: a dynamic `Data` variant if-let (`if data == Object(entries)` /
     // `if n == Int(v)`). The Rust if-let pattern is `{root}jet_std::DataTree::<Variant>(…)`;
@@ -487,7 +487,7 @@ fn lower_if_cond_atom(
                             pattern: TPattern::arm(pattern.clone(), enum_type),
                             subj: cloned_subj,
                         },
-                        Some((name.clone(), TLocal::user(name), ty)),
+                        vec![(name.clone(), TLocal::user(name), ty)],
                         Vec::new(),
                     );
                 }
@@ -501,7 +501,7 @@ fn lower_if_cond_atom(
                         pattern: TPattern::arm(pattern.clone(), enum_type),
                         subj: cloned_subj,
                     },
-                    None,
+                    Vec::new(),
                     Vec::new(),
                 );
             } else if bindings.is_empty() {
@@ -510,7 +510,7 @@ fn lower_if_cond_atom(
                         pattern: TPattern::arm(pattern.clone(), enum_type),
                         subj,
                     },
-                    None,
+                    Vec::new(),
                     Vec::new(),
                 );
             }
@@ -528,7 +528,7 @@ fn lower_if_cond_atom(
                             pattern: TPattern::arm(pattern.clone(), Some(enum_name)),
                             subj,
                         },
-                        Some((name.clone(), TLocal::user(name), ty)),
+                        vec![(name.clone(), TLocal::user(name), ty)],
                         Vec::new(),
                     );
                 }
@@ -538,7 +538,7 @@ fn lower_if_cond_atom(
                         pattern: TPattern::arm(pattern.clone(), Some(enum_name)),
                         subj,
                     },
-                    None,
+                    Vec::new(),
                     Vec::new(),
                 );
             }
@@ -575,7 +575,7 @@ fn lower_if_cond_atom(
                             },
                             subj,
                         },
-                        Some((name.clone(), place, Some(map_ty))),
+                        vec![(name.clone(), place, Some(map_ty))],
                         vec![prefix],
                     );
                 }
@@ -590,7 +590,7 @@ fn lower_if_cond_atom(
                         ),
                         subj,
                     },
-                    Some((name.clone(), place, ty)),
+                    vec![(name.clone(), place, ty)],
                     Vec::new(),
                 );
             }
@@ -619,7 +619,7 @@ fn lower_if_cond_atom(
                         pattern: TPattern::binding(pattern.clone()),
                         subj,
                     },
-                    Some((name.clone(), TLocal::user(name), ty)),
+                    vec![(name.clone(), TLocal::user(name), ty)],
                     Vec::new(),
                 );
             }
@@ -632,7 +632,7 @@ fn lower_if_cond_atom(
                         pattern: TPattern::binding(pattern.clone()),
                         subj,
                     },
-                    None,
+                    Vec::new(),
                     Vec::new(),
                 );
             }
@@ -661,10 +661,81 @@ fn lower_if_cond_atom(
                     pattern: TPattern::arm(pattern.clone(), enum_type),
                     subj,
                 },
-                None,
+                Vec::new(),
                 Vec::new(),
             );
         }
+    }
+    // D-DESTRUCT1: value-dispatch expression chains are represented as nested
+    // `Expr::If` nodes, so their struct-pattern arms use the same field equality
+    // and cloned binding facts as the statement-level mixed-switch lowering.
+    if let Expr::PatternTest {
+        subject,
+        pattern: pattern @ Pattern::Struct { .. },
+        ..
+    } = cond
+    {
+        // The subject is one source expression: evaluate it once into a
+        // generated temp (same law as the range lowering below), then let the
+        // condition's field tests and the arm's field bindings all read that
+        // temp.
+        let subj = lower_if_let_subject(subject, cx, env, cached);
+        let subject_ty = subj.ty.clone();
+        let temp = jet_format!("{jet_prefix}if_struct_{}", subject.span().start);
+        let local = TLocal::generated(&temp);
+        let local_expr = || TExpr {
+            ty: subject_ty.clone(),
+            kind: TExprKind::Local(local.clone()),
+        };
+        let condition = lower_struct_pattern_condition(pattern, &local_expr, cx, env);
+        let mut bindings = Vec::new();
+        let mut prefix = Vec::new();
+        if let Pattern::Struct { fields, .. } = pattern {
+            for field in fields {
+                let StructPatField::Bind { field, local, .. } = field else {
+                    continue;
+                };
+                let fty =
+                    struct_pattern_field_type(cx, &subject_ty, field).unwrap_or(Type::Int);
+                let place = if fty.is_allocator_view() {
+                    TLocal::user(local).through_ref()
+                } else {
+                    TLocal::user(local)
+                };
+                bindings.push((local.clone(), place, Some(fty.clone())));
+                prefix.push(TStmt::Let {
+                    name: local.clone(),
+                    kw: "let",
+                    let_ty: crate::Codegen::TIR::TLetTy::plain(fty.clone()),
+                    init: TExpr {
+                        ty: fty.clone(),
+                        kind: TExprKind::Clone(Box::new(struct_pattern_field_expr(
+                            local_expr(),
+                            field,
+                            fty,
+                            cx,
+                        ))),
+                    },
+                    gc_promotion: None,
+                    gc_transferred: false,
+                });
+            }
+        }
+        return (
+            TIfCond::WithPrelude {
+                prelude: vec![TStmt::Let {
+                    name: temp,
+                    kw: "let",
+                    let_ty: crate::Codegen::TIR::TLetTy::plain(subject_ty),
+                    init: subj,
+                    gc_promotion: None,
+                    gc_transferred: false,
+                }],
+                cond: Box::new(TIfCond::Plain(condition)),
+            },
+            bindings,
+            prefix,
+        );
     }
     // D-PATR / D-IFDIST1: expression-position range arm → `subject >= lo && subject <= hi`.
     if let Expr::PatternTest {
@@ -739,7 +810,7 @@ fn lower_if_cond_atom(
                     TStmt::ExprStmt(test),
                 ]),
             }),
-            None,
+            Vec::new(),
             Vec::new(),
         );
     }
@@ -791,7 +862,7 @@ fn lower_if_cond_atom(
             };
             return (
                 TIfCond::IfLet { pattern, subj },
-                Some((name, place, ty)),
+                vec![(name, place, ty)],
                 Vec::new(),
             );
         }
@@ -803,9 +874,56 @@ fn lower_if_cond_atom(
     let cached = cached && !matches!(cond, Expr::PatternTest { .. });
     (
         TIfCond::Plain(lower_if_expr(cond, cx, env, cached)),
-        None,
+        Vec::new(),
         Vec::new(),
     )
+}
+
+fn struct_pattern_field_expr(subject: TExpr, field: &str, field_ty: Type, cx: &Cx) -> TExpr {
+    let boxed = match &subject.ty {
+        Type::Named(name) => cx.boxed_edges.contains(&(name.clone(), field.to_string())),
+        _ => false,
+    };
+    TExpr {
+        ty: field_ty,
+        kind: TExprKind::Field {
+            recv: Box::new(subject),
+            field: field.to_string(),
+            boxed,
+        },
+    }
+}
+
+fn lower_struct_pattern_condition(
+    pattern: &Pattern,
+    subject: &dyn Fn() -> TExpr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let mut tests = Vec::new();
+    if let Pattern::Struct { fields, .. } = pattern {
+        for field in fields {
+            let StructPatField::Value { field, value, .. } = field else {
+                continue;
+            };
+            let subject_expr = subject();
+            let field_ty =
+                struct_pattern_field_type(cx, &subject_expr.ty, field).unwrap_or(Type::Int);
+            let lhs = struct_pattern_field_expr(subject_expr, field, field_ty.clone(), cx);
+            let rhs = lower_expr(value, cx, env);
+            tests.push(TExpr {
+                ty: Type::Bool,
+                kind: TExprKind::Binary {
+                    op: BinOp::Eq,
+                    overflow: false,
+                    line: 0,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                },
+            });
+        }
+    }
+    bool_and_chain(tests)
 }
 
 /// c109 Phase 4: lower a `when`/match. The gate (`switch_in_subset`) has already

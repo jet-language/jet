@@ -50,7 +50,8 @@ fn jet_std_fs_rename(from: &String, to: &String) -> Result<(), jet_std::IOError>
             "fault injected: FS.Write",
         ));
     }
-    std::fs::rename(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, from, e))
+    jet_fs_rename(from, to)
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, from, e))
 }
 fn jet_std_fs_stat(path: &String) -> Result<jet_std::Stat, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
@@ -180,33 +181,15 @@ fn jet_std_fs_walk_parallel(path: &String) -> Result<Vec<jet_std::WalkEntry>, je
     Ok(out)
 }
 fn jet_std_fs_glob(pattern: &String) -> Result<Vec<String>, jet_std::IOError> {
-    let split = pattern.find(['*', '?']).unwrap_or(pattern.len());
-    let base = pattern[..split]
-        .rsplit_once(std::path::MAIN_SEPARATOR)
-        .map(|(dir, _)| if dir.is_empty() { "." } else { dir })
-        .unwrap_or(".");
-    let mut out = Vec::new();
-    let base_s = base.to_string();
-    for entry in jet_std_fs_walk(&base_s)? {
-        if glob_match(pattern.as_str(), entry.path.as_str()) {
-            out.push(entry.path);
-        }
+    if jet_fault_should_fail("FS.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some(pattern.clone()),
+            "fault injected: FS.Read",
+        ));
     }
-    out.sort();
-    Ok(out)
-}
-fn glob_match(pattern: &str, text: &str) -> bool {
-    fn inner(p: &[u8], t: &[u8]) -> bool {
-        if p.is_empty() {
-            return t.is_empty();
-        }
-        match p[0] {
-            b'*' => inner(&p[1..], t) || (!t.is_empty() && inner(p, &t[1..])),
-            b'?' => !t.is_empty() && inner(&p[1..], &t[1..]),
-            c => !t.is_empty() && c == t[0] && inner(&p[1..], &t[1..]),
-        }
-    }
-    inner(pattern.as_bytes(), text.as_bytes())
+    jet_fs_glob(pattern)
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, pattern, e))
 }
 fn jet_std_fs_read_at(path: &String, offset: i64, len: i64) -> Result<Vec<u8>, jet_std::IOError> {
     use std::io::{Read, Seek, SeekFrom};

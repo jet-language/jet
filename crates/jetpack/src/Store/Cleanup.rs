@@ -18,6 +18,257 @@ fn with_clean_locks<T>(
     }
 }
 
+pub(crate) fn live_roots_unlocked(roots: &Roots) -> std::io::Result<LiveRoots> {
+    let cwd = std::env::current_dir()?;
+    let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
+    live_roots_from_graph(roots, &cwd, &graph)
+}
+
+#[cfg(test)]
+pub(crate) fn live_roots_from(roots: &Roots, start: &Path) -> std::io::Result<LiveRoots> {
+    let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
+    live_roots_from_graph(roots, start, &graph)
+}
+
+fn live_roots_from_graph(
+    roots: &Roots,
+    start: &Path,
+    graph: &Closure::ClosureGraph,
+) -> std::io::Result<LiveRoots> {
+    let mut live = lock_roots_from(start)?;
+    let lifecycle = Lifecycle::protected_targets_unlocked(roots)?;
+    let mut targets = live.output_hashes.clone();
+    for (receipt, package) in &live.receipt_packages {
+        let mut known = false;
+        let mut matching = Vec::new();
+        for record in graph.records.values().filter(|record| {
+            parse_meta(&record.package_meta).is_some_and(|meta| meta.receipt == *receipt)
+        }) {
+            known = true;
+            let meta = parse_meta(&record.package_meta).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Hangar closure record `{}` has invalid package metadata for receipt `{receipt}`",
+                        record.id
+                    ),
+                )
+            })?;
+            if meta.name == package.name
+                && meta.version == package.version
+                && receipt_source_matches(package, &meta.reference)
+                && receipt_envelope_matches(package, &meta.envelope.output_hash)
+            {
+                matching.push((record, meta));
+            }
+        }
+        // A receipt this Hangar has never issued belongs to a project served
+        // by another root (multiple jetpack instances and hangars are the
+        // intended design); it protects nothing here and must not fail clean.
+        if !known {
+            continue;
+        }
+        if matching.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "project lock receipt `{receipt}` disagrees with Hangar closure record: no matching package identity"
+                ),
+            ));
+        }
+        // A receipt is the lock's projection of the action root. Reachability
+        // follows the same graph closure as output and lifecycle roots.
+        for (record, _) in matching {
+            targets.insert(record.primary.clone());
+        }
+    }
+    for id in &live.ids {
+        if let Some(record) = graph.records.get(id) {
+            targets.insert(record.primary.clone());
+        }
+    }
+    for record in graph.records.values() {
+        let Some(meta) = parse_meta(&record.package_meta) else {
+            continue;
+        };
+        if live
+            .name_versions
+            .contains(&(meta.name.clone(), meta.version.clone()))
+        {
+            targets.insert(record.primary.clone());
+        }
+    }
+    targets.extend(lifecycle);
+    for target in targets {
+        live.output_hashes.extend(graph.closure(&target));
+    }
+    Ok(live)
+}
+
+fn current_project_root() -> std::io::Result<Option<PathBuf>> {
+    let cwd = std::env::current_dir()?;
+    let mut dir = Some(cwd.clone());
+    while let Some(current) = dir {
+        let managed = managed_dir(&current);
+        match fs::symlink_metadata(&managed) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "project managed directory `{}` is not a real directory",
+                        managed.display()
+                    ),
+                ));
+            }
+            Ok(_) => return Ok(Some(current)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                dir = current.parent().map(Path::to_path_buf);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    // A project can be preparing its first lock. Serialize that preparation
+    // against cleanup at the current root even before `.jet/lock` exists.
+    // Filesystem root is the neutral cwd used by no-project commands; never
+    // try to create `/.jet` there.
+    let is_below_filesystem_root = cwd
+        .parent()
+        .is_some_and(|parent| !parent.as_os_str().is_empty() && parent != cwd.as_path());
+    Ok(is_below_filesystem_root.then_some(cwd))
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct LiveRoots {
+    ids: BTreeSet<String>,
+    output_hashes: BTreeSet<String>,
+    name_versions: BTreeSet<(String, String)>,
+    pub(crate) receipts: BTreeSet<String>,
+    receipt_packages: Vec<(String, crate::Lock::LockedPackage)>,
+}
+
+pub(crate) fn lock_roots_from(start: &Path) -> std::io::Result<LiveRoots> {
+    let Some(lock_path) = nearest_lock_path(start)? else {
+        return Ok(LiveRoots::default());
+    };
+    let raw = fs::read_to_string(&lock_path).map_err(|error| {
+        std::io::Error::new(
+            error.kind(),
+            format!(
+                "could not read project lock `{}`: {error}",
+                lock_path.display()
+            ),
+        )
+    })?;
+    let lock = crate::Lock::parse(&raw).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "could not parse project lock `{}`: {error}",
+                lock_path.display()
+            ),
+        )
+    })?;
+    let mut roots = LiveRoots::default();
+    for pkg in lock.packages {
+        roots
+            .name_versions
+            .insert((pkg.name.clone(), pkg.version.clone()));
+        if let Some(receipt) = pkg.receipt.clone() {
+            if !valid_receipt_digest(&receipt) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "project lock `{}` contains an invalid Hangar receipt",
+                        lock_path.display()
+                    ),
+                ));
+            }
+            roots.receipts.insert(receipt.clone());
+            roots.receipt_packages.push((receipt, pkg.clone()));
+        }
+        if let Some(env) = pkg.envelope {
+            if !env.output_hash.is_empty() {
+                roots.output_hashes.insert(env.output_hash);
+            }
+        }
+    }
+    for toolchain in lock.toolchains {
+        roots.ids.insert(toolchain.id);
+        if !toolchain.envelope.output_hash.is_empty() {
+            roots.output_hashes.insert(toolchain.envelope.output_hash);
+        }
+    }
+    Ok(roots)
+}
+
+pub(crate) fn nearest_lock_path(start: &Path) -> std::io::Result<Option<PathBuf>> {
+    let mut dir = Some(start);
+    while let Some(current) = dir {
+        let managed = managed_dir(current);
+        match fs::symlink_metadata(&managed) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "project managed directory `{}` is a symlink; repair it before Hangar cleanup",
+                        managed.display()
+                    ),
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "project managed directory `{}` is not a directory; repair it before Hangar cleanup",
+                        managed.display()
+                    ),
+                ));
+            }
+            Ok(_) => {
+                let lock = lock_path(current);
+                match fs::symlink_metadata(&lock) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "project lock `{}` is a symlink; repair it before Hangar cleanup",
+                                lock.display()
+                            ),
+                        ));
+                    }
+                    Ok(metadata) if metadata.is_file() => return Ok(Some(lock)),
+                    Ok(_) => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "project lock `{}` is not a regular file; repair it before Hangar cleanup",
+                                lock.display()
+                            ),
+                        ));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        dir = current.parent();
+    }
+    Ok(None)
+}
+
+pub(crate) fn is_live(id: &str, meta: &ParsedMeta, roots: &LiveRoots) -> bool {
+    roots.receipts.contains(&meta.receipt)
+        || roots.ids.contains(id)
+        || (!meta.envelope.output_hash.is_empty()
+            && roots.output_hashes.contains(&meta.envelope.output_hash))
+        || (meta.envelope.output_hash.is_empty()
+            && roots
+                .name_versions
+                .contains(&(meta.name.clone(), meta.version.clone())))
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct MalformedObject {
     pub(crate) id: String,
@@ -420,7 +671,7 @@ fn clean_plan_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
     let opt = optimize_hangar_plan(&store)?;
     report.optimized_files += opt.optimized_files;
     report.optimized_bytes += opt.optimized_bytes;
-    let cas = optimize_objects_cas_pool_plan(&store)?;
+    let cas = optimize_objects_cas_pool_plan(roots)?;
     report.optimized_files += cas.optimized_files;
     report.optimized_bytes += cas.optimized_bytes;
     Ok(report)
@@ -480,7 +731,7 @@ fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
     report.removed_receipts += receipts.removed_receipts;
     report.removed_receipt_bytes += receipts.removed_receipt_bytes;
 
-    let opt = optimize_hangar(&store)?;
+    let opt = optimize_hangar(roots)?;
     report.optimized_files += opt.optimized_files;
     report.optimized_bytes += opt.optimized_bytes;
     Ok(report)
@@ -613,7 +864,8 @@ fn optimize_hangar_plan(hangar: &Path) -> std::io::Result<CleanReport> {
 /// Read-only counterpart to [`optimize_objects_cas_pool`]. Keep the plan
 /// honest for Store-v2 objects: `clean` applies the CAS pass even when there
 /// are no legacy package directories at the Hangar root.
-fn optimize_objects_cas_pool_plan(hangar: &Path) -> std::io::Result<CleanReport> {
+fn optimize_objects_cas_pool_plan(roots: &Roots) -> std::io::Result<CleanReport> {
+    let hangar = roots.hangar_dir();
     let objects = hangar.join(OBJECTS_DIR);
     let objects_metadata = match fs::symlink_metadata(&objects) {
         Ok(metadata) => metadata,
@@ -632,12 +884,12 @@ fn optimize_objects_cas_pool_plan(hangar: &Path) -> std::io::Result<CleanReport>
         ));
     }
 
-    let cas = hangar.join(CAS_DIR);
+    let cas = roots.shared_cas_dir();
     match fs::symlink_metadata(&cas) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Hangar CAS pool is not a real directory: {}", cas.display()),
+                format!("shared CAS pool is not a real directory: {}", cas.display()),
             ))
         }
         Ok(_) => {}
@@ -670,10 +922,11 @@ fn optimize_objects_cas_pool_plan(hangar: &Path) -> std::io::Result<CleanReport>
                 continue;
             }
             let bytes = fs::read(&file)?;
+            let mode = permission_identity(&metadata) & !0o222;
             let digest = format!(
                 "{}-{:08x}",
                 SHA256::sha256_hex(&bytes),
-                permission_identity(&metadata)
+                mode
             );
             let cas_file = cas.join(&digest);
             match fs::symlink_metadata(&cas_file) {
@@ -688,7 +941,7 @@ fn optimize_objects_cas_pool_plan(hangar: &Path) -> std::io::Result<CleanReport>
                 }
                 Ok(existing) => {
                     if existing.len() != metadata.len()
-                        || permission_identity(&existing) != permission_identity(&metadata)
+                        || permission_identity(&existing) != mode
                         || fs::read(&cas_file)? != bytes
                     {
                         return Err(std::io::Error::new(
@@ -712,9 +965,10 @@ fn optimize_objects_cas_pool_plan(hangar: &Path) -> std::io::Result<CleanReport>
     Ok(report)
 }
 
-fn optimize_hangar(hangar: &Path) -> std::io::Result<CleanReport> {
-    let mut report = optimize_package_tree_hardlinks(hangar)?;
-    let cas = optimize_objects_cas_pool(hangar)?;
+fn optimize_hangar(roots: &Roots) -> std::io::Result<CleanReport> {
+    let hangar = roots.hangar_dir();
+    let mut report = optimize_package_tree_hardlinks(&hangar)?;
+    let cas = optimize_objects_cas_pool(roots)?;
     report.optimized_files += cas.optimized_files;
     report.optimized_bytes += cas.optimized_bytes;
     Ok(report)
@@ -750,17 +1004,14 @@ fn optimize_package_tree_hardlinks(hangar: &Path) -> std::io::Result<CleanReport
     Ok(report)
 }
 
-/// Store v2: content-addressed file-byte pool under `hangar/cas/`.
-/// Ingest never links into cas (keeps sealed objects at nlink=1 until clean).
-/// After optimize, verify uses [`try_output_hash_of_in_hangar`] so cas peers
-/// are hangar-internal while outside-hangar hardlinks still reject.
-fn optimize_objects_cas_pool(hangar: &Path) -> std::io::Result<CleanReport> {
+/// Store v2: share immutable object files through the same CAS pool used by
+/// native registration. After optimize, verify accepts those peers while
+/// outside-hangar hardlinks still reject.
+fn optimize_objects_cas_pool(roots: &Roots) -> std::io::Result<CleanReport> {
+    let hangar = roots.hangar_dir();
     let objects = hangar.join(OBJECTS_DIR);
-    let cas = hangar.join(CAS_DIR);
-    let mut report = CleanReport::default();
-    Ingest::ensure_real_directory(hangar, "Hangar root")?;
+    Ingest::ensure_real_directory(&hangar, "Hangar root")?;
     Ingest::ensure_real_directory(&objects, "Hangar object pool")?;
-    Ingest::ensure_real_directory(&cas, "Hangar CAS pool")?;
     let mut object_dirs = Vec::new();
     for ent in fs::read_dir(&objects)? {
         let ent = ent?;
@@ -778,87 +1029,17 @@ fn optimize_objects_cas_pool(hangar: &Path) -> std::io::Result<CleanReport> {
         }
         object_dirs.push(path);
     }
-    for path in object_dirs {
-        make_tree_writable_for_removal(&path)?;
-        for file in files_under(&path) {
-            let Ok(meta) = fs::symlink_metadata(&file) else {
-                continue;
-            };
-            if meta.file_type().is_symlink() || !meta.is_file() || meta.len() == 0 {
-                continue;
-            }
-            let Ok(bytes) = fs::read(&file) else {
-                continue;
-            };
-            let digest = format!(
-                "{}-{:08x}",
-                SHA256::sha256_hex(&bytes),
-                permission_identity(&meta)
-            );
-            let cas_file = cas.join(&digest);
-            match fs::symlink_metadata(&cas_file) {
-                Ok(existing) if existing.file_type().is_symlink() || !existing.is_file() => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!(
-                            "Hangar CAS entry is not a regular file: {}",
-                            cas_file.display()
-                        ),
-                    ));
-                }
-                Ok(existing) => {
-                    if existing.len() != meta.len()
-                        || permission_identity(&existing) != permission_identity(&meta)
-                        || fs::read(&cas_file)? != bytes
-                    {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!("Hangar CAS entry is corrupt: {}", cas_file.display()),
-                        ));
-                    }
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    let tmp = cas.join(format!("{digest}.partial"));
-                    if let Ok(partial) = fs::symlink_metadata(&tmp) {
-                        if partial.file_type().is_symlink() || !partial.is_file() {
-                            return Err(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!(
-                                    "Hangar CAS partial is not a regular file: {}",
-                                    tmp.display()
-                                ),
-                            ));
-                        }
-                        fs::remove_file(&tmp)?;
-                    }
-                    let mut partial = fs::OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .open(&tmp)?;
-                    use std::io::Write as _;
-                    partial.write_all(&bytes)?;
-                    partial.sync_all()?;
-                    fs::set_permissions(&tmp, meta.permissions())?;
-                    if let Err(error) = fs::rename(&tmp, &cas_file) {
-                        let _ = fs::remove_file(&tmp);
-                        return Err(error);
-                    }
-                }
-                Err(error) => return Err(error),
-            }
-            if same_file_inode(&file, &cas_file) {
-                continue;
-            }
-            if hardlink_replace(&cas_file, &file).is_ok() {
-                report.optimized_files += 1;
-                report.optimized_bytes += meta.len();
-            }
+    Ingest::with_shared_cas_lock(roots, || {
+        let mut report = CleanReport::default();
+        for path in object_dirs {
+            let (optimized_files, optimized_bytes) =
+                Ingest::share_tree_files_unlocked_with_report(roots, &path, false)?;
+            report.optimized_files += optimized_files;
+            report.optimized_bytes += optimized_bytes;
         }
-        seal_node(&path)?;
-        fsync_tree(&path)?;
-    }
-    fs::File::open(&objects)?.sync_all()?;
-    Ok(report)
+        fs::File::open(&objects)?.sync_all()?;
+        Ok(report)
+    })
 }
 
 #[cfg(unix)]
@@ -894,7 +1075,7 @@ fn same_file_inode(a: &Path, b: &Path) -> bool {
 /// Run the cas-pool hardlink optimizer (also invoked from `clean`).
 pub fn optimize_cas_pool(roots: &Roots) -> std::io::Result<CleanReport> {
     crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
-        optimize_objects_cas_pool(&roots.hangar_dir())
+        optimize_objects_cas_pool(roots)
     })
 }
 

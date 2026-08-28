@@ -180,6 +180,7 @@ fn lower_error_conv_inner(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFu
         reactive_upgrades: Vec::new(),
         is_inline: false,
         is_inline_always: false,
+        is_scalar: false,
         kernel_proof: None,
         memo_field: None,
         body: lower_stmts(&conversion.body, cx, &mut env),
@@ -203,7 +204,22 @@ pub(crate) fn lower_web_func(f: &Func, cx: &Cx) -> TFunc {
 }
 
 fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool) -> TFunc {
-    let return_type = f.effective_return_type();
+    // D-STREAMYIELD1: a stream producer's declared `Stream<T>` is its
+    // executable protocol, not an ordinary fallible value carrier. Keep that
+    // raw type in TIR so Web can select the generator path and every engine
+    // sees the same yield contract.
+    let return_type = f
+        .return_type
+        .as_ref()
+        .filter(|ty| {
+            matches!(
+                ty,
+                Type::Apply { name, args }
+                    if name == Syntax::TYPE_STREAM && args.len() == 1
+            )
+        })
+        .cloned()
+        .unwrap_or_else(|| f.effective_return_type());
     let mut env = LowerEnv::new(f.name.clone());
     env.sentries_enabled = sentries_enabled_for_function(f, cx);
     env.sentries_fenced = cx.dependency_fenced;
@@ -312,6 +328,10 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         reactive_upgrades: f.reactive_upgrades.clone(),
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
+        is_scalar: f
+            .markers
+            .iter()
+            .any(|marker| marker.name == crate::Syntax::MARKER_SCALAR),
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
         memo_field: None,
         body,
@@ -823,6 +843,10 @@ fn lower_method_for_owner_inner(
         reactive_upgrades: f.reactive_upgrades.clone(),
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
+        is_scalar: f
+            .markers
+            .iter()
+            .any(|marker| marker.name == crate::Syntax::MARKER_SCALAR),
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
         memo_field,
         body,
@@ -859,9 +883,8 @@ fn lower_trait_method_inner(
     cx: &Cx,
     trait_name: &str,
 ) -> TFunc {
-    // D-FAILURE-FOUNDATION1: compiler-generated trait bridges implement raw
-    // Rust protocols (`bool`, `Ordering`, `DataTree`, or an explicitly typed
-    // decode result). Their `Func` nodes are Jet-internal producers, not
+    // D-FAILURE-FOUNDATION1: sema marks compiler-generated trait protocols as
+    // raw-return bodies. Their `Func` nodes are Jet-internal producers, not
     // user-callable declarations, so projecting an omitted contract onto them
     // would emit `Result<raw, Err>` and violate the Rust trait ABI. Ordinary
     // user trait methods still use the implicit Error carrier.
@@ -869,6 +892,10 @@ fn lower_trait_method_inner(
         Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
     });
     let return_type = if f.compiler_generated {
+        debug_assert!(
+            f.return_type.is_some(),
+            "compiler-generated trait protocols must declare their raw return type"
+        );
         resolve_self_ty(&declared_return_type, type_name)
     } else {
         resolve_self_ty(&f.effective_return_type(), type_name)
@@ -1013,6 +1040,10 @@ fn lower_trait_method_inner(
         reactive_upgrades: f.reactive_upgrades.clone(),
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
+        is_scalar: f
+            .markers
+            .iter()
+            .any(|marker| marker.name == crate::Syntax::MARKER_SCALAR),
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
         memo_field: None,
         body,
@@ -1112,6 +1143,7 @@ fn lower_delegation_method_inner(f: &Func, field: &str, cx: &Cx) -> TFunc {
         reactive_upgrades: Vec::new(),
         is_inline: false,
         is_inline_always: false,
+        is_scalar: false,
         kernel_proof: None,
         memo_field: None,
         body: Vec::new(),

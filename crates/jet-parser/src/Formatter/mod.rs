@@ -1950,6 +1950,7 @@ mod tests {
             (crate::Syntax::InterpolationSelectorKind::Debug, ""),
             (crate::Syntax::InterpolationSelectorKind::Pretty, ""),
             (crate::Syntax::InterpolationSelectorKind::Fixed, "(2)"),
+            (crate::Syntax::InterpolationSelectorKind::Hex, "(16)"),
             (crate::Syntax::InterpolationSelectorKind::Unit, "(name)"),
             (crate::Syntax::InterpolationSelectorKind::Unit, "(bare)"),
         ] {

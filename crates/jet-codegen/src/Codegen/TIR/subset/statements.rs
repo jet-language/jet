@@ -508,6 +508,25 @@ pub(crate) fn if_cond_in_subset(
     {
         return expr_in_subset(subject, cx, locals).then(Vec::new);
     }
+    // D-DESTRUCT1: a struct-pattern condition in an expression-position dispatch
+    // (`if value == { { field: literal, bound, .. } -> ... }`). The parser stores
+    // value dispatch as a nested `Expr::If` chain, so this path is the expression
+    // counterpart of `switch_in_subset`'s mixed-switch arm admission.
+    if let Expr::PatternTest {
+        subject,
+        pattern: pattern @ Pattern::Struct { .. },
+        ..
+    } = cond
+    {
+        if !expr_in_subset(subject, cx, locals)
+            || !struct_pattern_values_in_subset(pattern, cx, locals)
+        {
+            return None;
+        }
+        let mut names = HashSet::new();
+        add_struct_pattern_binding_names(pattern, &mut names);
+        return Some(names.into_iter().collect());
+    }
     // The atomic optional-binding (if-let) form. Conjunctions recurse above so each
     // later atom is checked with every earlier binding in scope.
     if let Expr::PatternTest {
@@ -674,6 +693,23 @@ pub(crate) fn switch_in_subset(
     // The subject must itself be in-subset (so it lowers + so `it` never escapes).
     if !expr_in_subset(subject, cx, locals) {
         return false;
+    }
+    if std::env::var_os("JET_DEBUG_STRUCT_PATTERN").is_some() {
+        eprintln!("[DEBUG-STRUCT] subject={subject:?}");
+        for arm in arms {
+            let struct_pat = arm_struct_pattern(cx, &arm.cond, subject);
+            eprintln!(
+                "[DEBUG-STRUCT] cond={:?} struct={:?} plain={} range={} str={} bin={} fallible={} variant={}",
+                arm.cond,
+                struct_pat,
+                arm_is_plain_cond(cx, &arm.cond, subject),
+                arm_head_range(cx, &arm.cond, subject).is_some(),
+                arm_str_match_pattern(cx, &arm.cond, subject).is_some(),
+                arm_bin_match_pattern(cx, &arm.cond, subject).is_some(),
+                arm_fallible_pattern(cx, &arm.cond, subject).is_some(),
+                arm_variant_pattern(cx, &arm.cond, subject).is_some(),
+            );
+        }
     }
     if crate::AST::is_subjectless_guard(subject, span) {
         // D-CONC-CHAN2=D: a subjectless readiness table is one covered TIR

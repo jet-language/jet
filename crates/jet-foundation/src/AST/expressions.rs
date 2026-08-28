@@ -306,7 +306,8 @@ pub enum UnitFormat {
     Bare,
 }
 
-/// D-DISPLAYDBG2/D-FMT-INTERP1/D-QUANTITY-PRINT1: how an interpolated value is shown.
+/// D-DISPLAYDBG2/D-FMT-INTERP1/D-FMT-INTERP3/D-QUANTITY-PRINT1: how an
+/// interpolated value is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StrFormat {
     /// Bare `{value}` — calls `Display` (D-DISPLAY-SHAPE).
@@ -318,6 +319,8 @@ pub enum StrFormat {
     Pretty,
     /// `{value:Fixed(n)}` — uses `core.text.fmt.decimal(value, n)`.
     Fixed(i64),
+    /// `{value:Hex(n)}` — uses `core.text.fmt.hex(value, n)`.
+    Hex(i64),
     /// `{value:Unit(name)}` / `{value:Unit(bare)}`.
     Unit(UnitFormat),
 }
@@ -439,11 +442,37 @@ pub enum TypedLitBody {
     Entries(Vec<(Expr, Expr)>),
     /// One expression: scalar `U8.{ 250 }` or assertion `Int.{ fetch_rows() }`.
     Value(Box<Expr>),
+    /// D-BYTELIT1=B: the quoted body of `[U8]{ "..." }`. Literal text stays
+    /// separate from `\xNN` parts until sema validates ASCII and builds U8
+    /// elements, so arbitrary byte values never pass through Unicode text.
+    ByteText(Vec<ByteTextPart>),
     /// Explicit empty: `[T].{}` / `[K:V].{}` / `.{}`.
     Empty,
 }
 
+#[derive(Debug, Clone)]
+pub enum ByteTextPart {
+    /// Decoded quoted text. Sema accepts it only when every character is ASCII.
+    Lit(String),
+    /// One explicitly written byte from a `\xNN` escape.
+    Byte(u8),
+}
+
 impl TypedLitBody {
+    /// D-BYTELIT1=B: turn a byte-text body into bytes after checking its
+    /// ordinary text is ASCII. `None` means the body contains non-ASCII text.
+    pub fn byte_text_bytes(parts: &[ByteTextPart]) -> Option<Vec<u8>> {
+        let mut bytes = Vec::new();
+        for part in parts {
+            match part {
+                ByteTextPart::Lit(text) if text.is_ascii() => bytes.extend(text.bytes()),
+                ByteTextPart::Lit(_) => return None,
+                ByteTextPart::Byte(byte) => bytes.push(*byte),
+            }
+        }
+        Some(bytes)
+    }
+
     pub fn for_each_expr<'a>(&'a self, mut f: impl FnMut(&'a Expr)) {
         match self {
             TypedLitBody::Fields(fields) => {
@@ -463,6 +492,7 @@ impl TypedLitBody {
                 }
             }
             TypedLitBody::Value(e) => f(e),
+            TypedLitBody::ByteText(_) => {}
             TypedLitBody::Empty => {}
         }
     }
@@ -486,6 +516,7 @@ impl TypedLitBody {
                 }
             }
             TypedLitBody::Value(e) => f(e),
+            TypedLitBody::ByteText(_) => {}
             TypedLitBody::Empty => {}
         }
     }

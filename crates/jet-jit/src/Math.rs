@@ -1,5 +1,5 @@
-//! D-SIMD2 / D-LINALG1: math-value host shims for the Cranelift JIT.
-//! Lane/matrix layouts match `MathTaskMem` (`[f32;4]` / column-major F64). Host
+//! D-SIMD2 / D-SIMD3 / D-LINALG1: math-value host shims for the Cranelift JIT.
+//! Lane/matrix layouts match `MathTaskMem` (fixed arrays / column-major F64). Host
 //! ops live here so the include fragment's `JetShow`/`Shared` deps stay out.
 
 // This module includes shared Prelude source that several hosts compile,
@@ -23,10 +23,27 @@ mod string_concat_semantics {
     include!("../../jet-codegen/src/Prelude/Core/StringConcat.rs");
 }
 
+mod simd_lanes {
+    include!("../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
+}
+
 #[derive(Clone, Copy)]
-struct F32x4([f32; 4]);
+struct F32Lanes {
+    lanes: [f32; 8],
+    len: u8,
+}
 #[derive(Clone, Copy)]
-struct F64x2([f64; 2]);
+struct F64Lanes {
+    lanes: [f64; 4],
+    len: u8,
+}
+#[derive(Clone, Copy)]
+struct IntLanes {
+    lanes: [i64; 32],
+    len: u8,
+    signed: bool,
+    bits: u8,
+}
 #[derive(Clone, Copy)]
 struct Vec2([f64; 2]);
 #[derive(Clone, Copy)]
@@ -40,8 +57,9 @@ struct Mat4([f64; 16]);
 
 #[derive(Clone, Copy)]
 enum MathVal {
-    F32x4(F32x4),
-    F64x2(F64x2),
+    F32(F32Lanes),
+    F64(F64Lanes),
+    Int(IntLanes),
     Vec2(Vec2),
     Vec3(Vec3),
     Vec4(Vec4),
@@ -106,10 +124,82 @@ fn alloc_f64_list(vals: &[f64]) -> i64 {
     })
 }
 
+fn list_i64s(list: i64) -> Vec<i64> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(list).unwrap_or(0);
+        let mut out = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            out.push(rt.heap.list_get_int(list, i).unwrap_or(0));
+        }
+        out
+    })
+}
+
+fn alloc_i64_list(vals: &[i64]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for &v in vals {
+            let _ = rt.heap.list_push_int(list, v);
+        }
+        list
+    })
+}
+
+fn integer_lane_info(kind: jet_foundation::Syntax::SimdLaneKind) -> Option<(bool, u8)> {
+    use jet_foundation::Syntax::SimdLaneKind;
+    match kind {
+        SimdLaneKind::I8 => Some((true, 8)),
+        SimdLaneKind::I16 => Some((true, 16)),
+        SimdLaneKind::I32 => Some((true, 32)),
+        SimdLaneKind::I64 => Some((true, 64)),
+        SimdLaneKind::U8 => Some((false, 8)),
+        SimdLaneKind::U16 => Some((false, 16)),
+        SimdLaneKind::U32 => Some((false, 32)),
+        SimdLaneKind::U64 => Some((false, 64)),
+        SimdLaneKind::F32 | SimdLaneKind::F64 => None,
+    }
+}
+
+fn simd_type_name(kind: jet_foundation::Syntax::SimdLaneKind, len: usize) -> Option<&'static str> {
+    jet_foundation::Syntax::SIMD_LANE_TYPE_NAMES
+        .iter()
+        .copied()
+        .find(|name| jet_foundation::Syntax::simd_lane_layout(name) == Some((kind, len)))
+}
+
+fn narrow_int(value: i128, signed: bool, bits: u8) -> i64 {
+    if bits == 64 {
+        return if signed {
+            value as i64
+        } else {
+            value as u64 as i64
+        };
+    }
+    let mask = (1i128 << bits) - 1;
+    let value = value & mask;
+    if signed && (value & (1i128 << (bits - 1))) != 0 {
+        (value | !mask) as i64
+    } else {
+        value as i64
+    }
+}
+
+fn int_lanes_of(v: MathVal) -> Option<Vec<i64>> {
+    let MathVal::Int(x) = v else { return None };
+    Some(x.lanes[..x.len as usize].to_vec())
+}
+
 fn lanes_of(v: MathVal) -> Vec<f64> {
     match v {
-        MathVal::F32x4(x) => x.0.iter().map(|n| f64::from(*n)).collect(),
-        MathVal::F64x2(x) => x.0.to_vec(),
+        MathVal::F32(x) => x.lanes[..x.len as usize]
+            .iter()
+            .map(|n| f64::from(*n))
+            .collect(),
+        MathVal::F64(x) => x.lanes[..x.len as usize].to_vec(),
+        MathVal::Int(x) => x.lanes[..x.len as usize]
+            .iter()
+            .map(|n| *n as f64)
+            .collect(),
         MathVal::Vec2(x) => x.0.to_vec(),
         MathVal::Vec3(x) => x.0.to_vec(),
         MathVal::Vec4(x) => x.0.to_vec(),
@@ -119,14 +209,45 @@ fn lanes_of(v: MathVal) -> Vec<f64> {
 }
 
 fn from_lanes(type_name: &str, lanes: &[f64]) -> Option<MathVal> {
+    if let Some((kind, len)) = jet_foundation::Syntax::simd_lane_layout(type_name) {
+        if lanes.len() != len {
+            return None;
+        }
+        match kind {
+            jet_foundation::Syntax::SimdLaneKind::F32 => {
+                let mut out = [0.0f32; 8];
+                for (dst, src) in out.iter_mut().zip(lanes) {
+                    *dst = *src as f32;
+                }
+                return Some(MathVal::F32(F32Lanes {
+                    lanes: out,
+                    len: len as u8,
+                }));
+            }
+            jet_foundation::Syntax::SimdLaneKind::F64 => {
+                let mut out = [0.0f64; 4];
+                out[..len].copy_from_slice(lanes);
+                return Some(MathVal::F64(F64Lanes {
+                    lanes: out,
+                    len: len as u8,
+                }));
+            }
+            kind => {
+                let (signed, bits) = integer_lane_info(kind)?;
+                let mut out = [0i64; 32];
+                for (dst, src) in out.iter_mut().zip(lanes) {
+                    *dst = narrow_int(*src as i128, signed, bits);
+                }
+                return Some(MathVal::Int(IntLanes {
+                    lanes: out,
+                    len: len as u8,
+                    signed,
+                    bits,
+                }));
+            }
+        }
+    }
     match type_name {
-        "F32x4" if lanes.len() == 4 => Some(MathVal::F32x4(F32x4([
-            lanes[0] as f32,
-            lanes[1] as f32,
-            lanes[2] as f32,
-            lanes[3] as f32,
-        ]))),
-        "F64x2" if lanes.len() == 2 => Some(MathVal::F64x2(F64x2([lanes[0], lanes[1]]))),
         "Vec2" if lanes.len() == 2 => Some(MathVal::Vec2(Vec2([lanes[0], lanes[1]]))),
         "Vec3" if lanes.len() == 3 => Some(MathVal::Vec3(Vec3([lanes[0], lanes[1], lanes[2]]))),
         "Vec4" if lanes.len() == 4 => Some(MathVal::Vec4(Vec4([
@@ -146,10 +267,44 @@ fn from_lanes(type_name: &str, lanes: &[f64]) -> Option<MathVal> {
     }
 }
 
+fn from_int_lanes(type_name: &str, lanes: &[i64]) -> Option<MathVal> {
+    let (kind, len) = jet_foundation::Syntax::simd_lane_layout(type_name)?;
+    let (signed, bits) = integer_lane_info(kind)?;
+    if lanes.len() != len {
+        return None;
+    }
+    let mut out = [0i64; 32];
+    for (dst, src) in out.iter_mut().zip(lanes) {
+        *dst = narrow_int(i128::from(*src), signed, bits);
+    }
+    Some(MathVal::Int(IntLanes {
+        lanes: out,
+        len: len as u8,
+        signed,
+        bits,
+    }))
+}
+
 fn type_name_of(v: MathVal) -> &'static str {
     match v {
-        MathVal::F32x4(_) => "F32x4",
-        MathVal::F64x2(_) => "F64x2",
+        MathVal::F32(x) => simd_type_name(jet_foundation::Syntax::SimdLaneKind::F32, x.len as usize)
+            .expect("known F32 lane layout"),
+        MathVal::F64(x) => simd_type_name(jet_foundation::Syntax::SimdLaneKind::F64, x.len as usize)
+            .expect("known F64 lane layout"),
+        MathVal::Int(x) => {
+            let kind = match (x.signed, x.bits) {
+                (true, 8) => jet_foundation::Syntax::SimdLaneKind::I8,
+                (true, 16) => jet_foundation::Syntax::SimdLaneKind::I16,
+                (true, 32) => jet_foundation::Syntax::SimdLaneKind::I32,
+                (true, 64) => jet_foundation::Syntax::SimdLaneKind::I64,
+                (false, 8) => jet_foundation::Syntax::SimdLaneKind::U8,
+                (false, 16) => jet_foundation::Syntax::SimdLaneKind::U16,
+                (false, 32) => jet_foundation::Syntax::SimdLaneKind::U32,
+                (false, 64) => jet_foundation::Syntax::SimdLaneKind::U64,
+                _ => unreachable!("known integer lane layout"),
+            };
+            simd_type_name(kind, x.len as usize).expect("known integer lane layout")
+        }
         MathVal::Vec2(_) => "Vec2",
         MathVal::Vec3(_) => "Vec3",
         MathVal::Vec4(_) => "Vec4",
@@ -158,9 +313,16 @@ fn type_name_of(v: MathVal) -> &'static str {
     }
 }
 
-/// Pack: bit0 = is_float_result; remaining bits = f64 bits or math handle.
+/// Pack a scalar float with a negative tag; math handles remain non-negative.
 fn pack_float(x: f64) -> i64 {
     (1i64 << 63) | (f64_bits(x) & !(1i64 << 63))
+}
+
+/// Integer reductions and lane reads already have an unboxed I64 carrier in
+/// Cranelift, so they need no tag. The caller selects this unpacker from the
+/// sema-proven return type.
+fn pack_int(x: i64) -> i64 {
+    x
 }
 
 fn pack_handle(h: i64) -> i64 {
@@ -175,26 +337,54 @@ fn unpack_float(p: i64) -> f64 {
     bits_f64(p & !(1i64 << 63))
 }
 
+fn unpack_int(p: i64) -> i64 {
+    p
+}
+
 fn unpack_handle(p: i64) -> i64 {
     p & !(1i64 << 63)
 }
 
+fn simd_binary_op(op: &str) -> Option<simd_lanes::JetSimdBinaryOp> {
+    Some(match op {
+        "add" => simd_lanes::JetSimdBinaryOp::Add,
+        "sub" => simd_lanes::JetSimdBinaryOp::Sub,
+        "mul" => simd_lanes::JetSimdBinaryOp::Mul,
+        "div" => simd_lanes::JetSimdBinaryOp::Div,
+        _ => return None,
+    })
+}
+
+fn simd_reduce_op(op: &str) -> Option<simd_lanes::JetSimdReduceOp> {
+    Some(match op {
+        "Add" | "sum" => simd_lanes::JetSimdReduceOp::Add,
+        "Mul" | "product" => simd_lanes::JetSimdReduceOp::Mul,
+        "Min" => simd_lanes::JetSimdReduceOp::Min,
+        "Max" => simd_lanes::JetSimdReduceOp::Max,
+        "Avg" => simd_lanes::JetSimdReduceOp::Avg,
+        _ => return None,
+    })
+}
+
 fn zip_binop(op: &str, a: &[f64], b: &[f64], f32_lanes: bool) -> Option<Vec<f64>> {
-    if a.len() != b.len() {
-        return None;
+    let op = simd_binary_op(op)?;
+    if f32_lanes {
+        let left = a.iter().map(|value| *value as f32).collect::<Vec<_>>();
+        let right = b.iter().map(|value| *value as f32).collect::<Vec<_>>();
+        return simd_lanes::jet_simd_binary_slice(&left, &right, op)
+            .map(|values| values.into_iter().map(f64::from).collect());
     }
-    let mut out = Vec::with_capacity(a.len());
-    for (l, r) in a.iter().zip(b.iter()) {
-        let n = match op {
-            "add" => l + r,
-            "sub" => l - r,
-            "mul" => l * r,
-            "div" => l / r,
-            _ => return None,
-        };
-        out.push(if f32_lanes { (n as f32) as f64 } else { n });
-    }
-    Some(out)
+    simd_lanes::jet_simd_binary_slice(a, b, op)
+}
+
+fn zip_int_binop(
+    op: &str,
+    a: &[i64],
+    b: &[i64],
+    signed: bool,
+    bits: u8,
+) -> Option<Vec<i64>> {
+    simd_lanes::jet_simd_integer_binary(a, b, simd_binary_op(op)?, signed, bits)
 }
 
 fn mat_mul(n: usize, a: &[f64], b: &[f64]) -> Vec<f64> {
@@ -224,18 +414,19 @@ fn mat_vec(n: usize, m: &[f64], v: &[f64]) -> Vec<f64> {
 }
 
 fn reduce_op(lanes: &[f64], op: &str, f32_lanes: bool) -> Option<f64> {
-    if lanes.is_empty() {
-        return None;
+    let op = simd_reduce_op(op)?;
+    if f32_lanes {
+        let lanes = lanes
+            .iter()
+            .map(|value| *value as f32)
+            .collect::<Vec<_>>();
+        return simd_lanes::jet_simd_reduce_slice(&lanes, op).map(f64::from);
     }
-    let acc = match op {
-        "Add" | "sum" => lanes.iter().sum(),
-        "Mul" | "product" => lanes.iter().copied().product(),
-        "Min" => lanes.iter().copied().fold(f64::INFINITY, f64::min),
-        "Max" => lanes.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-        "Avg" => lanes.iter().sum::<f64>() / lanes.len() as f64,
-        _ => return None,
-    };
-    Some(if f32_lanes { (acc as f32) as f64 } else { acc })
+    simd_lanes::jet_simd_reduce_slice(lanes, op)
+}
+
+fn reduce_int_op(lanes: &[i64], op: &str, signed: bool, bits: u8) -> Option<i64> {
+    simd_lanes::jet_simd_integer_reduce(lanes, simd_reduce_op(op)?, signed, bits)
 }
 
 fn trap(msg: &str) {
@@ -247,8 +438,8 @@ fn trap(msg: &str) {
 /// `type_name`/`func` are string handles. `args` is a list of i64:
 /// - for scalar float args: f64 bits
 /// - for math-value args: math handles
-/// - for array args (`from_array`): list handle of f64
-/// Returns packed float or math handle.
+/// - for array args (`from_array`): list handle of f64 or integer values
+/// Returns a packed float, integer, or math handle.
 fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
     let ty = clone_string(type_name);
     let func = clone_string(func);
@@ -261,32 +452,57 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
         out
     });
 
-    let f32_lanes = ty == "F32x4";
+    let simd_layout = jet_foundation::Syntax::simd_lane_layout(&ty);
+    let f32_lanes = simd_layout
+        .is_some_and(|(kind, _)| kind == jet_foundation::Syntax::SimdLaneKind::F32);
+    let int_layout = simd_layout.and_then(|(kind, _)| integer_lane_info(kind));
     let result = match (ty.as_str(), func.as_str()) {
         (_, "new") => {
-            let lanes: Vec<f64> = argv.iter().map(|b| bits_f64(*b)).collect();
-            from_lanes(&ty, &lanes).map(|v| pack_handle(push_val(v)))
+            if int_layout.is_some() {
+                from_int_lanes(&ty, &argv).map(|v| pack_handle(push_val(v)))
+            } else {
+                let lanes: Vec<f64> = argv.iter().map(|b| bits_f64(*b)).collect();
+                from_lanes(&ty, &lanes).map(|v| pack_handle(push_val(v)))
+            }
         }
         (_, "splat") if argv.len() == 1 => {
-            let v = bits_f64(argv[0]);
-            let n = match ty.as_str() {
-                "F32x4" => 4,
-                "F64x2" | "Vec2" => 2,
-                "Vec3" => 3,
-                "Vec4" => 4,
-                _ => 0,
-            };
-            let lanes = vec![if f32_lanes { (v as f32) as f64 } else { v }; n];
-            from_lanes(&ty, &lanes).map(|v| pack_handle(push_val(v)))
+            let n = simd_layout.map_or_else(
+                || match ty.as_str() {
+                    "Vec2" => 2,
+                    "Vec3" => 3,
+                    "Vec4" => 4,
+                    _ => 0,
+                },
+                |(_, n)| n,
+            );
+            if int_layout.is_some() {
+                let lanes = simd_lanes::jet_simd_splat_slice(argv[0], n);
+                from_int_lanes(&ty, &lanes).map(|v| pack_handle(push_val(v)))
+            } else {
+                let v = bits_f64(argv[0]);
+                let lanes = if f32_lanes {
+                    simd_lanes::jet_simd_splat_slice(v as f32, n)
+                        .into_iter()
+                        .map(f64::from)
+                        .collect()
+                } else {
+                    simd_lanes::jet_simd_splat_slice(v, n)
+                };
+                from_lanes(&ty, &lanes).map(|v| pack_handle(push_val(v)))
+            }
         }
         (_, "from_array") if argv.len() == 1 => {
-            let lanes = list_f64s(argv[0]);
-            let lanes = if f32_lanes {
-                lanes.into_iter().map(|v| (v as f32) as f64).collect()
+            if int_layout.is_some() {
+                from_int_lanes(&ty, &list_i64s(argv[0])).map(|v| pack_handle(push_val(v)))
             } else {
-                lanes
-            };
-            from_lanes(&ty, &lanes).map(|v| pack_handle(push_val(v)))
+                let lanes = list_f64s(argv[0]);
+                let lanes = if f32_lanes {
+                    lanes.into_iter().map(|v| (v as f32) as f64).collect()
+                } else {
+                    lanes
+                };
+                from_lanes(&ty, &lanes).map(|v| pack_handle(push_val(v)))
+            }
         }
         (_, "add" | "sub" | "mul" | "div") if argv.len() == 2 => {
             let Some(a) = take_val(argv[0]) else {
@@ -313,19 +529,39 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
             }
             let la = lanes_of(a);
             let lb = lanes_of(b);
-            let f32 = matches!(a, MathVal::F32x4(_));
-            let Some(out) = zip_binop(&func, &la, &lb, f32) else {
-                trap("math binary size mismatch");
-                return 0;
-            };
-            from_lanes(type_name_of(a), &out).map(|v| pack_handle(push_val(v)))
+            let name = type_name_of(a);
+            if let Some((signed, bits)) = int_layout {
+                let Some(la) = int_lanes_of(a) else {
+                    trap("math binary integer left");
+                    return 0;
+                };
+                let Some(lb) = int_lanes_of(b) else {
+                    trap("math binary integer right");
+                    return 0;
+                };
+                let Some(out) = zip_int_binop(&func, &la, &lb, signed, bits) else {
+                    trap("math binary size mismatch or division by zero");
+                    return 0;
+                };
+                from_int_lanes(name, &out).map(|v| pack_handle(push_val(v)))
+            } else {
+                let Some(out) = zip_binop(&func, &la, &lb, f32_lanes) else {
+                    trap("math binary size mismatch");
+                    return 0;
+                };
+                from_lanes(name, &out).map(|v| pack_handle(push_val(v)))
+            }
         }
         (_, "to_array") if argv.len() == 1 => {
             let Some(v) = take_val(argv[0]) else {
                 trap("to_array: bad recv");
                 return 0;
             };
-            Some(pack_handle(alloc_f64_list(&lanes_of(v))))
+            if matches!(v, MathVal::Int(_)) {
+                Some(pack_handle(alloc_i64_list(&int_lanes_of(v).unwrap())))
+            } else {
+                Some(pack_handle(alloc_f64_list(&lanes_of(v))))
+            }
         }
         (_, "sum" | "product" | "min" | "max" | "length") if argv.len() == 1 => {
             let Some(v) = take_val(argv[0]) else {
@@ -333,15 +569,23 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
                 return 0;
             };
             let lanes = lanes_of(v);
-            let f32 = matches!(v, MathVal::F32x4(_));
-            let n = match func.as_str() {
-                "length" => {
-                    let acc: f64 = lanes.iter().map(|n| n * n).sum();
-                    acc.sqrt()
-                }
-                other => reduce_op(&lanes, other, f32).unwrap_or(0.0),
-            };
-            Some(pack_float(n))
+            if let Some((signed, bits)) = int_layout {
+                let Some(n) = reduce_int_op(&int_lanes_of(v).unwrap(), &func, signed, bits)
+                else {
+                    trap("integer reduction failed");
+                    return 0;
+                };
+                Some(pack_int(n))
+            } else {
+                let n = match func.as_str() {
+                    "length" => {
+                        let acc: f64 = lanes.iter().map(|n| n * n).sum();
+                        acc.sqrt()
+                    }
+                    other => reduce_op(&lanes, other, f32_lanes).unwrap_or(0.0),
+                };
+                Some(pack_float(n))
+            }
         }
         (_, "normalize") if argv.len() == 1 => {
             let Some(v) = take_val(argv[0]) else {
@@ -428,12 +672,19 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
                 return 0;
             };
             let op = clone_string(argv[1]);
-            let f32 = matches!(v, MathVal::F32x4(_));
-            let Some(n) = reduce_op(&lanes_of(v), &op, f32) else {
-                trap(&format!("reduce({op})"));
-                return 0;
-            };
-            Some(pack_float(n))
+            if let Some((signed, bits)) = int_layout {
+                let Some(n) = reduce_int_op(&int_lanes_of(v).unwrap(), &op, signed, bits) else {
+                    trap(&format!("reduce({op})"));
+                    return 0;
+                };
+                Some(pack_int(n))
+            } else {
+                let Some(n) = reduce_op(&lanes_of(v), &op, f32_lanes) else {
+                    trap(&format!("reduce({op})"));
+                    return 0;
+                };
+                Some(pack_float(n))
+            }
         }
         (_, "lane") if argv.len() == 2 => {
             let Some(v) = take_val(argv[0]) else {
@@ -442,15 +693,18 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
             };
             let idx = argv[1];
             let lanes = lanes_of(v);
-            if idx < 0 || idx as usize >= lanes.len() {
-                trap(&format!(
-                    "lane index {idx} out of range for {} ({} lanes)",
-                    type_name_of(v),
-                    lanes.len()
-                ));
-                return 0;
+            let idx = match simd_lanes::jet_simd_lane_index(idx, type_name_of(v), lanes.len()) {
+                Ok(index) => index,
+                Err(message) => {
+                    trap(&message);
+                    return 0;
+                }
+            };
+            if int_layout.is_some() {
+                Some(pack_int(int_lanes_of(v).unwrap()[idx]))
+            } else {
+                Some(pack_float(lanes[idx]))
             }
-            Some(pack_float(lanes[idx as usize]))
         }
         (_, "swizzle_read") => {
             // args: recv, then lane indices as i64
@@ -470,9 +724,6 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
                     return 0;
                 }
                 let mut n = src[lane as usize];
-                if f32_lanes && ty != "F32x4" {
-                    // F32x4 → VecN promotes to f64
-                }
                 if ty == "F32x4" {
                     n = (n as f32) as f64;
                 }
@@ -528,7 +779,7 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
                     trap("swizzle assign lane out of range");
                     return 0;
                 }
-                cur[lane] = if matches!(base, MathVal::F32x4(_)) {
+                cur[lane] = if matches!(base, MathVal::F32(F32Lanes { len: 4, .. })) {
                     (val as f32) as f64
                 } else {
                     val
@@ -550,7 +801,7 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
                         return 0;
                     }
                     let mut n = rhs_lanes[i];
-                    if matches!(base, MathVal::F32x4(_)) {
+                    if matches!(base, MathVal::F32(F32Lanes { len: 4, .. })) {
                         n = (n as f32) as f64;
                     }
                     cur[lane] = n;
@@ -576,6 +827,10 @@ fn jet_jit_math_result_is_float(packed: i64) -> i8 {
 
 fn jet_jit_math_result_float(packed: i64) -> f64 {
     unpack_float(packed)
+}
+
+fn jet_jit_math_result_int(packed: i64) -> i64 {
+    unpack_int(packed)
 }
 
 fn jet_jit_math_result_handle(packed: i64) -> i64 {
@@ -799,6 +1054,7 @@ host_fns! {
     call: "jet_jit_math_call" => jet_jit_math_call: sig_call;
     result_is_float: "jet_jit_math_result_is_float" => jet_jit_math_result_is_float: sig_i64_i8;
     result_float: "jet_jit_math_result_float" => jet_jit_math_result_float: sig_i64_f64;
+    result_int: "jet_jit_math_result_int" => jet_jit_math_result_int: sig_unary;
     result_handle: "jet_jit_math_result_handle" => jet_jit_math_result_handle: sig_unary;
     html_escape: "jet_jit_html_escape" => jet_jit_html_escape: sig_unary;
     str_concat: "jet_jit_str_concat" => jet_jit_str_concat: sig_binary;

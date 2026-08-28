@@ -1526,6 +1526,10 @@ enum EvalExprWork<'a> {
         parent: &'a TIfCond,
         right: &'a TIfCond,
     },
+    IfAfterPrelude {
+        parent: &'a TIfCond,
+        cond: &'a TIfCond,
+    },
     IfAfterLeaf {
         cond: &'a TIfCond,
         expr: &'a TExpr,
@@ -4146,6 +4150,28 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             });
                             work.push(EvalExprWork::IfCondition { state, cond: left });
                         }
+                        TIfCond::WithPrelude {
+                            prelude,
+                            cond: inner,
+                        } => {
+                            match self.exec_stmts_synthetic(prelude, scope)? {
+                                Flow::Normal => {}
+                                _ => {
+                                    return Err(unsupported(
+                                        "control flow in if condition prelude",
+                                        self.span(),
+                                    ))
+                                }
+                            }
+                            work.push(EvalExprWork::IfAfterPrelude {
+                                parent: cond,
+                                cond: inner,
+                            });
+                            work.push(EvalExprWork::IfCondition {
+                                state,
+                                cond: inner,
+                            });
+                        }
                         TIfCond::Plain(expr)
                         | TIfCond::IsNone { subj: expr }
                         | TIfCond::IfLet { subj: expr, .. }
@@ -4173,6 +4199,12 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     EvalExprWork::IfAfterAndRight { parent, right, .. } => {
                         let value = eval_if_cond_cache_take(right).ok_or_else(|| {
                             unreachable!("if condition right value missing from evaluator worklist")
+                        })?;
+                        eval_if_cond_cache_put(parent, value);
+                    }
+                    EvalExprWork::IfAfterPrelude { parent, cond } => {
+                        let value = eval_if_cond_cache_take(cond).ok_or_else(|| {
+                            unreachable!("if condition prelude result missing from evaluator")
                         })?;
                         eval_if_cond_cache_put(parent, value);
                     }
@@ -4530,6 +4562,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             }
             TIfCond::Matches { pattern, .. } => {
                 super::stmts::bind_match_pattern(&pattern.pattern, &value, scope)
+            }
+            TIfCond::WithPrelude { .. } => {
+                unreachable!("condition prelude reached leaf evaluator")
             }
             TIfCond::And { .. } => unreachable!("and condition reached leaf evaluator"),
         }
@@ -4945,6 +4980,83 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         ))
     }
 
+    /// Run one native HTTP server operation while the evaluator services the
+    /// shared callback queue. Native HTTP parsing, routing, and response
+    /// framing stay in the Prelude; this loop only invokes the Jet callable
+    /// that the host callback marshaller cannot invoke itself.
+    fn run_http_server_job(&mut self, job: CtValue) -> Result<CtValue, Diagnostic> {
+        loop {
+            let mut receiver = job.clone();
+            let mut no_args = Vec::new();
+            let next = crate::Comptime::try_ambient_handle(
+                "HTTPJobNext",
+                &mut receiver,
+                &mut no_args,
+                self.span(),
+            )
+            .ok_or_else(|| unsupported("HTTP interpreter callback pump", self.span()))??;
+            let CtValue::Struct { type_name, fields } = next else {
+                continue;
+            };
+            if type_name == "__JetInterpHttpCallback" {
+                let id = fields
+                    .iter()
+                    .find_map(|(name, value)| match (name.as_str(), value) {
+                        ("id", CtValue::Int(id)) => Some(*id),
+                        _ => None,
+                    })
+                    .ok_or_else(|| unsupported("HTTP callback id", self.span()))?;
+                let callable = fields
+                    .iter()
+                    .find_map(|(name, value)| (name == "callable").then_some(value))
+                    .cloned()
+                    .ok_or_else(|| unsupported("HTTP callback callable", self.span()))?;
+                let callback_args = fields
+                    .iter()
+                    .find_map(|(name, value)| (name == "args").then_some(value))
+                    .and_then(|value| match value {
+                        CtValue::List(args) => Some(args.clone()),
+                        _ => None,
+                    })
+                    .ok_or_else(|| unsupported("HTTP callback arguments", self.span()))?;
+                let result = match self.call_callable(&callable, callback_args) {
+                    Ok(value) => value,
+                    Err(error) => CtValue::failed(Box::new(CtValue::Str(error.what))),
+                };
+                let mut reply_args = vec![CtValue::Int(id), result];
+                let mut reply_receiver = job.clone();
+                crate::Comptime::try_ambient_handle(
+                    "HTTPJobReply",
+                    &mut reply_receiver,
+                    &mut reply_args,
+                    self.span(),
+                )
+                .ok_or_else(|| unsupported("HTTP interpreter callback reply", self.span()))??;
+                continue;
+            }
+            if type_name == "__JetInterpHttpDone" {
+                let ok = fields
+                    .iter()
+                    .find_map(|(name, value)| match (name.as_str(), value) {
+                        ("ok", CtValue::Bool(ok)) => Some(*ok),
+                        _ => None,
+                    })
+                    .unwrap_or(false);
+                if ok {
+                    return Ok(CtValue::Present(Box::new(CtValue::Unit)));
+                }
+                let error = fields
+                    .iter()
+                    .find_map(|(name, value)| match (name.as_str(), value) {
+                        ("error", CtValue::Str(error)) => Some(error.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "HTTP server stopped".to_string());
+                return Ok(CtValue::failed(Box::new(CtValue::Str(error))));
+            }
+        }
+    }
+
     fn eval_core_call_expr(
         &mut self,
         expr: &'a TExpr,
@@ -5243,6 +5355,25 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         if module == "core.http.server" && method == "json" && args.len() == 2 {
             let tree = self.eval_serde_encode_value(argv[1].clone(), &args[1].ty)?;
             argv[1] = CtValue::Str(crate::Comptime::render_datatree_for_tir(&tree));
+        }
+        if self.runtime_execution
+            && module == "core.http.server"
+            && matches!(method, "serve_once_listener" | "serve_once" | "serve")
+        {
+            let value = self.apply_core_call_with_policy(
+                module,
+                method,
+                argv,
+                source_span,
+                Some(&expr.ty),
+            )?;
+            if matches!(
+                &value,
+                CtValue::Struct { type_name, .. } if type_name == "__JetInterpHttpJob"
+            ) {
+                return self.run_http_server_job(value);
+            }
+            return Ok(value);
         }
         if module == "core.encoding.cbor" && matches!(method, "to_bytes" | "to_bytes_canonical") {
             let value = argv.first().ok_or_else(|| {
@@ -5727,6 +5858,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                 crate::AST::StrFormat::Fixed(_) => {
                                     unreachable!(
                                         "Fixed interpolation lowers to core.text.fmt.decimal"
+                                    )
+                                }
+                                crate::AST::StrFormat::Hex(_) => {
+                                    unreachable!(
+                                        "Hex interpolation lowers to core.text.fmt.hex"
                                     )
                                 }
                                 crate::AST::StrFormat::Unit(_) => {
@@ -7688,7 +7824,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                 )
                                 .then(|| {
                                     conv_fn
-                                        .strip_prefix("__jet_errconv_")
+                                        .strip_prefix(&mangle_generated("errconv_"))
                                         .and_then(|stem| stem.split_once("_to_"))
                                         .map(|(source, target)| {
                                             (source.to_string(), target.to_string())

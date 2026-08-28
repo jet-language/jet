@@ -6,7 +6,7 @@ This document is the durable current law for ten ratified performance-budget dec
 
 ## Declaration surface and baseline policy
 
-**D-PERFBUDGET-SURFACE1=A — Role modules.** Performance budgets are typed facts declared under `module perf.<role> { budgets: [Budget.{ ... }] }`. The role belongs to its containing package. A budget's typed scope attaches it to its package, environment, service, scene, test, or target; role names do not create implicit attachments. Build, test, dev, prove, dossier, and CI consume the same facts. No manifest field, marker, external policy file, shorthand parser, or second enforcement engine exists.
+**D-PERFBUDGET-SURFACE1=A — Role modules.** Performance budgets are typed facts declared under `module perf.<role> { budgets: [Budget{ ... }] }`. The role belongs to its containing package. A budget's typed scope attaches it to its package, environment, service, scene, test, or target; role names do not create implicit attachments. Build, test, dev, prove, dossier, and CI consume the same facts. No manifest field, marker, external policy file, shorthand parser, or second enforcement engine exists.
 
 **D-PERFBUDGET-BASELINE1=A — Pinned baseline artifacts.** Statistical budgets use named pinned baseline history carrying exact hardware, OS, target, profile, toolchain, provider, workload, trend window, samples, and confidence policy. Checks never mutate baseline state. Only the explicit, plan-first update command may advance a named head, under the report, comparison, confirmation, and CAS law below. Absolute deterministic gates do not borrow statistical baseline semantics. Missing, mismatched, stale, zero, or unavailable evidence never silently passes.
 
@@ -29,7 +29,7 @@ provider, baseline, report, diagnostic, and command path. Its closed spelling is
 `CompileTime(.P50|.P90|.P95|.P99|.P999)` with
 `CompilerProbe(.Clean)`, `CompilerProbe(.NoChange)`, or
 `CompilerProbe(.Edit("name"))`. An edit name resolves to one typed
-`CompilerWorkload.Edit.{ target: "...", patch: "..." }` entry in the owning
+`CompilerWorkload.Edit{ target: "...", patch: "..." }` entry in the owning
 performance role. The provider applies that exact patch to a copied source
 tree; it never infers an edit from a timestamp or ambient cache file.
 
@@ -46,7 +46,7 @@ they never become a pass. The resident fixture accepts the built-in `dev`,
 project's `package.jet`; unknown profiles reject before measurement. Ordinary
 projects do not measure anything until they declare a compile budget.
 
-Value families: Duration suffixes ns/us/ms/s; Bytes suffixes B/KiB/MiB/GiB; Percent suffix pct; Count is a nonnegative integer; Rate is Rate.{ count: Int, per: Duration }. These suffixes are reserved in Syntax.rs. Source quantities normalize exactly to unsigned integer ns, bytes, count, or rate rational. Overflow, fractional bytes/counts, negative values, NaN/infinity, and runtime expressions are rejected.
+Value families: Duration suffixes ns/us/ms/s; Bytes suffixes B/KiB/MiB/GiB; Percent suffix pct; Count is a nonnegative integer; Rate is Rate{ count: Int, per: Duration }. These suffixes are reserved in Syntax.rs. Source quantities normalize exactly to unsigned integer ns, bytes, count, or rate rational. Overflow, fractional bytes/counts, negative values, NaN/infinity, and runtime expressions are rejected.
 
 Comparison law has three non-overlapping variants. Absolute is for deterministic facts and compares directly. AbsoluteFrom(baseline) is a statistical SLA with an absolute AtMost/AtLeast value, but obtains trials/hardware/confidence policy from the pinned baseline. RelativeTo(baseline) uses RegressionAtMost/ImprovementAtLeast Percent. Statistical metrics must use AbsoluteFrom or RelativeTo; deterministic metrics must use Absolute. A baseline-relative limit with Absolute/AbsoluteFrom, or an absolute limit with RelativeTo, is rejected.
 
@@ -54,7 +54,7 @@ Direction and enforcement is closed: lower-is-better metrics are BinarySize, Art
 
 Relative math is exact. pct stores integer basis points: 1pct = 100 basis points; source allows at most two fractional decimal places, so 0.25pct = 25. Baseline and current normalize to nonnegative integer base units or an exact reduced Rate rational. For lower-is-better regression, bad_delta=max(current-baseline,0); for higher-is-better, bad_delta=max(baseline-current,0). Regression passes iff bad_delta * 10000 <= baseline * limit_basis_points. Improvement swaps good direction and uses >=. Rate rationals cross-multiply before this comparison. Operations use a std-only arbitrary-precision unsigned implementation; no rounding occurs. A zero baseline makes every relative result unavailable, including 0 versus 0; it never passes. Absolute comparisons use normalized integers/rationals with no rounding.
 
-Applicability is BudgetApplies.{ targets, profiles }. Each axis is Current, All, or Only(nonempty list). Current means the one resolved target class/triple or profile of this invocation, recorded in the fact. All means every supported context. Only lists target selectors Class(Native/Web/Freestanding/Plugin/OSImage) or Triple("canonical-triple") and profiles Dev/Release/Small/Test/Bench/Named(text). Built-ins are exactly .Dev/.Release/.Small/.Test/.Bench. Named text is nonempty lowercase snake_case, cannot equal a built-in case-insensitively, and resolves uniquely to a declared containing-package profile; cross-package profiles use `<dependency-package>::<profile>` with the resolved dependency name, never an import alias. Unknown, ambiguous, wrong-case, wrong-package, and reserved values reject. An empty Only is invalid; there is no empty-means-all rule. A Triple must be canonical. Class and Triple selectors independently contribute to the targets union; a triple need not belong to any listed class. Selectors inside profiles Only are also a union; an entry applies to the Cartesian product of those two sets. Overlap/collision means both target-set intersection and profile-set intersection are nonempty; analysis expands classes/triples/profiles symbolically; Current overlaps the current invocation only. Non-applicable budgets remain checked declared facts with notSelected status.
+Applicability is BudgetApplies{ targets, profiles }. Each axis is Current, All, or Only(nonempty list). Current means the one resolved target class/triple or profile of this invocation, recorded in the fact. All means every supported context. Only lists target selectors Class(Native/Web/Freestanding/Plugin/OSImage) or Triple("canonical-triple") and profiles Dev/Release/Small/Test/Bench/Named(text). Built-ins are exactly .Dev/.Release/.Small/.Test/.Bench. Named text is nonempty lowercase snake_case, cannot equal a built-in case-insensitively, and resolves uniquely to a declared containing-package profile; cross-package profiles use `<dependency-package>::<profile>` with the resolved dependency name, never an import alias. Unknown, ambiguous, wrong-case, wrong-package, and reserved values reject. An empty Only is invalid; there is no empty-means-all rule. A Triple must be canonical. Class and Triple selectors independently contribute to the targets union; a triple need not belong to any listed class. Selectors inside profiles Only are also a union; an entry applies to the Cartesian product of those two sets. Overlap/collision means both target-set intersection and profile-set intersection are nonempty; analysis expands classes/triples/profiles symbolically; Current overlaps the current invocation only. Non-applicable budgets remain checked declared facts with notSelected status.
 
 Every BudgetSpec retains spans for module, whole entry, name, scope, metric, provider, comparison/baseline, limit/value, enforcement, and each target/profile selector. Baseline ids are nonempty slash-separated lowercase kebab-case segments (`[a-z0-9]+(?:-[a-z0-9]+)*` each), with no empty/dot segment, whitespace, uppercase, leading/trailing slash, or package qualifier. Only malformed baseline ids are compile-time errors; a well-formed id is declaration-valid without consulting mutable stored history. During check/report execution, a well-formed id with no pinned generation is an unavailable result and enters the downstream baseline bootstrap/update flow; it is never a compile error and never silently passes. REPORT1 and OUTPUT1 below pin unavailable status, enforcement outcome, command, and artifact generation. Compile-time rejection covers duplicate identity, overlapping effective key, bad attachment, bad provider/metric/scope, unit/direction/comparison mismatch, invalid applicability, deterministic Warn, malformed baseline id, and nonconstant/overflow value. OUTPUT1 below pins final diagnostic codes and copy.
 
@@ -80,17 +80,17 @@ Selected example:
 ```jet
 module perf.cli {
     budgets: [
-        Budget.{
+        Budget{
             name: "binary",
             scope: .Target("cli"),
             metric: .BinarySize,
             limit: .AtMost(2MiB),
-            applies: BudgetApplies.{
+            applies: BudgetApplies{
                 targets: .Only([.Triple("x86_64-unknown-linux-gnu")]),
                 profiles: .Only([.Release]),
             },
         },
-        Budget.{
+        Budget{
             name: "parse-throughput",
             scope: .Test("parse-large"),
             metric: .Throughput,

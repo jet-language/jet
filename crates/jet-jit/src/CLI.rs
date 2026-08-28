@@ -821,7 +821,7 @@ pub(crate) fn jet_jit_cli_main() -> i64 {
         });
         return 0;
     };
-    let argv = crate::program_args();
+    let argv = jet_codegen::Comptime::runtime_argv().unwrap_or_default();
     let run_ptr = CLI_RUN_PTR.load(Ordering::SeqCst);
     if run_ptr.is_null() {
         Concurrency::with_runtime_mut(|rt| {

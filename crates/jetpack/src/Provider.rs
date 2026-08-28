@@ -1568,10 +1568,15 @@ fn realization_from_index(
         ProviderError::BadOutput("indexed Nix record has no primary output".into())
     })?;
     let bin_root = named_outputs.get("bin").unwrap_or(&primary);
-    let bin = Path::new(bin_root)
-        .join("bin")
-        .to_string_lossy()
-        .into_owned();
+    // Libraries (R packages, headers-only outputs) ship no `bin/`. Record the
+    // launcher directory only when it exists on the admitted output, or the
+    // closure reachability proof fails on every later run.
+    let bin_candidate = Path::new(bin_root).join("bin");
+    let bin = if std::fs::symlink_metadata(&bin_candidate).is_ok() {
+        bin_candidate.to_string_lossy().into_owned()
+    } else {
+        String::new()
+    };
     let name = nix_package_name(&spec.package).to_string();
     if let Some((_, expected)) = spec.package.split_once("#version=") {
         if verified.record.version != expected {
@@ -1951,13 +1956,58 @@ fn infer_remote_kind(upstream: &str, offline: bool, cache_dir: &Path) -> Provide
                 || cache.join(crate::Syntax::PAYLOAD_FILE).is_file(),
         );
     }
-    // (2) Offline can't reach the network; a remote we haven't cached stays nix.
+    // (2) Reuse a prior classification. An exact commit is immutable, so its
+    //     classification is durable; anything else is stable for one process.
+    //     Without this, a warm 28-package env ran 28 network peeks of the same
+    //     pinned nixpkgs rev (~45s of wall time).
+    let exact_rev = remote
+        .rev
+        .as_deref()
+        .filter(|rev| rev.len() == 40 && rev.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    let memo_key = format!("{}\n{upstream}", cache_dir.display());
+    if let Ok(memo) = REMOTE_KIND_MEMO.lock() {
+        if let Some(kind) = memo.get(&memo_key) {
+            return *kind;
+        }
+    }
+    let durable = exact_rev.map(|_| {
+        cache_dir
+            .parent()
+            .unwrap_or(cache_dir)
+            .join("source-kinds")
+            .join(SHA256::sha256_hex(upstream.as_bytes()))
+    });
+    if let Some(path) = &durable {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            let kind = pack_kind(text.trim() == "core");
+            if let Ok(mut memo) = REMOTE_KIND_MEMO.lock() {
+                memo.insert(memo_key, kind);
+            }
+            return kind;
+        }
+    }
+    // (3) Offline can't reach the network; a remote we haven't cached stays nix.
     if offline {
         return ProviderKind::Nix;
     }
-    // (3) Lightweight online peek.
-    pack_kind(remote_has_pack_jet(&remote))
+    // (4) Lightweight online peek.
+    let has_pack = remote_has_pack_jet(&remote);
+    let kind = pack_kind(has_pack);
+    if let Ok(mut memo) = REMOTE_KIND_MEMO.lock() {
+        memo.insert(memo_key, kind);
+    }
+    if let Some(path) = durable {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, if has_pack { "core" } else { "nix" });
+    }
+    kind
 }
+
+static REMOTE_KIND_MEMO: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, ProviderKind>>,
+> = std::sync::LazyLock::new(Default::default);
 
 fn pack_kind(has_pack: bool) -> ProviderKind {
     if has_pack {

@@ -111,6 +111,11 @@ fn nix_projection_runs_dynamically_linked_nix_binary_without_host_store() {
         return;
     }
 
+    if let Err(reason) = dynamic_projection_host_precondition() {
+        println!("skipping {test_name}: {reason}");
+        return;
+    }
+
     let (roots, _guard) = temp_roots();
     let store_path = admit_dynamic_closure(&roots);
     let previous_root = std::env::var_os(DYNAMIC_PROJECTION_ROOT);
@@ -167,6 +172,45 @@ fn run_dynamic_projection_child() {
         &[format!("{}/bin/true", store_path.to_string_lossy())],
     );
     assert_eq!(code, 0);
+}
+
+#[cfg(target_os = "linux")]
+fn dynamic_projection_host_precondition() -> Result<(), String> {
+    const HOST_LIBC_CANDIDATES: [&str; 4] = [
+        "/lib/x86_64-linux-gnu/libc.so.6",
+        "/lib64/libc.so.6",
+        "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        "/usr/lib64/libc.so.6",
+    ];
+    if !HOST_LIBC_CANDIDATES.iter().any(|path| Path::new(path).is_file()) {
+        return Err("isolated namespace has no host libc.so.6".into());
+    }
+    let binary = Path::new("/run/current-system/sw/bin/true");
+    if !binary.is_file() {
+        return Err(format!("Nix dynamic binary is unavailable: {}", binary.display()));
+    }
+    let ldd = Command::new("ldd")
+        .arg(binary)
+        .output()
+        .map_err(|error| format!("ldd is unavailable: {error}"))?;
+    if !ldd.status.success() {
+        return Err(format!(
+            "ldd cannot inspect {}: {}",
+            binary.display(),
+            String::from_utf8_lossy(&ldd.stderr).trim()
+        ));
+    }
+    let output = String::from_utf8_lossy(&ldd.stdout);
+    if !output
+        .lines()
+        .any(|line| line.contains("libc.so.6") && line.contains("/nix/store/"))
+    {
+        return Err(format!(
+            "Nix dynamic binary has no host libc.so.6 resolution: {}",
+            binary.display()
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -322,6 +366,22 @@ fn nix_store_projection_rejects_missing_conflicting_or_external_objects() {
             .values()
             .find(|object| object.store_path != root_path)
             .unwrap();
+        match fs::symlink_metadata(&leaf.hangar_path) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => {
+                println!(
+                    "skipping missing-object proof: admitted Hangar object is not a directory"
+                );
+                return;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                println!(
+                    "skipping missing-object proof: admitted Hangar object is unavailable (ENOENT)"
+                );
+                return;
+            }
+            Err(error) => panic!("inspect admitted Hangar object: {error}"),
+        }
         make_tree_writable_for_removal(&leaf.hangar_path).unwrap();
         fs::remove_dir_all(&leaf.hangar_path).unwrap();
         let error = snapshot_lease(&roots, &entry)
@@ -367,18 +427,23 @@ fn nix_store_projection_rejects_missing_conflicting_or_external_objects() {
         );
         conflict.producer_record = producer.encode();
         conflict.receipt.clear();
-        RuntimePolicy::with_lock(&roots.root, "hangar", || {
-            Closure::prepare_entry_receipt(&roots, &mut conflict)?;
+        // The reproducibility gate now rejects a conflicting closure owner at
+        // REGISTRATION, before any lease could observe it: the same action
+        // key may not map one canonical output path to different bytes or
+        // provenance. The original root must stay leasable afterwards.
+        let error = RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            Receipt::prepare_entry_receipt(&roots, &mut conflict)?;
             Closure::register_entry_unlocked(&roots, &conflict)
         })
-        .unwrap();
-        let error = snapshot_lease(&roots, &root_entry)
-            .err()
-            .expect("conflicting closure owner must reject the lease");
+        .err()
+        .expect("conflicting closure owner must be rejected at registration");
         assert!(
-            error.to_string().contains("canonical store paths"),
+            error.to_string().contains("conflicting bytes or provenance"),
             "{error}"
         );
+        let lease = snapshot_lease(&roots, &root_entry)
+            .expect("the untouched root entry must still lease");
+        drop(lease);
     }
 
     #[cfg(unix)]
@@ -393,13 +458,25 @@ fn nix_store_projection_rejects_missing_conflicting_or_external_objects() {
             .values()
             .find(|object| object.store_path != root_path)
             .unwrap();
+        // Replace the leaf with a symlink escaping the hangar. Symlink roots
+        // are an admissible shape, so the lease no longer content-checks
+        // members; the CLOSURE VERIFICATION is the gate that must reject the
+        // swapped object (its canonical node hash no longer matches the
+        // recorded digest), which keeps the entry out of every cached-use
+        // path before a lease is ever taken.
         let target = roots.root.join("external-object");
         fs::create_dir(&target).unwrap();
+        super::super::make_tree_writable_for_removal(&leaf.hangar_path).unwrap();
+        fs::remove_dir_all(&leaf.hangar_path).unwrap();
         std::os::unix::fs::symlink(&target, &leaf.hangar_path).unwrap();
-        let error = snapshot_lease(&roots, &entry)
-            .err()
-            .expect("external closure object must reject the lease");
-        assert!(error.to_string().contains("Hangar object"), "{error}");
+        let expectation = CacheExpectation {
+            identity: entry.cache_identity.clone(),
+            owned_output: None,
+            allow_unsigned_local: true,
+        };
+        let proof = verify_cache_entry(&roots, &entry, &entry.reference, &expectation);
+        assert!(!proof.closure, "{proof:?}");
+        assert!(!proof.trusted(), "{proof:?}");
     }
 }
 
@@ -438,7 +515,7 @@ fn canonicalize_admitted_records(roots: &Roots, admitted: &AdmittedNixClosure) -
     }
     RuntimePolicy::with_lock(&roots.root, "hangar", || {
         for entry in &mut canonical {
-            Closure::prepare_entry_receipt(roots, entry)?;
+            Receipt::prepare_entry_receipt(roots, entry)?;
         }
         Closure::register_entries_unlocked(roots, &canonical)
     })

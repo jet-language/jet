@@ -25,6 +25,11 @@ fn jet_jit_fmt_decimal(value: f64, precision: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_decimal(value, precision))
 }
 
+fn jet_jit_fmt_hex(value: i64, width: i64) -> i64 {
+    let value = crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value));
+    alloc_string(fmt_rt::jet_fmt_hex_decimal(&value, width))
+}
+
 fn jet_jit_fmt_percent(value: f64, precision: i64) -> i64 {
     alloc_string(fmt_rt::jet_fmt_percent(value, precision))
 }
@@ -79,6 +84,10 @@ host_fns! {
         sig_f64_i64.params.push(AbiParam::new(types::F64));
         sig_f64_i64.params.push(AbiParam::new(types::I64));
         sig_f64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64_i64 = Signature::new(cc);
+        sig_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64.returns.push(AbiParam::new(types::I64));
         let mut sig_i64x3 = Signature::new(cc);
         sig_i64x3.params.push(AbiParam::new(types::I64));
         sig_i64x3.params.push(AbiParam::new(types::I64));
@@ -88,6 +97,7 @@ host_fns! {
     number: "jet_jit_fmt_number" => jet_jit_fmt_number: sig_i64;
     pretty: "jet_jit_fmt_pretty" => jet_jit_fmt_pretty: sig_i64;
     decimal: "jet_jit_fmt_decimal" => jet_jit_fmt_decimal: sig_f64_i64;
+    hex: "jet_jit_fmt_hex" => jet_jit_fmt_hex: sig_i64_i64;
     percent: "jet_jit_fmt_percent" => jet_jit_fmt_percent: sig_f64_i64;
     bytes: "jet_jit_fmt_bytes" => jet_jit_fmt_bytes: sig_i64;
     duration: "jet_jit_fmt_duration" => jet_jit_fmt_duration: sig_i64;

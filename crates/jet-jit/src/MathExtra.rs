@@ -25,6 +25,12 @@ fn jet_jit_math_abs_f64(value: f64) -> f64 {
 fn jet_jit_math_abs_f32(value: f64) -> f64 {
     math_rt::jet_std_math_abs_f32(value as f32) as f64
 }
+fn jet_jit_math_to_bits(value: f64) -> i64 {
+    math_rt::jet_std_math_to_bits(value)
+}
+fn jet_jit_math_from_bits(value: i64) -> f64 {
+    math_rt::jet_std_math_from_bits(value)
+}
 
 fn opt_i64(v: Option<i64>) -> i64 {
     match v {
@@ -302,6 +308,9 @@ host_fns! {
         let mut f64_i64 = Signature::new(cc);
         f64_i64.params.push(AbiParam::new(types::F64));
         f64_i64.returns.push(AbiParam::new(types::I64));
+        let mut i64_f64 = Signature::new(cc);
+        i64_f64.params.push(AbiParam::new(types::I64));
+        i64_f64.returns.push(AbiParam::new(types::F64));
         let mut f64_i8 = Signature::new(cc);
         f64_i8.params.push(AbiParam::new(types::F64));
         f64_i8.returns.push(AbiParam::new(types::I8));
@@ -338,6 +347,8 @@ host_fns! {
     abs_i64: "jet_jit_math_abs_i64" => jet_jit_math_abs_i64: i64_i64;
     abs_f64: "jet_jit_math_abs_f64" => jet_jit_math_abs_f64: f64_f64;
     abs_f32: "jet_jit_math_abs_f32" => jet_jit_math_abs_f32: f64_f64;
+    to_bits: "jet_jit_math_to_bits" => jet_jit_math_to_bits: f64_i64;
+    from_bits: "jet_jit_math_from_bits" => jet_jit_math_from_bits: i64_f64;
     erf: "jet_jit_math_erf" => jet_jit_math_erf: f64_f64;
     erfc: "jet_jit_math_erfc" => jet_jit_math_erfc: f64_f64;
     gamma: "jet_jit_math_gamma" => jet_jit_math_gamma: f64_f64;

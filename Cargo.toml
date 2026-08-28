@@ -38,6 +38,37 @@ default-members = [".", "crates/jet-driver", "crates/jetpack-bin", "crates/jetos
 exclude = ["corelib/core.archive/pkgs/archive"]
 resolver = "2"
 
+# Dev builds must not turn content-addressed hashing into the product's
+# bottleneck: an unoptimized SHA256 runs ~5-10 MB/s, so a debug `jetpack env`
+# spends tens of minutes digesting a warm multi-GB hangar (observed live).
+# Optimizing only the hashing crate keeps dev compile times intact while
+# store verification runs at release speed.
+[profile.dev.package.jet-foundation]
+opt-level = 3
+
+# Same reasoning: the canonical-archive walker that feeds the hasher lives in
+# jet-pkg-model; an unoptimized walk dominates once hashing is fast.
+[profile.dev.package.jet-pkg-model]
+opt-level = 3
+
+# Same reasoning: the hangar closure WAL verifies an ed25519 receipt per
+# store record on every graph load; unoptimized field arithmetic turns 1.5k
+# verifications into ~10s of pure CPU per jetpack invocation.
+[profile.dev.package.ed25519-dalek]
+opt-level = 3
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.dev.package.ed25519]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+
+# The env warm path (plan, verify, provider dispatch) is jetpack's own code;
+# at opt-level 0 a fully warm 28-package `jetpack env --prep` burns ~49s of
+# CPU. opt-level 1 keeps debuginfo and cheap builds while cutting that walk.
+[profile.dev.package.jetpack]
+opt-level = 1
+
 [package]
 name = "jet"
 version = "1.0.0"

@@ -1142,6 +1142,8 @@ pub fn binary_reader_method_return(
         ("read_u16_le" | "read_u16_be", 0) => Some(Some(result_ty(uintn_ty(16), Type::String))),
         ("read_u32_le" | "read_u32_be", 0) => Some(Some(result_ty(uintn_ty(32), Type::String))),
         ("read_u64_le" | "read_u64_be", 0) => Some(Some(result_ty(uintn_ty(64), Type::String))),
+        ("read_f32_le", 0) => Some(Some(result_ty(Type::Float32, Type::String))),
+        ("read_f64_le", 0) => Some(Some(result_ty(Type::Float, Type::String))),
         ("take", 1) => Some(Some(result_ty(bytes(), Type::String))),
         ("remaining", 0) => Some(Some(Type::Int)),
         ("is_at_end", 0) => Some(Some(Type::Bool)),

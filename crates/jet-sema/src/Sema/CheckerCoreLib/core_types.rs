@@ -231,6 +231,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
     if Syntax::typed_head_kind(name).is_some_and(|kind| kind.is_typed_text()) {
         return true;
     }
+    if Syntax::is_simd_lane_type(name) {
+        return true;
+    }
     matches!(
         name,
         "Unit" | "U8" | Syntax::TYPE_ERR | Syntax::TYPE_NEVER | Syntax::TYPE_TASK_FAILURE | "ProcessResult" | "ProcessReceipt" | "ProcessPlan" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"

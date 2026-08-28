@@ -512,7 +512,7 @@ fn join_with_or(items: &[String]) -> String {
     }
 }
 
-/// D-ATTR4=A/D-FMT-INTERP1=A/D-FMT-PRETTY1=A/D-QUANTITY-PRINT1=A+D:
+/// D-ATTR4=A/D-FMT-INTERP1=A/D-FMT-INTERP3=B/D-FMT-PRETTY1=A/D-QUANTITY-PRINT1=A+D:
 /// unknown interpolation selector after `:`.
 pub fn e0914(selector: &str, span: Span) -> Diagnostic {
     let valid_items = crate::Syntax::INTERPOLATION_SELECTORS
@@ -521,7 +521,8 @@ pub fn e0914(selector: &str, span: Span) -> Diagnostic {
             crate::Syntax::InterpolationSelectorArguments::None => {
                 format!("`:{}`", selector.name)
             }
-            crate::Syntax::InterpolationSelectorArguments::Precision => {
+            crate::Syntax::InterpolationSelectorArguments::Precision
+            | crate::Syntax::InterpolationSelectorArguments::Width => {
                 format!("`:{}(n)`", selector.name)
             }
             crate::Syntax::InterpolationSelectorArguments::UnitStyle(styles) => {
@@ -536,7 +537,8 @@ pub fn e0914(selector: &str, span: Span) -> Diagnostic {
             crate::Syntax::InterpolationSelectorArguments::None => {
                 format!("`{{value:{}}}`", selector.name)
             }
-            crate::Syntax::InterpolationSelectorArguments::Precision => {
+            crate::Syntax::InterpolationSelectorArguments::Precision
+            | crate::Syntax::InterpolationSelectorArguments::Width => {
                 format!("`{{value:{}(2)}}`", selector.name)
             }
             crate::Syntax::InterpolationSelectorArguments::UnitStyle(styles) => styles

@@ -629,7 +629,10 @@ impl<'a> Parser<'a> {
         let elems = match lit_body {
             TypedLitBody::Elements(elems) => elems,
             TypedLitBody::Empty => Vec::new(),
-            TypedLitBody::Fields(_) | TypedLitBody::Entries(_) | TypedLitBody::Value(_) => {
+            TypedLitBody::Fields(_)
+            | TypedLitBody::Entries(_)
+            | TypedLitBody::Value(_)
+            | TypedLitBody::ByteText(_) => {
                 return Err(Diagnostic::error(
                     "E0003",
                     format!(

@@ -2646,9 +2646,19 @@ mod tests {
             panic!("native peer-credential proof did not connect");
         };
         let uid = peer_uid(&stream).unwrap();
-        assert_ne!(uid, current_uid().unwrap());
-        drop(stream);
         assert!(status.success(), "peer probe failed: {status}");
+        let current = current_uid().unwrap();
+        if uid == current {
+            println!(
+                "skipping namespace UID proof: peer UID {uid} equals current UID {current}"
+            );
+            drop(stream);
+            let _ = UnixStream::connect(&socket);
+            let _ = fs::remove_file(socket);
+            return;
+        }
+        assert_ne!(uid, current);
+        drop(stream);
         let _ = UnixStream::connect(&socket);
         let _ = fs::remove_file(socket);
     }

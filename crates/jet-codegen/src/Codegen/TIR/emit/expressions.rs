@@ -11,7 +11,7 @@ use crate::Codegen::TIR::emit::emit_http_bridge_error;
 use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit::emit_math_swizzle_read;
 use crate::Codegen::TIR::emit::emit_require_stop;
-use crate::Codegen::TIR::emit::statements::{emit_mut_list_place, PRELUDE_CARRIED};
+use crate::Codegen::TIR::emit::statements::{emit_mut_collection_place, PRELUDE_CARRIED};
 use crate::Codegen::TIR::emit::{collect_select_after_durations, collect_select_arms};
 use crate::Codegen::TIR::emit_static_owner;
 use crate::Codegen::TIR::emit_tir_call_args;
@@ -758,6 +758,7 @@ fn collect_if_expr_branch_ids(cond: &TIfCond, cx: &Cx, ids: &mut Vec<String>) {
             collect_if_expr_branch_ids(left, cx, ids);
             collect_if_expr_branch_ids(right, cx, ids);
         }
+        TIfCond::WithPrelude { cond, .. } => collect_if_expr_branch_ids(cond, cx, ids),
         _ if cx.coverage => ids.push(cx.register_coverage_branch()),
         _ => {}
     }
@@ -766,6 +767,7 @@ fn collect_if_expr_branch_ids(cond: &TIfCond, cx: &Cx, ids: &mut Vec<String>) {
 fn if_expr_branch_count(cond: &TIfCond) -> usize {
     match cond {
         TIfCond::And { left, right } => if_expr_branch_count(left) + if_expr_branch_count(right),
+        TIfCond::WithPrelude { cond, .. } => if_expr_branch_count(cond),
         _ => 1,
     }
 }
@@ -778,6 +780,12 @@ fn emit_tir_if_expr_at(
     id_index: usize,
     cx: &Cx,
 ) -> String {
+    if let TIfCond::WithPrelude { prelude, cond } = cond {
+        let mut rendered = String::new();
+        crate::Codegen::TIR::emit::emit_tir_stmts(prelude, cx, &mut rendered, 1);
+        let inner = emit_tir_if_expr_at(cond, then_block, else_block, ids, id_index, cx);
+        return format!("{{ {rendered}{inner} }}");
+    }
     if let TIfCond::And { left, right } = cond {
         let left_count = if_expr_branch_count(left);
         let right = emit_tir_if_expr_at(
@@ -827,6 +835,7 @@ fn emit_tir_if_expr_at(
             then_block,
             else_block
         ),
+        TIfCond::WithPrelude { .. } => unreachable!("condition prelude was handled above"),
         TIfCond::And { .. } => unreachable!("handled above"),
     }
 }
@@ -2375,7 +2384,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
                 TBuiltinOp::ViewMutNew { line } => {
-                    let recv = emit_mut_list_place(recv_expr, cx, &[]);
+                    let recv = emit_mut_collection_place(recv_expr, cx, &[]);
                     if args.len() == 1 {
                         format!(
                             "jet_view_mut_range_new(&mut ({}), &({}), {:?}, {})",
@@ -2418,7 +2427,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
                 TBuiltinOp::ComputeViewMutNew { line } => {
-                    let recv = emit_mut_list_place(recv_expr, cx, &[]);
+                    let recv = emit_mut_collection_place(recv_expr, cx, &[]);
                     if args.len() == 1 {
                         format!(
                             "{}jet_compute_view_mut_range(&mut ({}), &({}), {:?}, {})",
@@ -3927,7 +3936,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // not inherit the outer conversion by accident.
                 TTryConvert::Typed(conv_fn) => {
                     let conversion = conv_fn
-                        .strip_prefix("__jet_errconv_")
+                        .strip_prefix(&mangle_generated("errconv_"))
                         .and_then(|stem| stem.split_once("_to_"));
                     match conversion {
                         Some((source, target)) if target == crate::Syntax::TYPE_ERR => format!(
@@ -6129,6 +6138,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ReaderReadU64Be => {
                     format!("{}jet_reader_read_u64_be(&mut ({}))", root, recv)
                 }
+                THandleOp::ReaderReadF32Le => {
+                    format!("{}jet_reader_read_f32_le(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderReadF64Le => {
+                    format!("{}jet_reader_read_f64_le(&mut ({}))", root, recv)
+                }
                 THandleOp::ReaderTake => {
                     // D-BINREAD-LEN1=A: sema admits only Int/U8/U16/U32 here.
                     // The host boundary widens the accepted unsigned lengths
@@ -6574,10 +6589,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             let call = format!("{}::{}({})", crate_name, wrapper, arg_str);
-            if *c_abi && matches!(&e.ty, Type::Int) {
+            let call = if *c_abi && matches!(&e.ty, Type::Int) {
                 format!("{}jet_std::jet_int_from_i64({call})", cx.root_prefix)
             } else {
                 call
+            };
+            // FFI bridge functions return the declared foreign value directly,
+            // while every fallible Jet call is represented by Rust's Result
+            // carrier. A `Type::Result` declaration already has that carrier;
+            // all other extern returns need the same `Ok` boundary as a normal
+            // Jet function call before `Try` or a caller can consume them.
+            if matches!(&e.ty, Type::Result { .. }) {
+                call
+            } else {
+                format!("Ok({call})")
             }
         }
     }

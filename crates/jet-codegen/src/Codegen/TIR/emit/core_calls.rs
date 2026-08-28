@@ -1462,8 +1462,6 @@ pub(crate) fn emit_tir_core_call(
             "if ({0}) > 0.0 {{ 1i64 }} else if ({0}) < 0.0 {{ -1i64 }} else {{ 0i64 }}",
             arg(0)
         ),
-        ("core.math", "to_bits") => format!("(({}).to_bits() as i64)", arg(0)),
-        ("core.math", "from_bits") => format!("f64::from_bits(({}) as u64)", arg(0)),
         ("core.math", "checked_add") => format!("({}).checked_add({})", arg(0), arg(1)),
         ("core.math", "checked_sub") => format!("({}).checked_sub({})", arg(0), arg(1)),
         ("core.math", "checked_mul") => format!("({}).checked_mul({})", arg(0), arg(1)),

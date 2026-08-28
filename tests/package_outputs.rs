@@ -381,8 +381,9 @@ fn action_cycle_package(tag: &str) -> common::Scratch {
 /// Only the programmable build path evaluates `fn build` and validates the
 /// graph it returns (`jet build`, and `jet inspect graph` for the
 /// no-execution variant). The default `jet run` lens compiles and runs the
-/// selected runtime program straight through the JIT — `run_compile_cmd`
-/// hands it to `Interpreter::run_jit_once_*`, which only seeds build facts —
+/// selected runtime program straight through the JIT — the native execution
+/// workflow hands it to `Interpreter::run_jit_once_*`, which only seeds build
+/// facts —
 /// so `jet run` never walks a build graph and can never observe this fault.
 fn cycle_diagnostic(scratch: &common::Scratch, args: &[&str]) -> String {
     let out = Command::new(jet_bin())

@@ -1,0 +1,21 @@
+// D-SIMD3=B (ratified 2026-08-27, card #2261): native AOT acceleration is
+// the default for the complete portable lane family. #Scalar is the explicit
+// per-function scalar boundary; every operation remains safe and portable.
+#Scalar fn scalar_witness(left: Float, right: Float) Float -> left + right
+
+fn run() {
+    wide :: F32x8(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0)
+    print((wide + F32x8.splat(1.0)).to_array())
+
+    precise :: F64x4.from_array([1.5, 2.5, 3.5, 4.5])
+    print((precise + precise).to_array())
+    print(precise.sum())
+
+    ints :: I32x8(1, 2, 3, 4, 5, 6, 7, 8)
+    print(ints.to_array())
+    print((ints + ints).to_array())
+    print(ints[7])
+    print(ints.reduce(.Add))
+
+    print(scalar_witness(1.0, 2.0))
+}

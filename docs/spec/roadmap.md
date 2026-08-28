@@ -162,6 +162,15 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 
 ## Active / not yet verified
 
+### Test-suite performance constraints
+
+`jet test golden` remains one atomic proof target so its full example corpus
+keeps one I5 result. Its seeded CI weight is 2700 seconds; re-measure that row
+after changes that affect the target. The compile-latency proof stays in its
+own target because the retained `cli` baseline is 307.782 seconds and the
+proof's warmup and sample workload is deliberately expensive. The typed
+performance-budget law is the source for measurement and report semantics.
+
 ### Jetpack and jetos
 
 **Jetpack** is Epoch 4. It owns the package-manager and environment substrate:

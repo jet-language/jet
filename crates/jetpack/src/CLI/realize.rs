@@ -548,14 +548,23 @@ pub(super) fn realize_ref_outcome(
         // opt-in); the bare env var alone is not.
         flags.fixtures.clone()
     };
-    let nix_index_client = if uses_nix && fixtures.is_none() && !cache_candidate_ok {
-        Some(
-            match flags.local_nix_catalog.as_deref() {
-                Some(catalog) => NixIndexClient::from_local_catalog(catalog, flags.offline),
-                None => NixIndexClient::from_roots_with_mode(roots, flags.offline),
-            }
-            .map_err(ProviderError::NixIndex),
-        )
+    // Build the index client even when a hangar cache candidate exists: the
+    // cached path falls back to the indexed provider when the closure proof
+    // fails (see `locked_pin` above), and that provider names the exact
+    // missing logical path (E1350) only with an index. Construction is a few
+    // stats and tiny reads; resolution stays lazy, so warm cached runs never
+    // touch the network. On the cached path an unconfigured index is not an
+    // error — the candidate is expected to serve without it.
+    let nix_index_client = if uses_nix && fixtures.is_none() {
+        let built = match flags.local_nix_catalog.as_deref() {
+            Some(catalog) => NixIndexClient::from_local_catalog(catalog, flags.offline),
+            None => NixIndexClient::from_roots_with_mode(roots, flags.offline),
+        };
+        match built {
+            Ok(client) => Some(Ok(client)),
+            Err(_) if cache_candidate_ok => None,
+            Err(error) => Some(Err(ProviderError::NixIndex(error))),
+        }
     } else {
         None
     };
@@ -1463,6 +1472,13 @@ fn report_unlocked_channel(theme: &Theme, name: &str, channel: &str) {
     );
 }
 
+/// D-CHANNEL-AUTO1=A refreshes automatic channels once per command. Package
+/// realization re-applies the source table per ref, so without this memo one
+/// warm 28-package env ran `git ls-remote` 56 times (~45s of wall time).
+static RESOLVED_CHANNELS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<(String, String), String>>,
+> = std::sync::LazyLock::new(Default::default);
+
 pub(super) fn resolve_source_channel(
     source: &ChannelSource,
     flags: &Flags,
@@ -1477,7 +1493,17 @@ pub(super) fn resolve_source_channel(
             source.channel.as_str()
         )));
     }
-    resolve_channel_with_git(source)
+    let key = (source.base.clone(), source.channel.as_str().to_string());
+    if let Ok(cache) = RESOLVED_CHANNELS.lock() {
+        if let Some(exact) = cache.get(&key) {
+            return Ok(exact.clone());
+        }
+    }
+    let exact = resolve_channel_with_git(source)?;
+    if let Ok(mut cache) = RESOLVED_CHANNELS.lock() {
+        cache.insert(key, exact.clone());
+    }
+    Ok(exact)
 }
 
 fn resolve_channel_from_fixture(source: &ChannelSource, flags: &Flags) -> Option<String> {

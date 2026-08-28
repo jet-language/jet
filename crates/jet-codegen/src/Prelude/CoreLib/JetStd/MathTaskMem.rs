@@ -1,16 +1,39 @@
-    // ── D-SIMD2 / D-LINALG1: built-in math value types ───────────────────────────
-    // SIMD lanes + linear-algebra vectors/matrices. The pinned stable rustc has no
-    // `std::simd` (portable_simd is unstable), so lane types are a SCALAR-ARRAY
-    // fallback: a `[f32; 4]` / `[f64; 2]` newtype with element-wise ops. This is
-    // correct and memory-safe by construction (I1) — no intrinsics, no feature gate,
-    // no `un`+`safe`. A `std::simd` backend can replace these structs later behind
-    // the same surface without touching generated code. Linalg types are column-major
-    // F64 arrays. All ops return fresh values (value semantics); `Copy` for ergonomics.
+    // ── D-SIMD2 / D-SIMD3 / D-LINALG1: built-in math value types ────────────────
+    // The pinned stable rustc has no `std::simd`, so the portable lane family is
+    // represented by fixed arrays. Native AOT builds enable the host CPU and LLVM
+    // can vectorize these fixed-width, inlined loops without target intrinsics.
+    // The representation is safe and portable (I1); the surface does not depend
+    // on a target feature. A future std::simd backend can replace these newtypes
+    // behind the same functions.
 
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    pub struct F32x4(pub [f32; 4]);
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    pub struct F64x2(pub [f64; 2]);
+    macro_rules! jet_lane_type {
+        ($T:ident, $E:ty, $N:literal) => {
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, PartialEq)]
+            pub struct $T(pub [$E; $N]);
+        };
+    }
+
+    jet_lane_type!(F32x4, f32, 4);
+    jet_lane_type!(F64x2, f64, 2);
+    jet_lane_type!(F32x8, f32, 8);
+    jet_lane_type!(F64x4, f64, 4);
+    jet_lane_type!(I8x16, i8, 16);
+    jet_lane_type!(I16x8, i16, 8);
+    jet_lane_type!(I32x4, i32, 4);
+    jet_lane_type!(I64x2, i64, 2);
+    jet_lane_type!(U8x16, u8, 16);
+    jet_lane_type!(U16x8, u16, 8);
+    jet_lane_type!(U32x4, u32, 4);
+    jet_lane_type!(U64x2, u64, 2);
+    jet_lane_type!(I8x32, i8, 32);
+    jet_lane_type!(I16x16, i16, 16);
+    jet_lane_type!(I32x8, i32, 8);
+    jet_lane_type!(I64x4, i64, 4);
+    jet_lane_type!(U8x32, u8, 32);
+    jet_lane_type!(U16x16, u16, 16);
+    jet_lane_type!(U32x8, u32, 8);
+    jet_lane_type!(U64x4, u64, 4);
     #[derive(Clone, Copy, PartialEq)]
     pub struct Vec2(pub [f64; 2]);
     #[derive(Clone, Copy, PartialEq)]
@@ -27,48 +50,54 @@
         ($T:ident, $E:ty, $N:literal) => {
             impl std::ops::Add for $T {
                 type Output = $T;
+                #[inline(always)]
                 fn add(self, o: $T) -> $T {
-                    let mut r = self.0;
-                    for i in 0..$N {
-                        r[i] = self.0[i] + o.0[i];
-                    }
-                    $T(r)
+                    $T(crate::jet_simd_add_array(&self.0, &o.0))
                 }
             }
             impl std::ops::Sub for $T {
                 type Output = $T;
+                #[inline(always)]
                 fn sub(self, o: $T) -> $T {
-                    let mut r = self.0;
-                    for i in 0..$N {
-                        r[i] = self.0[i] - o.0[i];
-                    }
-                    $T(r)
+                    $T(crate::jet_simd_sub_array(&self.0, &o.0))
                 }
             }
             impl std::ops::Mul for $T {
                 type Output = $T;
+                #[inline(always)]
                 fn mul(self, o: $T) -> $T {
-                    let mut r = self.0;
-                    for i in 0..$N {
-                        r[i] = self.0[i] * o.0[i];
-                    }
-                    $T(r)
+                    $T(crate::jet_simd_mul_array(&self.0, &o.0))
                 }
             }
             impl std::ops::Div for $T {
                 type Output = $T;
+                #[inline(always)]
                 fn div(self, o: $T) -> $T {
-                    let mut r = self.0;
-                    for i in 0..$N {
-                        r[i] = self.0[i] / o.0[i];
-                    }
-                    $T(r)
+                    $T(crate::jet_simd_div_array(&self.0, &o.0))
                 }
             }
         };
     }
     jet_lane_ops!(F32x4, f32, 4);
     jet_lane_ops!(F64x2, f64, 2);
+    jet_lane_ops!(F32x8, f32, 8);
+    jet_lane_ops!(F64x4, f64, 4);
+    jet_lane_ops!(I8x16, i8, 16);
+    jet_lane_ops!(I16x8, i16, 8);
+    jet_lane_ops!(I32x4, i32, 4);
+    jet_lane_ops!(I64x2, i64, 2);
+    jet_lane_ops!(U8x16, u8, 16);
+    jet_lane_ops!(U16x8, u16, 8);
+    jet_lane_ops!(U32x4, u32, 4);
+    jet_lane_ops!(U64x2, u64, 2);
+    jet_lane_ops!(I8x32, i8, 32);
+    jet_lane_ops!(I16x16, i16, 16);
+    jet_lane_ops!(I32x8, i32, 8);
+    jet_lane_ops!(I64x4, i64, 4);
+    jet_lane_ops!(U8x32, u8, 32);
+    jet_lane_ops!(U16x16, u16, 16);
+    jet_lane_ops!(U32x8, u32, 8);
+    jet_lane_ops!(U64x4, u64, 4);
 
     macro_rules! jet_vec_ops {
         ($T:ident, $N:literal) => {
@@ -183,16 +212,40 @@
         }
     }
 
-    impl super::JetShow for F32x4 {
-        fn jet_show(&self) -> String {
-            format!("F32x4({:?})", self.0)
+macro_rules! jet_lane_show {
+    ($T:ident) => {
+        impl super::JetShow for $T {
+            fn jet_show(&self) -> String {
+                format!("{}({:?})", stringify!($T), self.0)
+            }
         }
-    }
-    impl super::JetShow for F64x2 {
-        fn jet_show(&self) -> String {
-            format!("F64x2({:?})", self.0)
+        impl super::JetDebug for $T {
+            fn jet_debug(&self) -> String {
+                format!("{}({:?})", stringify!($T), self.0)
+            }
         }
-    }
+    };
+}
+    jet_lane_show!(F32x4);
+    jet_lane_show!(F64x2);
+    jet_lane_show!(F32x8);
+    jet_lane_show!(F64x4);
+    jet_lane_show!(I8x16);
+    jet_lane_show!(I16x8);
+    jet_lane_show!(I32x4);
+    jet_lane_show!(I64x2);
+    jet_lane_show!(U8x16);
+    jet_lane_show!(U16x8);
+    jet_lane_show!(U32x4);
+    jet_lane_show!(U64x2);
+    jet_lane_show!(I8x32);
+    jet_lane_show!(I16x16);
+    jet_lane_show!(I32x8);
+    jet_lane_show!(I64x4);
+    jet_lane_show!(U8x32);
+    jet_lane_show!(U16x16);
+    jet_lane_show!(U32x8);
+    jet_lane_show!(U64x4);
     macro_rules! jet_math_debug {
         ($type:ident, $($field:literal => $index:literal),+ $(,)?) => {
             impl std::fmt::Debug for $type {

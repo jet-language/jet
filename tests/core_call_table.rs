@@ -324,6 +324,11 @@ fn coverage_guard_rejects_a_missing_tier_projection() {
         ),
         vec!["core.fake.sema_only missing projection 0x40".to_string()]
     );
+    assert!(jet_foundation::Syntax::CoreCallCoverage::ALL.is_complete());
+    assert!(!jet_foundation::Syntax::CoreCallCoverage::from_bits(
+        jet_foundation::Syntax::CoreCallCoverage::SEMA
+    )
+    .is_complete());
     assert_eq!(
         jet_foundation::Syntax::core_call_projection_in(
             SEMA_ONLY,
@@ -335,6 +340,56 @@ fn coverage_guard_rejects_a_missing_tier_projection() {
         Err(jet_foundation::Syntax::CoreCallProjectionError::Uncovered {
             projection: jet_foundation::Syntax::CoreCallCoverage::JIT,
         })
+    );
+}
+
+#[test]
+fn coverage_guard_rejects_interpreter_without_executable_route() {
+    const NO_INTERPRETER_ROUTE: &[jet_foundation::Syntax::CoreCallRecord] = &[
+        jet_foundation::Syntax::CoreCallRecord::new_with_coverage(
+            "core.fake",
+            "no_interpreter_route",
+            "jet_fake_no_interpreter_route",
+            true,
+            &[],
+            jet_foundation::Syntax::CoreCallCoverage::ALL,
+        )
+        .with_interpreter_route(jet_foundation::Syntax::CoreCallInterpreterRoute::None),
+        jet_foundation::Syntax::CoreCallRecord::new_with_coverage(
+            "core.fake",
+            "empty_pure_route",
+            "jet_fake_empty_pure_route",
+            true,
+            &[],
+            jet_foundation::Syntax::CoreCallCoverage::ALL,
+        )
+        .with_interpreter_route(
+            jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(
+                jet_foundation::Syntax::CoreCallPureRoute::None,
+            ),
+        ),
+    ];
+    assert!(!jet_foundation::Syntax::CoreCallInterpreterRoute::None.is_executable());
+    assert!(!jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(
+        jet_foundation::Syntax::CoreCallPureRoute::None
+    )
+    .is_executable());
+    let route_violation = jet_foundation::Syntax::core_call_coverage_violations(
+        NO_INTERPRETER_ROUTE,
+        jet_foundation::Syntax::CoreCallCoverage::INTERPRETER,
+    );
+    assert_eq!(
+        route_violation,
+        vec![
+            "core.fake.no_interpreter_route declares interpreter coverage without an interpreter route"
+                .to_string(),
+            "core.fake.empty_pure_route declares interpreter coverage without an interpreter route"
+                .to_string(),
+        ]
+    );
+    assert_eq!(
+        jet_foundation::Syntax::core_call_table_violations(NO_INTERPRETER_ROUTE),
+        route_violation
     );
 }
 

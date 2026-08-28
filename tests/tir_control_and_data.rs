@@ -6,7 +6,9 @@ mod common;
 mod tir_support;
 
 use jet::Interpreter::{dev_iteration, RunOutcome};
-use tir_support::{build_and_run, build_and_run_full, compile, have_rustc, jit_run};
+use tir_support::{
+    assert_tiers_agree, build_and_run, build_and_run_full, compile, have_rustc, jit_run,
+};
 
 const RESULT_HANDLER_PACKAGE: &str =
     "name: \"result_handler_tiers\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [IO] } }\n";
@@ -433,7 +435,7 @@ fn run() {}
 #[test]
 fn default_err_value_and_typed_err_arm_have_distinct_shapes() {
     let src = r#"
-fn make() Err {
+fn make() Err -> {
     return Err("bad input", code: "E_BAD", cause: Err("root cause"))
 }
 
@@ -646,7 +648,7 @@ struct Grid {
 impl Grid.Index {
     type Key = Int
     type Value = Int
-    fn get(self, key: Int) ?Int {
+    fn get(self, key: Int) ?Int -> {
         if key < 0 || key >= self.cells.len() -> return None
         return Val(self.cells[key].value)
     }
@@ -914,7 +916,7 @@ fn arithmetic_and_helper_call() {
         return;
     }
     let src = "\
-fn double(n: Int) Int {
+fn double(n: Int) Int -> {
     return (n * 2)
 }
 fn run() {
@@ -965,7 +967,7 @@ fn if_expression_and_string_param() {
         return;
     }
     let src = "\
-fn shout(s: String) String {
+fn shout(s: String) String -> {
     return \"{s}!\"
 }
 fn run() {
@@ -987,7 +989,7 @@ fn if_else_chain_and_return() {
         return;
     }
     let src = "\
-fn label(n: Int) String {
+fn label(n: Int) String -> {
     if ((n % 15) == 0) {
         return \"FizzBuzz\"
     } else if ((n % 3) == 0) {
@@ -1018,7 +1020,7 @@ fn subjectless_guards_order_totality_and_nested_forms() {
         return;
     }
     let src = r#"
-fn check(note: String, answer: Bool) Bool {
+fn check(note: String, answer: Bool) Bool -> {
     print(note)
     return answer
 }
@@ -1059,7 +1061,7 @@ enum Choice {
     B(Int)
 }
 
-fn choose(note: String, value: Int) Choice {
+fn choose(note: String, value: Int) Choice -> {
     print(note)
     return Choice.A(value)
 }
@@ -1102,11 +1104,11 @@ struct Counter {
     n: Int
 }
 impl Counter {
-    fn bumped(self) Int {
+    fn bumped(self) Int -> {
         return (self.n + 1)
     }
 }
-fn add(a: Int, b: Int) Int {
+fn add(a: Int, b: Int) Int -> {
     return (a + b)
 }
 fn run() {
@@ -1147,7 +1149,7 @@ struct Raw {
     value: Int
 }
 
-fn hold(value: Int | Raw) Int | Raw {
+fn hold(value: Int | Raw) Int | Raw -> {
     return ~value
 }
 
@@ -1180,7 +1182,7 @@ struct WriteOnly {
 }
 
 impl WriteOnly.Encode {
-    fn encode(self) DataTree {
+    fn encode(self) DataTree -> {
         return DataTree.Text("write")
     }
 }
@@ -1380,7 +1382,7 @@ fn range_values_store_pass_return_loop_and_slice() {
         return;
     }
     let src = "\
-fn identity(band: ^Range) Range {
+fn identity(band: ^Range) Range -> {
     return band
 }
 fn run() {
@@ -1489,7 +1491,7 @@ fn yielding_and_result_loops_compile_and_run() {
         return;
     }
     let src = r#"
-fn find(xs: [Int]) Int {
+fn find(xs: [Int]) Int -> {
     found :: loop {
         loop x in xs {
             if x > 2 -> break(found, x)
@@ -1499,7 +1501,7 @@ fn find(xs: [Int]) Int {
     found
 }
 
-fn outer_result() Int {
+fn outer_result() Int -> {
     result :: loop {
         ignored :: loop {
             break(result, 9)
@@ -1511,7 +1513,7 @@ fn outer_result() Int {
 
 fn identity(value: Int) Int -> value
 
-fn nested_binary_exit() Int {
+fn nested_binary_exit() Int -> {
     result :: loop {
         ignored :: (loop {
             break(result, 11)
@@ -1522,7 +1524,7 @@ fn nested_binary_exit() Int {
     result
 }
 
-fn nested_call_exit() Int {
+fn nested_call_exit() Int -> {
     result :: loop {
         ignored :: identity(loop {
             break(result, 12)
@@ -1533,7 +1535,7 @@ fn nested_call_exit() Int {
     result
 }
 
-fn nested_condition_exit() Int {
+fn nested_condition_exit() Int -> {
     result :: loop {
         if (loop {
             break(result, 13)
@@ -1546,7 +1548,7 @@ fn nested_condition_exit() Int {
     result
 }
 
-fn counted_init_exit() Int {
+fn counted_init_exit() Int -> {
     result :: loop {
         loop i := (loop {
             break(result, 14)
@@ -1559,7 +1561,7 @@ fn counted_init_exit() Int {
     result
 }
 
-fn counted_step_exit() Int {
+fn counted_step_exit() Int -> {
     result :: loop {
         loop i := 0, i < 2 {
             i = (loop {
@@ -1572,7 +1574,7 @@ fn counted_step_exit() Int {
     result
 }
 
-fn value_if_exit() Int {
+fn value_if_exit() Int -> {
     result :: loop {
         ignored :: if true -> {
             break(result, 16)
@@ -1632,12 +1634,12 @@ fn unified_loop_headers_stride_and_next_edges() {
         return;
     }
     let src = r#"
-fn source() [Int] {
+fn source() [Int] -> {
     print("source")
     return [0, 1, 2, 3, 4, 5, 6]
 }
 
-fn stride() Int {
+fn stride() Int -> {
     print("stride")
     return 3
 }
@@ -1662,11 +1664,11 @@ fn run() {
     assert_eq!(stdout, "source\nstride\n0\n3\n6\nstate 2\n");
 
     let invalid = r#"
-fn source() [Int] {
+fn source() [Int] -> {
     print("source")
     return [1]
 }
-fn stride() Int {
+fn stride() Int -> {
     print("stride")
     return 0
 }
@@ -1701,10 +1703,10 @@ struct Point {
     x: Int
     y: Int
 }
-fn sum_pt(p: Point) Int {
+fn sum_pt(p: Point) Int -> {
     return (p.x + p.y)
 }
-fn origin() Point {
+fn origin() Point -> {
     return Point{ x: 0, y: 0 }
 }
 fn run() {
@@ -1764,7 +1766,7 @@ struct Outer {
     inner: Inner
     label: Int
 }
-fn deep(o: Outer) Int {
+fn deep(o: Outer) Int -> {
     return (o.inner.v + o.label)
 }
 fn run() {
@@ -1786,23 +1788,20 @@ fn run() {
 /// route through the TIR. Mirrors examples/features/types/enums.jet.
 #[test]
 fn enum_unit_variants_and_exhaustive_match() {
-    if !have_rustc() {
-        return;
-    }
     let src = "\
 enum Light {
     Red
     Yellow
     Green
 }
-fn next(light: Light) Light {
+fn next(light: Light) Light -> {
     if light == {
         .Red -> { return Light.Yellow }
         .Yellow -> { return Light.Green }
         .Green -> { return Light.Red }
     }
 }
-fn label(light: Light) String {
+fn label(light: Light) String -> {
     if light == {
         .Red -> { return \"stop\" }
         .Yellow -> { return \"caution\" }
@@ -1815,9 +1814,7 @@ fn run() {
     print(label(next(start)))
 }
 ";
-    let (code, stdout) = build_and_run("tir_enum_unit", src);
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "stop\ncaution\n");
+    assert_tiers_agree("tir_enum_unit", src, "stop\ncaution\n");
 }
 
 /// Scalar-payload variants, an enum literal with a payload (`Conn.Active(42)`), a
@@ -1835,7 +1832,7 @@ enum Conn {
     Idle(Int)
     Closed
 }
-fn describe(c: Conn) String {
+fn describe(c: Conn) String -> {
     if c == {
         .Active(id) | .Reconnecting(id) -> { return \"live:{id}\" }
         .Idle(_) -> { return \"idle\" }
@@ -1868,10 +1865,10 @@ enum Shape {
     Circle(Float)
     Rect(w: Float, h: Float)
 }
-fn area(Circle(r: Float)) Float {
+fn area(Circle(r: Float)) Float -> {
     return r * r
 }
-fn area(Rect(w: Float, h: Float)) Float {
+fn area(Rect(w: Float, h: Float)) Float -> {
     return w * h
 }
 fn run() {
@@ -1896,7 +1893,7 @@ enum HTTP {
     Good(Int)
     Fail(Int)
 }
-fn classify(r: HTTP) String {
+fn classify(r: HTTP) String -> {
     if r == {
         .Good(200..299) -> { return \"success\" }
         .Good(400..499) -> { return \"client error\" }
@@ -1926,7 +1923,7 @@ fn arm_head_range_dispatch() {
         return;
     }
     let src = "\
-fn grade(score: Int) String {
+fn grade(score: Int) String -> {
     if score == {
         0..59 -> { return \"F\" }
         60..69 -> { return \"D\" }
@@ -1952,7 +1949,7 @@ fn branch_classifier_emits_table_and_ordered_shapes_with_one_subject_evaluation(
     let table = compile(
         "tir_branch_table",
         r#"
-fn dense(n: Int) String {
+fn dense(n: Int) String -> {
     if n == {
         1 -> { return "one" }
         2 -> { return "two" }
@@ -1960,14 +1957,14 @@ fn dense(n: Int) String {
         else -> { return "other" }
     }
 }
-fn sparse(n: Int) String {
+fn sparse(n: Int) String -> {
     if n == {
         1 -> { return "one" }
         100 -> { return "hundred" }
         else -> { return "other" }
     }
 }
-fn truth(flag: Bool) String {
+fn truth(flag: Bool) String -> {
     if flag == {
         true -> { return "yes" }
         false -> { return "no" }
@@ -2001,7 +1998,7 @@ fn run() {
     let ordered = compile(
         "tir_branch_ordered",
         r#"
-fn subject() Int { return 7 }
+fn subject() Int -> { return 7 }
 fn run() {
     if subject() == {
         0..3 -> { print("low") }

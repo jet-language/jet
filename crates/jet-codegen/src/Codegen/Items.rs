@@ -2290,6 +2290,7 @@ fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out:
     let blocks = migration_blocks(cx, s).expect("caller checked");
     let shapes = migration_shapes(style, s, blocks);
     let k = shapes.len();
+    let migrate_decode_current = mangle_generated("migrate_decode_current");
     out.push_str(&format!(
         "    // D-MIGRATE4: #PublishedSchema migration chain — v1..v{} are historical shapes.\n",
         k
@@ -2297,7 +2298,9 @@ fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out:
     out.push_str(
         "    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {\n",
     );
-    out.push_str("        let __err = match Self::__jet_migrate_decode_current(__t) {\n");
+    out.push_str(&format!(
+        "        let __err = match Self::{migrate_decode_current}(__t) {{\n"
+    ));
     out.push_str("            Ok(__v) => return Ok(__v),\n");
     out.push_str("            Err(__e) => __e,\n");
     out.push_str("        };\n");
@@ -2325,7 +2328,9 @@ fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out:
             ));
         }
         out.push_str("            let __tree = jet_std::DataTree::Object(__pairs);\n");
-        out.push_str("            return Self::__jet_migrate_decode_current(&__tree);\n");
+        out.push_str(&format!(
+            "            return Self::{migrate_decode_current}(&__tree);\n"
+        ));
         out.push_str("        }\n");
     }
     out.push_str("        Err(__err)\n");
@@ -2595,7 +2600,7 @@ pub(crate) fn emit_trait_impl(
                     SerdeCodec::Decode,
                     cx,
                     out,
-                    "__jet_migrate_decode_current",
+                    &mangle_generated("migrate_decode_current"),
                 );
             }
         }
@@ -2784,7 +2789,7 @@ pub(crate) fn emit_external_trait_impl(
                     out,
                     1,
                     i.is_generated_serde,
-                    Some("__jet_migrate_decode_current"),
+                    Some(&mangle_generated("migrate_decode_current")),
                 );
             }
         }

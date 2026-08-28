@@ -248,7 +248,7 @@ pub const TRAIT_IO_READER: &str = "Reader";
 pub const TRAIT_IO_WRITER: &str = "Writer";
 /// D-DBDRIVER1=A: backend-neutral parameterized SQL driver contract in `core.db`.
 pub const TRAIT_DRIVER: &str = "Driver";
-/// D-ONCE-HASH1=B: interpolation selectors are a format-choice surface, not
+/// D-ONCE-HASH1=B / D-FMT-INTERP3=B: interpolation selectors are a format-choice surface, not
 /// applied rules. This table is their one vocabulary home; the parser and
 /// formatter must not grow selector-specific name copies beside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -256,6 +256,7 @@ pub enum InterpolationSelectorKind {
     Debug,
     Pretty,
     Fixed,
+    Hex,
     Unit,
 }
 
@@ -263,6 +264,7 @@ pub enum InterpolationSelectorKind {
 pub enum InterpolationSelectorArguments {
     None,
     Precision,
+    Width,
     UnitStyle(&'static [&'static str]),
 }
 
@@ -291,6 +293,11 @@ pub const INTERPOLATION_SELECTORS: &[InterpolationSelector] = &[
         name: "Fixed",
         kind: InterpolationSelectorKind::Fixed,
         arguments: InterpolationSelectorArguments::Precision,
+    },
+    InterpolationSelector {
+        name: "Hex",
+        kind: InterpolationSelectorKind::Hex,
+        arguments: InterpolationSelectorArguments::Width,
     },
     InterpolationSelector {
         name: "Unit",
@@ -333,12 +340,16 @@ mod interpolation_selector_tests {
                 .iter()
                 .map(|selector| selector.name)
                 .collect::<Vec<_>>(),
-            vec!["Debug", "Pretty", "Fixed", "Unit"]
+            vec!["Debug", "Pretty", "Fixed", "Hex", "Unit"]
         );
         assert!(matches!(
             interpolation_selector("Unit").map(|selector| selector.arguments),
             Some(InterpolationSelectorArguments::UnitStyle(styles))
                 if styles.len() == 2 && styles[0] == "name" && styles[1] == "bare"
+        ));
+        assert!(matches!(
+            interpolation_selector("Hex").map(|selector| selector.arguments),
+            Some(InterpolationSelectorArguments::Width)
         ));
         assert!(interpolation_selector("Repr").is_none());
     }
@@ -541,6 +552,10 @@ pub const REF_SOURCE_PROVIDERS: &[&str] = &[
 pub const JETPACK_WHY: &str = "why";
 /// D-JPK-IMPORTCMD1=A: import a foreign environment into canonical Jet source.
 pub const JETPACK_IMPORT_VERB: &str = "import";
+/// Card #2218: read-only changelog view over the unified `.jet/lock`.
+pub const JETPACK_LOCK_VERB: &str = "lock";
+pub const LOCK_DIFF_VERB: &str = "diff";
+pub const LOCK_DIFF_FLAG_AGAINST: &str = "--against";
 
 pub const JETPACK_VERBS: &[&str] = &[
     // Card #479: reuses D-DX2's existing `doctor` spelling for Jetpack health.
@@ -552,6 +567,7 @@ pub const JETPACK_VERBS: &[&str] = &[
     "add",
     "remove",
     "update",
+    JETPACK_LOCK_VERB,
     "outdated",
     "search",
     "info",
@@ -585,6 +601,8 @@ pub const ENV_FLAG_PACKAGE: &str = "-p";
 /// D-VERDICT-2189-1: materialize an environment or ad-hoc package shell
 /// without entering it.
 pub const ENV_FLAG_PREP: &str = "--prep";
+/// Card #2214: expand environment acquisition plans to per-package facts.
+pub const ENV_FLAG_EXPLAIN: &str = "--explain";
 /// D-VERDICT-2189-1: retired spelling; teach the canonical `--prep` form.
 pub const ENV_FLAG_PREP_RETIRED: &str = "--prepare";
 
@@ -704,11 +722,7 @@ pub const TOOL_SUBCOMMAND: &str = "tool";
 pub const TOOL_VERB_INSTALL: &str = "install";
 pub const TOOL_VERB_LIST: &str = "list";
 pub const TOOL_VERB_UNINSTALL: &str = "uninstall";
-pub const TOOL_VERBS: &[&str] = &[
-    TOOL_VERB_INSTALL,
-    TOOL_VERB_LIST,
-    TOOL_VERB_UNINSTALL,
-];
+pub const TOOL_VERBS: &[&str] = &[TOOL_VERB_INSTALL, TOOL_VERB_LIST, TOOL_VERB_UNINSTALL];
 /// Install under a different on-PATH bin name (avoids JPK-TOOL-COLLIDE / E1297).
 pub const TOOL_FLAG_AS: &str = "--as";
 /// Default profile name for `jetpack tool install` PATH projections.

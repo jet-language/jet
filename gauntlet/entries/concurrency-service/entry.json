@@ -1,0 +1,30 @@
+{
+  "name": "concurrency-service",
+  "tier": "program",
+  "cells": ["concurrency.service"],
+  "mode": "service",
+  "perf": true,
+  "languages": ["jet", "go", "rust", "python"],
+  "spec": {
+    "behavior": "Serve a long-lived line-oriented TCP worker service. `ready` reports readiness, `batch N` queues values 1 through N through four workers and returns their square sum, and `shutdown` returns goodbye then exits cleanly.",
+    "args": ["18080"],
+    "fixtureGen": null,
+    "expected": null
+  },
+  "service": {
+    "protocol": "line",
+    "portArg": true,
+    "ready": {"send": "ready\n", "expect": "ready\n"},
+    "probe": [
+      {"send": "batch 8\n", "expect": "batch 8 total 204\n"},
+      {"send": "batch 4\n", "expect": "batch 4 total 30\n"},
+      {"send": "shutdown\n", "expect": "bye\n"}
+    ]
+  },
+  "authoring": {
+    "jet": {"author": "luna-max", "turns": 4, "retries": 0, "diagnosticsHit": [], "notes": "Long-lived raw TCP line service; each batch uses the existing bounded task-group/channel worker pattern."},
+    "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib TCP listener and four-worker channel."},
+    "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only TCP listener, sync channel, and four worker threads."},
+    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib socket listener and four worker threads."}
+  }
+}

@@ -102,6 +102,29 @@ reader_read!(jet_jit_reader_read_u32_be, kernel::jet_reader_read_u32_be);
 reader_read!(jet_jit_reader_read_u64_le, kernel::jet_reader_read_u64_le);
 reader_read!(jet_jit_reader_read_u64_be, kernel::jet_reader_read_u64_be);
 
+macro_rules! reader_read_float {
+    ($name:ident, $kernel:path, $convert:expr) => {
+        fn $name(handle: i64) -> i64 {
+            match with_reader_mut(handle, |r| $kernel(r).map(|v| $convert(v) as i64)) {
+                Some(Ok(v)) => result_ok(v),
+                Some(Err(e)) => result_err(e),
+                None => result_err("Reader: bad handle".into()),
+            }
+        }
+    };
+}
+
+reader_read_float!(
+    jet_jit_reader_read_f32_le,
+    kernel::jet_reader_read_f32_le,
+    |v: f32| (v as f64).to_bits()
+);
+reader_read_float!(
+    jet_jit_reader_read_f64_le,
+    kernel::jet_reader_read_f64_le,
+    |v: f64| v.to_bits()
+);
+
 fn jet_jit_reader_take(handle: i64, n: i64) -> i64 {
     match with_reader_mut(handle, |r| kernel::jet_reader_take(r, n)) {
         Some(Ok(bytes)) => result_ok_bytes(bytes),
@@ -347,6 +370,8 @@ host_fns! {
     reader_read_u32_be: "jet_jit_reader_read_u32_be" => jet_jit_reader_read_u32_be: sig_unary;
     reader_read_u64_le: "jet_jit_reader_read_u64_le" => jet_jit_reader_read_u64_le: sig_unary;
     reader_read_u64_be: "jet_jit_reader_read_u64_be" => jet_jit_reader_read_u64_be: sig_unary;
+    reader_read_f32_le: "jet_jit_reader_read_f32_le" => jet_jit_reader_read_f32_le: sig_unary;
+    reader_read_f64_le: "jet_jit_reader_read_f64_le" => jet_jit_reader_read_f64_le: sig_unary;
     reader_take: "jet_jit_reader_take" => jet_jit_reader_take: sig_binary;
     reader_remaining: "jet_jit_reader_remaining" => jet_jit_reader_remaining: sig_unary;
     reader_at_end: "jet_jit_reader_at_end" => jet_jit_reader_at_end: sig_i8;

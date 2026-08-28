@@ -183,19 +183,14 @@ function jet_web_error_from_conversion(value, source, target, original = null) {
 
 // A `?` carries a typed propagation until the enclosing fallible function
 // returns its Err carrier. The final edge turns that carrier into the native
-// Web error object, so nested `?` sites keep one journey.
-function jet_web_try(value, file, line, fnName, note = null, convert = null, addContext = false) {
-  if (value && value.tag === "Ok") return "value" in value ? value.value : value.values?.[0];
-  if (value && value.tag === "Err") {
-    let carrier = jet_web_result_value(value);
-    if (typeof convert === "function") {
-      const original = carrier;
-      carrier = jet_web_result_value(convert(carrier, original));
-    }
+// Web error object, so nested `?` sites keep one journey. The thunk is
+// important: a nested `?` can throw before its caller's adapter gets control.
+function jet_web_try(valueOrThunk, file, line, fnName, note = null, convert = null, addContext = false) {
+  const appendHop = (carrier, priorHops = null) => {
     const wire = jet_web_error_wire(carrier?.wire ?? carrier);
-    const hops = carrier?.wire && Array.isArray(carrier.wire.source_journey)
-      ? carrier.wire.source_journey.slice()
-      : [];
+    const hops = priorHops
+      ? priorHops.slice()
+      : (Array.isArray(wire.source_journey) ? wire.source_journey.slice() : []);
     const last = hops[hops.length - 1];
     const noteText = typeof note === "function" ? String(note() ?? "") : "";
     if (last && (last.fn_name ?? last.fnName) === fnName && last.file === file && last.line === line) {
@@ -219,8 +214,33 @@ function jet_web_try(value, file, line, fnName, note = null, convert = null, add
       ];
     }
     throw new JetWebPropagation(nextWire, journey, jet_web_error_frame(nextWire, journey), hops);
+  };
+  const appendCaught = (error) => {
+    if (!(error instanceof JetWebPropagation)) throw error;
+    appendHop({ wire: error.wire }, error.hops);
+  };
+  const handle = (value) => {
+    if (value && value.tag === "Ok") return "value" in value ? value.value : value.values?.[0];
+    if (value && value.tag === "Err") {
+      let carrier = jet_web_result_value(value);
+      if (typeof convert === "function") {
+        const original = carrier;
+        carrier = jet_web_result_value(convert(carrier, original));
+      }
+      appendHop(carrier);
+    }
+    return value;
+  };
+  let value;
+  try {
+    value = typeof valueOrThunk === "function" ? valueOrThunk() : valueOrThunk;
+  } catch (error) {
+    appendCaught(error);
   }
-  return value;
+  if (value && typeof value.then === "function") {
+    return value.then(handle, appendCaught);
+  }
+  return handle(value);
 }
 
 function jet_list_bounds_message(len, index) {

@@ -437,6 +437,64 @@ impl JetWasmInt {
             text
         }
     }
+
+    // D-WRAP-SCOPE1=A: default `Int` has no finite width to wrap or saturate,
+    // so every policy-preserving method keeps the exact arithmetic result.
+    // These method names are the Web adapter's counterpart to the native
+    // `JetArith`/`JetPower` Prelude traits.
+    fn jet_add(self, rhs: Self, _file: &str, _line: u32) -> Self {
+        self.add_ref(&rhs)
+    }
+
+    fn jet_sub(self, rhs: Self, _file: &str, _line: u32) -> Self {
+        self.sub_ref(&rhs)
+    }
+
+    fn jet_mul(self, rhs: Self, _file: &str, _line: u32) -> Self {
+        self.mul_ref(&rhs)
+    }
+
+    fn jet_wrapping_add(self, rhs: Self) -> Self {
+        self.add_ref(&rhs)
+    }
+
+    fn jet_wrapping_sub(self, rhs: Self) -> Self {
+        self.sub_ref(&rhs)
+    }
+
+    fn jet_wrapping_mul(self, rhs: Self) -> Self {
+        self.mul_ref(&rhs)
+    }
+
+    fn jet_saturating_add(self, rhs: Self) -> Self {
+        self.add_ref(&rhs)
+    }
+
+    fn jet_saturating_sub(self, rhs: Self) -> Self {
+        self.sub_ref(&rhs)
+    }
+
+    fn jet_saturating_mul(self, rhs: Self) -> Self {
+        self.mul_ref(&rhs)
+    }
+
+    fn jet_pow(self, exponent: i128, file: &str, line: u32) -> Self {
+        jet_wasm_int_pow(
+            self,
+            Self::from_decimal(&exponent.to_string())
+                .unwrap_or_else(|_| jet_arithmetic_stop(file, line, "invalid exponent")),
+            file,
+            line,
+        )
+    }
+
+    fn jet_wrapping_pow(self, exponent: i128, file: &str, line: u32) -> Self {
+        self.jet_pow(exponent, file, line)
+    }
+
+    fn jet_saturating_pow(self, exponent: i128, file: &str, line: u32) -> Self {
+        self.jet_pow(exponent, file, line)
+    }
 }
 
 // D-RANGE-EXACT1=A: range iteration must use the same exact whole-number

@@ -366,18 +366,23 @@ impl<'a> Parser<'a> {
     }
 
     /// Most expression values are one primary plus an optional postfix
-    /// chain. Sending those values through every precedence layer creates
+    /// chain. Sending those values through the full postfix layer creates
     /// a large stack frame at each nesting level, even when no operator is
-    /// present. Probe that common shape first; an infix token restores the
-    /// parser and uses the canonical precedence path below.
+    /// present. Probe the primary alone first; a continuation restores the
+    /// parser and uses the canonical postfix/precedence path below.
     fn try_primary_expr(&mut self) -> Option<Result<Expr, Diagnostic>> {
         if !self.can_start_primary_expr() {
             return None;
         }
 
         let state = ExprProbeState::save(self);
-        match self.expr_postfix(true) {
-            Ok(expr) if !self.has_expr_infix_continuation() => Some(Ok(expr)),
+        match self.expr_primary(true) {
+            Ok(expr)
+                if !self.has_expr_infix_continuation()
+                    && !self.has_expr_postfix_continuation() =>
+            {
+                Some(Ok(expr))
+            }
             Ok(_) | Err(_) => {
                 state.restore(self);
                 None
@@ -482,6 +487,20 @@ impl<'a> Parser<'a> {
             }
             Ok(expr)
         })
+    }
+
+    fn has_expr_postfix_continuation(&self) -> bool {
+        matches!(
+            self.peek().kind,
+            TokKind::Dot
+                | TokKind::Question
+                | TokKind::QuestionDot
+                | TokKind::LParen
+                | TokKind::LBracket
+                | TokKind::LBrace
+                | TokKind::PlusPlus
+                | TokKind::MinusMinus
+        )
     }
 }
 

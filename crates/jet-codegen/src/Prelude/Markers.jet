@@ -41,6 +41,11 @@ marker Kernel(mode: KernelMode, @sites: [.Function])
 
 marker Inline(mode: InlineMode{.Hint}, @sites: [.Function, .Method, .Constant])
 
+// D-SIMD3=B: native auto-vectorization is the safe default; this explicit
+// function/method marker keeps scalar codegen available for reproducibility or
+// a workload whose measured result favors scalar execution.
+marker Scalar(@sites: [.Function, .Method])
+
 marker Job(scope: JobScope{.Dev}, packages: Value{[]}, cwd: Value{none}, inputs: Value{[]}, outputs: Value{[]}, skip: Value{none}, cache: Value{.Uncached}, limits: Value{none}, @sites: [.Function])
 
 marker Every(schedule: Duration | String, @sites: [.Function])

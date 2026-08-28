@@ -10,7 +10,7 @@ use super::mime_kernel;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtFloat, CtReport, CtValue, Type};
 
-use crate::Comptime::Builtins::{as_bool, as_int};
+use crate::Comptime::Builtins::{as_bool, as_int, exact_big};
 use crate::Comptime::Diagnostics::unsupported;
 use crate::Comptime::EmailAdapter;
 use crate::Comptime::Methods::as_float;
@@ -72,6 +72,20 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Time, "is_leap_year") => time_is_leap_year(args, span),
         (CoreCallPureRoute::Math, "decimal") => decimal_from_str(args, span),
         (CoreCallPureRoute::Math, "fraction") => fraction_new(args, span),
+        (CoreCallPureRoute::Math, "to_bits") => float_arg(args, 0, span)
+            .map(|value| CtValue::Int(super::math_lib_pure::jet_std_math_to_bits(value))),
+        (CoreCallPureRoute::Math, "from_bits") => one(args, 0, "core.math", "from_bits", span)
+            .and_then(|value| {
+                exact_big(value)
+                    .ok_or_else(|| {
+                        unsupported(concat!("core", ".math.from_bits expects an Int"), span)
+                    })
+            })
+            .map(|big| {
+                CtValue::Float(CtFloat::f64(super::math_lib_pure::jet_std_math_from_bits(
+                    big.wrapping_u64() as i64,
+                )))
+            }),
         // D-TYPE2-UNCERT1=A: `core.math.sqrt` keeps the measured grade. The
         // existing Prelude-backed method adapter owns the uncertainty rule;
         // ordinary Float sqrt remains on the core-call path below.
@@ -236,15 +250,6 @@ pub(super) fn evaluate_method(
     let normalized_type_name = type_name
         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
         .unwrap_or(type_name.as_str());
-    // D-TYPE2-UNCERT1=A: TIR lowers `core.math.sqrt(Measurement)` to this
-    // internal handle even though `sqrt` is not a user-facing Measurement
-    // method and therefore has no receiver registry row.
-    if normalized_type_name == crate::Syntax::TYPE_MEASUREMENT
-        && method == "sqrt"
-        && args.is_empty()
-    {
-        return Some(measurement_sqrt(recv, span));
-    }
     let row = jet_foundation::Syntax::core_receiver_method(type_name, method)
         .or_else(|| jet_foundation::Syntax::core_receiver_method(normalized_type_name, method))?;
     if !row

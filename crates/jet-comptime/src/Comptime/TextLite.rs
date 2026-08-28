@@ -140,6 +140,7 @@ mod text_kernel {
     }
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSWalk.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/FSOps.rs");
 
     pub(super) fn nfd(s: &str) -> String {
         jet_text_nfd(&s.to_string())
@@ -490,6 +491,24 @@ pub(super) fn fs_copy(from: &str, to: &str) -> FsResult<()> {
 }
 pub(super) fn fs_copy_dir(from: &str, to: &str) -> FsResult<()> {
     text_kernel::fs_copy_dir(from, to).map_err(io_error_ct)
+}
+pub(super) fn fs_rename(from: &str, to: &str) -> FsResult<()> {
+    text_kernel::jet_fs_rename(from, to).map_err(|error| {
+        io_error_ct(text_kernel::jet_std::io_error_at(
+            text_kernel::jet_std::IOOperation::Write,
+            from,
+            error,
+        ))
+    })
+}
+pub(super) fn fs_glob(pattern: &str) -> FsResult<Vec<String>> {
+    text_kernel::jet_fs_glob(pattern).map_err(|error| {
+        io_error_ct(text_kernel::jet_std::io_error_at(
+            text_kernel::jet_std::IOOperation::Read,
+            pattern,
+            error,
+        ))
+    })
 }
 /// `(name, full path, is_dir)` rows in the kernel's own sorted order (D-LSDIR1).
 pub(super) fn fs_list_dir(path: &str) -> FsResult<Vec<(String, String, bool)>> {

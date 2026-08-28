@@ -6,7 +6,8 @@
 //! journal and lock through the typed atomic update seam below.
 
 use super::{
-    legacy_user_hangar_dir, legacy_user_root, Closure, PreparedProfileGenerationRoot, Roots,
+    legacy_user_hangar_dir, legacy_user_root, Closure, Journal, PreparedProfileGenerationRoot,
+    Roots,
 };
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
@@ -862,7 +863,7 @@ pub(crate) fn atomic_remove(
     let expected = RootEtag::parse(expected_etag)?;
     crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         recover_unlocked(roots)?;
-        let (known, closure_head) = Closure::lifecycle_inputs_unlocked(roots)?;
+        let (known, closure_head) = Journal::lifecycle_inputs_unlocked(roots)?;
         let mut state = load_state(roots, &known)?;
         let root = state
             .get(id)
@@ -959,7 +960,7 @@ pub(crate) fn snapshot(roots: &Roots) -> io::Result<LifecycleSnapshot> {
 /// so dropping a short-lived verification lease cannot expose durable roots.
 pub(super) fn protected_targets_unlocked(roots: &Roots) -> io::Result<BTreeSet<String>> {
     recover_unlocked(roots)?;
-    let (known, _) = Closure::lifecycle_inputs_unlocked(roots)?;
+    let (known, _) = Journal::lifecycle_inputs_unlocked(roots)?;
     let state = load_state(roots, &known)?;
     validate_state_bounds(&state)?;
     let now = unix_now();
@@ -983,7 +984,7 @@ pub(crate) fn snapshot_with_legacy(
 pub(crate) fn recover(roots: &Roots) -> io::Result<usize> {
     crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         let recovered = recover_unlocked(roots)?;
-        let (known, _) = Closure::lifecycle_inputs_unlocked(roots)?;
+    let (known, _) = Journal::lifecycle_inputs_unlocked(roots)?;
         let state = load_state(roots, &known)?;
         compact_if_needed(roots, &state)?;
         Ok(recovered)
@@ -996,7 +997,7 @@ fn with_lifecycle_lock<T>(
 ) -> io::Result<T> {
     crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
         recover_unlocked(roots)?;
-        let (known, closure_head) = Closure::lifecycle_inputs_unlocked(roots)?;
+        let (known, closure_head) = Journal::lifecycle_inputs_unlocked(roots)?;
         operation(&known, closure_head)
     })
 }

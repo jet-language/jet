@@ -18,8 +18,7 @@ fn run() !IOError {
     ranked := counts.keys().to_list()
     sort_counts :: ~counts
     ranked.sort_by_desc((word: String) -> sort_counts.get(word) ?? 0)
-    loop i in 0..<20 {
-        print("{counts.get(ranked[i]) ?? 0} {ranked[i]}")
-    }
+    limit :: if ranked.len() < 20 -> ranked.len() else -> 20
+    loop i in 0..<limit -> print("{counts.get(ranked[i]) ?? 0} {ranked[i]}")
     print("distinct {counts.len()} total {total}")
 }

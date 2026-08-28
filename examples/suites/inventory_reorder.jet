@@ -1,0 +1,25 @@
+// User story: a stock clerk wants a quick reorder list.
+struct Stock {
+    name: String
+    on_hand: Int
+    reorder_at: Int
+}
+
+fn status(item: Stock) String -> {
+    if item.on_hand <= item.reorder_at -> return "reorder"
+    return "ready"
+}
+
+fn run() {
+    stock :: [
+        Stock{name: "notebooks", on_hand: 8, reorder_at: 10},
+        Stock{name: "pens", on_hand: 30, reorder_at: 12},
+        Stock{name: "folders", on_hand: 4, reorder_at: 4}
+    ]
+    shown := 0
+    loop item in stock {
+        print("{item.name}: {status(item)}")
+        shown += 1
+    }
+    print("items checked: {shown}")
+}

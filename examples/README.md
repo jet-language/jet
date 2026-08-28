@@ -2,7 +2,9 @@
 
 `canon.jet` is the compiling syntax showcase. `features/` groups every feature
 example by topic (D-REPO-EXAMPLES1); `features/expected/` mirrors the tree with
-each example's golden output. Run any example directly:
+each example's golden output. `suites/` contains complete user-story programs;
+its [README](suites/README.md) lists the stories and their goldens. Run any
+example directly:
 
 ```
 jet run examples/features/basics/hello.jet
@@ -12,9 +14,8 @@ The [executable lease recovery example](jetpack/executable-lease-recovery.md)
 shows the read-only audit and explicit Hangar recovery boundary for a stale
 process-tree lease.
 
-For a new project, the default is shorter: `jet new hello && cd hello && jet
-run`. That command selects the generated `run.jet`; the explicit path above
-is the standalone-example form.
+For the complete new-project workflow, use the [first-hour guide](../docs/first-hour.md).
+The explicit path above is the standalone-example form.
 
 ## Short path first (D-EXAMPLES-SHORTPATH1=A)
 

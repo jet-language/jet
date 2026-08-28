@@ -2643,6 +2643,10 @@ impl<'a> Checker<'a> {
                     crate::Syntax::InterpolationSelectorKind::Fixed,
                 )
                 .name;
+                let hex_selector = crate::Syntax::interpolation_selector_for_kind(
+                    crate::Syntax::InterpolationSelectorKind::Hex,
+                )
+                .name;
                 let unit_selector = crate::Syntax::interpolation_selector_for_kind(
                     crate::Syntax::InterpolationSelectorKind::Unit,
                 )
@@ -2805,6 +2809,22 @@ impl<'a> Checker<'a> {
                                             "fixed interpolation uses `core.text.fmt.decimal`, which formats `Float` values"
                                                 .to_string(),
                                             "pass a `Float`, or use bare interpolation for this value"
+                                                .to_string(),
+                                            Some(inner.span()),
+                                        ));
+                                    }
+                                }
+                                crate::AST::StrFormat::Hex(_) => {
+                                    if t != Type::Int {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0112",
+                                            format!(
+                                                "{} can't use `:{hex_selector}(n)`",
+                                                t.show()
+                                            ),
+                                            "hex interpolation uses `core.text.fmt.hex`, which formats `Int` values"
+                                                .to_string(),
+                                            "pass an `Int`, or use bare interpolation for this value"
                                                 .to_string(),
                                             Some(inner.span()),
                                         ));
@@ -4212,6 +4232,19 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-BYTELIT1=B: lower validated byte text to ordinary U8 integer
+    /// elements. The shared AST helper rejects non-ASCII literal text before
+    /// this path constructs values for the normal list checker.
+    fn byte_text_elements(parts: &[crate::AST::ByteTextPart], span: Span) -> Option<Vec<Expr>> {
+        let bytes = TypedLitBody::byte_text_bytes(parts)?;
+        Some(
+            bytes
+                .into_iter()
+                .map(|byte| Expr::Int(byte as i64, span, None, Some(byte.to_string())))
+                .collect(),
+        )
+    }
+
     /// D-DOTCTOR3=A: elaborate `Type.{ body }` / inferred `.{ body }` against the
     /// head (or expected type), rewrite to ListLit / MapLit / StructLit / value,
     /// then re-infer. Runtime exact-Int fixed-width scalar construction records
@@ -4254,6 +4287,27 @@ impl<'a> Checker<'a> {
         let head = self.resolve_type(head);
 
         match (head.clone(), body) {
+            (Type::List(_) | Type::FixedList { .. }, TypedLitBody::ByteText(parts)) => {
+                let Some(elems) = Self::byte_text_elements(&parts, span) else {
+                    *e = Expr::TypedLit {
+                        head: Some(head.clone()),
+                        body: TypedLitBody::ByteText(parts),
+                        span,
+                    };
+                    self.diags.push(Diagnostic::error(
+                        "E0119",
+                        format!(
+                            "this body doesn't match typed-literal head `{}`",
+                            head.name()
+                        ),
+                        "a typed literal body uses the head type's own literal shape".to_string(),
+                        "use ASCII text or numeric elements for a byte list".to_string(),
+                        Some(span),
+                    ));
+                    return Some(head);
+                };
+                *e = Expr::ListLit(elems, span);
+            }
             (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Empty) => {
                 *e = Expr::ListLit(Vec::new(), span);
             }

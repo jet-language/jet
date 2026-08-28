@@ -105,7 +105,7 @@ fn b3_map_get_through_object_pattern() {
 use core.encoding.json as json
 fn run() {
     data :: json.parse("{{\"a\":1}}") ?? panic("bad")
-    if data == Object(root) {
+    if data == .Object(root) {
         v :: root.get("a") ?? JSON.Null
         print(json.to_string(v))
     }
@@ -196,4 +196,119 @@ fn run() {
 }
 "#,
     );
+}
+
+#[test]
+fn b6_generated_trait_protocol_returns_are_raw() {
+    let dir = std::env::temp_dir().join(format!("jet_ice_b6_protocol_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("b6_generated_trait_protocol.jet");
+    let source = r#"
+use core.encoding.json as json
+
+#CLI
+struct Args {
+    #Doc("count") count: Int{1}
+}
+
+struct Pair {
+    left: Int
+    right: Int
+}
+
+enum Mark {
+    Low
+    High
+}
+
+#Codable
+struct Envelope<T> {
+    value: T
+}
+
+fn run(args: Args) {
+    pair :: Pair{left: args.count, right: 2}
+    other :: Pair{left: 2, right: 3}
+    print(pair == other)
+    print(pair < other)
+    print(Mark.Low == Mark.Low)
+    wire :: json.to_string(Envelope<Int>{value: args.count})
+    decoded :: json.decode<Envelope<Int>>(wire) ?? panic("decode")
+    print(decoded.value)
+}
+"#;
+    fs::write(&path, source).unwrap();
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "b6_generated_trait_protocol_returns_are_raw: front end rejected a valid program:\n{}",
+            jet::render_diagnostics(&shown, source, &diags)
+        )
+    });
+    let rust = common::strip_vetted_prelude_modules(&out.rust);
+
+    for (trait_name, method_name, return_type) in [
+        ("__jet_Equatable", "equal", "bool"),
+        ("__jet_Comparable", "compare", "__jet_Ordering"),
+        ("__jet_Encode", "jet_encode", "jet_std::DataTree"),
+    ] {
+        let marker = format!("{trait_name} for __jet_");
+        let mut found = false;
+        let mut search_from = 0;
+        while let Some(relative) = rust[search_from..].find(&marker) {
+            let hit = search_from + relative;
+            let start = rust[..hit]
+                .rfind("\nimpl ")
+                .map(|index| index + 1)
+                .unwrap_or(0);
+            let block = &rust[start..];
+            let end = block.find("\n}\n").unwrap_or(block.len());
+            let block = &block[..end];
+            let signature = block
+                .lines()
+                .find(|line| line.contains(&format!("fn {method_name}(")))
+                .unwrap_or_else(|| panic!("missing {trait_name}.{method_name} in:\n{block}"));
+            assert!(
+                signature.contains(&format!(" -> {return_type} {{")),
+                "{trait_name}.{method_name} has wrong ABI: {signature}"
+            );
+            assert!(
+                !block.contains("return Ok("),
+                "{trait_name}.{method_name} wraps its raw protocol return:\n{block}"
+            );
+            found = true;
+            search_from = start + end;
+        }
+        assert!(found, "missing generated {trait_name} implementation");
+    }
+    assert!(
+        rust.contains("__jet_Encode for __jet_Envelope<"),
+        "generic #Codable witness did not emit its encode implementation"
+    );
+    assert!(
+        rust.contains("fn jet_decode(") && rust.contains("-> Result<"),
+        "generated decode lost its declared Result ABI"
+    );
+    assert!(
+        !rust.contains("unsafe"),
+        "b6_generated_trait_protocol_returns_are_raw: invariant I1"
+    );
+
+    if have_rustc() {
+        let rs = dir.join("b6_generated_trait_protocol.rs");
+        let bin = dir.join("b6_generated_trait_protocol");
+        fs::write(&rs, &out.rust).unwrap();
+        let res = Command::new("rustc")
+            .args(["--edition", "2021"])
+            .arg(&rs)
+            .arg("-o")
+            .arg(&bin)
+            .output()
+            .unwrap();
+        assert!(
+            res.status.success(),
+            "I2 violated: rustc rejected generated code for b6_generated_trait_protocol_returns_are_raw:\n{}",
+            String::from_utf8_lossy(&res.stderr)
+        );
+    }
 }

@@ -1719,6 +1719,10 @@ pub const SUBTLE_CRATE_SPEC: (&str, &str) = ("subtle", "=2.6.1");
 /// seal/open/sign/verify is used (D-CRYPTOENV1, D-DEP-CRYPTO1).
 const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
 const OUTCOME_RUNTIME: &str = include_str!("../../jet-foundation/src/Outcome.rs");
+const ENCODING_ERRORS_RUNTIME: &str =
+    include_str!("../../jet-foundation/src/EncodingErrors.rs");
+const ENCODING_JSON_RUNTIME: &str = include_str!("../../jet-foundation/src/EncodingJson.rs");
+const JSON_NUMBER_RUNTIME: &str = include_str!("../../jet-foundation/src/JSONNumber.rs");
 const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
 const HOST_RUNTIME_STOP_END: &str = "// JET_HOST_RUNTIME_STOP_END";
 const CRYPTO_ENTROPY_RUNTIME: &str =
@@ -2791,6 +2795,9 @@ fn cache_key_full(
             "standalone_outcome_runtime",
             standalone_outcome_runtime().as_bytes(),
         );
+        identity.field("encoding_errors_runtime", ENCODING_ERRORS_RUNTIME.as_bytes());
+        identity.field("encoding_json_runtime", ENCODING_JSON_RUNTIME.as_bytes());
+        identity.field("json_number_runtime", JSON_NUMBER_RUNTIME.as_bytes());
         identity.field("crypto_runtime", CRYPTO_RUNTIME.as_bytes());
         identity.field("crypto_entropy_runtime", CRYPTO_ENTROPY_RUNTIME.as_bytes());
         // The helper is a separately cached binary. Its closed status protocol
@@ -3516,6 +3523,22 @@ fn emit_wrapper_lib(
         });
     }
     if needs_crypto || needs_secrets {
+        if needs_crypto {
+            // Outcome's standalone projection keeps its JSON decoding seam.
+            // These modules must stay at the bridge crate root because the
+            // embedded sources refer to them through `crate::`/`super::`.
+            for (name, source) in [
+                ("jet_encoding_errors", ENCODING_ERRORS_RUNTIME),
+                ("jet_json_number", JSON_NUMBER_RUNTIME),
+                ("EncodingJson", ENCODING_JSON_RUNTIME),
+            ] {
+                out.push_str("mod ");
+                out.push_str(name);
+                out.push_str(" {\n");
+                out.push_str(source);
+                out.push_str("\n}\n");
+            }
+        }
         // One module for both: the secrets runtime resolves the entropy
         // provider through a sibling `use jet_crypto_entropy::…`, which only
         // works when `mod jet_crypto_entropy` is an item of the same module.
@@ -4531,6 +4554,9 @@ mod tests {
         assert!(source.contains("pub struct JetAbsent;"));
         assert!(source.contains("pub fn jet_present<T, E>(value: T)"));
         assert!(source.contains("pub fn jet_render_runtime_stop_from_row("));
+        assert!(source.contains("mod jet_encoding_errors {"));
+        assert!(source.contains("mod jet_json_number {"));
+        assert!(source.contains("mod EncodingJson {"));
         assert!(!source.contains("crate::Registry::active_runtime_diagnostic"));
         assert!(!source.contains("JET_HOST_RUNTIME_STOP_BEGIN"));
         assert!(!source.contains("JET_HOST_RUNTIME_STOP_END"));

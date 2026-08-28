@@ -94,6 +94,18 @@ pub fn jet_std_math_abs_f32(value: f32) -> f32 {
     value.abs()
 }
 
+/// IEEE-754 bit conversions share this Prelude symbol across AOT, resident
+/// JIT, and the evaluator.  The integer carrier is intentionally word-sized;
+/// the evaluator projects larger exact `Int` values modulo two's-complement
+/// `u64` before calling this function.
+pub fn jet_std_math_to_bits(value: f64) -> i64 {
+    value.to_bits() as i64
+}
+
+pub fn jet_std_math_from_bits(bits: i64) -> f64 {
+    f64::from_bits(bits as u64)
+}
+
 pub fn jet_std_math_min_i64(left: i64, right: i64) -> i64 {
     left.min(right)
 }

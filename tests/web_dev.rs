@@ -50,9 +50,34 @@ fn canvas_session() -> Option<String> {
 /// client `jet dev --target=web`'s own std-only server (Source/CmdDevWeb.rs)
 /// expects, so the test doesn't need `curl` or any HTTP crate.
 fn http_get(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
+    http_get_with_session(port, path, canvas_session().as_deref())
+}
+
+fn http_get_without_session(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
+    http_get_with_session(port, path, None)
+}
+
+fn http_get_with_session(
+    port: u16,
+    path: &str,
+    session: Option<&str>,
+) -> Option<(u16, Vec<u8>)> {
+    let (status, _, body) = http_get_response_with_session(port, path, session)?;
+    Some((status, body))
+}
+
+fn http_get_with_content_type(port: u16, path: &str) -> Option<(u16, String, Vec<u8>)> {
+    http_get_response_with_session(port, path, None)
+}
+
+fn http_get_response_with_session(
+    port: u16,
+    path: &str,
+    session: Option<&str>,
+) -> Option<(u16, String, Vec<u8>)> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
-    let authorization = canvas_session()
+    let authorization = session
         .map(|session| format!("Authorization: Bearer {session}\r\n"))
         .unwrap_or_default();
     let req = format!(
@@ -75,7 +100,12 @@ fn http_get(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
         .nth(1)?
         .parse()
         .ok()?;
-    Some((status, raw[split..].to_vec()))
+    let content_type = header_text.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("content-type")
+            .then(|| value.trim().to_string())
+    })?;
+    Some((status, content_type, raw[split..].to_vec()))
 }
 
 fn http_post(port: u16, path: &str, body: &str) -> Option<(u16, Vec<u8>)> {
@@ -212,13 +242,27 @@ fn run() {
 }
 "#;
 
-/// Reads the child's stdout for the `serving http://localhost:<port>` line
-/// `run_dev_web` prints on startup (Source/CmdDevWeb.rs), with a bounded
-/// wait — never a blind `sleep`.
+fn port_from_url_line(line: &str, prefix: &str) -> Option<u16> {
+    let url = line.strip_prefix(prefix)?;
+    let authority = url.split("://").nth(1)?.split('/').next()?;
+    authority.rsplit_once(':')?.1.parse().ok()
+}
+
+fn session_from_canvas_url_line(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("Canvas: ")?.split("session=").nth(1)?;
+    rest.split(|c: char| !c.is_ascii_hexdigit())
+        .next()
+        .filter(|token| token.len() >= 32)
+        .map(str::to_string)
+}
+
+/// Reads the app preview and Canvas lines `run_dev_web` prints on startup,
+/// with a bounded wait — never a blind `sleep`.
 #[derive(Clone, Copy)]
 struct DevPorts {
     canvas: u16,
     application: u16,
+    app_before_canvas: bool,
 }
 
 fn wait_for_ports(child_stdout: std::process::ChildStdout) -> DevPorts {
@@ -229,38 +273,39 @@ fn wait_for_ports(child_stdout: std::process::ChildStdout) -> DevPorts {
         let mut canvas_port = None;
         let mut application_port = None;
         let mut session = None;
+        let mut saw_canvas = false;
+        let mut app_before_canvas = false;
         for line in reader.lines().map_while(Result::ok) {
             if canvas_port.is_none() {
-                if let Some(rest) = line.split("http://localhost:").nth(1) {
-                    if let Some(port_str) = rest.split(|c: char| !c.is_ascii_digit()).next() {
-                        canvas_port = port_str.parse::<u16>().ok();
-                    }
+                if let Some(port) = port_from_url_line(&line, "Canvas: ") {
+                    canvas_port = Some(port);
                 }
+                saw_canvas |= line.starts_with("Canvas: ");
             }
             if application_port.is_none() {
-                if let Some(rest) = line.split("app preview http://localhost:").nth(1) {
-                    if let Some(port_str) = rest.split(|c: char| !c.is_ascii_digit()).next() {
-                        application_port = port_str.parse::<u16>().ok();
-                    }
+                if let Some(port) = port_from_url_line(&line, "App preview: ") {
+                    application_port = Some(port);
+                }
+                if line.starts_with("App preview: ") && !saw_canvas {
+                    app_before_canvas = true;
                 }
             }
             if session.is_none() {
-                if let Some(rest) = line.split("session=").nth(1) {
-                    let token = rest
-                        .split(|c: char| !c.is_ascii_hexdigit())
-                        .next()
-                        .filter(|token| token.len() >= 32);
-                    session = token.map(str::to_string);
+                if let Some(token) = session_from_canvas_url_line(&line) {
+                    session = Some(token);
                 }
             }
-            if let (Some(canvas), Some(session)) = (canvas_port, session.as_ref()) {
+            if let (Some(canvas), Some(application), Some(session)) =
+                (canvas_port, application_port, session.as_ref())
+            {
                 *CANVAS_SESSION
                     .get_or_init(|| Mutex::new(None))
                     .lock()
                     .unwrap() = Some(session.clone());
                 let _ = tx.send(DevPorts {
                     canvas,
-                    application: application_port.unwrap_or(canvas),
+                    application,
+                    app_before_canvas,
                 });
                 return;
             }
@@ -268,6 +313,43 @@ fn wait_for_ports(child_stdout: std::process::ChildStdout) -> DevPorts {
     });
     rx.recv_timeout(Duration::from_secs(20))
         .expect("jet dev never printed its serving URL and Canvas session")
+}
+
+fn wait_for_app_preview(child_stdout: std::process::ChildStdout) -> u16 {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
+        let reader = BufReader::new(child_stdout);
+        let mut sent = false;
+        for line in reader.lines().map_while(Result::ok) {
+            if !sent {
+                if let Some(port) = port_from_url_line(&line, "App preview: ") {
+                    let _ = tx.send(port);
+                    sent = true;
+                }
+            }
+        }
+    });
+    rx.recv_timeout(Duration::from_secs(20))
+        .expect("jet dev never printed its static app preview URL")
+}
+
+fn wait_for_canvas_port(path: &std::path::Path, timeout: Duration) -> u16 {
+    let transcript = wait_for_file_text(path, "Canvas: http://", timeout);
+    let (port, session) = transcript
+        .lines()
+        .find_map(|line| {
+            Some((
+                port_from_url_line(line, "Canvas: ")?,
+                session_from_canvas_url_line(line)?,
+            ))
+        })
+        .expect("PTY startup did not include a Canvas URL");
+    *CANVAS_SESSION
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap() = Some(session);
+    port
 }
 
 #[test]
@@ -365,7 +447,21 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
     let stdout = child.stdout.take().unwrap();
     let guard = KillOnDrop(child);
 
-    let port = wait_for_ports(stdout).application;
+    let ports = wait_for_ports(stdout);
+    assert!(
+        (8080..=8089).contains(&ports.application),
+        "default app preview port escaped the stable range: {}",
+        ports.application
+    );
+    assert!(
+        ports.app_before_canvas,
+        "startup must print App preview before Canvas"
+    );
+    assert_ne!(
+        ports.application, ports.canvas,
+        "app preview and Canvas listeners must remain separate"
+    );
+    let port = ports.application;
 
     for path in ["/C:/Windows/win.ini", "/\\Windows\\win.ini", "/\\\\server\\share\\secret"] {
         let (status, _) = http_get(port, path).expect("static-path hostile request failed");
@@ -403,13 +499,15 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
     assert!(status_text.contains("\"clients\":"), "{status_text}");
 
     // index.html should carry the injected live-reload poller.
-    let (status, html_body) = http_get(port, "/").expect("GET / failed");
+    let (status, html_body) = http_get_without_session(port, "/").expect("GET / failed");
     assert_eq!(status, 200);
     let html = String::from_utf8_lossy(&html_body);
     assert!(
         html.contains("__jet_dev_status") && html.contains("Build failed"),
         "served index.html should have the live-reload script injected"
     );
+    let (status, _) = http_get_without_session(ports.canvas, "/").expect("GET Canvas root");
+    assert_eq!(status, 401, "Canvas control routes must keep their session gate");
 
     // Edit the SAME file the dev server is watching (never a real example
     // file — this is the throwaway temp copy) and wait for the rebuild.
@@ -733,13 +831,14 @@ fn jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region()
         }
     }
     let mut guard = KillOnDrop(pty);
-    wait_for_server_up(port, Duration::from_secs(20));
+    let canvas_port = wait_for_canvas_port(&transcript_path, Duration::from_secs(20));
+    wait_for_server_up(canvas_port, Duration::from_secs(20));
 
-    let ready = wait_for_status(port, "pty-tab", "ready", Duration::from_secs(5));
+    let ready = wait_for_status(canvas_port, "pty-tab", "ready", Duration::from_secs(5));
     assert!(ready.contains("\"clients\":1"), "{ready}");
     let pinned = wait_for_file_text(
         &transcript_path,
-        &format!("jet dev  [ready] localhost:{port} · 1 client"),
+        &format!("jet dev  [ready] localhost:{canvas_port} · 1 client"),
         Duration::from_secs(5),
     );
     assert!(
@@ -768,7 +867,7 @@ fn jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region()
 
     let broken = FIXTURE_SRC.replace("print(size.height)", "missing_hybrid_symbol()");
     fs::write(&src_path, broken).unwrap();
-    wait_for_status(port, "pty-tab", "error", Duration::from_secs(10));
+    wait_for_status(canvas_port, "pty-tab", "error", Duration::from_secs(10));
     let error = wait_for_file_text(
         &transcript_path,
         "missing_hybrid_symbol",
@@ -824,7 +923,7 @@ fn jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region()
     // EOF leaves the server running in cooked mode. A later refresh must not
     // reinstall DECSTBM after its raw-input cleanup guard has gone away.
     let scroll_regions_after_eof = after_eof.matches("\x1b[3r").count();
-    wait_for_status(port, "post-eof-tab", "error", Duration::from_secs(5));
+    wait_for_status(canvas_port, "post-eof-tab", "error", Duration::from_secs(5));
     std::thread::sleep(Duration::from_millis(100));
     let after_refresh = fs::read_to_string(&transcript_path).unwrap();
     assert_eq!(
@@ -2305,6 +2404,99 @@ fn run() {{
     fs::write(&src_path, edited).unwrap();
     let new_version = wait_for_version_change(port, &baseline_version, Duration::from_secs(20));
     assert_ne!(new_version, baseline_version);
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jet_dev_static_generator_serves_reloads_and_watches_inputs() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping jet_dev_static_generator_serves_reloads_and_watches_inputs (need rustc)"
+        );
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_static_generator_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source_path = dir.join("generate.jet");
+    fs::write(
+        &source_path,
+        include_str!("../examples/features/devloop/static_site_generator/run.jet"),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        include_str!("../examples/features/devloop/static_site_generator/package.jet"),
+    )
+    .unwrap();
+    fs::write(dir.join("content.txt"), "first headline").unwrap();
+    fs::write(dir.join("widget.wasm"), [0, 97, 115, 109]).unwrap();
+
+    let mut child = Command::new(jet_bin())
+        .args(["dev", "generate.jet"])
+        .current_dir(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to start static generator dev loop");
+
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let stdout = child.stdout.take().unwrap();
+    let guard = KillOnDrop(child);
+    let port = wait_for_app_preview(stdout);
+    wait_for_server_up(port, Duration::from_secs(20));
+
+    let (status, html_body) = http_get_without_session(port, "/").expect("GET static index");
+    assert_eq!(status, 200);
+    let html = String::from_utf8_lossy(&html_body);
+    assert!(html.contains("<h1>first headline</h1>"), "{html}");
+    assert!(html.contains("__jet_dev_status"), "live reload not injected");
+
+    let (status, content_type, wasm) =
+        http_get_with_content_type(port, "/widget.wasm").expect("GET generated wasm");
+    assert_eq!(status, 200);
+    assert_eq!(content_type, "application/wasm");
+    assert_eq!(wasm, [0, 97, 115, 109]);
+
+    let (_, baseline_body) = http_get_without_session(port, "/__jet_dev_version").unwrap();
+    let baseline = String::from_utf8_lossy(&baseline_body).trim().to_string();
+
+    fs::write(dir.join("content.txt"), "second headline").unwrap();
+    let after_input = wait_for_version_change(port, &baseline, Duration::from_secs(20));
+    assert_ne!(after_input, baseline);
+    let (_, html_body) = http_get_without_session(port, "/").expect("GET index after input edit");
+    assert!(
+        String::from_utf8_lossy(&html_body).contains("<h1>second headline</h1>"),
+        "generator input edit was not served"
+    );
+
+    let edited_source = include_str!("../examples/features/devloop/static_site_generator/run.jet")
+        .replace("<h1>{headline}</h1>", "<h1>source edit: {headline}</h1>");
+    assert_ne!(
+        edited_source,
+        include_str!("../examples/features/devloop/static_site_generator/run.jet"),
+        "static generator source fixture did not change"
+    );
+    fs::write(&source_path, edited_source).unwrap();
+    let after_source = wait_for_version_change(port, &after_input, Duration::from_secs(20));
+    assert_ne!(after_source, after_input);
+    let (_, html_body) = http_get_without_session(port, "/").expect("GET index after source edit");
+    assert!(
+        String::from_utf8_lossy(&html_body).contains("<h1>source edit: second headline</h1>"),
+        "generator source edit was not served"
+    );
 
     drop(guard);
     let _ = fs::remove_dir_all(&dir);

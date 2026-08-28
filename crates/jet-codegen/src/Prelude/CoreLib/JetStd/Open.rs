@@ -186,13 +186,18 @@ mod jet_std {
         flags: RegexFlags,
         groups: usize,
         names: std::sync::Arc<[Option<String>]>,
+        capture_cache: std::sync::Arc<std::sync::OnceLock<Vec<Option<(usize, usize)>>>>,
     }
 
-    #[derive(Clone, Debug)]
+    #[derive(Debug)]
     struct RegexProgram {
         insts: Vec<RegexInst>,
         start: usize,
+        anchored_start: bool,
         literal: Option<Vec<u8>>,
+        required_literal: Option<Vec<u8>>,
+        // ponytail: one per-regex scratch lock; split per-worker scratch if concurrent matching contends.
+        scratch: std::sync::Mutex<RegexScratch>,
     }
 
     #[derive(Clone, Debug)]
@@ -273,13 +278,14 @@ mod jet_std {
         outs: Vec<RegexPatch>,
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     struct RegexThread {
         pc: usize,
         start: usize,
         caps: Option<Vec<Option<usize>>>,
     }
 
+    #[derive(Debug)]
     struct RegexState {
         threads: Vec<RegexThread>,
         seen: Vec<u32>,
@@ -303,6 +309,21 @@ mod jet_std {
             if self.epoch == 0 {
                 self.seen.fill(0);
                 self.epoch = 1;
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct RegexScratch {
+        current: RegexState,
+        next: RegexState,
+    }
+
+    impl RegexScratch {
+        fn new(inst_count: usize) -> Self {
+            Self {
+                current: RegexState::new(inst_count),
+                next: RegexState::new(inst_count),
             }
         }
     }
@@ -416,30 +437,34 @@ mod jet_std {
             }
         }
 
-        fn capture_spans(&self) -> Vec<Option<(usize, usize)>> {
-            if self.groups == 0 {
-                return vec![Some(self.span)];
-            }
-            let base = self.span.0;
-            let window = &self.text[self.span.0..self.span.1];
-            regex_run(
-                &self.program,
-                &self.flags,
-                self.groups,
-                window,
-                0,
-                true,
-                true,
-            )
-            .and_then(|run| run.caps)
-            .map(|caps| regex_slots_to_spans(&caps))
-            .map(|spans| {
-                spans
-                    .into_iter()
-                    .map(|span| span.map(|(start, end)| (start + base, end + base)))
-                    .collect()
-            })
-            .unwrap_or_else(|| vec![Some(self.span)])
+        fn capture_spans(&self) -> &[Option<(usize, usize)>] {
+            self.capture_cache
+                .get_or_init(|| {
+                    if self.groups == 0 {
+                        return vec![Some(self.span)];
+                    }
+                    let base = self.span.0;
+                    let window = &self.text[self.span.0..self.span.1];
+                    regex_run(
+                        &self.program,
+                        &self.flags,
+                        self.groups,
+                        window,
+                        0,
+                        true,
+                        true,
+                    )
+                    .and_then(|run| run.caps)
+                    .map(|caps| regex_slots_to_spans(&caps))
+                    .map(|spans| {
+                        spans
+                            .into_iter()
+                            .map(|span| span.map(|(start, end)| (start + base, end + base)))
+                            .collect()
+                    })
+                    .unwrap_or_else(|| vec![Some(self.span)])
+                })
+                .as_slice()
         }
     }
 
@@ -598,25 +623,19 @@ mod jet_std {
         }
 
         fn find_match(&self, text: &str) -> Option<JetRegexMatch> {
-            let shared = std::sync::Arc::<str>::from(text);
-            self.find_from_shared(&shared, 0)
-        }
-
-        fn find_from_shared(
-            &self,
-            text: &std::sync::Arc<str>,
-            start: usize,
-        ) -> Option<JetRegexMatch> {
             regex_run(
                 &self.program,
                 &self.flags,
                 self.groups,
                 text,
-                start,
+                0,
                 false,
                 false,
             )
-            .map(|run| self.make_match(text, run.span))
+            .map(|run| {
+                let text = std::sync::Arc::<str>::from(text);
+                self.make_match(&text, run.span)
+            })
         }
 
         fn make_match(
@@ -631,6 +650,7 @@ mod jet_std {
                 flags: self.flags.clone(),
                 groups: self.groups,
                 names: std::sync::Arc::clone(&self.group_names),
+                capture_cache: std::sync::Arc::new(std::sync::OnceLock::new()),
             }
         }
     }
@@ -694,13 +714,17 @@ mod jet_std {
         let frag = compiler.compile_node(&root)?;
         let match_idx = compiler.push(RegexInst::Match);
         compiler.patch(&frag.outs, match_idx);
+        let insts = compiler.insts;
         Ok(JetRegex {
             pattern: pattern.to_string(),
             flags: flags.clone(),
             program: std::sync::Arc::new(RegexProgram {
-                insts: compiler.insts,
+                anchored_start: matches!(&insts[frag.start], RegexInst::AssertStart(_)),
+                scratch: std::sync::Mutex::new(RegexScratch::new(insts.len())),
+                insts,
                 start: frag.start,
                 literal: regex_literal_candidate(&root),
+                required_literal: regex_required_literal(&root),
             }),
             group_names: std::sync::Arc::from(parser.names.into_boxed_slice()),
             groups: parser.groups,
@@ -1253,8 +1277,14 @@ mod jet_std {
 
     fn regex_matcher_matches(matcher: &RegexMatcher, ch: char, flags: &RegexFlags) -> bool {
         match matcher {
-            RegexMatcher::Literal(expected) => super::jet_text_simple_fold(*expected as u32)
-                == super::jet_text_simple_fold(ch as u32),
+            RegexMatcher::Literal(expected) => {
+                if flags.case_insensitive {
+                    super::jet_text_simple_fold(*expected as u32)
+                        == super::jet_text_simple_fold(ch as u32)
+                } else {
+                    *expected == ch
+                }
+            }
             RegexMatcher::Any => flags.dotall || ch != '\n',
             RegexMatcher::Class(class) => regex_class_matches(class, ch, flags),
         }
@@ -1370,19 +1400,28 @@ mod jet_std {
                 return;
             }
         }
+        if !flags.case_insensitive {
+            if let Some(literal) = program.required_literal.as_deref() {
+                if regex_find_literal(text.as_bytes(), literal, start).is_none() {
+                    return;
+                }
+            }
+        }
 
-        let mut current = RegexState::new(program.insts.len());
-        let mut next = RegexState::new(program.insts.len());
-        current.clear();
+        let mut scratch = program.scratch.lock().unwrap();
+        scratch.current.clear();
         let mut pos = start;
         let mut winner_start = None;
         let mut last_match = None;
 
         loop {
-            if winner_start.is_none() && (!anchored || pos == start) {
+            let can_start = !program.anchored_start
+                || flags.multiline
+                || pos == 0;
+            if winner_start.is_none() && can_start && (!anchored || pos == start) {
                 let caps = capture.then(|| vec![None; (groups + 1) * 2]);
                 regex_add_thread(
-                    &mut current,
+                    &mut scratch.current,
                     program,
                     flags,
                     RegexThread {
@@ -1395,7 +1434,8 @@ mod jet_std {
                 );
             }
 
-            let found_start = current
+            let found_start = scratch
+                .current
                 .threads
                 .iter()
                 .filter(|thread| matches!(program.insts[thread.pc], RegexInst::Match))
@@ -1405,7 +1445,7 @@ mod jet_std {
                 winner_start = found_start;
             }
             if let Some(winner) = winner_start {
-                if let Some(found) = current.threads.iter().find(|thread| {
+                if let Some(found) = scratch.current.threads.iter().find(|thread| {
                     thread.start == winner
                         && matches!(program.insts[thread.pc], RegexInst::Match)
                 }) {
@@ -1431,70 +1471,77 @@ mod jet_std {
                     return;
                 };
                 let resume = regex_next_search_pos(text, run.span.0, run.span.1);
+                drop(scratch);
                 if !on_match(run) {
                     return;
                 }
                 if resume > text.len() {
                     return;
                 }
-                current.clear();
+                scratch = program.scratch.lock().unwrap();
+                scratch.current.clear();
                 winner_start = None;
                 last_match = None;
                 pos = resume;
                 continue;
             }
-            next.clear();
-            let Some(ch) = text[pos..].chars().next() else {
+            let Some((ch, next_pos)) = regex_next_char(text, pos) else {
                 return;
             };
-            let next_pos = pos + ch.len_utf8();
-            for thread in &current.threads {
-                let RegexInst::Consume(matcher, Some(target)) = &program.insts[thread.pc]
-                else { continue };
-                if !regex_matcher_matches(matcher, ch, flags) {
-                    continue;
-                };
-                if capture {
-                    let caps = thread.caps.clone();
-                    regex_add_thread(
-                        &mut next,
-                        program,
-                        flags,
-                        RegexThread {
-                            pc: *target,
-                            start: thread.start,
-                            caps,
-                        },
-                        next_pos,
-                        text,
-                    );
-                } else {
-                    regex_add_thread(
-                        &mut next,
-                        program,
-                        flags,
-                        RegexThread {
-                            pc: *target,
-                            start: thread.start,
-                            caps: None,
-                        },
-                        next_pos,
-                        text,
-                    );
+            {
+                let scratch_ref = &mut *scratch;
+                let (current, next) = (&mut scratch_ref.current, &mut scratch_ref.next);
+                next.clear();
+                for thread in &current.threads {
+                    let RegexInst::Consume(matcher, Some(target)) = &program.insts[thread.pc]
+                    else { continue };
+                    if !regex_matcher_matches(matcher, ch, flags) {
+                        continue;
+                    };
+                    if capture {
+                        let caps = thread.caps.clone();
+                        regex_add_thread(
+                            next,
+                            program,
+                            flags,
+                            RegexThread {
+                                pc: *target,
+                                start: thread.start,
+                                caps,
+                            },
+                            next_pos,
+                            text,
+                        );
+                    } else {
+                        regex_add_thread(
+                            next,
+                            program,
+                            flags,
+                            RegexThread {
+                                pc: *target,
+                                start: thread.start,
+                                caps: None,
+                            },
+                            next_pos,
+                            text,
+                        );
+                    }
                 }
+                std::mem::swap(current, next);
             }
-            std::mem::swap(&mut current, &mut next);
             if let Some(winner) = winner_start {
-                if !current.threads.iter().any(|thread| thread.start == winner) {
+                if !scratch.current.threads.iter().any(|thread| thread.start == winner) {
                     let Some(run) = last_match.take() else { return };
                     let resume = regex_next_search_pos(text, run.span.0, run.span.1);
+                    drop(scratch);
                     if !on_match(run) {
                         return;
                     }
                     if resume > text.len() {
                         return;
                     }
-                    current.clear();
+                    scratch = program.scratch.lock().unwrap();
+                    scratch.current.clear();
                     winner_start = None;
                     last_match = None;
                     pos = resume;
@@ -1572,8 +1619,75 @@ mod jet_std {
         (!literal.is_empty()).then(|| literal.into_bytes())
     }
 
-    // Required-literal prefilter. It scans the haystack once, then the VM only
-    // sees candidates. The VM remains the authority for non-literal programs.
+    fn regex_required_literal(node: &RegexNode) -> Option<Vec<u8>> {
+        match node {
+            RegexNode::Seq(pieces) => {
+                let mut best = None;
+                let mut run = Vec::new();
+                for piece in pieces {
+                    if !regex_quant_required(&piece.quant) {
+                        regex_prefer_longer(&mut best, std::mem::take(&mut run));
+                        continue;
+                    }
+                    match (&piece.atom, &piece.quant) {
+                        (RegexAtom::Literal(ch), RegexQuant::One) => {
+                            let mut bytes = [0; 4];
+                            run.extend(ch.encode_utf8(&mut bytes).as_bytes());
+                        }
+                        (RegexAtom::Literal(ch), _) => {
+                            regex_prefer_longer(&mut best, std::mem::take(&mut run));
+                            regex_prefer_longer(&mut best, ch.to_string().into_bytes());
+                        }
+                        _ => {
+                            regex_prefer_longer(&mut best, std::mem::take(&mut run));
+                            if let Some(literal) = regex_required_atom_literal(&piece.atom) {
+                                regex_prefer_longer(&mut best, literal);
+                            }
+                        }
+                    }
+                }
+                regex_prefer_longer(&mut best, run);
+                best
+            }
+            RegexNode::Alt(arms) => {
+                let mut arms = arms.iter();
+                let first = regex_required_literal(arms.next()?)?;
+                arms.all(|arm| regex_required_literal(arm).as_deref() == Some(first.as_slice()))
+                    .then_some(first)
+            }
+        }
+    }
+
+    fn regex_required_atom_literal(atom: &RegexAtom) -> Option<Vec<u8>> {
+        match atom {
+            RegexAtom::Literal(ch) => Some(ch.to_string().into_bytes()),
+            RegexAtom::Group(_, node) => regex_required_literal(node),
+            RegexAtom::Any
+            | RegexAtom::Class(_)
+            | RegexAtom::Start
+            | RegexAtom::End => None,
+        }
+    }
+
+    fn regex_prefer_longer(best: &mut Option<Vec<u8>>, candidate: Vec<u8>) {
+        if candidate.is_empty() {
+            return;
+        }
+        if best
+            .as_ref()
+            .map_or(true, |current| candidate.len() > current.len())
+        {
+            *best = Some(candidate);
+        }
+    }
+
+    fn regex_quant_required(quant: &RegexQuant) -> bool {
+        !matches!(quant, RegexQuant::ZeroOrMore | RegexQuant::ZeroOrOne)
+            && !matches!(quant, RegexQuant::Range { min: 0, .. })
+    }
+
+    // Required-literal prefilter. It rejects haystacks that cannot match before
+    // entering the VM. The VM remains the authority for non-literal programs.
     fn regex_find_literal(haystack: &[u8], needle: &[u8], start: usize) -> Option<usize> {
         if needle.is_empty() {
             return Some(start.min(haystack.len()));
@@ -1781,11 +1895,20 @@ mod jet_std {
         if end > start {
             return end;
         }
-        text[end..]
+        regex_next_char(text, end)
+            .map(|(_, next)| next)
+            .unwrap_or(text.len() + 1)
+    }
+
+    fn regex_next_char(text: &str, pos: usize) -> Option<(char, usize)> {
+        let byte = *text.as_bytes().get(pos)?;
+        if byte.is_ascii() {
+            return Some((byte as char, pos + 1));
+        }
+        text[pos..]
             .chars()
             .next()
-            .map(|ch| end + ch.len_utf8())
-            .unwrap_or(text.len() + 1)
+            .map(|ch| (ch, pos + ch.len_utf8()))
     }
 
     fn expand_regex_replacement(repl: &str, mat: &JetRegexMatch) -> String {

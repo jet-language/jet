@@ -17,6 +17,9 @@ fn run() {
     k :: "apple"
     item :: 0
     i :: 9
+    if i < 0 {
+        print(item)
+    }
     xs := [value, v]
     xs[1] = value
     loop (list_index, list_item) in xs {
@@ -128,6 +131,45 @@ fn run() {
     let (code, stdout) = build_and_run("tir_list_assign", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "1\n99\n3\n");
+}
+
+/// Nested list/map projections are mutable places, not value reads. The
+/// side-effecting `pop` indexes also prove that every base/index/RHS is
+/// evaluated once while the three-level list proves recursive write-back.
+#[test]
+fn nested_index_assignment_updates_live_collections() {
+    let src = r#"
+fn run() {
+    list_lists := [[1, 2], [3, 4]]
+    list_lists[1][0] = 9
+    print(list_lists[1][0])
+
+    map_lists := [String:[Int]]{}
+    map_lists["row"] = [5, 6]
+    map_lists["row"][1] = 8
+    print(map_lists["row"][1])
+
+    list_maps := [[String:Int]]{[String:Int]{}, [String:Int]{}}
+    list_maps[1]["new"] = 7
+    print(list_maps[1]["new"])
+
+    map_maps := [String:[String:Int]]{}
+    map_maps["outer"] = [String:Int]{}
+    map_maps["outer"]["inner"] = 6
+    print(map_maps["outer"]["inner"])
+
+    cube := [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+    cube[1][0][1] = 42
+    print(cube[1][0][1])
+
+    selectors := [8, 0, 0, 1]
+    rows := [[10, 11], [12, 13]]
+    rows[selectors.pop() ?? 0][selectors.pop() ?? 0] = selectors.pop() ?? 0
+    print(selectors.len())
+    print(rows[0][0])
+}
+"#;
+    assert_tiers_agree("tir_nested_index_assignment", src, "9\n8\n7\n6\n42\n1\n1\n");
 }
 
 /// A map literal (`[]`), map indexing, map insert (`m[k] = v`), and two-binding
@@ -278,11 +320,11 @@ struct Dog {
     sound: String
 }
 impl Dog.Named {
-    fn label(self) String -[]> {
+    fn label(self) String -> {
         return \"dog\"
     }
 }
-fn describe(d: Dog) String -[]> {
+fn describe(d: Dog) String -> {
     return d.label()
 }
 fn run() {
@@ -487,11 +529,12 @@ fn fallible_try_and_or_fallback() {
         return;
     }
     let src = "\
+#Error
 enum ParseError {
     Empty
     BadDigit(Int)
 }
-fn parse_age(raw: Int) Int !ParseError -[]> {
+fn parse_age(raw: Int) Int !ParseError -> {
     if raw == 0 {
         return Err(ParseError.Empty)
     }
@@ -500,7 +543,7 @@ fn parse_age(raw: Int) Int !ParseError -[]> {
     }
     return Ok((raw * 2))
 }
-fn load(raw: Int) Int !ParseError -[]> {
+fn load(raw: Int) Int !ParseError -> {
     n :: parse_age(raw)
     return Ok((n + 1))
 }
@@ -525,13 +568,13 @@ fn or_fallback_return_form() {
         return;
     }
     let src = "\
-fn checked(x: Int) Int !Err -[]> {
+fn checked(x: Int) Int !Err -> {
     if x == 0 {
         return Err(\"zero\")
     }
     return Ok((100 /% x))
 }
-fn safe(x: Int) Int -[]> {
+fn safe(x: Int) Int -> {
     return checked(x) ?? return -1
 }
 fn run() {
@@ -835,7 +878,7 @@ fn run() {
 #[test]
 fn eager_container_adapters_and_lazy_opt_in() {
     let src = "\
-fn count_and_keep(n: Int, visits: Cell<Int>) Bool -[]> {
+fn count_and_keep(n: Int, visits: Cell<Int>) Bool -> {
     visits.edit(count -> count += 1)
     return n % 2 == 0
 }
@@ -846,7 +889,7 @@ fn run() {
     print(mapped.len())
     visits := Cell.new(0)
     visits_copy :: ~visits
-    even := nums.map((n: Int) -> n + 1).filter((n: Int) -> count_and_keep(n, visits_copy))
+    even := nums.map((n: Int) -> n + 1).filter((n: Int) -> count_and_keep(n, visits_copy) ?? false)
     print(even)
     print(visits.get())
     lazy_values := nums.lazy().filter((n: Int) -> n > 2).map((n: Int) -> n * 10).to_list()
@@ -881,7 +924,7 @@ fn run() {
     words := ["zero", "one"]
     print(words.skip(1).first() ?? "missing")
     decimals := [1.5, 2.5]
-    print(decimals.skip(1).first() ?? -1.0)
+    print(decimals.skip(1).first() ?? 0.0)
 }
 "#;
     let rust = compile("tir_iter_positional_pick", src);
@@ -1096,40 +1139,27 @@ fn run() {
     assert_eq!(stdout, "a-b\n");
 }
 
-/// A `when` over a fallible value with `ok`/`err` patterns (Shape C). The subject
-/// is a user fallible fn call; the bound payload prints.
+/// A compact Result handler over a fallible value. The subject is a user
+/// fallible fn call; the bound payload prints.
 #[test]
 fn fallible_when_match() {
     if !have_rustc() {
         return;
     }
     let src = "\
+#Error
 enum ClassifyError {
     Bad(String)
 }
-fn classify(x: Int) Int !ClassifyError -[]> {
+fn classify(x: Int) Int !ClassifyError -> {
     if x == 0 {
         return Err(ClassifyError.Bad(\"bad\"))
     }
     return Ok((x + 10))
 }
 fn run() {
-    if classify(5) == {
-        .Ok(n) -> {
-            print(n)
-        }
-        .Err(e) -> {
-            print(e)
-        }
-    }
-    if classify(0) == {
-        .Ok(n) -> {
-            print(n)
-        }
-        .Err(e) -> {
-            print(e)
-        }
-    }
+    classify(5) ? n -> { print(n) } ! e -> { print(e) }
+    classify(0) ? n -> { print(n) } ! e -> { print(e) }
 }
 ";
     let (code, stdout) = build_and_run("tir_fallible_when", src);

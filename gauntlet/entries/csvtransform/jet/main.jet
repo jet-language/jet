@@ -3,7 +3,6 @@ use core.files as files
 use core.process as process
 use core.regex as re
 use core.sys as sys
-use core.text.fmt as fmt
 
 fn run() {
     args :: process.argv()
@@ -31,9 +30,9 @@ fn run() {
     regions.sort()
     loop region in regions {
         sum :: sums.get(region) ?? Float{0.0}
-        formatted :: re.replace_all(Regex{","}, fmt.decimal(sum, 2), "")
+        formatted :: re.replace_all(Regex{","}, "", "{sum:Fixed(2)}")
         print("{region} n={counts.get(region) ?? 0} sum={formatted}")
     }
-    formatted_total :: re.replace_all(Regex{","}, fmt.decimal(total, 2), "")
+    formatted_total :: re.replace_all(Regex{","}, "", "{total:Fixed(2)}")
     print("total n={total_count} sum={formatted_total}")
 }

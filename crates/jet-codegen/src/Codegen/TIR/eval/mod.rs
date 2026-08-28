@@ -1759,6 +1759,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             return run(self);
         }
         let (ambient_core, ambient_handle, ambient_extern) = crate::Comptime::ambient_hooks();
+        let runtime_argv = crate::Comptime::runtime_argv();
         std::thread::scope(|threads| {
             let (sender, receiver) = mpsc::channel();
             self.task_sender = Some(sender);
@@ -1771,6 +1772,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     move || {
                         while let Ok(job) = receiver.recv() {
                             let job_config = (*config).clone();
+                            let runtime_argv = runtime_argv.clone();
                             std::thread::Builder::new()
                                 .name("jet-tir-task".to_string())
                                 .stack_size(8 * 1024 * 1024)
@@ -1779,7 +1781,13 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                         ambient_core,
                                         ambient_handle,
                                         ambient_extern,
-                                        || Self::run_eval_job(job_config, job),
+                                        || match runtime_argv.as_deref() {
+                                            Some(args) => crate::Comptime::with_runtime_argv(
+                                                args,
+                                                || Self::run_eval_job(job_config, job),
+                                            ),
+                                            None => Self::run_eval_job(job_config, job),
+                                        },
                                     )
                                 })
                                 .expect("evaluator task worker");
@@ -4303,9 +4311,10 @@ fn run_program_with_structs_at_stage_and_cli(
     // worker on the reverted "2026" default, which picks the unchecked
     // `core.data` surface for a program sema typed as checked: `line_text` then
     // yields a plain `Str` that matches neither the `.Ok` nor the `.Err` arm and
-    // the arm table prints nothing. The comptime ambient hooks are the one piece
-    // of caller-established state the run reads, so they are carried explicitly.
+    // the arm table prints nothing. The comptime ambient hooks and runtime argv
+    // are caller-established state the run reads, so they are carried explicitly.
     let (ambient_core, ambient_handle, ambient_extern) = crate::Comptime::ambient_hooks();
+    let runtime_argv = crate::Comptime::runtime_argv();
     let edition = program.edition.clone();
     // D-FAIL-CTX1 / I9: the E3002 journey belongs to the program, not to
     // whichever thread the evaluator needed for stack room. `?` pushes its hop
@@ -4323,7 +4332,7 @@ fn run_program_with_structs_at_stage_and_cli(
             .name("jet-tir-eval".to_string())
             .stack_size(64 * 1024 * 1024)
             .spawn_scoped(scope, move || {
-                let outcome =
+                let run = || {
                     jet_foundation::PackageEdition::with_package_edition(&edition, || {
                         crate::Comptime::with_ambient(
                             ambient_core,
@@ -4345,7 +4354,12 @@ fn run_program_with_structs_at_stage_and_cli(
                                 )
                             },
                         )
-                    });
+                    })
+                };
+                let outcome = match runtime_argv.as_deref() {
+                    Some(args) => crate::Comptime::with_runtime_argv(args, run),
+                    None => run(),
+                };
                 (outcome, jet_foundation::Outcome::jet_journey_take_hops())
             })
             .expect("evaluator worker");

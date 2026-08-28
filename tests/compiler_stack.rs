@@ -78,7 +78,7 @@ fn split_edit(cell: Cell<Pair>) {
 fn make_edit_guards(cell: Cell<Pair>) (
     first: CellEditGuard<Int>,
     second: CellEditGuard<Int>
-) {
+) -> {
     return cell.guard_edit().split(
         pair -> pair.left,
         pair -> pair.right
@@ -170,6 +170,71 @@ fn run() {
     print(twice(21))
 }
 "#;
+
+const PACKAGE_EDITION_PROGRAM: &str = r#"
+use core.data as data
+
+#Codable
+struct Sale {
+    month: String
+    value: Float
+}
+
+fn run() {
+    rows :: data.csv<Sale>("month,value\nJan,4.0\nFeb,6.0") ?? panic("csv")
+    groups :: data.group_mean(rows, sale -> sale.month, sale -> sale.value) ?? panic("groups")
+    if groups.len() == 2 {
+        print("checked")
+    }
+    print("edition-sentinel")
+}
+"#;
+
+const PACKAGE_EDITION_MANIFEST: &str =
+    "name: \"tir_eval_edition\"\nversion: \"0.1.0\"\nedition: \"2027\"\nauthority: .{ holds: { allow: [IO, Mem.Alloc, Panic] } }\n";
+
+#[test]
+fn package_edition_survives_tir_eval_worker() {
+    let dir = common::unique_tmp("jet_compiler_stack_package_edition");
+    std::fs::create_dir_all(&dir).expect("create the fixture directory");
+    std::fs::write(dir.join("package.jet"), PACKAGE_EDITION_MANIFEST)
+        .expect("write the package manifest");
+    let file = dir.join("main.jet");
+    std::fs::write(&file, PACKAGE_EDITION_PROGRAM).expect("write the fixture");
+    let path = file.to_string_lossy().into_owned();
+
+    for (tier, outcome) in [
+        (
+            "forced interpreter",
+            jet::Interpreter::run_interpreter_once_with_args(&path, &[]),
+        ),
+        (
+            "default JIT",
+            jet::Interpreter::run_jit_once_with_args(&path, &[]),
+        ),
+    ] {
+        match outcome {
+            jet::Interpreter::RunOutcome::Ran {
+                exit_code,
+                stdout,
+                stderr,
+            } => {
+                assert_eq!(exit_code, 0, "{tier} must run: {stderr}");
+                assert!(stderr.is_empty(), "{tier} emitted diagnostics: {stderr}");
+                assert_eq!(
+                    stdout,
+                    "checked\nedition-sentinel\n",
+                    "{tier} lost the package edition"
+                );
+            }
+            jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                panic!("{tier} rejected the edition fixture: {diagnostics:?}");
+            }
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
 
 /// An embedder holding a checked bundle reaches the JIT without ever touching
 /// the driver's compile entries, so `CraneliftBackend::run` has to own the
@@ -270,7 +335,7 @@ fn the_compiler_boundary_never_nests_a_second_worker() {
 
 fn parenthesized_source(levels: usize) -> String {
     format!(
-        "fn nested() Int {{\n    return {}1{}\n}}\nfn run() {{ print(nested()) }}\n",
+        "fn nested() Int -> {{\n    return {}1{}\n}}\nfn run() {{ print(nested()) }}\n",
         "(".repeat(levels),
         ")".repeat(levels)
     )
@@ -318,6 +383,7 @@ fn tir_func(
         reactive_upgrades: Vec::new(),
         is_inline: false,
         is_inline_always: false,
+        is_scalar: false,
         kernel_proof: None,
         memo_field: None,
         body,

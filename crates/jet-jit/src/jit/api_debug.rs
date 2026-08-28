@@ -525,6 +525,10 @@ fn collect_if_cond_ops(cond: &TIfCond, out: &mut Vec<String>) {
         }
         TIfCond::IfLet { subj, .. } => collect_expr_ops(subj, out),
         TIfCond::IsNone { subj, .. } | TIfCond::Matches { subj, .. } => collect_expr_ops(subj, out),
+        TIfCond::WithPrelude { prelude, cond } => {
+            collect_stmt_ops(prelude, out);
+            collect_if_cond_ops(cond, out);
+        }
     }
 }
 

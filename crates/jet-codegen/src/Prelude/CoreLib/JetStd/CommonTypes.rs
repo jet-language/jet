@@ -1735,6 +1735,7 @@
         JET_INT_BIG_VALUES.get_or_init(|| std::sync::Mutex::new(Vec::new()))
     }
 
+    #[inline(always)]
     fn jet_int_is_tagged(value: i64) -> bool {
         value < JET_INT_SMALL_MIN
     }
@@ -1855,6 +1856,7 @@
         jet_int_value(value).bit_count(width, method).unwrap_or(0)
     }
 
+    #[inline(always)]
     pub fn jet_int_compare(left: i64, right: i64) -> i64 {
         if !jet_int_is_tagged(left) && !jet_int_is_tagged(right) {
             return match left.cmp(&right) {
@@ -1863,6 +1865,12 @@
                 std::cmp::Ordering::Greater => 1,
             };
         }
+        jet_int_compare_slow(left, right)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn jet_int_compare_slow(left: i64, right: i64) -> i64 {
         match jet_int_value(left).compare(&jet_int_value(right)) {
             std::cmp::Ordering::Less => -1,
             std::cmp::Ordering::Equal => 0,
@@ -1870,6 +1878,9 @@
         }
     }
 
+    /// Hot default-Int path. Keep promotion/overflow handling in a cold
+    /// helper so tight loops see two tag tests and one checked machine op.
+    #[inline(always)]
     pub fn jet_int_add(left: i64, right: i64) -> i64 {
         if !jet_int_is_tagged(left) && !jet_int_is_tagged(right) {
             if let Some(value) = left.checked_add(right) {
@@ -1878,9 +1889,16 @@
                 }
             }
         }
+        jet_int_add_slow(left, right)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn jet_int_add_slow(left: i64, right: i64) -> i64 {
         jet_int_pack(jet_int_value(left).add(&jet_int_value(right)))
     }
 
+    #[inline(always)]
     pub fn jet_int_sub(left: i64, right: i64) -> i64 {
         if !jet_int_is_tagged(left) && !jet_int_is_tagged(right) {
             if let Some(value) = left.checked_sub(right) {
@@ -1889,9 +1907,16 @@
                 }
             }
         }
+        jet_int_sub_slow(left, right)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn jet_int_sub_slow(left: i64, right: i64) -> i64 {
         jet_int_pack(jet_int_value(left).sub(&jet_int_value(right)))
     }
 
+    #[inline(always)]
     pub fn jet_int_mul(left: i64, right: i64) -> i64 {
         if !jet_int_is_tagged(left) && !jet_int_is_tagged(right) {
             if let Some(value) = left.checked_mul(right) {
@@ -1900,6 +1925,12 @@
                 }
             }
         }
+        jet_int_mul_slow(left, right)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn jet_int_mul_slow(left: i64, right: i64) -> i64 {
         jet_int_pack(jet_int_value(left).mul(&jet_int_value(right)))
     }
 
@@ -1915,6 +1946,7 @@
         jet_int_pack(jet_int_value(left).bit_xor(&jet_int_value(right)))
     }
 
+    #[inline(always)]
     pub fn jet_int_neg(value: i64) -> i64 {
         if !jet_int_is_tagged(value) {
             if let Some(value) = value.checked_neg() {
@@ -1923,6 +1955,12 @@
                 }
             }
         }
+        jet_int_neg_slow(value)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn jet_int_neg_slow(value: i64) -> i64 {
         jet_int_pack(jet_int_value(value).neg())
     }
 

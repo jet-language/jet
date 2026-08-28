@@ -1,7 +1,8 @@
 use super::{
     admission_reservation, admission_size, ensure_hangar_capacity, fsync_tree,
     make_tree_writable_for_removal, recover_seals, remove_seal, seal_node, sync_store_directory,
-    write_seal, Closure, Ingest, Roots, StoreEntry, OBJECTS_DIR, PARTIAL_SUFFIX, STAGE_DIR,
+    write_seal, Closure, Ingest, Receipt, Roots, StoreEntry, OBJECTS_DIR, PARTIAL_SUFFIX,
+    STAGE_DIR,
 };
 use crate::SHA256;
 use std::collections::BTreeSet;
@@ -220,7 +221,7 @@ impl<'a> AdmissionTransaction<'a> {
             }
         }
         for entry in entries.iter_mut() {
-            if Closure::prepare_entry_receipt_with_status(self.roots, entry)? {
+            if Receipt::prepare_entry_receipt_with_status(self.roots, entry)? {
                 self.receipts.push(
                     self.roots
                         .hangar_dir()

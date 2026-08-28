@@ -6,7 +6,7 @@
 //! point; this module only renders wrappers and deterministic foreign text.
 
 use crate::AST::{AccessConvention, ProgramBundle};
-use jet_foundation::Names::mangle;
+use jet_foundation::Names::{mangle, mangle_generated};
 
 /// Library compatibility name for the shared embedding scalar table.
 pub use super::Embedding::ExportScalar as LibraryScalar;
@@ -95,7 +95,10 @@ pub fn emit_library(
                     .then_some("mut ")
                     .unwrap_or_default();
                 if export.scalar == LibraryScalar::Text {
-                    format!("let {mutable}p{index} = __jet_library_read_text(p{index});")
+                    format!(
+                        "let {mutable}p{index} = {}(p{index});",
+                        mangle_generated("library_read_text")
+                    )
                 } else if matches!(convention, AccessConvention::Write) {
                     format!("let mut p{index} = p{index};")
                 } else {
@@ -121,7 +124,11 @@ pub fn emit_library(
         };
         let call = format!("{callee}({})", args.join(", "));
         let body = if export.scalar == LibraryScalar::Text {
-            format!("{} __jet_library_return_text({call})", locals.join(" "))
+            format!(
+                "{} {}({call})",
+                locals.join(" "),
+                mangle_generated("library_return_text")
+            )
         } else if !locals.is_empty() {
             format!("{} {call}", locals.join(" "))
         } else {
@@ -140,7 +147,7 @@ pub fn emit_library(
     rust.push_str("\n// D-LIB-EXPORT1=C: generated native Library wrappers.\n");
     if has_text_export {
         rust.push_str("// JET_VETTED_UNSAFE_BEGIN: library_text_abi\n");
-        rust.push_str(LIBRARY_TEXT_HELPERS);
+        rust.push_str(&library_text_helpers());
         rust.push_str("\n// JET_VETTED_UNSAFE_END: library_text_abi\n");
     }
     rust.push_str(&wrappers);
@@ -292,6 +299,16 @@ fn render_swift(exports: &[LibraryExport]) -> String {
     out
 }
 
+fn library_text_helpers() -> String {
+    let read_text = mangle_generated("library_read_text");
+    let return_text = mangle_generated("library_return_text");
+    let text_free = mangle_generated("library_text_free");
+    LIBRARY_TEXT_HELPERS
+        .replace("JET_LIBRARY_READ_TEXT", &read_text)
+        .replace("JET_LIBRARY_RETURN_TEXT", &return_text)
+        .replace("JET_LIBRARY_TEXT_FREE", &text_free)
+}
+
 const LIBRARY_TEXT_HELPERS: &str = r#"
 #[repr(C)]
 pub struct JetText {
@@ -299,14 +316,14 @@ pub struct JetText {
     pub len: usize,
 }
 
-fn __jet_library_read_text(value: JetText) -> String {
+fn JET_LIBRARY_READ_TEXT(value: JetText) -> String {
     if value.ptr.is_null() || value.len == 0 {
         return String::new();
     }
     unsafe { String::from_utf8_lossy(std::slice::from_raw_parts(value.ptr, value.len)).into_owned() }
 }
 
-fn __jet_library_return_text(value: String) -> JetText {
+fn JET_LIBRARY_RETURN_TEXT(value: String) -> JetText {
     let bytes = value.into_bytes();
     if bytes.is_empty() {
         return JetText { ptr: std::ptr::null(), len: 0 };
@@ -317,7 +334,7 @@ fn __jet_library_return_text(value: String) -> JetText {
 }
 
 #[export_name = "jet_text_free"]
-pub extern "C" fn __jet_library_text_free(value: JetText) {
+pub extern "C" fn JET_LIBRARY_TEXT_FREE(value: JetText) {
     if value.ptr.is_null() || value.len == 0 {
         return;
     }

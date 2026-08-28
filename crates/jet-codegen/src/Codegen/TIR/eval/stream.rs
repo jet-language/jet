@@ -55,6 +55,12 @@ pub(super) fn eval(
         THandleOp::ReaderReadU64Be => read(recv, span, |r| {
             kernel::jet_reader_read_u64_be(r).map(|v| v as i64)
         }),
+        THandleOp::ReaderReadF32Le => read_float(recv, span, |r| {
+            kernel::jet_reader_read_f32_le(r).map(CtFloat::f32)
+        }),
+        THandleOp::ReaderReadF64Le => read_float(recv, span, |r| {
+            kernel::jet_reader_read_f64_le(r).map(CtFloat::f64)
+        }),
         THandleOp::ReaderTake => {
             let CtValue::Int(n) = arg(args, 0, span)? else {
                 return Err(unsupported("Reader.take length", span));
@@ -212,6 +218,14 @@ fn read(
     call: impl FnOnce(&mut kernel::JetReader) -> Result<i64, String>,
 ) -> Result<CtValue, Diagnostic> {
     with_reader(recv, span, |r| call(r).map(CtValue::Int))
+}
+
+fn read_float(
+    recv: &mut CtValue,
+    span: Span,
+    call: impl FnOnce(&mut kernel::JetReader) -> Result<CtFloat, String>,
+) -> Result<CtValue, Diagnostic> {
+    with_reader(recv, span, |r| call(r).map(CtValue::Float))
 }
 
 fn with_reader(

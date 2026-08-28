@@ -284,7 +284,8 @@ fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std::IOError> 
             "fault injected: FS.Read",
         ));
     }
-    let f = std::fs::File::open(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
+    let f = jet_fs_open(path)
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     Ok(JetFileReader {
         inner: std::io::BufReader::new(f),
         path: path.clone(),

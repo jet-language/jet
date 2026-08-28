@@ -1273,10 +1273,12 @@ fn jet_trace_err_note<T, E, F: FnOnce() -> String>(
 
 // D-FIXARR1: index/unpack/slice helpers accept `&[T]` so that both growable
 // `Vec<T>` and fixed-size `[T; N]` stack arrays coerce in without `.to_vec()`.
+#[inline(always)]
 fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {
     jet_fixed_list_index(xs.len(), i, |index| xs[index].clone())
         .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
 }
+#[inline(always)]
 fn jet_index_vec_mut<'a, T>(
     xs: &'a mut [T],
     i: i64,
@@ -1577,6 +1579,16 @@ impl<K: Ord + Clone, V: Clone> std::ops::DerefMut for JetMap<K, V> {
     }
 }
 
+/// Borrow map storage once for a proven unique mutation region. The caller
+/// keeps the returned borrow inside that region; ordinary `JetMap` mutation
+/// retains copy-on-write semantics everywhere else.
+#[inline(always)]
+fn jet_map_make_mut<K: Ord + Clone, V: Clone>(
+    m: &mut JetMap<K, V>,
+) -> &mut std::collections::BTreeMap<K, V> {
+    std::sync::Arc::make_mut(&mut m.0)
+}
+
 impl<'a, K: Ord, V> IntoIterator for &'a JetMap<K, V> {
     type Item = (&'a K, &'a V);
     type IntoIter = std::collections::btree_map::Iter<'a, K, V>;
@@ -1607,8 +1619,8 @@ enum JetRemoveBy {
     Slot,
 }
 
-fn jet_index_map<K: Ord + Clone + JetShow, V: Clone>(
-    m: &JetMap<K, V>,
+fn jet_index_map<M, K: Ord + Clone + JetShow, V: Clone>(
+    m: &M,
     k: &K,
     file: &str,
     line: u32,
@@ -1616,7 +1628,10 @@ fn jet_index_map<K: Ord + Clone + JetShow, V: Clone>(
     src_line: &str,
     col: u32,
     caret_len: u32,
-) -> V {
+) -> V
+where
+    M: std::ops::Deref<Target = std::collections::BTreeMap<K, V>>,
+{
     match m.get(k) {
         Some(v) => v.clone(),
         None => jet_panic_rich(
@@ -1631,7 +1646,39 @@ fn jet_index_map<K: Ord + Clone + JetShow, V: Clone>(
         ),
     }
 }
-fn jet_map_insert<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>, k: K, v: V) {
+
+fn jet_index_map_mut<'a, M, K: Ord + Clone + JetShow + 'a, V: Clone>(
+    m: &'a mut M,
+    k: K,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    col: u32,
+    caret_len: u32,
+) -> &'a mut V
+where
+    M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
+{
+    match m.get_mut(&k) {
+        Some(value) => value,
+        None => jet_panic_rich(
+            file,
+            line,
+            fn_name,
+            src_line,
+            col,
+            caret_len,
+            &jet_missing_map_key_value(k.jet_show()),
+            "",
+        ),
+    }
+}
+#[inline(always)]
+fn jet_map_insert<M, K: Ord + Clone, V: Clone>(m: &mut M, k: K, v: V)
+where
+    M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
+{
     m.insert(k, v);
 }
 

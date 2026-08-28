@@ -17,6 +17,10 @@ use jet_codegen::AST::{CtKey, CtReport, CtValue, Type};
 pub use jet_foundation::Outcome::*;
 use std::cell::RefCell;
 
+mod fs_ops_kernel {
+    include!("../../../jet-codegen/src/Prelude/Core/FSOps.rs");
+}
+
 /// Canonical stream runtime (jet_std types + EncodingStream algorithm).
 #[allow(dead_code, unused_imports, unused_variables, clippy::all)]
 pub(crate) mod runtime {
@@ -2111,7 +2115,7 @@ pub(crate) fn jet_jit_fs_open(path: i64) -> i64 {
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {p}"));
     }
-    match std::fs::File::open(&p) {
+    match fs_ops_kernel::jet_fs_open(&p) {
         Ok(f) => {
             let r = runtime::JetFileReader {
                 inner: std::io::BufReader::new(f),

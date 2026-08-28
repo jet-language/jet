@@ -785,6 +785,9 @@ fn plain_string_value(parts: &[StrTokPart]) -> Option<String> {
     for part in parts {
         match part {
             StrTokPart::Lit(text) => value.push_str(text),
+            // D-BYTELIT1=B: a raw `\xNN` byte is not plain text; callers that
+            // need a plain string must not fold byte literals.
+            StrTokPart::Byte(_) => return None,
             StrTokPart::Interp(_) => return None,
         }
     }

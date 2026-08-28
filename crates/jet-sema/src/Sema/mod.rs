@@ -101,6 +101,20 @@ impl MethodSig {
     }
 }
 
+/// Select the return contract used while checking a function body. Ordinary
+/// Jet callables use the shared failure carrier; compiler-synthesized trait
+/// protocol methods keep the raw return ABI declared by their trait bridge.
+pub(crate) fn checked_body_return_type(
+    function: &Func,
+    raw_protocol_return: bool,
+) -> Option<Type> {
+    if raw_protocol_return || function.name.starts_with("__errconv_") {
+        function.return_type.clone()
+    } else {
+        Some(function.effective_return_type())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum TypeDef {
     Struct {
@@ -1744,6 +1758,13 @@ pub(crate) struct Checker<'a> {
     /// propagation explicitly. Do not apply source-level transparent failure
     /// propagation to those synthetic ASTs.
     compiler_generated: bool,
+    /// Compiler-generated trait protocol bodies implement a raw Rust ABI. This
+    /// is distinct from `compiler_generated`: policy wrappers and validation
+    /// builders remain ordinary Jet callables with the shared failure carrier.
+    raw_protocol_return: bool,
+    /// Source-declared return type. The checker keeps `ret` as the effective
+    /// failure carrier, while generator checks use this declaration directly.
+    declared_return_type: Option<Type>,
     /// Canonical caller-visible parameter order; excludes `self`.
     current_param_names: Vec<String>,
     /// Compiler-private names in inserted defaults resolve to their declaration

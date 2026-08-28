@@ -1632,6 +1632,7 @@ impl<'a> Fmt<'a> {
                     crate::AST::TypedLitBody::Fields(fields) => fields.len(),
                     crate::AST::TypedLitBody::Elements(elems) => elems.len(),
                     crate::AST::TypedLitBody::Entries(entries) => entries.len(),
+                    crate::AST::TypedLitBody::ByteText(_) => 1,
                     _ => 0,
                 };
                 if multiline {
@@ -1724,6 +1725,9 @@ impl<'a> Fmt<'a> {
                         if multiline {
                             self.emit_trailing(expr.span().end);
                         }
+                    }
+                    crate::AST::TypedLitBody::ByteText(parts) => {
+                        self.fmt_byte_text_parts(parts);
                     }
                 }
                 if multiline {
@@ -2389,6 +2393,22 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    /// D-BYTELIT1=B: retain byte escapes in the canonical `[U8]{"..."}`
+    /// source form. Ordinary ASCII text uses the normal string escape table;
+    /// explicit bytes never pass through Unicode text formatting.
+    fn fmt_byte_text_parts(&mut self, parts: &[crate::AST::ByteTextPart]) {
+        self.write("\"");
+        for part in parts {
+            match part {
+                crate::AST::ByteTextPart::Lit(text) => self.write(&escape_str_lit(text)),
+                crate::AST::ByteTextPart::Byte(byte) => {
+                    self.write(&format!("\\x{byte:02X}"));
+                }
+            }
+        }
+        self.write("\"");
+    }
+
     /// D-BINPAT1 / D-UNIFYLIT1=A: render a `BinMatchPart` list as `[U8]{"…"}`.
     pub(super) fn fmt_bin_match_parts(&mut self, parts: &[crate::AST::BinMatchPart]) {
         use crate::AST::{BinEndian, BinMatchPart, BinSpec};
@@ -2396,7 +2416,7 @@ impl<'a> Fmt<'a> {
         for part in parts {
             match part {
                 BinMatchPart::Lit(bytes) => {
-                    self.write(&escape_typed_head_lit(&String::from_utf8_lossy(bytes)));
+                    self.write(&escape_binary_lit(bytes));
                 }
                 BinMatchPart::Hole { name, spec, .. } => {
                     self.write("{");
@@ -2844,6 +2864,18 @@ impl<'a> Fmt<'a> {
                 self.write(&precision.to_string());
                 self.write(")");
             }
+            crate::AST::StrFormat::Hex(width) => {
+                self.write(crate::Syntax::INTERPOLATION_SELECTOR_RAIL);
+                self.write(
+                    crate::Syntax::interpolation_selector_for_kind(
+                        crate::Syntax::InterpolationSelectorKind::Hex,
+                    )
+                    .name,
+                );
+                self.write("(");
+                self.write(&width.to_string());
+                self.write(")");
+            }
             crate::AST::StrFormat::Unit(style) => {
                 let selector = crate::Syntax::interpolation_selector_for_kind(
                     crate::Syntax::InterpolationSelectorKind::Unit,
@@ -2926,6 +2958,25 @@ fn escape_typed_head_lit(s: &str) -> String {
                 out.push(ch);
             }
             ch => out.push(ch),
+        }
+    }
+    out
+}
+
+fn escape_binary_lit(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    for byte in bytes {
+        match *byte {
+            b'"' => out.push_str("\\\""),
+            b'\\' => out.push_str("\\\\"),
+            b'\n' => out.push_str("\\n"),
+            b'\t' => out.push_str("\\t"),
+            b'{' | b'}' => {
+                out.push(*byte as char);
+                out.push(*byte as char);
+            }
+            b' '..=b'~' => out.push(*byte as char),
+            byte => out.push_str(&format!("\\x{byte:02X}")),
         }
     }
     out

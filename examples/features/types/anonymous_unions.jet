@@ -6,18 +6,21 @@ enum Payload {
 }
 
 fn describe(value: Int | String) String -> {
-    return if value == {
-        .Int(n) -> "n={n}"
-        .String(s) -> "s={s}"
+    copied :: ~value
+    if copied == {
+        .Int(n) -> { return "n={n}" }
+        .String(s) -> { return "s={s}" }
     }
+    return "unknown"
 }
 
 fn take_number(n: Int | String) String -> describe(n)
 
 fn as_named(value: Int | String) Payload -> {
-    return if value == {
-        .Int(n) -> .Count(n)
-        .String(s) -> .Name(s)
+    copied :: ~value
+    if copied == {
+        .Int(n) -> { return .Count(n) }
+        .String(s) -> { return .Name(s) }
     }
 }
 
@@ -40,11 +43,13 @@ fn run() {
     print(take_number("hi"))
     mixed :: hold(3)
     print(describe(mixed))
-    print(describe(from_named(as_named("x"))))
+    named :: as_named("x")
+    value :: from_named(named)
+    print(describe(value))
     packed :: Box{value: 9}
     boxed :: packed.value
     if boxed == {
-        .Int(n) -> { print("box={n}") }
-        .String(s) -> { print("box={s}") }
+        .Int(n) -> { print("box={n}"); 0 }
+        .String(s) -> { print("box={s}"); 0 }
     }
 }

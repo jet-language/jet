@@ -466,6 +466,7 @@ fn check_func_body_incremental(
     states: &[ModuleState],
     effect_facts: &jet_foundation::Facts::FactRegistry,
     owner_type: Option<&str>,
+    raw_protocol_return: bool,
     ct_funcs: &HashMap<String, Func>,
     ct_externs: &HashSet<String>,
     ct_base_dir: &std::path::Path,
@@ -492,6 +493,7 @@ fn check_func_body_incremental(
             states,
             effect_facts,
             owner_type,
+            raw_protocol_return,
             ct_funcs,
             ct_externs,
             ct_base_dir,
@@ -513,6 +515,7 @@ fn check_func_body_incremental(
             states,
             effect_facts,
             owner_type,
+            raw_protocol_return,
             ct_funcs,
             ct_externs,
             ct_base_dir,
@@ -533,7 +536,8 @@ fn check_func_body_incremental(
     // this recursive Debug form only when the caller can actually use the
     // cache: deep fluent expressions can exceed the ordinary test-thread stack,
     // and disabled-cache checks have no fingerprint consumer.
-    let input = format!("{function:?}").into_bytes();
+    let mut input = format!("{function:?}").into_bytes();
+    input.push(if raw_protocol_return { 1 } else { 0 });
     if let Some(hit) = cache.get(&key, &input) {
         if hit.uses_exact_int {
             states[module_idx].exact_int_reachable.set(true);
@@ -559,6 +563,7 @@ fn check_func_body_incremental(
         states,
         effect_facts,
         owner_type,
+        raw_protocol_return,
         ct_funcs,
         ct_externs,
         ct_base_dir,
@@ -865,6 +870,7 @@ pub(crate) fn check_module_bodies(
         key: String,
         owner: Option<String>,
         trait_name: Option<String>,
+        raw_protocol_return: bool,
         function: Func,
     }
     let mut view_jobs = Vec::new();
@@ -874,6 +880,7 @@ pub(crate) fn check_module_bodies(
                 key: function.name.clone(),
                 owner: None,
                 trait_name: None,
+                raw_protocol_return: false,
                 function: function.clone(),
             }),
             Item::Struct(definition) => {
@@ -882,6 +889,7 @@ pub(crate) fn check_module_bodies(
                         key: format!("{}::{}", definition.name, function.name),
                         owner: Some(definition.name.clone()),
                         trait_name: None,
+                        raw_protocol_return: false,
                         function: function.clone(),
                     });
                 }
@@ -894,6 +902,8 @@ pub(crate) fn check_module_bodies(
                             ),
                             owner: Some(definition.name.clone()),
                             trait_name: Some(implementation.trait_name.clone()),
+                            raw_protocol_return:
+                                implementation.compiler_generated && function.compiler_generated,
                             function: function.clone(),
                         });
                     }
@@ -905,6 +915,7 @@ pub(crate) fn check_module_bodies(
                         key: format!("{}::{}", definition.name, function.name),
                         owner: Some(definition.name.clone()),
                         trait_name: None,
+                        raw_protocol_return: false,
                         function: function.clone(),
                     });
                 }
@@ -917,6 +928,8 @@ pub(crate) fn check_module_bodies(
                             ),
                             owner: Some(definition.name.clone()),
                             trait_name: Some(implementation.trait_name.clone()),
+                            raw_protocol_return:
+                                implementation.compiler_generated && function.compiler_generated,
                             function: function.clone(),
                         });
                     }
@@ -933,6 +946,8 @@ pub(crate) fn check_module_bodies(
                         ),
                         owner: Some(implementation.type_name.clone()),
                         trait_name: implementation.trait_name.clone(),
+                        raw_protocol_return:
+                            implementation.trait_name.is_some() && function.compiler_generated,
                         function: function.clone(),
                     });
                 }
@@ -1028,6 +1043,7 @@ pub(crate) fn check_module_bodies(
                 states,
                 effect_facts,
                 job.owner.as_deref(),
+                job.raw_protocol_return,
                 &ct_funcs,
                 &ct_externs,
                 &ct_base_dir,
@@ -1111,6 +1127,7 @@ pub(crate) fn check_module_bodies(
                     states,
                     effect_facts,
                     None,
+                    false,
                     &ct_funcs,
                     &ct_externs,
                     &ct_base_dir,
@@ -1140,6 +1157,7 @@ pub(crate) fn check_module_bodies(
                         states,
                         effect_facts,
                         Some(&s.name),
+                        false,
                         &ct_funcs,
                         &ct_externs,
                         &ct_base_dir,
@@ -1182,6 +1200,7 @@ pub(crate) fn check_module_bodies(
                                 states,
                                 effect_facts,
                                 Some(&s.name),
+                                block.compiler_generated && m.compiler_generated,
                                 &ct_funcs,
                                 &ct_externs,
                                 &ct_base_dir,
@@ -1225,6 +1244,7 @@ pub(crate) fn check_module_bodies(
                         states,
                         effect_facts,
                         Some(&e.name),
+                        false,
                         &ct_funcs,
                         &ct_externs,
                         &ct_base_dir,
@@ -1262,6 +1282,7 @@ pub(crate) fn check_module_bodies(
                                 states,
                                 effect_facts,
                                 Some(&e.name),
+                                block.compiler_generated && m.compiler_generated,
                                 &ct_funcs,
                                 &ct_externs,
                                 &ct_base_dir,
@@ -1326,6 +1347,7 @@ pub(crate) fn check_module_bodies(
                         states,
                         effect_facts,
                         Some(&i.type_name),
+                        i.trait_name.is_some() && m.compiler_generated,
                         &ct_funcs,
                         &ct_externs,
                         &ct_base_dir,
@@ -1415,6 +1437,7 @@ pub(crate) fn check_module_bodies(
                     states,
                     effect_facts,
                     None,
+                    false,
                     &ct_funcs,
                     &ct_externs,
                     &ct_base_dir,
@@ -1450,6 +1473,7 @@ pub(crate) fn check_module_bodies(
                                     states,
                                     effect_facts,
                                     None,
+                                    false,
                                     &ct_funcs,
                                     &ct_externs,
                                     &ct_base_dir,
@@ -1567,6 +1591,7 @@ pub(crate) fn check_module_bodies(
                     states,
                     effect_facts,
                     Some(&ec.from_ty),
+                    false,
                     &ct_funcs,
                     &ct_externs,
                     &ct_base_dir,
@@ -1773,6 +1798,7 @@ pub(crate) fn check_module_bodies(
                 states,
                 effect_facts,
                 None,
+                false,
                 &ct_funcs,
                 &ct_externs,
                 &ct_base_dir,
@@ -1823,6 +1849,7 @@ fn check_func_body_bundle_with_usage(
     states: &[ModuleState],
     effect_facts: &jet_foundation::Facts::FactRegistry,
     owner_type: Option<&str>,
+    raw_protocol_return: bool,
     ct_funcs: &HashMap<String, Func>,
     ct_externs: &HashSet<String>,
     ct_base_dir: &std::path::Path,
@@ -1843,6 +1870,7 @@ fn check_func_body_bundle_with_usage(
         states,
         effect_facts,
         owner_type,
+        raw_protocol_return,
         ct_funcs,
         ct_externs,
         ct_base_dir,
@@ -1866,6 +1894,7 @@ pub(crate) fn check_func_body_bundle(
     states: &[ModuleState],
     effect_facts: &jet_foundation::Facts::FactRegistry,
     owner_type: Option<&str>,
+    raw_protocol_return: bool,
     ct_funcs: &HashMap<String, Func>,
     ct_externs: &HashSet<String>,
     ct_base_dir: &std::path::Path,
@@ -1885,6 +1914,7 @@ pub(crate) fn check_func_body_bundle(
         states,
         effect_facts,
         owner_type,
+        raw_protocol_return,
         ct_funcs,
         ct_externs,
         ct_base_dir,
@@ -1908,6 +1938,7 @@ fn check_func_body_bundle_scoped(
     states: &[ModuleState],
     effect_facts: &jet_foundation::Facts::FactRegistry,
     owner_type: Option<&str>,
+    raw_protocol_return: bool,
     ct_funcs: &HashMap<String, Func>,
     ct_externs: &HashSet<String>,
     ct_base_dir: &std::path::Path,
@@ -2047,16 +2078,13 @@ fn check_func_body_bundle_scoped(
         fallback_is_shape_miss: false,
         in_comptime: false,
         compiler_api_allowed: st.allow_compiler_api && super::is_build_entry(f),
-        // Error-conversion bodies are checked as ordinary Rust-shaped helper
-        // functions, not as public Jet callables. Every other callable uses
-        // the one shared Result carrier, including an omitted return type.
-        ret: if f.name.starts_with("__errconv_") {
-            f.return_type.clone()
-        } else {
-            Some(f.effective_return_type())
-        },
+        // Raw generated trait protocols and error-conversion bodies retain
+        // their declared return ABI; ordinary callables use the shared carrier.
+        ret: crate::Sema::checked_body_return_type(f, raw_protocol_return),
         fn_name: f.name.clone(),
         compiler_generated: f.compiler_generated,
+        raw_protocol_return,
+        declared_return_type: f.return_type.clone(),
         current_param_names: f
             .params
             .iter()

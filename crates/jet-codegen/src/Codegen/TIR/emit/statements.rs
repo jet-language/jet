@@ -18,6 +18,7 @@ use crate::Codegen::TIR::TIfCond;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::{TExpr, TExprKind, TOrFallback, TBuiltinOp};
 use crate::AST::BinOp;
 use crate::AST::Type;
 
@@ -26,6 +27,218 @@ use crate::AST::Type;
 /// `rust_spell` would mean one of those slipped past that branch.
 pub(crate) const PRELUDE_CARRIED: &str =
     "this operator has no Rust spelling and is emitted as a Prelude call";
+
+/// A mutable map local can be shadowed by its unique storage borrow for one
+/// loop. Keep this gate deliberately conservative: only direct map mutation
+/// and ordinary map reads are admitted, and every other use must remain
+/// representable through `&mut BTreeMap`. This makes ownership the proof
+/// boundary instead of recognizing benchmark names or loop shapes.
+fn map_root_local(expr: &TExpr) -> Option<TLocal> {
+    match &expr.kind {
+        TExprKind::Local(local)
+            if local.mutable
+                && !local.deref
+                && !local.is_persistent()
+                && matches!(expr.ty, Type::Map { .. }) =>
+        {
+            Some(local.clone())
+        }
+        _ => None,
+    }
+}
+
+fn same_local(left: &TLocal, right: &TLocal) -> bool {
+    left.rust_name() == right.rust_name() && left.deref == right.deref
+}
+
+fn map_alias_method_allowed(op: &TBuiltinOp) -> bool {
+    matches!(
+        op,
+        TBuiltinOp::GetMap
+            | TBuiltinOp::LenList
+            | TBuiltinOp::IsEmpty
+            | TBuiltinOp::ContainsKey
+            | TBuiltinOp::TryInsertMap
+            | TBuiltinOp::InsertMap
+            | TBuiltinOp::AddNewMap
+            | TBuiltinOp::RemoveMap
+            | TBuiltinOp::Clear
+    )
+}
+
+/// Whether expression can run while map local is shadowed by `&mut BTreeMap`.
+/// Unknown expression forms reject hoisting; omission costs optimization, never
+/// safety or generated-code validity.
+fn map_alias_expr_safe(expr: &TExpr, root: &TLocal) -> bool {
+    match &expr.kind {
+        TExprKind::IntLit(..)
+        | TExprKind::FloatLit(..)
+        | TExprKind::BoolLit(..)
+        | TExprKind::CharLit(..)
+        | TExprKind::Unit
+        | TExprKind::DefaultLit
+        | TExprKind::Uninit
+        | TExprKind::CtLit(..)
+        | TExprKind::ConstRef(..)
+        | TExprKind::Absent => true,
+        // A deref slot may be a live borrow into storage owned elsewhere. It
+        // is not needed by the witness path, so reject it at this proof
+        // boundary instead of guessing that the borrow cannot reach `root`.
+        TExprKind::Local(local) => !local.deref && !same_local(local, root),
+        TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
+            crate::Codegen::TIR::TStrPart::Lit(_) => true,
+            crate::Codegen::TIR::TStrPart::Interp(value, _) => {
+                map_alias_expr_safe(value, root)
+            }
+        }),
+        TExprKind::Binary { lhs, rhs, .. } => {
+            map_alias_expr_safe(lhs, root) && map_alias_expr_safe(rhs, root)
+        }
+        TExprKind::Unary { operand, .. }
+        | TExprKind::Clone(operand)
+        | TExprKind::ExplicitCopy(operand)
+        | TExprKind::MaterializeView(operand)
+        | TExprKind::Present(operand)
+        | TExprKind::Ok(operand)
+        | TExprKind::Err(operand)
+        | TExprKind::DistinctRaw(operand)
+        | TExprKind::Print(operand)
+        | TExprKind::Drop(operand)
+        | TExprKind::Close(operand)
+        | TExprKind::ResourceNew(operand)
+        | TExprKind::Deref(operand)
+        | TExprKind::RawOf(operand) => map_alias_expr_safe(operand, root),
+        TExprKind::OrFallback { value, fallback } => {
+            map_alias_expr_safe(value, root)
+                && match fallback {
+                    TOrFallback::Value(value) => map_alias_expr_safe(value, root),
+                    TOrFallback::Break
+                    | TOrFallback::Continue
+                    | TOrFallback::BreakLabel(_)
+                    | TOrFallback::ContinueLabel(_) => true,
+                    TOrFallback::Return(_) | TOrFallback::Panic { .. } => false,
+                }
+        }
+        TExprKind::BuiltinMethod { recv, op, args } => {
+            if let Some(local) = map_root_local(recv) {
+                same_local(&local, root)
+                    && map_alias_method_allowed(op)
+                    && args.iter().all(|arg| map_alias_expr_safe(arg, root))
+            } else {
+                map_alias_expr_safe(recv, root)
+                    && args.iter().all(|arg| map_alias_expr_safe(arg, root))
+            }
+        }
+        TExprKind::Index {
+            base,
+            index,
+            is_map,
+            ..
+        } => {
+            if let Some(local) = map_root_local(base) {
+                same_local(&local, root) && *is_map && map_alias_expr_safe(index, root)
+            } else {
+                map_alias_expr_safe(base, root) && map_alias_expr_safe(index, root)
+            }
+        }
+        TExprKind::MapLit(entries) => entries.iter().all(|(key, value)| {
+            map_alias_expr_safe(key, root) && map_alias_expr_safe(value, root)
+        }),
+        TExprKind::ListLit(items) => items.iter().all(|item| map_alias_expr_safe(item, root)),
+        TExprKind::TupleLit { fields, .. } => fields
+            .iter()
+            .all(|(_, value)| map_alias_expr_safe(value, root)),
+        TExprKind::Call { args, .. } => args
+            .iter()
+            .all(|arg| map_alias_expr_safe(&arg.value, root)),
+        _ => false,
+    }
+}
+
+fn direct_map_mutation_root(expr: &TExpr) -> Option<TLocal> {
+    match &expr.kind {
+        TExprKind::BuiltinMethod { recv, op, .. }
+            if matches!(
+                op,
+                TBuiltinOp::TryInsertMap
+                    | TBuiltinOp::InsertMap
+                    | TBuiltinOp::AddNewMap
+                    | TBuiltinOp::RemoveMap
+                    | TBuiltinOp::Clear
+            ) => map_root_local(recv),
+        _ => None,
+    }
+}
+
+fn map_alias_stmt_safe(stmt: &TStmt, root: &TLocal) -> bool {
+    match stmt {
+        TStmt::SourceSpan(_) | TStmt::LineMarker(_) | TStmt::Break(_) | TStmt::Continue(_) => true,
+        // A nested binding can shadow the root's Rust spelling. The TIR local
+        // identity is intentionally name-based, so keep this proof boundary
+        // closed unless the whole loop body has no declarations.
+        TStmt::Let { .. } => false,
+        TStmt::ExprStmt(init) => map_alias_expr_safe(init, root),
+        TStmt::Assign { place, value, .. } => {
+            let place_safe = match place {
+                TPlace::Local(local) => !local.deref && !same_local(local, root),
+                TPlace::Expr(expr) => map_alias_expr_safe(expr, root),
+            };
+            place_safe && map_alias_expr_safe(value, root)
+        }
+        TStmt::IndexAssign {
+            base,
+            index,
+            is_map,
+            value,
+            ..
+        } => {
+            if let Some(local) = map_root_local(base) {
+                same_local(&local, root)
+                    && *is_map
+                    && map_alias_expr_safe(index, root)
+                    && map_alias_expr_safe(value, root)
+            } else {
+                map_alias_expr_safe(base, root)
+                    && map_alias_expr_safe(index, root)
+                    && map_alias_expr_safe(value, root)
+            }
+        }
+        _ => false,
+    }
+}
+
+fn map_hoist_root(
+    source: &TExpr,
+    collection: &TExpr,
+    step: Option<&TExpr>,
+    body: &[TStmt],
+) -> Option<TLocal> {
+    let mut root = None;
+    for stmt in body {
+        let candidate = match stmt {
+            TStmt::IndexAssign { base, is_map, .. } if *is_map => map_root_local(base),
+            TStmt::ExprStmt(expr) => direct_map_mutation_root(expr),
+            _ => None,
+        };
+        let Some(candidate) = candidate else {
+            continue;
+        };
+        match &root {
+            Some(existing) if !same_local(existing, &candidate) => return None,
+            None => root = Some(candidate),
+            _ => {}
+        }
+    }
+    let root = root?;
+    if !map_alias_expr_safe(source, &root)
+        || !map_alias_expr_safe(collection, &root)
+        || step.is_some_and(|step| !map_alias_expr_safe(step, &root))
+        || !body.iter().all(|stmt| map_alias_stmt_safe(stmt, &root))
+    {
+        return None;
+    }
+    Some(root)
+}
 
 /// D-EXPSEM1=A / D-FLOORDIV1=A / D-STR-CONCAT1: these compound operations
 /// cannot use Rust's direct `place OP= value` form for Jet's meaning. This
@@ -283,9 +496,10 @@ fn emit_coverage_not_taken(id: Option<&str>, cx: &Cx, out: &mut String, indent: 
     }
 }
 
-/// Mutable list place for `SplitViews` owners. Nested `grid[i]` must use
-/// `jet_index_vec_mut` so the window is the live inner list, not a clone.
-pub(super) fn emit_mut_list_place(
+/// Mutable collection place for nested owners. An indexed read is a clone;
+/// an indexed write must keep walking through live list/map storage so the
+/// final assignment cannot land on a temporary copy.
+pub(super) fn emit_mut_collection_place(
     e: &crate::Codegen::TIR::TExpr,
     cx: &Cx,
     cleanups: &[ActiveCleanup],
@@ -295,23 +509,37 @@ pub(super) fn emit_mut_list_place(
         TExprKind::Index {
             base,
             index,
-            is_map: false,
+            is_map,
             line,
             ..
         } => {
-            let b = emit_mut_list_place(base, cx, cleanups);
+            let b = emit_mut_collection_place(base, cx, cleanups);
             let i = emit_expr_with_cleanups(index, cx, cleanups);
-            format!(
-                "(*jet_index_vec_mut(&mut ({b}), {i}, {:?}, {line}))",
-                cx.file
-            )
+            if *is_map {
+                let fn_name = cx.current_fn.borrow().clone();
+                let src_line = cx
+                    .src
+                    .lines()
+                    .nth((*line as usize).saturating_sub(1))
+                    .unwrap_or_default()
+                    .to_string();
+                format!(
+                    "(*jet_index_map_mut(&mut ({b}), ({i}).clone(), {:?}, {line}, {:?}, {:?}, 1, 1))",
+                    cx.file, fn_name, src_line
+                )
+            } else {
+                format!(
+                    "(*jet_index_vec_mut(&mut ({b}), {i}, {:?}, {line}))",
+                    cx.file
+                )
+            }
         }
         TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
-            emit_mut_list_place(place, cx, cleanups)
+            emit_mut_collection_place(place, cx, cleanups)
         }
         TExprKind::Field { recv, field, boxed } => {
             let recv_ty = &recv.ty;
-            let recv = emit_mut_list_place(recv, cx, cleanups);
+            let recv = emit_mut_collection_place(recv, cx, cleanups);
             let field = emit_field_rust(cx, recv_ty, field);
             let place = format!("({recv}).{field}");
             if *boxed {
@@ -403,6 +631,11 @@ fn emit_if_head(
             ));
             id
         }
+        TIfCond::WithPrelude { prelude, cond } => {
+            let mut active = active_cleanups.to_vec();
+            emit_tir_stmts_inline(prelude, cx, out, indent, &mut active);
+            emit_if_head(cond, cx, out, indent, &active)
+        }
         TIfCond::And { .. } => unreachable!("conjunction heads are atomic"),
     }
 }
@@ -468,6 +701,21 @@ fn emit_tir_if(
     indent: usize,
     active_cleanups: &[ActiveCleanup],
 ) {
+    if let TIfCond::WithPrelude { prelude, cond } = cond {
+        let mut active = active_cleanups.to_vec();
+        emit_tir_stmts_inline(prelude, cx, out, indent, &mut active);
+        emit_tir_if(
+            cond,
+            then_body,
+            else_body,
+            else_is_elseif,
+            cx,
+            out,
+            indent,
+            &active,
+        );
+        return;
+    }
     if let TIfCond::And { left, right } = cond {
         let left_branch = emit_if_head(left, cx, out, indent, active_cleanups);
         emit_coverage_taken(left_branch.as_deref(), cx, out, indent + 1);
@@ -791,7 +1039,7 @@ fn emit_tir_stmt(
             if let Some(owner) = owner {
                 // Nested / field owners must be mutable places (`jet_index_vec_mut`),
                 // not value clones (`jet_index_vec`) — otherwise writes hit a temporary.
-                let owner = emit_mut_list_place(owner, cx, active_deferred_closes);
+                let owner = emit_mut_collection_place(owner, cx, active_deferred_closes);
                 out.push_str(&format!(
                     "{}let {} = &mut ({})[..];\n{}let {} = ({}).len() as i64;\n",
                     pad, root, owner, pad, len, root
@@ -1422,8 +1670,13 @@ fn emit_tir_stmt(
                     }
                     _ => emit_expr_with_cleanups(base, cx, active_deferred_closes),
                 }
-            } else {
+            } else if is_compute_view_mut(&base.ty)
+                || is_float_view(&base.ty)
+                || is_view(&base.ty)
+            {
                 emit_expr_with_cleanups(base, cx, active_deferred_closes)
+            } else {
+                emit_mut_collection_place(base, cx, active_deferred_closes)
             };
             let i = emit_expr_with_cleanups(index, cx, active_deferred_closes);
             let v = emit_expr_with_cleanups(value, cx, active_deferred_closes);
@@ -1591,6 +1844,13 @@ fn emit_tir_stmt(
                 stride_suffix = String::new();
                 source_rust.as_str()
             };
+            let map_hoist = map_hoist_root(source, collection, step.as_ref(), body);
+            if let Some(root) = &map_hoist {
+                out.push_str(&format!(
+                    "{pad}{{ let mut {name} = jet_map_make_mut(&mut ({name}));\n",
+                    name = root.rust_name(),
+                ));
+            }
             // c109 Phase 22: a method-call collection takes a distinct `emit_for_in`
             // branch (`source` holds the RECEIVER for chars/lines). Only the
             // stdin form opens an extra block that needs an extra closing brace.
@@ -1819,6 +2079,9 @@ fn emit_tir_stmt(
                                 active_deferred_closes,
                             );
                             out.push_str(&format!("{}}}\n", pad));
+                            if map_hoist.is_some() {
+                                out.push_str(&format!("{}}}\n", pad));
+                            }
                             if stride_wrapper {
                                 out.push_str(&format!("{}}}\n", pad));
                             }
@@ -1867,6 +2130,9 @@ fn emit_tir_stmt(
             out.push_str(&format!("{}}}\n", pad));
             // D-STDIN1=A: close the outer block holding the JetStdinReader local.
             if needs_extra_close {
+                out.push_str(&format!("{}}}\n", pad));
+            }
+            if map_hoist.is_some() {
                 out.push_str(&format!("{}}}\n", pad));
             }
             if stride_wrapper {

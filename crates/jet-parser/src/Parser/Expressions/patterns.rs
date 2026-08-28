@@ -32,7 +32,7 @@ fn run() {
     }
 }
 
-fn is_byte_list_head(ty: &Type) -> bool {
+pub(super) fn is_byte_list_head(ty: &Type) -> bool {
     matches!(
         ty,
         Type::List(elem) | Type::FixedList { elem, .. }
@@ -50,14 +50,16 @@ impl<'a> Parser<'a> {
     /// D-PARSESTR1 / D-BINPAT1: one literal-part walk for both pattern
     /// modes. Only hole elaboration and literal conversion vary by mode;
     /// the pattern engine owns the token-part traversal.
-    fn build_match_parts<T, L, H>(
+    fn build_match_parts<T, L, B, H>(
         &mut self,
         parts: Vec<StrTokPart>,
         mut literal: L,
+        mut byte: B,
         mut hole: H,
     ) -> Result<Vec<T>, Diagnostic>
     where
         L: FnMut(String) -> Option<T>,
+        B: FnMut(u8) -> Option<T>,
         H: FnMut(&mut Self, Vec<Token>) -> Result<Option<T>, Diagnostic>,
     {
         let mut out = Vec::new();
@@ -65,6 +67,11 @@ impl<'a> Parser<'a> {
             match part {
                 StrTokPart::Lit(s) => {
                     if let Some(part) = literal(s) {
+                        out.push(part);
+                    }
+                }
+                StrTokPart::Byte(byte_value) => {
+                    if let Some(part) = byte(byte_value) {
                         out.push(part);
                     }
                 }
@@ -145,6 +152,7 @@ impl<'a> Parser<'a> {
         let match_parts = self.build_match_parts(
             parts,
             |s| Some(StrMatchPart::Lit(s)),
+            |byte| Some(StrMatchPart::Lit(char::from(byte).to_string())),
             |parser, toks| parser.parse_str_match_hole(toks).map(Some),
         )?;
 
@@ -501,6 +509,7 @@ impl<'a> Parser<'a> {
         let out = self.build_match_parts(
             parts,
             |s| (!s.is_empty()).then(|| BinMatchPart::Lit(s.into_bytes())),
+            |byte| Some(BinMatchPart::Lit(vec![byte])),
             |parser, toks| Ok(parser.parse_bin_match_hole(toks, lit_span)),
         )?;
         // E1009 (byte-mode E0147 analog): a `...` rest capture must be the

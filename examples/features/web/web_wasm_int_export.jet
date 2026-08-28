@@ -1,0 +1,18 @@
+// D-JSBIND1: scalar Int Wasm export with a loop-shaped body.
+#WasmExport
+fn triangular(n: Int) Int -> {
+    total := 0
+    loop i in 1..n -> total += i
+    return total
+}
+
+#Target(JS)
+fn run() {
+    sum := 0
+    loop i in 1..12 {
+        value := triangular(i)
+        print("t{i} {value}")
+        sum += value
+    }
+    print("sum {sum}")
+}

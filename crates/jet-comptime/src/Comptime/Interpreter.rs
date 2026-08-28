@@ -632,6 +632,7 @@ impl<'a> Interp<'a> {
 }
 
 thread_local! {
+    /// The one in-process invocation argv carrier shared by every engine.
     static RUNTIME_ARGV: std::cell::RefCell<Option<Vec<String>>> =
         const { std::cell::RefCell::new(None) };
 }

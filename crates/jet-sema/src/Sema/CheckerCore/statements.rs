@@ -43,6 +43,14 @@ fn encoding_reader_item_type(name: &str) -> Option<Type> {
     }
 }
 
+fn stream_element_type(ty: Option<&Type>) -> Option<Type> {
+    match ty {
+        Some(Type::Apply { name, args })
+            if name == Syntax::TYPE_STREAM && args.len() == 1 => Some(args[0].clone()),
+        _ => None,
+    }
+}
+
 use super::helpers::layout_constraint_fingerprint;
 use std::collections::HashSet;
 
@@ -450,25 +458,33 @@ impl<'a> Checker<'a> {
         // D-ENC-DYN1=A+: the declared return type may be a `Data` alias
         // (`JSON`/`TOML`/…); canonicalize it so it unifies with the returned value.
         let resolved_ret = return_type
+            .clone()
             .or_else(|| self.ret.clone())
             .map(|t| self.resolve_type(t));
         // D-STREAMYIELD1: a generator (`Stream<T> ->`) yields values; `return`
         // only ever ends the stream early — bare `return;` is fine, `return
         // value;` is E0806 (a generator body yields, it doesn't return a value).
-        if let Some(Type::Apply { name, args }) = &resolved_ret {
-            if name == Syntax::TYPE_STREAM && args.len() == 1 {
-                if let Some(e) = expr {
-                    self.infer(e);
-                    self.diags.push(Diagnostic::error(
-                                    "E0806",
-                                    format!("`{}` yields values, so `return` can't carry one", self.fn_name),
-                                    "a generator body produces values with `yield`; `return` only ends the stream early".to_string(),
-                                    "write `yield ...;` to hand back a value, or a bare `return;` to end the stream".to_string(),
-                                    Some(e.span()),
-                                ));
-                }
-                return;
+        if stream_element_type(
+            return_type
+                .as_ref()
+                .or(self.declared_return_type.as_ref()),
+        )
+        .is_some()
+        {
+            if let Some(e) = expr {
+                self.infer(e);
+                self.diags.push(Diagnostic::error(
+                    "E0806",
+                    format!(
+                        "`{}` yields values, so `return` can't carry one",
+                        self.fn_name
+                    ),
+                    "a generator body produces values with `yield`; `return` only ends the stream early".to_string(),
+                    "write `yield ...;` to hand back a value, or a bare `return;` to end the stream".to_string(),
+                    Some(e.span()),
+                ));
             }
+            return;
         }
         match (&mut *expr, resolved_ret) {
             (Some(e), Some(rt)) => {
@@ -1948,15 +1964,8 @@ impl<'a> Checker<'a> {
                     }
                     return;
                 }
-                let resolved_ret = self.ret.clone().map(|t| self.resolve_type(t));
-                let elem_ty = match &resolved_ret {
-                    Some(Type::Apply { name, args })
-                        if name == Syntax::TYPE_STREAM && args.len() == 1 =>
-                    {
-                        Some(args[0].clone())
-                    }
-                    _ => None,
-                };
+                let elem_ty = stream_element_type(self.declared_return_type.as_ref())
+                    .map(|ty| self.resolve_type(ty));
                 let Some(elem_ty) = elem_ty else {
                     self.diags.push(Diagnostic::error(
                             "E0805",

@@ -702,18 +702,12 @@ fn jet_jit_list_uninit(len: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_uninit_list(len.max(0) as usize))
 }
 
-/// `core.process.argv()` — List(String) matching AOT `jet_std_io_args`, fed by the
-/// `with_program_args` argv installed for this JIT run (falls back to
+/// `core.process.argv()` — List(String) matching AOT `jet_std_io_args`, fed by
+/// the shared `Comptime::RUNTIME_ARGV` carrier (falling back to
 /// `std::env::args` when unset, same as a bare host process).
 fn jet_jit_io_args() -> i64 {
-    let args = {
-        let installed = crate::program_args();
-        if installed.is_empty() {
-            std::env::args().collect::<Vec<_>>()
-        } else {
-            installed
-        }
-    };
+    let args = jet_codegen::Comptime::runtime_argv()
+        .unwrap_or_else(|| std::env::args().collect::<Vec<_>>());
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         for arg in args {

@@ -287,6 +287,9 @@
 // `{value:Fixed(n)}` uses the colon rail and ordinary integer-call parentheses.
 // D-FMT-PRETTY1=A (ratified 2026-08-14, card #1966) adds `Pretty` to the same
 // rail; it expands canonical Debug output with stable two-space indentation.
+// D-FMT-INTERP3=B (ratified 2026-08-27, card #2257) adds `Hex(n)` to the same
+// closed family; it formats an `Int` as lowercase hexadecimal, zero-padded to
+// the requested width through `core.text.fmt.hex`.
 // D-FMT-INTERP2=A: trailing `=` in a hole reprints the expression source,
 // then " = ", then the value — `{count=}` → `count = 3`. Composes with
 // selectors: `{count=:Debug}`.

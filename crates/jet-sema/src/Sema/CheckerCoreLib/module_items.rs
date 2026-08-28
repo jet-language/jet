@@ -678,6 +678,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "number",
             "pretty",
             "decimal",
+            "hex",
             "percent",
             "bytes",
             "duration",

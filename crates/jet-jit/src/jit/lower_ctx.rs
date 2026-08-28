@@ -5551,6 +5551,19 @@ impl LowerCtx<'_, '_> {
                 ..
             } => {
                 in_own_frame(|| -> Result<(), String> {
+                    let cond = match cond {
+                        TIfCond::WithPrelude {
+                            prelude,
+                            cond: inner,
+                        } => {
+                            self.lower_stmts(prelude)?;
+                            if self.dead {
+                                return Ok(());
+                            }
+                            inner.as_ref()
+                        }
+                        cond => cond,
+                    };
                     let cond_val = match cond {
                         TIfCond::Plain(e) => self.lower_expr(e)?,
                         TIfCond::IfLet { pattern, subj } => {
@@ -5683,6 +5696,9 @@ impl LowerCtx<'_, '_> {
                                 return Ok(());
                             }
                             self.lower_matches_condition(pattern, subj)?
+                        }
+                        TIfCond::WithPrelude { .. } => {
+                            unreachable!("condition prelude was handled before lowering")
                         }
                     };
                     if self.dead {
@@ -6062,8 +6078,8 @@ impl LowerCtx<'_, '_> {
             } => {
                 in_own_frame(|| -> Result<(), String> {
                     if *is_map {
-                        let map = self.lower_expr(base)?;
-                        let key = self.lower_expr(index)?;
+                        // Match AOT evaluation order: evaluate the assignment
+                        // value before acquiring the mutable collection place.
                         let val = self.lower_expr(value)?;
                         let val = match self.meta.clif_ty(&value.ty) {
                             Some(types::I32) => self.b.ins().uextend(types::I64, val),
@@ -6075,6 +6091,8 @@ impl LowerCtx<'_, '_> {
                             ),
                             _ => val,
                         };
+                        let map = self.lower_expr(base)?;
+                        let key = self.lower_expr(index)?;
                         let host_ref = self.module.declare_func_in_func(
                             self.map_insert_host_for_key(&index.ty),
                             self.b.func,
@@ -6084,11 +6102,13 @@ impl LowerCtx<'_, '_> {
                     } else {
                         // ViewMut write-through: absolute index = window.start + idx.
                         if Self::is_view_mut_ty(&base.ty) {
+                            // Match AOT evaluation order: the assignment value
+                            // is evaluated before the collection place/index.
+                            let val = self.lower_expr(value)?;
                             let handle = self.lower_expr(base)?;
                             let (list, start, _end) = self.unpack_view_mut(handle)?;
                             let idx = self.lower_expr(index)?;
                             let abs = self.view_mut_index(start, idx);
-                            let val = self.lower_expr(value)?;
                             let line = self.b.ins().iconst(types::I32, 1);
                             let host_id = if self.list_elem_is_f64(&value.ty) {
                                 self.host.coll.list_set_f64
@@ -6101,9 +6121,11 @@ impl LowerCtx<'_, '_> {
                             self.emit_trap_check()?;
                             return Ok(());
                         }
+                        // Match AOT evaluation order: evaluate the assignment
+                        // value before acquiring the mutable collection place.
+                        let val = self.lower_expr(value)?;
                         let list = self.lower_expr(base)?;
                         let idx = self.lower_expr(index)?;
-                        let val = self.lower_expr(value)?;
                         let val = match self.b.func.dfg.value_type(val) {
                             types::I8 | types::I32 => self.b.ins().uextend(types::I64, val),
                             types::F32 => self.b.ins().fpromote(types::F64, val),
@@ -13930,16 +13952,29 @@ impl LowerCtx<'_, '_> {
                 else_value,
             } => {
                 in_own_frame(|| -> Result<Value, String> {
+                    let cond = match cond.as_ref() {
+                        TIfCond::WithPrelude {
+                            prelude,
+                            cond: inner,
+                        } => {
+                            self.lower_stmts(prelude)?;
+                            if self.dead {
+                                return Ok(self.dead_value(&expr.ty));
+                            }
+                            inner.as_ref()
+                        }
+                        cond => cond,
+                    };
                     if let Some(entries) =
-                        Self::map_lit_desugar_entries(cond.as_ref(), then_body, then_value)
+                        Self::map_lit_desugar_entries(cond, then_body, then_value)
                     {
                         return self.lower_map_lit_pairs(entries);
                     }
-                    let cond_val = match cond.as_ref() {
+                    let cond_val = match cond {
                         TIfCond::Plain(cond) => self.lower_expr(cond)?,
                         // Same plain `&&` chain as the statement path — one
                         // short-circuited condition value feeding the phi below.
-                        TIfCond::And { .. } => self.lower_plain_conjunction_value(cond.as_ref())?,
+                        TIfCond::And { .. } => self.lower_plain_conjunction_value(cond)?,
                         TIfCond::IfLet { pattern, subj } => {
                             return self.lower_if_let_expr(
                                 pattern, subj, then_body, then_value, else_body, else_value,
@@ -13961,6 +13996,9 @@ impl LowerCtx<'_, '_> {
                                 );
                             }
                             self.lower_matches_condition(pattern, subj)?
+                        }
+                        TIfCond::WithPrelude { .. } => {
+                            unreachable!("condition prelude was handled before lowering")
                         }
                     };
                     if self.dead {
@@ -16919,6 +16957,14 @@ impl LowerCtx<'_, '_> {
                                     self.host.num.decimal_from_str,
                                     vec![self.lower_expr(&args[0])?],
                                 ),
+                                "to_bits" if args.len() == 1 => (
+                                    self.host.math_extra.to_bits,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
+                                "from_bits" if args.len() == 1 => (
+                                    self.host.math_extra.from_bits,
+                                    vec![self.lower_expr(&args[0])?],
+                                ),
                                 "fraction" if args.len() == 2 => (
                                     self.host.num.fraction_new,
                                     vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
@@ -17381,6 +17427,13 @@ impl LowerCtx<'_, '_> {
                                         ],
                                     )
                                 }
+                                "hex" if args.len() == 2 => (
+                                    self.host.fmt.hex,
+                                    vec![
+                                        self.lower_expr(&args[0])?,
+                                        self.lower_expr(&args[1])?,
+                                    ],
+                                ),
                                 "plural" if args.len() == 3 => (
                                     self.host.fmt.plural,
                                     vec![
@@ -18420,6 +18473,120 @@ impl LowerCtx<'_, '_> {
                     }
                     // Channel receive-status encoding stays on lower_result_receive_status;
                     // Result ?? uses the Result handle + result_is_ok / result_payload.
+                    if matches!(
+                        &value.ty,
+                        Type::Result { ok, .. }
+                            if matches!(ok.as_ref(), Type::Option(_))
+                    ) {
+                        // The resident Result ABI keeps the optional success
+                        // role packed inside the outer Result payload. A
+                        // failed outer carrier and a zero packed payload both
+                        // take the same fallback edge.
+                        let handle = self.lower_expr(value)?;
+                        let inner_ty = match &value.ty {
+                            Type::Result { ok, .. } => ok
+                                .as_ref()
+                                .unwrap_option()
+                                .expect("optional-success Result has an Option payload"),
+                            _ => unreachable!("optional-success Result shape changed"),
+                        };
+                        let is_unit = matches!(inner_ty, Type::Named(n) if n == "Unit")
+                            || matches!(inner_ty, Type::Tuple(items) if items.is_empty());
+                        let ret_ty = if is_unit {
+                            types::I8
+                        } else {
+                            self.meta
+                                .clif_ty(inner_ty)
+                                .or_else(|| clif_ty(inner_ty))
+                                .or_else(|| self.meta.clif_ty(&expr.ty))
+                                .or_else(|| clif_ty(&expr.ty))
+                                .or_else(|| Self::list_handle_carrier(inner_ty))
+                                .or_else(|| Self::list_handle_carrier(&expr.ty))
+                                .ok_or_else(|| {
+                                    format!(
+                                        "jit optional-success ?? type unsupported: ok={inner_ty:?} expr={:?}",
+                                        expr.ty
+                                    )
+                                })?
+                        };
+                        let outer_ok = self.call_host(self.host.result_is_ok, &[handle]);
+                        let outer_ok_block = self.b.create_block();
+                        let ok_block = self.b.create_block();
+                        let fail_block = self.b.create_block();
+                        let merge = self.b.create_block();
+                        self.b.append_block_param(merge, ret_ty);
+                        self.b
+                            .ins()
+                            .brif(outer_ok, outer_ok_block, &[], fail_block, &[]);
+
+                        self.b.switch_to_block(outer_ok_block);
+                        self.b.seal_block(outer_ok_block);
+                        let packed = self.call_host(self.host.result_get_i64, &[handle]);
+                        let inner_result_abi = matches!(inner_ty, Type::IntN { .. });
+                        let present = if inner_result_abi {
+                            self.call_host(self.host.result_is_ok, &[packed])
+                        } else {
+                            let zero = self.b.ins().iconst(types::I64, 0);
+                            self.b.ins().icmp(IntCC::NotEqual, packed, zero)
+                        };
+                        self.b.ins().brif(present, ok_block, &[], fail_block, &[]);
+
+                        self.b.switch_to_block(ok_block);
+                        self.b.seal_block(ok_block);
+                        let ok_val = if inner_result_abi {
+                            self.result_payload(packed, inner_ty)?
+                        } else {
+                            self.unpack_option_payload(packed, inner_ty)?
+                        };
+                        self.b.ins().jump(merge, &[ok_val]);
+
+                        self.b.switch_to_block(fail_block);
+                        self.b.seal_block(fail_block);
+                        self.call_host(self.host.trace_reset, &[]);
+                        match fallback {
+                            TOrFallback::Value(e) => {
+                                let fb = self.lower_expr(e)?;
+                                if !self.dead {
+                                    self.b.ins().jump(merge, &[fb]);
+                                }
+                            }
+                            TOrFallback::Return(None) => {
+                                self.emit_lexical_exit(None, false, self.shield_depth)?;
+                            }
+                            TOrFallback::Return(Some(e)) => {
+                                let val = self.lower_expr(e)?;
+                                self.emit_lexical_exit(Some(val), false, self.shield_depth)?;
+                            }
+                            TOrFallback::Panic { msg, loc } => {
+                                let msg_val = self.lower_expr(msg)?;
+                                self.emit_rich_panic(loc, msg_val)?;
+                                let dummy = if ret_ty == types::F64 {
+                                    self.b.ins().f64const(0.0)
+                                } else {
+                                    self.b.ins().iconst(ret_ty, 0)
+                                };
+                                self.b.ins().jump(merge, &[dummy]);
+                            }
+                            TOrFallback::Break => {
+                                self.emit_loop_fallback(None, "break", false)?;
+                            }
+                            TOrFallback::Continue => {
+                                self.emit_loop_fallback(None, "continue", true)?;
+                            }
+                            TOrFallback::BreakLabel(name) => {
+                                self.emit_loop_fallback(Some(name), "break", false)?;
+                            }
+                            TOrFallback::ContinueLabel(name) => {
+                                self.emit_loop_fallback(Some(name), "continue", true)?;
+                            }
+                        }
+                        self.b.switch_to_block(merge);
+                        self.b.seal_block(merge);
+                        self.dead = false;
+                        let value = self.b.block_params(merge)[0];
+                        self.track_compute_value(value, &expr.ty)?;
+                        return Ok(value);
+                    }
                     if let Ok(status) = self.lower_result_receive_status(value) {
                         let ok_block = self.b.create_block();
                         let fail_block = self.b.create_block();
@@ -26302,6 +26469,12 @@ impl LowerCtx<'_, '_> {
             THandleOp::ReaderReadU64Be => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.parse.reader_read_u64_be, &[recv_val]))
             }),
+            THandleOp::ReaderReadF32Le => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.parse.reader_read_f32_le, &[recv_val]))
+            }),
+            THandleOp::ReaderReadF64Le => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.parse.reader_read_f64_le, &[recv_val]))
+            }),
             THandleOp::ReaderTake => in_own_frame(|| -> Result<Value, String> {
                 let n = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.parse.reader_take, &[recv_val, n]))
@@ -26839,10 +27012,11 @@ impl LowerCtx<'_, '_> {
         matches!(
             ty,
             Type::Named(name)
-                if matches!(
-                    name.as_str(),
-                    "F32x4" | "F64x2" | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
-                )
+                if jet_foundation::Syntax::is_simd_lane_type(name)
+                    || matches!(
+                        name.as_str(),
+                        "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
+                    )
         )
     }
 
@@ -26897,6 +27071,9 @@ impl LowerCtx<'_, '_> {
     }
 
     fn unpack_math_result(&mut self, packed: Value, ret_ty: &Type) -> Result<Value, String> {
+        if matches!(ret_ty, Type::Int | Type::IntN { .. } | Type::InlineRange { .. }) {
+            return Ok(self.call_host(self.host.math.result_int, &[packed]));
+        }
         if matches!(ret_ty, Type::Float | Type::Float32) {
             let flag = self.call_host(self.host.math.result_is_float, &[packed]);
             let float_block = self.b.create_block();
@@ -30138,11 +30315,15 @@ impl LowerCtx<'_, '_> {
                              and only a leading `if let` may bind";
         match cond {
             TIfCond::Plain(expr) => self.lower_expr(expr),
+            TIfCond::WithPrelude { prelude, cond } => {
+                self.lower_stmts(prelude)?;
+                if self.dead {
+                    return Ok(self.b.ins().iconst(types::I8, 0));
+                }
+                self.lower_plain_conjunction_value(cond)
+            }
             TIfCond::And { left, right } => {
-                let TIfCond::Plain(head) = left.as_ref() else {
-                    return Err(SHAPE.to_string());
-                };
-                let head_val = self.lower_expr(head)?;
+                let head_val = self.lower_plain_conjunction_value(left)?;
                 // A diverging head term leaves the current block already
                 // terminated. Hand the value back and let the caller's existing
                 // `self.dead` check skip the branch, exactly as the single

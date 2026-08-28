@@ -253,16 +253,28 @@ pub struct ApplicationAuthority {
 
 impl Default for ApplicationAuthority {
     fn default() -> Self {
-        Self {
-            required_effects: Holds::new(),
-            granted_effects: Holds::new(),
-            denied_effects: Holds::new(),
-            authority: "application default".to_string(),
-        }
+        Self::ambient_basics()
     }
 }
 
 impl ApplicationAuthority {
+    /// D-AUTH-AMBIENT1=A: a manifest-less application may use the beginner
+    /// basics without an authority ceremony. A package manifest replaces this
+    /// default with its explicit holds, so expert deny/audit control remains.
+    pub const AMBIENT_BASIC_EFFECTS: [&'static str; 3] = ["IO", "Mem.Alloc", "Exec"];
+
+    pub fn ambient_basics() -> Self {
+        Self {
+            required_effects: Holds::new(),
+            granted_effects: Self::AMBIENT_BASIC_EFFECTS
+                .iter()
+                .map(|effect| (*effect).to_string())
+                .collect(),
+            denied_effects: Holds::new(),
+            authority: "application default".to_string(),
+        }
+    }
+
     /// Project the parsed `authority.holds` rows without teaching an engine
     /// how to parse package policy.
     pub fn from_policy(
@@ -307,6 +319,25 @@ impl ApplicationAuthority {
         self.undecided_effects().is_empty() && self.denied_required_effects().is_empty()
     }
 
+    /// Render the one-line manifest fix from the complete undecided set.
+    /// Denied effects are never turned into an allow suggestion.
+    pub fn policy_fix(&self) -> String {
+        let undecided = self.undecided_effects();
+        let policy_step = if undecided.is_empty() {
+            "adjust the denial in `authority.holds.deny`".to_string()
+        } else {
+            let effects = undecided
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("add `allow: [{effects}]` under `authority.holds` in `package.jet`")
+        };
+        format!(
+            "{policy_step}; otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal"
+        )
+    }
+
     /// Structured refusal shared by the interpreter and JIT adapters. CLI
     /// approval happens before those adapters and updates this same carrier.
     pub fn policy_diagnostic(&self) -> Option<Diagnostic> {
@@ -338,7 +369,7 @@ impl ApplicationAuthority {
                 "required_effects={required_text}; granted_effects={granted_text}; denied_effects={denied_policy_text}; denied_required_effects={denied_text}; undecided_effects={undecided_text}; authority={}",
                 self.authority
             ),
-            "declare the effect in `authority.holds.allow`, or approve it before execution in an interactive terminal".to_string(),
+            self.policy_fix(),
             None,
         ))
     }
@@ -732,6 +763,37 @@ mod tests {
         assert_eq!(Effect::all().len(), 13);
         assert_eq!(parse_right("Panic").as_deref(), Some("Panic"));
         assert_eq!(parse_right("Mem.Alloc").as_deref(), Some("Mem.Alloc"));
+    }
+
+    #[test]
+    fn manifestless_application_default_grants_beginner_basics() {
+        let authority = ApplicationAuthority::default();
+        assert_eq!(
+            authority.granted_effects,
+            Holds::from([
+                "IO".to_string(),
+                "Mem.Alloc".to_string(),
+                "Exec".to_string(),
+            ])
+        );
+        assert!(authority.denied_effects.is_empty());
+        assert_eq!(authority.authority, "application default");
+    }
+
+    #[test]
+    fn authority_diagnostic_fix_lists_all_undecided_effects() {
+        let authority = ApplicationAuthority {
+            required_effects: Holds::from([
+                "IO".to_string(),
+                "Mem.Alloc".to_string(),
+                "Exec".to_string(),
+            ]),
+            granted_effects: Holds::new(),
+            denied_effects: Holds::new(),
+            authority: "package.jet authority.holds".to_string(),
+        };
+        let diagnostic = authority.policy_diagnostic().expect("E1803");
+        assert!(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"));
     }
 
     #[test]

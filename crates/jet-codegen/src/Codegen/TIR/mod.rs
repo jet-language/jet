@@ -66,7 +66,7 @@ pub(crate) use lower::*;
 pub use subset::is_civil_time_method_name;
 pub(crate) use subset::*;
 
-use crate::Codegen::{mangle, mangle_path};
+use crate::Codegen::{mangle, mangle_generated, mangle_path};
 use crate::AST::{
     AccessConvention, BinOp, CtValue, Expr, Item, Pattern, ProgramBundle, Type, UnOp,
     VariantPayload,
@@ -2573,6 +2573,9 @@ pub struct TFunc {
     /// (E0917/E0918/E0919 would have failed the build otherwise) — I3: sema
     /// decides, codegen just emits.
     pub is_inline_always: bool,
+    /// D-SIMD3=B: `#Scalar` is the explicit native auto-vectorization opt-out.
+    /// It is a codegen boundary hint; semantics remain in the shared Prelude.
+    pub is_scalar: bool,
     /// D-COMPUTE-KERNEL-SURFACE1=B: sema's complete safe-kernel proof. The
     /// emitter and interpreter carry this fact without re-deriving it.
     pub kernel_proof: Option<crate::AST::KernelProof>,
@@ -2732,6 +2735,11 @@ pub enum TForInMethod {
 ///    mirroring `add_pattern_bindings`).
 ///  - `IsNone` — an `x == null` test (`Pattern::Absent`): `if {subj}.is_none() {`.
 ///  - `Matches` — a binding-free enum variant/group test (`d == .Fire`): `if matches!(&{subj}, {pat}) {`.
+///  - `WithPrelude` — compiler-owned statements that must run immediately before
+///    the condition and remain in scope for both the condition and its selected
+///    branch. This is used when a structural pattern reads one subject in both
+///    places; the subject is evaluated once, outside the condition's expression
+///    scope.
 pub enum TIfCond {
     Plain(TExpr),
     /// A right-associated, short-circuiting conjunction. `left` is atomic;
@@ -2750,6 +2758,10 @@ pub enum TIfCond {
     Matches {
         pattern: TPattern,
         subj: TExpr,
+    },
+    WithPrelude {
+        prelude: Vec<TStmt>,
+        cond: Box<TIfCond>,
     },
 }
 
@@ -3306,10 +3318,12 @@ pub enum TStmt {
     /// c109 Phase 5: indexed assignment `coll[i] = value` (`Stmt::Assign` with an
     /// `LValue::Index`). `is_map` is the resolved `IndexKind` (TOTAL, from sema):
     /// `true` → `jet_map_insert(&mut (base), (i).clone(), v)`; `false` →
-    /// `(base)[i as usize] = v`. Both wrap the value in a `{ let __jet_v = …; … }`
-    /// block, byte-for-byte the AST `LValue::Index` form. Compound ops (`+=`) on an
-    /// index are not a Jet construct here (the parser/sema only admit a plain `=` to
-    /// an index lvalue), so no `op` is carried.
+    /// `(base)[i as usize] = v`. `base` may itself be an index projection: each
+    /// engine must lower that chain as a mutable place, not as a cloned value.
+    /// Both wrap the value in a `{ let __jet_v = …; … }` block, byte-for-byte the
+    /// AST `LValue::Index` form. Compound ops (`+=`) on an index are not a Jet
+    /// construct here (the parser/sema only admit a plain `=` to an index lvalue),
+    /// so no `op` is carried.
     IndexAssign {
         /// The base is fixed-list storage created with `Type.{ uninit }`.
         /// Engines keep the same TIR operation but choose storage-safe writes.
@@ -4806,7 +4820,7 @@ pub fn try_target_is_default_error(inner: &TExpr, convert: &TTryConvert) -> bool
             Some(Type::Named(name)) if name == crate::Syntax::TYPE_ERR
         ),
         TTryConvert::Typed(name) => name
-            .strip_prefix("__jet_errconv_")
+            .strip_prefix(&mangle_generated("errconv_"))
             .and_then(|stem| stem.rsplit_once("_to_"))
             .is_some_and(|(_, target)| target == crate::Syntax::TYPE_ERR),
         TTryConvert::Never | TTryConvert::WidenUnion { .. } => false,
@@ -5800,6 +5814,8 @@ pub enum THandleOp {
     ReaderReadU32Be,
     ReaderReadU64Le,
     ReaderReadU64Be,
+    ReaderReadF32Le,
+    ReaderReadF64Le,
     /// D-SHIFT1: `reader.take(n)` → `{root}jet_reader_take(&mut (recv), (a0))`
     /// → `Result<Vec<u8>, String>` (owned copy — see CoreLib.rs comment on
     /// why `take` copies rather than borrowing a `View<T>`).

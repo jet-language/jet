@@ -58,7 +58,7 @@ fn token_stream_has_executable_drop(tokens: &[jet::Lexer::Token]) -> bool {
     here || tokens.iter().any(|token| match &token.kind {
         jet::Lexer::TokKind::Str(parts) => parts.iter().any(|part| match part {
             jet::Lexer::StrTokPart::Interp(inner) => token_stream_has_executable_drop(inner),
-            jet::Lexer::StrTokPart::Lit(_) => false,
+            jet::Lexer::StrTokPart::Lit(_) | jet::Lexer::StrTokPart::Byte(_) => false,
         }),
         _ => false,
     })
@@ -85,7 +85,7 @@ fn token_stream_has_active_suppress(tokens: &[jet::Lexer::Token]) -> bool {
     here || tokens.iter().any(|token| match &token.kind {
         jet::Lexer::TokKind::Str(parts) => parts.iter().any(|part| match part {
             jet::Lexer::StrTokPart::Interp(inner) => token_stream_has_active_suppress(inner),
-            jet::Lexer::StrTokPart::Lit(_) => false,
+            jet::Lexer::StrTokPart::Lit(_) | jet::Lexer::StrTokPart::Byte(_) => false,
         }),
         _ => false,
     })

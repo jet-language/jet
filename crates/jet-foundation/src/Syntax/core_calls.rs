@@ -54,6 +54,7 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
                 "period_days",
                 "period_months",
                 "period_years",
+                "parse_rfc3339",
                 "zone",
                 "utc",
                 "zoned",
@@ -355,6 +356,10 @@ impl CoreCallCoverage {
     pub const fn from_bits(bits: u8) -> Self {
         Self(bits)
     }
+
+    pub const fn is_complete(self) -> bool {
+        self.bits() == Self::KNOWN
+    }
 }
 
 /// Why one engine could not project a row. The engine owns user-facing
@@ -388,6 +393,24 @@ pub enum CoreCallPureRoute {
     Io,
     Net,
     Crypto,
+}
+
+/// The executable route for a row's interpreter projection.  `Pure` names
+/// the shared CorePureParity family; the other two variants select the
+/// existing ambient or typed evaluator adapters.  `None` is a deliberate
+/// incomplete-row marker and is rejected by the coverage guard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoreCallInterpreterRoute {
+    None,
+    Pure(CoreCallPureRoute),
+    Ambient,
+    TypedIntrinsic,
+}
+
+impl CoreCallInterpreterRoute {
+    pub const fn is_executable(self) -> bool {
+        !matches!(self, Self::None | Self::Pure(CoreCallPureRoute::None))
+    }
 }
 
 /// Where AOT resolves a Core call's Rust symbol.
@@ -451,6 +474,7 @@ pub struct CoreCallRecord {
     pub effect: Option<Effect>,
     pub sink_class: Option<SinkClass>,
     pub pure_route: CoreCallPureRoute,
+    pub interpreter_route: CoreCallInterpreterRoute,
     pub symbol: CoreCallSymbol,
     pub coverage: CoreCallCoverage,
     /// Whether AOT can emit this row as one plain symbol call. Typed rows can
@@ -487,6 +511,10 @@ impl CoreCallRecord {
             effect: effect_for(module, member),
             sink_class: sink_for(module, member),
             pure_route: CoreCallPureRoute::None,
+            interpreter_route: match effect_for(module, member) {
+                Some(_) => CoreCallInterpreterRoute::Ambient,
+                None => CoreCallInterpreterRoute::TypedIntrinsic,
+            },
             symbol: if prelude {
                 CoreCallSymbol::Prelude(symbol)
             } else {
@@ -535,6 +563,7 @@ impl CoreCallRecord {
             effect: None,
             sink_class: None,
             pure_route: CoreCallPureRoute::None,
+            interpreter_route: CoreCallInterpreterRoute::TypedIntrinsic,
             symbol: CoreCallSymbol::Rust(""),
             coverage: CoreCallCoverage::ALL,
             aot_direct: false,
@@ -560,6 +589,12 @@ impl CoreCallRecord {
 
     pub const fn with_pure_route(mut self, route: CoreCallPureRoute) -> Self {
         self.pure_route = route;
+        self.interpreter_route = CoreCallInterpreterRoute::Pure(route);
+        self
+    }
+
+    pub const fn with_interpreter_route(mut self, route: CoreCallInterpreterRoute) -> Self {
+        self.interpreter_route = route;
         self
     }
 
@@ -872,7 +907,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_std_fs_rename",
         true,
         &[true, true],
-    ),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.files",
         "symlink",
@@ -909,15 +945,18 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         true,
         &[true],
     ),
-    CoreCallRecord::new("core.files", "walk", "jet_std_fs_walk", true, &[true]),
+    CoreCallRecord::new("core.files", "walk", "jet_std_fs_walk", true, &[true])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.files",
         "walk_parallel",
         "jet_std_fs_walk_parallel",
         true,
         &[true],
-    ),
-    CoreCallRecord::new("core.files", "glob", "jet_std_fs_glob", true, &[true]),
+    )
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
+    CoreCallRecord::new("core.files", "glob", "jet_std_fs_glob", true, &[true])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.files",
         "read_at",
@@ -1188,10 +1227,12 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_std_process_workspace",
         true,
         &[],
-    ),
+    )
+    .without_direct_aot(),
     // D-AUTHORITY-NAME1=A: the explicit authority form uses the typed emitter
     // and host adapter below; do not let the one-argument row erase its value.
-    CoreCallRecord::new("core.process", "run", "jet_std_process_run", true, &[true]),
+    CoreCallRecord::new("core.process", "run", "jet_std_process_run", true, &[true])
+        .without_direct_aot(),
     CoreCallRecord::new("core.process", "cmd", "jet_std_process_cmd", true, &[true]),
     CoreCallRecord::new(
         "core.process",
@@ -1273,6 +1314,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         &[],
     ),
     CoreCallRecord::new("core.math", "round", "jet_std_math_round", true, &[false]),
+    CoreCallRecord::new("core.math", "sqrt", "jet_std_math_sqrt", true, &[false])
+        .with_pure_route(CoreCallPureRoute::Math)
+        .without_direct_aot(),
+    CoreCallRecord::new("core.math", "to_bits", "jet_std_math_to_bits", true, &[false])
+        .with_pure_route(CoreCallPureRoute::Math),
+    CoreCallRecord::new("core.math", "from_bits", "jet_std_math_from_bits", true, &[false])
+        .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "isqrt", "jet_std_math_isqrt", true, &[false]),
     CoreCallRecord::new(
         "core.math",
@@ -1920,7 +1968,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     ),
     // D-SERVICE1=D (#444): the typed tree constructor carries its name into
     // the shared Prelude; worker/group topology stays on typed methods.
-    CoreCallRecord::new("core.service", "tree", "jet_services_tree", true, &[false]),
+    CoreCallRecord::new("core.service", "tree", "jet_services_tree", true, &[false])
+        .without_direct_aot(),
     CoreCallRecord::new(
         "core.service",
         "tree_show",
@@ -1977,42 +2026,48 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_services_mailbox_depth",
         true,
         &[true, true],
-    ),
+    )
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.services",
         "restarts",
         "jet_services_restarts",
         true,
         &[true, true],
-    ),
+    )
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.services",
         "dead_letter_count",
         "jet_services_dead_letter_count",
         true,
         &[true],
-    ),
+    )
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.services",
         "restore_snapshot",
         "jet_services_restore_snapshot",
         true,
         &[true],
-    ),
+    )
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.services",
         "event_count",
         "jet_services_event_count",
         true,
         &[true],
-    ),
+    )
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.services",
         "replay_events",
         "jet_services_replay_events",
         true,
         &[true],
-    ),
+    )
+    .without_direct_aot(),
     // Workflow handles are read through their run id. Keep this on the bespoke
     // emitter so a non-Copy handle is borrowed instead of moved.
     CoreCallRecord::new(
@@ -2029,42 +2084,48 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "jet_services_directory_resolve",
         true,
         &[true, true],
-    ),
+    )
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.services",
         "directory_generation",
         "jet_services_directory_generation",
         true,
         &[true],
-    ),
+    )
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.services",
         "upgrade_receipt",
         "jet_services_upgrade_receipt",
         true,
         &[true],
-    ),
+    )
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.services",
         "observe",
         "jet_services_observe",
         true,
         &[true],
-    ),
+    )
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.services",
         "endpoint_show",
         "jet_services_endpoint_show",
         true,
         &[true],
-    ),
+    )
+    .without_direct_aot(),
     CoreCallRecord::new(
         "core.services",
         "tree_show",
         "jet_services_tree_show",
         true,
         &[true],
-    ),
+    )
+    .without_direct_aot(),
     CoreCallRecord::new("core.data", "table", "jet_data_table", true, &[true]),
     CoreCallRecord::new("core.data", "rows", "jet_data_rows", true, &[true]),
     CoreCallRecord::new("core.data", "series", "jet_data_series", true, &[true]),
@@ -2133,6 +2194,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         "core.text.fmt",
         "decimal",
         "jet_fmt_decimal",
+        true,
+        &[false, false],
+    ),
+    CoreCallRecord::new(
+        "core.text.fmt",
+        "hex",
+        "jet_fmt_hex",
         true,
         &[false, false],
     ),
@@ -4190,6 +4258,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::receiver(&["Measurement"], "sub", &[false]),
     CoreCallRecord::receiver(&["Measurement"], "mul", &[false]),
     CoreCallRecord::receiver(&["Measurement"], "div", &[false]),
+    CoreCallRecord::receiver(&["Measurement"], "sqrt", &[]),
     CoreCallRecord::receiver(&["HyperLogLog"], "new", &[]),
     CoreCallRecord::receiver(&["HyperLogLog"], "add", &[true]),
     CoreCallRecord::receiver(&["HyperLogLog"], "count", &[]),
@@ -4223,6 +4292,30 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         &[],
     ),
 ];
+
+/// Build gate for the one Core-call registry. A row may use a typed adapter,
+/// but it cannot quietly disappear from one execution tier.
+const fn assert_core_call_coverage() {
+    let mut index = 0;
+    while index < CORE_CALLS.len() {
+        assert!(
+            CORE_CALLS[index].coverage.is_complete(),
+            "Core-call registry row misses required execution-tier coverage"
+        );
+        if CORE_CALLS[index]
+            .coverage
+            .contains(CoreCallCoverage::INTERPRETER)
+        {
+            assert!(
+                CORE_CALLS[index].interpreter_route.is_executable(),
+                "Core-call registry row declares interpreter coverage without an executable route"
+            );
+        }
+        index += 1;
+    }
+}
+
+const _: () = assert_core_call_coverage();
 
 /// The one canonical lookup used by all plain Core-call projections.
 pub fn core_call(module: &str, member: &str) -> Option<&'static CoreCallRecord> {
@@ -4395,6 +4488,14 @@ pub fn core_call_table_violations(rows: &[CoreCallRecord]) -> Vec<String> {
                 row.coverage.bits() & !CoreCallCoverage::KNOWN
             ));
         }
+        if row.coverage.contains(CoreCallCoverage::INTERPRETER)
+            && !row.interpreter_route.is_executable()
+        {
+            violations.push(format!(
+                "{}.{} declares interpreter coverage without an interpreter route",
+                row.module, row.member
+            ));
+        }
         for other in &rows[index + 1..] {
             let duplicate = if row.is_receiver() || other.is_receiver() {
                 row.is_receiver()
@@ -4415,12 +4516,23 @@ pub fn core_call_table_violations(rows: &[CoreCallRecord]) -> Vec<String> {
 /// Return rows that do not declare one consumer projection.
 pub fn core_call_coverage_violations(rows: &[CoreCallRecord], projection: u8) -> Vec<String> {
     rows.iter()
-        .filter(|row| !row.coverage.contains(projection))
-        .map(|row| {
-            format!(
-                "{}.{} missing projection 0x{:02x}",
-                row.module, row.member, projection
-            )
+        .flat_map(|row| {
+            let missing = (!row.coverage.contains(projection)).then(|| {
+                format!(
+                    "{}.{} missing projection 0x{:02x}",
+                    row.module, row.member, projection
+                )
+            });
+            let missing_route = (projection == CoreCallCoverage::INTERPRETER
+                && row.coverage.contains(CoreCallCoverage::INTERPRETER)
+                && !row.interpreter_route.is_executable())
+            .then(|| {
+                format!(
+                    "{}.{} declares interpreter coverage without an interpreter route",
+                    row.module, row.member
+                )
+            });
+            missing.into_iter().chain(missing_route)
         })
         .collect()
 }

@@ -2836,7 +2836,7 @@ fn jet_http_accept_once(
                 if started.elapsed() >= timeout {
                     return Err("HTTP serve_once accept timed out".to_string());
                 }
-                std::thread::sleep(std::time::Duration::from_millis(1));
+                std::thread::sleep(std::time::Duration::from_micros(100));
             }
             Err(error) => return Err(format!("accept failed: {error}")),
         }

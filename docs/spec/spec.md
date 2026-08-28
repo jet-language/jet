@@ -86,7 +86,7 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
 ```
 program  = { func | struct | const } ;
 func     = [ "pub" ] "fn" ident "(" [ params ] ")" [ type ]
-           ( "->" expr | "-[" [ effect-row ] "]>" block | block | "=" expr NL ) ;
+           ( "->" expr | "-[" [ effect-row ] "]>" block | block ) ;
 params   = param { "," param } ;
 param    = ident ":" [ "^" | "&" ] type ;
 effect-row = effect { "," effect } | ".." ident ;
@@ -362,7 +362,7 @@ fn bump(n: &Int) { n += 1 }
 fn archive(name: ^String) String -> { return name }
 
 fn run() {
-    score: Int := 41
+    score := 41
     bump(&score)                 // & mirrors &Int
     saved :: archive(^"vault")   // ^ mirrors ^String
 }
@@ -404,7 +404,7 @@ method" error). The retired `copy x` word teaches **E0991**, pointing at
 copyable).
 
 ```jet
-name: String :: "vault"
+name :: "vault"
 saved :: ~name    // fresh, independent value; `name` still usable after
 ```
 
@@ -429,7 +429,7 @@ its value:
 struct Span { text: String, meta: String }
 
 fn describe(source: String, kind: String) {
-    s: Span :: Span{text: source, meta: kind}   // fields own their data
+    s :: Span{text: source, meta: kind}   // fields own their data
     print(s.text)
 }
 ```
@@ -2017,9 +2017,9 @@ with postfix `p.*` (the deref step), both inside `#Unsafe`:
 ```jet
 use core.mem
 
-flag: Bool :: true
+flag :: true
 #Unsafe("flag is live on this stack frame and the pointer never escapes") {
-    addr: Int :: mem.address_of(flag)
+    addr :: mem.address_of(flag)
     p :: mem.Ptr<Bool>.from_addr(addr)
     print(p.*)
 }
@@ -3264,7 +3264,7 @@ type_fixed_list = "[" type "#" int_literal "]" ;
 ```
 
 ```jet
-result :: [Int#3].{2, 4, 6};
+result :: [Int#3]{2, 4, 6};
 [a, b, c] :: result;   // OK — 3 names for 3 elements
 ```
 
@@ -3313,7 +3313,7 @@ representation.
 | `Time`  | ambient `core.time` clock/zone reads (`now`, `now_utc`, `today`, `instant`, `zone`, `sleep`, `start`) |
 | `Rand`  | `core.math.random.*` |
 | `Env`   | `core.sys.*` |
-| `Exec`  | `core.process.run`/`exit`/`cmd`/`pipeline`, `ProcessSpec.run`/`spawn`, `ProcessChild` wait/control/stream calls, `core.watcher.process_pid` |
+| `Exec`  | `core.process.argv`, `core.process.run`/`exit`/`cmd`/`pipeline`, `ProcessSpec.run`/`spawn`, `ProcessChild` wait/control/stream calls, `core.watcher.process_pid` |
 | `DB`    | `core.db.*`; leaves (D-EFFDBREAD1): `conn.query`/`conn.query_one` carry `DB.Read`, `conn.execute` carries `DB.Write`, `begin`/`commit`/`rollback`/`close` and `open`/`open_memory` keep the bare `DB` root |
 | `Log`   | `core.log.*` |
 | `GPU`   | `core.game.raylib.*`, future `core.gpu.*` / `core.game.*` |
@@ -3321,6 +3321,22 @@ representation.
 A call to an `extern rust`/C foreign function, whose body the compiler can't
 inspect, contributes the **maximal** set (every effect) — it is assumed to do
 anything. This keeps inference sound without reading foreign code.
+
+The #2259 witnesses are `print("Shipping {project}")` in
+`examples/features/basics/first_hour_expert.jet` and
+`core.process.argv()` in that example and
+`gauntlet/entries/sieve/jet/main.jet`. The interpolated print records
+`Mem.Alloc` for its fresh `String` as well as `IO`; argv records `Exec`.
+These are honest sema facts. The application authority only supplies the
+ratified manifest-less beginner default and does not change inference.
+
+### Manifest-less application authority (D-AUTH-AMBIENT1=A)
+
+A program with no `package.jet` receives the beginner ambient basics
+`IO`, `Mem.Alloc`, and `Exec`. This covers stdout, ordinary allocation, and
+argv reads without manifest ceremony. An explicit `package.jet` replaces this
+default with its `authority.holds` allow/deny rows, so an expert can deny or
+audit the same effects deliberately.
 
 ### Cryptography (D-CRYPTO-API1)
 

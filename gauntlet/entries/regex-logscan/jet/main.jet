@@ -5,7 +5,7 @@ use core.regex as re
 fn run() {
     path :: process.argv().get(1) ?? "access.log"
     text :: fs.read(path) ?? return Err("read failed")
-    pattern :: Regex{"^([0-9.]+) - - \[01/Jan/2026:00:00:00 \+0000\] \"GET (/api/[^ ]+) HTTP/1\.1\" 5[0-9][0-9] "}
+    pattern :: Regex{"^([0-9.]+) - - \[[^]]+\] \"GET (/api/[^ ]+) HTTP/1\.1\" 5[0-9][0-9] "}
     counts := [String:Int]{}
     matches := 0
 
@@ -21,26 +21,20 @@ fn run() {
     }
 
     print("matches {matches}")
-    top := [Int]{}
+    ips := counts.keys().to_list()
+    top := [String]{}
     loop _ in 0..<5 {
-        best_i := 0
+        best_ip := ""
         best_count := -1
-        loop i in 1..50 {
-            ip_for_count :: "192.0.2.{i}"
-            count :: counts.get(ip_for_count) ?? 0
-            ip_for_compare :: "192.0.2.{i}"
-            best_ip_for_compare :: "192.0.2.{best_i}"
-            if !top.contains(i) && (count > best_count || (count == best_count && (best_i == 0 || ip_for_compare < best_ip_for_compare))) {
-                best_i = i
+        loop ip in ips {
+            count :: counts.get(ip) ?? 0
+            if !top.contains(ip) && (count > best_count || (count == best_count && (best_ip == "" || ip < best_ip))) {
+                best_ip = ip
                 best_count = count
             }
         }
-        top.push(best_i)
+        if best_ip == "" -> break
+        top.push(best_ip)
     }
-    loop i in top {
-        ip_for_count :: "192.0.2.{i}"
-        count :: counts.get(ip_for_count) ?? 0
-        ip_for_print :: "192.0.2.{i}"
-        print("{count} {ip_for_print}")
-    }
+    loop i in 0..<top.len() -> print("{counts.get(top[i]) ?? 0} {top[i]}")
 }

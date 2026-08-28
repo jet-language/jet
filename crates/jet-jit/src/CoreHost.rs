@@ -24,6 +24,10 @@ mod fs_walk_kernel {
     include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
 }
 
+mod fs_ops_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/FSOps.rs");
+}
+
 mod keep_kernel {
     include!("../../jet-codegen/src/Prelude/Core/Keep.rs");
 }
@@ -1202,20 +1206,6 @@ fn system_time_ms(t: std::time::SystemTime) -> Option<i64> {
         .map(|d| d.as_millis() as i64)
 }
 
-fn glob_match(pattern: &str, text: &str) -> bool {
-    fn inner(p: &[u8], t: &[u8]) -> bool {
-        if p.is_empty() {
-            return t.is_empty();
-        }
-        match p[0] {
-            b'*' => inner(&p[1..], t) || (!t.is_empty() && inner(p, &t[1..])),
-            b'?' => !t.is_empty() && inner(&p[1..], &t[1..]),
-            c => !t.is_empty() && c == t[0] && inner(&p[1..], &t[1..]),
-        }
-    }
-    inner(pattern.as_bytes(), text.as_bytes())
-}
-
 fn walk_entries(root: &std::path::Path) -> Result<Vec<(String, String, bool, i64)>, String> {
     let mut out = Vec::new();
     fn walk_dir(
@@ -1628,6 +1618,18 @@ fn jet_jit_fs_walk(path: i64) -> i64 {
     result_ok(list as u64)
 }
 
+fn jet_jit_fs_rename(from: i64, to: i64) -> i64 {
+    let from = clone_string(from);
+    let to = clone_string(to);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {to}"));
+    }
+    match fs_ops_kernel::jet_fs_rename(&from, &to) {
+        Ok(()) => result_ok(0),
+        Err(error) => result_err_msg(&format!("rename {from}: {error}")),
+    }
+}
+
 fn jet_jit_fs_walk_parallel(path: i64) -> i64 {
     let p = clone_string(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
@@ -1665,21 +1667,10 @@ fn jet_jit_fs_glob(pattern: i64) -> i64 {
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {pat}"));
     }
-    let split = pat.find(['*', '?']).unwrap_or(pat.len());
-    let base = pat[..split]
-        .rsplit_once(std::path::MAIN_SEPARATOR)
-        .map(|(dir, _)| if dir.is_empty() { "." } else { dir })
-        .unwrap_or(".");
-    let entries = match walk_entries(std::path::Path::new(base)) {
-        Ok(e) => e,
-        Err(e) => return result_err_msg(&format!("glob {pat}: {e}")),
+    let matches = match fs_ops_kernel::jet_fs_glob(&pat) {
+        Ok(matches) => matches,
+        Err(error) => return result_err_msg(&format!("glob {pat}: {error}")),
     };
-    let mut matches: Vec<String> = entries
-        .into_iter()
-        .map(|(path, _, _, _)| path)
-        .filter(|path| glob_match(&pat, path))
-        .collect();
-    matches.sort();
     let list = Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         for path in matches {
@@ -2306,6 +2297,7 @@ host_fns! {
     fs_write_atomic: "jet_jit_fs_write_atomic" => jet_jit_fs_write_atomic: sig_i64_i64_i64;
     fs_walk: "jet_jit_fs_walk" => jet_jit_fs_walk: sig_unary_i64;
     fs_walk_parallel: "jet_jit_fs_walk_parallel" => jet_jit_fs_walk_parallel: sig_unary_i64;
+    fs_rename: "jet_jit_fs_rename" => jet_jit_fs_rename: sig_i64_i64_i64;
     fs_glob: "jet_jit_fs_glob" => jet_jit_fs_glob: sig_unary_i64;
     fs_symlink: "jet_jit_fs_symlink" => jet_jit_fs_symlink: sig_i64_i64_i64;
     fs_read_link: "jet_jit_fs_read_link" => jet_jit_fs_read_link: sig_unary_i64;

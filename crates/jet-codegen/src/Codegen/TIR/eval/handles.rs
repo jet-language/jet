@@ -1379,6 +1379,8 @@ pub(super) fn eval_handle_with_type_and_sink(
         | THandleOp::ReaderReadU32Be
         | THandleOp::ReaderReadU64Le
         | THandleOp::ReaderReadU64Be
+        | THandleOp::ReaderReadF32Le
+        | THandleOp::ReaderReadF64Le
         | THandleOp::ReaderTake
         | THandleOp::ReaderRemaining
         | THandleOp::ReaderAtEnd
