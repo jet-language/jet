@@ -582,7 +582,7 @@ fn error_body() String -> {
       <div class="page-header">
         <p class="eyebrow">// error codes</p>
         <h1>You followed a link the compiler printed.</h1>
-        <p>Every Jet diagnostic carries a code and links here. Per-code pages are coming; until they land, the same registered explanation is available offline, instantly, from the toolchain you already have.</p>
+        <p>Every Jet diagnostic carries a code and links here. Each code has a generated page with the registered What, Why, Fix, and its first UI snapshot example. <a href="E0112/">See the E0112 page</a>. The same explanation is available offline, instantly, from the toolchain you already have.</p>
       </div>
     </section>
     <article class="wrap article">
@@ -596,6 +596,7 @@ fn error_body() String -> {
 
 fn run() {
     fs.create_dir("dist") ?? return Err("could not create dist")
+    // tests/diagnostic_pages.rs owns dist/e/<CODE>/index.html; this SSG owns the landing page.
     fs.create_dir("dist/e") ?? return Err("could not create dist/e")
     fs.copy_dir("assets", "dist/assets") ?? return Err("could not copy assets")
 
