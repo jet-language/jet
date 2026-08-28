@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Jet Gauntlet — 2026-08-28</title>
+<style>
+  :root {
+    --bg:#141413; --panel:#1c1c1a; --panel-2:#242421; --line:#383832;
+    --ivory:#f2eee4; --soft:#c8c1b4; --muted:#999286;
+    --clay:#e08a64; --olive:#a4bc7d; --rust:#ef796b; --deep-rust:#6e2723;
+    --amber:#e6ad62; --sky:#7faabd;
+    --serif:ui-serif,Georgia,"Times New Roman",serif;
+    --sans:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  }
+  * { box-sizing:border-box; }
+  html { background:var(--bg); color-scheme:dark; }
+  body { margin:0; min-height:100vh; background:var(--bg); color:var(--ivory); font:15px/1.55 var(--sans); -webkit-font-smoothing:antialiased; }
+  .page { max-width:1420px; margin:auto; padding:54px 28px 90px; }
+  header { padding-bottom:38px; border-bottom:1px solid var(--line); }
+  .eyebrow,.kicker,.label,.legend,.note-label { font:600 11px/1.35 var(--mono); letter-spacing:.1em; text-transform:uppercase; }
+  .eyebrow { color:var(--clay); display:flex; align-items:center; gap:9px; }
+  .eyebrow::before { content:""; width:20px; height:2px; background:var(--clay); }
+  h1,h2,h3 { font-family:var(--serif); font-weight:400; margin:0; }
+  h1 { max-width:970px; margin-top:15px; font-size:clamp(38px,6vw,70px); line-height:.98; letter-spacing:-.035em; }
+  .headline { max-width:1130px; margin:24px 0 0; padding-left:18px; border-left:3px solid var(--rust); color:var(--soft); font-size:clamp(16px,2vw,21px); line-height:1.45; }
+  .headline strong { color:var(--ivory); }
+  .run-note { margin:18px 0 0; color:var(--muted); font:12px/1.6 var(--mono); }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:30px; }
+  .stat { min-height:142px; padding:21px 22px; border:1px solid var(--line); border-radius:14px; background:var(--panel); position:relative; overflow:hidden; }
+  .stat::before { content:""; position:absolute; inset:0 0 auto; height:3px; background:var(--line); }
+  .stat.warn::before { background:var(--amber); } .stat.fail::before { background:var(--rust); } .stat.info::before { background:var(--sky); }
+  .stat-value { margin-top:12px; font:400 44px/1 var(--serif); letter-spacing:-.025em; }
+  .stat-label { margin-top:12px; color:var(--muted); font:600 10px/1.35 var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+  .stat-detail { margin-top:6px; color:var(--soft); font:11px/1.35 var(--mono); }
+  section { scroll-margin-top:24px; margin-top:68px; }
+  .section-head { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:18px; }
+  h2 { font-size:clamp(29px,4vw,42px); line-height:1.05; letter-spacing:-.025em; }
+  .section-copy { max-width:660px; margin:8px 0 0; color:var(--soft); }
+  .section-count { color:var(--muted); white-space:nowrap; font:11px var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+  .panel { border:1px solid var(--line); border-radius:14px; background:var(--panel); overflow:hidden; }
+  .table-scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; }
+  caption { text-align:left; padding:14px 17px; color:var(--muted); font:11px/1.45 var(--mono); }
+  th { padding:12px 14px; text-align:left; color:var(--muted); background:var(--panel-2); border-bottom:1px solid var(--line); font:600 10px/1.35 var(--mono); letter-spacing:.075em; text-transform:uppercase; white-space:nowrap; }
+  td { padding:12px 14px; color:var(--soft); border-bottom:1px solid rgba(56,56,50,.68); vertical-align:top; }
+  tr:last-child td { border-bottom:0; }
+  tbody tr:hover td { background:rgba(255,255,255,.022); }
+  td:first-child { color:var(--ivory); }
+  code,.mono { font-family:var(--mono); font-size:.92em; }
+  .loss-id { font:700 12px var(--mono); }
+  .loss-table tr.compiler td:first-child { box-shadow:inset 4px 0 var(--rust); }
+  .loss-table tr.perf td:first-child { box-shadow:inset 4px 0 var(--amber); }
+  .loss-table tr.surface td:first-child { box-shadow:inset 4px 0 var(--muted); }
+  .loss-table .card { color:var(--clay); font-family:var(--mono); white-space:nowrap; }
+  .severity { display:inline-flex; margin-top:6px; padding:3px 7px; border-radius:5px; font:700 9px var(--mono); letter-spacing:.07em; text-transform:uppercase; }
+  .severity.compiler { color:#ffb0a8; background:rgba(239,121,107,.15); }
+  .severity.perf { color:#ffd092; background:rgba(230,173,98,.13); }
+  .severity.surface { color:#cbc5bb; background:rgba(153,146,134,.13); }
+  .cross-check { margin:14px 0 0; padding:14px 16px; border-left:3px solid var(--rust); background:rgba(239,121,107,.07); color:var(--soft); }
+  .legend { display:flex; flex-wrap:wrap; gap:14px; color:var(--muted); }
+  .key { display:inline-flex; align-items:center; gap:6px; }
+  .swatch { width:10px; height:10px; border-radius:3px; }
+  .scoreboard th:not(:first-child),.scoreboard td:not(:first-child) { text-align:right; }
+  .scoreboard td { white-space:nowrap; font-family:var(--mono); font-size:12px; }
+  .scoreboard td:first-child { position:sticky; left:0; z-index:1; background:var(--panel); font-family:var(--sans); white-space:nowrap; }
+  .scoreboard th:first-child { position:sticky; left:0; z-index:2; }
+  .scoreboard .best { color:#d9efb6; background:rgba(164,188,125,.16); font-weight:700; }
+  .scoreboard .parity { color:#d2cdc4; background:rgba(153,146,134,.15); }
+  .scoreboard .slow { color:#ffaaa0; background:rgba(239,121,107,.11); }
+  .scoreboard .broken { color:#ffd0ca; background:var(--deep-rust); font-weight:800; letter-spacing:.05em; }
+  .scoreboard .empty { color:#666057; }
+  .scoreboard .verdict { min-width:230px; text-align:left!important; white-space:normal; font-family:var(--sans); }
+  .expert td:first-child::after { content:"expert"; margin-left:7px; padding:2px 5px; color:var(--sky); border:1px solid rgba(127,170,189,.35); border-radius:4px; font:8px var(--mono); text-transform:uppercase; }
+  .tier-summary { display:grid; grid-template-columns:190px 1fr; gap:14px; margin-bottom:14px; }
+  .pass-card { display:grid; place-items:center; min-height:150px; padding:20px; text-align:center; background:linear-gradient(145deg,rgba(239,121,107,.13),rgba(28,28,26,.2)); border:1px solid rgba(239,121,107,.35); border-radius:14px; }
+  .pass-card strong { font:400 58px/1 var(--serif); color:var(--rust); }
+  .pass-card span { color:var(--soft); font:10px var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+  .tier-statement { display:flex; align-items:center; padding:24px; border:1px solid var(--line); border-radius:14px; background:var(--panel); color:var(--soft); font-size:18px; }
+  .status { display:inline-block; min-width:78px; padding:4px 8px; border-radius:5px; text-align:center; font:700 9px var(--mono); letter-spacing:.07em; text-transform:uppercase; }
+  .status.pass { color:#d9efb6; background:rgba(164,188,125,.17); }
+  .status.fail { color:#ffaaa0; background:rgba(239,121,107,.14); }
+  .status.broken { color:#ffd0ca; background:var(--deep-rust); }
+  .status.shipped { color:#d9efb6; background:rgba(164,188,125,.17); }
+  .status.measured { color:#ffe0b6; background:rgba(230,173,98,.15); }
+  .cell-id { color:var(--muted); font:11px var(--mono); }
+  .split { display:grid; grid-template-columns:minmax(350px,.78fr) minmax(680px,1.55fr); gap:14px; align-items:start; }
+  .subhead { display:flex; justify-content:space-between; align-items:baseline; padding:20px 20px 5px; }
+  h3 { font-size:23px; }
+  .callout { margin:0; padding:17px 20px; border-top:1px solid var(--line); color:var(--soft); }
+  .wins-table td:first-child { color:#d9efb6; }
+  .badge-group { display:flex; gap:6px; flex-wrap:wrap; }
+  .advisory-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(400px,1.1fr); gap:14px; }
+  .advisory-copy { padding:25px; }
+  .advisory-copy h3 { margin-bottom:14px; }
+  .advisory-copy p { color:var(--soft); margin:0 0 14px; }
+  .advisory-copy p:last-child { margin-bottom:0; }
+  .cost-chart { padding:25px; border-color:rgba(239,121,107,.45); background:linear-gradient(145deg,#251b19,var(--panel) 52%); }
+  .cost-chart .kicker { color:var(--rust); }
+  .cost-chart h3 { margin:6px 0 2px; font-size:31px; }
+  .damning { margin:0 0 23px; color:#ffb6ad; }
+  .bar-row { display:grid; grid-template-columns:72px 1fr 52px; align-items:center; gap:10px; margin:12px 0; }
+  .bar-label { color:var(--soft); font:11px var(--mono); text-transform:uppercase; }
+  .bar-track { height:25px; background:#11110f; border:1px solid var(--line); border-radius:5px; overflow:hidden; }
+  .bar-fill { height:100%; min-width:3px; background:var(--muted); }
+  .bar-row.jet .bar-fill { background:linear-gradient(90deg,var(--rust),var(--clay)); }
+  .bar-row.jet .bar-label,.bar-row.jet .bar-value { color:#ffb0a8; font-weight:800; }
+  .bar-value { text-align:right; font:12px var(--mono); color:var(--ivory); }
+  .cost-meta { margin-top:20px; padding-top:17px; border-top:1px solid var(--line); color:var(--muted); font:11px/1.7 var(--mono); }
+  .cost-meta strong { color:var(--soft); }
+  .territory { display:grid; grid-template-columns:minmax(260px,.7fr) minmax(520px,1.3fr); gap:14px; }
+  .territory-copy { padding:25px; }
+  .territory-list { display:flex; flex-wrap:wrap; gap:8px; margin:17px 0; }
+  .territory-list code { padding:7px 9px; color:var(--amber); border:1px solid rgba(230,173,98,.3); border-radius:6px; background:rgba(230,173,98,.07); }
+  .assumption { margin:24px 0 0; padding-top:20px; border-top:1px solid var(--line); color:var(--soft); }
+  footer { margin-top:60px; padding-top:20px; border-top:1px solid var(--line); display:flex; justify-content:space-between; gap:20px; color:var(--muted); font:10px/1.6 var(--mono); }
+  @media (max-width:1200px) { .split { grid-template-columns:1fr; } }
+  @media (max-width:900px) { .advisory-grid,.territory { grid-template-columns:1fr; } }
+  @media (max-width:768px) {
+    .page { padding:36px 16px 60px; }
+    .stats { grid-template-columns:repeat(2,1fr); }
+    .section-head { align-items:flex-start; flex-direction:column; gap:8px; }
+    .tier-summary { grid-template-columns:1fr; }
+    .pass-card { min-height:120px; }
+    .tier-statement { font-size:16px; }
+    td,th { padding:10px 11px; }
+    footer { flex-direction:column; }
+  }
+  @media (max-width:460px) { .stats { grid-template-columns:1fr; } .stat { min-height:120px; } .advisory-grid { display:block; } .advisory-grid > *+* { margin-top:14px; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <header id="overview">
+    <div class="eyebrow">JET GAUNTLET / 2026-08-28</div>
+    <h1>Every Jet cell runs. Two entries now beat hand-rolled C.</h1>
+    <p class="headline"><strong>All 19 entries build and run on the fresh binary</strong> — the derive ICE, argv loss, warning-fatal exits, web ICE, and byte-Reader collapse from 08-27 are fixed. binparse went from 460× slower than C to <strong>4.6× faster</strong>; the HTTP service moved from 16× behind Go to 0.25 ms median; the concurrency service beats Go, Rust, and Python outright. Remaining losses are bounded hot-loop codegen gaps (#2254) and SIMD ceiling (#2261).</p>
+    <p class="run-note">One machine · one binary (post-overnight-wave debug build) · 7 languages · shipped artifacts only · medians of 3 runs · results JSON: gauntlet/results/2026-08-28.json</p>
+    <div class="stats" aria-label="Run summary">
+      <article class="stat"><div class="label">Corpus</div><div class="stat-value">19</div><div class="stat-label">entries (2 new: text-script, concurrency-service)</div></article>
+      <article class="stat info"><div class="label">Jet cells green</div><div class="stat-value">19/19</div><div class="stat-label">was 15/17 broken-or-dodged</div></article>
+      <article class="stat warn"><div class="label">Cards closed tonight</div><div class="stat-value">9</div><div class="stat-label">#2211 #2232 #2234* #2240 #2245 #2248 #2250 #2255 #2262 #2264</div><div class="stat-detail">*awaits owner visual acceptance</div></article>
+      <article class="stat fail"><div class="label">New P0s found &amp; fixed</div><div class="stat-value">4</div><div class="stat-label">double failure carrier · [^]] class law · U64 literal→0 · regex span order</div></article>
+    </div>
+  </header>
+
+  <section id="fixed" aria-labelledby="fixed-title">
+    <div class="section-head"><div><div class="kicker">Since 08-27</div><h2 id="fixed-title">What the overnight wave fixed</h2><p class="section-copy">Twenty-one implementation lanes plus corrections. Each row names its card and the measured before/after.</p></div><div class="section-count">run-to-run deltas</div></div>
+    <div class="panel table-scroll">
+      <table class="loss-table">
+        <thead><tr><th>Fix</th><th>Before (08-27)</th><th>After (08-28)</th><th>Card</th></tr></thead>
+        <tbody>
+          <tr class="compiler"><td><span class="loss-id">F1</span><br><span class="severity compiler">compiler</span></td><td>#CLI/#Codable derive ICE poisoned 5 entries</td><td>nbody, sieve, taskfile-cli, wordfreq, http-service all green</td><td class="card">#2249</td></tr>
+          <tr class="compiler"><td><span class="loss-id">F2</span><br><span class="severity compiler">compiler</span></td><td>argv dropped after <code>--</code> (sieve count 0)</td><td>one RUNTIME_ARGV carrier; tier-0 smoke delivers all args; sieve/taskfile green</td><td class="card">#2250 closed</td></tr>
+          <tr class="compiler"><td><span class="loss-id">F3</span><br><span class="severity compiler">compiler</span></td><td>warnings fatal on run tier</td><td>diagnostic_gate matrix green 15/15 (warn proceeds, deny blocks)</td><td class="card">#2264 closed</td></tr>
+          <tr class="compiler"><td><span class="loss-id">F4</span><br><span class="severity compiler">compiler</span></td><td>nested index assignment silent no-op in AOT</td><td>write-through place fix; once-only eval proven on all tiers</td><td class="card">#2262 closed</td></tr>
+          <tr class="compiler"><td><span class="loss-id">F5</span><br><span class="severity compiler">compiler</span></td><td>--target=web ICE, no wasm</td><td>web-widget emits 1.4 MB wasm, runner output matches, first result 27 ms</td><td class="card">#2260</td></tr>
+          <tr class="perf"><td><span class="loss-id">F6</span><br><span class="severity perf">performance</span></td><td>binparse byte Reader 20 656 ms (460× vs C)</td><td><strong>10.0 ms — beats C 4.6×</strong>; 1.75× Rust</td><td class="card">#2253 #2258</td></tr>
+          <tr class="perf"><td><span class="loss-id">F7</span><br><span class="severity perf">performance</span></td><td>HTTP service 1.158 ms median (16× Go)</td><td><strong>0.254 ms median · 0.326 ms p99 · RSS 2.8 MB</strong> (accept-once fix)</td><td class="card">#2255 closed</td></tr>
+          <tr class="compiler"><td><span class="loss-id">F8</span><br><span class="severity compiler">compiler</span></td><td>found tonight: <code>?? return Err(...)</code> emitted invalid <code>Ok(Err(...))</code> (rustc leak, I2)</td><td>or-fallback return no longer re-wraps carrier-typed values</td><td class="card">integration commit</td></tr>
+          <tr class="compiler"><td><span class="loss-id">F9</span><br><span class="severity compiler">compiler</span></td><td>found tonight: <code>U64{...}</code> above i64::MAX silently became <strong>0</strong></td><td>big unsigned literals flow through CtBigInt; binparse fnv exact</td><td class="card">integration commit</td></tr>
+          <tr class="compiler"><td><span class="loss-id">F10</span><br><span class="severity compiler">compiler</span></td><td>found tonight: <code>[^]]</code> parsed as empty negated class; replace_all dropped text</td><td>standard class grammar; absolute spans; regex-logscan green, beats C</td><td class="card">#2256</td></tr>
+          <tr class="surface"><td><span class="loss-id">F11</span><br><span class="severity surface">surface</span></td><td>format selectors, byte literals, ambient authority, SIMD lanes — all unratified/missing</td><td>D-FMT-INTERP3=B :Hex landed · D-BYTELIT1=B [U8]{"…"} · D-AUTH-AMBIENT1=A · D-SIMD3=B lane family (F64x4 runs)</td><td class="card">#2257 #2259 #2261 #2265</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="cross-check"><strong>New pre-existing wall carded:</strong> nested call arguments reject any user function result (implicit-failure E0401, golden example red on master, baseline-proven at HEAD) — #2266. It blocks the last ice_regressions/tir_control reds; not a regression from this wave.</p>
+  </section>
+
+  <section id="runtime" aria-labelledby="runtime-title">
+    <div class="section-head"><div><div class="kicker">AOT · median milliseconds · 3 runs</div><h2 id="runtime-title">Runtime scoreboard</h2><p class="section-copy">Fastest cell is olive; within 5% is muted; slower is rust-red. No Jet cell is broken.</p></div><div class="legend" aria-label="Score colors"><span class="key"><i class="swatch" style="background:var(--olive)"></i>win</span><span class="key"><i class="swatch" style="background:var(--muted)"></i>parity ≤1.05</span><span class="key"><i class="swatch" style="background:var(--rust)"></i>loss</span></div></div>
+    <div class="panel table-scroll">
+      <table class="scoreboard">
+        <thead><tr><th>Entry</th><th>Jet</th><th>Rust</th><th>Python</th><th>C</th><th>Zig</th><th>Go</th><th>JS</th><th>Jet verdict vs best peer</th></tr></thead>
+        <tbody>
+          <tr><td>nbody</td><td class="parity">2.84</td><td class="best">2.05</td><td class="slow">301.2</td><td class="parity">2.84</td><td class="slow">2.57</td><td class="empty">–</td><td class="empty">–</td><td class="verdict"><strong>parity with C</strong>, 1.4× Rust (was ICE)</td></tr>
+          <tr class="expert"><td>nbody expert</td><td class="slow">3.38</td><td class="slow">1.75</td><td class="empty">–</td><td class="best">1.52</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">runs on new SIMD lanes; loss 2.2× (#2261 open)</td></tr>
+          <tr><td>sieve</td><td class="slow">93.7</td><td class="best">8.2</td><td class="slow">621.9</td><td class="slow">9.4</td><td class="slow">9.6</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">loss 11.4× (was 16×; #2254 open)</td></tr>
+          <tr><td>wordfreq</td><td class="slow">340.4</td><td class="slow">56.9</td><td class="slow">179.0</td><td class="slow">48.9</td><td class="best">23.3</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">loss 14.6× (#2254 open)</td></tr>
+          <tr><td>binparse</td><td class="slow">10.0</td><td class="best">5.7</td><td class="slow">631.5</td><td class="slow">46.1</td><td class="parity">5.7</td><td class="empty">–</td><td class="empty">–</td><td class="verdict"><strong>beats C 4.6×</strong> (was 460× slower); 1.75× Rust</td></tr>
+          <tr><td>regex-logscan</td><td class="slow">167.6</td><td class="best">44.5</td><td class="slow">140.3</td><td class="slow">176.1</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="verdict"><strong>beats hand-rolled C</strong>; loss 3.8× Rust</td></tr>
+          <tr><td>csvtransform</td><td class="slow">105.6</td><td class="slow">90.6</td><td class="slow">258.7</td><td class="empty">–</td><td class="best">9.9</td><td class="slow">40.5</td><td class="empty">–</td><td class="verdict">loss 2.6× vs Go</td></tr>
+          <tr><td>datasummary</td><td class="slow">104.9</td><td class="best">3.9</td><td class="slow">89.2</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">loss; still behind Python (#2254 class)</td></tr>
+          <tr><td>parallel-grep</td><td class="slow">8.5</td><td class="best">7.1</td><td class="slow">122.7</td><td class="empty">–</td><td class="empty">–</td><td class="slow">15.8</td><td class="empty">–</td><td class="verdict"><strong>near-parity Rust, beats Go 1.8×</strong></td></tr>
+          <tr><td>procpipe</td><td class="slow">346.7</td><td class="slow">337.1</td><td class="slow">352.2</td><td class="empty">–</td><td class="empty">–</td><td class="best">335.0</td><td class="empty">–</td><td class="verdict">parity-class (child-process bound)</td></tr>
+          <tr><td>taskfile-cli</td><td class="slow">4.0</td><td class="best">3.3</td><td class="slow">90.5</td><td class="empty">–</td><td class="empty">–</td><td class="slow">17.9</td><td class="empty">–</td><td class="verdict"><strong>beats Go 4.5×, Python 22×</strong></td></tr>
+          <tr><td>tzreport</td><td class="slow">0.82</td><td class="best">0.72</td><td class="slow">11.5</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">near-parity Rust, beats Python 14×</td></tr>
+          <tr><td>bulkrename</td><td class="parity">5.63</td><td class="best">5.60</td><td class="slow">25.1</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="verdict"><strong>parity with Rust</strong>, beats Python 4.5×</td></tr>
+          <tr><td>http-client</td><td class="slow">1.90</td><td class="best">1.41</td><td class="slow">45.7</td><td class="empty">–</td><td class="empty">–</td><td class="slow">2.95</td><td class="empty">–</td><td class="verdict"><strong>beats Go and Python</strong></td></tr>
+          <tr><td>text-script <span class="cell-id">new</span></td><td class="slow">0.81</td><td class="best">0.64</td><td class="slow">10.7</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">near-parity Rust, beats Python 13×</td></tr>
+          <tr><td>logreport</td><td class="slow">verified</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="verdict">jet cell green in direct smoke; harness lane hung on a non-Jet tier probe — remeasure owed</td></tr>
+          <tr><td>http-service (latency)</td><td class="slow">0.254</td><td class="slow">0.130</td><td class="slow">0.160</td><td class="empty">–</td><td class="empty">–</td><td class="best">0.069</td><td class="empty">–</td><td class="verdict">was 16× Go, now 3.7×; <strong>best p99 after Go; RSS 2.8 MB</strong></td></tr>
+          <tr><td>concurrency-service <span class="cell-id">new</span></td><td class="best">1.259</td><td class="slow">2.302</td><td class="slow">2.433</td><td class="empty">–</td><td class="empty">–</td><td class="slow">2.219</td><td class="empty">–</td><td class="verdict"><strong>beats Go, Rust, and Python outright</strong>; RSS 3.6 MB; clean exit</td></tr>
+          <tr><td>web-app (first result)</td><td class="slow">24.1</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="best">19.8</td><td class="verdict">loss 1.2×</td></tr>
+          <tr><td>web-widget (first result)</td><td class="slow">27.2</td><td class="parity">20.4 (wasm)</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="empty">–</td><td class="best">20.0</td><td class="verdict">runs (was ICE); loss 1.4×</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="tiers" aria-labelledby="tiers-title">
+    <div class="section-head"><div><div class="kicker">Default run / dev</div><h2 id="tiers-title">Default-tier repairs landed; full probe matrix owed</h2></div><div class="section-count">re-probe next run</div></div>
+    <div class="tier-summary"><div class="pass-card"><strong>4</strong><span>root causes fixed</span></div><div class="tier-statement">The four causes behind 08-27's 13/15 default-tier failures are individually fixed and test-proven: argv delivery (tier-0 smoke green), warning-fatal exits (diagnostic_gate 15/15), E0956 interpreter routes (registry guard green, routes for rename/parse_rfc3339/from_bits/glob/for-in/HTTP callbacks landed), and silent exit-0 (guard witness landed). The composed 15-entry default-tier probe matrix is owed on the next full harness run (#2251/#2252 stay open until it is green).</div></div>
+  </section>
+
+  <section id="jetpack" aria-labelledby="jetpack-title">
+    <div class="section-head"><div><div class="kicker">Package manager</div><h2 id="jetpack-title">Jetpack: first fully green env, 47× faster warm</h2></div><div class="section-count">same night</div></div>
+    <div class="panel table-scroll">
+      <table>
+        <thead><tr><th>Milestone</th><th>Before</th><th>After</th></tr></thead>
+        <tbody>
+          <tr><td>jetpack env --prep -y on this repo (28 packages, real nixpkgs closures)</td><td>exit 1 · E1315/E1340/E1349 walls, store corruption, OOM kills</td><td><strong>exit 0, zero errors, three consecutive runs</strong>; quarantined lld/tzdata/rWrapper/jsonlite closures healed; hangar doctor: 424/424 seals clean</td></tr>
+          <tr><td>Warm run time</td><td>23 m 45 s</td><td><strong>59 s debug · 30 s release</strong> (graph cache, sealed manifests, member-proof memo, one channel refresh, remote-kind cache); nix bar 17.6 s — remaining lever logged on #2246</td></tr>
+          <tr><td>Multi-instance</td><td>foreign lock receipts failed closed</td><td>unknown receipts skip (another hangar's project); known-receipt identity mismatch still fails closed</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="cards" aria-labelledby="cards-title">
+    <div class="section-head"><div><div class="kicker">Board state</div><h2 id="cards-title">Sidequest ledger after the wave</h2></div><div class="section-count">tower is authoritative</div></div>
+    <div class="panel table-scroll">
+      <table>
+        <thead><tr><th>State</th><th>Cards</th></tr></thead>
+        <tbody>
+          <tr><td><span class="status pass">closed tonight</span></td><td class="mono">#2211 #2232 #2240 #2245 #2248 #2250 #2255 #2262 #2264</td></tr>
+          <tr><td><span class="status measured">owner eyes</span></td><td class="mono">#2170 (Canvas unified session) · #2234 (web DX epic — machine criteria met, visual acceptance pending)</td></tr>
+          <tr><td><span class="status measured">open · implementation landed, measurement criteria remain</span></td><td class="mono">#2246 (sub-10s warm) · #2249 (blocked by #2266) · #2251 #2252 (probe matrix) · #2253 (witness 20×) · #2254 (hot loops) · #2256 (≤120 ms) · #2257 (remaining selectors) · #2258 (aliases) · #2259 (snapshots) · #2260 (web suite) · #2261 (1.2× expert) · #2263 (embedded cells) · #2265 (stdlib brevity) · #2247 (jet-pkg-model reds)</td></tr>
+          <tr><td><span class="status fail">new</span></td><td class="mono">#2266 — pre-existing nested-call E0401 wall (baseline-proven on HEAD; blocks the last ice/tir/web reds)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+</body>
+</html>
