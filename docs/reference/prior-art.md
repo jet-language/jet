@@ -116,6 +116,33 @@ mechanism for each job and rejects Python's dynamic baggage.
   reject object-only JSON roots and direct file truncation as safe defaults.
   https://www.youtube.com/watch?v=4rmBOxn0PdI
 
+**Five-language release batch (5 videos, mined 2026-08-28).** The owner's
+"Jet Research Queue" playlist mined together with live binary probes; full
+report at `docs/audits/video-mine-five-languages-2026-08-28.md`. Meta-lesson:
+every mature language is paying down a default it can no longer change.
+
+- Let's Get Rusty — The biggest change to the Rust compiler is here!: next-gen
+  trait solver; 4-year dual-solver cost, instruction-counts-not-wall-time perf
+  plot; Jet's one-solver design confirmed live with product diagnostics.
+  https://www.youtube.com/watch?v=aPL6y2oJjMw
+- Indently — 5 Uncommon Python Features I Love: slice objects, set operators,
+  `__format__`, walrus, currying; found D-DISPLAYDBG1 broken on all tiers and
+  the S40 `slice(a..b)` drift; declined operator/walrus second spellings.
+  https://www.youtube.com/watch?v=sQ1Q96-Vhjk
+- Better Stack — JavaScript's Biggest Update in Years (ES2027): Temporal,
+  `using`, `Iterator.zip`, `Atomics.pause`; Jet's zoned DST arithmetic and
+  compile-time date-literal rejection ran live; ownership-checked `close(^r)`
+  beats runtime disposal; E0620/E0041 immunities make `import defer` and
+  `Atomics.pause` unnecessary. https://www.youtube.com/watch?v=DLT6n3wCkuc
+- Coding with Patrik — Everything New in Go 1.27: generic methods (interface
+  fence), stdlib `uuid`, `json/v2`, `simd`, `goroutineleak`, `synctest`;
+  fed the E0956 reproducer batch (#2252) and the task-leak/observability gap.
+  https://www.youtube.com/watch?v=rTgROnXIwnI
+- Awesome — Go is becoming shockingly good: Go 1.27 opinion pass; 150-like
+  audience verdict that generics erode Go's readability identity; JSON-default
+  and enum/sum-type contrasts favor Jet live.
+  https://www.youtube.com/watch?v=c7eLIsaDL7U
+
 **Compiled-scripting and explicitness batch (3 videos, mined 2026-08-21).**
 A YouTube playlist mined together: the compiled-TypeScript moment, the
 hardware-cost optimization thesis, and Zig 0.16 explicitness pedagogy.
