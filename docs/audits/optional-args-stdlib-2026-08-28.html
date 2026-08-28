@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Optional parameters vs sibling methods — Jet stdlib API-shape study (2026-08-28)</title>
+<style>
+  :root {
+    --ivory: #FAF9F5;
+    --slate: #141413;
+    --clay: #D97757;
+    --olive: #788C5D;
+    --rust: #B04A3F;
+    --gray-100: #F5F4EE;
+    --gray-150: #F0EEE6;
+    --gray-300: #D1CFC5;
+    --gray-500: #87867F;
+    --gray-700: #3D3D3A;
+    --card: #FFFFFF;
+    --code: #F0EEE6;
+    --serif: ui-serif, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--ivory);
+    color: var(--gray-700);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    width: min(1120px, calc(100% - 48px));
+    margin: 0 auto;
+    padding: 64px 0 96px;
+  }
+
+  header {
+    max-width: 900px;
+    padding-bottom: 40px;
+    border-bottom: 1px solid var(--gray-300);
+    margin-bottom: 42px;
+  }
+
+  .eyebrow,
+  .section-no,
+  .kicker {
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: .11em;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .eyebrow { color: var(--clay); margin-bottom: 14px; }
+  h1, h2, h3 { color: var(--slate); font-family: var(--serif); font-weight: 500; }
+  h1 {
+    margin: 0 0 18px;
+    max-width: 880px;
+    font-size: clamp(38px, 5vw, 58px);
+    line-height: 1.04;
+    letter-spacing: -.035em;
+  }
+  .dek {
+    max-width: 760px;
+    margin: 0;
+    color: var(--gray-500);
+    font-size: 17px;
+  }
+
+  main { display: grid; gap: 32px; }
+  section {
+    background: var(--card);
+    border: 1px solid var(--gray-300);
+    border-radius: 14px;
+    padding: 34px;
+  }
+  .section-head {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 14px;
+    align-items: baseline;
+    margin-bottom: 24px;
+  }
+  .section-no { color: var(--gray-500); }
+  h2 {
+    margin: 0;
+    font-size: 27px;
+    line-height: 1.15;
+    letter-spacing: -.015em;
+  }
+  h3 { margin: 0 0 10px; font-size: 20px; line-height: 1.25; }
+  p { margin: 0 0 14px; }
+  p:last-child { margin-bottom: 0; }
+  code, pre { font-family: var(--mono); }
+  code {
+    font-size: .88em;
+    color: var(--slate);
+    background: var(--gray-100);
+    border-radius: 4px;
+    padding: .12em .35em;
+  }
+
+  blockquote {
+    margin: 0;
+    border-left: 4px solid var(--clay);
+    padding: 4px 0 4px 22px;
+    color: var(--slate);
+    font-family: var(--serif);
+    font-size: 22px;
+    line-height: 1.48;
+  }
+
+  .fact-grid,
+  .analysis-grid,
+  .code-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .fact {
+    border: 1px solid var(--gray-300);
+    border-radius: 10px;
+    padding: 18px;
+    background: var(--gray-100);
+  }
+  .fact .kicker { display: block; color: var(--gray-500); margin-bottom: 7px; }
+  .fact p { font-size: 14px; }
+  .fact.restriction { border-left: 3px solid var(--rust); }
+
+  .conclusion,
+  .boundary {
+    margin-top: 18px;
+    border-radius: 10px;
+    padding: 18px 20px;
+    background: rgba(217, 119, 87, .09);
+    border: 1px solid rgba(217, 119, 87, .4);
+    color: var(--slate);
+  }
+  .conclusion code {
+    display: block;
+    margin: 10px 0 6px;
+    padding: 11px 13px;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--gray-300);
+    border-radius: 11px;
+  }
+  table {
+    width: 100%;
+    min-width: 900px;
+    border-collapse: collapse;
+    background: var(--card);
+  }
+  th {
+    padding: 13px 14px;
+    background: var(--gray-100);
+    color: var(--gray-500);
+    border-bottom: 1px solid var(--gray-300);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .08em;
+    text-align: left;
+    text-transform: uppercase;
+    vertical-align: bottom;
+  }
+  td {
+    padding: 15px 14px;
+    border-bottom: 1px solid var(--gray-150);
+    font-size: 13.5px;
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: rgba(217, 119, 87, .04); }
+  td:first-child { color: var(--slate); font-weight: 650; width: 16%; }
+  td:nth-child(2) { width: 23%; }
+  td:nth-child(3) { width: 16%; }
+  td:nth-child(4) { width: 45%; }
+
+  .badge {
+    display: inline-block;
+    margin-bottom: 6px;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .07em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .badge.olive { color: var(--olive); background: rgba(120, 140, 93, .14); border: 1px solid rgba(120, 140, 93, .35); }
+  .badge.gray { color: var(--gray-700); background: var(--gray-150); border: 1px solid var(--gray-300); }
+  .badge.clay { color: var(--clay); background: rgba(217, 119, 87, .13); border: 1px solid rgba(217, 119, 87, .38); }
+  .badge.rust { color: var(--rust); background: rgba(176, 74, 63, .11); border: 1px solid rgba(176, 74, 63, .35); }
+
+  .analysis-card {
+    border: 1px solid var(--gray-300);
+    border-top: 3px solid var(--olive);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .analysis-card.risks { border-top-color: var(--rust); }
+  ul { margin: 0; padding-left: 19px; }
+  li { margin-bottom: 9px; }
+  li:last-child { margin-bottom: 0; }
+  .analysis-card li { font-size: 14px; }
+  .boundary { border-color: rgba(120, 140, 93, .42); background: rgba(120, 140, 93, .1); }
+  .boundary strong { color: var(--slate); }
+
+  .code-card {
+    overflow: hidden;
+    border: 1px solid var(--gray-300);
+    border-radius: 10px;
+    background: var(--code);
+  }
+  .code-card .label {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--gray-300);
+    color: var(--gray-500);
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+  }
+  .code-card.after { border-top: 3px solid var(--olive); }
+  .code-card.before { border-top: 3px solid var(--gray-500); }
+  pre {
+    margin: 0;
+    padding: 20px;
+    overflow-x: auto;
+    color: var(--slate);
+    font-size: 13px;
+    line-height: 1.75;
+    white-space: pre;
+  }
+
+  .status-panel {
+    border-left: 4px solid var(--clay);
+    border-radius: 10px;
+    background: var(--gray-100);
+    padding: 22px 24px;
+  }
+  .status-panel .kicker { display: block; color: var(--clay); margin-bottom: 12px; }
+  .status-panel ul { padding-left: 20px; }
+  .status-panel li { margin-bottom: 12px; }
+
+  footer {
+    padding-top: 28px;
+    color: var(--gray-500);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  @media (max-width: 1200px) {
+    .page { width: min(100% - 56px, 1040px); }
+  }
+
+  @media (max-width: 768px) {
+    .page { width: min(100% - 28px, 720px); padding: 38px 0 64px; }
+    header { padding-bottom: 30px; margin-bottom: 26px; }
+    h1 { font-size: 38px; }
+    main { gap: 20px; }
+    section { padding: 23px 18px; }
+    .section-head { grid-template-columns: 32px minmax(0, 1fr); gap: 8px; }
+    h2 { font-size: 24px; }
+    .fact-grid, .analysis-grid, .code-grid { grid-template-columns: 1fr; }
+    blockquote { font-size: 19px; padding-left: 16px; }
+    .table-wrap { margin-inline: -18px; border-radius: 0; border-left: 0; border-right: 0; }
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ivory: #141413;
+      --slate: #FAF9F5;
+      --clay: #E58A6A;
+      --olive: #9AAF7A;
+      --rust: #DF7166;
+      --gray-100: #272725;
+      --gray-150: #242422;
+      --gray-300: #3D3D3A;
+      --gray-500: #A8A69F;
+      --gray-700: #FAF9F5;
+      --card: #1E1E1C;
+      --code: #181817;
+    }
+    body { background: #141413; color: #FAF9F5; }
+    section, table { background: #1E1E1C; }
+    section, .fact, .analysis-card, .code-card, .table-wrap, header { border-color: #3D3D3A; }
+    th, .fact, .status-panel { background: #272725; }
+    td { border-color: #3D3D3A; }
+    .badge.gray { color: #E3E1D9; background: #272725; border-color: #3D3D3A; }
+    tbody tr:hover { background: rgba(229, 138, 106, .06); }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div class="eyebrow">JET / STDLIB DESIGN STUDY</div>
+    <h1>Optional parameters vs sibling methods — Jet stdlib API-shape study (2026-08-28)</h1>
+    <p class="dek">One policy question: when should a single root operation expose named options, and when should Core keep separate sibling methods?</p>
+  </header>
+
+  <main>
+    <section id="question">
+      <div class="section-head">
+        <span class="section-no">01</span>
+        <h2>The question</h2>
+      </div>
+      <blockquote>
+        The owner proposes: instead of sibling methods sharing one signature shape (<code>String.replace()</code>, <code>String.replace_first()</code>), ship one root method with a great default for the most common operation, taking an optional customization parameter—for example, an enum for <code>First</code>/<code>All</code>. Namespace stays small, there is only one method to find, and the options are discoverable inside the signature. Siblings stay justified when signatures genuinely differ.
+      </blockquote>
+    </section>
+
+    <section id="ratified">
+      <div class="section-head">
+        <span class="section-no">02</span>
+        <h2>What Jet already ratified</h2>
+      </div>
+      <div class="fact-grid">
+        <article class="fact">
+          <span class="kicker">Call binding</span>
+          <p><strong>D-CALLPOS1=A</strong> (ratified 2026-08-19, card #2042): bare call arguments fill left to right when deterministic; <strong>DEFAULTS FILL AFTER SUPPLIED ARGUMENTS</strong>; named arguments deconflict.</p>
+        </article>
+        <article class="fact">
+          <span class="kicker">Default spelling</span>
+          <p>Parameter and field declaration defaults spell with braces: <code>param: Type{default}</code> (D-CHOOSE-FNBODY1 lineage).</p>
+        </article>
+        <article class="fact">
+          <span class="kicker">Option surface</span>
+          <p>Enums with dot-variant patterns (<code>.First</code> / <code>.All</code>) are core surface.</p>
+        </article>
+        <article class="fact restriction">
+          <span class="kicker">Tier-0 restriction</span>
+          <p>Comptime/generic-module VALUE parameters explicitly forbid defaults and named arguments. This policy can cover only ordinary runtime functions and methods.</p>
+        </article>
+      </div>
+      <div class="conclusion">
+        <strong>Mechanism exists. Zero new syntax needed.</strong>
+        <code>fn replace(pattern: String, with: String, mode: ReplaceMode{.All}) String</code>
+        Call sites: <code>s.replace(p, w)</code> and <code>s.replace(p, w, mode: .First)</code>.
+      </div>
+    </section>
+
+    <section id="clusters">
+      <div class="section-head">
+        <span class="section-no">03</span>
+        <h2>Real sibling clusters in today’s Core + in-flight ballots</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Cluster</th>
+              <th>Members today/proposed</th>
+              <th>Same subject + result shape?</th>
+              <th>Verdict under proposed policy</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Regex/String replace</td>
+              <td><code>replace</code> + <code>replace_first</code><br>Ballot D-REGEXREPL1, card #2304, open</td>
+              <td>Yes</td>
+              <td><span class="badge olive">Unifiable</span><br><code>replace(p, w, mode: .All{default}/.First)</code>.</td>
+            </tr>
+            <tr>
+              <td>Bytes/UTF-8 decode</td>
+              <td><code>from_bytes</code> + <code>from_bytes_lossy</code><br>Ballot D-BYTESDECODE1, card #2297, open</td>
+              <td>No: <code>String!DecodeError</code> vs <code>String</code></td>
+              <td><span class="badge clay">Borderline</span><br>Modes change the failure type. Honest options: sibling pair, or mode enum with a unified fallible result.</td>
+            </tr>
+            <tr>
+              <td>Byte codec matrix</td>
+              <td>Card #2310: <code>read_i8/i16/i32/i64</code> × <code>le/be</code>, matching writes, plus <code>f32/f64</code>; ~24 sibling methods</td>
+              <td>Integers: yes. Floats: different result types.</td>
+              <td><span class="badge olive">Unifiable</span><br><code>read_int(width: .W8/.W16/.W32/.W64, endian: .LE{default}/.BE, signed: Bool{true})</code> returning <code>Int</code> collapses 16 readers to one. Floats keep <code>read_f32</code>/<code>read_f64</code>.</td>
+            </tr>
+            <tr>
+              <td>zip family</td>
+              <td>Ratified D-ZIPLEN1=D: “three named verbs, no default guessing”; D-ZIPPAD1=E: typed fill</td>
+              <td>Same subject; risk differs by length policy.</td>
+              <td><span class="badge rust">RATIFIED TENSION</span><br>The verdict deliberately chose verbs so the dangerous case cannot be the short spelling. <code>zip(b, ends: .Strict{default}/.Shortest/.Pad(x))</code> satisfies “reading the call tells you” only when the default is the safe, loud one. Retrofit needs an owner amendment.</td>
+            </tr>
+            <tr>
+              <td>trim family</td>
+              <td><code>trim</code> / <code>trim_start</code> / <code>trim_end</code></td>
+              <td>Yes</td>
+              <td><span class="badge olive">Unifiable</span><br><code>trim(edges: .Both{default}/.Start/.End)</code>. Three tiny verbs remain defensible; lowest stakes.</td>
+            </tr>
+            <tr>
+              <td>min_by/max_by</td>
+              <td><code>min_by</code> / <code>max_by</code>; tie-break rule on card #2298</td>
+              <td>No: different operations, not variants.</td>
+              <td><span class="badge gray">Keep siblings</span><br>Their tie-break rule could become an option later.</td>
+            </tr>
+            <tr>
+              <td>sort vs sort_by</td>
+              <td><code>sort</code> / <code>sort_by</code></td>
+              <td>No: comparator parameter changes the signature.</td>
+              <td><span class="badge gray">Keep siblings</span><br>Policy explicitly does not apply.</td>
+            </tr>
+            <tr>
+              <td>String.split limit variants</td>
+              <td>Optional limit argument in practice</td>
+              <td>Yes</td>
+              <td><span class="badge gray">Already conforms</span><br>Already shaped as an optional argument.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="analysis">
+      <div class="section-head">
+        <span class="section-no">04</span>
+        <h2>Design analysis</h2>
+      </div>
+      <div class="analysis-grid">
+        <article class="analysis-card">
+          <h3>What root + options buys</h3>
+          <ul>
+            <li>One discoverable name per operation; the signature shows the whole option space.</li>
+            <li>LSP hover and autocomplete teach available modes.</li>
+            <li>No combinatorial name explosion: the codec matrix drops from 24 names to 3.</li>
+            <li>Beginner call stays ceremony-free: <code>s.replace(p, w)</code>.</li>
+            <li>Expert choice is named at the call site: <code>mode: .First</code> reads better than a bare second method name.</li>
+            <li>Matches Python (<code>re.sub count=</code>) and Swift (labeled parameters + enums). Rust uses siblings because Rust lacks default arguments—a constraint Jet does not have.</li>
+          </ul>
+        </article>
+        <article class="analysis-card risks">
+          <h3>Where it breaks down</h3>
+          <ul>
+            <li>The default is invisible at call sites. For dangerous variants such as zip length policy, the ratified verdict chose verbs precisely to force visibility.</li>
+            <li>Enum-option APIs need excellent diagnostics for the wrong enum and a missing label.</li>
+            <li>Options that change the result type—strict vs lossy decode—do not fit one signature cleanly. That is the honest sibling boundary.</li>
+            <li>Options can hide combinatorial semantics inside one body. Testing surface does not shrink; the same matrix remains.</li>
+          </ul>
+        </article>
+      </div>
+      <div class="boundary"><strong>Policy boundary:</strong> use an options enum when subject and result shape are identical and every mode is safe. Keep siblings when the result type changes, when a mode is a safety cliff the call site must spell, or when signatures genuinely differ.</div>
+    </section>
+
+    <section id="worked-example">
+      <div class="section-head">
+        <span class="section-no">05</span>
+        <h2>Worked before / after</h2>
+      </div>
+      <div class="code-grid">
+        <article class="code-card before">
+          <div class="label">Before — sibling world</div>
+          <pre><code>clean :: re.replace_first(post, mask)
+bytes.read_i16_le(buf)
+parts :: s.trim_start()</code></pre>
+        </article>
+        <article class="code-card after">
+          <div class="label">After — root + options world</div>
+          <pre><code>clean :: re.replace(post, mask, mode: .First)
+bytes.read_int(buf, width: .W16)          // endian .LE, signed true are defaults
+parts :: s.trim(edges: .Start)</code></pre>
+        </article>
+      </div>
+    </section>
+
+    <section id="routing">
+      <div class="section-head">
+        <span class="section-no">06</span>
+        <h2>Decision routing</h2>
+      </div>
+      <div class="status-panel">
+        <span class="kicker">Owner decision pending</span>
+        <ul>
+          <li>New policy ballot <strong>D-STDLIB-OPTPARAM1</strong> is raised on new Tower card <strong>#2322</strong>.</li>
+          <li>Existing open ballots <strong>D-REGEXREPL1</strong> (#2304) and <strong>D-BYTESDECODE1</strong> (#2297) each gained a new root + options option; they resolve consistently with whatever the policy ballot decides.</li>
+          <li>Ratified <strong>D-ZIPLEN1=D</strong> / <strong>D-ZIPPAD1=E</strong> remain law unless the owner explicitly amends them. The policy ballot offers forward-only and retrofit scopes as separate options.</li>
+          <li>Card <strong>#2310</strong> (byte codec matrix) implementation should wait for the policy pick. It is the largest immediate beneficiary.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer>Jet stdlib design study · 2026-08-28 · owner decision brief</footer>
+</div>
+</body>
+</html>
