@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2331,
-    "rev": 46623,
+    "rev": 46627,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -159283,7 +159283,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T01:19:48.476Z",
-      "updated": "2026-08-29T01:19:48.476Z",
+      "updated": "2026-08-29T01:23:30.288Z",
       "updatedBy": "fable"
     },
     {
@@ -159312,7 +159312,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T01:19:49.846Z",
-      "updated": "2026-08-29T01:19:49.846Z",
+      "updated": "2026-08-29T01:23:31.401Z",
       "updatedBy": "fable"
     },
     {
@@ -159343,7 +159343,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T01:19:51.255Z",
-      "updated": "2026-08-29T01:19:51.255Z",
+      "updated": "2026-08-29T01:25:04.858Z",
       "updatedBy": "fable"
     },
     {
@@ -159401,7 +159401,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T01:20:12.647Z",
-      "updated": "2026-08-29T01:20:12.648Z",
+      "updated": "2026-08-29T01:24:51.358Z",
       "updatedBy": "fable"
     },
     {
@@ -217953,6 +217953,327 @@
       "created": "2026-08-28T21:21:17.394Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-28"
+    },
+    {
+      "id": "D-COSTLAW1",
+      "cardId": "c0ec2l6s",
+      "group": "tooling",
+      "title": "Cost transparency: what surfaces a hidden expensive operation",
+      "gist": "How Jet tells you when an innocent-looking line does expensive hidden work.",
+      "lesson": "Jet's value semantics sometimes do hidden work. A view stored into an owned slot copies (D-MEM-COPYSEM1). A shared collection clones its spine on write, and a huge Int falls back to slow big-number math. Each choice is safe and usually right. But inside a loop, one hidden copy can turn a linear-looking function into a quadratic one. This decision picks how Jet makes such costs visible, so performance stays predictable, not just fast.",
+      "explainer": "",
+      "story": "Priya ports her team's log pipeline to Jet. It benchmarks great on samples, then times out on a 2GB file in production. The slow line looks identical to every fast line around it. She has no way to see that it copies a string per iteration, so she concludes Jet is unpredictable and ports back.",
+      "inWild": "fn headers(logs: [String]) [String] {\n    out := []\n    loop log in logs {\n        out.push(log.lines().first())\n    }\n    return out\n}\n\nEach push stores a read view into an owned slot, so D-MEM-COPYSEM1 copies the line. The copy is invisible on the page, and it repeats every iteration.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Standing law, loop lint, and a cost view",
+          "detail": "Three parts. A standing law: no construct ships a new invisible super-linear cost without a matching surface. A lint: a hidden copy, clone, or representation fallback inside a loop gets a registered advisory naming the exact repair. A cost view: jet explain --cost annotates each line with its hidden allocations, copies, and fallbacks. Beginners see nothing until a real cliff exists; experts get a per-line ledger on demand.",
+          "technical": "Lint facts come from TIR lowering, where copy and clone insertion already happens; no second analysis. Cost-view rows are tier-labeled. The law lands in performance-budget-decisions.md and binds future ballots: a new hidden cost names its lint or cost-view row at ballot time.",
+          "code": "$ jet check pipeline.jet\nL2510 pipeline.jet:4  this push copies the String view into an owned slot, once per loop turn\n  fix: bind the copy once outside the loop, or keep views with [View<String>]\n\n$ jet explain --cost pipeline.jet\n4  out.push(log.lines().first())   copy String (view -> owned)   repeats: per iteration"
+        },
+        {
+          "key": "B",
+          "name": "Loop lint only",
+          "detail": "Ship the hot-loop hidden-cost lint and stop. Cheapest path to catching the worst cliffs. But there is no per-line ledger for code the lint does not flag, and no standing rule, so the next feature can quietly add a new invisible cost.",
+          "code": "$ jet check pipeline.jet\nL2510 pipeline.jet:4  this push copies the String view into an owned slot, once per loop turn\n  fix: bind the copy once outside the loop, or keep views with [View<String>]"
+        },
+        {
+          "key": "C",
+          "name": "Optimizer removes the cliffs, no surface",
+          "detail": "Spend the effort on codegen: hoist clone-on-write out of loops, keep small strings inline, widen the fast Int path. Real cliffs get rarer and code stays clean of tooling. But some costs are semantic and cannot be optimized away: a copy demanded by D-MEM-COPYSEM1 must happen, and big-number fallback must exist. Those stay invisible.",
+          "code": "fn headers(logs: [String]) [String] {\n    out := []\n    loop log in logs {\n        out.push(log.lines().first())\n    }\n    return out\n}\n\nSame source, no diagnostic; the optimizer hoists what it can and the rest stays hidden."
+        },
+        {
+          "key": "D",
+          "name": "Hidden loop copies become teaching errors",
+          "detail": "Inside a loop, a hidden copy is an error until you write the explicit ~ copy. Nothing expensive is ever silent. But the common case gains a marker it did not need before, which is ceremony creep: beginners writing a 10-item loop now meet a memory lesson.",
+          "code": "$ jet check pipeline.jet\nE2511 pipeline.jet:4  this push would copy the String view each loop turn\n  fix: write out.push(~log.lines().first()) to make the copy explicit\n\nfn headers(logs: [String]) [String] {\n    out := []\n    loop log in logs {\n        out.push(~log.lines().first())\n    }\n    return out\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Copy-on-write cliffs are famous and invisible; finding one requires Instruments profiling. This is the failure mode Jet inherits by default.",
+          "code": "var out: [String] = []\nfor log in logs { out.append(String(log.prefix(while: { $0 != \"\\n\" }))) }"
+        },
+        {
+          "lang": "Rust",
+          "note": "Costs are visible in the source: an owned copy is a written .clone() or .to_owned(). Predictable, but every reader pays the ceremony everywhere, not only where a cliff exists.",
+          "code": "out.push(line.to_owned());"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Option A keeps the beginner page clean, catches real cliffs where they bite, gives experts a full per-line ledger, and binds future features so the guarantee survives new ballots.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Without the law and the cost view, unflagged code stays illegible and the next feature can reintroduce invisible cliffs."
+          },
+          {
+            "key": "C",
+            "reason": "Semantic copies and big-number fallback cannot be optimized away, so the worst surprises stay invisible; optimizer work is complementary, not a substitute."
+          },
+          {
+            "key": "D",
+            "reason": "It taxes every ordinary loop to prevent a cliff most loops do not have, which is ceremony creep on the common case."
+          }
+        ],
+        "tradeoff": "A new advisory lint and a new explain mode must be built and kept honest against TIR changes. That cost is accepted because predictability is the trust product; effort is expendable."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared a standing law plus surfaces, a lone lint, optimizer-only work, and mandatory explicit copies, and recommended the law with both surfaces.",
+        "boilOcean": "The breadth pass tested runtime profiling hooks, a cost budget per function, and IDE-only inlay hints. Profiling and budgets already exist in the performance-budget system, and inlay hints are a rendering of the same cost facts, so none earned a separate option.",
+        "hybrid": "The hybrid pass merged optimizer work into A's law: a cost the optimizer provably removes needs no lint row. That keeps the ledger small and stops A and C from being rivals.",
+        "cooperative": "The cooperative pass strengthened D: scoping the error to profiled hot paths only would cut its ceremony. It still gates a beginner's ordinary code behind a memory lesson, so it stays behind A.",
+        "adversarial": "Attacked A on lint noise in tiny loops and on the ledger going stale against TIR changes. Repairs: the lint fires only when the copied value can exceed a small fixed size, and cost-view rows are snapshot-tested against lowering."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-29T01:23:30.287Z"
+    },
+    {
+      "id": "D-RTFAIL1",
+      "cardId": "c0102pc7",
+      "group": "runtime",
+      "title": "Runtime failures: product bar or best effort",
+      "gist": "Whether a crash at runtime gets the same product quality bar as a compile error.",
+      "lesson": "I4 makes every compile-time diagnostic a product: registered code, what/why/fix text, snapshot test. Runtime failure has no such bar. A panic in a deployed Jet service today can print free-form text. A stack trace can show generated Rust frames the user never wrote. This decision picks the bar for panics, traps, and traces on every tier.",
+      "explainer": "",
+      "story": "Marcus runs a Jet order service. At 3am it crashes. The trace names jet_out.rs and mangled runtime frames, none of which appear in his code. He cannot tell which of his functions failed, and his on-call notes say to restart and hope. His postmortem recommends moving off Jet.",
+      "inWild": "What Marcus sees today when a list index is out of range in fn pick_order:\n\nthread 'main' panicked at 'index out of bounds: the len is 3 but the index is 7', jet_out.rs:412\nstack backtrace:\n   0: jet_rt::list::index_fail\n   1: jet_out::__jet_fn_pick_order\n   2: jet_out::main\n\nNot one line of this names his file, his function spelling, or a fix.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Invariant: every runtime failure is a product",
+          "detail": "Extend I4's bar to runtime. Every panic and trap has a registered code with what/why/fix text. Stack traces show Jet frames only, mapped through source maps; generated Rust never appears on any tier, which extends I2 to runtime. All of it is snapshot-tested. I9 requires the same failure text and trace shape on AOT, JIT, and interpreter. E2-M12 implements under this law.",
+          "technical": "Trap sites already flow through Prelude functions, so registered text lives there once (I9). Frame mapping uses the existing codegen source maps. Snapshot coverage rides the existing UI snapshot harness; a runtime failure with no snapshot does not ship.",
+          "code": "runtime error R0210: list index out of range\n  what: index 7, but orders has 3 items\n  where: orders.jet:31, fn pick_order\n  fix: check idx < orders.len(), or use orders.get(idx) and handle .None\n  trace: pick_order (orders.jet:31) <- handle_request (server.jet:88) <- run (run.jet:5)"
+        },
+        {
+          "key": "B",
+          "name": "Spec guideline, no invariant",
+          "detail": "Write the same goals into the spec and let E2-M12 implement them without invariant status. No enforcement teeth: a new trap site with lazy text or a leaked Rust frame is a bug like any other, not a stop-and-fix. History says the teeth are what made I4 work.",
+          "code": "runtime error: list index out of range at orders.jet:31\n\nBetter than today, but nothing forces the what/why/fix shape or blocks a new failure surface that skips it."
+        },
+        {
+          "key": "C",
+          "name": "Traces only",
+          "detail": "Mandate Jet-frame-only traces, since leaked Rust frames are the worst confusion, but leave panic text free-form. Cheapest credible fix. The 3am reader gets the right file and function, yet still no what/why/fix, and text drifts per trap site.",
+          "code": "panicked: index out of bounds: the len is 3 but the index is 7\n  trace: pick_order (orders.jet:31) <- handle_request (server.jet:88) <- run (run.jet:5)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Backtraces are opt-in, noisy, and show internal frames; panic text is free-form per call site. Widely tolerated, never loved.",
+          "code": "thread 'main' panicked at src/main.rs:31: index out of bounds"
+        },
+        {
+          "lang": "Java",
+          "note": "Stack traces are legible and name user frames, which is why teams accept them; but the text explains nothing and suggests no fix.",
+          "code": "java.lang.IndexOutOfBoundsException: Index 7 out of bounds for length 3"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Compile-time diagnostics are Jet's strongest asset; the same bar at runtime is a differentiator no incumbent meets, and invariant status is what kept the compile-time bar from eroding.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Without teeth, coverage erodes exactly the way pre-I4 diagnostics did; a guideline cannot stop a lazy trap site from shipping."
+          },
+          {
+            "key": "C",
+            "reason": "It fixes the trace and leaves the message: the reader learns where, but not what went wrong or how to fix it."
+          }
+        ],
+        "tradeoff": "Every current and future trap site must carry registered text and a snapshot, which is real ongoing work. Accepted: effort is expendable, the 3am experience is not."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared invariant status, a spec guideline, and traces-only, and recommended the invariant because enforcement is what made the compile-time bar hold.",
+        "boilOcean": "The breadth pass tested crash-dump artifacts, structured JSON failure output for machines, and automatic error reporting. All three are E2-M12 implementation shapes under whichever bar wins, not separate bars, so they folded into the options.",
+        "hybrid": "The hybrid pass gave A its rollout ladder from C: traces land first, registered text follows, the invariant gates only what has shipped. A stays one coherent option with a staged path.",
+        "cooperative": "The cooperative pass strengthened B: a spec section plus a review-checklist line is nearly free and catches most drift in review. It still cannot block a merged lazy trap site, which the invariant does.",
+        "adversarial": "Attacked A on panic-path binary size and on snapshot brittleness across tiers. Repairs: registered text lives once in Prelude so size cost is one table, and tier snapshots share one golden with a tier label."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-29T01:23:31.401Z"
+    },
+    {
+      "id": "D-TEAMPOLICY1",
+      "cardId": "c0i3acwg",
+      "group": "tooling",
+      "title": "Team policy surface: where a tech lead sets project ceilings",
+      "gist": "Where a team writes and enforces its project rules: allowed effects, unsafe use, expert features, dependencies.",
+      "lesson": "Professionals adopt a language as a team, and a tech lead's first question is whether the toolchain can enforce team rules. Jet already has package-level contain and harden keys (D-MEM-GUARANTEE1), but no general policy surface. Without one, every team invents an unofficial style-guide dialect and enforces it by hand in review. This decision picks where such rules live and what enforces them. A project with no policy block must stay exactly as ceremony-free as today.",
+      "explainer": "",
+      "story": "Elena leads eight engineers on a payments service. Her rules: no #Unsafe outside the audited module, no network effects in the domain layer, no new dependencies without review. Today her only tools are code review vigilance and hope; one tired approval ships a violation.",
+      "inWild": "A junior adds a quick fix inside the domain layer:\n\nfn settle(o: Order) Receipt -[IO.Net]> {\n    http.post(\"https://internal/audit\", o.json())\n    return finalize(o)\n}\n\nThe team rule says the domain layer never talks to the network. Nothing in the toolchain knows that rule exists, so the build is green and the violation ships.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Policy block on the existing package keys",
+          "detail": "One policy section in package.jet, extending the same key family as contain and harden. It sets effect ceilings by module path, an unsafe allowance, an expert-surface ceiling, and a dependency allow list. Sema and lint enforce it with registered diagnostics, so a violation is a build result, not a review catch. jet inspect guarantees shows the effective policy and every grant. No policy block means no new behavior anywhere.",
+          "technical": "Proposed spelling, final shape at implementation ballot: policy: .{ effects: [module path -> ceiling], unsafe: .Deny | .Paths([...]), expert: .Deny | .Allow, deps: .List([...]) }. Enforcement reuses the existing effect-checking and marker machinery in sema; no second checker. Diagnostics get I4 registration and snapshots.",
+          "code": "package.jet (proposed):\n\npolicy: .{\n    effects: .{ \"src/domain\": -[]> },\n    unsafe: .Paths([\"src/audited\"]),\n    deps: .Reviewed,\n}\n\n$ jet check\nE2960 settle.jet:2  src/domain code may not use IO.Net\n  why: this project's policy gives the domain layer an empty effect ceiling\n  fix: move the call behind a boundary module, or change policy: in package.jet"
+        },
+        {
+          "key": "B",
+          "name": "Tool config file, outside the language",
+          "detail": "A lint profile file, like clippy.toml, read by jet lint only. Easy to add and easy to ignore: it guards nothing unless CI runs lint, it cannot use sema's effect facts as guarantees, and jet inspect guarantees cannot vouch for it. Rules drift from the code they govern.",
+          "code": "jet-lint.toml (proposed):\n\n[policy]\ndomain_effects = []\nunsafe_paths = [\"src/audited\"]\n\n$ jet lint --policy\nwarning: src/domain/settle.jet uses IO.Net"
+        },
+        {
+          "key": "C",
+          "name": "No surface: review and CI scripts",
+          "detail": "Teams keep enforcing rules with code review and homegrown CI greps. Zero language cost. Every team pays the same tax separately, greps miss what sema would catch for free, and the tech lead's first evaluation question gets the answer no.",
+          "code": "ci.sh (per team, homegrown):\n\nif rg -l 'http\\.' src/domain; then\n  echo \"domain layer may not use the network\"; exit 1\nfi\n\nMisses aliased imports, wrapped calls, and every future effect the grep never heard of."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "The closest prior art: a crate-level attribute makes unsafe a hard error for the whole crate. Teams use it precisely because it is in the language, not in a config file.",
+          "code": "#![forbid(unsafe_code)]"
+        },
+        {
+          "lang": "Deno",
+          "note": "Permission flags gate effects at run time per invocation. Strong idea, wrong layer for teams: the rule lives in whoever types the command, not in the project.",
+          "code": "deno run --allow-net=internal server.ts"
+        },
+        {
+          "lang": "ESLint",
+          "note": "Config-file rules drift and get disabled inline; every large team carries a graveyard of eslint-disable comments.",
+          "code": "/* eslint-disable no-restricted-imports */"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A makes team rules build results backed by sema's real effect and marker facts, extends an existing key family instead of adding a mechanism, and costs solo users nothing.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A config file outside the language cannot use sema's guarantees, is skippable, and drifts from the code it governs."
+          },
+          {
+            "key": "C",
+            "reason": "It answers the tech lead's first question with no, and makes every team rebuild weaker enforcement by hand."
+          }
+        ],
+        "tradeoff": "The package schema grows one section that solo beginners will never touch. Accepted: the section is invisible until written, and teams are the adoption unit for professionals."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared an in-language policy block, a lint config file, and no surface, recommending the policy block because enforcement rides sema facts.",
+        "boilOcean": "The breadth pass tested per-file pragmas, a separate policy.jet file, and workspace-level inheritance. Pragmas scatter the rules they should centralize; the separate file and inheritance are placement details of A, folded into its technical shape.",
+        "hybrid": "The hybrid pass moved B's best part into A: lint-severity policy rows are allowed, so a team can stage a rule as advisory before making it a build error.",
+        "cooperative": "The cooperative pass strengthened C with a curated official CI recipe, which would help small teams. It still cannot see effects sema sees, so it stays weakest.",
+        "adversarial": "Attacked A as a second permission system beside contain/harden and as monorepo pain when policies nest. Repairs: A is defined as the same key family with one merge law, and workspace nesting reuses the existing package merge table."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-29T01:24:51.357Z"
+    },
+    {
+      "id": "D-MEGAPROJ1",
+      "cardId": "c0oakubh",
+      "group": "research",
+      "title": "Megaproject scale canary: which program anchors it",
+      "gist": "Which real 20-50k line program becomes Jet's standing scale probe.",
+      "lesson": "The largest real Jet program is about 650 lines. Language flaws that only appear at scale — compile time stacking on rustc, error cascades, editor latency, refactoring pain — are invisible to the current workflow. Card #217 already requires a dogfood portfolio before self-hosting; this decision picks the one flagship-scale anchor program inside that portfolio and instruments it with continuous scale measurements. Ratifying this ballot picks the program only: the owner separately says when building starts.",
+      "explainer": "",
+      "story": "The first professional team adopts Jet and their codebase passes 30k lines in month two. Whatever breaks for them at that size breaks in public, with their patience as the budget. The megaproject exists so an agent fleet hits those walls first, in private, with unlimited patience.",
+      "inWild": "What the canary measures continuously once built, gauntlet-style:\n\ncold build            full compile from clean\nwarm build            incremental after a one-line edit\nlsp latency           completion and diagnostics percentiles on the open buffer\nerror cascade         diagnostics quality after one seeded breaking change\nrefactor task         timed rename/move across packages\n\nEvery regression class mints a Tower card.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Port the Tower board to Jet",
+          "detail": "A real web product the owner uses every day: HTTP service, live board UI, persistence, validation, SSE updates. Exercises services, concurrency, web UI, and long-lived state — the shapes professional teams build. Runs as a read-only shadow against board snapshots; it never writes the canonical store, and any switchover is a separate owner decision. Daily use means drift and papercuts get noticed immediately.",
+          "technical": "Shadow law: the Jet port reads exported snapshots of plugins/tower/.tower, never the live files, honoring the standing one-server rule. Parity is measured against the Node app's rendered state, which doubles as a Jet-versus-Node comparison on a real program.",
+          "code": "tower-jet/\n  package.jet\n  src/\n    model/      cards, decisions, lanes, archive law\n    store/      snapshot read, journal replay\n    server/     http service, sse, json api\n    board/      web ui, focus mode\n    lint/       board-health checks\n  tests/        parity suite vs Node renderings"
+        },
+        {
+          "key": "B",
+          "name": "Grow the Jet site into a docs platform",
+          "detail": "Expand site/generate.jet (650 lines today) into the full docs platform: spec rendering, diagnostic browser, searchable stdlib reference, playground. Builds on working Jet code and produces public-facing value. But it is mostly one shape of program — static generation plus templating — so it under-stresses services, concurrency, and long-lived state.",
+          "code": "site/\n  package.jet\n  src/\n    generate/   existing generator, grown\n    spec/       decision-log renderer\n    diagbrowse/ all 854 diagnostics, searchable\n    search/     index build + query\n    playground/ web-target compile service"
+        },
+        {
+          "key": "C",
+          "name": "Port a toolchain piece: jet fmt or jetpack",
+          "detail": "Compiler-shaped Jet: parsing, trees, arenas, index handles. This is exactly the code shape self-hosting needs, so it doubles as an early e11 down payment. But it front-runs the e11 readiness gate that card #217 guards, and its single shape misses services, UI, and persistence.",
+          "code": "fmt-jet/\n  package.jet\n  src/\n    lexer/      token stream\n    tree/       arena ast, index handles\n    print/      canonical style, fixpoint law\n  tests/        byte-parity vs shipped jet fmt on the example corpus"
+        },
+        {
+          "key": "D",
+          "name": "Game or media vertical slice",
+          "detail": "The e11 epoch already names a game/media dogfood slice: real-time loop, assets, FFI into raylib, performance pressure. Strong stress on a dimension the other options miss. But it is the least like what professional teams ship first, and its quality bar is visual, which machines verify poorly.",
+          "code": "game-jet/\n  package.jet\n  src/\n    loop/       fixed-step simulation\n    render/     raylib ffi\n    assets/     deterministic loading (card #238)\n    net/        lobby service"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Cargo and rustc themselves became the scale canaries; every compile-time complaint in the world got filed against real code first.",
+          "code": ""
+        },
+        {
+          "lang": "TypeScript",
+          "note": "The compiler is written in TypeScript and was for years the largest TS program; scale pain hit the team before users.",
+          "code": ""
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A is a real multi-shape product — service, UI, persistence, concurrency — that the owner exercises daily, and its Node twin gives a free honest Jet-versus-incumbent comparison.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "One program shape: static generation under-stresses services, concurrency, and long-lived state, which is where professional teams live."
+          },
+          {
+            "key": "C",
+            "reason": "It front-runs the e11 readiness gate card #217 guards, and its compiler shape misses services, UI, and persistence."
+          },
+          {
+            "key": "D",
+            "reason": "Its quality bar is visual and machine-verified poorly, and it is the least like a professional team's first Jet program."
+          }
+        ],
+        "tradeoff": "The board is live infrastructure, so the port must stay a read-only shadow with parity tests until a separate owner decision. Accepted: the shadow law is written into the option itself."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared the board port, the docs platform, a toolchain port, and a game slice, recommending the board port for shape breadth and daily dogfooding.",
+        "boilOcean": "The breadth pass tested a synthetic generated megaproject and porting an existing open-source app. Synthetic code stresses nothing real; a foreign port imports foreign architecture, so neither earned an option.",
+        "hybrid": "The hybrid pass ordered instead of merged: the portfolio in card #217 still wants multiple shapes later, so losing options remain future portfolio entries rather than parts of a chimera anchor.",
+        "cooperative": "The cooperative pass strengthened D with a headless deterministic-replay mode, making more of it machine-checkable. Its first-team relevance gap remains.",
+        "adversarial": "Attacked A on shadow-parity cost and on the one-server data-loss history. Repairs: parity runs against exported snapshots only, and the shadow law forbids any write to the canonical store without a new owner decision."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-29T01:25:04.858Z"
     }
   ],
   "questions": [
@@ -220034,6 +220355,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-29T01:25:04.858Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-MEGAPROJ1",
+      "note": "Megaproject scale canary: which program anchors it"
+    },
+    {
+      "at": "2026-08-29T01:24:51.358Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-TEAMPOLICY1",
+      "note": "Team policy surface: where a tech lead sets project ceilings"
+    },
+    {
+      "at": "2026-08-29T01:23:31.401Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-RTFAIL1",
+      "note": "Runtime failures: product bar or best effort"
+    },
+    {
+      "at": "2026-08-29T01:23:30.288Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-COSTLAW1",
+      "note": "Cost transparency: what surfaces a hidden expensive operation"
+    },
     {
       "at": "2026-08-29T01:22:38.096Z",
       "by": "fable",
@@ -223505,34 +223854,6 @@
       "action": "card.update",
       "ref": "c09xsceu",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:50.893Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c02livam",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:50.510Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0v5e0kd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:50.177Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0kgi07h",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:49.877Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c095d6zw",
-      "note": "phase,plan,logEntry"
     }
   ],
   "nextNum": 368,
