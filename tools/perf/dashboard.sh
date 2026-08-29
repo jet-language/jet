@@ -52,6 +52,9 @@ MAX_CORPUS_FILE_BYTES=$((64 * 1024 * 1024))
 LATENCY_REGRESSION_PCT=15
 MEMORY_REGRESSION_PCT=15
 VARIANCE_BUDGET_PCT=100
+# Samples allowed outside the Tukey fence. A shared machine costs a few; a
+# quarter of the run disagreeing means the path itself is bimodal.
+OUTLIER_BUDGET_COUNT=5
 TAB=$(printf '\t')
 REPORT_VERSION=4
 PARITY_RECEIPT=unverified
@@ -597,14 +600,54 @@ median_file() {
     sort -n "$median_file_path" | awk -v count="$SAMPLES" 'NR == int((count + 1) / 2) { print $1; exit }'
 }
 
+# Dispersion of the sample distribution, relative to its median.
+#
+# This was peak-to-peak `(max - min) / median`, which is by construction the
+# single worst sample: one scheduler hiccup, one page fault, or one competing
+# build in 20 samples reported 120-130% against a 100% budget, so the gate
+# bounced on machine noise instead of describing the compiler. A range is a
+# statement about extremes, not about stability.
+#
+# The interquartile spread describes the middle half of the distribution, so a
+# bounded number of outliers cannot dominate it, while a genuinely wide or
+# bimodal path still fails: if the compiler really varies run to run, the
+# quartiles separate. Outliers are not swept under the rug — `outlier_file`
+# below reports how many samples fall outside the Tukey fence, and a path that
+# is unstable rather than merely noisy trips that count.
+#
+# Input must be sorted numerically; both callers sort.
 variance_file() {
     variance_file_path=$1
     sort -n "$variance_file_path" | awk -v count="$SAMPLES" '
-        { values[NR] = $1; if (NR == 1) minimum = $1; maximum = $1 }
+        { values[NR] = $1 }
         END {
+            if (count == 0) exit 1
             median = values[int((count + 1) / 2)]
-            if (count == 0 || median == 0) exit 1
-            printf "%.0f\n", ((maximum - minimum) * 100) / median
+            if (median == 0) exit 1
+            first_quartile = values[int((count + 3) / 4)]
+            third_quartile = values[int((3 * count + 1) / 4)]
+            printf "%.0f\n", ((third_quartile - first_quartile) * 100) / median
+        }'
+}
+
+# How many samples sit outside the Tukey fence (1.5 x IQR beyond a quartile).
+# A noisy machine produces a few; a bimodal compiler path produces many, which
+# is the case the spread alone would not catch.
+outlier_file() {
+    outlier_file_path=$1
+    sort -n "$outlier_file_path" | awk -v count="$SAMPLES" '
+        { values[NR] = $1 }
+        END {
+            if (count == 0) { print 0; exit }
+            first_quartile = values[int((count + 3) / 4)]
+            third_quartile = values[int((3 * count + 1) / 4)]
+            fence = (third_quartile - first_quartile) * 3 / 2
+            outliers = 0
+            for (position = 1; position <= count; position++) {
+                if (values[position] < first_quartile - fence) outliers++
+                else if (values[position] > third_quartile + fence) outliers++
+            }
+            print outliers
         }'
 }
 
@@ -1010,8 +1053,16 @@ measure_state() {
     state_latency_median=$(median_file "$state_latency")
     state_memory_max=$(sort -n "$state_memory" | tail -n1)
     state_variance=$(variance_file "$state_latency")
+    state_outliers=$(outlier_file "$state_latency")
     if [ "$state_variance" -gt "$VARIANCE_BUDGET_PCT" ]; then
-        echo "unstable compiler-speed benchmark: $state_program/$state_name variance=${state_variance}% budget=${VARIANCE_BUDGET_PCT}%" >&2
+        echo "unstable compiler-speed benchmark: $state_program/$state_name interquartile spread=${state_variance}% budget=${VARIANCE_BUDGET_PCT}%" >&2
+        exit 1
+    fi
+    # A wide middle half means an unstable compiler; a fat tail means a bimodal
+    # path, which the spread alone cannot see. Allow the handful of samples a
+    # shared machine costs us, and fail when a quarter of the run disagrees.
+    if [ "$state_outliers" -gt "$OUTLIER_BUDGET_COUNT" ]; then
+        echo "bimodal compiler-speed benchmark: $state_program/$state_name outliers=${state_outliers} of ${SAMPLES} budget=${OUTLIER_BUDGET_COUNT}" >&2
         exit 1
     fi
     if [ "$state_stage" = "jit-fast" ]; then
