@@ -20,7 +20,7 @@ Combined fixture hash: `a6ad831ca668a435bafdec6cc414d06c63f0467cc6e7c533fdeeb0a7
 
 The scope is snapshot-only. Node write and recovery are outside the comparison. Token counts use `simple-regex-v1` from `dogfood/tower/tests/metrics/node_baseline.mjs`.
 
-The JS capture and metric harnesses reject symlinks and hardlinked regular files. Jet canonicalizes the fixed fixture root, every directory, and every file. It rejects canonical overlap with `plugins/tower/.tower`. It validates the exact schema, date, order, commits, fixture map, source map, file map, and capture time. It then verifies each SHA-256 before parity checks.
+Jet exact-canonicalizes and validates fixed paths and the exact manifest. It rejects overlap with `plugins/tower/.tower`. The selected six files are each canonicalized, read once, checked against lowercase SHA-256, retained, then parsed from the verified bytes. This removes post-hash rereads. JS capture/metrics reject symlinks and hardlinks. Capture manifest validation enforces exact top-level/entry/source/file/hash-record keys and valid `captured_at`/`capture_day`.
 
 ## Source facts
 
@@ -34,11 +34,11 @@ These source facts are not runtime proof.
 
 | Surface | Node LOC | Node tokens | Jet LOC | Jet tokens |
 | --- | ---: | ---: | ---: | ---: |
-| Backend | 2,883 | 31,224 | 2,472 | 20,987 |
-| UI | 2,678 | 34,593 | 4,069 | 34,180 |
-| Total | 5,561 | 65,817 | 6,541 | 55,167 |
+| Backend | 3,083 | 33,473 | 2,497 | 21,332 |
+| UI | 2,678 | 34,593 | 4,068 | 34,176 |
+| Total | 5,761 | 68,066 | 6,565 | 55,508 |
 
-In this scope, Jet is 980 LOC larger but 10,650 tokens smaller. Counts are not parity evidence.
+In this scope, Jet is 804 LOC larger but 12,558 tokens smaller. Counts are not parity evidence.
 
 ## Reproduction commands
 
@@ -68,20 +68,20 @@ The final five-run sequential Node medians on the `2026-08-28` fixture are:
 
 | Metric | Value |
 | --- | ---: |
-| Fixture load | 341.568 ms |
-| Project | 172.049 ms |
-| Load and project | 487.835 ms |
-| Load, project, and serialize | 643.378 ms |
-| RSS before | 57,438,208 bytes |
-| RSS after | 225,058,816 bytes |
-| RSS delta | 168,579,072 bytes |
+| Fixture load | 106.954 ms |
+| Project | 69.708 ms |
+| Load and project | 176.663 ms |
+| Load, project, and serialize | 221.450 ms |
+| RSS before | 58,949,632 bytes |
+| RSS after | 199,352,320 bytes |
+| RSS delta | 140,087,296 bytes |
 | Serialized state | 19,094,088 bytes |
 
 These are successful Node baseline values.
 
 ## Jet validation
 
-`node --check` passes `board.js`, `capture.mjs`, and `node_baseline.mjs`.
+`scripts/agent/jet-env node --check` passes `board.js`, `capture.mjs`, and `node_baseline.mjs`.
 
 `scripts/agent/jet-env jet fmt --check dogfood/tower/run.jet` passes.
 
@@ -107,7 +107,7 @@ The final source-build command is:
 scripts/agent/jet-env jet build dogfood/tower/run.jet
 ```
 
-It exits 101 after 25.66 s. The generated Rust failure is tracked by #2350 and #2356.
+It exits 101 after 24.88 s in generated `build/run.rs`. The failure is tracked by #2350 and #2356.
 
 Earlier pre-hardening historical measurements for the same command were:
 
@@ -117,7 +117,7 @@ Earlier pre-hardening historical measurements for the same command were:
 | Warm source build | 18,935 ms | 101 |
 | One-line comment rebuild | 20,343 ms | 101 |
 
-`scripts/agent/jet-env jet test dogfood/tower` exits 101 in generated `build/run.rs` after 29.67 s. This is tracked by #2350 and #2356. The parity tests are present, but this command does not pass.
+`scripts/agent/jet-env jet test dogfood/tower` exits 101 in generated `build/run.rs` after 27.78 s. This is tracked by #2350 and #2356. The parity tests are present, but this command does not pass.
 
 `scripts/agent/jet-env jet build dogfood/tower` exits 1 after 1,508 ms with E1334. This directory build result is tracked by #2352.
 
@@ -129,7 +129,7 @@ The final default command is:
 scripts/agent/jet-env jet run dogfood/tower -- dogfood/tower/tests/parity/fixtures/2026-08-28 8090
 ```
 
-It exits 1 after 19.95 s with E0956 at `core.files.canonicalize`, tracked by #2252. The service never binds to port 8090.
+It exits 1 after 21.00 s with E0956 at `core.files.canonicalize`, tracked by #2252. It does not bind to port 8090.
 
 Final dev readiness uses:
 
@@ -137,7 +137,7 @@ Final dev readiness uses:
 scripts/agent/jet-env jet dev dogfood/tower -- dogfood/tower/tests/parity/fixtures/2026-08-28 8090
 ```
 
-Readiness waits 120 s. It never sees the exact banner or port 8090. It logs the same E0956, then the watcher stops. The exact banner exists in source but was not observed at runtime.
+`jet dev` waits 120 s. The exact banner and port 8090 never become ready. It logs the same E0956, then the watcher stops. The exact banner exists in source but was not observed at runtime.
 
 ## Runtime evidence limits
 

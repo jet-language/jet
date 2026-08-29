@@ -1,0 +1,2821 @@
+use core.crypto.[sha256_bytes]
+use core.encoding.json as json
+use core.files as files
+use core.http.server as http_server
+use core.math as math
+use core.net.url as url
+use core.process as process
+use core.regex as re
+use core.time as time
+
+fn tree_field(tree: DataTree, name: String) DataTree !Never -> {
+    return tree.field(name) ?? DataTree.Null
+}
+
+fn list_at(tree: DataTree, name: String) [DataTree] !Never -> {
+    empty := [DataTree]{}
+    value :: tree_field(~tree, ~name)
+    return if value == {
+        .Array(items) -> items
+        else -> empty
+    }
+}
+
+fn int_at(tree: DataTree, name: String) Int !Never -> {
+    value :: tree_field(~tree, ~name)
+    return value.int() ?? 0
+}
+
+fn is_null(value: DataTree) Bool !Never -> {
+    if {
+        value == .Null -> return true
+        else -> return false
+    }
+}
+
+fn has_field(tree: DataTree, name: String) Bool -> {
+    return if tree == {
+        .Object(fields) -> fields.has_key(name)
+        else -> false
+    }
+}
+
+fn is_object(tree: DataTree) Bool -> {
+    return if tree == {
+        .Object(_fields) -> true
+        else -> false
+    }
+}
+
+fn copy_object_fields(fields: [String:DataTree]) [String:DataTree] !Never -> {
+    out := [String:DataTree]{}
+    loop (key, value) in fields -> out[key] = ~value
+    return out
+}
+
+fn remove_object_fields(fields: [String:DataTree], removed: [String]) [String:DataTree] -> {
+    out := [String:DataTree]{}
+    loop (key, value) in fields {
+        if !removed.contains(key) -> out[key] = ~value
+    }
+    return out
+}
+
+fn merge_object_fields(base: [String:DataTree], fields: [String:DataTree]) [String:DataTree] -> {
+    out := base
+    loop (key, value) in fields -> out[key] = ~value
+    return out
+}
+
+fn merge_public_config_fields(base: [String:DataTree], fields: [String:DataTree]) [String:DataTree] -> {
+    out := base
+    loop (key, value) in fields {
+        if key != "auth" && key != "push" -> out[key] = ~value
+    }
+    return out
+}
+
+fn object_fields(tree: DataTree) [String:DataTree] !Never -> {
+    out := [String:DataTree]{}
+    return if tree == {
+        .Object(fields) -> copy_object_fields(~fields)
+        else -> out
+    }
+}
+
+fn object_without(tree: DataTree, removed: [String]) DataTree -> {
+    out := [String:DataTree]{}
+    return if tree == {
+        .Object(fields) -> DataTree.Object(remove_object_fields(~fields, ~removed))
+        else -> DataTree.Object(out)
+    }
+}
+
+fn object_with(tree: DataTree, name: String, value: DataTree) DataTree !Never -> {
+    out := object_fields(tree)
+    out[name] = value
+    return DataTree.Object(out)
+}
+
+fn array_field(tree: DataTree, name: String) [DataTree] !Never -> {
+    empty := [DataTree]{}
+    value :: tree_field(tree, name)
+    return if value == {
+        .Array(items) -> items
+        else -> empty
+    }
+}
+
+// #2356: split payload arms for AOT codegen.
+fn scalar_text_text(value: DataTree) String !Never -> {
+    return if value == {
+        .Text(text) -> ~text
+        else -> scalar_text_int(~value)
+    }
+}
+
+fn scalar_text_int(value: DataTree) String !Never -> {
+    return if value == {
+        .Int(number) -> "{number}"
+        else -> scalar_text_float(~value)
+    }
+}
+
+fn scalar_text_float(value: DataTree) String !Never -> {
+    return if value == {
+        .Float(number) -> "{number}"
+        else -> scalar_text_bool(~value)
+    }
+}
+
+fn scalar_text_bool(value: DataTree) String !Never -> {
+    return if value == {
+        .Bool(flag) -> "{flag}"
+        else -> ""
+    }
+}
+
+fn scalar_text(value: DataTree) String !Never -> { return scalar_text_text(~value) }
+
+fn javascript_truthy_null(value: DataTree) Bool !Never -> {
+    return if value == {
+        .Null -> false
+        else -> javascript_truthy_bool(~value)
+    }
+}
+
+fn javascript_truthy_bool(value: DataTree) Bool !Never -> {
+    return if value == {
+        .Bool(flag) -> flag
+        else -> javascript_truthy_int(~value)
+    }
+}
+
+fn javascript_truthy_int(value: DataTree) Bool !Never -> {
+    return if value == {
+        .Int(number) -> number != 0
+        else -> javascript_truthy_float(~value)
+    }
+}
+
+fn javascript_truthy_float(value: DataTree) Bool !Never -> {
+    return if value == {
+        .Float(number) -> number != 0.0
+        else -> javascript_truthy_text(~value)
+    }
+}
+
+fn javascript_truthy_text(value: DataTree) Bool !Never -> {
+    return if value == {
+        .Text(text) -> !text.is_empty()
+        else -> javascript_truthy_array(~value)
+    }
+}
+
+fn javascript_truthy_array(value: DataTree) Bool !Never -> {
+    return if value == {
+        .Array(_items) -> true
+        else -> javascript_truthy_object(~value)
+    }
+}
+
+fn javascript_truthy_object(value: DataTree) Bool !Never -> {
+    return if value == {
+        .Object(_entries) -> true
+        else -> true
+    }
+}
+
+fn javascript_truthy(value: DataTree) Bool !Never -> { return javascript_truthy_null(~value) }
+
+fn javascript_text_or_empty(value: DataTree) String -> {
+    if javascript_truthy(~value) -> return scalar_text(~value)
+    return ""
+}
+
+fn text_field(tree: DataTree, name: String, fallback: String) String !Never -> {
+    value :: tree_field(tree, name)
+    if is_null(~value) -> return fallback
+    return scalar_text(~value)
+}
+
+fn int_value(value: DataTree, fallback: Int) Int !Never -> {
+    return if value == {
+        .Int(number) -> number
+        else -> fallback
+    }
+}
+
+fn int_field(tree: DataTree, name: String, fallback: Int) Int !Never -> {
+    return int_value(tree_field(tree, name), fallback)
+}
+
+fn bool_value(value: DataTree) Bool !Never -> {
+    subject := ~value
+    return if subject == {
+        .Bool(flag) -> flag
+        else -> javascript_truthy(~value)
+    }
+}
+
+fn same_source_value(left: DataTree, right: DataTree) Bool !Never -> {
+    return semantic_equal(left, right)
+}
+
+fn arrays_semantically_equal(left_values: [DataTree], right_values: [DataTree]) Bool !Never -> {
+    if left_values.len() != right_values.len() -> return false
+    i := 0
+    loop i < left_values.len() {
+        left_value :: left_values[i]
+        right_value :: right_values[i]
+        if !semantic_equal(~left_value, ~right_value) -> return false
+        i += 1
+    }
+    return true
+}
+
+fn objects_semantically_equal(left_fields: [String:DataTree], right_fields: [String:DataTree]) Bool !Never -> {
+    if left_fields.len() != right_fields.len() -> return false
+    loop (key, value) in left_fields {
+        if !right_fields.has_key(key) -> return false
+        right_value :: right_fields[key]
+        if !semantic_equal(~value, ~right_value) -> return false
+    }
+    return true
+}
+
+fn semantic_equal_left_null(left: DataTree, right: DataTree) Bool !Never -> {
+    return if left == {
+        .Null -> is_null(~right)
+        else -> semantic_equal_left_bool(~left, ~right)
+    }
+}
+
+fn semantic_equal_left_bool(left: DataTree, right: DataTree) Bool !Never -> {
+    return if left == {
+        .Bool(left_value) -> {
+            return if right == {
+                .Bool(right_value) -> left_value == right_value
+                else -> false
+            }
+
+        }
+        else -> semantic_equal_left_int(~left, ~right)
+    }
+}
+
+fn semantic_equal_left_int(left: DataTree, right: DataTree) Bool !Never -> {
+    return if left == {
+        .Int(left_value) -> {
+            return if right == {
+                .Int(right_value) -> left_value == right_value
+                else -> false
+            }
+
+        }
+        else -> semantic_equal_left_float(~left, ~right)
+    }
+}
+
+fn semantic_equal_left_float(left: DataTree, right: DataTree) Bool !Never -> {
+    return if left == {
+        .Float(left_value) -> {
+            return if right == {
+                .Float(right_value) -> left_value == right_value
+                else -> false
+            }
+
+        }
+        else -> semantic_equal_left_text(~left, ~right)
+    }
+}
+
+fn semantic_equal_left_text(left: DataTree, right: DataTree) Bool !Never -> {
+    return if left == {
+        .Text(left_value) -> {
+            return if right == {
+                .Text(right_value) -> left_value == right_value
+                else -> false
+            }
+
+        }
+        else -> semantic_equal_left_array(~left, ~right)
+    }
+}
+
+fn semantic_equal_left_array(left: DataTree, right: DataTree) Bool !Never -> {
+    return if left == {
+        .Array(left_values) -> {
+            return if right == {
+                .Array(right_values) -> arrays_semantically_equal(~left_values, ~right_values)
+                else -> false
+            }
+
+        }
+        else -> semantic_equal_left_object(~left, ~right)
+    }
+}
+
+fn semantic_equal_left_object(left: DataTree, right: DataTree) Bool !Never -> {
+    return if left == {
+        .Object(left_fields) -> {
+            return if right == {
+                .Object(right_fields) -> objects_semantically_equal(~left_fields, ~right_fields)
+                else -> false
+            }
+
+        }
+        else -> false
+    }
+}
+
+pub fn semantic_equal(left: DataTree, right: DataTree) Bool !Never -> {
+    return semantic_equal_left_null(~left, ~right)
+}
+
+fn normalized_array_field(tree: DataTree, name: String) DataTree -> {
+    return DataTree.Array(array_field(~tree, name))
+}
+
+fn normalize_card(card: DataTree) DataTree -> {
+    out := object_fields(~card)
+    out["blockedBy"] = normalized_array_field(~card, "blockedBy")
+    out["log"] = normalized_array_field(~card, "log")
+    out["criteria"] = normalized_array_field(~card, "criteria")
+    out["refs"] = normalized_array_field(~card, "refs")
+    out["tags"] = normalized_array_field(~card, "tags")
+    out["parentId"] = tree_field(~card, "parentId")
+    out["needsAcceptance"] = DataTree.Bool(bool_value(tree_field(~card, "needsAcceptance")))
+    return DataTree.Object(out)
+}
+
+fn normalize_cards(cards: [DataTree]) [DataTree] -> {
+    out := [DataTree]{}
+    loop card in cards -> out.push(normalize_card(~card))
+    return out
+}
+
+fn allowed_milestone_status(status: String) Bool -> {
+    return ["open", "review-ready", "met"].contains(status)
+}
+
+fn allowed_criterion_status(status: String) Bool -> {
+    return ["open", "met", "verified"].contains(status)
+}
+
+fn normalize_criterion(item: DataTree, index: Int, captured_day: String) DataTree -> {
+    source := ~item
+    source = if item == {
+        .Text(text) -> DataTree.Object(["text": DataTree.Text(~text)])
+        else -> source
+    }
+
+    n_value := tree_field(~source, "n")
+    if is_null(~n_value) -> n_value = DataTree.Int(index + 1)
+
+    text_value :: javascript_text_or_empty(tree_field(~source, "text")).trim()
+    status := text_field(~source, "status", "open")
+    if !allowed_criterion_status(~status) -> status = "open"
+    met_by :: tree_field(~source, "metBy")
+    verified_by :: tree_field(~source, "verifiedBy")
+    evidence :: javascript_text_or_empty(tree_field(~source, "evidence"))
+    at := javascript_text_or_empty(tree_field(~source, "at"))
+    if (~at).is_empty() -> at = ~captured_day
+
+    return DataTree.Object([
+        "n": ~n_value,
+        "text": DataTree.Text(text_value),
+        "status": DataTree.Text(~status),
+        "metBy": met_by,
+        "verifiedBy": verified_by,
+        "evidence": DataTree.Text(evidence),
+        "at": DataTree.Text(~at)
+    ])
+}
+
+fn normalize_criteria_items(items: [DataTree], captured_day: String) [DataTree] -> {
+    out := [DataTree]{}
+    index := 0
+    loop item in items {
+        out.push(normalize_criterion(~item, index, ~captured_day))
+        index += 1
+    }
+    return out
+}
+
+fn normalize_criteria_array(raw: DataTree, captured_day: String) DataTree -> {
+    return if raw == {
+        .Array(items) -> DataTree.Array(normalize_criteria_items(~items, ~captured_day))
+        else -> normalize_criteria_object(~raw, ~captured_day)
+    }
+}
+
+fn normalize_criteria_object_items(items: DataTree, raw: DataTree, captured_day: String) DataTree -> {
+    return if items == {
+        .Array(values) -> DataTree.Array(normalize_criteria_items(~values, ~captured_day))
+        else -> DataTree.Array([normalize_criterion(~raw, 0, ~captured_day)])
+    }
+}
+
+fn normalize_criteria_object(raw: DataTree, captured_day: String) DataTree -> {
+    return if raw == {
+        .Object(_fields) -> normalize_criteria_object_items(tree_field(~raw, "items"), ~raw, ~captured_day)
+        else -> normalize_criteria_text(~raw, ~captured_day)
+    }
+}
+
+fn normalize_criteria_text(raw: DataTree, captured_day: String) DataTree -> {
+    empty_text := [DataTree]{}
+    return if raw == {
+        .Text(text) -> {
+            if text.is_empty() -> return DataTree.Array(empty_text)
+            return DataTree.Array([normalize_criterion(~raw, 0, ~captured_day)])
+
+        }
+        else -> normalize_criteria_null(~raw, ~captured_day)
+    }
+}
+
+fn normalize_criteria_null(raw: DataTree, captured_day: String) DataTree -> {
+    empty_null := [DataTree]{}
+    return if raw == {
+        .Null -> DataTree.Array(empty_null)
+        else -> DataTree.Array([normalize_criterion(~raw, 0, ~captured_day)])
+    }
+}
+
+fn normalize_criteria(raw: DataTree, captured_day: String) DataTree -> {
+    return normalize_criteria_array(~raw, ~captured_day)
+}
+
+fn normalize_milestone(milestone: DataTree, captured_day: String) DataTree -> {
+    status := text_field(~milestone, "status", "open")
+    if !allowed_milestone_status(~status) -> status = "open"
+    criteria :: normalize_criteria(tree_field(~milestone, "criteria"), ~captured_day)
+
+    if status == "met" && !javascript_truthy(tree_field(~milestone, "verification")) {
+        out := object_fields(object_without(~milestone, ["metAt"]))
+        out["criteria"] = criteria
+        out["status"] = DataTree.Text("review-ready")
+        return DataTree.Object(out)
+    }
+
+    out := object_fields(~milestone)
+    out["criteria"] = criteria
+    out["status"] = DataTree.Text(~status)
+    return DataTree.Object(out)
+}
+
+fn normalize_milestones(milestones: [DataTree], captured_day: String) [DataTree] -> {
+    out := [DataTree]{}
+    loop milestone in milestones -> out.push(normalize_milestone(~milestone, ~captured_day))
+    return out
+}
+
+fn normalize_decisions(decisions: [DataTree]) [DataTree] -> {
+    replacement_present := false
+    loop decision in decisions {
+        if text_field(~decision, "id", "") == "D-ONCE-TIER1" -> replacement_present = true
+    }
+
+    out := [DataTree]{}
+    loop decision in decisions {
+        fields := object_fields(~decision)
+        fields["draft"] = DataTree.Bool(bool_value(tree_field(~decision, "draft")))
+        if text_field(~decision, "id", "") == "D-VERDICT-1254-1" && replacement_present && !javascript_truthy(tree_field(~decision, "supersededBy")) {
+            fields["supersededBy"] = DataTree.Text("D-ONCE-TIER1")
+        }
+        out.push(DataTree.Object(fields))
+    }
+    return out
+}
+
+fn default_epochs() [DataTree] -> {
+    return [DataTree]{
+        DataTree.Object([
+            "id": DataTree.Text("e1"),
+            "name": DataTree.Text("Epoch 1"),
+            "goal": DataTree.Text(""),
+            "status": DataTree.Text("active")
+        ])
+    }
+}
+
+fn normalize_epochs(epochs: [DataTree], current_epoch: DataTree) [DataTree] -> {
+    active_present := false
+    loop epoch in epochs {
+        if text_field(~epoch, "status", "") == "active" -> active_present = true
+    }
+
+    out := [DataTree]{}
+    loop epoch in epochs {
+        fields := object_fields(~epoch)
+        if !active_present && !is_null(~current_epoch) && same_source_value(tree_field(~epoch, "id"), ~current_epoch) {
+            fields["status"] = DataTree.Text("active")
+        }
+        out.push(DataTree.Object(fields))
+    }
+    return out
+}
+
+fn normalize_meta(meta: DataTree) DataTree -> {
+    out := [String:DataTree]{
+        "version": DataTree.Int(4),
+        "project": DataTree.Text("Project"),
+        "nextNum": DataTree.Int(1),
+        "rev": DataTree.Int(0)
+    }
+    meta_subject := ~meta
+    out = if meta_subject == {
+        .Object(fields) -> merge_object_fields(~out, ~fields)
+        else -> out
+    }
+
+    empty_toggled := [DataTree]{}
+    ui := [String:DataTree]{"toggled": DataTree.Array(empty_toggled)}
+    raw_ui :: tree_field(~meta, "ui")
+    ui = if raw_ui == {
+        .Object(fields) -> merge_object_fields(~ui, ~fields)
+        else -> ui
+    }
+    out["version"] = DataTree.Int(4)
+    out["ui"] = DataTree.Object(ui)
+
+    clean :: object_without(DataTree.Object(out), ["digestCursor", "currentEpoch"])
+    clean_fields := object_fields(clean)
+    completion :: tree_field(~meta, "completionCursor")
+    digest :: tree_field(~meta, "digestCursor")
+    if is_null(~completion) && !is_null(~digest) -> clean_fields["completionCursor"] = ~digest
+    return DataTree.Object(clean_fields)
+}
+
+fn milestone_progress(milestone: DataTree, cards: [DataTree], history_cards: [DataTree]) DataTree -> {
+    selected := [String:DataTree]{}
+    milestone_id :: tree_field(~milestone, "id")
+
+    loop card in history_cards {
+        if same_source_value(tree_field(~card, "milestoneId"), ~milestone_id) {
+            card_id :: scalar_text(tree_field(~card, "id"))
+            selected[card_id] = ~card
+        }
+    }
+    loop card in cards {
+        if same_source_value(tree_field(~card, "milestoneId"), ~milestone_id) {
+            card_id :: scalar_text(tree_field(~card, "id"))
+            selected[card_id] = ~card
+        }
+    }
+
+    total :: selected.len()
+    done := 0
+    loop (_selected_id, card) in selected {
+        if text_field(~card, "phase", "") == "done" -> done += 1
+    }
+    review_ready :: total > 0 && done == total
+    met :: review_ready && text_field(~milestone, "status", "") == "met" && javascript_truthy(tree_field(~milestone, "verification"))
+    return DataTree.Object([
+        "total": DataTree.Int(total),
+        "done": DataTree.Int(done),
+        "reviewReady": DataTree.Bool(review_ready),
+        "met": DataTree.Bool(met)
+    ])
+}
+
+fn sync_milestone(milestone: DataTree, cards: [DataTree], history_cards: [DataTree]) DataTree -> {
+    progress :: milestone_progress(~milestone, ~cards, ~history_cards)
+    total :: int_field(~progress, "total", 0)
+    done :: int_field(~progress, "done", 0)
+
+    if total == 0 || done != total {
+        out := object_fields(object_without(~milestone, ["verification", "metAt"]))
+        out["status"] = DataTree.Text("open")
+        return DataTree.Object(out)
+    }
+
+    if text_field(~milestone, "status", "") == "met" && javascript_truthy(tree_field(~milestone, "verification")) {
+        return ~milestone
+    }
+
+    out := object_fields(object_without(~milestone, ["verification", "metAt"]))
+    out["status"] = DataTree.Text("review-ready")
+    return DataTree.Object(out)
+}
+
+fn sync_milestones(milestones: [DataTree], cards: [DataTree], history_cards: [DataTree]) [DataTree] -> {
+    out := [DataTree]{}
+    loop milestone in milestones -> out.push(sync_milestone(~milestone, ~cards, ~history_cards))
+    return out
+}
+
+fn normalize_state(tower: DataTree, history: DataTree, captured_day: String) DataTree -> {
+    tower_is_object :: is_object(~tower)
+    meta_source :: tree_field(~tower, "meta")
+    current_epoch :: tree_field(~meta_source, "currentEpoch")
+
+    epochs_source := array_field(~tower, "epochs")
+    if !tower_is_object -> epochs_source = default_epochs()
+    epochs :: normalize_epochs(~epochs_source, ~current_epoch)
+
+    history_cards :: array_field(~history, "cards")
+    milestones_source :: array_field(~tower, "milestones")
+    cards_source :: array_field(~tower, "cards")
+    milestones0 :: normalize_milestones(~milestones_source, ~captured_day)
+    cards :: normalize_cards(~cards_source)
+    milestones :: sync_milestones(~milestones0, ~cards, ~history_cards)
+    decisions :: normalize_decisions(array_field(~tower, "decisions"))
+    questions :: array_field(~tower, "questions")
+    ideas :: array_field(~tower, "ideas")
+    papercuts :: array_field(~tower, "papercuts")
+    events :: array_field(~tower, "events")
+
+    return DataTree.Object([
+        "meta": normalize_meta(~meta_source),
+        "epochs": DataTree.Array(epochs),
+        "milestones": DataTree.Array(milestones),
+        "cards": DataTree.Array(~cards),
+        "decisions": DataTree.Array(decisions),
+        "questions": DataTree.Array(questions),
+        "ideas": DataTree.Array(ideas),
+        "papercuts": DataTree.Array(papercuts),
+        "events": DataTree.Array(events)
+    ])
+}
+
+fn linked_records(records: [DataTree], card: DataTree, field_name: String) [DataTree] !Never -> {
+    out := [DataTree]{}
+    target :: tree_field(~card, "id")
+    loop record in records {
+        if same_source_value(tree_field(~record, ~field_name), ~target) -> out.push(~record)
+    }
+    return out
+}
+
+fn clearance_for(card: DataTree, decisions: [DataTree]) DataTree !Never -> {
+    target :: tree_field(~card, "id")
+    open_ids := [DataTree]{}
+    total := 0
+    ratified := 0
+    loop decision in decisions {
+        if same_source_value(tree_field(~decision, "cardId"), ~target) && !bool_value(tree_field(~decision, "draft")) {
+            total += 1
+            if text_field(~decision, "status", "") == "ratified" -> ratified += 1 else {
+                open_ids.push(tree_field(~decision, "id"))
+            }
+        }
+    }
+    state := "none"
+    if total > 0 -> state = "cleared"
+    if open_ids.len() > 0 -> state = "pending"
+    return DataTree.Object([
+        "state": DataTree.Text(state),
+        "open": DataTree.Array(open_ids),
+        "total": DataTree.Int(total),
+        "ratified": DataTree.Int(ratified)
+    ])
+}
+
+fn blocking_decision(decision: DataTree) Bool !Never -> {
+    return text_field(~decision, "status", "") != "ratified" && !bool_value(tree_field(~decision, "draft"))
+}
+
+fn reference_number(reference: String) Int !Never -> {
+    text := ~reference
+    if (~text).starts_with("#") -> text = (~text).slice(1, (~text).len())
+    return Int.parse(~text) ?? -1
+}
+
+fn card_matches_id(card: DataTree, reference: String) Bool !Never -> {
+    card_id :: scalar_text(tree_field(~card, "id"))
+    return card_id == reference
+}
+
+fn card_matches_number(card: DataTree, number: Int) Bool !Never -> {
+    return int_field(~card, "num", -1) == number
+}
+
+fn card_for_reference(reference: DataTree, cards: [DataTree]) Int !Never -> {
+    reference_text :: scalar_text(~reference)
+    index := 0
+    loop card in cards {
+        if card_matches_id(~card, ~reference_text) -> return index
+        index += 1
+    }
+
+    number :: reference_number(~reference_text)
+    if number >= 0 {
+        index = 0
+        loop card in cards {
+            if card_matches_number(~card, number) -> return index
+            index += 1
+        }
+    }
+    return -1
+}
+
+fn open_decision_for_reference(reference: DataTree, decisions: [DataTree]) Bool !Never -> {
+    loop decision in decisions {
+        if same_source_value(tree_field(~decision, "id"), ~reference) && text_field(~decision, "status", "") != "ratified" {
+            return true
+        }
+    }
+    return false
+}
+
+fn lane_record(lane: String, who: DataTree, label: String) DataTree !Never -> {
+    return DataTree.Object([
+        "lane": DataTree.Text(~lane),
+        "who": who,
+        "label": DataTree.Text(~label)
+    ])
+}
+
+fn lane_of(card: DataTree, decisions: [DataTree], cards: [DataTree]) DataTree !Never -> {
+    phase :: text_field(~card, "phase", "")
+    if phase == "done" -> return lane_record("done", DataTree.Null, "Done")
+    if phase == "frozen" {
+        return lane_record("frozen", DataTree.Text("owner"), "Frozen — owner reactivates it")
+    }
+
+    target :: tree_field(~card, "id")
+    open_ids := [DataTree]{}
+    loop decision in decisions {
+        if same_source_value(tree_field(~decision, "cardId"), ~target) && blocking_decision(~decision) && text_field(~decision, "group", "") != "acceptance" {
+            open_ids.push(tree_field(~decision, "id"))
+        }
+    }
+    if open_ids.len() > 0 {
+        suffix := "s"
+        if open_ids.len() == 1 -> suffix = ""
+        return DataTree.Object([
+            "lane": DataTree.Text("decide"),
+            "who": DataTree.Text("owner"),
+            "label": DataTree.Text("{open_ids.len()} decision{suffix} to make"),
+            "decisions": DataTree.Array(open_ids)
+        ])
+    }
+
+    blockers := [DataTree]{}
+    labels := [String]{}
+    for_blocked :: array_field(~card, "blockedBy")
+    loop reference in for_blocked {
+        found_index :: card_for_reference(~reference, ~cards)
+        if found_index >= 0 {
+            blocking_card :: ~cards[found_index]
+            if text_field(~blocking_card, "phase", "") != "done" {
+                blockers.push(~reference)
+                blocking_num :: int_field(~blocking_card, "num", 0)
+                labels.push("#{blocking_num}")
+            }
+        } else {
+            if open_decision_for_reference(~reference, ~decisions) {
+                blockers.push(~reference)
+                labels.push(scalar_text(~reference))
+            }
+        }
+    }
+    if blockers.len() > 0 {
+        label_text :: labels.join(", ")
+        return DataTree.Object([
+            "lane": DataTree.Text("blocked"),
+            "who": DataTree.Null,
+            "label": DataTree.Text("Blocked by {label_text}"),
+            "blockers": DataTree.Array(blockers)
+        ])
+    }
+
+    if phase == "deciding" {
+        if javascript_truthy(tree_field(~card, "plan")) {
+            return lane_record("implement", DataTree.Text("agent"), "Ready to implement")
+        }
+        return lane_record("plan", DataTree.Text("agent"), "Build a plan + raise decisions")
+    }
+    if phase == "planning" || phase == "triage" {
+        if javascript_truthy(tree_field(~card, "plan")) {
+            return lane_record("plan", DataTree.Text("agent"), "Vet the plan + raise decisions")
+        }
+        return lane_record("plan", DataTree.Text("agent"), "Build a plan + raise decisions")
+    }
+    if phase == "ready" {
+        return lane_record("implement", DataTree.Text("agent"), "Ready to implement")
+    }
+    if phase == "building" {
+        return lane_record("building", DataTree.Text("agent"), "Continue building")
+    }
+    if phase == "verify" {
+        if bool_value(tree_field(~card, "needsAcceptance")) {
+            card_num :: int_field(~card, "num", 0)
+            expected :: "D-ACCEPT-{card_num}"
+            acceptance_open := false
+            loop decision in decisions {
+                if scalar_text(tree_field(~decision, "id")) == expected && text_field(~decision, "status", "") != "ratified" {
+                    acceptance_open = true
+                }
+            }
+            if acceptance_open {
+                return lane_record("verify", DataTree.Text("owner"), "Owner visual/UX acceptance")
+            }
+            return lane_record("verify", DataTree.Text("agent"), "Finish criteria before owner visual review")
+        }
+        return lane_record("verify", DataTree.Text("agent"), "Close when exit criteria are met")
+    }
+    return lane_record("blocked", DataTree.Null, "")
+}
+
+fn project_card(card: DataTree, decisions: [DataTree], cards: [DataTree], questions: [DataTree]) DataTree !Never -> {
+    linked_decisions :: linked_records(~decisions, ~card, "cardId")
+    linked_questions :: linked_records(~questions, ~card, "cardId")
+    open_questions := 0
+    loop question in linked_questions {
+        if text_field(~question, "kind", "") != "message" && text_field(~question, "status", "") == "open" {
+            open_questions += 1
+        }
+    }
+
+    out := object_fields(~card)
+    out["clearance"] = clearance_for(~card, ~decisions)
+    out["decisions"] = DataTree.Array(linked_decisions)
+    out["questions"] = DataTree.Array(linked_questions)
+    out["openQ"] = DataTree.Int(open_questions)
+    out["lane"] = lane_of(~card, ~decisions, ~cards)
+    return DataTree.Object(out)
+}
+
+pub fn project_archived_card(card: DataTree, decisions: [DataTree], cards: [DataTree]) DataTree !Never -> {
+    questions :: array_field(~card, "questions")
+    projected :: project_card(~card, ~decisions, ~cards, ~questions)
+    return object_with(~projected, "archived", DataTree.Bool(true))
+}
+
+fn project_cards(cards: [DataTree], decisions: [DataTree], questions: [DataTree]) [DataTree] -> {
+    out := [DataTree]{}
+    loop card in cards -> out.push(project_card(~card, ~decisions, ~cards, ~questions))
+    return out
+}
+
+fn project_milestones(milestones: [DataTree], cards: [DataTree], history_cards: [DataTree]) [DataTree] -> {
+    out := [DataTree]{}
+    loop milestone in milestones {
+        progress :: milestone_progress(~milestone, ~cards, ~history_cards)
+        out.push(object_with(~milestone, "progress", ~progress))
+    }
+    return out
+}
+
+fn phases_tree() DataTree -> {
+    return DataTree.Array([
+        DataTree.Object([
+            "id": DataTree.Text("deciding"),
+            "label": DataTree.Text("Deciding"),
+            "seq": DataTree.Int(0),
+            "who": DataTree.Text("owner"),
+            "blurb": DataTree.Text("Blocked on a decision")
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("planning"),
+            "label": DataTree.Text("Planning"),
+            "seq": DataTree.Int(1),
+            "who": DataTree.Text("agent"),
+            "blurb": DataTree.Text("Build a plan + raise the decisions it needs")
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("ready"),
+            "label": DataTree.Text("Ready"),
+            "seq": DataTree.Int(2),
+            "who": DataTree.Text("agent"),
+            "blurb": DataTree.Text("Plan vetted, decisions cleared — implement it")
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("building"),
+            "label": DataTree.Text("Building"),
+            "seq": DataTree.Int(3),
+            "who": DataTree.Text("agent"),
+            "blurb": DataTree.Text("Implementation in progress")
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("verify"),
+            "label": DataTree.Text("Review"),
+            "seq": DataTree.Int(4),
+            "who": DataTree.Text("agent"),
+            "blurb": DataTree.Text("Owner visual review for flagged cards; no separate agent verify step")
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("done"),
+            "label": DataTree.Text("Done"),
+            "seq": DataTree.Int(5),
+            "who": DataTree.Null,
+            "blurb": DataTree.Text("Closed — exit criteria met")
+        ]),
+        DataTree.Object([
+            "id": DataTree.Text("frozen"),
+            "label": DataTree.Text("Frozen"),
+            "seq": DataTree.Int(-1),
+            "who": DataTree.Text("owner"),
+            "blurb": DataTree.Text("Owner-only — paused; the owner unpauses with a phase update")
+        ])
+    ])
+}
+
+fn lanes_tree() DataTree -> {
+    return DataTree.Object([
+        "decide": DataTree.Object([
+            "who": DataTree.Text("owner"),
+            "label": DataTree.Text("Decide"),
+            "rank": DataTree.Int(0)
+        ]),
+        "plan": DataTree.Object([
+            "who": DataTree.Text("agent"),
+            "label": DataTree.Text("Plan"),
+            "rank": DataTree.Int(1)
+        ]),
+        "implement": DataTree.Object([
+            "who": DataTree.Text("agent"),
+            "label": DataTree.Text("Implement"),
+            "rank": DataTree.Int(2)
+        ]),
+        "building": DataTree.Object([
+            "who": DataTree.Text("agent"),
+            "label": DataTree.Text("Building"),
+            "rank": DataTree.Int(3)
+        ]),
+        "verify": DataTree.Object([
+            "who": DataTree.Text("agent"),
+            "label": DataTree.Text("Review"),
+            "rank": DataTree.Int(4)
+        ]),
+        "blocked": DataTree.Object([
+            "who": DataTree.Null,
+            "label": DataTree.Text("Blocked"),
+            "rank": DataTree.Int(5)
+        ]),
+        "frozen": DataTree.Object([
+            "who": DataTree.Text("owner"),
+            "label": DataTree.Text("Frozen"),
+            "rank": DataTree.Int(6)
+        ]),
+        "done": DataTree.Object([
+            "who": DataTree.Null,
+            "label": DataTree.Text("Done"),
+            "rank": DataTree.Int(7)
+        ])
+    ])
+}
+
+fn default_terms() DataTree -> {
+    return DataTree.Object([
+        "epoch": DataTree.Text("Epoch"),
+        "epochs": DataTree.Text("Epochs"),
+        "milestone": DataTree.Text("Milestone"),
+        "milestones": DataTree.Text("Milestones"),
+        "sidequest": DataTree.Text("Sidequests"),
+        "ideas": DataTree.Text("Ideas"),
+        "owner": DataTree.Text("Owner"),
+        "agent": DataTree.Text("Agent")
+    ])
+}
+
+fn default_config() DataTree -> {
+    return DataTree.Object([
+        "project": DataTree.Text("Project"),
+        "terms": default_terms(),
+        "tracks": DataTree.Array([
+            DataTree.Text("epoch"),
+            DataTree.Text("sidequest")
+        ]),
+        "kinds": DataTree.Array([
+            DataTree.Text("task"),
+            DataTree.Text("feature"),
+            DataTree.Text("idea"),
+            DataTree.Text("bug")
+        ]),
+        "priorities": DataTree.Array([
+            DataTree.Text("P0"),
+            DataTree.Text("P1"),
+            DataTree.Text("P2"),
+            DataTree.Text("P3")
+        ]),
+        "decisionGroups": DataTree.Array([
+            DataTree.Text("design"),
+            DataTree.Text("architecture"),
+            DataTree.Text("api"),
+            DataTree.Text("ui"),
+            DataTree.Text("tooling"),
+            DataTree.Text("process"),
+            DataTree.Text("research")
+        ]),
+        "codeLanguage": DataTree.Text(""),
+        "port": DataTree.Int(7878),
+        "backups": DataTree.Int(20),
+        "retireAfterDays": DataTree.Int(3)
+    ])
+}
+
+fn public_config(config: DataTree) DataTree -> {
+    if is_null(~config) -> return DataTree.Null
+    out := object_fields(default_config())
+    config_subject := ~config
+    out = if config_subject == {
+        .Object(fields) -> merge_public_config_fields(~out, ~fields)
+        else -> out
+    }
+
+    terms := object_fields(tree_field(default_config(), "terms"))
+    raw_terms :: tree_field(~config, "terms")
+    terms = if raw_terms == {
+        .Object(fields) -> merge_object_fields(~terms, ~fields)
+        else -> terms
+    }
+    out["terms"] = DataTree.Object(terms)
+    return DataTree.Object(out)
+}
+
+fn required_day(text: String) LocalDate -> {
+    value := text.trim()
+    if value.len() == 10 -> value = "{value}T00:00:00Z"
+    parsed :: time.parse_rfc3339(value) ?? panic("capture-time.txt must contain a valid date")
+    return parsed.date()
+}
+
+fn required_capture_at(text: String) String -> {
+    value := text.trim()
+    _parsed :: time.parse_rfc3339(value) ?? panic("capture-time.txt must contain a valid RFC3339 instant")
+    return value
+}
+
+fn parsed_unix_ms(text: String, date_only: Bool) ?Int -> {
+    value := text
+    if value == "" -> return None
+    if date_only && value.len() <= 10 -> value = "{value}T00:00:00Z"
+    parsed :: time.parse_rfc3339(value) ? instant -> {
+        Val(instant.to_unix_ms())
+    }
+    ! _error -> {
+        return None
+    }
+    return parsed
+}
+
+fn day_key(value: DataTree) String -> {
+    text :: javascript_text_or_empty(value)
+    if text.len() >= 10 -> return text.slice(0, 10)
+    return ""
+}
+
+fn older_than(value: DataTree, captured_at: String, days: Int) Bool -> {
+    if !javascript_truthy(~value) -> return false
+    stamped :: parsed_unix_ms(scalar_text(~value), true) ?? return false
+    captured :: parsed_unix_ms(~captured_at, false) ?? return false
+    return captured - stamped > days * 86400000
+}
+
+fn recently_decided(decisions: [DataTree], config: DataTree, captured_at: String) DataTree -> {
+    buffer_days :: int_field(~config, "retireAfterDays", 3)
+    out := [DataTree]{}
+    loop decision in decisions {
+        if text_field(~decision, "status", "") == "ratified" && !bool_value(tree_field(~decision, "draft")) && !older_than(tree_field(~decision, "ratifiedAt"), ~captured_at, buffer_days) {
+            record := [String:DataTree]{}
+            if has_field(~decision, "id") -> record["id"] = tree_field(~decision, "id")
+            if has_field(~decision, "title") -> record["title"] = tree_field(~decision, "title")
+            if has_field(~decision, "outcome") {
+                record["outcome"] = tree_field(~decision, "outcome")
+            }
+            comment :: javascript_text_or_empty(tree_field(~decision, "comment"))
+            record["comment"] = DataTree.Text(comment)
+            if has_field(~decision, "ratifiedAt") {
+                record["ratifiedAt"] = tree_field(~decision, "ratifiedAt")
+            }
+            if has_field(~decision, "cardId") -> record["cardId"] = tree_field(~decision, "cardId")
+            out.push(DataTree.Object(record))
+        }
+    }
+    out.sort_by_desc((record: DataTree) -> text_field(~record, "ratifiedAt", ""))
+    return DataTree.Array(out)
+}
+
+fn is_active_phase(phase: String) Bool -> {
+    return ["deciding", "planning", "ready", "building", "verify"].contains(phase)
+}
+
+fn count_phase(cards: [DataTree], phase: String) Int -> {
+    count := 0
+    loop card in cards {
+        if text_field(~card, "phase", "") == phase -> count += 1
+    }
+    return count
+}
+
+fn count_lane(cards: [DataTree], lane: String) Int -> {
+    count := 0
+    loop card in cards {
+        if text_field(tree_field(~card, "lane"), "lane", "") == lane -> count += 1
+    }
+    return count
+}
+
+fn count_generic_decisions(decisions: [DataTree]) Int -> {
+    count := 0
+    loop decision in decisions {
+        if blocking_decision(~decision) && text_field(~decision, "group", "") != "acceptance" {
+            count += 1
+        }
+    }
+    return count
+}
+
+fn counts_tree(cards: [DataTree], decisions: [DataTree], questions: [DataTree], ideas: [DataTree]) DataTree -> {
+    by_phase := [String:DataTree]{
+        "deciding": DataTree.Int(count_phase(~cards, "deciding")),
+        "planning": DataTree.Int(count_phase(~cards, "planning")),
+        "ready": DataTree.Int(count_phase(~cards, "ready")),
+        "building": DataTree.Int(count_phase(~cards, "building")),
+        "verify": DataTree.Int(count_phase(~cards, "verify")),
+        "done": DataTree.Int(count_phase(~cards, "done")),
+        "frozen": DataTree.Int(count_phase(~cards, "frozen"))
+    }
+    open_questions := 0
+    loop question in questions {
+        if text_field(~question, "kind", "") != "message" && text_field(~question, "status", "") == "open" {
+            open_questions += 1
+        }
+    }
+    sidequests := 0
+    loop card in cards {
+        if text_field(~card, "track", "") == "sidequest" && is_active_phase(text_field(~card, "phase", "")) {
+            sidequests += 1
+        }
+    }
+    open_ideas := 0
+    loop idea in ideas {
+        if text_field(~idea, "status", "") != "tagged" -> open_ideas += 1
+    }
+    decide :: count_generic_decisions(~decisions)
+    agent_ready := count_lane(~cards, "plan") + count_lane(~cards, "implement") + count_lane(~cards, "building") + count_lane(~cards, "verify")
+    return DataTree.Object([
+        "byPhase": DataTree.Object(by_phase),
+        "forYou": DataTree.Int(decide),
+        "decide": DataTree.Int(decide),
+        "agentReady": DataTree.Int(agent_ready),
+        "sidequests": DataTree.Int(sidequests),
+        "frozen": DataTree.Int(count_phase(~cards, "frozen")),
+        "ideas": DataTree.Int(open_ideas),
+        "openQuestions": DataTree.Int(open_questions)
+    ])
+}
+
+fn limited_events(events: [DataTree]) DataTree -> {
+    out := [DataTree]{}
+    index := 0
+    loop event in events {
+        if index >= 300 -> break
+        out.push(~event)
+        index += 1
+    }
+    return DataTree.Array(out)
+}
+
+fn epoch_order(epoch: DataTree) Int -> {
+    order :: tree_field(~epoch, "order")
+    if !is_null(~order) -> return int_value(~order, 999)
+    number :: tree_field(~epoch, "num")
+    if !is_null(~number) -> return int_value(~number, 999)
+    return 999
+}
+
+fn current_epoch_id(epochs: [DataTree]) String -> {
+    loop epoch in epochs {
+        if text_field(~epoch, "status", "") == "active" {
+            return scalar_text(tree_field(~epoch, "id"))
+        }
+    }
+    return ""
+}
+
+fn ordered_epochs(epochs: [DataTree], current: String) [DataTree] -> {
+    current_epochs := [DataTree]{}
+    other_epochs := [DataTree]{}
+    loop epoch in epochs {
+        if scalar_text(tree_field(~epoch, "id")) == current -> current_epochs.push(~epoch) else {
+            other_epochs.push(~epoch)
+        }
+    }
+    other_epochs.sort_by((epoch: DataTree) -> epoch_order(epoch))
+    current_epochs.extend(other_epochs)
+    return current_epochs
+}
+
+fn active_cards_for_epoch(cards: [DataTree], epoch_id: String) Int -> {
+    count := 0
+    loop card in cards {
+        phase :: text_field(~card, "phase", "")
+        if scalar_text(tree_field(~card, "epoch")) == epoch_id && text_field(~card, "track", "") != "sidequest" && phase != "done" && phase != "frozen" {
+            count += 1
+        }
+    }
+    return count
+}
+
+fn done_cards_for_epoch(cards: [DataTree], epoch_id: String) Int -> {
+    count := 0
+    loop card in cards {
+        if scalar_text(tree_field(~card, "epoch")) == epoch_id && text_field(~card, "track", "") != "sidequest" && text_field(~card, "phase", "") == "done" {
+            count += 1
+        }
+    }
+    return count
+}
+
+fn done_card_ref(ref: DataTree, cards: [DataTree], epoch_id: String) Bool -> {
+    loop card in cards {
+        if scalar_text(tree_field(~card, "epoch")) == epoch_id && text_field(~card, "track", "") != "sidequest" && text_field(~card, "phase", "") == "done" && same_source_value(tree_field(~card, "id"), ~ref) {
+            return true
+        }
+    }
+    return false
+}
+
+fn burndown30(cards: [DataTree], events: [DataTree], epoch_id: String, captured_day: String) DataTree -> {
+    days := [String]{}
+    counts := [Int]{}
+    offset := 29
+    loop offset >= 0 {
+        days.push(shifted_day(~captured_day, -offset))
+        counts.push(0)
+        offset -= 1
+    }
+
+    loop event in events {
+        if text_field(~event, "action", "") == "card.update" && done_card_ref(tree_field(~event, "ref"), ~cards, ~epoch_id) && javascript_text_or_empty(tree_field(~event, "note")).split(",").to_list().contains("phase") {
+            event_day :: day_key(tree_field(~event, "at"))
+            index := 0
+            loop index < days.len() {
+                if days[index] == event_day -> counts[index] = counts[index] + 1
+                index += 1
+            }
+        }
+    }
+
+    out := [DataTree]{}
+    index := 0
+    loop index < days.len() {
+        out.push(DataTree.Object([
+            "day": DataTree.Text(~days[index]),
+            "n": DataTree.Int(counts[index])
+        ]))
+        index += 1
+    }
+    return DataTree.Array(out)
+}
+
+fn milestone_stalled_days(milestone: DataTree, cards: [DataTree], events: [DataTree], captured_at: String) DataTree -> {
+    milestone_id :: tree_field(~milestone, "id")
+    linked_ids := [DataTree]{}
+    loop card in cards {
+        if same_source_value(tree_field(~card, "milestoneId"), ~milestone_id) && !linked_ids.contains(tree_field(~card, "id")) {
+            linked_ids.push(tree_field(~card, "id"))
+        }
+    }
+    if linked_ids.len() == 0 -> return DataTree.Null
+
+    found := false
+    hit := DataTree.Null
+    loop event in events {
+        if !found && linked_ids.contains(tree_field(~event, "ref")) {
+            found = true
+            hit = ~event
+        }
+    }
+    if !found -> return DataTree.Null
+    age :: age_days(tree_field(~hit, "at"), ~captured_at)
+    if age == Float.INFINITY -> return DataTree.Null
+    return DataTree.Int(Int.from_float(math.floor(age)) ?? 0)
+}
+
+fn radar_milestone(milestone: DataTree, cards: [DataTree], history_cards: [DataTree], events: [DataTree], captured_at: String) DataTree -> {
+    progress :: milestone_progress(~milestone, ~cards, ~history_cards)
+    return DataTree.Object([
+        "id": tree_field(~milestone, "id"),
+        "title": tree_field(~milestone, "title"),
+        "goal": tree_field(~milestone, "goal"),
+        "status": tree_field(~milestone, "status"),
+        "met": tree_field(~progress, "met"),
+        "total": tree_field(~progress, "total"),
+        "done": tree_field(~progress, "done"),
+        "reviewReady": tree_field(~progress, "reviewReady"),
+        "stalledDays": milestone_stalled_days(~milestone, ~cards, ~events, ~captured_at)
+    ])
+}
+
+fn radar_milestones(milestones: [DataTree], epoch_id: String, cards: [DataTree], history_cards: [DataTree], events: [DataTree], captured_at: String) [DataTree] -> {
+    out := [DataTree]{}
+    loop milestone in milestones {
+        if scalar_text(tree_field(~milestone, "epochId")) == epoch_id && !javascript_truthy(tree_field(~milestone, "archived")) {
+            out.push(radar_milestone(~milestone, ~cards, ~history_cards, ~events, ~captured_at))
+        }
+    }
+    return out
+}
+
+fn radar_data(epochs: [DataTree], milestones: [DataTree], cards: [DataTree], events: [DataTree], history_cards: [DataTree], captured_at: String) DataTree -> {
+    active_epochs := [DataTree]{}
+    loop epoch in epochs {
+        status :: text_field(~epoch, "status", "")
+        if status != "arrived" && status != "done" -> active_epochs.push(~epoch)
+    }
+    ordered :: ordered_epochs(active_epochs, current_epoch_id(~epochs))
+    captured_day :: captured_at.slice(0, 10)
+    out := [DataTree]{}
+    loop epoch in ordered {
+        epoch_id :: scalar_text(tree_field(~epoch, "id"))
+        milestone_values :: radar_milestones(~milestones, ~epoch_id, ~cards, ~history_cards, ~events, ~captured_at)
+        milestone_total :: milestone_values.len()
+        milestones_met := 0
+        loop milestone in milestone_values {
+            if bool_value(tree_field(~milestone, "met")) -> milestones_met += 1
+        }
+        pct := 0
+        if milestone_total > 0 {
+            pct = (milestones_met * 200 + milestone_total) /% (milestone_total * 2)
+        }
+        out.push(DataTree.Object([
+            "id": tree_field(~epoch, "id"),
+            "name": tree_field(~epoch, "name"),
+            "goal": tree_field(~epoch, "goal"),
+            "active": DataTree.Int(active_cards_for_epoch(~cards, ~epoch_id)),
+            "done": DataTree.Int(done_cards_for_epoch(~cards, ~epoch_id)),
+            "doneArchivedHint": DataTree.Null,
+            "milestoneTotal": DataTree.Int(milestone_total),
+            "milestonesMet": DataTree.Int(milestones_met),
+            "pct": DataTree.Int(pct),
+            "burndown": burndown30(~cards, ~events, ~epoch_id, ~captured_day),
+            "milestones": DataTree.Array(~milestone_values)
+        ]))
+    }
+    return DataTree.Array(out)
+}
+
+fn shifted_day(day: String, offset: Int) String -> {
+    return required_day(day).add_days(offset).to_string()
+}
+
+pub fn project_state(tower: DataTree, history: DataTree, config: DataTree, captured_at: String) DataTree -> {
+    validated_captured_at :: required_capture_at(~captured_at)
+    captured_day :: validated_captured_at.slice(0, 10)
+    normalized :: normalize_state(~tower, ~history, ~captured_day)
+    meta :: tree_field(~normalized, "meta")
+    epochs :: array_field(~normalized, "epochs")
+    milestones :: array_field(~normalized, "milestones")
+    cards :: array_field(~normalized, "cards")
+    decisions :: array_field(~normalized, "decisions")
+    questions :: array_field(~normalized, "questions")
+    ideas :: array_field(~normalized, "ideas")
+    papercuts :: array_field(~normalized, "papercuts")
+    events :: array_field(~normalized, "events")
+    history_cards :: array_field(~history, "cards")
+    public :: public_config(~config)
+    projected_cards :: project_cards(~cards, ~decisions, ~questions)
+    projected_milestones :: project_milestones(~milestones, ~cards, ~history_cards)
+
+    out := [String:DataTree]{
+        "meta": meta,
+        "epochs": DataTree.Array(~epochs),
+        "milestones": DataTree.Array(projected_milestones),
+        "phases": phases_tree(),
+        "lanes": lanes_tree(),
+        "cards": DataTree.Array(~projected_cards),
+        "decisions": DataTree.Array(~decisions),
+        "questions": DataTree.Array(~questions),
+        "ideas": DataTree.Array(~ideas),
+        "papercuts": DataTree.Array(~papercuts),
+        "events": limited_events(~events),
+        "counts": counts_tree(~projected_cards, ~decisions, ~questions, ~ideas),
+        "recentlyDecided": recently_decided(~decisions, ~public, ~validated_captured_at),
+        "radar": radar_data(~epochs, ~milestones, ~cards, ~events, ~history_cards, ~validated_captured_at)
+    }
+    if !is_null(~public) -> out["config"] = public
+    return DataTree.Object(out)
+}
+
+// The optional docs/spec filesystem pass is omitted: snapshot fixtures carry no docs corpus.
+fn finding(rule: String, reference: String, message: String) DataTree -> {
+    DataTree.Object([
+        "rule": DataTree.Text(~rule),
+        "ref": DataTree.Text(~reference),
+        "msg": DataTree.Text(~message)
+    ])
+}
+
+fn detail_finding(rule: String, reference: String, detail: String) DataTree -> {
+    DataTree.Object([
+        "rule": DataTree.Text(~rule),
+        "ref": DataTree.Text(~reference),
+        "detail": DataTree.Text(~detail)
+    ])
+}
+
+fn value_string_null(value: DataTree) String -> {
+    return if value == {
+        .Null -> "null"
+        else -> value_string_bool(~value)
+    }
+}
+
+fn value_string_bool(value: DataTree) String -> {
+    return if value == {
+        .Bool(flag) -> "{flag}"
+        else -> value_string_int(~value)
+    }
+}
+
+fn value_string_int(value: DataTree) String -> {
+    return if value == {
+        .Int(number) -> "{number}"
+        else -> value_string_float(~value)
+    }
+}
+
+fn value_string_float(value: DataTree) String -> {
+    return if value == {
+        .Float(number) -> "{number}"
+        else -> value_string_text(~value)
+    }
+}
+
+fn value_string_text(value: DataTree) String -> {
+    return if value == {
+        .Text(text) -> ~text
+        else -> value_string_array(~value)
+    }
+}
+
+fn value_string_array(value: DataTree) String -> {
+    return if value == {
+        .Array(_items) -> "[object Object]"
+        else -> value_string_object(~value)
+    }
+}
+
+fn value_string_object(value: DataTree) String -> {
+    return if value == {
+        .Object(_entries) -> "[object Object]"
+        else -> ""
+    }
+}
+
+fn value_string(value: DataTree) String -> { return value_string_null(~value) }
+
+fn text_at(tree: DataTree, name: String) String -> {
+    value :: tree_field(tree, name)
+    if is_null(~value) -> return ""
+    return value_string(~value)
+}
+
+fn has_text(value: DataTree) Bool -> {
+    if !truthy(~value) -> return false
+    return value_string(~value).trim() != ""
+}
+
+fn truthy_null(value: DataTree) Bool -> {
+    return if value == {
+        .Null -> false
+        else -> truthy_bool(~value)
+    }
+}
+
+fn truthy_bool(value: DataTree) Bool -> {
+    return if value == {
+        .Bool(flag) -> flag
+        else -> truthy_int(~value)
+    }
+}
+
+fn truthy_int(value: DataTree) Bool -> {
+    return if value == {
+        .Int(number) -> number != 0
+        else -> truthy_float(~value)
+    }
+}
+
+fn truthy_float(value: DataTree) Bool -> {
+    return if value == {
+        .Float(number) -> number != 0.0 && !math.is_nan(number)
+        else -> truthy_text(~value)
+    }
+}
+
+fn truthy_text(value: DataTree) Bool -> {
+    return if value == {
+        .Text(text) -> text != ""
+        else -> truthy_array(~value)
+    }
+}
+
+fn truthy_array(value: DataTree) Bool -> {
+    return if value == {
+        .Array(_items) -> true
+        else -> truthy_object(~value)
+    }
+}
+
+fn truthy_object(value: DataTree) Bool -> {
+    return if value == {
+        .Object(_entries) -> true
+        else -> true
+    }
+}
+
+fn truthy(value: DataTree) Bool -> { return truthy_null(~value) }
+
+fn age_days(value: DataTree, captured_at: String) Float -> {
+    raw_value :: value.text() ?? return Float.INFINITY
+    stamp :: parsed_unix_ms(~raw_value, true) ?? return Float.INFINITY
+    captured :: parsed_unix_ms(~captured_at, false) ?? return Float.INFINITY
+    elapsed :: captured - stamp
+    return Float.from_int(elapsed) / 86400000.0
+}
+
+fn whole_days_text(age: Float) String -> {
+    if age == Float.INFINITY -> return "Infinity"
+    whole :: Int.from_float(math.floor(age)) ?? Int.MAX
+    return "{whole}"
+}
+
+fn evidence_mention(text: String) Bool -> {
+    lower :: text.to_lower()
+    return lower.contains("verif") || lower.contains("green") || lower.contains("test") || lower.contains("evidence")
+}
+
+fn criteria_settled(card: DataTree) Bool -> {
+    items :: list_at(card, "criteria")
+    if items.len() == 0 -> return false
+    loop item in items {
+        status :: text_at(item, "status")
+        if status != "met" && status != "verified" -> return false
+    }
+    return true
+}
+
+fn rule_done_without_evidence(cards: [DataTree]) [DataTree] -> {
+    findings := [DataTree]{}
+    loop card in cards {
+        if text_at(card, "phase") != "done" -> next
+        if criteria_settled(card) -> next
+        logs :: list_at(card, "log")
+        has_evidence := false
+        loop log in logs {
+            if evidence_mention(text_at(log, "text")) -> has_evidence = true
+        }
+        if has_evidence -> next
+        number :: int_at(card, "num")
+        title :: text_at(card, "title")
+        findings.push(finding("done-without-evidence", "#{number}", "#{number} \"{title}\" is done with no verif/tests/green/evidence mention in its log and no fully-met criteria"))
+    }
+    return findings
+}
+
+fn rule_claimed_idle(cards: [DataTree], captured_at: String) [DataTree] -> {
+    findings := [DataTree]{}
+    loop card in cards {
+        if !truthy(tree_field(card, "assignee")) -> next
+        phase :: text_at(card, "phase")
+        if phase != "building" && phase != "ready" -> next
+        age :: age_days(tree_field(card, "updated"), ~captured_at)
+        if age <= 3.0 -> next
+        number :: int_at(card, "num")
+        title :: text_at(card, "title")
+        assignee :: text_at(card, "assignee")
+        age_text :: whole_days_text(age)
+        findings.push(finding("claimed-idle", "#{number}", "#{number} \"{title}\" claimed by {assignee}, phase {phase}, untouched {age_text}d"))
+    }
+    return findings
+}
+
+fn rule_missing_attribution(events: [DataTree]) [DataTree] -> {
+    findings := [DataTree]{}
+    limit := events.len()
+    if limit > 500 -> limit = 500
+    loop index in 0..<limit {
+        event :: events[index]
+        by :: tree_field(event, "by")
+        if truthy(by) && value_string(by).trim() != "" -> next
+        ref_value :: tree_field(event, "ref")
+        reference := "(no ref)"
+        if truthy(ref_value) -> reference = value_string(ref_value)
+        action :: value_string(tree_field(event, "action"))
+        at :: value_string(tree_field(event, "at"))
+        findings.push(finding("missing-attribution", reference, "event \"{action}\" at {at} has no attribution (by)"))
+    }
+    return findings
+}
+
+fn review_pass_keys() [String] -> ["base", "boilOcean", "hybrid", "cooperative", "adversarial"]
+
+fn paragraph_count(text: String) Int -> { re.split(Regex{"\n\s*\n"}, text.trim()).len() }
+
+fn sentence_count(text: String) Int -> { re.split(Regex{"[.!?]\s+"}, text.trim()).len() }
+
+fn prose_density(label: String, value: DataTree) [String] -> {
+    gaps := [String]{}
+    if !has_text(value) -> return gaps
+    text :: value_string(value).trim()
+    paragraphs :: re.split(Regex{"\n\s*\n"}, text)
+    paragraph_number := 0
+    loop paragraph in paragraphs {
+        paragraph_number += 1
+        paragraph_words :: word_count(paragraph)
+        if paragraph_words > 90 {
+            gaps.push("{label} paragraph {paragraph_number} has {paragraph_words} words (max 90)")
+        }
+        sentences :: re.split(Regex{"[.!?]\s+"}, paragraph)
+        sentence_number := 0
+        loop sentence in sentences {
+            sentence_number += 1
+            sentence_words :: word_count(sentence)
+            if sentence_words > 32 {
+                gaps.push("{label} sentence {sentence_number} has {sentence_words} words (max 32)")
+            }
+        }
+    }
+    return gaps
+}
+
+fn example_prose_density(label: String, value: DataTree) [String] -> {
+    gaps := [String]{}
+    if !has_text(value) -> return gaps
+    text :: value_string(value)
+    lines :: re.split(Regex{"\n"}, text)
+    line_number := 0
+    loop line in lines {
+        line_number += 1
+        sentences :: re.split(Regex{"[.!?]\s+"}, line)
+        sentence_number := 0
+        loop sentence in sentences {
+            sentence_number += 1
+            sentence_words :: word_count(sentence)
+            if sentence_words > 32 {
+                gaps.push("{label} line {line_number} sentence {sentence_number} has {sentence_words} words (max 32)")
+            }
+        }
+    }
+    return gaps
+}
+
+fn word_count(text: String) Int -> {
+    re.find_all(Regex{"[\p{{L}}\p{{N}}][\p{{L}}\p{{N}}'’-]*"}, text).len()
+}
+
+fn option_key_text(option: DataTree) String -> {
+    key :: tree_field(option, "key")
+    if truthy(key) -> return value_string(key)
+    return "?"
+}
+
+fn plain_language_gaps(decision: DataTree) [String] -> {
+    gaps := [String]{}
+
+    prose := prose_density("title", tree_field(decision, "title"))
+    loop gap in prose -> gaps.push(gap)
+    prose = prose_density("gist", tree_field(decision, "gist"))
+    loop gap in prose -> gaps.push(gap)
+    prose = prose_density("lesson", tree_field(decision, "lesson"))
+    loop gap in prose -> gaps.push(gap)
+    prose = prose_density("explainer", tree_field(decision, "explainer"))
+    loop gap in prose -> gaps.push(gap)
+    prose = prose_density("story", tree_field(decision, "story"))
+    loop gap in prose -> gaps.push(gap)
+    prose = example_prose_density("inWild", tree_field(decision, "inWild"))
+    loop gap in prose -> gaps.push(gap)
+    prose = prose_density("detail", tree_field(decision, "detail"))
+    loop gap in prose -> gaps.push(gap)
+
+    options :: list_at(decision, "options")
+    loop option in options {
+        key :: option_key_text(option)
+        prose = prose_density("option {key} name", tree_field(option, "name"))
+        loop gap in prose -> gaps.push(gap)
+        prose = prose_density("option {key}", tree_field(option, "detail"))
+        loop gap in prose -> gaps.push(gap)
+        prose = prose_density("option {key} technical", tree_field(option, "technical"))
+        loop gap in prose -> gaps.push(gap)
+    }
+
+    comparisons :: list_at(decision, "comparisons")
+    loop comparison in comparisons {
+        language_value :: tree_field(comparison, "lang")
+        language := "?"
+        if truthy(language_value) -> language = value_string(language_value)
+        prose = prose_density("comparison {language}", tree_field(comparison, "note"))
+        loop gap in prose -> gaps.push(gap)
+    }
+
+    recommendation :: tree_field(decision, "recommendation")
+    prose = prose_density("recommendation why", tree_field(recommendation, "why"))
+    loop gap in prose -> gaps.push(gap)
+    prose = prose_density("recommendation tradeoff", tree_field(recommendation, "tradeoff"))
+    loop gap in prose -> gaps.push(gap)
+    why_not :: list_at(recommendation, "whyNot")
+    loop rejected in why_not {
+        key :: option_key_text(rejected)
+        prose = prose_density("recommendation why not {key}", tree_field(rejected, "reason"))
+        loop gap in prose -> gaps.push(gap)
+    }
+
+    hybrid :: tree_field(decision, "hybrid")
+    prose = prose_density("hybrid synthesis", tree_field(hybrid, "synthesis"))
+    loop gap in prose -> gaps.push(gap)
+    harvest :: list_at(hybrid, "harvest")
+    loop item in harvest {
+        key :: option_key_text(item)
+        prose = prose_density("hybrid {key} aspect", tree_field(item, "aspect"))
+        loop gap in prose -> gaps.push(gap)
+        prose = prose_density("hybrid {key} use", tree_field(item, "use"))
+        loop gap in prose -> gaps.push(gap)
+    }
+
+    passes :: tree_field(decision, "reviewPasses")
+    loop key in review_pass_keys() {
+        prose = prose_density("reviewPasses.{key}", tree_field(passes, key))
+        loop gap in prose -> gaps.push(gap)
+    }
+
+    instructions :: tree_field(decision, "checkInstructions")
+    instructions_subject :: ~instructions
+    empty_instruction_gaps := [String]{}
+    instruction_gaps :: if instructions_subject == {
+        .Text(text) -> prose_density("checkInstructions", DataTree.Text(~text))
+        else -> empty_instruction_gaps
+    }
+    loop gap in instruction_gaps -> gaps.push(gap)
+    return gaps
+}
+
+fn option_key_list(options: [DataTree]) [String] -> {
+    keys := [String]{}
+    loop option in options {
+        key :: tree_field(option, "key")
+        if truthy(key) -> keys.push(value_string(key))
+    }
+    return keys
+}
+
+fn missing_option_labels(options: [DataTree], field: String) [String] -> {
+    labels := [String]{}
+    missing_index := 0
+    loop option in options {
+        if !has_text(tree_field(option, field)) {
+            key :: tree_field(option, "key")
+            label := "#{missing_index + 1}"
+            if truthy(key) -> label = value_string(key)
+            labels.push(label)
+            missing_index += 1
+        }
+    }
+    return labels
+}
+
+fn duplicate_option_keys(keys: [String]) [String] -> {
+    duplicates := [String]{}
+    loop index in 0..<keys.len() {
+        key :: keys[index]
+        loop later in index + 1..<keys.len() {
+            if keys[later] == key {
+                if !duplicates.contains(key) -> duplicates.push(key)
+                break
+            }
+        }
+    }
+    return duplicates
+}
+
+fn recommendation_has_reason(why_not: [DataTree], key: String) Bool -> {
+    loop item in why_not {
+        if text_at(~item, "key") != key -> next
+        return has_text(tree_field(~item, "reason"))
+    }
+    return false
+}
+
+fn review_pass_text_gap(key: String, text: String) String -> {
+    text_view :: text.trim()
+    text_owned :: ~text_view
+    if text_owned == "" -> return "reviewPasses.{key} (need text)"
+    if sentence_count(text) > 2 -> return "reviewPasses.{key} (need 1-2 sentences)"
+    return ""
+}
+
+fn review_pass_gap(key: String, summary: DataTree) String -> {
+    return if summary == {
+        .Text(text) -> review_pass_text_gap(~key, ~text)
+        else -> "reviewPasses.{key} (need text)"
+    }
+}
+
+fn unexpected_review_pass_gaps(passes: DataTree) [String] -> {
+    entries :: if passes == {
+        .Object(values) -> values
+        else -> [String:DataTree]{}
+    }
+    gaps := [String]{}
+    loop (key, _value) in entries {
+        if !review_pass_keys().contains(key) -> gaps.push("reviewPasses.{key} (unexpected)")
+    }
+    return gaps
+}
+
+fn ballot_gaps(decision: DataTree) [String] -> {
+    missing := [String]{}
+    ballot_mode := text_at(decision, "ballotMode")
+    if ballot_mode == "" -> ballot_mode = "full"
+    if ballot_mode != "full" && ballot_mode != "short" -> missing.push("ballotMode (full or short)")
+
+    if !has_text(tree_field(decision, "gist")) -> missing.push("gist")
+
+    lesson :: tree_field(decision, "lesson")
+    if !has_text(lesson) -> missing.push("lesson") else if paragraph_count(value_string(lesson)) > 1 {
+        missing.push("lesson (one paragraph maximum)")
+    }
+
+    if !has_text(tree_field(decision, "story")) -> missing.push("story")
+    if !has_text(tree_field(decision, "inWild")) -> missing.push("inWild")
+
+    options :: list_at(decision, "options")
+    option_keys :: option_key_list(options)
+    if options.len() < 2 -> missing.push("options (need at least 2)") else {
+        no_key := missing_option_labels(options, "key")
+        if no_key.len() > 0 -> missing.push("options[].key")
+        no_name := missing_option_labels(options, "name")
+        if no_name.len() > 0 {
+            names_text :: no_name.join(", ")
+            missing.push("options[].name (missing on {names_text})")
+        }
+        no_detail := missing_option_labels(options, "detail")
+        if no_detail.len() > 0 {
+            details_text :: no_detail.join(", ")
+            missing.push("options[].detail (missing on {details_text})")
+        }
+        no_code := missing_option_labels(options, "code")
+        if no_code.len() > 0 {
+            codes_text :: no_code.join(", ")
+            missing.push("options[].code (missing on {codes_text})")
+        }
+        duplicates :: duplicate_option_keys(option_keys)
+        if duplicates.len() > 0 {
+            duplicates_text :: duplicates.join(", ")
+            missing.push("options[].key (duplicate: {duplicates_text})")
+        }
+    }
+
+    rec_value :: tree_field(decision, "rec")
+    rec_text := ""
+    if truthy(rec_value) -> rec_text = value_string(rec_value)
+    if !truthy(rec_value) || rec_text.trim() == "" -> missing.push("rec")
+    if truthy(rec_value) && !option_keys.contains(rec_text) {
+        missing.push("rec (must match an option key)")
+    }
+
+    recommendation :: tree_field(decision, "recommendation")
+    if is_null(~recommendation) || !is_object(~recommendation) -> missing.push("recommendation") else {
+        if !has_text(tree_field(recommendation, "why")) -> missing.push("recommendation.why")
+        if !has_text(tree_field(recommendation, "tradeoff")) {
+            missing.push("recommendation.tradeoff")
+        }
+        why_not :: list_at(recommendation, "whyNot")
+        loop key in option_keys {
+            if key == rec_text -> next
+            if !recommendation_has_reason(why_not, key) {
+                missing.push("recommendation.whyNot[{key}]")
+            }
+        }
+    }
+
+    if ballot_mode == "full" {
+        passes :: tree_field(decision, "reviewPasses")
+        if is_null(~passes) || !is_object(~passes) -> missing.push("reviewPasses") else {
+            loop key in review_pass_keys() {
+                summary :: tree_field(passes, key)
+                gap :: review_pass_gap(~key, ~summary)
+                if gap != "" -> missing.push(gap)
+            }
+            unexpected_gaps :: unexpected_review_pass_gaps(~passes)
+            loop gap in unexpected_gaps -> missing.push(gap)
+        }
+    } else if ballot_mode == "short" {
+        if !has_text(tree_field(decision, "shortAuthorizedBy")) -> missing.push("shortAuthorizedBy")
+        review_passes :: tree_field(decision, "reviewPasses")
+        if !is_null(~review_passes) -> missing.push("short ballots must omit reviewPasses")
+    }
+
+    dense :: plain_language_gaps(decision)
+    if dense.len() > 0 {
+        dense_text :: dense.join("; ")
+        missing.push("plain language: {dense_text}")
+    }
+    return missing
+}
+
+fn rule_ballot_gaps(decisions: [DataTree]) [DataTree] -> {
+    findings := [DataTree]{}
+    loop decision in decisions {
+        if text_at(decision, "status") == "ratified" -> next
+        if truthy(tree_field(decision, "draft")) -> next
+        if text_at(decision, "group") == "acceptance" -> next
+        gaps :: ballot_gaps(decision)
+        if gaps.len() == 0 -> next
+        id :: text_at(decision, "id")
+        gaps_text :: gaps.join(", ")
+        findings.push(finding("ballot-gaps", id, "{id} incomplete ballot — missing: {gaps_text}"))
+    }
+    return findings
+}
+
+fn rule_stale_draft(decisions: [DataTree], captured_at: String) [DataTree] -> {
+    findings := [DataTree]{}
+    loop decision in decisions {
+        if !truthy(tree_field(decision, "draft")) -> next
+        age :: age_days(tree_field(decision, "created"), ~captured_at)
+        if age <= 7.0 -> next
+        id :: text_at(decision, "id")
+        age_text :: whole_days_text(age)
+        findings.push(finding("stale-draft", id, "{id} draft untouched {age_text}d — finish it (decision update --ready) or drop it"))
+    }
+    return findings
+}
+
+fn card_resolves(cards: [DataTree], reference: String) Bool -> {
+    loop card in cards {
+        id :: tree_field(~card, "id")
+        if !is_null(~id) && value_string(~id) == reference -> return true
+    }
+    number_text := reference
+    if reference.starts_with("#") -> number_text = reference.replace("#", "")
+    number :: Int.parse(number_text) ?? -1
+    loop card in cards {
+        if int_at(card, "num") == number -> return true
+    }
+    return false
+}
+
+fn rule_orphan_blockers(cards: [DataTree], decisions: [DataTree], history_cards: [DataTree]) [DataTree] -> {
+    findings := [DataTree]{}
+    decision_ids := [String]{}
+    loop decision in decisions -> decision_ids.push(text_at(decision, "id"))
+    loop card in cards {
+        blocked_by :: list_at(card, "blockedBy")
+        loop blocker in blocked_by {
+            reference :: value_string(blocker)
+            if card_resolves(cards, reference) -> next
+            if card_resolves(history_cards, reference) -> next
+            if decision_ids.contains(reference) -> next
+            number :: int_at(card, "num")
+            title :: text_at(card, "title")
+            findings.push(finding("orphan-blockers", "#{number}", "#{number} \"{title}\" blockedBy dangling ref {reference}"))
+        }
+    }
+    return findings
+}
+
+fn rule_blocker_unpopulated(cards: [DataTree]) [DataTree] -> {
+    findings := [DataTree]{}
+    loop card in cards {
+        if text_at(card, "track") != "epoch" -> next
+        if text_at(card, "phase") != "planning" -> next
+        plan :: tree_field(card, "plan")
+        if !has_text(plan) -> next
+        if list_at(card, "blockedBy").len() > 0 -> next
+        lower :: value_string(plan).to_lower()
+        if re.is_match(Regex{"\b(?:blockedby\s*:\s*none|no blockers?)\b"}, lower) -> next
+        number :: int_at(card, "num")
+        title :: text_at(card, "title")
+        findings.push(finding("blocker-unpopulated", "#{number}", "#{number} \"{title}\" has a plan but empty blockedBy — record prerequisites (or write \"blockedBy: none\" in the plan)"))
+    }
+    return findings
+}
+
+fn explicit_dispute(text: String) Bool -> {
+    lower :: text.to_lower()
+    if re.is_match(Regex{"\bnot\s+satisfied\b"}, lower) -> return true
+    if lower.contains("unproven") -> return true
+    return re.is_match(Regex{"\b(?:criterion|proof|check|test)\s+(?:is|remains)\s+(?:not\s+met|incomplete)\b"}, lower)
+}
+
+fn weak_dispute(text: String) Bool -> {
+    lower :: text.to_lower()
+    if re.is_match(Regex{"\b(?:could|can|did|does)\s+not\s+(?:be\s+)?(?:run|finish|pass|prove|cover|exercise|satisfy|meet|complete)\b"}, lower) {
+        return true
+    }
+    return re.is_match(Regex{"\bnot\s+(?:run|verified|met|complete|implemented)\b"}, lower)
+}
+
+fn historical_evidence(text: String) Bool -> {
+    re.is_match(Regex{"\b(?:before|prior(?:\s+to)?|previously|formerly|earlier|at\s+that\s+head|historical(?:ly)?|was\s+fixed|were\s+fixed|has\s+been\s+fixed|have\s+been\s+fixed|now\s+(?:fits|passes|green|works|fixed|resolved)|removed|resolved|predated|old\s+state|past)\b"}, text.to_lower())
+}
+
+fn irrelevant_evidence(text: String) Bool -> {
+    re.is_match(Regex{"\b(?:unrelated|independent|contains|quoted|source\s+string|outside\s+(?:this|the)\s+(?:card|criterion|scope)|not\s+(?:this|the)\s+(?:card|criterion|change))\b"}, text.to_lower())
+}
+
+fn qualified_evidence(text: String) Bool -> {
+    re.is_match(Regex{"\b(?:evidence|criterion|audit|review|report|log)\b[^.!?]{{0,80}}\b(?:said|reported|recorded|found|read|showed)\b[^.!?]{{0,40}}\b(?:not\s+satisfied|unproven)\b|\bnot\s+satisfied\s+by\b|\bnot\s+implemented\s+as\s+written\b"}, text.to_lower())
+}
+
+fn positive_evidence(text: String) Bool -> {
+    re.is_match(Regex{"\b(?:proof|pass(?:ed|es|ing)?|green|verified|confirmed|clean|success(?:ful)?|works?|assert(?:ed|s)?|golden|parity|measured|re-verified|production)\b"}, text.to_lower())
+}
+
+fn evidence_conflicts(evidence: String) Bool -> {
+    prose :: re.replace_all(Regex{"`[^`]*`"}, " ", evidence)
+    has_positive :: positive_evidence(~prose)
+    sentences :: re.split(Regex{"\n+|[.!?]\s+"}, prose)
+    loop sentence in sentences {
+        current_view :: sentence.trim()
+        current :: ~current_view
+        if current == "" -> next
+        explicit :: explicit_dispute(~current)
+        weak :: weak_dispute(~current)
+        if !explicit && !weak -> next
+        if historical_evidence(~current) || irrelevant_evidence(~current) || qualified_evidence(~current) {
+            next
+        }
+        if explicit || !has_positive -> return true
+    }
+    return false
+}
+
+fn rule_criteria_evidence_conflicts(cards: [DataTree]) [DataTree] -> {
+    findings := [DataTree]{}
+    loop card in cards {
+        criteria :: list_at(card, "criteria")
+        loop item in criteria {
+            status :: text_at(item, "status")
+            if status != "met" && status != "verified" -> next
+            evidence_value :: tree_field(item, "evidence")
+            if !truthy(evidence_value) -> next
+            evidence :: value_string(evidence_value).trim()
+            if evidence == "" -> next
+            if !evidence_conflicts(evidence) -> next
+            number :: int_at(card, "num")
+            title :: text_at(card, "title")
+            criterion_number :: int_at(item, "n")
+            findings.push(finding("criteria-evidence-conflict", "#{number}", "#{number} \"{title}\" criterion #{criterion_number} is {status} but its evidence disputes it: {evidence}"))
+        }
+    }
+    return findings
+}
+
+fn reference_name(name: String) Bool -> {
+    lower :: name.to_lower()
+    if re.is_match(Regex{"(^|_)(test|fixture|example|spec)(_|$)"}, lower) -> return true
+    return re.is_match(Regex{"^(test|fixture|example|spec)[a-z]"}, lower)
+}
+
+fn reference_label(token: String) String -> {
+    if token.starts_with("path:") -> return token.replace("path:", "")
+    return token.replace("name:", "")
+}
+
+fn reference_tokens(body: String) [String] -> {
+    tokens := [String]{}
+    lower :: body.to_lower()
+    paths :: re.find_all(Regex{"\b(?:tests?|examples?|fixtures?|specs?)/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\b"}, lower)
+    loop path in paths {
+        token := "path:{path}"
+        if !tokens.contains(token) -> tokens.push(token)
+    }
+    names :: re.find_all(Regex{"\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b"}, body)
+    loop name in names {
+        if !reference_name(name) -> next
+        name_text :: name.to_lower()
+        token := "name:{name_text}"
+        if !tokens.contains(token) -> tokens.push(token)
+    }
+    return tokens
+}
+
+fn card_open(card: DataTree) Bool -> {
+    if is_null(~card) -> return false
+    phase :: text_at(~card, "phase")
+    return phase != "done" && phase != "frozen"
+}
+
+fn card_identity(card: DataTree) String -> {
+    id :: tree_field(~card, "id")
+    if !is_null(~id) -> return value_string(~id)
+    number :: int_at(~card, "num")
+    return "#{number}"
+}
+
+fn duplicate_findings(cards: [DataTree]) [DataTree] -> {
+    findings := [DataTree]{}
+    open_cards := [DataTree]{}
+    open_tokens := [[String]]{}
+    loop card in cards {
+        if !card_open(~card) -> next
+        open_cards.push(card)
+        open_tokens.push(reference_tokens(text_at(~card, "body")))
+    }
+
+    seen_tokens := [String]{}
+    group_keys := [String]{}
+    group_cards := [[Int]]{}
+    group_references := [[String]]{}
+
+    loop i in 0..<open_cards.len() {
+        loop token in open_tokens[i] {
+            if seen_tokens.contains(token) -> next
+            seen_tokens.push(token)
+            matching := [Int]{}
+            loop j in 0..<open_cards.len() {
+                if open_tokens[j].contains(token) -> matching.push(j)
+            }
+            if matching.len() < 2 -> next
+
+            key := ""
+            loop j in matching {
+                if key != "" -> key += "|"
+                key += card_identity(~open_cards[j])
+            }
+            group_index := -1
+            loop k in 0..<group_keys.len() {
+                if group_keys[k] == key {
+                    group_index = k
+                    break
+                }
+            }
+            if group_index < 0 {
+                group_keys.push(key)
+                group_cards.push(matching)
+                group_references.push([reference_label(token)])
+            } else { group_references[group_index].push(reference_label(token)) }
+        }
+    }
+
+    loop group_index in 0..<group_cards.len() {
+        indices :: group_cards[group_index]
+        card_refs := [String]{}
+        card_text := ""
+        loop index in indices {
+            number :: int_at(~open_cards[index], "num")
+            card_refs.push("#{number}")
+            if card_text != "" -> card_text += "; "
+            title :: tree_field(~open_cards[index], "title")
+            title_text := "(untitled)"
+            if !is_null(~title) -> title_text = value_string(~title)
+            card_text += "#{number} \"{title_text}\""
+        }
+        references :: group_references[group_index].join(", ")
+        findings.push(finding("duplicate-suspect", card_refs.join(","), "open cards share {references}: {card_text}"))
+    }
+    return findings
+}
+
+pub fn lint_findings_at(tower: DataTree, history: DataTree, captured_at: String) [DataTree] -> {
+    findings := [DataTree]{}
+    cards :: list_at(tower, "cards")
+    decisions :: list_at(tower, "decisions")
+    events :: list_at(tower, "events")
+    history_cards :: list_at(history, "cards")
+
+    done_findings :: rule_done_without_evidence(cards)
+    loop item in done_findings -> findings.push(item)
+    idle_findings :: rule_claimed_idle(cards, ~captured_at)
+    loop item in idle_findings -> findings.push(item)
+    attribution_findings :: rule_missing_attribution(events)
+    loop item in attribution_findings -> findings.push(item)
+    ballot_findings :: rule_ballot_gaps(decisions)
+    loop item in ballot_findings -> findings.push(item)
+    draft_findings :: rule_stale_draft(decisions, ~captured_at)
+    loop item in draft_findings -> findings.push(item)
+    blocker_plan_findings :: rule_blocker_unpopulated(cards)
+    loop item in blocker_plan_findings -> findings.push(item)
+
+    loop card in cards {
+        if text_at(card, "track") != "epoch" -> next
+        epoch :: tree_field(card, "epoch")
+        if !is_null(~epoch) -> next
+        if text_at(card, "phase") == "frozen" -> next
+        number :: int_at(card, "num")
+        findings.push(detail_finding("unhomed-card", "#{number}", "epoch-track card with no epoch — assign an epoch, make it a sidequest, or freeze it"))
+    }
+
+    criteria_findings :: rule_criteria_evidence_conflicts(cards)
+    loop item in criteria_findings -> findings.push(item)
+    duplicate_rule_findings :: duplicate_findings(cards)
+    loop item in duplicate_rule_findings -> findings.push(item)
+
+    orphan_findings :: rule_orphan_blockers(cards, decisions, history_cards)
+    loop item in orphan_findings -> findings.push(item)
+    return findings
+}
+
+pub fn lint_findings(tower: DataTree, history: DataTree) [DataTree] -> {
+    return lint_findings_at(tower, history, time.now_utc().to_string())
+}
+
+fn live_tower_root() String -> "plugins/tower/.tower"
+
+fn path_is_under(path: String, root: String) Bool -> {
+    candidate :: path.replace("\\", "/")
+    base :: root.replace("\\", "/")
+    if candidate == base -> return true
+    return candidate.starts_with("{base}/")
+}
+
+fn paths_overlap(left: String, right: String) Bool -> {
+    return path_is_under(~left, ~right) || path_is_under(~right, ~left)
+}
+
+fn canonical_live_root() String -> {
+    return files.canonicalize(live_tower_root()) ?? panic("live Tower root cannot be resolved")
+}
+
+fn canonical_repo_root() String -> {
+    return files.canonicalize(".") ?? panic("repository root cannot be resolved")
+}
+
+fn canonical_fixed_path(path: String, expected: String, label: String) String -> {
+    candidate :: files.canonicalize(~path) ?? panic("{label}: path cannot be resolved")
+    live :: canonical_live_root()
+    if paths_overlap(~candidate, ~live) -> panic("{label}: path overlaps plugins/tower/.tower")
+    if candidate != expected -> panic("{label}: path is not the exact canonical location")
+    return candidate
+}
+
+fn canonical_fixtures_root() String -> {
+    repo :: canonical_repo_root()
+    expected :: Path.from(~repo).join(fixtures_root()).to_string()
+    return canonical_fixed_path(fixtures_root(), ~expected, "fixtures root")
+}
+
+fn canonical_manifest_path(path: String, label: String) String -> {
+    repo :: canonical_repo_root()
+    expected :: Path.from(~repo).join(manifest_path()).to_string()
+    return canonical_fixed_path(~path, ~expected, ~label)
+}
+
+fn canonical_fixture_path(path: String, root: String, date: String, file: String, label: String) String -> {
+    expected :: Path.from(~root).join(date).join(file).to_string()
+    return canonical_fixed_path(~path, ~expected, ~label)
+}
+
+fn snapshot_index(dir: String) Int -> {
+    requested :: dir.replace("\\", "/")
+    if requested == "dogfood/tower/tests/parity/fixtures/2026-08-26" -> return 0
+    if requested == "dogfood/tower/tests/parity/fixtures/2026-08-27" -> return 1
+    if requested == "dogfood/tower/tests/parity/fixtures/2026-08-28" -> return 2
+    panic("snapshot directory must be an exported parity fixture")
+    return -1
+}
+
+fn safe_snapshot_dir(dir: String) String -> {
+    index :: snapshot_index(~dir)
+    date :: parity_date(index)
+    root :: canonical_fixtures_root()
+    expected :: Path.from(~root).join(date).to_string()
+    return canonical_fixed_path(~dir, ~expected, "snapshot directory")
+}
+
+fn snapshot_path(dir: String, name: String) String -> {
+    return Path.from(~dir).join(name).to_string()
+}
+
+fn read_json(path: String, name: String, date: String, file: String) DataTree -> {
+    root :: canonical_fixtures_root()
+    canonical :: canonical_fixture_path(~path, ~root, ~date, ~file, ~name)
+    raw :: files.read(~canonical) ?? panic("snapshot {name} cannot be read")
+    return json.parse(raw) ?? panic("snapshot {name} is not valid JSON")
+}
+
+fn parse_verified_json(raw: String, name: String) DataTree -> {
+    return json.parse(raw) ?? panic("snapshot {name} is not valid JSON")
+}
+
+fn read_fixture_text(path: String, name: String, date: String, file: String) String -> {
+    root :: canonical_fixtures_root()
+    canonical :: canonical_fixture_path(~path, ~root, ~date, ~file, ~name)
+    raw :: files.read(~canonical) ?? panic("snapshot {name} cannot be read")
+    return raw.trim()
+}
+
+pub fn load_snapshot(dir: String) [String:DataTree] -> {
+    index :: snapshot_index(~dir)
+    safe_dir :: safe_snapshot_dir(~dir)
+    date :: parity_date(index)
+    manifest :: parse_json(manifest_path(), "snapshots.json")
+    validate_manifest(~manifest)
+    items :: array_field(~manifest, "snapshots")
+    entry :: manifest_snapshot_entry(~items, index, ~date)
+    verified := [String:String]{}
+    loop file in parity_files() {
+        path :: snapshot_path(~safe_dir, ~file)
+        verified[file] = verify_file_hash(~entry, ~date, ~file, ~path)
+    }
+
+    tower :: parse_verified_json(verified["tower.json"], "tower.json")
+    history :: parse_verified_json(verified["history.json"], "history.json")
+    config :: parse_verified_json(verified["config.json"], "config.json")
+    captured_at :: required_capture_at(verified["capture-time.txt"])
+    captured_value :: json.parse("\"{captured_at}\"") ?? panic("snapshot capture time is not valid JSON")
+
+    return [
+        "tower": tower,
+        "history": history,
+        "config": config,
+        "capturedAt": captured_value
+    ]
+}
+
+pub fn snapshot_tower(snapshot: [String:DataTree]) DataTree -> { return snapshot["tower"] }
+
+pub fn snapshot_history(snapshot: [String:DataTree]) DataTree -> { return snapshot["history"] }
+
+pub fn snapshot_config(snapshot: [String:DataTree]) DataTree -> { return snapshot["config"] }
+
+pub fn snapshot_captured_at(snapshot: [String:DataTree]) String -> {
+    value :: snapshot["capturedAt"]
+    return value.text() ?? panic("snapshot field capturedAt is not text")
+}
+
+pub fn project_snapshot(snapshot: [String:DataTree]) DataTree -> {
+    tower :: snapshot_tower(~snapshot)
+    history :: snapshot_history(~snapshot)
+    config :: snapshot_config(~snapshot)
+    captured_at :: snapshot_captured_at(~snapshot)
+    return project_state(~tower, ~history, ~config, ~captured_at)
+}
+
+fn server_text_at(tree: DataTree, name: String) String !Never -> {
+    value :: tree_field(~tree, ~name)
+    return value.text() ?? ""
+}
+
+fn revision(state: DataTree) Int !Never -> {
+    meta :: tree_field(~state, "meta")
+    return int_at(~meta, "rev")
+}
+
+fn query_value(path: String, wanted: String) String !Never -> {
+    query :: path.split_once("?") ?? return ""
+    loop pair in query.after.split("&").to_list() {
+        fields :: pair.split_once("=") ?? next
+        key :: url.percent_decode(fields.before) ?? ""
+        if key != wanted -> next
+        return url.percent_decode(fields.after) ?? ""
+    }
+    return ""
+}
+
+fn card_epoch(card: DataTree) String !Never -> { return server_text_at(~card, "epoch") }
+
+fn card_matches(card: DataTree, reference: String) Bool !Never -> {
+    if server_text_at(~card, "id") == reference -> return true
+
+    number :: int_at(~card, "num")
+    if reference.starts_with("#") {
+        return number == (Int.parse(reference.slice(1, reference.len())) ?? -1)
+    }
+    return number == (Int.parse(reference) ?? -1)
+}
+
+fn find_card(cards: [DataTree], reference: String) DataTree !Never -> {
+    loop card in cards {
+        if card_matches(~card, ~reference) -> return ~card
+    }
+    return DataTree.Null
+}
+
+fn done_cards(state: DataTree) [DataTree] !Never -> {
+    result := [DataTree]{}
+    loop card in list_at(~state, "cards") {
+        if server_text_at(~card, "phase") == "done" -> result.push(~card)
+    }
+    return result
+}
+
+fn archived_cards(history: DataTree) [DataTree] !Never -> {
+    result := [DataTree]{}
+    decisions :: list_at(~history, "decisions")
+    cards :: list_at(~history, "cards")
+    loop card in cards -> result.push(~project_archived_card(~card, ~decisions, ~cards))
+    return result
+}
+
+pub fn project_snapshot_dir(dir: String) DataTree -> {
+    snapshot :: load_snapshot(dir)
+    return project_snapshot(~snapshot)
+}
+
+pub fn lint_snapshot_dir(dir: String) DataTree -> {
+    snapshot :: load_snapshot(dir)
+    tower :: snapshot_tower(~snapshot)
+    history :: snapshot_history(~snapshot)
+    captured_at :: snapshot_captured_at(~snapshot)
+    return DataTree.Array(lint_findings_at(~tower, ~history, ~captured_at))
+}
+
+fn api_error(status: Int, code: String, message: String) HTTPResponse !HTTPError -> {
+    payload :: DataTree.Object([
+        "code": DataTree.Text(~code),
+        "message": DataTree.Text(~message)
+    ])
+    return Ok(http_server.json(status, payload))
+}
+
+fn state_response(state: DataTree) HTTPResponse !HTTPError -> {
+    return Ok(http_server.json(200, state))
+}
+
+fn card_response(req: HTTPRequest, state: DataTree, history: DataTree) HTTPResponse !HTTPError -> {
+    reference := query_value(req.path(), "id")
+    if reference == "" -> reference = query_value(req.path(), "card")
+    if reference == "" {
+        return api_error(400, "E_BAD_REQUEST", "GET /api/card requires an id query parameter")
+    }
+
+    live_card :: find_card(list_at(~state, "cards"), ~reference)
+    if !is_null(~live_card) {
+        payload :: DataTree.Object([
+            "rev": DataTree.Int(revision(~state)),
+            "card": live_card
+        ])
+        return Ok(http_server.json(200, payload))
+    }
+
+    history_decisions :: list_at(~history, "decisions")
+    history_cards :: list_at(~history, "cards")
+    archived_value :: find_card(~history_cards, ~reference)
+    if is_null(~archived_value) {
+        return api_error(404, "E_NOT_FOUND", "card {reference} is not present in the snapshot")
+    }
+
+    payload :: DataTree.Object([
+        "rev": DataTree.Int(revision(~state)),
+        "card": project_archived_card(~archived_value, ~history_decisions, ~history_cards)
+    ])
+    return Ok(http_server.json(200, payload))
+}
+
+fn closed_response(state: DataTree, history: DataTree) HTTPResponse !HTTPError -> {
+    done :: done_cards(~state)
+    archived :: archived_cards(~history)
+    cards := [DataTree]{}
+    loop card in done -> cards.push(~card)
+    loop card in archived -> cards.push(~card)
+
+    payload :: DataTree.Object([
+        "rev": DataTree.Int(revision(~state)),
+        "cards": DataTree.Array(cards),
+        "counts": DataTree.Object([
+            "done": DataTree.Int(done.len()),
+            "archived": DataTree.Int(archived.len())
+        ])
+    ])
+    return Ok(http_server.json(200, payload))
+}
+
+fn history_response(req: HTTPRequest, _state: DataTree, history: DataTree) HTTPResponse !HTTPError -> {
+    epoch :: query_value(req.path(), "epoch")
+    all_cards :: list_at(~history, "cards")
+    selected := [DataTree]{}
+
+    loop card in all_cards {
+        if epoch == "" || card_epoch(~card) == epoch -> selected.push(~card)
+    }
+
+    count_text :: query_value(req.path(), "count")
+    if count_text == "1" {
+        payload :: DataTree.Object([
+            "count": DataTree.Int(selected.len())
+        ])
+        return Ok(http_server.json(200, payload))
+    }
+
+    payload :: DataTree.Object([
+        "cards": DataTree.Array(selected),
+        "count": DataTree.Int(selected.len())
+    ])
+    return Ok(http_server.json(200, payload))
+}
+
+fn lint_response(lint: DataTree) HTTPResponse !HTTPError -> {
+    return Ok(http_server.json(200, lint))
+}
+
+fn version_response(state: DataTree, captured_at: String) HTTPResponse !HTTPError -> {
+    revision_value :: revision(~state)
+    identity :: "snapshot:{captured_at}:rev:{revision_value}"
+    payload :: DataTree.Object([
+        "mode": DataTree.Text("immutable-snapshot"),
+        "capturedAt": DataTree.Text(~captured_at),
+        "revision": DataTree.Int(revision_value),
+        "identity": DataTree.Text(~identity)
+    ])
+    return Ok(http_server.json(200, payload))
+}
+
+fn stream_response(state: DataTree) HTTPResponse !HTTPError -> {
+    state_json :: json.to_string(state)
+    body :: "event: state\ndata: {state_json}\n\n"
+    return Ok(http_server.response(200, body)
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-cache"))
+}
+
+fn read_only_response(_req: HTTPRequest) HTTPResponse !HTTPError -> {
+    return api_error(405, "E_READ_ONLY", "Jet Tower shadow is read-only; POST, PUT, PATCH, and DELETE are unavailable")
+}
+
+fn asset_response(path: String, mime: String) HTTPResponse !HTTPError -> {
+    return Ok(http_server.static_file(path, mime))
+}
+
+fn index_response(_req: HTTPRequest) HTTPResponse !HTTPError -> {
+    return asset_response("dogfood/tower/src/board/index.html", "text/html; charset=utf-8")
+}
+
+fn css_response(_req: HTTPRequest) HTTPResponse !HTTPError -> {
+    return asset_response("dogfood/tower/src/board/board.css", "text/css; charset=utf-8")
+}
+
+fn js_response(_req: HTTPRequest) HTTPResponse !HTTPError -> {
+    return asset_response("dogfood/tower/src/board/board.js", "application/javascript; charset=utf-8")
+}
+
+pub fn serve(snapshot_dir: String, port: String) {
+    snapshot :: load_snapshot(snapshot_dir)
+    tower :: snapshot_tower(~snapshot)
+    history :: snapshot_history(~snapshot)
+    captured_at :: snapshot_captured_at(~snapshot)
+    state :: project_snapshot(~snapshot)
+    lint :: DataTree.Array(lint_findings_at(~tower, ~history, ~captured_at))
+
+    mux :: http_server.mux()
+    mux.get("/", (req: HTTPRequest) -> index_response(req))
+    mux.get("/index.html", (req: HTTPRequest) -> index_response(req))
+    mux.get("/board.css", (req: HTTPRequest) -> css_response(req))
+    mux.get("/board.js", (req: HTTPRequest) -> js_response(req))
+    mux.get("/api/state", (_req: HTTPRequest) -> state_response(~state))
+    mux.get("/api/card", (req: HTTPRequest) -> card_response(req, ~state, ~history))
+    mux.get("/api/closed", (_req: HTTPRequest) -> closed_response(~state, ~history))
+    mux.get("/api/history", (req: HTTPRequest) -> history_response(req, ~state, ~history))
+    mux.get("/api/lint", (_req: HTTPRequest) -> lint_response(~lint))
+    mux.get("/api/version", (_req: HTTPRequest) -> version_response(~state, ~captured_at))
+    mux.get("/api/stream", (_req: HTTPRequest) -> stream_response(~state))
+
+    mux.post("/api", (req: HTTPRequest) -> read_only_response(req))
+    mux.post("/api/*path", (req: HTTPRequest) -> read_only_response(req))
+    mux.put("/api", (req: HTTPRequest) -> read_only_response(req))
+    mux.put("/api/*path", (req: HTTPRequest) -> read_only_response(req))
+    mux.patch("/api", (req: HTTPRequest) -> read_only_response(req))
+    mux.patch("/api/*path", (req: HTTPRequest) -> read_only_response(req))
+    mux.delete("/api", (req: HTTPRequest) -> read_only_response(req))
+    mux.delete("/api/*path", (req: HTTPRequest) -> read_only_response(req))
+
+    print("Jet Tower shadow (read-only, snapshot-backed) listening on http://localhost:{port}")
+    http_server.serve("127.0.0.1:{port}", mux) ?? panic("Tower shadow server failed")
+}
+
+fn fixtures_root() String -> "dogfood/tower/tests/parity/fixtures"
+
+fn manifest_path() String -> "dogfood/tower/tests/parity/snapshots.json"
+
+fn parse_json(path: String, section: String) DataTree -> {
+    canonical :: canonical_manifest_path(~path, ~section)
+    raw :: files.read(~canonical) ?? panic("{section}: read failure")
+    return json.parse(raw) ?? panic("{section}: parse failure")
+}
+
+fn panic_data_tree(message: String) DataTree -> {
+    panic(message)
+    return DataTree.Null
+}
+
+fn manifest_snapshot_entry(items: [DataTree], index: Int, date: String) DataTree -> {
+    snapshots :: DataTree.Array(~items)
+    return snapshots.at(index) ?? panic("{date}/snapshots.json: snapshot entry missing")
+}
+
+fn parity_files() [String] -> {
+    return ["tower.json", "history.json", "config.json", "state.json", "lint.json", "capture-time.txt"]
+}
+
+fn parity_date(index: Int) String -> {
+    if index == 0 -> return "2026-08-26"
+    if index == 1 -> return "2026-08-27"
+    return "2026-08-28"
+}
+
+fn expected_commit(date: String) String -> {
+    if date == "2026-08-26" -> return "12564eb3c0c4e4cd715281c46e6d577db544411f"
+    if date == "2026-08-27" -> return "7428b1e36fdcb64a1f522d4b062ceabcd2925106"
+    return "8b027acc19d9a9f3446bcd885d9392d4c635f06b"
+}
+
+fn manifest_text(tree: DataTree, field: String, section: String) String -> {
+    value :: tree.field(~field) ?? panic("{section}: {field} missing")
+    return value.text() ?? panic("{section}: {field} is not text")
+}
+
+fn validate_exact_object_keys(tree: DataTree, expected: [String], section: String) {
+    fields :: object_fields(~tree)
+    if fields.len() != expected.len() -> panic("{section}: keys are not exact")
+    loop key in expected {
+        if !fields.has_key(key) -> panic("{section}: {key} is missing")
+    }
+}
+
+fn expected_source(file: String) String -> {
+    if file == "tower.json" -> return "plugins/tower/.tower/tower.json"
+    if file == "history.json" -> return "plugins/tower/.tower/history.json"
+    return "plugins/tower/.tower/config.json"
+}
+
+fn validate_manifest_source(entry: DataTree, date: String) {
+    section := "{date}/snapshots.json"
+    source :: entry.field("source") ?? panic("{section}: source missing")
+    if !is_object(~source) -> panic("{section}: source is not an object")
+    fields :: object_fields(~source)
+    expected := ["tower.json", "history.json", "config.json"]
+    if fields.len() != expected.len() -> panic("{section}: source map is not exact")
+    loop file in expected {
+        actual :: manifest_text(~source, ~file, ~section)
+        if actual != expected_source(~file) {
+            panic("{section}: source for {file} is not canonical")
+        }
+    }
+}
+
+fn validate_manifest_files(entry: DataTree, date: String) {
+    section := "{date}/snapshots.json"
+    file_records :: entry.field("files") ?? panic("{section}: files missing")
+    if !is_object(~file_records) -> panic("{section}: files is not an object")
+    fields :: object_fields(~file_records)
+    expected :: parity_files()
+    if fields.len() != expected.len() -> panic("{section}: file map is not exact")
+    loop file in expected {
+        record :: file_records.field(~file) ?? panic("{section}: {file} hash missing")
+        if !is_object(~record) -> panic("{section}: {file} hash record is not an object")
+        record_fields :: object_fields(~record)
+        if record_fields.len() != 1 || !record_fields.has_key("sha256") {
+            panic("{section}: {file} hash record is not exact")
+        }
+        hash :: manifest_text(~record, "sha256", "{date}/{file}")
+        if !re.is_match(Regex{"^[0-9a-f]{{64}}$"}, hash) {
+            panic("{date}/{file}: SHA-256 is not 64 lowercase hex characters")
+        }
+    }
+}
+
+fn validate_manifest_entry(entry: DataTree, index: Int, date: String, captured_at: String, capture_day: String) {
+    section := "{date}/snapshots.json"
+    if !is_object(~entry) -> panic("{section}: snapshot entry is not an object")
+    validate_exact_object_keys(~entry, ["date", "fixture", "commit", "source", "files"], ~section)
+    expected_date :: parity_date(index)
+    if date != expected_date -> panic("{section}: date is not in the fixed order")
+    if manifest_text(~entry, "date", ~section) != date {
+        panic("{section}: date does not match its position")
+    }
+    if manifest_text(~entry, "fixture", ~section) != "fixtures/{date}" {
+        panic("{section}: fixture path is not exact")
+    }
+    commit :: manifest_text(~entry, "commit", ~section)
+    if !re.is_match(Regex{"^[0-9a-f]{{40}}$"}, commit) {
+        panic("{section}: commit is not a 40-hex revision")
+    }
+    if commit != expected_commit(~date) -> panic("{section}: commit is not the expected revision")
+    validate_manifest_source(~entry, ~date)
+    validate_manifest_files(~entry, ~date)
+
+    fixture_dir :: safe_snapshot_dir("{fixtures_root()}/{date}")
+    capture_path :: snapshot_path(~fixture_dir, "capture-time.txt")
+    fixture_capture :: read_fixture_text(~capture_path, "{date}/capture-time.txt", ~date, "capture-time.txt")
+    if fixture_capture != captured_at {
+        panic("{section}: capture-time.txt does not match captured_at")
+    }
+    if fixture_capture.slice(0, 10) != capture_day {
+        panic("{section}: capture-time.txt does not match capture_day")
+    }
+}
+
+fn validate_manifest(manifest: DataTree) {
+    section := "snapshots.json"
+    if !is_object(~manifest) -> panic("{section}: manifest is not an object")
+    validate_exact_object_keys(~manifest, ["schema", "snapshots", "captured_at", "capture_day"], ~section)
+    if manifest_text(~manifest, "schema", ~section) != "jet.tower.parity.v1" {
+        panic("{section}: schema is not jet.tower.parity.v1")
+    }
+    captured_at :: required_capture_at(manifest_text(~manifest, "captured_at", ~section))
+    capture_day :: manifest_text(~manifest, "capture_day", ~section)
+    if capture_day != captured_at.slice(0, 10) {
+        panic("{section}: capture_day does not match captured_at")
+    }
+    snapshots :: manifest.field("snapshots") ?? panic("{section}: snapshots missing")
+    if !is_array_tree(~snapshots) -> panic("{section}: snapshots is not an array")
+    items :: array_field(~manifest, "snapshots")
+    if items.len() != 3 -> panic("{section}: snapshots must contain exactly three entries")
+    loop index in 0..<items.len() {
+        date :: parity_date(index)
+        entry :: manifest_snapshot_entry(~items, index, ~date)
+        validate_manifest_entry(~entry, index, ~date, ~captured_at, ~capture_day)
+    }
+}
+
+fn manifest_snapshot(index: Int, date: String) DataTree -> {
+    manifest :: parse_json(manifest_path(), "{date}/snapshots.json")
+    validate_manifest(~manifest)
+    items :: array_field(~manifest, "snapshots")
+    return manifest_snapshot_entry(~items, index, ~date)
+}
+
+fn expected_hash(entry: DataTree, date: String, file: String) String -> {
+    file_records :: entry.field("files") ?? panic("{date}/snapshots.json: files missing")
+    record :: file_records.field(file) ?? panic("{date}/snapshots.json: {file} hash missing")
+    hash :: record.field("sha256") ?? panic("{date}/{file}: hash field missing")
+    if hash == .Null -> panic("{date}/{file}: null hash is not accepted")
+    return hash.text() ?? panic("{date}/{file}: hash is not text")
+}
+
+fn verify_file_hash(entry: DataTree, date: String, file: String, path: String) String -> {
+    root :: canonical_fixtures_root()
+    canonical :: canonical_fixture_path(~path, ~root, ~date, ~file, "{date}/{file}")
+    expected :: expected_hash(entry, date, file)
+    raw :: files.read(~canonical) ?? panic("{date}/{file}: fixture read failure")
+    actual :: sha256_bytes(raw.bytes())
+    assert(actual == expected, "{date}/{file}: SHA-256 mismatch")
+    return raw
+}
+
+fn array_field_values(items: [DataTree], field: String, section: String) DataTree -> {
+    values := [DataTree]{}
+    loop item in items {
+        values.push(item.field(~field) ?? panic("{section}: item missing {field}"))
+    }
+    return DataTree.Array(values)
+}
+
+fn parity_array_field(tree: DataTree, field: String, section: String) DataTree -> {
+    return if tree == {
+        .Array(items) -> array_field_values(~items, ~field, ~section)
+        else -> panic_data_tree("{section}: expected array")
+    }
+}
+
+fn is_array_tree(tree: DataTree) Bool -> {
+    return if tree == {
+        .Array(_items) -> true
+        else -> false
+    }
+}
+
+fn assert_finding_array(tree: DataTree, section: String) {
+    if !is_array_tree(~tree) -> panic("{section}: lint findings are not an array")
+}
+
+fn check_snapshot(date: String, index: Int) {
+    fixture :: "{fixtures_root()}/{date}"
+    entry :: manifest_snapshot(index, date)
+
+    loop file in parity_files() -> verify_file_hash(entry, date, file, "{fixture}/{file}")
+
+    actual :: project_snapshot_dir(fixture)
+    expected :: read_json("{fixture}/state.json", "{date}/state.json", ~date, "state.json")
+    assert(semantic_equal(actual, expected), "{date}/state.json: full project snapshot mismatch")
+
+    actual_lanes :: actual.field("lanes") ?? panic("{date}/lanes: computed section missing")
+    expected_lanes :: expected.field("lanes") ?? panic("{date}/lanes: recorded section missing")
+    assert(semantic_equal(actual_lanes, expected_lanes), "{date}/lanes: computed lane mismatch")
+
+    actual_card_lanes :: parity_array_field(actual.field("cards") ?? panic("{date}/cards: computed section missing"), "lane", "{date}/cards")
+    expected_card_lanes :: parity_array_field(expected.field("cards") ?? panic("{date}/cards: recorded section missing"), "lane", "{date}/cards")
+    assert(semantic_equal(actual_card_lanes, expected_card_lanes), "{date}/cards: lane mismatch")
+
+    actual_progress :: parity_array_field(actual.field("milestones") ?? panic("{date}/milestones: computed section missing"), "progress", "{date}/milestones")
+    expected_progress :: parity_array_field(expected.field("milestones") ?? panic("{date}/milestones: recorded section missing"), "progress", "{date}/milestones")
+    assert(semantic_equal(actual_progress, expected_progress), "{date}/milestones: progress mismatch")
+
+    actual_counts :: actual.field("counts") ?? panic("{date}/counts: computed section missing")
+    expected_counts :: expected.field("counts") ?? panic("{date}/counts: recorded section missing")
+    assert(semantic_equal(actual_counts, expected_counts), "{date}/counts: mismatch")
+
+    expected_lint :: read_json("{fixture}/lint.json", "{date}/lint.json", ~date, "lint.json")
+    assert_finding_array(expected_lint, "{date}/lint.json")
+    actual_lint :: lint_snapshot_dir(fixture)
+    assert_finding_array(actual_lint, "{date}/lint")
+    assert(semantic_equal(actual_lint, expected_lint), "{date}/lint.json: lint finding array mismatch")
+}
+
+#Test("Tower parity 2026-08-26") {
+    check_snapshot("2026-08-26", 0)
+}
+
+#Test("Tower parity 2026-08-27") {
+    check_snapshot("2026-08-27", 1)
+}
+
+#Test("Tower parity 2026-08-28") {
+    check_snapshot("2026-08-28", 2)
+}
+
+fn run() {
+    args :: process.argv()
+    snapshot_dir :: args.get(1) ?? "dogfood/tower/tests/parity/fixtures/2026-08-28"
+    port :: args.get(2) ?? "8090"
+    serve(snapshot_dir, port)
+}

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f1eadc">
+  <title>Jet Tower Shadow</title>
+  <link rel="stylesheet" href="board.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
+  <div class="site-frame">
+    <header class="masthead" aria-labelledby="page-title">
+      <div class="signal-ribbon" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <div class="masthead__identity">
+        <p class="eyebrow">JET / OPERATIONS MIRROR</p>
+        <h1 id="page-title">JET TOWER SHADOW — read-only snapshot</h1>
+        <p class="load-state" id="load-state" role="status" aria-live="polite">Loading snapshot…</p>
+      </div>
+      <div class="masthead__tools">
+        <div class="read-only-mark"><span aria-hidden="true">●</span> GET surface</div>
+        <button class="button button--quiet" id="refresh-button" type="button">Refresh snapshot</button>
+      </div>
+    </header>
+
+    <nav class="view-tabs" id="view-tabs" aria-label="Shadow views" role="tablist">
+      <button class="view-tab is-active" id="tab-board" type="button" role="tab" aria-selected="true" aria-controls="panel-board" tabindex="0" data-view="board">
+        <span class="view-tab__key" aria-hidden="true">1</span><span>Board</span>
+      </button>
+      <button class="view-tab" id="tab-focus" type="button" role="tab" aria-selected="false" aria-controls="panel-focus" tabindex="-1" data-view="focus">
+        <span class="view-tab__key" aria-hidden="true">2</span><span>Focus</span>
+      </button>
+      <button class="view-tab" id="tab-papercuts" type="button" role="tab" aria-selected="false" aria-controls="panel-papercuts" tabindex="-1" data-view="papercuts">
+        <span class="view-tab__key" aria-hidden="true">3</span><span>Papercuts</span>
+      </button>
+      <button class="view-tab" id="tab-status" type="button" role="tab" aria-selected="false" aria-controls="panel-status" tabindex="-1" data-view="status">
+        <span class="view-tab__key" aria-hidden="true">4</span><span>Status</span>
+      </button>
+    </nav>
+
+    <aside class="read-only-note" aria-label="Read-only explanation">
+      <span class="read-only-note__label">READ-ONLY SURFACE</span>
+      <span>Snapshot data only. Navigation and refresh use GET requests; no board changes are available here.</span>
+    </aside>
+
+    <main id="main-content" class="main-content" tabindex="-1">
+      <section class="view-panel" id="panel-board" role="tabpanel" aria-labelledby="tab-board">
+        <div class="view-heading">
+          <div>
+            <p class="section-kicker">01 / MAP</p>
+            <h2>Board</h2>
+            <p class="view-heading__lede">Snapshot counts, milestone signal, radar, and work arranged by the lane projection.</p>
+          </div>
+          <div class="view-heading__actions">
+            <button class="button button--outline" id="closed-toggle" type="button" aria-pressed="false">Show closed</button>
+          </div>
+        </div>
+        <div class="board-toolbar" id="board-toolbar" aria-label="Client-side card view controls">
+          <div class="board-toolbar__row">
+            <label class="board-control board-control--search" for="board-filter-text">
+              <span>Find cards</span>
+              <input id="board-filter-text" type="search" autocomplete="off" placeholder="Title, #, tag, or text">
+            </label>
+            <label class="board-control" for="board-filter-lane">
+              <span>Lane</span>
+              <select id="board-filter-lane">
+                <option value="all">All lanes</option>
+              </select>
+            </label>
+            <label class="board-control" for="board-filter-priority">
+              <span>Priority</span>
+              <select id="board-filter-priority">
+                <option value="all">All priorities</option>
+              </select>
+            </label>
+            <label class="board-control" for="board-filter-track">
+              <span>Track</span>
+              <select id="board-filter-track">
+                <option value="all">All tracks</option>
+              </select>
+            </label>
+            <label class="board-control" for="board-sort">
+              <span>Sort cards</span>
+              <select id="board-sort">
+                <option value="projection">Lane projection</option>
+                <option value="priority">Priority</option>
+                <option value="updated">Recently updated</option>
+                <option value="title">Title</option>
+                <option value="number">Card number</option>
+              </select>
+            </label>
+            <button class="button button--quiet board-sort-direction" id="board-sort-direction" type="button" aria-label="Reverse card sort" data-direction="asc">Ascending</button>
+          </div>
+          <p class="board-toolbar__status" id="board-filter-status" role="status" aria-live="polite">All projected cards</p>
+        </div>
+        <div class="panel-content" id="board-content" aria-live="polite"></div>
+      </section>
+
+      <section class="view-panel" id="panel-focus" role="tabpanel" aria-labelledby="tab-focus" hidden>
+        <div class="view-heading">
+          <div>
+            <p class="section-kicker">02 / INSPECT</p>
+            <h2>Focus</h2>
+            <p class="view-heading__lede">Read one returned card, its owning decisions, evidence, messages, and complete record.</p>
+          </div>
+        </div>
+        <div class="panel-content" id="focus-content" aria-live="polite"></div>
+      </section>
+
+      <section class="view-panel" id="panel-papercuts" role="tabpanel" aria-labelledby="tab-papercuts" hidden>
+        <div class="view-heading">
+          <div>
+            <p class="section-kicker">03 / FRICTION</p>
+            <h2>Papercuts</h2>
+            <p class="view-heading__lede">Append-only tooling friction, newest report first.</p>
+          </div>
+          <div class="view-heading__actions">
+            <button class="button button--outline" id="papercut-filter" type="button" aria-pressed="false">Show all</button>
+          </div>
+        </div>
+        <div class="panel-content" id="papercut-content" aria-live="polite"></div>
+      </section>
+
+      <section class="view-panel" id="panel-status" role="tabpanel" aria-labelledby="tab-status" hidden>
+        <div class="view-heading">
+          <div>
+            <p class="section-kicker">04 / INSTRUMENTS</p>
+            <h2>Status</h2>
+            <p class="view-heading__lede">Phase counts, projected lanes, lint, and immutable snapshot identity.</p>
+          </div>
+        </div>
+        <div class="panel-content" id="status-content" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p><span class="site-footer__mark">SHADOW / GET ONLY</span><span id="source-stamp">Waiting for snapshot</span></p>
+      <p>Keyboard: <kbd>←</kbd>/<kbd>→</kbd> tabs · <kbd>1</kbd>–<kbd>4</kbd> views · <kbd>Esc</kbd> closes focus</p>
+    </footer>
+  </div>
+
+  <dialog class="focus-dialog" id="focus-dialog" aria-modal="true" aria-label="Read-only card focus">
+    <div class="focus-dialog__inner" id="focus-dialog-content"></div>
+  </dialog>
+
+  <noscript>
+    <div class="no-script" role="alert">This read-only snapshot needs JavaScript enabled to load its GET data.</div>
+  </noscript>
+
+  <script src="board.js" defer></script>
+</body>
+</html>

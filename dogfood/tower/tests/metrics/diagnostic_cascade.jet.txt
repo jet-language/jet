@@ -1,0 +1,57 @@
+// One intentional defect: claim_card has one missing ')'; weekly canary runs `cp dogfood/tower/tests/metrics/diagnostic_cascade.jet.txt "$JET_DISK_CACHE/diagnostic_cascade.jet" && jet check "$JET_DISK_CACHE/diagnostic_cascade.jet"`.
+
+enum Phase {
+    Ready
+    Claimed
+    Verify
+    Done
+}
+
+struct Agent {
+    id: String
+    name: String
+    lane: String
+}
+
+struct Card {
+    id: String
+    title: String
+    phase: Phase
+    owner: ?Agent
+    criteria: [String]
+}
+
+fn is_open(card: Card) Bool -> {
+    return card.phase != Phase.Done
+}
+
+fn claim_card(card: Card, agent: Agent Card -> {
+    return Card {
+        id: card.id
+        title: card.title
+        phase: Phase.Claimed
+        owner: card.owner
+        criteria: card.criteria
+    }
+}
+
+fn has_ready(cards: [Card]) Bool -> {
+    loop card in cards {
+        if card.phase == Phase.Ready {
+            return true
+        }
+    }
+    return false
+}
+
+fn event_text(card: Card, actor: Agent) String -> {
+    return "{actor.name} claimed {card.id}"
+}
+
+fn queue_title(cards: [Card]) String -> {
+    return "tower queue"
+}
+
+fn lane_name(agent: Agent) String -> {
+    return agent.lane
+}
