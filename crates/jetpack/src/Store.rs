@@ -126,11 +126,12 @@ static ENTRY_LIST_CACHE: std::sync::LazyLock<
 > = std::sync::LazyLock::new(Default::default);
 
 fn list_unlocked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
+    // One command asks for the entry list once per package (28 packages in the
+    // repo's own env). `list_checked` walks and verifies every entry, so
+    // without this memo a 100 percent cache hit paid ~250ms per package. The
+    // key is the WAL state stamp: any journal commit invalidates it, so a
+    // concurrent writer's change is never served from cache.
     let stamp = Closure::wal_state_stamp(roots)?;
-    let probe_disable = true;
-    if probe_disable {
-        return jet_pkg_model::Store::list_checked(roots);
-    }
     if let Ok(cache) = ENTRY_LIST_CACHE.lock() {
         if let Some((cached_stamp, entries)) = cache.get(&roots.root) {
             if *cached_stamp == stamp {

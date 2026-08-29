@@ -526,6 +526,11 @@ pub(super) fn compose_env_scoped_with_stats(
     let live_tty = live_mode && theme.live_enabled();
     let mut live = theme.live_region();
     let mut completed_steps = 0usize;
+    let phase_timing = std::env::var_os("JETPACK_TIMING").is_some();
+    let compose_started = std::time::Instant::now();
+    if phase_timing {
+        eprintln!("TIMING compose-preamble: {:?}", compose_started.elapsed());
+    }
     for spec in plan.refs.iter() {
         if live_tty {
             live.set_aggregate_status(
@@ -540,7 +545,8 @@ pub(super) fn compose_env_scoped_with_stats(
             RowStyle::Ready
         };
         let live_arg = live_tty.then_some(&mut live);
-        match realize_ref_outcome(
+        let step_started = std::time::Instant::now();
+        let step_outcome = realize_ref_outcome(
             theme,
             roots,
             flags,
@@ -550,7 +556,15 @@ pub(super) fn compose_env_scoped_with_stats(
             style,
             live_arg,
             scope,
-        ) {
+        );
+        if phase_timing {
+            eprintln!(
+                "TIMING step {}: {:?}",
+                spec.package,
+                step_started.elapsed()
+            );
+        }
+        match step_outcome {
             RefOutcome::Realized(entry, state, line, lease) => {
                 if live_mode {
                     live.finish(&line);

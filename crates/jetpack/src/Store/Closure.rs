@@ -1229,8 +1229,29 @@ pub fn closure_graph_structure(roots: &Roots) -> std::io::Result<ClosureGraph> {
     })
 }
 
+static GRAPH_CACHE: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, (String, ClosureGraph)>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// One command rebuilt this graph once per package (28 times for the repo's own
+/// env), and the first build dominates a warm entry. The migration + graph read
+/// is a pure function of committed journal state, so memoize it on the WAL
+/// state stamp: any commit changes the stamp and invalidates the entry, so a
+/// concurrent writer is never served a stale graph.
 pub(super) fn closure_graph_structure_unlocked(roots: &Roots) -> std::io::Result<ClosureGraph> {
-    migrate_closure_graph_unlocked(roots).map(|(_, graph)| graph)
+    let stamp = wal_state_stamp(roots)?;
+    if let Ok(cache) = GRAPH_CACHE.lock() {
+        if let Some((cached_stamp, graph)) = cache.get(&roots.root) {
+            if *cached_stamp == stamp {
+                return Ok(graph.clone());
+            }
+        }
+    }
+    let graph = migrate_closure_graph_unlocked(roots).map(|(_, graph)| graph)?;
+    if let Ok(mut cache) = GRAPH_CACHE.lock() {
+        cache.insert(roots.root.clone(), (stamp, graph.clone()));
+    }
+    Ok(graph)
 }
 
 pub(super) fn lifecycle_closure_graph_unlocked(roots: &Roots) -> std::io::Result<ClosureGraph> {

@@ -1616,6 +1616,16 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
             roots.root.display()
         )));
     }
+    // JETPACK_TIMING=1 prints one line per entry phase. Warm entry must be
+    // dominated by nothing: a 100 percent cache hit has no work to do beyond
+    // reading the stamp and projecting the closure.
+    let timing = std::env::var_os("JETPACK_TIMING").is_some();
+    let mark = |label: &str| {
+        if timing {
+            eprintln!("TIMING {label}: {:?}", ready_started.elapsed());
+        }
+    };
+    mark("roots");
 
     let mut flags = parsed.flags.clone();
 
@@ -1647,6 +1657,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
             environment: ModuleEval::EnvironmentFacts::default(),
         }
     };
+    mark("plan-loaded");
 
     // U16: ad-hoc `-p` packages become ordinary Jetpack `RefSpec`s, folded
     // into the same plan as any manifest-declared package — same realize
@@ -1682,9 +1693,11 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     ) {
         return code;
     }
+    mark("trust-gate");
     if let Err(code) = configure_project_catalog(theme, &roots, &project_dir, &plan, &mut flags) {
         return code;
     }
+    mark("catalog-configured");
 
     if let Err(code) = validate_declared_secrets(
         theme,
@@ -1694,6 +1707,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     ) {
         return code;
     }
+    mark("secrets-validated");
 
     let (env, ready_stats) = match compose_env_scoped_with_stats(
         theme,
@@ -1706,6 +1720,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(result) => result,
         Err(code) => return code,
     };
+    mark("env-composed");
     if flags.prep {
         auto_clean_after_success(theme, &roots);
         return 0;
@@ -1723,6 +1738,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     ) {
         return code;
     }
+    mark("lifecycle-hooks");
 
     if let Err(error) = announce_env_ready(
         theme,
@@ -1732,6 +1748,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     ) {
         theme.detail(&format!("couldn't record env entry: {error}"));
     }
+    mark("announced");
 
     let code = match &parsed.command {
         Some(cmd) if !cmd.is_empty() => Shell::run_command(&env, cmd),

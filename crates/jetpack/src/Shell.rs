@@ -334,8 +334,26 @@ fn nix_projection_command(
         "{} /nix/store none bind,ro,x-mount.mkdir 0 0\n",
         fstab_field(&empty_store.to_string_lossy())
     ));
+    // Bind-mounted logicals are verified inside the namespace; symlink roots
+    // are created directly in the projected store and have no mount to check.
+    let mut bound_logicals = Vec::<String>::new();
     for (logical, source) in &projections {
         validate_projection_path(logical)?;
+        let name = logical
+            .strip_prefix("/nix/store/")
+            .expect("validated projection path");
+        let mountpoint = empty_store.join(name);
+        // A Nix symlink root (gcc-wrapper-info, man-page indirections) names
+        // another store path. Following it here is wrong twice over: the
+        // target may not exist on this host at all, and the projection must
+        // preserve the link itself so it resolves against the projected
+        // closure inside the namespace. Recreate the link verbatim.
+        let link_metadata = std::fs::symlink_metadata(source)?;
+        if link_metadata.file_type().is_symlink() {
+            let target = std::fs::read_link(source)?;
+            std::os::unix::fs::symlink(&target, &mountpoint)?;
+            continue;
+        }
         let source = std::fs::canonicalize(source)?;
         if source.starts_with("/nix/store") {
             return Err(NixProjectionError::invalid(format!(
@@ -350,10 +368,6 @@ fn nix_projection_command(
                 source.display()
             )));
         }
-        let name = logical
-            .strip_prefix("/nix/store/")
-            .expect("validated projection path");
-        let mountpoint = empty_store.join(name);
         if metadata.is_dir() {
             std::fs::create_dir(mountpoint)?;
         } else {
@@ -365,6 +379,7 @@ fn nix_projection_command(
             fstab_field(&source.to_string_lossy()),
             fstab_field(logical)
         ));
+        bound_logicals.push(logical.clone());
     }
 
     let fstab_path = unique_tmp("jetpack-nix-fstab");
@@ -432,8 +447,8 @@ fi
         .args(["-c", script, "jetpack-nix-run"])
         .arg(mount)
         .arg(&fstab_path)
-        .arg(projections.len().to_string());
-    for logical in projections.keys() {
+        .arg(bound_logicals.len().to_string());
+    for logical in &bound_logicals {
         command.arg(logical);
     }
     command
