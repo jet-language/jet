@@ -536,9 +536,7 @@ fn as_ct_float(v: &CtValue, span: Span) -> Result<CtFloat, Diagnostic> {
         CtValue::Struct { type_name, .. } if type_name == crate::Syntax::TYPE_FRACTION => {
             let fraction = crate::Numeric::CtFraction::from_value(v)
                 .map_err(|_| unsupported("malformed Fraction", span))?;
-            Ok(CtFloat::F64(
-                fraction.numerator as f64 / fraction.denominator as f64,
-            ))
+            Ok(CtFloat::F64(fraction.to_float()))
         }
         CtValue::Struct { type_name, .. } if type_name == crate::Syntax::TYPE_DECIMAL => {
             let decimal = crate::Numeric::CtDecimal::from_value(v)

@@ -140,23 +140,28 @@ fn jet_wasm_fraction_from_parts(
     numerator: JetWasmInt,
     denominator: JetWasmInt,
 ) -> JetWasmFraction {
-    JetWasmFraction::new(numerator, denominator).expect("invalid exact quotient")
+    JetWasmFraction::new(numerator, denominator)
+        .unwrap_or_else(|| jet_panic("", 0, "", "", "invalid exact quotient"))
 }
 
 fn jet_wasm_fraction_add(a: &JetWasmFraction, b: &JetWasmFraction) -> JetWasmFraction {
-    a.add(b).expect("exact ratio overflow")
+    a.add(b)
+        .unwrap_or_else(|| jet_panic("", 0, "", "", "exact ratio overflow"))
 }
 
 fn jet_wasm_fraction_sub(a: &JetWasmFraction, b: &JetWasmFraction) -> JetWasmFraction {
-    a.sub(b).expect("exact ratio overflow")
+    a.sub(b)
+        .unwrap_or_else(|| jet_panic("", 0, "", "", "exact ratio overflow"))
 }
 
 fn jet_wasm_fraction_mul(a: &JetWasmFraction, b: &JetWasmFraction) -> JetWasmFraction {
-    a.mul(b).expect("exact ratio overflow")
+    a.mul(b)
+        .unwrap_or_else(|| jet_panic("", 0, "", "", "exact ratio overflow"))
 }
 
 fn jet_wasm_fraction_div(a: &JetWasmFraction, b: &JetWasmFraction) -> JetWasmFraction {
-    a.div(b).expect("divided by zero")
+    a.div(b)
+        .unwrap_or_else(|| jet_panic("", 0, "", "", "divided by zero"))
 }
 
 fn jet_wasm_fraction_equal(a: &JetWasmFraction, b: &JetWasmFraction) -> bool {
@@ -192,45 +197,11 @@ struct JetWasmDecimal {
 
 impl JetWasmDecimal {
     fn from_str(s: &str) -> Result<Self, String> {
-        let text = s.trim();
-        if text.is_empty() {
-            return Err("empty Decimal string".to_string());
-        }
-        let (negative, body) = if let Some(rest) = text.strip_prefix('-') {
-            (true, rest)
-        } else if let Some(rest) = text.strip_prefix('+') {
-            (false, rest)
-        } else {
-            (false, text)
-        };
-        let parts: Vec<&str> = body.split('.').collect();
-        if parts.len() > 2 {
-            return Err(format!("invalid Decimal string `{s}`"));
-        }
-        let int_part = parts[0];
-        let frac_part = parts.get(1).copied().unwrap_or("");
-        if int_part.is_empty() && frac_part.is_empty()
-            || !int_part.chars().all(|c| c.is_ascii_digit())
-            || !frac_part.chars().all(|c| c.is_ascii_digit())
-        {
-            return Err(format!("invalid Decimal string `{s}`"));
-        }
-
-        let mut digits: Vec<u8> = int_part
-            .chars()
-            .chain(frac_part.chars())
-            .map(|c| c as u8 - b'0')
-            .collect();
-        while digits.len() > 1 && digits.first() == Some(&0) {
-            digits.remove(0);
-        }
-        if digits.is_empty() {
-            digits.push(0);
-        }
+        let (negative, digits, scale) = json_decimal_lexeme(s)?;
         Ok(Self {
             negative,
             digits,
-            scale: frac_part.len() as u32,
+            scale,
         }
         .normalize())
     }
@@ -361,7 +332,8 @@ impl std::fmt::Display for JetWasmDecimal {
 }
 
 fn jet_wasm_decimal_from_str(s: &String) -> JetWasmDecimal {
-    JetWasmDecimal::from_str(s).expect("invalid Decimal string")
+    JetWasmDecimal::from_str(s)
+        .unwrap_or_else(|_| jet_panic("", 0, "", "", "invalid Decimal string"))
 }
 
 fn jet_wasm_decimal_add(a: &JetWasmDecimal, b: &JetWasmDecimal) -> JetWasmDecimal {

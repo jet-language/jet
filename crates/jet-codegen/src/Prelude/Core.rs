@@ -58,12 +58,6 @@ impl JetShow for JetPeriod {
     }
 }
 
-impl JetShow for JetInstant {
-    fn jet_show(&self) -> String {
-        self.to_string_fmt()
-    }
-}
-
 impl JetShow for JetDateTime {
     fn jet_show(&self) -> String {
         self.to_string_fmt()
@@ -113,18 +107,6 @@ impl JetDisplay for JetPeriod {
 }
 
 impl JetDebug for JetPeriod {
-    fn jet_debug(&self) -> String {
-        self.to_string_fmt()
-    }
-}
-
-impl JetDisplay for JetInstant {
-    fn jet_display(&self) -> String {
-        self.to_string_fmt()
-    }
-}
-
-impl JetDebug for JetInstant {
     fn jet_debug(&self) -> String {
         self.to_string_fmt()
     }
@@ -641,7 +623,6 @@ fn jet_std_os_run_atexit() {
 fn jet_runtime_report_parked_tasks() -> Option<i32> {
     let report = jet_observe_parked_tasks_report()?;
     eprint!("{}", report.rendered);
-    jet_scheduler_drain_after_exit();
     Some(report.exit_code)
 }
 
@@ -2005,17 +1986,13 @@ where
     xs.into_iter().fold(init, |acc, x| f(&acc, &x))
 }
 // Float has no Rust `Ord` implementation because NaN makes `partial_cmp`
-// return `None`. Jet's sort surface is total: NaN follows every non-NaN
-// value, and NaN compares equal to NaN. Keep that policy in the shared
-// Prelude so AOT, JIT and interpreter adapters use one ordering.
+// return `None`. The shared FloatOrdering Prelude part supplies Jet's total
+// sort comparator; this wrapper only converts it to the generated enum.
 fn jet_float_ordering(left: f64, right: f64) -> __jet_Ordering {
-    match left.partial_cmp(&right) {
-        Some(std::cmp::Ordering::Less) => __jet_Ordering::__jet_Less,
-        Some(std::cmp::Ordering::Equal) => __jet_Ordering::__jet_Equal,
-        Some(std::cmp::Ordering::Greater) => __jet_Ordering::__jet_Greater,
-        None if left.is_nan() && right.is_nan() => __jet_Ordering::__jet_Equal,
-        None if left.is_nan() => __jet_Ordering::__jet_Greater,
-        None => __jet_Ordering::__jet_Less,
+    match jet_float_sort_cmp(left, right) {
+        std::cmp::Ordering::Less => __jet_Ordering::__jet_Less,
+        std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal,
+        std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater,
     }
 }
 

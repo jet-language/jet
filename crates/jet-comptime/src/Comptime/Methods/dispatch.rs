@@ -15,7 +15,7 @@ use crate::AST::{AccessConvention, CallArg, CtFloat, Expr, Func, LambdaBody, Str
 use jet_foundation::Effects::{core_requires_comptime_gate, is_nondeterministic_core};
 
 use super::super::Builtins::{
-    apply_method, apply_mutating, apply_static_type_method, as_bool, as_int, cmp,
+    apply_method, apply_mutating, apply_static_type_method, as_bool, as_int, cmp_for_sort,
 };
 use super::super::Diagnostics::{comptime_panic, unsupported};
 use super::super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
@@ -48,7 +48,7 @@ fn seeded_rng_float(state: &mut u64) -> f64 {
 
 fn sorted_unique(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     let mut sort_error = None;
-    items.sort_by(|left, right| match cmp(left.clone(), right.clone(), span) {
+    items.sort_by(|left, right| match cmp_for_sort(left.clone(), right.clone(), span) {
         Ok(order) => order,
         Err(error) => {
             sort_error.get_or_insert(error);
@@ -130,7 +130,7 @@ pub fn vault_comptime_denied(module: &str, method: &str, span: Span) -> Diagnost
 
 fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     let mut sort_error = None;
-    items.sort_by(|left, right| match cmp(right.clone(), left.clone(), span) {
+    items.sort_by(|left, right| match cmp_for_sort(right.clone(), left.clone(), span) {
         Ok(order) => order,
         Err(error) => {
             sort_error.get_or_insert(error);

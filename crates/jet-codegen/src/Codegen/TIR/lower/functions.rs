@@ -24,54 +24,6 @@ use crate::Syntax;
 use crate::AST::{AccessConvention, BinOp, ContractClause, Expr, Func, Param, Stmt, Type};
 use std::collections::HashMap;
 
-fn first_auto_vectorization(
-    stmts: &[TStmt],
-) -> Option<crate::AST::AutoVectorizationFacts> {
-    for stmt in stmts {
-        if let TStmt::Range {
-            auto_vectorization: Some(facts),
-            ..
-        } = stmt
-        {
-            return Some(facts.clone());
-        }
-        match stmt {
-            TStmt::ContractScope { body, .. }
-            | TStmt::TaskGroup { body, .. }
-            | TStmt::Loop { body, .. }
-            | TStmt::While { body, .. }
-            | TStmt::Range { body, .. }
-            | TStmt::ForIn { body, .. } => {
-                if let Some(facts) = first_auto_vectorization(body) {
-                    return Some(facts);
-                }
-            }
-            TStmt::CountedLoop { body, .. } => {
-                if let Some(facts) = first_auto_vectorization(body) {
-                    return Some(facts);
-                }
-            }
-            TStmt::If {
-                then_body,
-                else_body,
-                ..
-            } => {
-                if let Some(facts) = first_auto_vectorization(then_body) {
-                    return Some(facts);
-                }
-                if let Some(facts) = else_body
-                    .as_deref()
-                    .and_then(first_auto_vectorization)
-                {
-                    return Some(facts);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 /// D-COV1: 1-based line number of a byte offset in the source, for coverage probes.
 pub(crate) fn cov_line(cx: &Cx, offset: usize) -> usize {
     line_at_byte_offset(&cx.src, offset)
@@ -229,7 +181,6 @@ fn lower_error_conv_inner(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFu
         is_inline: false,
         is_inline_always: false,
         is_scalar: false,
-        auto_vectorization: None,
         kernel_proof: None,
         memo_field: None,
         body: lower_stmts(&conversion.body, cx, &mut env),
@@ -356,7 +307,6 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         Some(cx.expand_type_aliases(&return_type)),
         cx,
     );
-    let auto_vectorization = first_auto_vectorization(&body);
     TFunc {
         name: f.name.clone(),
         source_span: f.span,
@@ -382,7 +332,6 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
             .markers
             .iter()
             .any(|marker| marker.name == crate::Syntax::MARKER_SCALAR),
-        auto_vectorization,
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
         memo_field: None,
         body,
@@ -875,7 +824,6 @@ fn lower_method_for_owner_inner(
         Some(cx.expand_type_aliases(&return_type)),
         cx,
     );
-    let auto_vectorization = first_auto_vectorization(&body);
     let mut clone_types = env.cloned_types.borrow().clone();
     collect_signature_clone_types(&owner_ty, cx, &mut clone_types);
     for param in &f.params {
@@ -921,7 +869,6 @@ fn lower_method_for_owner_inner(
             .markers
             .iter()
             .any(|marker| marker.name == crate::Syntax::MARKER_SCALAR),
-        auto_vectorization,
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
         memo_field,
         body,
@@ -1139,7 +1086,6 @@ fn lower_trait_method_inner(
             .markers
             .iter()
             .any(|marker| marker.name == crate::Syntax::MARKER_SCALAR),
-        auto_vectorization: first_auto_vectorization(&body),
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
         memo_field: None,
         body,
@@ -1240,7 +1186,6 @@ fn lower_delegation_method_inner(f: &Func, field: &str, cx: &Cx) -> TFunc {
         is_inline: false,
         is_inline_always: false,
         is_scalar: false,
-        auto_vectorization: None,
         kernel_proof: None,
         memo_field: None,
         body: Vec::new(),

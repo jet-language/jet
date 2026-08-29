@@ -290,8 +290,9 @@ fn jet_observe_task_register_at_with_control_weak(
     id
 }
 
-/// Stable text for a task failure. The id makes the identity unique and the
-/// spawn-site label makes it actionable when several tasks share a body.
+/// Stable text for a task failure. The compiler-assigned spawn-site label is
+/// the user-visible identity; the registry id stays internal because helper
+/// tasks can consume ids in a tier-dependent order.
 pub fn jet_observe_task_identity(id: usize) -> String {
     let Some(registry) = jet_observe_registry() else {
         return format!("task #{id}");
@@ -299,7 +300,7 @@ pub fn jet_observe_task_identity(id: usize) -> String {
     let Some(task) = registry.tasks.lock().unwrap().get(&id).cloned() else {
         return format!("task #{id}");
     };
-    format!("task #{id} ({}, spawn site {})", task.label, task.spawn_site)
+    format!("{} (spawn site {})", task.label, task.spawn_site)
 }
 
 pub fn jet_observe_task_failure_message(id: usize, reason: String) -> String {
@@ -460,9 +461,9 @@ pub fn jet_observe_parked_tasks_report() -> Option<JetRuntimeDiagnostic> {
     }
 
     let mut details = String::new();
-    for (id, task) in parked {
+    for (_, task) in parked {
         details.push_str(&format!(
-            "\n  task #{id} ({}, spawn site {})\n    state: {}\n    wait target: {}",
+            "\n  {} (spawn site {})\n    state: {}\n    wait target: {}",
             task.label,
             task.spawn_site,
             task.state,

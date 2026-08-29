@@ -1626,21 +1626,6 @@ impl<'a> Fmt<'a> {
                 self.write("}");
             }
             Expr::TypedLit { head, body, span } => {
-                if let crate::AST::TypedLitBody::ByteText(parts) = body {
-                    // D-BYTELIT1=B: the parser keeps the byte value's source
-                    // span, so fmt can retain the ratified `b"…"` spelling
-                    // without adding a second AST literal mechanism.
-                    if self
-                        .src
-                        .as_bytes()
-                        .get(span.start..)
-                        .is_some_and(|tail| tail.starts_with(b"b\""))
-                    {
-                        self.write(crate::Syntax::BYTE_STRING_PREFIX);
-                        self.fmt_byte_text_parts(parts, true);
-                        return;
-                    }
-                }
                 // D-DOTCTOR3: print the head (when present) and the body shape.
                 if let Some(head) = head {
                     self.fmt_type(head);
@@ -1749,7 +1734,7 @@ impl<'a> Fmt<'a> {
                         }
                     }
                     crate::AST::TypedLitBody::ByteText(parts) => {
-                        self.fmt_byte_text_parts(parts, false);
+                        self.fmt_byte_text_parts(parts);
                     }
                 }
                 if multiline {
@@ -2415,41 +2400,20 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    /// D-BYTELIT1=B: retain byte escapes in the canonical byte-text source
-    /// form. Typed `[U8]{"..."}` bodies double literal braces for their
-    /// interpolation-aware scanner; `b"..."` bodies keep braces literal.
-    fn fmt_byte_text_parts(&mut self, parts: &[crate::AST::ByteTextPart], byte_literal: bool) {
+    /// D-BYTELIT1=B: retain byte escapes in the canonical `[U8]{"..."}`
+    /// source form. Ordinary ASCII text uses the normal string escape table;
+    /// explicit bytes never pass through Unicode text formatting.
+    fn fmt_byte_text_parts(&mut self, parts: &[crate::AST::ByteTextPart]) {
         self.write("\"");
         for part in parts {
             match part {
-                crate::AST::ByteTextPart::Lit(text) => {
-                    if byte_literal {
-                        self.write(&Self::escape_byte_text_lit(text));
-                    } else {
-                        self.write(&escape_str_lit(text));
-                    }
-                }
+                crate::AST::ByteTextPart::Lit(text) => self.write(&escape_str_lit(text)),
                 crate::AST::ByteTextPart::Byte(byte) => {
                     self.write(&format!("\\x{byte:02X}"));
                 }
             }
         }
         self.write("\"");
-    }
-
-    fn escape_byte_text_lit(text: &str) -> String {
-        let mut out = String::new();
-        for ch in text.chars() {
-            match ch {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\n' => out.push_str("\\n"),
-                '\t' => out.push_str("\\t"),
-                '\r' => out.push_str("\\r"),
-                ch => out.push(ch),
-            }
-        }
-        out
     }
 
     /// D-BINPAT1 / D-UNIFYLIT1=A: render a `BinMatchPart` list as `[U8]{"…"}`.

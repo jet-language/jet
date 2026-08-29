@@ -381,7 +381,18 @@ fn emit_named_fn_value_with_storage(cx: &Cx, name: &str, ft: &Type, send_sync: b
     } else {
         cx.rust_type(ft)
     };
-    if !middleware && ret.as_deref().is_some_and(|ret| cx.type_contains_view(ret)) {
+    // A Jet declaration with the default failure contract returns
+    // `JetOutcome<success, JetErr>` in AOT, while a `fn(...) T` callback
+    // carries only `T`. Explicit `?T`/`!E` returns already expose their
+    // outcome carrier in the function type and must remain direct.
+    let returns_outcome = matches!(
+        ret.as_deref(),
+        Some(Type::Option(_)) | Some(Type::Result { .. })
+    );
+    if !middleware
+        && returns_outcome
+        && ret.as_deref().is_some_and(|ret| cx.type_contains_view(ret))
+    {
         return format!("{wrap}({rust_name}) as {rust_type}");
     }
     let arg_decls: Vec<String> = params
@@ -410,12 +421,17 @@ fn emit_named_fn_value_with_storage(cx: &Cx, name: &str, ft: &Type, send_sync: b
             }
         })
         .collect();
-    let _ = ret;
+    let call = format!("{rust_name}({})", arg_calls.join(", "));
+    let body = if returns_outcome {
+        call
+    } else {
+        format!(
+            "match {call} {{ Ok(value) => value, Err(error) => jet_entry_error_exit_jet(error) }}"
+        )
+    };
     format!(
-        "{wrap}(move |{}| {}({})) as {rust_type}",
+        "{wrap}(move |{}| {body}) as {rust_type}",
         arg_decls.join(", "),
-        rust_name,
-        arg_calls.join(", "),
     )
 }
 

@@ -838,7 +838,7 @@ impl<'a> Resolver<'a> {
                 if !git_available() {
                     return Err(vec![Lock::e1203()]);
                 }
-                if let Err(reason) = validate_git_transport_url(url) {
+                if let Err(reason) = validate_git_transport_url(url, self.project_root) {
                     return Err(vec![git_transport_diagnostic(url, &reason)]);
                 }
 
@@ -848,7 +848,7 @@ impl<'a> Resolver<'a> {
 
                 // Clone/fetch if not already cached.
                 if !is_real_directory(&clone_dir) {
-                    git_clone(url, &rev_to_fetch, &clone_dir)?;
+                    git_clone(url, &rev_to_fetch, &clone_dir, self.project_root)?;
                 }
 
                 // Load the dep's manifest from the cloned dir.
@@ -1433,7 +1433,7 @@ impl<'a> Resolver<'a> {
                     }
                 }
                 // Resolve the tag to a specific commit via ls-remote.
-                git_resolve_ref(url, t).map_err(|d| vec![d])
+                git_resolve_ref(url, t, self.project_root).map_err(|d| vec![d])
             }
             GitSelector::Branch(b) | GitSelector::Tag(b) => {
                 // Moving selector: always re-resolve if updating.
@@ -1446,7 +1446,7 @@ impl<'a> Resolver<'a> {
                             });
                     }
                 }
-                git_resolve_ref(url, b).map_err(|d| vec![d])
+                git_resolve_ref(url, b, self.project_root).map_err(|d| vec![d])
             }
         }
     }
@@ -2404,14 +2404,14 @@ fn git_cache_dir(url: &str, rev: &str) -> Result<PathBuf, Diagnostic> {
     Ok(path)
 }
 
-fn git_resolve_ref(url: &str, refname: &str) -> Result<String, Diagnostic> {
-    if let Err(reason) = validate_git_transport_url(url) {
+fn git_resolve_ref(url: &str, refname: &str, project_root: &Path) -> Result<String, Diagnostic> {
+    if let Err(reason) = validate_git_transport_url(url, project_root) {
         return Err(git_transport_diagnostic(url, &reason));
     }
     if let Err(reason) = validate_git_revision(refname) {
         return Err(git_revision_diagnostic(refname, &reason));
     }
-    let out = Command::new("git")
+    let out = hardened_git_command()
         .args(["ls-remote", "--exit-code", "--", url, refname])
         .output()
         .map_err(|_| Lock::e1203())?;
@@ -2444,8 +2444,13 @@ fn git_resolve_ref(url: &str, refname: &str) -> Result<String, Diagnostic> {
     Ok(rev)
 }
 
-fn git_clone(url: &str, rev: &str, dest: &Path) -> Result<(), Vec<Diagnostic>> {
-    if let Err(reason) = validate_git_transport_url(url) {
+fn git_clone(
+    url: &str,
+    rev: &str,
+    dest: &Path,
+    project_root: &Path,
+) -> Result<(), Vec<Diagnostic>> {
+    if let Err(reason) = validate_git_transport_url(url, project_root) {
         return Err(vec![git_transport_diagnostic(url, &reason)]);
     }
     if let Err(reason) = validate_git_revision(rev) {
@@ -2486,7 +2491,7 @@ fn git_clone(url: &str, rev: &str, dest: &Path) -> Result<(), Vec<Diagnostic>> {
         }
     }
 
-    let clone_ok = Command::new("git")
+    let clone_ok = hardened_git_command()
         .args(["clone", "--quiet", "--", url, tmp.to_str().unwrap_or(".")])
         .status()
         .map(|s| s.success())
@@ -2502,7 +2507,7 @@ fn git_clone(url: &str, rev: &str, dest: &Path) -> Result<(), Vec<Diagnostic>> {
         )]);
     }
 
-    let checkout_ok = Command::new("git")
+    let checkout_ok = hardened_git_command()
         .args([
             "-C",
             tmp.to_str().unwrap_or("."),
@@ -2659,27 +2664,79 @@ fn is_real_directory(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn validate_git_transport_url(url: &str) -> Result<(), String> {
+fn hardened_git_command() -> Command {
+    let mut command = Command::new("git");
+    command
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", git_null_device())
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", git_null_device())
+        .env("GIT_SSH_COMMAND", hardened_ssh_command())
+        // Command-line config wins over a repository-local credential helper.
+        .args([
+            "-c",
+            "credential.helper=",
+            "-c",
+            "protocol.ext.allow=never",
+            "-c",
+            "protocol.file.allow=always",
+        ]);
+    command
+}
+
+fn git_null_device() -> &'static str {
+    if cfg!(windows) {
+        "NUL"
+    } else {
+        "/dev/null"
+    }
+}
+
+fn hardened_ssh_command() -> &'static str {
+    if cfg!(windows) {
+        "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F NUL"
+    } else {
+        "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F /dev/null"
+    }
+}
+
+fn validate_git_transport_url(url: &str, project_root: &Path) -> Result<(), String> {
     if url.is_empty() || url.chars().any(char::is_control) || url.starts_with('-') {
         return Err("the URL is empty or contains unsafe characters".to_string());
     }
     if let Some(path) = url.strip_prefix("file://") {
-        if path.is_empty() || path.contains(['?', '#']) || !path.starts_with('/') {
+        if path.is_empty()
+            || path.contains(['?', '#', '\\'])
+            || !path.starts_with('/')
+        {
             return Err("file URLs must name a local absolute path".to_string());
         }
-        return Ok(());
+        return validate_local_git_path(Path::new(path), project_root);
     }
     if !url.contains("://") && !looks_like_scp_url(url) {
-        return Ok(());
+        return Err("local git paths must use file:// inside the project root".to_string());
     }
     let (scheme, authority) = if let Some((scheme, rest)) = url.split_once("://") {
         let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
         (scheme.to_ascii_lowercase(), authority)
     } else {
-        ("ssh".to_string(), url.split_once(':').map(|(host, _)| host).unwrap_or(""))
+        (
+            "ssh".to_string(),
+            url.split_once(':').map(|(host, _)| host).unwrap_or(""),
+        )
     };
     if !matches!(scheme.as_str(), "git" | "http" | "https" | "ssh") {
         return Err(format!("the `{scheme}` transport is not allowed"));
+    }
+    if let Some((user, _)) = authority.rsplit_once('@') {
+        if scheme != "ssh"
+            || user.is_empty()
+            || user.contains('@')
+            || user.contains(':')
+            || user.chars().any(char::is_whitespace)
+        {
+            return Err("embedded credentials are not allowed in Git URLs".to_string());
+        }
     }
     let host = host_from_git_authority(authority)?;
     let port = if let Some(port) = port_from_git_authority(authority)? {
@@ -2702,6 +2759,36 @@ fn validate_git_transport_url(url: &str) -> Result<(), String> {
         .collect::<Vec<_>>();
     if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(address.ip())) {
         return Err("the destination resolves to a non-public address".to_string());
+    }
+    Ok(())
+}
+
+fn validate_local_git_path(path: &Path, project_root: &Path) -> Result<(), String> {
+    let root = std::fs::canonicalize(project_root)
+        .map_err(|error| format!("could not resolve the project root: {error}"))?;
+    let candidate = std::fs::canonicalize(path)
+        .map_err(|error| format!("could not resolve the local Git path: {error}"))?;
+    if !candidate.starts_with(&root) {
+        return Err("the local Git path resolves outside the project root".to_string());
+    }
+    reject_git_path_symlinks(path)?;
+    if !is_real_directory(&candidate) {
+        return Err("the local Git path must be a real directory".to_string());
+    }
+    Ok(())
+}
+
+fn reject_git_path_symlinks(path: &Path) -> Result<(), String> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        let metadata = std::fs::symlink_metadata(&current).map_err(|error| error.to_string())?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "the local Git path contains a symlink component `{}`",
+                current.display()
+            ));
+        }
     }
     Ok(())
 }

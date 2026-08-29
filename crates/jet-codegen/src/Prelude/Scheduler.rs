@@ -624,6 +624,12 @@ impl JetTaskControl {
     }
 }
 
+impl JetObserveControl for JetTaskControl {
+    fn cancel(&self) {
+        JetTaskControl::cancel(self);
+    }
+}
+
 thread_local! {
     static TASK_CONTROL: std::cell::RefCell<Option<Arc<JetTaskControl>>> =
         const { std::cell::RefCell::new(None) };
@@ -2751,6 +2757,7 @@ fn worker_count() -> usize {
 }
 
 fn scheduler() -> Arc<Scheduler> {
+    jet_observe_register_exit_drain(jet_scheduler_drain_after_exit);
     SCHEDULER
         .get_or_init(|| {
             let n = worker_count();

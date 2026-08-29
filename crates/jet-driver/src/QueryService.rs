@@ -634,6 +634,8 @@ fn edit_bytes(old: Option<&str>, new: &str) -> usize {
 mod tests {
     use super::*;
 
+    const COMPILER_SPEED_PLAN: &str = include_str!("../../../docs/plans/compiler-speed.md");
+
     fn checked_key(path: impl AsRef<Path>) -> QueryKey {
         QueryKey::for_file(
             "checked.lsp",
@@ -717,6 +719,15 @@ mod tests {
 
     #[test]
     fn batch_disk_interface_change_keeps_unrelated_module_warm() {
+        for requirement in [
+            "Promote the jet-queries demand cache onto the batch compile path: per-module",
+            "Hand-rolled (I6) bounded staged-source lex/parse fan-out",
+        ] {
+            assert!(
+                COMPILER_SPEED_PLAN.contains(requirement),
+                "batch frontend proof is no longer backed by docs/plans/compiler-speed.md: missing {requirement:?}"
+            );
+        }
         let root =
             std::env::temp_dir().join(format!("jet-query-batch-interface-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -865,22 +876,20 @@ mod tests {
     #[test]
     fn local_body_edit_rechecks_only_changed_item() {
         let mut service = CompilerQueries::new();
-        let before = "fn alpha() Int -> { return 1 }\nfn beta() Int -> { return 2 }\n";
-        let after = "fn alpha() Int -> { return 1 }\nfn beta() Int -> { return 3 }\n";
+        let before = "fn _alpha() Int -> { return 1 }\nfn _beta() Int -> { return 2 }\n";
+        let after = "fn _alpha() Int -> { return 1 }\nfn _beta() Int -> { return 3 }\n";
+        let path = std::env::temp_dir()
+            .join(format!("jet-query-items-{}.jet", std::process::id()));
+        let path = path.to_string_lossy().into_owned();
 
-        assert!(service
-            .check_text("items.jet", before, true)
-            .diagnostics
-            .is_empty());
+        let initial = service.check_text(&path, before, true);
+        assert!(initial.diagnostics.is_empty(), "{:?}", initial.diagnostics);
         let cold = service.stats();
         assert_eq!(cold.item_hits, 0);
         assert_eq!(cold.item_recomputes, 2);
         assert_eq!(cold.live_items, 2);
 
-        assert!(service
-            .check_text("items.jet", after, true)
-            .diagnostics
-            .is_empty());
+        assert!(service.check_text(&path, after, true).diagnostics.is_empty());
         let warm = service.stats();
         assert_eq!(warm.item_hits, 1, "unchanged alpha must reuse checked body");
         assert_eq!(warm.item_recomputes, 3, "only changed beta may recheck");

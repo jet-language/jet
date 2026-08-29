@@ -132,12 +132,12 @@ use core.http.client as http_client
 use core.net.ws as ws
 
 fn run() {
-    if http_client.get("http://127.0.0.1:1/path\r\nInjected: yes") == {
+    if http_client.get("http://127.0.0.1:1/path\nInjected: yes") == {
         .Ok(_) -> print("http accepted")
         .Err(_) -> print("http rejected")
         else -> print("http unexpected")
     }
-    if ws.connect("ws://127.0.0.1:1/path\r\nInjected: yes") == {
+    if ws.connect("ws://127.0.0.1:1/path\nInjected: yes") == {
         .Ok(_) -> print("ws accepted")
         .Err(_) -> print("ws rejected")
         else -> print("ws unexpected")

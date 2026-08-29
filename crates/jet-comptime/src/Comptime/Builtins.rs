@@ -16,7 +16,6 @@ mod duration_semantics {
 }
 
 mod time_semantics {
-    pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
     include!("../../../jet-codegen/src/Prelude/Core/Time.rs");
 }
 
@@ -31,6 +30,10 @@ mod string_bytes_semantics {
 }
 mod authority_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/Authority.rs");
+}
+
+mod float_ordering {
+    include!("../../../jet-codegen/src/Prelude/Core/FloatOrdering.rs");
 }
 
 use crate::AST::{BinOp, CtFloat, Type};
@@ -822,6 +825,15 @@ pub fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Dia
     }
 }
 
+/// Collection sorting has a total Float comparator even though ordinary Float
+/// relational operators retain IEEE partial-order behavior for NaN.
+pub fn cmp_for_sort(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
+    if let (CtValue::Float(left), CtValue::Float(right)) = (&a, &b) {
+        return Ok(float_ordering::jet_float_sort_cmp(left.as_f64(), right.as_f64()));
+    }
+    cmp(a, b, span)
+}
+
 /// c97/D-STRPARSE1: static method dispatch for built-in types (`Int.parse`,
 /// `Float.parse`). Returns `None` when the receiver is not a recognised
 /// built-in type name; the caller falls through to user-defined methods.
@@ -1214,11 +1226,15 @@ pub fn apply_mutating_with_type(
             Ok(CtValue::Unit)
         }
         (CtValue::List(xs), "sort") => {
-            xs.sort_by(|a, b| cmp(a.clone(), b.clone(), span).unwrap_or(std::cmp::Ordering::Equal));
+            xs.sort_by(|a, b| {
+                cmp_for_sort(a.clone(), b.clone(), span).unwrap_or(std::cmp::Ordering::Equal)
+            });
             Ok(CtValue::Unit)
         }
         (CtValue::List(xs), "sort_desc") => {
-            xs.sort_by(|a, b| cmp(b.clone(), a.clone(), span).unwrap_or(std::cmp::Ordering::Equal));
+            xs.sort_by(|a, b| {
+                cmp_for_sort(b.clone(), a.clone(), span).unwrap_or(std::cmp::Ordering::Equal)
+            });
             Ok(CtValue::Unit)
         }
         (CtValue::List(xs), "clear") => {

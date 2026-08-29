@@ -477,18 +477,18 @@ pub(super) fn evaluate_method(
             fraction_from_value(recv, span).map(|f| CtValue::Str(f.to_string_rep()))
         }
         ("Fraction", "numerator", 0) => {
-            fraction_from_value(recv, span).map(|f| CtValue::Int(f.numerator))
+            fraction_from_value(recv, span)
+                .map(|f| crate::Comptime::Builtins::exact_int_value(f.numerator))
         }
         ("Fraction", "denominator", 0) => {
-            fraction_from_value(recv, span).map(|f| CtValue::Int(f.denominator))
+            fraction_from_value(recv, span)
+                .map(|f| crate::Comptime::Builtins::exact_int_value(f.denominator))
         }
         ("Fraction", "to_float", 0) => fraction_from_value(recv, span).map(|f| {
-            CtValue::Float(crate::AST::CtFloat::F64(
-                f.numerator as f64 / f.denominator as f64,
-            ))
+            CtValue::Float(crate::AST::CtFloat::F64(f.to_float()))
         }),
         ("Fraction", "is_zero", 0) => {
-            fraction_from_value(recv, span).map(|f| CtValue::Bool(f.numerator == 0))
+            fraction_from_value(recv, span).map(|f| CtValue::Bool(f.is_zero()))
         }
         ("Fraction", "equal", 1) => fraction_from_value(recv, span).and_then(|left| {
             let right = fraction_from_value(&args[0], span)?;
@@ -657,6 +657,11 @@ pub(super) fn solver_new(args: &[CtValue], span: Span) -> EvalResult {
 pub(super) fn display(value: &CtValue) -> Option<String> {
     if let Some(text) = io_error_display(value) {
         return Some(text);
+    }
+    if let CtValue::Struct { type_name, fields } = value {
+        if let Some(text) = tuple_display(type_name, fields) {
+            return Some(text);
+        }
     }
     match value {
         CtValue::List(values) => {
@@ -1047,6 +1052,41 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             }
         }
     }
+}
+
+fn tuple_display(type_name: &str, fields: &[(String, CtValue)]) -> Option<String> {
+    let type_name = type_name
+        .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(type_name);
+    if type_name != "tuple" && !type_name.starts_with("JetTup_") {
+        return None;
+    }
+    if fields.is_empty() {
+        return Some("()".to_string());
+    }
+    let label = format!(
+        "({})",
+        fields
+            .iter()
+            .map(|(name, _)| {
+                name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or(name)
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let rendered = fields
+        .iter()
+        .map(|(name, value)| {
+            Some(format!(
+                "{}: {}",
+                name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                    .unwrap_or(name),
+                nested_display(value)?
+            ))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(format!("{label} {{ {} }}", rendered.join(", ")))
 }
 
 fn nested_display(value: &CtValue) -> Option<String> {
@@ -2390,21 +2430,18 @@ fn decimal_from_str(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn fraction_new(args: &[CtValue], span: Span) -> EvalResult {
-    let numerator = match args.first() {
-        Some(CtValue::Int(n)) => *n,
-        _ => return Err(unsupported("a ratio top that is not a whole number", span)),
-    };
-    let denominator = match args.get(1) {
-        Some(CtValue::Int(n)) => *n,
-        _ => {
-            return Err(unsupported(
-                "a ratio bottom that is not a whole number",
-                span,
-            ))
-        }
-    };
+    let numerator = crate::Comptime::Builtins::exact_big(
+        args.first()
+            .ok_or_else(|| unsupported("a ratio top that is not a whole number", span))?,
+    )
+    .ok_or_else(|| unsupported("a ratio top that is not a whole number", span))?;
+    let denominator = crate::Comptime::Builtins::exact_big(
+        args.get(1)
+            .ok_or_else(|| unsupported("a ratio bottom that is not a whole number", span))?,
+    )
+    .ok_or_else(|| unsupported("a ratio bottom that is not a whole number", span))?;
     Ok(
-        match crate::Numeric::CtFraction::new(numerator, denominator) {
+        match crate::Numeric::CtFraction::from_bigints(numerator, denominator) {
             Some(value) => CtValue::Present(Box::new(value.to_value())),
             None => CtValue::absent(crate::AST::Type::Named(
                 crate::Syntax::TYPE_FRACTION.to_string(),

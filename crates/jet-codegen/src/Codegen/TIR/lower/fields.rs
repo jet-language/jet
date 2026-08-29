@@ -854,12 +854,19 @@ pub(crate) fn lower_comptime_scalar(
     }
 }
 
-/// The resolved return type of a called plain function: its declared return
-/// type if known, else `Unit`. (In the subset, callees return scalar/String/Unit.)
-/// Read from `cx.fn_types`, which sema-built `Type::Fn { ret, .. }` per function.
+/// The resolved return carrier of a called plain function.
+///
+/// `Func::return_type` stores the source success type for a bare declaration,
+/// while the emitted callable always returns its effective failure carrier.
+/// Project that same carrier here so a call inside an inferred fallible
+/// callback has the ABI type that its generated Rust value already has.
 pub(crate) fn call_return_type(cx: &Cx, name: &str) -> Type {
     match cx.fn_types.get(name) {
-        Some(Type::Fn { ret: Some(r), .. }) => cx.expand_type_aliases(r),
+        Some(Type::Fn { ret, .. }) => {
+            let declared = ret.as_deref().map(|ty| cx.expand_type_aliases(ty));
+            jet_foundation::AST::FailureContract::from_return_type(declared.as_ref())
+                .effective_type()
+        }
         // c109 Phase 23: a distinct-type constructor `UserId(x)` yields the distinct
         // type itself (it has no `fn_types` entry). Keeps the call's result type total.
         _ if cx.distinct_types.contains_key(name) => Type::Named(name.to_string()),

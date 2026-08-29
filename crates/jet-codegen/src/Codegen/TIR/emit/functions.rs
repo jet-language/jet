@@ -54,19 +54,67 @@ fn emit_sentry_gate(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
 /// the complete elementwise proof. `#Scalar` suppresses it; its loop barrier is
 /// emitted instead. This is a native codegen hint, not a second semantic check.
 fn auto_vectorization_attr(tir: &TFunc, indent: usize) -> String {
-    let Some(facts) = tir.auto_vectorization.as_ref().filter(|_| !tir.is_scalar) else {
+    let Some(facts) = first_auto_vectorization(&tir.body).filter(|_| !tir.is_scalar) else {
         return String::new();
     };
     let pad = "    ".repeat(indent);
+    let inline = if tir.is_inline || tir.is_inline_always {
+        ""
+    } else {
+        "#[inline(always)]\n"
+    };
     format!(
         "{pad}/* jet-auto-vectorize: element={} no_aliasing={} no_early_exit={} effect_free_body={} no_cross_iteration_deps={} */\n\
-{pad}#[inline(always)]\n",
+{pad}{inline}",
         facts.element_type.name(),
         facts.no_aliasing,
         facts.no_early_exit,
         facts.effect_free_body,
         facts.no_cross_iteration_deps,
     )
+}
+
+/// Read only the fact sema attached to a TIR loop. This traversal never
+/// reconstructs legality from lowered expressions; it only finds the first
+/// proof so the enclosing native function gets the same codegen hint.
+fn first_auto_vectorization(
+    stmts: &[crate::Codegen::TIR::TStmt],
+) -> Option<crate::AST::AutoVectorizationFacts> {
+    for stmt in stmts {
+        if let crate::Codegen::TIR::TStmt::Range {
+            auto_vectorization: Some(facts),
+            ..
+        } = stmt
+        {
+            return Some(facts.clone());
+        }
+        let nested = match stmt {
+            crate::Codegen::TIR::TStmt::ContractScope { body, .. }
+            | crate::Codegen::TIR::TStmt::TaskGroup { body, .. }
+            | crate::Codegen::TIR::TStmt::Loop { body, .. }
+            | crate::Codegen::TIR::TStmt::While { body, .. }
+            | crate::Codegen::TIR::TStmt::Range { body, .. }
+            | crate::Codegen::TIR::TStmt::ForIn { body, .. }
+            | crate::Codegen::TIR::TStmt::CountedLoop { body, .. } => {
+                Some(body.as_slice())
+            }
+            crate::Codegen::TIR::TStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if let Some(facts) = first_auto_vectorization(then_body) {
+                    return Some(facts);
+                }
+                else_body.as_deref()
+            }
+            _ => None,
+        };
+        if let Some(facts) = nested.and_then(first_auto_vectorization) {
+            return Some(facts);
+        }
+    }
+    None
 }
 
 /// D-CMD-OVERRIDE1=C: `TestSuite` is a `Copy` snapshot, and the

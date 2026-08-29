@@ -1,0 +1,9 @@
+// core-conformance: core.compute.transfer_show
+use core.compute as compute
+
+fn run() {
+    source :: compute.matrix(2, 2, 1.0) ?? panic("source")
+    moved :: compute.transfer(source, compute.device_cpu()) ?? panic("transfer")
+    result :: compute.transfer_show(moved)
+    print(result.len() > 0)
+}

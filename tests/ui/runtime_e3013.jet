@@ -1,0 +1,15 @@
+// A detached child parked on a full channel must be named at process exit.
+use core.tasks as tasks
+
+fn run() {
+    (sender, receiver) :: channel<Int>(1)
+    sender.send(1)
+    blocked :: task ^sender {
+        sender.send(2)
+        receiver.close()
+    }
+    blocked.detach()
+    tasks.yield_now()
+    print("leaving")
+}
+// @dev_interpreter

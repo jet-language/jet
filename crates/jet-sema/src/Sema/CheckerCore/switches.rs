@@ -148,6 +148,23 @@ pub(crate) fn contextual_literal(name: &str) -> Option<ContextualLiteral> {
     }
 }
 
+fn pattern_consumes_result_carrier(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Ok { .. } | Pattern::Err { .. } => true,
+        Pattern::Or(alts, _) => alts.iter().any(pattern_consumes_result_carrier),
+        Pattern::Variant {
+            variant, bindings, ..
+        } => {
+            bindings.len() == 1
+                && matches!(
+                    contextual_literal(variant),
+                    Some(ContextualLiteral::Ok | ContextualLiteral::Err)
+                )
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &Type) {
     if let Pattern::Or(alts, _) = pattern {
         for alt in alts {
@@ -721,9 +738,7 @@ impl<'a> Checker<'a> {
         // Result handlers are lowered to this ordinary exhaustive if chain.
         // Keep a direct fallible receiver as the carrier while the coverage
         // probe infers it; ordinary value positions still auto-propagate.
-        let preserve_result_carrier = raw
-            .iter()
-            .any(|pattern| matches!(pattern, Pattern::Ok { .. } | Pattern::Err { .. }));
+        let preserve_result_carrier = raw.iter().any(pattern_consumes_result_carrier);
         if preserve_result_carrier {
             self.failure_auto_depth += 1;
         }
@@ -842,7 +857,24 @@ impl<'a> Checker<'a> {
                 self.rewrite_optional_flow_ne_none(&mut arm.cond);
             }
         }
-        let subj_ty = self.infer(subject);
+        // Result patterns consume the carrier itself. Keep a direct
+        // fallible subject as `T !E`; ordinary value positions still use the
+        // transparent automatic-propagation path.
+        let preserve_result_carrier = arms.iter().any(|arm| {
+            matches!(&arm.cond, Expr::PatternTest { pattern, .. }
+                if pattern_consumes_result_carrier(pattern))
+        });
+        if preserve_result_carrier {
+            self.failure_auto_depth += 1;
+        }
+        let subj_ty = if preserve_result_carrier {
+            self.infer_without_auto_propagation(subject)
+        } else {
+            self.infer(subject)
+        };
+        if preserve_result_carrier {
+            self.failure_auto_depth -= 1;
+        }
         let subj_name = match &*subject {
             Expr::Ident(n, _) => Some(n.clone()),
             _ if !subjectless_guard && !matches!(&*subject, Expr::PatternTest { .. }) => {

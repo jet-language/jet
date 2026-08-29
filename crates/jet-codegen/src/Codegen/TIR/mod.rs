@@ -2649,10 +2649,6 @@ pub struct TFunc {
     /// D-SIMD3=B: `#Scalar` is the explicit native auto-vectorization opt-out.
     /// It is a codegen boundary hint; semantics remain in the shared Prelude.
     pub is_scalar: bool,
-    /// D-SIMD3=B: sema-proven elementwise-loop facts found in this function.
-    /// The emitter uses this only to select the native vectorizable target
-    /// feature; it never reconstructs safety from lowered expressions.
-    pub auto_vectorization: Option<crate::AST::AutoVectorizationFacts>,
     /// D-COMPUTE-KERNEL-SURFACE1=B: sema's complete safe-kernel proof. The
     /// emitter and interpreter carry this fact without re-deriving it.
     pub kernel_proof: Option<crate::AST::KernelProof>,
@@ -6080,7 +6076,7 @@ pub enum THandleOp {
         parts: Vec<crate::AST::StrMatchPart>,
         canonical: Vec<(String, Type)>,
     },
-    /// D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
+    /// D-BINPAT1 (card #506 follow-up): `reader.take_pattern([U8]{"…"})` —
     /// consume-mode reuse of the D-BINPAT1 bit-scan engine
     /// (`bin_match_scan_closure_ex`, I8: one matcher, not two). `parts` is
     /// the pattern literal's already-parsed holes; `canonical` is the same

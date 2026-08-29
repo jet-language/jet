@@ -2015,7 +2015,6 @@ impl<'a> Checker<'a> {
                 span: _,
                 arrow_body,
                 label,
-                auto_vectorization,
             } => {
                 let memory_multiplier = self.memory_control_multiplier;
                 self.memory_control_multiplier = None;
@@ -2067,7 +2066,9 @@ impl<'a> Checker<'a> {
                 span: _,
                 arrow_body,
                 label,
+                auto_vectorization,
             } => {
+                let auto_vectorization_kind = kind.clone();
                 let memory_multiplier = self.memory_control_multiplier;
                 let loop_multiplier = memory_multiplier.and_then(|outer| {
                     statically_bounded_for_iterations(kind)
@@ -2177,7 +2178,7 @@ impl<'a> Checker<'a> {
                         }
                         self.arrow_loop_body = previous_arrow_loop_body;
                         *auto_vectorization = self.prove_auto_vectorization_loop(
-                            kind,
+                            &auto_vectorization_kind,
                             var,
                             body,
                             &before_auto_direct,

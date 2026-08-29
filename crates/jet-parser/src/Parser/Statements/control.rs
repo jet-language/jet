@@ -1465,7 +1465,6 @@ impl<'a> Parser<'a> {
                 span,
                 arrow_body,
                 label,
-                auto_vectorization: None,
             })
         } else if matches!(self.peek().kind, TokKind::LBrace) {
             // Infinite loop
@@ -1593,6 +1592,7 @@ impl<'a> Parser<'a> {
                 span,
                 arrow_body,
                 label,
+                auto_vectorization: None,
             })
         } else {
             // Conditional: loop cond { }

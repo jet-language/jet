@@ -4406,6 +4406,46 @@ fn web_wasm_list_string_export_hostile_roundtrip() {
         stdout.contains("emoji🌍"),
         "Unicode scalar was lost:\n{stdout}"
     );
+    let hostile = r#"
+import { instantiateWasm, unmarshalAbi } from "./jet_dom_runtime.js";
+
+function mustTrap(call, label) {
+  try {
+    call();
+  } catch (_) {
+    return;
+  }
+  throw new Error(`${label} accepted an untrusted ownership token`);
+}
+
+const instance = await instantiateWasm("./app.wasm");
+mustTrap(
+  () => instance.exports.jet_abi_list_string_free(0x100, 9),
+  "forged list-string free",
+);
+const ptr = instance.exports.jet_abi_list_string_alloc(9);
+const bytes = new Uint8Array(instance.exports.memory.buffer, ptr, 9);
+const view = new DataView(instance.exports.memory.buffer, ptr, 9);
+view.setUint32(0, 1, true);
+view.setUint32(4, 1, true);
+bytes[8] = 120;
+mustTrap(
+  () => instance.exports.jet_export_echo_strs((BigInt(ptr >>> 0) << 32n) | 10n),
+  "list-string length mismatch",
+);
+const raw = instance.exports.jet_export_echo_strs(
+  (BigInt(ptr >>> 0) << 32n) | 9n,
+);
+const out = unmarshalAbi(raw, "list-string", instance.exports);
+if (out.length !== 1 || out[0] !== "x") {
+  throw new Error(`valid list-string allocation did not round-trip: ${out}`);
+}
+console.log("ok");
+"#;
+    assert_eq!(
+        run_node_harness(&dir, "wasm_list_string_ownership_harness.mjs", hostile),
+        "ok\n"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -4462,6 +4502,49 @@ fn web_wasm_map_string_int_export_hostile_roundtrip() {
     let stdout = run_web_app(&dir);
     let expected = include_str!("../examples/features/expected/web/web_wasm_map.out");
     assert_eq!(stdout, expected);
+
+    let hostile = r#"
+import { instantiateWasm, unmarshalAbi } from "./jet_dom_runtime.js";
+
+function mustTrap(call, label) {
+  try {
+    call();
+  } catch (_) {
+    return;
+  }
+  throw new Error(`${label} accepted an untrusted ownership token`);
+}
+
+const instance = await instantiateWasm("./app.wasm");
+mustTrap(
+  () => instance.exports.jet_abi_map_string_int_free(0x100, 14),
+  "forged map-string-int free",
+);
+const ptr = instance.exports.jet_abi_map_string_int_alloc(14);
+const bytes = new Uint8Array(instance.exports.memory.buffer, ptr, 14);
+const view = new DataView(instance.exports.memory.buffer, ptr, 14);
+view.setUint32(0, 1, true);
+view.setUint32(4, 1, true);
+bytes[8] = 120;
+view.setUint32(9, 1, true);
+bytes[13] = 55;
+mustTrap(
+  () => instance.exports.jet_export_echo_scores((BigInt(ptr >>> 0) << 32n) | 15n),
+  "map-string-int length mismatch",
+);
+const raw = instance.exports.jet_export_echo_scores(
+  (BigInt(ptr >>> 0) << 32n) | 14n,
+);
+const out = unmarshalAbi(raw, "map-string-int", instance.exports);
+if (out.size !== 1 || out.get("x") !== 7n) {
+  throw new Error("valid map-string-int allocation did not round-trip");
+}
+console.log("ok");
+"#;
+    assert_eq!(
+        run_node_harness(&dir, "wasm_map_string_int_ownership_harness.mjs", hostile),
+        "ok\n"
+    );
 
     let harness = r#"
 import { marshalAbi, unmarshalAbi } from "./jet_dom_runtime.js";

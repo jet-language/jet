@@ -231,6 +231,7 @@ const PRELUDE_PARTS: &[&str] = &[
     // D-WRAP-SCOPE1=A / I9: one fixed-width arithmetic operation table for
     // AOT, JIT, TIR evaluation, comptime, and web adapters.
     include_str!("../Prelude/Core/FixedArithmetic.rs"),
+    include_str!("../Prelude/Core/FloatOrdering.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/ViewAccess.rs"),
     // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module
@@ -1552,6 +1553,7 @@ fn push_corelib_prelude_body(
     // conditional math surface.
     out.push_str(include_str!("../Prelude/Core/SeededRandom.rs"));
     out.push_str(include_str!("../Prelude/Core/StringBytes.rs"));
+    out.push_str(include_str!("../Prelude/Core/TimeInstant.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/FakeData.rs"));
 

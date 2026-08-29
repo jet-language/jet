@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// `jetpack hangar list` — show realized store entries.
 pub(super) fn cmd_list(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
-    let entries = match Store::list_checked(&roots) {
+    let entries = match Store::list_read_only_checked(&roots) {
         Ok(entries) => entries,
         Err(error) => {
             return hangar_report_error(

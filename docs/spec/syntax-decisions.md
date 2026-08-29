@@ -675,13 +675,15 @@ capture. Valid wherever string patterns are: `==` pattern tests,
 if-table arms (refutable — table needs `else`), and consume mode via
 `Reader.take_pattern([U8]{"…"})` (D-SHIFT1, prefix match + advance). Same
 non-greedy anchoring and E0147-class ambiguity law as text holes. The
-`b"…"` value literal is not a pattern head; byte patterns use this typed form.
+The `[U8]{"…"}` value literal is not a pattern head; byte patterns use this
+typed form with holes.
 
-**D-BYTELIT1=B — byte-string values** *(ratified 2026-08-27, card #2258)*:
-`b"…"` is a byte value. ASCII text contributes one `U8` per character and
-`\xNN` contributes the written byte. Braces are literal text, not
-interpolation. The value has `[U8]` shape and compares directly with other
-byte lists. `[U8]{"…"}` remains the explicit typed-list and byte-pattern form.
+**D-BYTELIT1=B — byte-string values** *(ratified 2026-08-27, card #2265)*:
+`[U8]{"…"}` is a byte value. ASCII text contributes one `U8` per character
+and `\xNN` contributes the written byte. The typed-list body uses the ordinary
+brace/interpolation rules; a literal brace is doubled. The value has `[U8]`
+shape and compares directly with other byte lists. In pattern position, the
+same head admits typed holes.
 
 **S77 — Field punning**: in a struct literal, bare `name` ≡ `name: name` when
 a binding of that name is in scope; mixes freely with explicit fields.
@@ -1289,8 +1291,8 @@ surface is superseded by D-UNIFYLIT1=A).
 **D-UNIFYLIT1=A — unify domain text + pattern modes** *(ratified 2026-07-28,
 card #1265)*: one surface law — the head names the language; the body is that
 language's quoted recipe. Domain text: `SQL`/`HTML`/`Sh{"…"}` only (plus
-`.raw`). Byte values: `b"…"` per D-BYTELIT1. Byte patterns:
-`[U8]{"…"}` in pattern / `Reader.take_pattern` position. Text patterns keep
+`.raw`). Byte values: `[U8]{"…"}` per D-BYTELIT1. Byte patterns use the same
+head with typed holes in pattern / `Reader.take_pattern` position. Text patterns keep
 plain `"…"` convenience and optional `String{"…"}`. Amends
 D-TYPEDTEXT1/2 and D-BINPAT1; supersedes D-LITERAL-PREFIX1's prefix-first
 surface.
@@ -6514,12 +6516,12 @@ ambiguous links. Implemented end to end on card #544.
 
 **2026-07-28 — D-TRAILBLOCK2=A** *(arrow spelling amended by D-ARROW-RESPELL1=A)*: code-as-argument uses explicit `() -> { … }` inside call parentheses (multiline bodies and multiple code args allowed); retires D-TRAILBLOCK1 trailing `{ }` sugar (`twice { … }` / `f() { … }`). E0335 teaches the `() ->` form. Card #1266.
 
-**2026-07-28 — D-UNIFYLIT1=A** *(head spelling amended by D-LIT-DOT1=B)*: typed heads only for domain text (`SQL{"…"}`/`HTML{"…"}`/`Sh{"…"}` + `.raw`); byte values use `b"…"` per D-BYTELIT1 and byte patterns use `[U8]{"…"}`; retires `sql"`/`html"`/`sh"` prefixes and silent expected-type rewrite of bare quotes; text patterns keep plain `"…"` convenience. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes D-LITERAL-PREFIX1 prefix surface. Card #1265.
+**2026-07-28 — D-UNIFYLIT1=A** *(head spelling amended by D-LIT-DOT1=B)*: typed heads only for domain text (`SQL{"…"}`/`HTML{"…"}`/`Sh{"…"}` + `.raw`); byte values use `[U8]{"…"}` per D-BYTELIT1 and byte patterns use the same head with typed holes; retires `sql"`/`html"`/`sh"` prefixes and silent expected-type rewrite of bare quotes; text patterns keep plain `"…"` convenience. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes D-LITERAL-PREFIX1 prefix surface. Card #1265.
 
-**2026-08-27 — D-BYTELIT1=B**: `b"…"` is the byte-value literal. ASCII text
-contributes one `U8` per character, `\xNN` contributes the written byte, and
-braces are literal text. `[U8]{"…"}` remains the explicit typed-list and
-byte-pattern form. Card #2258.
+**2026-08-27 — D-BYTELIT1=B**: `[U8]{"…"}` is the byte-value literal. ASCII
+text contributes one `U8` per character, `\xNN` contributes the written byte,
+and literal braces are doubled. The same head with typed holes is the byte
+pattern form. Card #2265.
 
 **2026-07-29 — D-FACTMODEL1=A**: tags, states, taint kinds, and effect leaves
 are compile-time enum facts. They share one registry, segment-aware

@@ -632,6 +632,10 @@ pub(crate) fn resident_hot_swap(
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     // Rebuild the module (Cranelift rejects redefining `__jet_jit_main`) but keep
     // the live runtime heap — the M2 contract.
+    // HTTP workers retain raw handler/runtime/code pointers. Stop and join them
+    // before replacing either resident allocation; ordinary teardown cannot
+    // cover this hot-swap-only replacement path.
+    crate::net_http_rt::clear_net_http_handles();
     crate::CoreHost::reset_jit_interrupts();
     let mut runtime = RESIDENT_RUNTIME
         .with(|slot| slot.borrow_mut().take())

@@ -1,0 +1,10 @@
+// core-conformance: core.compiler.check
+use core.compiler as compiler
+
+@source :: "fn generated() String -> {{ return \"ok\" }}"
+@parsed :: compiler.parse(@source) ?? panic("parse")
+@checked :: compiler.check(@parsed) ?? panic("check")
+
+fn run() {
+    print(@checked.functions().len())
+}

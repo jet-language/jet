@@ -1086,7 +1086,15 @@ measure_state() {
         state_linker_backend_sha256="$TRIAL_LINKER_BACKEND_SHA256"
         state_profile="release"
         state_artifact_bytes="$TRIAL_ARTIFACT_BYTES"
-        state_phase_text="parse_us=$(required_phase_average "$state_phases" parse);sema_us=$(required_phase_average "$state_phases" sema);ffi_us=$(phase_average "$state_phases" ffi);tir_us=$(required_phase_average "$state_phases" tir);emission_us=$(required_phase_average "$state_phases" emission);build_plan_us=$(phase_average "$state_phases" build_plan);backend_us=$(required_phase_average "$state_phases" backend);link_us=$(required_phase_average "$state_phases" link)"
+        if [ "$state_kind" = "no-change" ]; then
+            # A cache hit skips TIR/emission; zero is the measured work.
+            state_tir_us=$(phase_average "$state_phases" tir)
+            state_emission_us=$(phase_average "$state_phases" emission)
+        else
+            state_tir_us=$(required_phase_average "$state_phases" tir)
+            state_emission_us=$(required_phase_average "$state_phases" emission)
+        fi
+        state_phase_text="parse_us=$(required_phase_average "$state_phases" parse);sema_us=$(required_phase_average "$state_phases" sema);ffi_us=$(phase_average "$state_phases" ffi);tir_us=$state_tir_us;emission_us=$state_emission_us;build_plan_us=$(phase_average "$state_phases" build_plan);backend_us=$(required_phase_average "$state_phases" backend);link_us=$(required_phase_average "$state_phases" link)"
     fi
     state_artifact_source="$state_work"
     if [ "$state_kind" = "clean" ]; then

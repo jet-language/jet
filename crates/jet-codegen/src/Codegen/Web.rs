@@ -4958,8 +4958,9 @@ fn wasm_emit_ct_value(value: &crate::AST::CtValue, ty: &Type) -> Result<String, 
                 let fraction =
                     jet_foundation::Numeric::CtFraction::from_value(value).map_err(|_| ())?;
                 format!(
-                    "jet_wasm_fraction_from_parts(JetWasmInt::from_i64({}), JetWasmInt::from_i64({}))",
-                    fraction.numerator, fraction.denominator
+                    "jet_wasm_fraction_from_parts(JetWasmInt::from_decimal({:?}).expect(\"valid exact numerator\"), JetWasmInt::from_decimal({:?}).expect(\"valid exact denominator\"))",
+                    fraction.numerator.to_string_rep(),
+                    fraction.denominator.to_string_rep()
                 )
             } else if type_name == Syntax::TYPE_DECIMAL {
                 let decimal =
@@ -10844,6 +10845,8 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     include_str!("../Prelude/Core/Division.rs"),
     "\n",
     include_str!("../Prelude/Core/ExactInt.rs"),
+    "\n",
+    include_str!("../../../jet-foundation/src/JSONNumber.rs"),
     "\n",
     include_str!("../Prelude/Core/ExactNumbers.rs"),
     "\n",

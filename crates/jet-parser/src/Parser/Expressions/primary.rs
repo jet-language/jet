@@ -1,8 +1,7 @@
 use super::super::{
     describe, AccessConvention, CallArg, Diagnostic, EnumLitArg, Expr, Lambda, LambdaBody,
-    LambdaMeta, Parser, Span, StrPart, StrTokPart, Syntax, TokKind, Type, TypedLitBody,
+    LambdaMeta, Parser, Span, StrPart, StrTokPart, Syntax, TokKind,
 };
-use crate::AST::ByteTextPart;
 
 impl<'a> Parser<'a> {
     pub(super) fn expr_primary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
@@ -921,37 +920,11 @@ impl<'a> Parser<'a> {
         parts: Vec<StrTokPart>,
         span: Span,
     ) -> Result<Expr, Diagnostic> {
-        if parts
-            .iter()
-            .any(|part| matches!(part, StrTokPart::ByteText(_)))
-        {
-            let body = parts
-                .into_iter()
-                .map(|part| match part {
-                    StrTokPart::ByteText(text) | StrTokPart::Lit(text) => {
-                        ByteTextPart::Lit(text)
-                    }
-                    StrTokPart::Byte(byte) => ByteTextPart::Byte(byte),
-                    StrTokPart::Interp(_) => {
-                        unreachable!("byte-string interpolation is lexed as literal braces")
-                    }
-                })
-                .collect();
-            return Ok(Expr::TypedLit {
-                head: Some(Type::List(Box::new(Type::IntN {
-                    signed: false,
-                    bits: 8,
-                }))),
-                body: TypedLitBody::ByteText(body),
-                span,
-            });
-        }
         let mut out = Vec::new();
         for part in parts {
             match part {
                 StrTokPart::Lit(s) => out.push(StrPart::Lit(s)),
                 StrTokPart::Byte(byte) => out.push(StrPart::Lit(char::from(byte).to_string())),
-                StrTokPart::ByteText(text) => out.push(StrPart::Lit(text)),
                 StrTokPart::Interp(toks) => {
                     let mut sub = Parser {
                         toks: &toks,
@@ -1259,7 +1232,6 @@ impl<'a> Parser<'a> {
                 match part {
                     StrTokPart::Lit(text) => fill.push_str(&text),
                     StrTokPart::Byte(byte) => fill.push(char::from(byte)),
-                    StrTokPart::ByteText(text) => fill.push_str(&text),
                     StrTokPart::Interp(_) => {
                         return Err(Diagnostic::error(
                             "E0003",

@@ -44,13 +44,13 @@ fn run() {
     f64 :: floats.read_f64_le() ?? return Err("bad Float")
     print("float_reads={f32}/{f64} remaining={floats.remaining()}")
 
-    magic_bytes :: Reader.over(b"JGB1").take(4) ?? return Err("short byte magic")
-    bytes_match :: magic_bytes == b"JGB1"
+    magic_bytes :: Reader.over([U8]{"JGB1"}).take(4) ?? return Err("short byte magic")
+    bytes_match :: magic_bytes == [U8]{"JGB1"}
     print("bytes_match={bytes_match}")
 
-    max_u64 :: u64_from_bytes(b"\xff\xff\xff\xff\xff\xff\xff\xff")
+    max_u64 :: u64_from_bytes([U8]{"\xff\xff\xff\xff\xff\xff\xff\xff"})
     wrapped_u64 :: max_u64.wrapping_add(U64{1})
-    fnv :: fnv1a(b"hello")
+    fnv :: fnv1a([U8]{"hello"})
     print("u64_wrap={wrapped_u64} fnv1a={fnv}")
 
     // A bounds miss is an ordinary error value — `?`-composable, never a panic.
@@ -82,8 +82,8 @@ fn u64_from_bytes(bytes: [U8]) U64 -> {
 }
 
 fn fnv1a(bytes: [U8]) U64 -> {
-    offset :: u64_from_bytes(b"\xcb\xf2\x9c\xe4\x84\x22\x23\x25")
-    prime :: u64_from_bytes(b"\x00\x00\x01\x00\x00\x00\x01\xb3")
+    offset :: u64_from_bytes([U8]{"\xcb\xf2\x9c\xe4\x84\x22\x23\x25"})
+    prime :: u64_from_bytes([U8]{"\x00\x00\x01\x00\x00\x00\x01\xb3"})
     hash := offset
     loop byte in bytes {
         hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)

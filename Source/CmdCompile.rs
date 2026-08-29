@@ -1673,6 +1673,19 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
         } else {
             None
         };
+    debug_native_cache_event(format!(
+        "compile pid={} cmd={} file={} profile={} mode={} key={:?} cwd={} cache_dir={:?}",
+        std::process::id(),
+        cmd,
+        file,
+        cache_profile_tag,
+        mode_tag,
+        native_key,
+        std::env::current_dir()
+            .map(|path| path.display().to_string())
+            .unwrap_or_default(),
+        std::env::var_os("JET_CACHE_DIR"),
+    ));
 
     // `jet run` short-circuits the whole front end (only the parse inside the
     // key computation ran) when this exact program is already in the content
@@ -5455,6 +5468,19 @@ fn manifest_fingerprint(file: &str) -> Option<String> {
     Some(String::new())
 }
 
+fn debug_native_cache_event(event: impl AsRef<str>) {
+    let Ok(path) = std::env::var("JET_DEBUG_NATIVE_CACHE_LOG") else {
+        return;
+    };
+    if let Ok(mut log) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = std::io::Write::write_all(&mut log, format!("{}\n", event.as_ref()).as_bytes());
+    }
+}
+
 fn append_cache_field(bytes: &mut Vec<u8>, value: &str) {
     let value = value.as_bytes();
     bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
@@ -5695,28 +5721,42 @@ fn native_cache_key_with_toolchain(
     mode_tag: &str,
     toolchain_identity: &str,
 ) -> Option<String> {
+    debug_native_cache_event(format!(
+        "key-entry pid={} file={} profile={} mode={}",
+        std::process::id(),
+        file,
+        profile_tag,
+        mode_tag,
+    ));
     // `jet prove` consumes a compiler-private structured harness protocol. A
     // dirty/development compiler must never receive an older cached harness
     // that predates or mismatches that protocol.
     if std::env::var_os("JET_PROVE_FRESH_TEST").is_some() {
+        debug_native_cache_event("key-none prove-fresh");
         return None;
     }
-    let mut bundle = jet::Loader::load_entry_with_overlay(file, None, false).ok()?;
+    let Ok(mut bundle) = jet::Loader::load_entry_with_overlay(file, None, false) else {
+        debug_native_cache_event("key-none load");
+        return None;
+    };
     // Checked before the front end runs: an `embed_file` program is never
     // cacheable, so it must not pay a sema pass to find that out.
     if program_uses_embed(&bundle) {
+        debug_native_cache_event("key-none embed");
         return None;
     }
     // #91: instance identity is a sema product. Run the front end before a
     // cache lookup so a hit is keyed by resolved template identity rather than
     // consumer spelling. A hit still skips codegen/rustc, never validation.
     if jet::Driver::seed_build_facts(&mut bundle, profile, false, &BTreeMap::new()).is_err() {
+        debug_native_cache_event("key-none seed-facts");
         return None;
     }
     if jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check)
         .iter()
         .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
     {
+        debug_native_cache_event("key-none sema");
         return None;
     }
     native_cache_key_for_program(file, &bundle, profile_tag, mode_tag, toolchain_identity)
@@ -5739,13 +5779,23 @@ fn native_cache_key_for_program(
     mode_tag: &str,
     toolchain_identity: &str,
 ) -> Option<String> {
+    debug_native_cache_event(format!(
+        "program-key-entry pid={} file={} profile={} mode={} modules={}",
+        std::process::id(),
+        file,
+        profile_tag,
+        mode_tag,
+        bundle.modules.len(),
+    ));
     if std::env::var_os("JET_PROVE_FRESH_TEST").is_some() {
+        debug_native_cache_event("program-key-none prove-fresh");
         return None;
     }
     // The output depends on external file bytes the AST does not capture, so
     // this program must never be served from — or stored into — a cache keyed
     // on the AST alone.
     if program_uses_embed(bundle) {
+        debug_native_cache_event("program-key-none embed");
         return None;
     }
     let instances: Vec<String> = bundle
@@ -5766,7 +5816,10 @@ fn native_cache_key_for_program(
     let runtime_fingerprint = jet::Codegen::cached_runtime_fingerprint();
     let corelib_fingerprint =
         jet::Codegen::corelib_emission_fingerprint(bundle, mode_tag.starts_with("test"));
-    let manifest = manifest_fingerprint(file)?;
+    let Some(manifest) = manifest_fingerprint(file) else {
+        debug_native_cache_event("program-key-none manifest");
+        return None;
+    };
     let salt = native_cache_salt(
         toolchain_identity,
         &format!("{manifest}:{dependency_interfaces}"),
@@ -5776,7 +5829,41 @@ fn native_cache_key_for_program(
         &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         &instances,
     );
-    Some(jet::CanonicalAST::ast_cache_key(bundle, profile_tag, &salt))
+    let canonical = jet::CanonicalAST::canonical_bytes(bundle);
+    let canonical_fingerprint = jet::SHA256::sha256_hex(&canonical);
+    let key = jet::CanonicalAST::ast_cache_key(bundle, profile_tag, &salt);
+    if let Ok(path) = std::env::var("JET_DEBUG_NATIVE_CACHE_LOG") {
+        let line = format!(
+            "pid={} file={} profile={} mode={} canonical={} toolchain={} dependency={} runtime={} corelib={} manifest={} salt={} key={} instances={:?}\n",
+            std::process::id(),
+            file,
+            profile_tag,
+            mode_tag,
+            canonical_fingerprint,
+            jet::SHA256::sha256_hex(toolchain_identity.as_bytes()),
+            dependency_interfaces,
+            runtime_fingerprint,
+            corelib_fingerprint,
+            manifest,
+            salt,
+            key,
+            instances,
+        );
+        if let Ok(mut log) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = std::io::Write::write_all(&mut log, line.as_bytes());
+        }
+    }
+    debug_native_cache_event(format!(
+        "program-key-ok pid={} file={} key={}",
+        std::process::id(),
+        file,
+        key,
+    ));
+    Some(key)
 }
 
 /// `embed_file`/`embed_bytes` detection: a conservative source-substring scan.

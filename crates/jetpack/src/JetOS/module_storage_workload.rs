@@ -64,6 +64,7 @@ pub(super) fn write_storage_facts(dir: &Path, system: &SystemPlan) -> std::io::R
     let root_fs = option_value(system, &["storage.filesystem.root.type"])
         .or_else(|| option_value(system, &["filesystem.root.type"]))
         .map(|s| clean_symbol(&s))
+        .filter(|fs| valid_filesystem_type(fs))
         .unwrap_or_else(|| "ext4".to_string());
     let ephemeral = option_value(system, &["storage.ephemeralRoot", "storage.root.ephemeral"])
         .unwrap_or_else(|| "false".to_string());
@@ -136,9 +137,15 @@ fn valid_storage_size(size: &str) -> bool {
         && matches!(suffix, "K" | "M" | "G" | "T" | "KiB" | "MiB" | "GiB" | "TiB")
 }
 
+fn valid_filesystem_type(filesystem: &str) -> bool {
+    filesystem.eq_ignore_ascii_case("ext4") || filesystem.eq_ignore_ascii_case("btrfs")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::valid_storage_size;
+    use super::{valid_filesystem_type, valid_storage_size, write_storage_facts};
+    use jet_env_model::ModuleEval::{OptionPlan, SystemPlan};
+    use std::fs;
 
     #[test]
     fn storage_size_allowlist_rejects_shell_source() {
@@ -147,6 +154,38 @@ mod tests {
         assert!(!valid_storage_size("512M; touch pwned"));
         assert!(!valid_storage_size("$(touch pwned)"));
         assert!(!valid_storage_size(""));
+    }
+
+    #[test]
+    fn filesystem_type_allowlist_rejects_shell_source() {
+        assert!(valid_filesystem_type("ext4"));
+        assert!(valid_filesystem_type("Btrfs"));
+        assert!(!valid_filesystem_type("ext4 || true; touch pwned #"));
+    }
+
+    #[test]
+    fn storage_script_uses_safe_filesystem_default_for_hostile_option() {
+        let dir = std::env::temp_dir().join(format!(
+            "jetos-storage-root-fs-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let marker = dir.join("root-fs-injection-marker");
+        let system = SystemPlan {
+            name: "hostile-root-fs".to_string(),
+            target: "linux.x64".to_string(),
+            packages: Vec::new(),
+            services: Vec::new(),
+            options: vec![OptionPlan {
+                key: "filesystem.root.type".to_string(),
+                value: format!("ext4 || true; touch {} #", marker.display()),
+            }],
+        };
+        write_storage_facts(&dir, &system).unwrap();
+        let script = fs::read_to_string(dir.join("sw/bin/jetos-storage-apply")).unwrap();
+        assert!(script.contains("mkfs.ext4 -L jetos-root"));
+        assert!(!script.contains("touch"));
+        fs::remove_dir_all(dir).ok();
     }
 }
 

@@ -7,7 +7,7 @@
 
 use super::{Concurrency, JitRuntime};
 use crate::MathExtra::math_rt::JetComplex;
-use jet_foundation::Numeric::{CtDecimal, CtFraction};
+use jet_foundation::Numeric::{CtBigInt, CtDecimal, CtFraction};
 
 fn trap_decimal(msg: &str) {
     Concurrency::with_runtime_mut(|rt| {
@@ -457,15 +457,23 @@ fn jet_jit_decimal_to_string(a: i64) -> i64 {
 }
 
 /// Packed `Option<Fraction>` ABI: `0` = None, else `handle.wrapping_add(1)`.
+fn fraction_from_int_handles(numerator: i64, denominator: i64) -> Option<CtFraction> {
+    Concurrency::with_runtime_mut(|rt| {
+        let numerator = CtBigInt::from_str(&rt.heap.int_to_string(numerator)).ok()?;
+        let denominator = CtBigInt::from_str(&rt.heap.int_to_string(denominator)).ok()?;
+        CtFraction::from_bigints(numerator, denominator)
+    })
+}
+
 fn jet_jit_fraction_new(numerator: i64, denominator: i64) -> i64 {
-    match CtFraction::new(numerator, denominator) {
+    match fraction_from_int_handles(numerator, denominator) {
         Some(f) => push_fraction(f).wrapping_add(1),
         None => 0,
     }
 }
 
 fn jet_jit_fraction_from_parts(numerator: i64, denominator: i64) -> i64 {
-    match CtFraction::new(numerator, denominator) {
+    match fraction_from_int_handles(numerator, denominator) {
         Some(f) => push_fraction(f),
         None => {
             trap_fraction("invalid exact quotient");
@@ -474,15 +482,16 @@ fn jet_jit_fraction_from_parts(numerator: i64, denominator: i64) -> i64 {
     }
 }
 
+fn zero_fraction() -> CtFraction {
+    CtFraction {
+        numerator: CtBigInt::from_int(0),
+        denominator: CtBigInt::from_int(1),
+    }
+}
+
 fn jet_jit_fraction_add(a: i64, b: i64) -> i64 {
-    let left = with_fraction(a, |f| *f).unwrap_or(CtFraction {
-        numerator: 0,
-        denominator: 1,
-    });
-    let right = with_fraction(b, |f| *f).unwrap_or(CtFraction {
-        numerator: 0,
-        denominator: 1,
-    });
+    let left = with_fraction(a, Clone::clone).unwrap_or_else(zero_fraction);
+    let right = with_fraction(b, Clone::clone).unwrap_or_else(zero_fraction);
     match left.add(&right) {
         Some(out) => push_fraction(out),
         None => {
@@ -493,14 +502,8 @@ fn jet_jit_fraction_add(a: i64, b: i64) -> i64 {
 }
 
 fn jet_jit_fraction_sub(a: i64, b: i64) -> i64 {
-    let left = with_fraction(a, |f| *f).unwrap_or(CtFraction {
-        numerator: 0,
-        denominator: 1,
-    });
-    let right = with_fraction(b, |f| *f).unwrap_or(CtFraction {
-        numerator: 0,
-        denominator: 1,
-    });
+    let left = with_fraction(a, Clone::clone).unwrap_or_else(zero_fraction);
+    let right = with_fraction(b, Clone::clone).unwrap_or_else(zero_fraction);
     match left.sub(&right) {
         Some(out) => push_fraction(out),
         None => {
@@ -511,14 +514,8 @@ fn jet_jit_fraction_sub(a: i64, b: i64) -> i64 {
 }
 
 fn jet_jit_fraction_mul(a: i64, b: i64) -> i64 {
-    let left = with_fraction(a, |f| *f).unwrap_or(CtFraction {
-        numerator: 0,
-        denominator: 1,
-    });
-    let right = with_fraction(b, |f| *f).unwrap_or(CtFraction {
-        numerator: 0,
-        denominator: 1,
-    });
+    let left = with_fraction(a, Clone::clone).unwrap_or_else(zero_fraction);
+    let right = with_fraction(b, Clone::clone).unwrap_or_else(zero_fraction);
     match left.mul(&right) {
         Some(out) => push_fraction(out),
         None => {
@@ -529,14 +526,8 @@ fn jet_jit_fraction_mul(a: i64, b: i64) -> i64 {
 }
 
 fn jet_jit_fraction_div(a: i64, b: i64) -> i64 {
-    let left = with_fraction(a, |f| *f).unwrap_or(CtFraction {
-        numerator: 0,
-        denominator: 1,
-    });
-    let right = with_fraction(b, |f| *f).unwrap_or(CtFraction {
-        numerator: 0,
-        denominator: 1,
-    });
+    let left = with_fraction(a, Clone::clone).unwrap_or_else(zero_fraction);
+    let right = with_fraction(b, Clone::clone).unwrap_or_else(zero_fraction);
     match left.div(&right) {
         Some(out) => push_fraction(out),
         None => {
@@ -547,8 +538,8 @@ fn jet_jit_fraction_div(a: i64, b: i64) -> i64 {
 }
 
 fn jet_jit_fraction_equal(a: i64, b: i64) -> i8 {
-    let left = with_fraction(a, |f| *f);
-    let right = with_fraction(b, |f| *f);
+    let left = with_fraction(a, Clone::clone);
+    let right = with_fraction(b, Clone::clone);
     match (left, right) {
         (Some(l), Some(r)) => (l == r) as i8,
         _ => 0,
@@ -556,11 +547,15 @@ fn jet_jit_fraction_equal(a: i64, b: i64) -> i8 {
 }
 
 fn jet_jit_fraction_numerator(a: i64) -> i64 {
-    with_fraction(a, |f| f.numerator).unwrap_or(0)
+    let text = with_fraction(a, |f| f.numerator.to_string_rep())
+        .unwrap_or_else(|| "0".to_string());
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_from_str(&text).unwrap_or(0))
 }
 
 fn jet_jit_fraction_denominator(a: i64) -> i64 {
-    with_fraction(a, |f| f.denominator).unwrap_or(1)
+    let text = with_fraction(a, |f| f.denominator.to_string_rep())
+        .unwrap_or_else(|| "1".to_string());
+    Concurrency::with_runtime_mut(|rt| rt.heap.int_from_str(&text).unwrap_or(1))
 }
 
 fn jet_jit_fraction_to_string(a: i64) -> i64 {
@@ -576,11 +571,11 @@ fn jet_jit_decimal_to_float(a: i64) -> f64 {
 }
 
 fn jet_jit_fraction_to_float(a: i64) -> f64 {
-    with_fraction(a, |f| f.numerator as f64 / f.denominator as f64).unwrap_or(0.0)
+    with_fraction(a, CtFraction::to_float).unwrap_or(0.0)
 }
 
 fn jet_jit_fraction_is_zero(a: i64) -> i8 {
-    with_fraction(a, |f| f.numerator == 0).unwrap_or(false) as i8
+    with_fraction(a, CtFraction::is_zero).unwrap_or(false) as i8
 }
 
 fn jet_jit_complex_from_parts(real: f64, imaginary: f64) -> i64 {

@@ -49,6 +49,10 @@ mod authority_semantics {
     include!("../../jet-codegen/src/Prelude/Core/Authority.rs");
 }
 
+mod float_ordering {
+    include!("../../jet-codegen/src/Prelude/Core/FloatOrdering.rs");
+}
+
 // The resident collection ABI owns only handle conversion.  The operation
 // itself must stay in the same Prelude source embedded by AOT and evaluated by
 // tier 0 (I9).  This small module supplies the Prelude's sibling types that
@@ -1342,6 +1346,30 @@ fn jet_jit_list_order_str(a: i64, b: i64) -> i8 {
 
 fn jet_jit_list_order_f64(a: i64, b: i64) -> i8 {
     list_order(&clone_list_floats(a), &clone_list_floats(b))
+}
+
+fn jet_jit_list_sort_f64(list: i64) {
+    let mut values = clone_list_floats(list);
+    values.sort_by(|left, right| float_ordering::jet_float_sort_cmp(*left, *right));
+    Concurrency::with_runtime_mut(|rt| {
+        for (index, value) in values.into_iter().enumerate() {
+            rt.heap
+                .list_set_float(list, index as i64, value)
+                .expect("jit list sort_f64: set");
+        }
+    });
+}
+
+fn jet_jit_list_sort_f64_desc(list: i64) {
+    let mut values = clone_list_floats(list);
+    values.sort_by(|left, right| float_ordering::jet_float_sort_cmp(*right, *left));
+    Concurrency::with_runtime_mut(|rt| {
+        for (index, value) in values.into_iter().enumerate() {
+            rt.heap
+                .list_set_float(list, index as i64, value)
+                .expect("jit list sort_f64_desc: set");
+        }
+    });
 }
 
 /// Mirror AOT `jet_iter_indexes(n)` — materialize `Iter<Int>` as a list handle.
@@ -5880,6 +5908,8 @@ host_fns! {
     list_indexes: "jet_jit_list_indexes" => jet_jit_list_indexes: sig_len;
     list_sort: "jet_jit_list_sort" => jet_jit_list_sort: sig_sort;
     list_sort_desc: "jet_jit_list_sort_desc" => jet_jit_list_sort_desc: sig_sort;
+    list_sort_f64: "jet_jit_list_sort_f64" => jet_jit_list_sort_f64: sig_sort;
+    list_sort_f64_desc: "jet_jit_list_sort_f64_desc" => jet_jit_list_sort_f64_desc: sig_sort;
     list_sort_str: "jet_jit_list_sort_str" => jet_jit_list_sort_str: sig_sort;
     list_sort_str_desc: "jet_jit_list_sort_str_desc" => jet_jit_list_sort_str_desc: sig_sort;
     list_clone: "jet_jit_list_clone" => jet_jit_list_clone: sig_len;

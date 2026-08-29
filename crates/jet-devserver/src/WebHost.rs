@@ -2201,13 +2201,7 @@ fn handle_connection_with_root(
             status.note_client(&client);
             session.note_client(&client);
         }
-        let mut body = status.json();
-        if body.ends_with('}') {
-            body.pop();
-            body.push_str(",\"session\":");
-            body.push_str(&session.json());
-            body.push('}');
-        }
+        let body = status.json();
         return write_response(
             &mut stream,
             "200 OK",

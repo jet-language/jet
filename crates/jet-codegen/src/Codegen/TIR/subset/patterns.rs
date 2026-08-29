@@ -39,7 +39,7 @@ pub(crate) fn arm_str_match_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Opt
 }
 
 /// D-BINPAT1 (card #506): a binary-pattern arm head over the switch subject —
-/// a `b"…"` literal in pattern position (`subject == b"{v:U4}…"`).
+/// a `[U8]{"…"}` literal in pattern position (`subject == [U8]{"{v:U4}…"}`).
 pub(crate) fn arm_bin_match_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Option<Pattern> {
     match cond {
         Expr::PatternTest {

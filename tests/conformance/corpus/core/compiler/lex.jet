@@ -1,0 +1,9 @@
+// core-conformance: core.compiler.lex
+use core.compiler as compiler
+
+@source :: "fn generated() String -> {{ return \"ok\" }}"
+@lexed :: compiler.lex(@source) ?? panic("lex")
+
+fn run() {
+    print(@lexed.tokens().len())
+}

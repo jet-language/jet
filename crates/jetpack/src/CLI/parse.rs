@@ -516,7 +516,7 @@ pub fn main(args: Vec<String>) -> i32 {
         );
         return 2;
     }
-    // Doctor and audit observe state without repairing or migrating it.
+    // Read-only commands observe state without repairing or migrating it.
     let read_only_shared_store_status = verb == "hangar"
         && parsed.positional.first().map(String::as_str) == Some("shared")
         && parsed.positional.get(1).map(String::as_str) == Some("status");
@@ -526,10 +526,13 @@ pub fn main(args: Vec<String>) -> i32 {
             .positional
             .iter()
             .any(|argument| argument == "--repair");
+    let read_only_hangar_list = verb == "hangar"
+        && parsed.positional.first().map(String::as_str) == Some("list");
     let read_only_command = matches!(verb.as_str(), "doctor" | "audit")
         || verb == Syntax::JETPACK_WHY
         || verb == Syntax::JETPACK_LOCK_VERB
-        || read_only_hangar_doctor;
+        || read_only_hangar_doctor
+        || read_only_hangar_list;
     if !read_only_command && !read_only_shared_store_status {
         let roots = Store::resolve();
         if let Err(error) = Store::migrate_legacy_hangar(&roots) {

@@ -2245,8 +2245,8 @@
     // answers nothing rather than a wrong number.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct JetFraction {
-        pub numerator: i64,
-        pub denominator: i64,
+        numerator: JetBigInt,
+        denominator: JetBigInt,
     }
 
     impl PartialOrd for JetFraction {
@@ -2257,70 +2257,69 @@
 
     impl Ord for JetFraction {
         fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-            ((self.numerator as i128) * (other.denominator as i128)).cmp(
-                &((other.numerator as i128) * (self.denominator as i128)),
-            )
+            self.numerator
+                .mul(&other.denominator)
+                .compare(&other.numerator.mul(&self.denominator))
         }
     }
 
     impl JetFraction {
         pub fn new(numerator: i64, denominator: i64) -> Option<Self> {
-            if denominator == 0 {
+            Self::from_bigints(jet_int_value(numerator), jet_int_value(denominator))
+        }
+
+        pub fn from_bigints(
+            mut numerator: JetBigInt,
+            mut denominator: JetBigInt,
+        ) -> Option<Self> {
+            if denominator.is_zero() {
                 return None;
             }
-            let (mut n, mut d) = (numerator, denominator);
-            if d < 0 {
-                n = n.checked_neg()?;
-                d = d.checked_neg()?;
+            if denominator.negative {
+                numerator = numerator.neg();
+                denominator = denominator.neg();
             }
-            let mut a = n.checked_abs()?;
-            let mut b = d;
-            while b != 0 {
-                let r = a % b;
-                a = b;
-                b = r;
-            }
-            let divisor = if a == 0 { 1 } else { a };
+            let divisor = JetBigInt::gcd(&numerator, &denominator);
             Some(Self {
-                numerator: n / divisor,
-                denominator: d / divisor,
+                numerator: numerator.div_rem(&divisor)?.0,
+                denominator: denominator.div_rem(&divisor)?.0,
             })
         }
 
         pub fn add(&self, other: &Self) -> Option<Self> {
-            let left = self.numerator.checked_mul(other.denominator)?;
-            let right = other.numerator.checked_mul(self.denominator)?;
-            Self::new(
-                left.checked_add(right)?,
-                self.denominator.checked_mul(other.denominator)?,
+            let left = self.numerator.mul(&other.denominator);
+            let right = other.numerator.mul(&self.denominator);
+            Self::from_bigints(
+                left.add(&right),
+                self.denominator.mul(&other.denominator),
             )
         }
 
         pub fn sub(&self, other: &Self) -> Option<Self> {
-            let left = self.numerator.checked_mul(other.denominator)?;
-            let right = other.numerator.checked_mul(self.denominator)?;
-            Self::new(
-                left.checked_sub(right)?,
-                self.denominator.checked_mul(other.denominator)?,
+            let left = self.numerator.mul(&other.denominator);
+            let right = other.numerator.mul(&self.denominator);
+            Self::from_bigints(
+                left.sub(&right),
+                self.denominator.mul(&other.denominator),
             )
         }
 
         pub fn mul(&self, other: &Self) -> Option<Self> {
-            Self::new(
-                self.numerator.checked_mul(other.numerator)?,
-                self.denominator.checked_mul(other.denominator)?,
+            Self::from_bigints(
+                self.numerator.mul(&other.numerator),
+                self.denominator.mul(&other.denominator),
             )
         }
 
         pub fn div(&self, other: &Self) -> Option<Self> {
-            Self::new(
-                self.numerator.checked_mul(other.denominator)?,
-                self.denominator.checked_mul(other.numerator)?,
+            Self::from_bigints(
+                self.numerator.mul(&other.denominator),
+                self.denominator.mul(&other.numerator),
             )
         }
 
         pub fn from_int(value: i64) -> Option<Self> {
-            Self::new(jet_int_to_i64(value)?, 1)
+            Self::from_bigints(jet_int_value(value), JetBigInt::from_int(1))
         }
 
         pub fn from_float(value: f64) -> Option<Self> {
@@ -2328,10 +2327,7 @@
                 return None;
             }
             if value == 0.0 {
-                return Some(Self {
-                    numerator: 0,
-                    denominator: 1,
-                });
+                return Self::new(0, 1);
             }
             let bits = value.to_bits();
             let negative = (bits >> 63) != 0;
@@ -2342,18 +2338,23 @@
             } else {
                 (fraction | (1u64 << 52), exponent - 1023 - 52)
             };
-            let magnitude = i128::from(significand);
-            let (numerator, denominator) = if power >= 0 {
-                (magnitude.checked_shl(power as u32)?, 1i128)
+            let mut numerator = JetBigInt::from_u64(significand);
+            let denominator = if power >= 0 {
+                for _ in 0..u32::try_from(power).ok()? {
+                    numerator = numerator.mul(&JetBigInt::from_int(2));
+                }
+                JetBigInt::from_int(1)
             } else {
-                (magnitude, 1i128.checked_shl((-power) as u32)?)
+                let mut denominator = JetBigInt::from_int(1);
+                for _ in 0..u32::try_from(-power).ok()? {
+                    denominator = denominator.mul(&JetBigInt::from_int(2));
+                }
+                denominator
             };
-            let numerator = if negative {
-                numerator.checked_neg()?
-            } else {
-                numerator
-            };
-            Self::new(i64::try_from(numerator).ok()?, i64::try_from(denominator).ok()?)
+            if negative {
+                numerator = numerator.neg();
+            }
+            Self::from_bigints(numerator, denominator)
         }
 
         pub fn from_decimal(value: &JetDecimal) -> Option<Self> {
@@ -2361,7 +2362,8 @@
         }
 
         pub fn to_int_exact(&self) -> Option<i64> {
-            (self.denominator == 1).then(|| jet_int_from_i64(self.numerator))
+            (self.denominator == JetBigInt::from_int(1))
+                .then(|| jet_int_pack(self.numerator.clone()))
         }
 
         pub fn to_decimal(&self) -> Option<JetDecimal> {
@@ -2369,69 +2371,36 @@
         }
 
         pub fn to_float(&self) -> f64 {
-            self.numerator as f64 / self.denominator as f64
+            self.numerator.to_string_rep().parse::<f64>().unwrap_or_else(|_| {
+                if self.numerator.negative {
+                    f64::NEG_INFINITY
+                } else {
+                    f64::INFINITY
+                }
+            }) / self.denominator.to_string_rep().parse::<f64>().unwrap_or(f64::INFINITY)
         }
 
         pub fn is_zero(&self) -> bool {
-            self.numerator == 0
+            self.numerator.is_zero()
         }
 
         pub fn to_string_rep(&self) -> String {
-            if let Some(decimal) = finite_fraction_decimal(self.numerator, self.denominator) {
-                return decimal;
+            if let Some(decimal) = JetDecimal::from_fraction(self) {
+                return decimal.to_string_rep();
             }
-            format!("{}/{}", self.numerator, self.denominator)
-        }
-    }
-
-    /// Render a finite reduced ratio without passing through binary floating
-    /// point. A denominator with any factor beyond 2 and 5 stays a fraction.
-    fn finite_fraction_decimal(numerator: i64, denominator: i64) -> Option<String> {
-        if denominator <= 0 {
-            return None;
-        }
-        if numerator == 0 {
-            return Some("0".to_string());
+            format!(
+                "{}/{}",
+                self.numerator.to_string_rep(),
+                self.denominator.to_string_rep()
+            )
         }
 
-        let mut factors = denominator as u64;
-        let mut twos = 0u32;
-        while factors % 2 == 0 {
-            factors /= 2;
-            twos += 1;
-        }
-        let mut fives = 0u32;
-        while factors % 5 == 0 {
-            factors /= 5;
-            fives += 1;
-        }
-        if factors != 1 {
-            return None;
+        pub fn numerator_value(&self) -> i64 {
+            jet_int_pack(self.numerator.clone())
         }
 
-        let scale = twos.max(fives);
-        let denominator = denominator as u128;
-        let magnitude = numerator.unsigned_abs() as u128;
-        let mut remainder = magnitude % denominator;
-        let whole = magnitude / denominator;
-        let sign = if numerator < 0 { "-" } else { "" };
-        if scale == 0 {
-            return Some(format!("{sign}{whole}"));
-        }
-
-        let mut fraction = String::with_capacity(scale as usize);
-        for _ in 0..scale {
-            remainder *= 10;
-            fraction.push(char::from(b'0' + (remainder / denominator) as u8));
-            remainder %= denominator;
-        }
-        while fraction.ends_with('0') {
-            fraction.pop();
-        }
-        if fraction.is_empty() {
-            Some(format!("{sign}{whole}"))
-        } else {
-            Some(format!("{sign}{whole}.{fraction}"))
+        pub fn denominator_value(&self) -> i64 {
+            jet_int_pack(self.denominator.clone())
         }
     }
 
@@ -2457,42 +2426,7 @@
 
     impl JetDecimal {
         pub fn from_str(s: &str) -> Result<Self, String> {
-            let t = s.trim();
-            if t.is_empty() {
-                return Err("empty Decimal string".to_string());
-            }
-            let (negative, body) = if let Some(rest) = t.strip_prefix('-') {
-                (true, rest)
-            } else if let Some(rest) = t.strip_prefix('+') {
-                (false, rest)
-            } else {
-                (false, t)
-            };
-            let parts: Vec<&str> = body.split('.').collect();
-            if parts.len() > 2 {
-                return Err(format!("invalid Decimal string `{s}`"));
-            }
-            let (int_part, frac_part) = (parts[0], parts.get(1).copied().unwrap_or(""));
-            if int_part.is_empty() && frac_part.is_empty() {
-                return Err(format!("invalid Decimal string `{s}`"));
-            }
-            if !int_part.chars().all(|c| c.is_ascii_digit())
-                || !frac_part.chars().all(|c| c.is_ascii_digit())
-            {
-                return Err(format!("invalid Decimal string `{s}`"));
-            }
-            let mut digits: Vec<u8> = int_part
-                .chars()
-                .chain(frac_part.chars())
-                .map(|c| (c as u8 - b'0'))
-                .collect();
-            while digits.len() > 1 && digits.first() == Some(&0) {
-                digits.remove(0);
-            }
-            if digits.is_empty() {
-                digits.push(0);
-            }
-            let scale = frac_part.len() as u32;
+            let (negative, digits, scale) = crate::jet_json_number::json_decimal_lexeme(s)?;
             Ok(JetDecimal {
                 negative,
                 digits,
@@ -2662,9 +2596,7 @@
         }
 
         pub fn to_fraction(&self) -> Option<JetFraction> {
-            let numerator = self.signed_bigint().try_i64()?;
-            let denominator = Self::scale_factor(self.scale).try_i64()?;
-            JetFraction::new(numerator, denominator)
+            JetFraction::from_bigints(self.signed_bigint(), Self::scale_factor(self.scale))
         }
 
         pub fn div(&self, other: &JetDecimal) -> Option<JetFraction> {
@@ -2735,24 +2667,31 @@
         /// Build a Decimal only when the reduced ratio has a finite base-10
         /// expansion. Repeating ratios remain Fractions by design.
         pub fn from_fraction(fraction: &JetFraction) -> Option<Self> {
-            let mut factors = fraction.denominator as u64;
+            let mut factors = fraction.denominator.clone();
             let mut twos = 0u32;
-            while factors % 2 == 0 {
-                factors /= 2;
+            loop {
+                let (quotient, remainder) = factors.div_rem_small(2);
+                if remainder != 0 {
+                    break;
+                }
+                factors = quotient;
                 twos += 1;
             }
             let mut fives = 0u32;
-            while factors % 5 == 0 {
-                factors /= 5;
+            loop {
+                let (quotient, remainder) = factors.div_rem_small(5);
+                if remainder != 0 {
+                    break;
+                }
+                factors = quotient;
                 fives += 1;
             }
-            if factors != 1 {
+            if factors != JetBigInt::from_int(1) {
                 return None;
             }
             let scale = twos.max(fives);
-            let numerator = JetBigInt::from_int(fraction.numerator);
-            let scaled = numerator.mul(&Self::scale_factor(scale));
-            let (digits, remainder) = scaled.div_rem(&JetBigInt::from_int(fraction.denominator))?;
+            let scaled = fraction.numerator.mul(&Self::scale_factor(scale));
+            let (digits, remainder) = scaled.div_rem(&fraction.denominator)?;
             if !remainder.is_zero() {
                 return None;
             }

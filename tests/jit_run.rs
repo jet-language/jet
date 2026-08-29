@@ -270,6 +270,12 @@ fn jit_http_worker_teardown_quiesces_runtime_before_resident_drop() {
             && !prelude.contains("if worker.is_finished() { let _ = worker.join(); }"),
         "HTTP teardown must join every worker, including unfinished workers"
     );
+    assert!(
+        prelude.contains("let already_requested = server.inner.shutdown_called.swap(true, Ordering::AcqRel);")
+            && prelude.contains("if already_requested { return jet_http_server_wait_for_report(server); }")
+            && prelude.contains("report = server.inner.report_ready.wait(report).unwrap();"),
+        "duplicate HTTP shutdown must wait for the first shutdown's worker joins"
+    );
 
     let concurrency = include_str!("../crates/jet-jit/src/Concurrency.rs");
     assert!(
@@ -300,6 +306,23 @@ fn jit_http_worker_teardown_quiesces_runtime_before_resident_drop() {
             "Concurrency::set_active_runtime(None);\n        Concurrency::clear_http_shared_runtime();"
         ),
         "normal resident invocation must not clear the shared HTTP runtime while workers live"
+    );
+    let hot_swap_start = resident
+        .find("pub(crate) fn resident_hot_swap(")
+        .expect("resident hot-swap function must exist");
+    let hot_swap = &resident[hot_swap_start..];
+    let hot_swap_handles = hot_swap
+        .find("crate::net_http_rt::clear_net_http_handles();")
+        .expect("hot-swap must quiesce HTTP workers");
+    let hot_swap_runtime = hot_swap
+        .find("let mut runtime = RESIDENT_RUNTIME")
+        .expect("hot-swap must retain the resident runtime until workers stop");
+    let hot_swap_module = hot_swap
+        .find("RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);")
+        .expect("hot-swap must replace the resident module");
+    assert!(
+        hot_swap_handles < hot_swap_runtime && hot_swap_handles < hot_swap_module,
+        "hot-swap must quiesce HTTP workers before taking the runtime or dropping the old module"
     );
 }
 

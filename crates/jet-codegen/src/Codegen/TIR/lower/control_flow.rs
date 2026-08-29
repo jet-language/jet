@@ -592,6 +592,36 @@ fn lower_if_cond_atom(
             }
         }
         if is_json_variant(variant) {
+            // DataTree dispatch is valid for unit and wildcard payload arms as
+            // well as bound payloads. Keep all three forms in TIR so statement
+            // dispatch cannot fall through to the unsupported PatternTest
+            // expression path (card #2356).
+            if bindings.is_empty() {
+                return (
+                    TIfCond::Matches {
+                        pattern: TPattern::arm(
+                            pattern.clone(),
+                            Some(Syntax::TYPE_DATA.to_string()),
+                        ),
+                        subj,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                );
+            }
+            if bindings.len() == 1 && matches!(bindings.first(), Some(PatSlot::Wildcard)) {
+                return (
+                    TIfCond::IfLet {
+                        pattern: TPattern::arm(
+                            pattern.clone(),
+                            Some(Syntax::TYPE_DATA.to_string()),
+                        ),
+                        subj,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                );
+            }
             if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
                 let ty = crate::Sema::core_json_pattern_types(variant)
                     .and_then(|ts| ts.into_iter().next());

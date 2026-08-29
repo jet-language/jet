@@ -14,6 +14,7 @@ use jet_codegen::AST::CtValue;
 pub(crate) mod time_rt {
     include!("../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
     include!("../../jet-codegen/src/Prelude/Core/Time.rs");
+    include!("../../jet-codegen/src/Prelude/Core/TimeInstant.rs");
 }
 
 #[derive(Clone)]

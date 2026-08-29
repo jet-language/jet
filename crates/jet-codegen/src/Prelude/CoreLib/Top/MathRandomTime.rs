@@ -1,3 +1,24 @@
+// D-TIME-INSTANT-SPLIT1=A: these trait impls stay beside the Core-owned
+// carrier. The shared carrier itself lives in Core/TimeInstant.rs so JIT and
+// AOT use the same implementation.
+impl JetShow for JetInstant {
+    fn jet_show(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDisplay for JetInstant {
+    fn jet_display(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
+impl JetDebug for JetInstant {
+    fn jet_debug(&self) -> String {
+        self.to_string_fmt()
+    }
+}
+
 fn jet_deadline_exceeded(wait_kind: &str) -> ! {
     let rendered = jet_std::jet_task_deadline(wait_kind).render();
     jet_std::jet_task_deadline_mark_pending();
@@ -450,7 +471,8 @@ fn jet_mime_extension(mime: &String) -> Option<String> {
 
 // D-DECIMAL1 / D-NUMTYPE1: precise numeric constructors and methods.
 fn jet_decimal_from_str(s: &String) -> jet_std::JetDecimal {
-    jet_std::JetDecimal::from_str(s).expect("invalid Decimal string")
+    jet_std::JetDecimal::from_str(s)
+        .unwrap_or_else(|_| jet_panic("", 0, "invalid Decimal string"))
 }
 // D-NUMTYPE1=A: exact ratios. Every answer is optional, because a zero bottom
 // has no value and a product can leave the range.
@@ -458,7 +480,8 @@ fn jet_fraction_new(numerator: i64, denominator: i64) -> Option<jet_std::JetFrac
     jet_std::JetFraction::new(numerator, denominator)
 }
 fn jet_fraction_from_parts(numerator: i64, denominator: i64) -> jet_std::JetFraction {
-    jet_std::JetFraction::new(numerator, denominator).expect("invalid exact quotient")
+    jet_std::JetFraction::new(numerator, denominator)
+        .unwrap_or_else(|| jet_panic("", 0, "invalid exact quotient"))
 }
 fn jet_fraction_add(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
     a.add(b).expect("this sum of ratios overflows the value type")
@@ -485,10 +508,10 @@ fn jet_fraction_equal(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> boo
     a == b
 }
 fn jet_fraction_numerator(a: &jet_std::JetFraction) -> i64 {
-    a.numerator
+    a.numerator_value()
 }
 fn jet_fraction_denominator(a: &jet_std::JetFraction) -> i64 {
-    a.denominator
+    a.denominator_value()
 }
 fn jet_fraction_to_string(a: &jet_std::JetFraction) -> String {
     a.to_string_rep()

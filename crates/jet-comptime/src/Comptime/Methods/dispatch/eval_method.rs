@@ -1079,7 +1079,7 @@ impl<'a> Interp<'a> {
                     }
                     let mut sort_err = None;
                     let descending = method == "sort_by_desc";
-                    keyed.sort_by(|a, b| match cmp(a.0.clone(), b.0.clone(), span) {
+                    keyed.sort_by(|a, b| match cmp_for_sort(a.0.clone(), b.0.clone(), span) {
                         Ok(o) if descending => o.reverse(),
                         Ok(o) => o,
                         Err(e) => {

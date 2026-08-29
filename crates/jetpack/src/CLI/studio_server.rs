@@ -22,6 +22,8 @@ pub(super) struct StudioContext {
     pub(super) proved_source: std::sync::Mutex<Option<StudioProvedSource>>,
 }
 
+const STUDIO_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 pub(super) fn studio_host(parsed: &Parsed) -> Option<String> {
     parsed.flags.studio_host.clone()
 }
@@ -109,8 +111,7 @@ pub(super) fn serve_studio(
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
-                let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
+                let _ = configure_studio_stream(&stream);
                 let _ = handle_studio_request(&mut stream, app, meta, data, context, local_addr);
             }
             Err(e) => {
@@ -124,6 +125,11 @@ pub(super) fn serve_studio(
         }
     }
     0
+}
+
+fn configure_studio_stream(stream: &std::net::TcpStream) -> std::io::Result<()> {
+    stream.set_read_timeout(Some(STUDIO_IO_TIMEOUT))?;
+    stream.set_write_timeout(Some(STUDIO_IO_TIMEOUT))
 }
 
 fn handle_studio_request(
@@ -477,4 +483,35 @@ fn http_request_complete(buf: &[u8]) -> bool {
         })
         .unwrap_or(0);
     buf.len().saturating_sub(header_end) >= content_len
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn studio_slowloris_connections_have_io_deadlines() {
+        use std::io::Write;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+
+        configure_studio_stream(&server).unwrap();
+        assert_eq!(server.read_timeout().unwrap(), Some(STUDIO_IO_TIMEOUT));
+        assert_eq!(server.write_timeout().unwrap(), Some(STUDIO_IO_TIMEOUT));
+        server
+            .set_read_timeout(Some(std::time::Duration::from_millis(20)))
+            .unwrap();
+        client.write_all(b"GET /studio/ HTTP/1.1\r\n").unwrap();
+        let error = read_http_request(&mut server).unwrap_err();
+        assert!(
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ),
+            "partial request should hit the read deadline: {error}"
+        );
+        drop(client);
+    }
 }

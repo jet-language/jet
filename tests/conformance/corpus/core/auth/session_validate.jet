@@ -1,0 +1,10 @@
+// core-conformance: core.auth.session_validate
+use core.auth as auth
+
+fn run() {
+    auth.register_user("alice", "argon2id:demo") ?? panic("register")
+    session :: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? panic("login")
+    id :: auth.session_id(session)
+    result :: auth.session_validate(id, 1_700_000_000_001) ?? panic("validate")
+    print(auth.session_user(result))
+}

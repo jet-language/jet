@@ -3772,6 +3772,97 @@ fn git_dep_rejects_private_transport_before_network_access() {
 }
 
 #[test]
+fn git_dep_rejects_unscoped_local_transport_before_git_execution() {
+    if !have_git() {
+        eprintln!("note: skipping git_dep_unscoped_local_transport (git not found)");
+        return;
+    }
+
+    for (index, (project, outside, url)) in [
+        {
+            let project = tmp_dir("git_local_transport_file");
+            let outside = project.with_file_name(format!(
+                "jet_pkg_git_local_transport_outside_{}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&outside).unwrap();
+            let url = format!("file://{}", outside.display());
+            (project, outside, url)
+        },
+        (
+            tmp_dir("git_local_transport_path"),
+            PathBuf::new(),
+            "../unscoped.git".to_string(),
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let raw = manifest_with_deps(
+            "app",
+            "0.1.0",
+            &format!(
+                "    hostile{index}: {{ git: \"{url}\", rev: \"0000000000000000000000000000000000000000\" }},"
+            ),
+        );
+        write(&project, "package.jet", &raw);
+        let manifest = jet::Manifest::parse(&project.join("package.jet"), &raw).unwrap();
+        let store = project.join("store");
+        fs::create_dir_all(&store).unwrap();
+        let options = jet::Fetch::FetchOptions {
+            locked: false,
+            update: false,
+            update_dep: None,
+            resolution: jet::Publish::ResolveMode::Conservative,
+        };
+
+        let diagnostics = with_store(&store, || {
+            jet::Fetch::fetch(&project, &manifest, None, &options)
+        })
+        .expect_err("unscoped local Git transport must be rejected before Git runs");
+        assert_eq!(first_diag_code(&diagnostics), "E1203");
+        assert!(!project.join(".jet").exists());
+        let _ = fs::remove_dir_all(&project);
+        if !outside.as_os_str().is_empty() {
+            let _ = fs::remove_dir_all(&outside);
+        }
+    }
+}
+
+#[test]
+fn git_dep_rejects_embedded_credentials_before_git_execution() {
+    if !have_git() {
+        eprintln!("note: skipping git_dep_embedded_credentials (git not found)");
+        return;
+    }
+
+    let tmp = tmp_dir("git_embedded_credentials");
+    let raw = manifest_with_deps(
+        "app",
+        "0.1.0",
+        "    hostile: { git: \"https://user:secret@example.com/repo.git\", rev: \"0000000000000000000000000000000000000000\" },",
+    );
+    write(&tmp, "package.jet", &raw);
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    let options = jet::Fetch::FetchOptions {
+        locked: false,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+
+    let diagnostics = with_store(&store, || {
+        jet::Fetch::fetch(&tmp, &manifest, None, &options)
+    })
+    .expect_err("embedded Git credentials must be rejected before network access");
+    assert_eq!(first_diag_code(&diagnostics), "E1203");
+    assert!(!tmp.join(".jet").exists());
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
 fn git_dep_rejects_option_revision_before_git_execution() {
     if !have_git() {
         eprintln!("note: skipping git_dep_option_revision (git not found)");

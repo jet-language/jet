@@ -11,9 +11,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MAX_CAPTURED_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+// Build actions must have a finite wall-clock budget in every native backend.
+pub const DEFAULT_ACTION_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[cfg(target_os = "macos")]
 const MACOS_SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
@@ -329,6 +331,26 @@ pub fn output(
     env: &BTreeMap<String, String>,
     share_network: bool,
 ) -> Result<Output, Error> {
+    output_with_timeout(
+        executable,
+        args,
+        source_dir,
+        output_dir,
+        env,
+        share_network,
+        None,
+    )
+}
+
+pub fn output_with_timeout(
+    executable: &Path,
+    args: &[String],
+    source_dir: &Path,
+    output_dir: Option<&Path>,
+    env: &BTreeMap<String, String>,
+    share_network: bool,
+    timeout: Option<Duration>,
+) -> Result<Output, Error> {
     let argv0 = executable.file_name().map(std::ffi::OsStr::to_owned);
     let child = spawn(
         executable,
@@ -348,7 +370,7 @@ pub fn output(
             Ok(())
         },
     )?;
-    wait_with_limited_output(child)
+    wait_with_limited_output(child, timeout)
 }
 
 fn read_output_limited<R: Read>(mut reader: R) -> std::io::Result<(Vec<u8>, bool)> {
@@ -368,7 +390,7 @@ fn read_output_limited<R: Read>(mut reader: R) -> std::io::Result<(Vec<u8>, bool
     }
 }
 
-fn wait_with_limited_output(mut child: Child) -> Result<Output, Error> {
+fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Result<Output, Error> {
     let stdout = child
         .stdout
         .take()
@@ -395,13 +417,27 @@ fn wait_with_limited_output(mut child: Child) -> Result<Output, Error> {
         result
     });
 
+    let deadline = timeout.map(|limit| Instant::now() + limit);
+    let mut timed_out = false;
     let status = loop {
-        if exceeded.load(Ordering::Acquire) {
-            let _ = child.kill();
-        }
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) => thread::sleep(Duration::from_millis(5)),
+            Ok(None) => {
+                if exceeded.load(Ordering::Acquire) {
+                    let _ = child.kill();
+                    break child
+                        .wait()
+                        .map_err(|error| Error::Io(error.to_string()))?;
+                }
+                if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                    timed_out = true;
+                    let _ = child.kill();
+                    break child
+                        .wait()
+                        .map_err(|error| Error::Io(error.to_string()))?;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -420,6 +456,13 @@ fn wait_with_limited_output(mut child: Child) -> Result<Output, Error> {
     if exceeded.load(Ordering::Acquire) {
         return Err(Error::Io(format!(
             "sandbox process output exceeded {MAX_CAPTURED_OUTPUT_BYTES} bytes"
+        )));
+    }
+    if timed_out {
+        let timeout = timeout.expect("timeout flag requires a timeout");
+        return Err(Error::Io(format!(
+            "sandbox process timed out after {}ms",
+            timeout.as_millis()
         )));
     }
     Ok(Output {

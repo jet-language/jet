@@ -421,8 +421,13 @@ where
 
 /// Count each item directly. `count_by(x -> x)` is the same operation with
 /// the identity projection, but this named kernel keeps the common path terse.
-fn jet_list_counts<T: Ord + Clone, I: IntoIterator<Item = T>>(xs: I) -> JetMap<T, i64> {
-    jet_list_count_by(xs, |item| item.clone())
+fn jet_list_counts<T: Ord, I: IntoIterator<Item = T>>(xs: I) -> JetMap<T, i64> {
+    let mut m: JetMap<T, i64> = JetMap::new();
+    let storage = std::ops::DerefMut::deref_mut(&mut m);
+    for item in xs {
+        *storage.entry(item).or_insert(0) += 1;
+    }
+    m
 }
 
 fn jet_map_copy_kernel<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> JetMap<K, V> {

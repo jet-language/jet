@@ -958,7 +958,10 @@ input must be unpadded and canonical.
 `UnsupportedToken`, `InvalidSignature`, `WeakKey`, `MissingClaim`,
 `WrongAudience`, `WrongIssuer`, `TokenExpired`, `DecodeError`, and
 `TokenNotYetValid` variants. Sessions use httponly/secure/samesite cookie
-defaults.
+defaults. The current OAuth surface fails closed: `oauth_begin` issues no
+bearer state and `oauth_finish` accepts no caller-supplied subject until a
+browser-bound provider flow verifies the provider proof, issuer, audience, and
+nonce.
 The implementation is compiler-embedded, reuses Jet's JSON and crypto
 mechanisms, and adds no external dependency.
 

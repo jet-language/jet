@@ -1180,7 +1180,6 @@ impl<'a> EvalRecursiveStep<'a> {
             | Self::BinaryRight { name, .. } => name,
         }
     }
-
 }
 
 enum EvalRecursiveContinuation<'a> {
@@ -1209,48 +1208,6 @@ struct EvalRecursiveFrame<'a> {
 
 fn recursive_marker(stmt: &TStmt) -> bool {
     matches!(stmt, TStmt::LineMarker(_) | TStmt::SourceSpan(_))
-}
-
-fn recursive_debug_expr(expr: &TExpr) -> String {
-    match &expr.kind {
-        TExprKind::Ok(inner) => format!("Ok({:?}; {})", expr.ty, recursive_debug_expr(inner)),
-        TExprKind::Try { inner, .. } => format!("Try({})", recursive_debug_expr(inner)),
-        TExprKind::Call { name, args, .. } => format!("Call({name}/{})", args.len()),
-        TExprKind::InlineBlock(stmts) => format!(
-            "Inline({:?}; {})",
-            expr.ty,
-            stmts
-                .iter()
-                .filter_map(|stmt| match stmt {
-                    TStmt::ExprStmt(value) => Some(recursive_debug_expr(value)),
-                    TStmt::Let { init, .. } => {
-                        Some(format!("Let({})", recursive_debug_expr(init)))
-                    }
-                    TStmt::Return(value) => value.as_ref().map(recursive_debug_expr),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        TExprKind::StaticCall { method, args, .. } => {
-            format!("StaticCall({}/{})", method.name, args.len())
-        }
-        TExprKind::ModuleCall { args, .. } => format!("ModuleCall({})", args.len()),
-        TExprKind::MethodCall { method, args, .. } => {
-            format!("MethodCall({}/{})", method.name, args.len())
-        }
-        TExprKind::FnFieldCall { args, .. } => format!("FnFieldCall({})", args.len()),
-        TExprKind::Clone(inner) => format!("Clone({})", recursive_debug_expr(inner)),
-        TExprKind::ExplicitCopy(inner) => format!("Copy({})", recursive_debug_expr(inner)),
-        TExprKind::Binary { op, lhs, rhs, .. } => format!(
-            "Binary({op:?}; {} + {})",
-            recursive_debug_expr(lhs),
-            recursive_debug_expr(rhs)
-        ),
-        TExprKind::Local(local) => format!("Local({:?}; {:?})", local.name, expr.ty),
-        TExprKind::IntLit(value, _) => format!("Int({value}; {:?})", expr.ty),
-        _ => format!("other; {:?}", expr.ty),
-    }
 }
 
 fn one_recursive_stmt<'a>(stmts: &'a [TStmt]) -> Option<&'a TStmt> {
@@ -3865,47 +3822,6 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         args: Vec<CtValue>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        if func.name == "recurse" && self.call_depth < 2 {
-            let recursive = recursive_body(func);
-            eprintln!(
-                "[DEBUG-w6recurse] ret={:?} body={} chain={} step={} raw={}",
-                func.ret,
-                recursive.is_some(),
-                recursive_chain_supported(&self.funcs, func),
-                recursive
-                    .map(|body| body.step.name().to_string())
-                    .unwrap_or_default(),
-                func.body
-                    .iter()
-                    .filter_map(|stmt| match stmt {
-                        TStmt::If {
-                            cond: TIfCond::Plain(condition),
-                            then_body,
-                            ..
-                        } => Some(format!(
-                            "if {} then {}",
-                            match condition.kind {
-                                TExprKind::Binary { .. } => "binary",
-                                _ => "other",
-                            },
-                            then_body
-                                .iter()
-                                .filter_map(|stmt| match stmt {
-                                    TStmt::Return(Some(value)) => {
-                                        Some(recursive_debug_expr(value))
-                                    }
-                                    _ => None,
-                                })
-                                .collect::<Vec<_>>()
-                                .join(","),
-                        )),
-                        TStmt::Return(Some(value)) => Some(recursive_debug_expr(value)),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" | "),
-            );
-        }
         // D-MEMO1=A: the interpreter adapter marshals the argument tuple to the
         // same Prelude store used by emitted Rust. Sema has already proved the
         // tuple safe to cache; this path never rechecks purity or hashability.

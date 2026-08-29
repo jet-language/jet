@@ -3204,6 +3204,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             kind,
             body,
             label,
+            auto_vectorization,
             ..
         } => match kind {
             ForKind::Range {

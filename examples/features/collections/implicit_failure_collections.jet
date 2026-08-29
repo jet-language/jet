@@ -1,0 +1,15 @@
+// Implicit failure rows propagate through collection callbacks.
+fn parse_default(s: String) Int -> {
+    return Int.parse(s) ?? panic("bad integer")
+}
+
+fn keep_default(s: String) Bool -> {
+    return parse_default(s) > 1
+}
+
+fn run() {
+    nums :: ["1", "2", "3"].map(s -> parse_default(s))
+    selected :: ["1", "2", "3"].filter(s -> keep_default(s))
+    print(nums)
+    print(selected)
+}

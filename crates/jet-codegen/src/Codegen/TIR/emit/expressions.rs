@@ -6557,7 +6557,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ok_val = ok_val,
                     )
                 }
-                // D-BINPAT1 (card #2100): `reader.take_pattern(b"…")` —
+                // D-BINPAT1 (card #2100): `reader.take_pattern([U8]{"…"})` —
                 // marshal the byte tail through the shared Prelude matcher,
                 // then project the binding tuple and consumed byte count.
                 THandleOp::ReaderTakePattern { parts, canonical } => {

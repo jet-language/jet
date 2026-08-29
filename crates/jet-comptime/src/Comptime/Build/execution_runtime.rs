@@ -244,16 +244,37 @@ pub fn run_native_sandboxed(
     env: &BTreeMap<String, String>,
     share_network: bool,
 ) -> Result<NativeSandboxOutput, NativeSandboxError> {
+    run_native_sandboxed_with_timeout(
+        executable,
+        args,
+        source_dir,
+        output_dir,
+        env,
+        share_network,
+        None,
+    )
+}
+
+fn run_native_sandboxed_with_timeout(
+    executable: &Path,
+    args: &[String],
+    source_dir: &Path,
+    output_dir: Option<&Path>,
+    env: &BTreeMap<String, String>,
+    share_network: bool,
+    timeout: Option<Duration>,
+) -> Result<NativeSandboxOutput, NativeSandboxError> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         let output_is_separate = output_dir.is_some();
-        let output = jet_process_sandbox::output(
+        let output = jet_process_sandbox::output_with_timeout(
             executable,
             args,
             source_dir,
             output_dir,
             env,
             share_network,
+            timeout,
         )
         .map_err(|error| match error {
             jet_process_sandbox::Error::Unsupported(detail) => {
@@ -283,7 +304,7 @@ pub fn run_native_sandboxed(
             share_network,
             true,
             output_dir.is_none(),
-            None,
+            timeout.map(|limit| limit.as_millis().min(i64::MAX as u128) as i64),
             Some(64 * 1024 * 1024),
         )
         .map_err(|error| match error {
@@ -846,16 +867,22 @@ fn execute_one_action(
         })
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<BTreeMap<_, _>>();
-    let output = run_native_sandboxed(
+    let output = match run_native_sandboxed_with_timeout(
         &executable,
         &action.argv[1..],
         &sandbox,
         None,
         &env,
         grants.contains(&BuildCapability::Net) && action.caps.contains(&BuildCapability::Net),
+        Some(jet_process_sandbox::DEFAULT_ACTION_TIMEOUT),
     )
-    .map_err(|error| native_sandbox_error(action, error))?
-    .output;
+    {
+        Ok(result) => result.output,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&sandbox);
+            return Err(native_sandbox_error(action, error));
+        }
+    };
     let code = output.status.code().unwrap_or(1);
     if !output.status.success() {
         let _ = fs::remove_dir_all(&sandbox);
@@ -2601,5 +2628,64 @@ mod tests {
 
         assert!(result.is_none());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_sandbox_timeout_stops_a_hanging_build_action() {
+        let shell = std::env::split_paths(
+            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+        )
+        .map(|directory| directory.join("sh"))
+        .find(|candidate| candidate.is_file())
+        .or_else(|| {
+            std::env::split_paths(
+                &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+            )
+            .map(|directory| directory.join("bash"))
+            .find(|candidate| candidate.is_file())
+        })
+        .expect("a shell is required for the timeout regression");
+        let root = std::env::temp_dir().join(format!(
+            "jet-build-action-timeout-{}-{}",
+            std::process::id(),
+            REMOTE_ATTEMPT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let started = Instant::now();
+        let result = run_native_sandboxed_with_timeout(
+            &shell,
+            &["-c".to_string(), "while :; do :; done".to_string()],
+            &root,
+            None,
+            &BTreeMap::new(),
+            false,
+            Some(Duration::from_millis(100)),
+        );
+        let elapsed = started.elapsed();
+        let status = native_sandbox_status();
+        if !status.available {
+            assert!(
+                matches!(result, Err(NativeSandboxError::Unsupported(_))),
+                "unsupported backend must refuse the hanging action: {result:?}"
+            );
+        } else {
+            match result {
+                Err(NativeSandboxError::Io(detail)) => {
+                    assert!(
+                        detail.contains("timed out"),
+                        "timeout regression returned the wrong error: {detail}"
+                    );
+                }
+                other => panic!("hanging action was not stopped: {other:?}"),
+            }
+            assert!(
+                elapsed < Duration::from_secs(5),
+                "timeout took too long: {elapsed:?}"
+            );
+        }
+
+        fs::remove_dir_all(&root).unwrap();
     }
 }

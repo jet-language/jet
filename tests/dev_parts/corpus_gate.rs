@@ -121,10 +121,11 @@ fn core_conformance_corpus_uses_strict_three_tier_gate() {
     });
 }
 
-/// #2286 criterion 3: the generator's structural guard must reject the
-/// bind-and-discard shape that previously made `uuid.v4` look covered.
+/// #2286 criteria 1 and 3: the checker rejects structural false greens and
+/// synthetic denominator rows, including the bind-and-discard shape that
+/// previously made `uuid.v4` look covered.
 #[test]
-fn core_conformance_checker_rejects_unconsumed_result() {
+fn core_conformance_checker_rejects_structural_false_greens() {
     let output = std::process::Command::new("node")
         .arg("scripts/agent/core-conformance.mjs")
         .arg("--hostile-fixtures")
@@ -140,6 +141,10 @@ fn core_conformance_checker_rejects_unconsumed_result() {
     assert!(
         String::from_utf8_lossy(&output.stdout).contains("rejected bind-and-discard result"),
         "hostile fixture output must state the result-consumption guard"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("denominator rows"),
+        "hostile fixture output must state the denominator guard"
     );
 }
 

@@ -787,7 +787,7 @@ fn plain_string_value(parts: &[StrTokPart]) -> Option<String> {
             StrTokPart::Lit(text) => value.push_str(text),
             // D-BYTELIT1=B: a raw `\xNN` byte is not plain text; callers that
             // need a plain string must not fold byte literals.
-            StrTokPart::Byte(_) | StrTokPart::ByteText(_) => return None,
+            StrTokPart::Byte(_) => return None,
             StrTokPart::Interp(_) => return None,
         }
     }
@@ -810,7 +810,6 @@ fn string_parts_equal(left: &[StrTokPart], right: &[StrTokPart]) -> bool {
             .zip(right)
             .all(|(left, right)| match (left, right) {
                 (StrTokPart::Lit(left), StrTokPart::Lit(right)) => left == right,
-                (StrTokPart::ByteText(left), StrTokPart::ByteText(right)) => left == right,
                 (StrTokPart::Interp(left), StrTokPart::Interp(right)) => {
                     let left: Vec<_> = left
                         .iter()

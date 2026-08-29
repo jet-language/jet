@@ -1965,8 +1965,9 @@ impl CtValue {
                     let fraction = crate::Numeric::CtFraction::from_value(self)
                         .expect("comptime Fraction must have its carrier fields");
                     return format!(
-                        "jet_fraction_from_parts({}i64, {}i64)",
-                        fraction.numerator, fraction.denominator
+                        "jet_fraction_from_parts(jet_std::jet_int_from_str({:?}).unwrap(), jet_std::jet_int_from_str({:?}).unwrap())",
+                        fraction.numerator.to_string_rep(),
+                        fraction.denominator.to_string_rep()
                     );
                 }
                 if type_name == crate::Syntax::TYPE_DECIMAL {

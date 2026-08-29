@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2357,
-    "rev": 46744,
+    "rev": 46782,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -155322,6 +155322,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "2026-08-29, canonical run.jet passes jet check dogfood/tower with 12 warnings and jet fmt --check. jet run reaches E3011 PatternTest after 74,959 ms, exits 70, and records failed-startup peak RSS 4,684,036 KiB. No steady-state request/RSS measurement exists."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "Jetpack scale canary adds a non-corpus whole-program deopt failure: after removing the known files and Codable gaps, trace-tiers selects tier0 because generated CLIError.decode has body stmt Other, then exits E0956 field recv. One generated struct decoder makes every plan/list/inspect function deopt and fail."
         },
         {
@@ -155423,7 +155428,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-27T21:47:19.215Z",
-      "updated": "2026-08-29T04:23:37.555Z",
+      "updated": "2026-08-29T08:34:53.088Z",
       "updatedBy": "fable"
     },
     {
@@ -155762,7 +155767,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "The mechanism is ratified and partially shipped. Probe evidence (fable, 2026-08-27, fresh binary): {ratio:Fixed(2)} and {ratio:Debug} work on the default tier; E0914 fix-text names the live selector set Debug, Pretty, Fixed(n), Unit(name|bare). The rail spells ':', one selector per hole, lowering to core.text.fmt (Fixed -> fmt.decimal, Float-only per E0112).\n\nThree work streams:\n1. CORPUS FIX (with #2263): binparse/datasummary/csvtransform hand-rolled decimals were avoidable — {x:Fixed(6)} exists. Rewrite those Jet sources.\n2. IMPLEMENT/VERIFY tier parity: prove every live selector on every tier (I9) — one probe program per selector on default run, --interpret, release, dev, AOT; fix any tier gap found.\n3. RATIFIED D-FMT-INTERP3=B (2026-08-27) — implement the full family: {n:Hex(16)} zero-padded lowercase hex, {s:Pad(20)} and {s:PadLeft(8)}, Fixed widened to accept Int, {x:Sci(3)} scientific, {x:Percent(1)}, {n:Bin}, {n:Oct}, plus a fill argument for padding. Law: every selector maps 1:1 to one core.fmt function (owner mechanism pick 2026-08-27: sugar lowers to fmt methods); the set stays closed. I7 chores: Syntax.rs rows with decision ID, E0914 fix-text lists the full set, syntax-decisions.md log entry, grammars regenerated, UI snapshots re-blessed.\n\nNon-corpus witness: a formatting example under examples/features/text/ exercising every selector, golden-tested, identical on every tier.\nOwned paths: parser/sema selector table, core.text.fmt Prelude parts, Syntax.rs, examples/features/text/, snapshots.",
       "checkSteps": null,
@@ -155816,11 +155821,11 @@
         {
           "n": 4,
           "text": "I7 chores: Syntax.rs entries, E0914 fix-text lists the full set, UI snapshots re-blessed, examples/features/text formatting example golden-added",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-27T22:36:47.538Z"
+          "evidence": "Lane wafmtspec: Syntax.rs lines 297-307 register every D-FMT-INTERP3 selector and E0914 lists the full selector set; snapshot re-blessed from real binary output, cmp exit 0.",
+          "at": "2026-08-29T09:12:31.931Z"
         },
         {
           "n": 5,
@@ -155843,20 +155848,20 @@
         {
           "n": 7,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-27T23:16:46.606Z"
+          "evidence": "Lane wafmtspec: 'jet self devtools grammars' regenerated the editor grammar sections.",
+          "at": "2026-08-29T09:12:33.026Z"
         },
         {
           "n": 8,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-27T23:16:46.606Z"
+          "evidence": "Lane wafmtspec: diagnostic snapshot re-blessed from real binary output; cmp against the blessed file exits 0.",
+          "at": "2026-08-29T09:12:33.501Z"
         }
       ],
       "refs": [],
@@ -155869,8 +155874,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-27T21:47:21.410Z",
-      "updated": "2026-08-28T21:55:44.256Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T09:12:34.390Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-29T09:12:34.390Z"
     },
     {
       "id": "c02livam",
@@ -157576,8 +157582,18 @@
       "plan": "1) Denominator: module_items.rs public Core rows (~926). Generator emits tests/conformance/corpus/<module>/<fn>.jet - one minimal program per function that CONSUMES its result (print/assert on a derived value; bind-and-discard is a build error in the generator). Hand-authored bodies where mechanical synthesis fails; the generator only scaffolds and verifies coverage, never invents semantics. 2) Discovery: the existing corpus gate (tests/dev_parts/corpus_gate.rs) picks the new tree up unchanged; its ledger gains a denominator law: every module_items row has exactly one conformance program or a named carve-out entry (owner-ratified list) - missing coverage fails the suite. 3) Tier law: byte-diff AOT vs default vs forced-interpreter per program (existing gate mechanics). 4) Landing order: generator + denominator check first (expect RED = today's uncovered surface), then burn coverage in lanes per module family. Non-goals: no new harness binary; reuse the gate.",
       "checkSteps": "denominator test enforces stem-or-exclusion per registry row;corpus discovered by existing gate;exclusion list explicit and counted;gate red rows match #2252 backlog exactly",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "fable",
       "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Lane waconform result: the registry-driven denominator now exists and reports honestly — 927 public rows, 158 programs, 0 carve-outs, 769 uncovered. Criterion 3 MET: the hostile-fixture gate exits 0 and correctly rejects both a bind-and-discard result and an unused binding, which is the probe law that made the earlier census false-green. Criterion 1 is blocked by the 769 uncovered rows (that is the work, not a defect). Criterion 2 is blocked by a real compile error: crates/jet-foundation/src/Numeric.rs:289 returns CtDecimal where String is expected. Direct encoding witnesses pass both tiers and goldens. ALSO: relocate the .jet corpus sources out of examples/features/expected/ (goldens only) into tests/conformance/corpus/ before any of this lands."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "REVIEW FINDING on the uncommitted conformance-corpus work — do not commit it as-is.\\n\\nThe lane wrote .jet SOURCE files into examples/features/expected/conformance/core/math/ (abs.jet, acos.jet, checked_add.jet, and roughly 25 more). That tree holds .out GOLDENS only; a .jet file there is a category error and will confuse both the golden runner and every future reader. The corpus itself belongs under tests/conformance/corpus/, which the same lane correctly created for tests/conformance/corpus/core/encoding/ and core/text/. Relocate the math rows to match the encoding and text rows, and keep examples/features/expected/** for expected output.\\n\\nAlso uncommitted from this work: .jet/core-conformance-check.txt and .jet/core-conformance-inventory.json at the repo root. Generated inventories under .jet/ are machine output — either give them a home under tests/conformance/ if they are authored fixtures, or gitignore them if they are regenerated. Do not commit them to .jet/ where nothing prunes them (18 tracked production receipts under .jet/reports/ just had to be untracked for exactly this reason, commit 95ba19530).\\n\\nThe probe law from the earlier census still applies to every row: a bind-and-discard probe false-greens. Each corpus program must CONSUME its value (print it or assert on it), or a missing Core route passes silently."
+        },
         {
           "at": "2026-08-28",
           "by": "fable",
@@ -157606,11 +157622,11 @@
         {
           "n": 3,
           "text": "Bind-and-discard probes impossible: generator rejects programs whose result is unconsumed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-28T21:59:48.535Z"
+          "evidence": "Lane waconform: 'node scripts/agent/core-conformance.mjs --hostile-fixtures' exits 0 — 'core conformance hostile fixtures: rejected bind-and-discard result and unused binding'.",
+          "at": "2026-08-29T09:12:58.936Z"
         }
       ],
       "refs": [],
@@ -157624,8 +157640,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T18:12:41.984Z",
-      "updated": "2026-08-28T21:59:49.933Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T09:12:58.936Z",
+      "updatedBy": "fable",
+      "claimedAt": "2026-08-29T09:12:58.446Z"
     },
     {
       "id": "c0waaa0u",
@@ -158222,7 +158239,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Draft ballot: (A) admit infix '|' in expression position (value context is unambiguous vs type position) — recommended; (B) respell bitwise OR to a tilde family form (~& style) and retire '|='; (C) status quo documented. Whichever wins: parser + Syntax.rs decision ID + fixtures + docs in one change.",
       "checkSteps": "ballot decided;expression-or spellable or explicitly documented out;fixtures",
@@ -158238,38 +158255,38 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-28T21:11:19.019Z"
+          "evidence": "Lane wabitor: D-BITOREXPR1 registered in crates/jet-foundation/src/Syntax.rs lines 283-285.",
+          "at": "2026-08-29T09:12:02.901Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-28T21:11:19.019Z"
+          "evidence": "Lane wabitor: D-BITOREXPR1 logged in docs/spec/syntax-decisions.md (lines 420, 701, 8223).",
+          "at": "2026-08-29T09:12:03.450Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-28T21:11:19.019Z"
+          "evidence": "Lane wabitor: 'jet self devtools grammars' wrote four grammar files and regenerated the editor grammar sections.",
+          "at": "2026-08-29T09:12:04.022Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-28T21:11:19.019Z"
+          "evidence": "Lane wabitor: examples/features/math/xor_operator.jet exits 0 on default and release with stdout 6/14/150/80/9; cmp confirms tier identity and golden match.",
+          "at": "2026-08-29T09:12:05.688Z"
         }
       ],
       "refs": [],
@@ -158282,8 +158299,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T20:04:09.974Z",
-      "updated": "2026-08-28T21:11:19.020Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-29T09:12:07.499Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-29T09:12:07.498Z"
     },
     {
       "id": "c0i5wla2",
@@ -159031,14 +159049,33 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Find the fold path that evaluates pure recursive calls inside binary expressions; budget it and fall back to runtime code, never a user-visible failure; fixtures: minimal pair, depth 1000, two-function file, mutual recursion, all tiers.",
       "checkSteps": "f6_recurse_min.jet prints 10 both tiers;recurse2.jet works;depth-1000 fixture passes",
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A pure recursive call inside a foldable return arithmetic expression admits without a false E3012 on every tier; witness green byte-identical vs golden",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "Lane waoverflow: recursive witness exits 0 on default and release, first line 10, tier stdout identical, golden matched — the false E3012 stack-overflow diagnostic no longer fires.",
+          "at": "2026-08-29T09:12:25.643Z"
+        },
+        {
+          "n": 2,
+          "text": "Independent and mutual recursion both admit and evaluate correctly on default and release",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "Lane waoverflow: witness outputs 10/10/1000/1000 across default and release with identical tier stdout and golden match, covering independent and mutual recursion.",
+          "at": "2026-08-29T09:12:27.006Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "sweep",
@@ -159049,8 +159086,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T21:17:41.081Z",
-      "updated": "2026-08-28T21:17:41.081Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T09:12:28.890Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-29T09:12:28.890Z"
     },
     {
       "id": "c0umbiqy",
@@ -159222,6 +159260,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Criterion 3 remains open: the #2310 sibling codec API still exists, and the linked reader witness hits an I2 ICE while the hex witness fails to compile. Law 9 and the L9 review row (criteria 1 and 2) are recorded and stand. Criterion 3 should move to #2310 or wait on it rather than block this policy card."
+        },
+        {
           "at": "2026-08-28",
           "text": "All decisions ratified; advanced out of deciding."
         }
@@ -159265,7 +159308,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T21:20:18.791Z",
-      "updated": "2026-08-28T23:23:31.538Z",
+      "updated": "2026-08-29T09:12:53.514Z",
       "updatedBy": "fable"
     },
     {
@@ -159409,6 +159452,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "2026-08-29 scope is Node 5,561 nonblank LOC / 65,817 tokens and Jet 5,063 / 41,634. Child cards are #2252, #2350, #2352, #2356, #2331, #2332, and #2333. Standing parent #2327 remains open; these logs make no blocked-criteria claim."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "Jetpack side-by-side canary Phase 1 is implemented on branch dogfood/jetpack-integration through 3d5c0e3f6: 1,961 Jet implementation LOC / 6,379 whitespace tokens, package semantic check green, transcript harness semantically clean. Runtime parity is not green: default run is blocked by P0 #2252 and AOT/package tests by P0 #2350. Phases 2-3 remain unopened per the sequential gate. Current comparison and finding ledger are in dogfood/jetpack/METRICS.md and docs/audits/dogfood-jetpack-2026-08-28.md."
         },
         {
@@ -159439,7 +159487,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T01:19:51.255Z",
-      "updated": "2026-08-29T04:32:13.334Z",
+      "updated": "2026-08-29T08:35:05.971Z",
       "updatedBy": "fable"
     },
     {
@@ -159540,7 +159588,13 @@
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "2026-08-29, Node five-run medians are load 93.989 ms, projection 86.293 ms, combined 180.815 ms, serialize total 224.239 ms, RSS delta 134,463,488 bytes, output 19,094,088 bytes. Three-fixture hash: 83341cfafa7fd1946d6d093eaa9682220f05db9e183e19b58b46e973bd7cc8b5."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -159581,7 +159635,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T02:21:41.191Z",
-      "updated": "2026-08-29T02:21:41.191Z",
+      "updated": "2026-08-29T08:35:03.000Z",
       "updatedBy": "fable"
     },
     {
@@ -159599,7 +159653,13 @@
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "2026-08-29, jet run exits 70 after 74,959 ms first error and 74,981 ms wall with E3011 PatternTest. Service never binds. jet dev reaches the same error in about 71 seconds and remains as watcher. Request and RSS steady-state cannot be measured."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -159650,7 +159710,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T02:21:42.023Z",
-      "updated": "2026-08-29T03:22:52.650Z",
+      "updated": "2026-08-29T08:35:04.305Z",
       "updatedBy": "fable"
     },
     {
@@ -159722,13 +159782,30 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "1) Ratify only the quantitative handoff threshold in D-HARDENING-GATE1; the triple gate, first investment, continuous cadence, auto-carding, and default-tier P0 law are already owner-ratified. 2) Land the tagged public-surface/result-bundle contract. 3) In parallel, land the bounded one-cycle runner, domain oracle adapters plus value mutators, and Tower atomic dedup. 4) Feed #2286 and #2287 through that contract; never replace their ledgers or tests. 5) Land the derived dashboard and repeatable fresh-context red-team session. 6) Run the ratified clean window; every finding is carded, minimized, and added to a permanent regression corpus before its fix closes. 7) Add property, grammar, and compiler-mutation layers in order on the same runner.",
+      "plan": "D-HARDENING-GATE1=A is law: 14 clean days, 10,000,000 valid cases, 100 valid mutations per fuzz-eligible callable, and eight fresh lanes in waves of two. 1) Land the tagged public-surface/result-bundle contract. 2) In parallel, land the bounded one-cycle runner, domain oracle adapters plus value mutators, and Tower atomic dedup. 3) Feed #2286 and #2287 through that contract; never replace their ledgers or tests. 4) Land the derived dashboard and repeatable fresh-context red-team session. 5) Run the ratified clean window; every finding is carded, minimized, and added to a permanent regression corpus before its fix closes. 6) Add property, grammar, and compiler-mutation layers in order on the same runner.",
       "checkSteps": "tagged denominator and #2286 green on every applicable tier;bounded runner produces reproducible bundles without residue;auto-carding updates one root-seam card and regression-locks fixed finds;dashboard derives all four gates on one commit;ratified clean window and red-team quota complete with zero new P0;Tower reports zero known open P0",
-      "blockedBy": [],
+      "blockedBy": [
+        "c0dv6wwu",
+        "c03qmfe9",
+        "c0d2n18e",
+        "c0mt3yxo",
+        "c00acag6",
+        "c0p17tvy",
+        "c0vm00kc",
+        "c0ug7amh",
+        "c0l6hyzh",
+        "c052g0so"
+      ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Design and full implementation slate complete. D-HARDENING-GATE1=A is ratified. The epic now waits on its ten owned child slices; implementation stays with the burndown agent."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -159803,7 +159880,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T02:58:27.591Z",
-      "updated": "2026-08-29T02:58:27.591Z",
+      "updated": "2026-08-29T08:19:29.288Z",
       "updatedBy": "fable"
     },
     {
@@ -160201,9 +160278,9 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "OWNER-GATED only on D-HARDENING-GATE1. After ratification: 1) Add scripts/agent/hardening-rig.mjs status with human and --json forms. 2) Read the current tagged surface manifest, #2286 corpus verdicts, rig run bundles, latest valid red-team bundle, Tower CLI open-P0 query, and resource ledgers. 3) Print conformance totals by tagged kind and tier; covered, excluded, missing, refused, and stale are separate states. 4) Print clean-window dates, valid case count, per-row floor, domain distribution, silent findings, last seed, and invalidation cause. 5) Print red-team target commit, lane/quota completion, unique P0s, duplicates, false positives, and staleness. 6) Print open P0 count and exact refs from Tower plus target/cache/scratch state. 7) Compute READY only when all four ratified gates are green on one commit and every source hash matches; missing, skipped, unreadable, stale, or mismatched input is red.",
+      "plan": "D-HARDENING-GATE1=A is law: 14 clean days, 10,000,000 valid cases, 100 valid mutations per fuzz-eligible callable, and eight fresh lanes in waves of two. 1) Add scripts/agent/hardening-rig.mjs status with human and --json forms. 2) Read the current tagged surface manifest, #2286 corpus verdicts, rig run bundles, latest valid red-team bundle, Tower CLI open-P0 query, and resource ledgers. 3) Print conformance totals by tagged kind and tier; covered, excluded, missing, refused, and stale are separate states. 4) Print clean-window dates, valid case count, per-row floor, domain distribution, silent findings, last seed, and invalidation cause. 5) Print red-team target commit, lane/quota completion, unique P0s, duplicates, false positives, and staleness. 6) Print open P0 count and exact refs from Tower plus target/cache/scratch state. 7) Compute READY only when all four ratified gates are green on one commit and every source hash matches; missing, skipped, unreadable, stale, or mismatched input is red.",
       "checkSteps": "status human and json agree;missing source red;registry change stales prior proof;different target commits red;open P0 red;excluded rows counted and listed;all four synthetic green sources yield READY;resource overage red",
       "blockedBy": [
         "c0dv6wwu",
@@ -160212,7 +160289,13 @@
         "c0mt3yxo"
       ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "D-HARDENING-GATE1=A ratified by the owner in chat: 14 clean days, 10,000,000 valid cases, 100 valid mutations per eligible callable, and eight fresh lanes in waves of two. Plan now implements the fixed threshold."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -160297,7 +160380,7 @@
       "parentId": "c0lnb7zq",
       "needsAcceptance": false,
       "created": "2026-08-29T03:01:13.910Z",
-      "updated": "2026-08-29T03:02:11.820Z",
+      "updated": "2026-08-29T08:19:38.233Z",
       "updatedBy": "fable"
     },
     {
@@ -160842,14 +160925,35 @@
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "HYPOTHESIS 1 ELIMINATED. Re-ran the isolation test WITH the dashboard's exact fixture manifest present (package.jet carrying 'authority: .{ holds: { allow: [IO, Mem.Alloc] } }'), three consecutive builds against one JET_CACHE_DIR: run 1 'cache miss -> compiling', runs 2 and 3 'cache hit -> reused cached binary'. So an authority-bearing manifest does not break reuse, and the key is not mtime-sensitive for it.\\n\\nWhere that leaves the card. Everything reachable from outside the harness now caches correctly: the release profile, JET_TIMING, JET_CACHE_DIR, the pinned binary copy, the run.jet name, and the fixture manifest. Yet the aot-release-no-change row reports hits=0 misses=1 at sample 1 even though the warmup compiled in the very same work dir with the very same cache dir.\\n\\nThe next agent should therefore stop hypothesising and instrument. Concretely: inside run_aot_trial, before each build, append to a log the resolved JET_CACHE_DIR, its directory listing, the sha256 of run.jet and package.jet, and the mtimes of both; run only the hello.jet no-change row; then diff the warmup's record against sample 1's. One 65-second run produces the answer. The remaining suspects are ordered by likelihood: (a) something between the warmup and sample 1 empties or relocates the cache dir, (b) the warmup's cache write does not land where sample 1 reads because JET_CACHE_DIR is interpreted relative to a different cwd for the two invocations, (c) the key includes a value that changes once per process rather than once per input.\\n\\nAlso worth deleting while there: prepare_fixture writes package.jet twice, a 'cp \\\"$FIXTURE_PACKAGE\\\"' immediately overwritten by a printf. The cp is dead work today and merely confusing."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "DECISIVE EVIDENCE — the dashboard's exact build invocation caches correctly in isolation.\\n\\nReproduced the invocation from run_aot_trial verbatim (same env, same pinned binary, same run.jet name, twice against one JET_CACHE_DIR):\\n  env JET_CACHE_DIR=<cache>/build JET_TIMING=1 JET_TIMING_DIR=<work>/timing NO_COLOR=1 \\\\\\n    jet-env bash -c \"cd <work> && exec <pinned jet> build --profile=release --verbose run.jet\"\\nRun 1: '[build] cache miss -> compiling' plus '[build] runtime -> cache hit'. Run 2: '[build] cache hit -> reused cached binary'. Exit 0 both times.\\n\\nSo neither the AOT cache key nor JET_TIMING nor the pinned-binary copy nor the release profile breaks reuse. The no-change row shares one work dir and one cache dir between its warmup and every sample, so sample 1 should observe the warmup's entry — and it reports hits=0 misses=1.\\n\\nThat leaves the staging itself. Two specific things to check, in this order:\\n1. The fixture package. My isolation run had NO package.jet; the dashboard's prepare_fixture writes one containing 'authority: .{ holds: { allow: [IO, Mem.Alloc] } }'. If the cache key incorporates the manifest by path or mtime rather than by content, an authority-bearing fixture could miss where a bare program hits. Re-run the isolation test WITH that package.jet present — if it then misses on run 2, the bug is found and it is a real compiler bug (a manifest must be keyed by content, not mtime).\\n2. prepare_fixture writes package.jet TWICE — 'cp \"$FIXTURE_PACKAGE\"' then a printf that overwrites it. The cp is dead work today, but it means the file is created and immediately rewritten, so any mtime-sensitive key sees two different stamps for identical content. Delete the dead cp regardless; it is confusing and it is a plausible trigger.\\n\\nStep 1 is a two-minute test and will most likely settle the card."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "MAJOR NARROWING — the AOT content cache is NOT broken in general.\\n\\nVerified directly: copy examples/features/basics/hello.jet into a scratch dir and run 'jet build --verbose main.jet' twice. Both runs print '[build] cache hit -> reused cached binary'. Reuse works, and the key is stable across processes in a fixed directory. (Note for anyone reproducing: the hit/miss lines are behind --verbose; without it 'jet build' prints nothing and a naive probe looks like a total cache failure.)\\n\\nSo the defect is in how tools/perf/dashboard.sh stages the aot-release-no-change row, or in an interaction that staging triggers — not in the cache key as such. Facts about that staging, from the script: the no-change row shares one work dir and one cache dir between the warmup and every sample (state_work=$state_root/seeded, state_cache=$state_work/cache, cache_policy=shared-cache-after-warmup), so the warmup should populate exactly the cache sample 1 then reads. It reports hits=0 misses=1 at sample 1 anyway.\\n\\nNext concrete steps, in order: (1) print the cache dir and the computed key for the warmup and for sample 1 of that row and diff them; (2) check whether run_aot_trial removes or rewrites build/ or the cache between runs; (3) check the linker capture — run_aot_trial records trial_linker and the scale path resets TRIAL_LINKER=, so confirm the same linker is selected for warmup and sample (a different linker legitimately changes the key); (4) confirm prepare_fixture is not re-copying the source with a fresh mtime or a different absolute path into the key.\\n\\nThat is a much smaller search than 'the AOT cache is broken', and it can be settled with one instrumented run of about 65 seconds."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Lane w9aotcache timed out mid-investigation; its debug instrumentation in tools/perf/dashboard.sh was reverted (tree is CHECK OK, no leftovers). It had reached the right place: it was logging, inside run_aot_trial, whether the trial stats file and the build stderr exist per run, which is how you compare the warmup's key inputs against the measured sample's. Next agent should resume exactly there: instrument the AOT cache key inputs in run_aot_trial, print the computed key for the warmup and for sample 1, and diff them. The JIT no-change row passes, so the differing field is in the AOT-specific part of the key (linker probe, artifact path, or a toolchain identity hash), not in the shared portion."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T04:06:16.324Z",
-      "updated": "2026-08-29T04:06:16.324Z",
+      "updated": "2026-08-29T05:19:10.230Z",
       "updatedBy": "fable"
     },
     {
@@ -161117,6 +161221,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "2026-08-29, jet build dogfood/tower/run.jet exits 101 after 19,785 ms. Cold and warm source builds before formatting exit 101 after 18,768 ms and 18,935 ms. One-line rebuild after a comment edit also exits 101 after 20,343 ms."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "Package-mode AOT reproduces independently of the test harness: from dogfood/jetpack, bare jet build reads runner.jet, passes checking and authority, generates build/runner.rs, then exits 101 because generated Rust does not compile."
         },
         {
@@ -161168,7 +161277,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T04:16:42.113Z",
-      "updated": "2026-08-29T04:30:23.625Z",
+      "updated": "2026-08-29T08:34:57.421Z",
       "updatedBy": "fable"
     },
     {
@@ -161186,7 +161295,13 @@
       "checkSteps": "Run package output resolver tests and jet check, run, and build dogfood/jetpack with entry app.cli_run and no runner adapter.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "2026-08-29, jet build dogfood/tower exits 1 after 1,508 ms with E1334 directory authority. Building dogfood/tower/run.jet reaches the generated build path and exits 101 after 19,785 ms."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -161229,7 +161344,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T04:17:43.964Z",
-      "updated": "2026-08-29T04:17:58.354Z",
+      "updated": "2026-08-29T08:34:59.462Z",
       "updatedBy": "fable"
     },
     {
@@ -161309,25 +161424,31 @@
       "checkSteps": "Run list against an absent and populated throwaway root and assert byte-identical JSON with no created or changed paths.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Criterion 3 is BLOCKED only by ownership, not by the fix: the dogfood transcript lives in another agent's active dogfood/jetpack-integration worktree (normalization at dogfood/jetpack/tests/transcript.jet:88). The read-only-inspection fix itself is proven by criteria 1 and 2. Close this card once that worktree lands, or reassign criterion 3 to the dogfood card."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Hangar list on an absent root returns the same JSON without creating the root or lock file.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-29T04:19:14.468Z"
+          "evidence": "Lane wahangarlock: post-patch 'jetpack hangar list' exits 0 with identical JSON; an absent JETPACK_ROOT stays absent and lock_exists=no — read-only inspection no longer creates a lock file.",
+          "at": "2026-08-29T09:12:48.735Z"
         },
         {
           "n": 2,
           "text": "Hangar list on a populated root changes no file content, metadata projection, journal, or lock path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-29T04:19:15.211Z"
+          "evidence": "Lane wahangarlock: populated-root list exits 0, snapshot cmp identical, metadata/journal/lock path unchanged.",
+          "at": "2026-08-29T09:12:50.376Z"
         },
         {
           "n": 3,
@@ -161353,7 +161474,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T04:19:03.505Z",
-      "updated": "2026-08-29T04:19:15.956Z",
+      "updated": "2026-08-29T09:12:51.611Z",
       "updatedBy": "fable"
     },
     {
@@ -161371,7 +161492,13 @@
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "2026-08-29, jet test dogfood/tower exits 101 after 22,673 ms because generated build/run.rs fails. The file build and one-line comment rebuild also exit 101, providing repeat failure evidence for the generated Rust/AOT path."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -161416,7 +161543,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T04:26:24.011Z",
-      "updated": "2026-08-29T04:26:24.011Z",
+      "updated": "2026-08-29T08:35:01.546Z",
       "updatedBy": "fable"
     }
   ],
@@ -220364,8 +220491,11 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-29T03:02:11.820Z"
+      "status": "ratified",
+      "created": "2026-08-29T03:02:11.820Z",
+      "outcome": "A",
+      "comment": "Owner chose the balanced time, volume, breadth, and eight-lane gate in chat.",
+      "ratifiedAt": "2026-08-29"
     }
   ],
   "questions": [
@@ -222456,6 +222586,272 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-29T09:12:58.936Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0r0vc6w",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-29T09:12:58.446Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0r0vc6w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T09:12:53.514Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c020qob4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T09:12:51.611Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c06v570e",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T09:12:50.376Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c06v570e",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-29T09:12:48.735Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c06v570e",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-29T09:12:34.390Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0v5e0kd",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-29T09:12:33.501Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0v5e0kd",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-29T09:12:33.026Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0v5e0kd",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-29T09:12:31.932Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0v5e0kd",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-29T09:12:28.890Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0lsdg0i",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-29T09:12:27.006Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0lsdg0i",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-29T09:12:25.644Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0lsdg0i",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-29T09:12:23.141Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0lsdg0i",
+      "note": "#2 Independent and mutual recursion both admit and evaluate cor"
+    },
+    {
+      "at": "2026-08-29T09:12:19.816Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0lsdg0i",
+      "note": "#1 A pure recursive call inside a foldable return arithmetic ex"
+    },
+    {
+      "at": "2026-08-29T09:12:07.499Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0659793",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-29T09:12:05.688Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0659793",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-29T09:12:04.022Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0659793",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-29T09:12:03.450Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0659793",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-29T09:12:02.901Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0659793",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-29T08:35:05.971Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0oakubh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T08:35:04.305Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0dmclkf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T08:35:03.000Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0zukf9a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T08:35:01.546Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0k0pur7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T08:34:59.462Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ndytaf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T08:34:57.421Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c08hj382",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T08:34:53.088Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0uua999",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T08:32:26.904Z",
+      "by": "fable",
+      "action": "card.claim",
+      "ref": "c0r0vc6w",
+      "note": ""
+    },
+    {
+      "at": "2026-08-29T08:19:38.234Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c00acag6",
+      "note": "plan"
+    },
+    {
+      "at": "2026-08-29T08:19:29.289Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0lnb7zq",
+      "note": "plan"
+    },
+    {
+      "at": "2026-08-29T08:19:18.495Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0lnb7zq",
+      "note": "phase,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-08-29T08:19:09.729Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c00acag6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-29T08:18:31.710Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-HARDENING-GATE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-29T05:19:10.230Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0r2zvln",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T05:18:24.708Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0r2zvln",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T05:16:44.540Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0r0vc6w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T05:15:16.415Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0r2zvln",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T05:13:44.958Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0r2zvln",
+      "note": "logEntry"
+    },
     {
       "at": "2026-08-29T04:32:21.932Z",
       "by": "fable",
@@ -225689,272 +226085,6 @@
       "action": "card.add",
       "ref": "c0nrsx21",
       "note": "Pin the exact rustc toolchain and regression-test the generated-Rust-rejection ICE branch"
-    },
-    {
-      "at": "2026-08-28T16:03:06.335Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0nzmjg1",
-      "note": "Generic inference: typed lambda does not instantiate a two-parameter generic call; E0904 fix text lies; E0904/E0112 duplicated"
-    },
-    {
-      "at": "2026-08-28T16:02:25.786Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c01dwqs7",
-      "note": "S40 drift: ratified s.slice(a..b) is E0311; only undocumented s.slice(a, b) ships"
-    },
-    {
-      "at": "2026-08-28T16:02:25.471Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0w6n3vi",
-      "note": "User Display/Debug impls: interpolation ignores them on run tier; --release ICEs (D-DISPLAYDBG1 violation)"
-    },
-    {
-      "at": "2026-08-28T15:18:40.842Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c01vyo8j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T15:18:40.418Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0o21kte",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T15:18:40.003Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0o21kte",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T15:13:40.416Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c05la7ri",
-      "note": "#6 AOT closure lowering: fallible callee inside a map/filter cl"
-    },
-    {
-      "at": "2026-08-28T15:12:30.153Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-28T15:12:30.153Z"
-    },
-    {
-      "at": "2026-08-28T15:06:04.600Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0qr0p8c",
-      "note": "M4: Luna-max corpus rewrite + full board re-measure + scoreboard"
-    },
-    {
-      "at": "2026-08-28T15:06:04.103Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0ij6orc",
-      "note": "M3 brevity pack v2: <=1.2x Python LOC corpus-wide, beat Python tokens"
-    },
-    {
-      "at": "2026-08-28T15:06:03.599Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0a7csj9",
-      "note": "M2 JIT: default jet run beats CPython AND Node on every corpus entry"
-    },
-    {
-      "at": "2026-08-28T15:06:03.096Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c01vyo8j",
-      "note": "M1 codegen: AOT kernels reach the hardware ceiling (beat C/Zig, meet rustc)"
-    },
-    {
-      "at": "2026-08-28T15:05:35.166Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c07ymi2r",
-      "note": "EPIC: Win-everything gauntlet campaign - beat every language on every axis"
-    },
-    {
-      "at": "2026-08-28T14:51:00.357Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0c8534w",
-      "note": "Runaway .jet/lock: lockfile grew to 2 GiB in-repo and broke git push"
-    },
-    {
-      "at": "2026-08-28T14:43:43.816Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08xjus3",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T14:43:43.251Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c08xjus3",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-28T14:43:42.835Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c08xjus3",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-28T14:43:42.431Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c08xjus3",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T14:21:54.662Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-28T14:21:54.662Z"
-    },
-    {
-      "at": "2026-08-28T13:46:08.198Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0niggys",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T13:44:26.573Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0v5e0kd",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T13:44:25.962Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0ga42wx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T13:43:57.785Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08ovzl9",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T13:43:57.120Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c08ovzl9",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-28T13:43:56.648Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c08ovzl9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T13:43:55.183Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c08ovzl9",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T13:43:43.985Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rdtx81",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T13:43:42.503Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0rdtx81",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-28T13:43:13.621Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0h7zcqi",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T13:43:12.950Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0h7zcqi",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-28T13:43:12.483Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0h7zcqi",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-28T13:43:11.853Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0h7zcqi",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T13:43:11.391Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09xsceu",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T13:42:55.550Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c09xsceu",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-28T13:42:55.118Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c09xsceu",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-28T13:42:54.658Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c09xsceu",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T13:42:54.231Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c09xsceu",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T12:51:01.773Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-28T12:51:01.773Z"
     }
   ],
   "nextNum": 368,

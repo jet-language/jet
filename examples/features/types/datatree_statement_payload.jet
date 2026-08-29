@@ -1,0 +1,33 @@
+// #2356: statement-position payload dispatch for user enums and DataTree.
+enum Marker {
+    Label(String)
+    Count(Int)
+    Empty
+}
+
+fn show_marker(value: Marker) {
+    if value == {
+        .Label(text) -> print("marker:{text}")
+        .Count(_) -> print("marker:count")
+        .Empty -> print("marker:empty")
+    }
+}
+
+fn show(value: DataTree) {
+    if value == {
+        .Text(text) -> print("text:{text}")
+        .Int(_) -> print("int")
+        .Null -> print("null")
+        else -> print("other")
+    }
+}
+
+fn run() {
+    show_marker(.Label("hello"))
+    show_marker(.Count(42))
+    show_marker(.Empty)
+    show(DataTree.Text("hello"))
+    show(DataTree.Int(42))
+    show(DataTree.Null)
+    show(DataTree.Bool(true))
+}

@@ -35,6 +35,23 @@ mod production_path {
         env::join_paths(paths).unwrap()
     }
 
+    #[test]
+    fn compiler_speed_closeout_is_backed_by_plan() {
+        for requirement in [
+            "The cross-backend proof runs the same checked example through optimized AOT",
+            "the default tiered lens, then compares exit status, stdout, and stderr.",
+            "The speed proof uses the existing phase reports and typed `CompilerProbe`",
+            "The checked-corpus dashboard uses one warmup and twenty measured samples for",
+            "15% latency or peak-RSS regression against the pinned row and a range/median",
+            "sample variance of at most 100%; output and phase records must remain exact.",
+        ] {
+            assert!(
+                COMPILER_SPEED_PLAN.contains(requirement),
+                "compiler-speed closeout proof is no longer backed by docs/plans/compiler-speed.md: missing {requirement:?}"
+            );
+        }
+    }
+
     fn invocations(log: &str) -> Vec<Vec<String>> {
         let mut all = Vec::new();
         let mut current = None;
@@ -77,7 +94,8 @@ mod production_path {
     fn production_build_follows_compiler_speed_plan_flags_and_linker() {
         for requirement in [
             "Fast linker (mold → lld → system), tuned rustc flags.",
-            "Native rustc builds honor explicit `RUSTC_LINKER`/`CC`",
+            "Native rustc builds honor explicit",
+            "`RUSTC_LINKER`/`CC`; otherwise Jet selects mold, then lld",
             "Fast builds pass explicit `opt-level=0`, `codegen-units=256`, and",
             "`lto=off`",
             "optimized AOT passes explicit `opt-level=2`, thin LTO, and strip.",

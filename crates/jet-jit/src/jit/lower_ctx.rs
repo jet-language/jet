@@ -5923,6 +5923,7 @@ impl LowerCtx<'_, '_> {
                 end,
                 step,
                 exclusive,
+                auto_vectorization: _,
                 body,
             } => {
                 in_own_frame(|| -> Result<(), String> {
@@ -21467,6 +21468,8 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::Sort => in_own_frame(|| -> Result<Value, String> {
                 let host_id = if jit_list_string_type(&recv_ty) {
                     self.host.coll.list_sort_str
+                } else if jit_list_float_type(&recv_ty) {
+                    self.host.coll.list_sort_f64
                 } else {
                     self.host.coll.list_sort
                 };
@@ -21477,6 +21480,8 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::SortDesc => in_own_frame(|| -> Result<Value, String> {
                 let host_id = if jit_list_string_type(&recv_ty) {
                     self.host.coll.list_sort_str_desc
+                } else if jit_list_float_type(&recv_ty) {
+                    self.host.coll.list_sort_f64_desc
                 } else {
                     self.host.coll.list_sort_desc
                 };

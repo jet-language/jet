@@ -347,6 +347,15 @@ fn same_pure_key_expr(left: &TExpr, right: &TExpr, root: &TLocal) -> bool {
     }
 }
 
+fn strip_copy_wrappers(expr: &TExpr) -> &TExpr {
+    match &expr.kind {
+        TExprKind::Clone(inner) | TExprKind::ExplicitCopy(inner) => {
+            strip_copy_wrappers(inner)
+        }
+        _ => expr,
+    }
+}
+
 /// Recognize the generic `m[k] = (m.get(k) ?? default) OP delta` update.
 /// The shape is deliberately independent of corpus names or benchmark sizes.
 fn map_update_shape<'a>(
@@ -371,9 +380,12 @@ fn map_update_shape<'a>(
     else {
         return None;
     };
-    if !matches!(lookup.ty, Type::Int) || !matches!(default.ty, Type::Int) {
+    if !matches!(&lookup.ty, Type::Option(inner) if **inner == Type::Int)
+        || !matches!(default.ty, Type::Int)
+    {
         return None;
     }
+    let lookup = strip_copy_wrappers(lookup);
     let TExprKind::BuiltinMethod {
         recv,
         op: TBuiltinOp::GetMap,

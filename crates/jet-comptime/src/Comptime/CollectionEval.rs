@@ -4,7 +4,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::Type;
 
-use super::Builtins::{as_int, cmp};
+use super::Builtins::{as_int, cmp_for_sort};
 use super::Diagnostics::{index_oob, unsupported};
 use crate::AST::CtValue;
 use jet_foundation::Prelude::jet_as_bytes as as_bytes;
@@ -302,7 +302,7 @@ fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
 
 fn sorted_unique(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     let mut sort_error = None;
-    items.sort_by(|left, right| match cmp(left.clone(), right.clone(), span) {
+    items.sort_by(|left, right| match cmp_for_sort(left.clone(), right.clone(), span) {
         Ok(order) => order,
         Err(error) => {
             sort_error.get_or_insert(error);
@@ -318,7 +318,7 @@ fn sorted_unique(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Di
 
 fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     let mut sort_error = None;
-    items.sort_by(|left, right| match cmp(right.clone(), left.clone(), span) {
+    items.sort_by(|left, right| match cmp_for_sort(right.clone(), left.clone(), span) {
         Ok(order) => order,
         Err(error) => {
             sort_error.get_or_insert(error);
@@ -761,7 +761,7 @@ fn set_method(
         "sort" => {
             let mut sorted = items;
             sorted.sort_by(|a, b| {
-                super::Builtins::cmp(a.clone(), b.clone(), span)
+                super::Builtins::cmp_for_sort(a.clone(), b.clone(), span)
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
             Ok(CtValue::List(sorted))

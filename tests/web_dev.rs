@@ -1964,6 +1964,67 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
 }
 
 #[test]
+fn jet_dev_web_status_does_not_expose_canvas_session_data() {
+    if !have_tool("rustc") {
+        eprintln!(
+            "note: skipping jet_dev_web_status_does_not_expose_canvas_session_data (need rustc)"
+        );
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_canvas_status_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("app.jet"), FIXTURE_SRC).unwrap();
+
+    let mut child = Command::new(jet_bin())
+        .args(["dev", "app.jet", "--target=web"])
+        .current_dir(&dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to start `jet dev --target=web`");
+
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let stdout = child.stdout.take().unwrap();
+    let guard = KillOnDrop(child);
+    let port = wait_for_ports(stdout).canvas;
+
+    let (status, graph) = http_get(port, "/canvas/graph").expect("GET authorized Canvas graph");
+    assert_eq!(status, 200);
+    assert!(
+        String::from_utf8_lossy(&graph).contains("\"source_text\":"),
+        "authorized graph must contain its source projection"
+    );
+
+    let (status, public_status) =
+        http_get_without_session(port, "/__jet_dev_status").expect("GET public dev status");
+    assert_eq!(status, 200);
+    let public_status = String::from_utf8_lossy(&public_status);
+    assert!(
+        !public_status.contains("\"session\":"),
+        "public dev status must not expose retained Canvas session data: {public_status}"
+    );
+    assert!(
+        !public_status.contains("\"source_text\":"),
+        "public dev status must not expose retained Canvas graph source: {public_status}"
+    );
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn jet_dev_web_live_canvas_debug_session_round_trip() {
     if !have_tool("rustc") {
         eprintln!("note: skipping jet_dev_web_live_canvas_debug_session_round_trip (need rustc)");

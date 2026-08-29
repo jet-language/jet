@@ -1271,9 +1271,16 @@ impl PackageFacts {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| {
+                    // Only the project-root and `src/` locations are entry
+                    // conventions. A deeper `main.jet` is an ordinary module
+                    // and must remain visible to a quoted Output reference.
                     name == crate::Syntax::PACKAGE_FILE
                         || name == crate::Syntax::PAYLOAD_FILE
-                        || name == crate::Syntax::LEGACY_ENTRY_FILE
+                        || (name == crate::Syntax::LEGACY_ENTRY_FILE
+                            && (file.relative
+                                == Path::new(crate::Syntax::LEGACY_ENTRY_FILE)
+                                || file.relative
+                                    == Path::new("src").join(crate::Syntax::LEGACY_ENTRY_FILE)))
                 });
             let config = self
                 .resolved_config_paths
@@ -3457,8 +3464,13 @@ fn imported_module_targets(
             continue;
         }
         for candidate in import_target_paths(root, &source.path, &import.kind) {
-            if sources.iter().any(|other| other.path == candidate) {
-                targets.push(candidate);
+            let Some(candidate) = normalize_safe_import_path(root, &candidate) else {
+                continue;
+            };
+            if let Some(target) = sources.iter().find(|other| {
+                normalize_discovery_path(&other.path) == candidate
+            }) {
+                targets.push(target.path.clone());
             }
         }
     }
@@ -3475,7 +3487,7 @@ fn imported_source_paths(
         .imports
         .iter()
         .flat_map(|import| import_target_paths(root, &source.path, &import.kind))
-        .map(|path| normalize_discovery_path(&path))
+        .filter_map(|path| normalize_safe_import_path(root, &path))
         .filter(|path| {
             sources
                 .iter()
@@ -3498,6 +3510,32 @@ fn normalize_discovery_path(path: &std::path::Path) -> std::path::PathBuf {
         }
     }
     normalized
+}
+
+fn normalize_safe_import_path(
+    root: &std::path::Path,
+    path: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let root = normalize_discovery_path(root);
+    let relative = path.strip_prefix(&root).ok()?;
+    let mut normalized = root.clone();
+    for component in relative.components() {
+        match component {
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => return None,
+            std::path::Component::CurDir => {}
+            // Match the ordinary quoted-import loader: `..` is never a safe
+            // package entry spelling, even when it would normalize back
+            // inside the authority root.
+            std::path::Component::ParentDir => return None,
+            std::path::Component::Normal(part) => {
+                if part.to_string_lossy().contains("..") {
+                    return None;
+                }
+                normalized.push(part);
+            }
+        }
+    }
+    Some(normalized)
 }
 
 fn import_target_paths(
@@ -4041,6 +4079,71 @@ outputs: .{ app: .Executable.{ entry: launch } }"#,
             Some(dir.join("launch.jet"))
         );
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn output_entry_resolves_a_nested_main_module() {
+        let dir = temp_dir("output-entry-nested-main");
+        std::fs::create_dir_all(dir.join("src/cli")).unwrap();
+        std::fs::write(dir.join("entry.jet"), "use \"src/cli/main\" as app\n").unwrap();
+        std::fs::write(
+            dir.join("src/cli/main.jet"),
+            "pub fn cli_run() {}\nfn run() { cli_run() }\n",
+        )
+        .unwrap();
+        let facts = PackageFacts::parse(
+            r#"name: "demo"
+outputs: .{ app: .Executable.{ entry: app.cli_run } }"#,
+            "package.jet",
+        )
+        .unwrap();
+        let output = facts.outputs.get("app").unwrap();
+        assert_eq!(
+            facts.entry_path(&dir, output).unwrap(),
+            Some(dir.join("src/cli/main.jet"))
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn nested_output_entries_fail_closed_for_missing_ambiguous_and_escaping_imports() {
+        fn assert_rejected(tag: &str, entry_source: &str, extra: &[(&str, &str)]) {
+            let dir = temp_dir(tag);
+            std::fs::write(dir.join("entry.jet"), entry_source).unwrap();
+            for &(relative, source) in extra {
+                let path = dir.join(relative);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, source).unwrap();
+            }
+            let facts = PackageFacts::parse(
+                r#"name: "demo"
+outputs: .{ app: .Executable.{ entry: app.cli_run } }"#,
+                "package.jet",
+            )
+            .unwrap();
+            let error = facts.resolve_run_entry(&dir).unwrap_err();
+            assert!(error.contains("no unique source entry"), "{error}");
+            std::fs::remove_dir_all(dir).ok();
+        }
+
+        assert_rejected(
+            "output-entry-nested-missing",
+            "use \"src/cli/missing\" as app\n",
+            &[],
+        );
+        assert_rejected(
+            "output-entry-nested-ambiguous",
+            "use \"src/cli/main\" as app\n",
+            &[
+                ("src/cli/main.jet", "pub fn cli_run() {}\n"),
+                ("src/cli/main/module.jet", "pub fn cli_run() {}\n"),
+            ],
+        );
+        assert_rejected(
+            "output-entry-nested-escaping",
+            "use \"../../outside/main\" as app\n",
+            &[],
+        );
     }
 
     #[test]

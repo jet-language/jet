@@ -1064,7 +1064,7 @@ pub(crate) fn method_call_in_subset(
         {
             return expr_in_subset(receiver, cx, locals);
         }
-        // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
+        // D-BINPAT1 (card #506 follow-up): `reader.take_pattern([U8]{"…"})` —
         // same reasoning, byte-mode sibling. The sole argument is a
         // parser-committed `Expr::BinMatchLit` leaf.
         if handle == "Reader"

@@ -39,6 +39,10 @@ fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
 
+fn nested_example_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/outputs_nested")
+}
+
 #[test]
 fn outputs_build_example_has_no_convention_entry_filename() {
     // The whole point of this fixture: no `main.jet`/`run.jet` file exists,
@@ -117,6 +121,96 @@ fn outputs_block_drives_jet_build_aot() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), expected_output());
 
     let _ = fs::remove_dir_all(&build_dir);
+}
+
+#[test]
+fn nested_outputs_entry_follows_src_cli_import_on_both_run_tiers() {
+    let dir = nested_example_dir();
+    assert!(!dir.join("runner.jet").is_file());
+    assert!(dir.join("src/cli/main.jet").is_file());
+
+    let mut outputs = Vec::new();
+    for args in [vec!["run"], vec!["run", "--release"]] {
+        let out = Command::new(jet_bin())
+            .args(&args)
+            .current_dir(&dir)
+            .output()
+            .expect("nested output should execute");
+        assert!(
+            out.status.success(),
+            "nested output {:?} failed:\n{}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        outputs.push(out.stdout);
+    }
+
+    assert_eq!(outputs[0], outputs[1]);
+    assert_eq!(
+        outputs[0],
+        fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples/features/expected/packages/outputs_nested.out")
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn nested_output_failures_keep_the_package_diagnostic() {
+    fn run_case(tag: &str, entry: &str, extra: &[(&str, &str)]) {
+        let dir = std::env::temp_dir().join(format!(
+            "jet-outputs-nested-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("package.jet"),
+            "name: \"nested_output_negative\"\nversion: \"0.1.0\"\noutputs: .{ app: .Executable{ entry: app.cli_run } }\n",
+        )
+        .unwrap();
+        fs::write(dir.join("entry.jet"), entry).unwrap();
+        for &(relative, source) in extra {
+            let path = dir.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, source).unwrap();
+        }
+
+        let out = Command::new(jet_bin())
+            .arg("run")
+            .current_dir(&dir)
+            .output()
+            .expect("nested output rejection should execute");
+        assert!(!out.status.success(), "nested output unexpectedly succeeded");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("Error [E2105]"), "missing E2105:\n{stderr}");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    run_case(
+        "missing",
+        "use \"src/cli/missing\" as app\n",
+        &[],
+    );
+    run_case(
+        "ambiguous",
+        "use \"src/cli/main\" as app\n",
+        &[
+            ("src/cli/main.jet", "pub fn cli_run() {}\n"),
+            ("src/cli/main/module.jet", "pub fn cli_run() {}\n"),
+        ],
+    );
+    run_case(
+        "escaping",
+        "use \"../../outside/main\" as app\n",
+        &[],
+    );
 }
 
 /// The negative half of the proof: copy the fixture but drop `outputs:` from

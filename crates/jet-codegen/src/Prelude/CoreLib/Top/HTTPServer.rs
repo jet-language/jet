@@ -859,9 +859,19 @@ fn jet_http_server_serve(server: &JetHTTPServer) -> Result<JetHTTPShutdownReport
     } else { server.inner.report_ready.notify_all(); result }
 }
 
+fn jet_http_server_wait_for_report(server: &JetHTTPServer) -> Result<JetHTTPShutdownReport, String> {
+    use std::sync::atomic::Ordering;
+    let mut report = server.inner.report.lock().unwrap();
+    while report.is_none() && server.inner.lifecycle.load(Ordering::Acquire) == 1 {
+        report = server.inner.report_ready.wait(report).unwrap();
+    }
+    (*report).ok_or_else(|| "HTTP server stopped without a shutdown report".to_string())
+}
+
 fn jet_http_server_shutdown(server: &JetHTTPServer, grace: &jet_std::Duration) -> Result<JetHTTPShutdownReport, String> {
     use std::sync::atomic::Ordering;
-    if server.inner.shutdown_called.swap(true, Ordering::AcqRel) { return Err("HTTP server shutdown was already requested".to_string()); }
+    let already_requested = server.inner.shutdown_called.swap(true, Ordering::AcqRel);
+    if already_requested { return jet_http_server_wait_for_report(server); }
     if server.inner.lifecycle.load(Ordering::Acquire) != 1 { return Err("HTTP server is not serving".to_string()); }
     let grace_ms = grace.as_millis().max(0) as u64;
     // Publish the absolute drain deadline before the shutdown flag so H2 and the
@@ -870,9 +880,7 @@ fn jet_http_server_shutdown(server: &JetHTTPServer, grace: &jet_std::Duration) -
     server.inner.drain_deadline_ms.store(deadline_ms, Ordering::Release);
     server.inner.grace_ms.store(grace_ms, Ordering::Release);
     server.inner.shutdown.store(true, Ordering::Release);
-    let mut report = server.inner.report.lock().unwrap();
-    while report.is_none() && server.inner.lifecycle.load(Ordering::Acquire) == 1 { report = server.inner.report_ready.wait(report).unwrap(); }
-    (*report).ok_or_else(|| "HTTP server stopped without a shutdown report".to_string())
+    jet_http_server_wait_for_report(server)
 }
 
 fn jet_http_server_run_listener(

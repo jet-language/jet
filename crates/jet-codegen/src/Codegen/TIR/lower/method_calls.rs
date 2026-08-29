@@ -5350,7 +5350,7 @@ fn lower_method_call_impl(
             }
         }
     }
-    // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` — the
+    // D-BINPAT1 (card #506 follow-up): `reader.take_pattern([U8]{"…"})` — the
     // byte-mode sibling, same reasoning. The parser already committed to
     // `Expr::BinMatchLit` for this argument (sema rejects any other shape).
     if let Some(handle) = recv_type {

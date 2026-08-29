@@ -57,6 +57,19 @@ fn regular_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn debug_cache_event(event: impl AsRef<str>) {
+    let Ok(path) = std::env::var("JET_DEBUG_NATIVE_CACHE_LOG") else {
+        return;
+    };
+    if let Ok(mut log) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = std::io::Write::write_all(&mut log, format!("cache {}\n", event.as_ref()).as_bytes());
+    }
+}
+
 fn safe_cache_dir(dir: &Path) -> Result<(), String> {
     let root = cache_dir();
     match fs::symlink_metadata(&root) {
@@ -101,15 +114,55 @@ fn verified_cached_bytes(key: &str) -> Option<(Vec<u8>, fs::Permissions)> {
     let digest = dir.join("bin.sha256");
     let bin = dir.join("bin");
     if !regular_file(&digest) || !regular_file(&bin) {
+        debug_cache_event(format!(
+            "verify-files key={} digest_regular={} bin_regular={} dir={}",
+            key,
+            regular_file(&digest),
+            regular_file(&bin),
+            dir.display(),
+        ));
         return None;
     }
-    let digest_bytes = fs::read(digest).ok()?;
-    let expected = parse_digest_record(&digest_bytes)?;
-    let mut source = fs::File::open(dir.join("bin")).ok()?;
-    let permissions = source.metadata().ok()?.permissions();
+    let digest_bytes = match fs::read(&digest) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            debug_cache_event(format!("verify-digest-read key={} error={error}", key));
+            return None;
+        }
+    };
+    let Some(expected) = parse_digest_record(&digest_bytes) else {
+        debug_cache_event(format!(
+            "verify-digest-record key={} bytes={}",
+            key,
+            digest_bytes.len(),
+        ));
+        return None;
+    };
+    let mut source = match fs::File::open(&bin) {
+        Ok(source) => source,
+        Err(error) => {
+            debug_cache_event(format!("verify-bin-read key={} error={error}", key));
+            return None;
+        }
+    };
+    let permissions = match source.metadata() {
+        Ok(metadata) => metadata.permissions(),
+        Err(error) => {
+            debug_cache_event(format!("verify-bin-stat key={} error={error}", key));
+            return None;
+        }
+    };
     let mut bytes = Vec::new();
-    source.read_to_end(&mut bytes).ok()?;
-    (sha256_hex(&bytes) == expected).then_some((bytes, permissions))
+    if let Err(error) = source.read_to_end(&mut bytes) {
+        debug_cache_event(format!("verify-bin-read-to-end key={} error={error}", key));
+        return None;
+    }
+    if sha256_hex(&bytes) != expected {
+        debug_cache_event(format!("verify-digest-mismatch key={} bytes={}", key, bytes.len()));
+        return None;
+    }
+    debug_cache_event(format!("verify-ok key={} bytes={}", key, bytes.len()));
+    Some((bytes, permissions))
 }
 
 fn temp_path(path: &Path, label: &str) -> Option<PathBuf> {
@@ -154,20 +207,31 @@ fn publish_bytes(
 /// Copy a cached binary to `dest` when present. Returns `true` on cache hit.
 pub fn try_copy_cached(key: &str, dest: &Path) -> bool {
     let Some(dir) = cache_entry_dir(key) else {
+        debug_cache_event(format!("copy-invalid-key key={} dest={}", key, dest.display()));
         return false;
     };
     if safe_cache_dir(&dir).is_err() {
+        debug_cache_event(format!("copy-unsafe key={} dir={}", key, dir.display()));
         return false;
     }
     let Some((bytes, permissions)) = verified_cached_bytes(key) else {
+        debug_cache_event(format!("copy-unverified key={} dest={}", key, dest.display()));
         return false;
     };
     if let Some(parent) = dest.parent() {
         if fs::create_dir_all(parent).is_err() {
+            debug_cache_event(format!("copy-parent-failed key={} dest={}", key, dest.display()));
             return false;
         }
     }
-    publish_bytes(dest, &bytes, Some(permissions), "copy").is_ok()
+    let result = publish_bytes(dest, &bytes, Some(permissions), "copy");
+    debug_cache_event(format!(
+        "copy-result key={} dest={} result={:?}",
+        key,
+        dest.display(),
+        result,
+    ));
+    result.is_ok()
 }
 
 /// Store a freshly built binary in the cache.
@@ -177,6 +241,12 @@ pub fn try_copy_cached(key: &str, dest: &Path) -> bool {
 /// therefore never observes a half-written `bin`. Preserve source permissions
 /// so cached native artifacts stay executable.
 pub fn store_cached(key: &str, bin: &Path) -> Result<(), String> {
+    debug_cache_event(format!(
+        "store-start key={} bin={} cache_dir={}",
+        key,
+        bin.display(),
+        cache_dir().display(),
+    ));
     let dir = cache_entry_dir(key)
         .ok_or_else(|| "refusing to store a cache entry with an invalid key".to_string())?;
     if !regular_file(bin) {
@@ -208,6 +278,7 @@ pub fn store_cached(key: &str, bin: &Path) -> Result<(), String> {
         None,
         "digest",
     )?;
+    debug_cache_event(format!("store-ok key={} dir={}", key, dir.display()));
     Ok(())
 }
 

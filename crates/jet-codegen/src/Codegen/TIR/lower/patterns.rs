@@ -77,7 +77,7 @@ pub(super) fn lower_cursor_take_pattern(
     }
 }
 
-/// D-BINPAT1 (card #506 follow-up): lower `reader.take_pattern(b"…")` — the
+/// D-BINPAT1 (card #506 follow-up): lower `reader.take_pattern([U8]{"…"})` — the
 /// byte-mode sibling of `lower_cursor_take_pattern` immediately above. Builds
 /// the SAME canonical hole list the same way sema did when it set this call's
 /// `resolved_ret` (`bin_match_hole_types`), so the `JetTup_<hash>` struct

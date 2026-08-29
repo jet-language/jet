@@ -1,0 +1,9 @@
+// core-conformance: core.auth.magic_link_issue
+use core.auth as auth
+use core.text as text
+
+fn run() {
+    auth.register_user("alice@example.com", "argon2id:demo") ?? panic("register")
+    result :: auth.magic_link_issue("alice@example.com", 1_700_000_000_000, 600_000) ?? panic("issue")
+    print(text.byte_count(result) > 0)
+}

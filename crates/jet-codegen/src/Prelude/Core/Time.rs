@@ -247,11 +247,6 @@ impl JetPeriod {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct JetInstant {
-    start_ns: i64,
-}
-
 pub(crate) fn jet_time_instant_add_duration_ns(start_ns: i64, duration_ns: i64) -> i64 {
     start_ns.saturating_add(duration_ns)
 }
@@ -273,40 +268,6 @@ pub(crate) fn jet_time_instant_compare(left_ns: i64, right_ns: i64) -> i64 {
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,
-    }
-}
-
-impl JetInstant {
-    pub(crate) fn now() -> Self {
-        JetInstant {
-            start_ns: jet_time_monotonic_now_ns(),
-        }
-    }
-    pub(crate) fn elapsed_millis(&self) -> i64 {
-        self.elapsed_nanos().saturating_div(1_000_000)
-    }
-    pub(crate) fn elapsed_nanos(&self) -> i64 {
-        jet_time_instant_elapsed_ns(jet_time_monotonic_now_ns(), self.start_ns)
-    }
-    pub(crate) fn plus_duration_ns(&self, ns: i64) -> Self {
-        Self {
-            start_ns: jet_time_instant_add_duration_ns(self.start_ns, ns),
-        }
-    }
-    pub(crate) fn minus_duration_ns(&self, ns: i64) -> Self {
-        Self {
-            start_ns: jet_time_instant_sub_duration_ns(self.start_ns, ns),
-        }
-    }
-    pub(crate) fn difference_ns(&self, other: &Self) -> i64 {
-        jet_time_instant_difference_ns(self.start_ns, other.start_ns)
-    }
-    pub(crate) fn compare_to(&self, other: &Self) -> i64 {
-        jet_time_instant_compare(self.start_ns, other.start_ns)
-    }
-
-    pub(crate) fn to_string_fmt(&self) -> String {
-        "Instant".to_string()
     }
 }
 

@@ -34,7 +34,6 @@ mod math_lib_pure {
 #[allow(dead_code)]
 mod render_time_rt {
     #![allow(dead_code)]
-    pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
     include!("../../../Prelude/Core/Time.rs");
 }
 
@@ -11587,10 +11586,14 @@ fn eval_precise_builtin(
             None => Err(unsupported("`Decimal.to_float`", span)),
         },
         ("Fraction", "from_parts") => {
-            let [CtValue::Int(numerator), CtValue::Int(denominator)] = args.as_slice() else {
+            let [numerator, denominator] = args.as_slice() else {
                 return Err(unsupported("`Fraction.from_parts`", span));
             };
-            CtFraction::new(*numerator, *denominator)
+            let numerator = crate::Comptime::Builtins::exact_big(numerator)
+                .ok_or_else(|| unsupported("`Fraction.from_parts`", span))?;
+            let denominator = crate::Comptime::Builtins::exact_big(denominator)
+                .ok_or_else(|| unsupported("`Fraction.from_parts`", span))?;
+            CtFraction::from_bigints(numerator, denominator)
                 .map(|fraction| fraction.to_value())
                 .ok_or_else(|| unsupported("invalid exact quotient", span))
         }
@@ -11609,10 +11612,9 @@ fn eval_precise_builtin(
         }
         ("Fraction", "from_int") => match args.first() {
             Some(value) => crate::Comptime::Builtins::exact_big(value)
-                .and_then(|integer| integer.try_i64())
-                .and_then(|integer| CtFraction::from_int(integer))
+                .and_then(CtFraction::from_bigint)
                 .map(|fraction| fraction.to_value())
-                .ok_or_else(|| unsupported("`Fraction.from_int` needs a word-sized Int", span)),
+                .ok_or_else(|| unsupported("`Fraction.from_int` needs an exact Int", span)),
             None => Err(unsupported("`Fraction.from_int`", span)),
         },
         ("Fraction", "from_float") => match args.first() {
@@ -11626,14 +11628,14 @@ fn eval_precise_builtin(
                 .ok()
                 .and_then(|decimal| CtFraction::from_decimal(&decimal))
                 .map(|fraction| fraction.to_value())
-                .ok_or_else(|| unsupported("`Fraction.from_decimal` needs a word-sized Decimal", span)),
+                .ok_or_else(|| unsupported("`Fraction.from_decimal` needs an exact Decimal", span)),
             None => Err(unsupported("`Fraction.from_decimal`", span)),
         },
         ("Fraction", "to_int") => match args.first() {
             Some(value) => CtFraction::from_value(value)
                 .ok()
                 .and_then(|fraction| fraction.to_int_exact())
-                .map(CtValue::Int)
+                .map(crate::Comptime::Builtins::exact_int_value)
                 .ok_or_else(|| unsupported("`Fraction.to_int` needs an integer value", span)),
             None => Err(unsupported("`Fraction.to_int`", span)),
         },

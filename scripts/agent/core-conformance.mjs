@@ -118,10 +118,10 @@ fn run() {
 
 function matching(text, start, opening, closing) {
   let depth = 0;
-  let quote = false;
+  let quote = null;
   let escaped = false;
   let lineComment = false;
-  let blockComment = false;
+  let blockDepth = 0;
   for (let i = start; i < text.length; i += 1) {
     const c = text[i];
     const n = text[i + 1];
@@ -129,21 +129,38 @@ function matching(text, start, opening, closing) {
       if (c === "\n") lineComment = false;
       continue;
     }
-    if (blockComment) {
-      if (c === "*" && n === "/") {
-        blockComment = false;
+    if (blockDepth > 0) {
+      if (c === "/" && n === "*") {
+        blockDepth += 1;
+        i += 1;
+      } else if (c === "*" && n === "/") {
+        blockDepth -= 1;
         i += 1;
       }
       continue;
     }
-    if (quote) {
+    if (quote === "triple") {
       if (escaped) escaped = false;
       else if (c === "\\") escaped = true;
-      else if (c === '"') quote = false;
+      else if (c === '"' && text.slice(i, i + 3) === '"""') {
+        quote = null;
+        i += 2;
+      }
+      continue;
+    }
+    if (quote === "regular") {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') quote = null;
+      continue;
+    }
+    if (c === '"' && text.slice(i, i + 3) === '"""') {
+      quote = "triple";
+      i += 2;
       continue;
     }
     if (c === '"') {
-      quote = true;
+      quote = "regular";
       continue;
     }
     if (c === "/" && n === "/") {
@@ -152,7 +169,7 @@ function matching(text, start, opening, closing) {
       continue;
     }
     if (c === "/" && n === "*") {
-      blockComment = true;
+      blockDepth = 1;
       i += 1;
       continue;
     }
@@ -162,8 +179,205 @@ function matching(text, start, opening, closing) {
   throw new Error(`unbalanced ${opening} at ${start}`);
 }
 
+// Keep source offsets and line structure while removing syntax that must not
+// participate in registry or witness discovery.
+function withoutComments(text) {
+  let out = "";
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockDepth = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    const n = text[i + 1];
+    if (lineComment) {
+      if (c === "\n") {
+        lineComment = false;
+        out += c;
+      } else {
+        out += c === "\r" ? c : " ";
+      }
+      continue;
+    }
+    if (blockDepth > 0) {
+      if (c === "/" && n === "*") {
+        blockDepth += 1;
+        out += "  ";
+        i += 1;
+      } else if (c === "*" && n === "/") {
+        blockDepth -= 1;
+        out += "  ";
+        i += 1;
+      } else {
+        out += c === "\n" || c === "\r" ? c : " ";
+      }
+      continue;
+    }
+    if (quote === "triple") {
+      out += c;
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"' && text.slice(i, i + 3) === '"""') {
+        out += '""';
+        i += 2;
+        quote = null;
+      }
+      continue;
+    }
+    if (quote === "regular") {
+      out += c;
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') quote = null;
+      continue;
+    }
+    if (c === '"' && text.slice(i, i + 3) === '"""') {
+      out += '"""';
+      i += 2;
+      quote = "triple";
+      continue;
+    }
+    if (c === '"') {
+      out += c;
+      quote = "regular";
+      continue;
+    }
+    if (c === "/" && n === "/") {
+      out += "  ";
+      i += 1;
+      lineComment = true;
+      continue;
+    }
+    if (c === "/" && n === "*") {
+      out += "  ";
+      i += 1;
+      blockDepth = 1;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+// The complement of withoutComments: strings are blanked too, so names and
+// calls in comments or string literals can never become witness evidence.
+function codeOnly(text) {
+  let out = "";
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockDepth = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    const n = text[i + 1];
+    if (lineComment) {
+      if (c === "\n") {
+        lineComment = false;
+        out += c;
+      } else {
+        out += c === "\r" ? c : " ";
+      }
+      continue;
+    }
+    if (blockDepth > 0) {
+      if (c === "/" && n === "*") {
+        blockDepth += 1;
+        out += "  ";
+        i += 1;
+      } else if (c === "*" && n === "/") {
+        blockDepth -= 1;
+        out += "  ";
+        i += 1;
+      } else {
+        out += c === "\n" || c === "\r" ? c : " ";
+      }
+      continue;
+    }
+    if (quote === "triple") {
+      if (c === '"' && text.slice(i, i + 3) === '"""') {
+        out += "   ";
+        i += 2;
+        quote = null;
+      } else {
+        out += c === "\n" || c === "\r" ? c : " ";
+        if (escaped) escaped = false;
+        else if (c === "\\") escaped = true;
+      }
+      continue;
+    }
+    if (quote === "regular") {
+      out += c === "\n" || c === "\r" ? c : " ";
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') quote = null;
+      continue;
+    }
+    if (c === '"' && text.slice(i, i + 3) === '"""') {
+      out += "   ";
+      i += 2;
+      quote = "triple";
+      continue;
+    }
+    if (c === '"') {
+      out += " ";
+      quote = "regular";
+      continue;
+    }
+    if (c === "/" && n === "/") {
+      out += "  ";
+      i += 1;
+      lineComment = true;
+      continue;
+    }
+    if (c === "/" && n === "*") {
+      out += "  ";
+      i += 1;
+      blockDepth = 1;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+function decodeRustString(value) {
+  try {
+    return JSON.parse(`"${value}"`);
+  } catch {
+    return value;
+  }
+}
+
+function rustStringConstants(source) {
+  const constants = new Map();
+  const clean = withoutComments(source);
+  const pattern = /pub\s+const\s+([A-Z][A-Z0-9_]*)\s*:\s*&str\s*=\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g;
+  for (const match of clean.matchAll(pattern)) {
+    constants.set(match[1], decodeRustString(match[2]));
+  }
+  return constants;
+}
+
+function rustStringExpressions(text, constants) {
+  const clean = withoutComments(text);
+  const names = new Set(quoted(clean));
+  for (const match of clean.matchAll(/\b(?:Syntax::)?([A-Z][A-Z0-9_]*)\b/g)) {
+    if (constants.has(match[1])) names.add(constants.get(match[1]));
+  }
+  for (const match of clean.matchAll(/\bSyntax::([A-Z][A-Z0-9_]*)\b/g)) {
+    if (!constants.has(match[1])) {
+      throw new Error(`unresolved Syntax string constant: ${match[1]}`);
+    }
+  }
+  return Array.from(names);
+}
+
 function quoted(text) {
-  return Array.from(text.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"/g), (m) => m[1]);
+  return Array.from(text.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"/g), (m) => decodeRustString(m[1]));
+}
+
+function escapedRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function moduleItems() {
@@ -171,37 +385,40 @@ function moduleItems() {
   const start = source.indexOf("pub fn core_module_items");
   const end = source.indexOf("/// Ratified nominal types", start);
   if (start < 0 || end < 0) throw new Error("core_module_items source anchors disappeared");
-  const body = source.slice(start, end);
+  const body = withoutComments(source.slice(start, end));
+  const constants = rustStringConstants(readFileSync(MEM_SURFACE, "utf8"));
   const out = new Map();
   const arms = /^\s*((?:"[^"]+"\s*(?:\|\s*)?)+)=>\s*&\[/gm;
   for (const arm of body.matchAll(arms)) {
-    const modules = quoted(arm[1]);
+    const modules = rustStringExpressions(arm[1], constants);
     const opening = body.indexOf("[", arm.index + arm[0].length - 1);
     const close = matching(body, opening, "[", "]");
-    const names = quoted(body.slice(opening + 1, close));
+    const names = rustStringExpressions(body.slice(opening + 1, close), constants);
     for (const module of modules) {
       if (!out.has(module)) out.set(module, new Set());
       for (const name of names) out.get(module).add(name);
     }
   }
 
+  // This branch is registry-owned too, although its names are generated from
+  // policy declarations rather than written as a literal array. The current
+  // declarations are type-like and therefore contribute no function rows.
+  if (body.includes('module == "core.compiler.lang"')) {
+    out.set("core.compiler.lang", new Set());
+  }
+
   // core.mem is intentionally a typed gate table instead of a literal match
   // arm. Resolve its string constants from the same source that owns the gate.
-  const memSource = readFileSync(MEM_SURFACE, "utf8");
+  const memSource = withoutComments(readFileSync(MEM_SURFACE, "utf8"));
   const memStart = memSource.indexOf("pub const CORE_MEM_GATE_TIERS");
-  const memEnd = memSource.indexOf("];", memStart);
-  if (memStart < 0 || memEnd < 0) throw new Error("CORE_MEM_GATE_TIERS source anchor disappeared");
-  const constants = new Map(
-    Array.from(memSource.matchAll(/pub const ([A-Z][A-Z0-9_]*)\s*:\s*&str\s*=\s*"([^"]+)"/g),
-      (m) => [m[1], m[2]],
-    ),
-  );
-  const mem = new Set();
-  for (const name of memSource.slice(memStart, memEnd).matchAll(/\b[A-Z][A-Z0-9_]*\b/g)) {
-    if (constants.has(name[0])) mem.add(constants.get(name[0]));
-  }
+  const table = memSource.indexOf("= &[", memStart);
+  if (memStart < 0 || table < 0) throw new Error("CORE_MEM_GATE_TIERS source anchor disappeared");
+  const opening = memSource.indexOf("[", table);
+  const close = matching(memSource, opening, "[", "]");
+  const mem = new Set(rustStringExpressions(memSource.slice(opening + 1, close), constants));
   if (mem.size === 0) throw new Error("CORE_MEM_GATE_TIERS resolved no item names");
   out.set("core.mem", mem);
+  if (out.size === 0) throw new Error("core_module_items yielded no modules");
   return out;
 }
 
@@ -240,111 +457,167 @@ function keyForPath(path) {
 function parseExclusions() {
   if (!existsSync(EXCLUSIONS)) return new Map();
   const rows = new Map();
-  for (const raw of readFileSync(EXCLUSIONS, "utf8").split(/\r?\n/)) {
+  for (const [index, raw] of readFileSync(EXCLUSIONS, "utf8").split(/\r?\n/).entries()) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
-    const [key, reason = ""] = line.split("\t", 2);
+    const fields = raw.split("\t");
+    if (fields.length !== 2 || !fields[0].trim()) {
+      throw new Error(`malformed conformance carve-out at line ${index + 1}: expected key<TAB>reason`);
+    }
+    const key = fields[0].trim();
     if (rows.has(key)) throw new Error(`duplicate conformance carve-out: ${key}`);
-    rows.set(key, reason.trim());
+    rows.set(key, fields[1].trim());
   }
   return rows;
 }
 
-function withoutLineComment(line) {
-  let quote = false;
+function stringInterpolatesValue(text, value) {
+  const clean = withoutComments(text);
+  let quote = null;
   let escaped = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const c = line[i];
-    const n = line[i + 1];
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (c === "\\") escaped = true;
-      else if (c === '"') quote = false;
-    } else if (c === '"') {
-      quote = true;
-    } else if (c === "/" && n === "/") {
-      return line.slice(0, i);
+  for (let i = 0; i < clean.length; i += 1) {
+    const c = clean[i];
+    if (!quote) {
+      if (c === '"' && clean.slice(i, i + 3) === '"""') {
+        quote = "triple";
+        i += 2;
+      } else if (c === '"') {
+        quote = "regular";
+      }
+      continue;
     }
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (c === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote === "triple" && c === '"' && clean.slice(i, i + 3) === '"""') {
+      quote = null;
+      i += 2;
+      continue;
+    }
+    if (quote === "regular" && c === '"') {
+      quote = null;
+      continue;
+    }
+    if (c !== "{") continue;
+    if (clean[i + 1] === "{") {
+      i += 1;
+      continue;
+    }
+    let close;
+    try {
+      close = matching(clean, i, "{", "}");
+    } catch {
+      return false;
+    }
+    if (expressionConsumesValue(clean.slice(i + 1, close), value)) return true;
+    i = close;
   }
-  return line;
+  return false;
 }
 
-function lineConsumesValue(line, value) {
-  const codeLine = withoutLineComment(line);
-  const consumer = /\b(?:print|eprint|assert)\s*\(/.exec(codeLine);
-  if (!consumer) return false;
-  const valueUse = new RegExp(`\\b${value}\\b`);
-  let quote = false;
-  let escaped = false;
-  let code = "";
-  for (let i = consumer.index + consumer[0].length; i < codeLine.length; i += 1) {
-    const c = codeLine[i];
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (c === "\\") escaped = true;
-      else if (c === '"') quote = false;
-      else if (c === "{") {
-        const close = codeLine.indexOf("}", i + 1);
-        if (close >= 0 && valueUse.test(codeLine.slice(i + 1, close))) return true;
-        if (close >= 0) i = close;
-      }
-    } else if (c === '"') {
-      quote = true;
-    } else {
-      code += c;
+function expressionConsumesValue(text, value) {
+  const valueUse = new RegExp(`\\b${escapedRegExp(value)}\\b`);
+  return valueUse.test(codeOnly(text)) || stringInterpolatesValue(text, value);
+}
+
+function observerCalls(code) {
+  const observers = [];
+  const pattern = /(?<![A-Za-z0-9_.])(?:print|eprint|assert)\s*\(/g;
+  for (const match of code.matchAll(pattern)) {
+    const open = match.index + match[0].lastIndexOf("(");
+    try {
+      observers.push({ open, close: matching(code, open, "(", ")") });
+    } catch {
+      // An unbalanced observer cannot prove result consumption.
     }
   }
-  return valueUse.test(code);
+  return observers;
 }
 
 function sourceErrors(key, source) {
   const errors = [];
-  const marker = source.match(/^\s*\/\/\s*core-conformance:\s*([^\s]+)\s*$/m);
-  if (!marker) errors.push("missing // core-conformance: module.function marker");
-  else if (marker[1] !== key) errors.push(`marker names ${marker[1]}`);
+  const expectedMarker = `// core-conformance: ${key}`;
+  const firstLine = source.split(/\r?\n/, 1)[0];
+  if (firstLine !== expectedMarker) {
+    const marker = firstLine.match(/^\s*\/\/\s*core-conformance:\s*(.*?)\s*$/);
+    if (marker) errors.push(`marker names ${marker[1] || "<empty>"}`);
+    else errors.push(`file must start with ${expectedMarker}`);
+  }
+  const markerCount = source
+    .split(/\r?\n/)
+    .filter((line) => line.trim() === expectedMarker)
+    .length;
+  if (markerCount > 1) errors.push(`expected exactly one ${expectedMarker} marker, found ${markerCount}`);
 
   const dot = key.lastIndexOf(".");
   const module = key.slice(0, dot);
   const name = key.slice(dot + 1);
-  const alias = source.match(new RegExp(`^\\s*use\\s+${module.replaceAll(".", "\\.")}\\s+as\\s+([A-Za-z_][A-Za-z0-9_]*)`, "m"));
-  if (!alias) {
-    errors.push(`missing use ${module} as <alias>`);
+  const code = codeOnly(source);
+  const usePattern = new RegExp(
+    `^\\s*use\\s+${escapedRegExp(module)}\\s+as\\s+([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(?:;[ \\t]*)?\\r?$`,
+    "gm",
+  );
+  const aliases = Array.from(code.matchAll(usePattern));
+  if (aliases.length !== 1) {
+    errors.push(`expected one use ${module} as <alias>, found ${aliases.length}`);
     return errors;
   }
-  const call = new RegExp(`\\b${alias[1]}\\.${name}\\s*\\(`, "g");
-  const calls = Array.from(source.matchAll(call));
+  const alias = aliases[0][1];
+  const call = new RegExp(
+    `(?<![A-Za-z0-9_.])${escapedRegExp(alias)}\\s*\\.\\s*${escapedRegExp(name)}\\s*\\(`,
+    "g",
+  );
+  const calls = Array.from(code.matchAll(call));
   if (calls.length !== 1) {
     errors.push(`expected one ${module}.${name} call, found ${calls.length}`);
     return errors;
   }
 
   const callStart = calls[0].index;
-  const lineStart = source.lastIndexOf("\n", callStart) + 1;
-  const beforeCall = source.slice(lineStart, callStart);
-  const binding = beforeCall.match(/\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:::|:=)\s*$/);
+  const callOpen = callStart + calls[0][0].lastIndexOf("(");
+  let callClose;
+  try {
+    callClose = matching(code, callOpen, "(", ")");
+  } catch {
+    errors.push(`malformed ${module}.${name} call: unbalanced parentheses`);
+    return errors;
+  }
+
+  const lineStart = code.lastIndexOf("\n", callStart) + 1;
+  const beforeCall = code.slice(lineStart, callStart);
+  const binding = beforeCall.match(/(?:^|[{};])\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:::|:=)\s*$/);
+  const observers = observerCalls(code);
   if (binding) {
     const value = binding[1];
     if (value.startsWith("_")) errors.push(`result is bound to discard name ${value}`);
-    const callEnd = calls[0].index + calls[0][0].length;
-    const after = source.slice(callEnd);
-    const consumed = after.split(/\r?\n/).some((line) => lineConsumesValue(line, value));
+    const consumed = observers.some(
+      ({ open, close }) => open > callClose && expressionConsumesValue(source.slice(open + 1, close), value),
+    );
     if (!consumed) errors.push(`bound result ${value} is never consumed by print/eprint/assert`);
   } else {
-    const line = source.slice(lineStart, source.indexOf("\n", callStart) < 0 ? source.length : source.indexOf("\n", callStart));
-    if (!/\b(?:print|eprint|assert)\s*\(/.test(line.slice(0, callStart - lineStart))) {
-      errors.push("direct result is not consumed by print/eprint/assert");
-    }
+    const consumed = observers.some(({ open, close }) => open < callStart && callStart < close);
+    if (!consumed) errors.push("direct result is not consumed by print/eprint/assert");
   }
   return errors;
 }
 
-function audit() {
-  const expected = inventory();
-  const expectedSet = new Set(expected);
-  const files = new Map();
+function auditEntries(expected, witnesses, exclusions) {
+  const expectedRows = Array.from(expected).sort();
+  const expectedSet = new Set(expectedRows);
   const errors = [];
-  for (const path of walk(CORPUS)) {
-    const key = keyForPath(path);
+  for (let i = 1; i < expectedRows.length; i += 1) {
+    if (expectedRows[i] === expectedRows[i - 1]) {
+      errors.push(`${expectedRows[i]}: denominator contains a duplicate row`);
+    }
+  }
+  const files = new Map();
+  for (const witness of witnesses) {
+    const { key, path, source } = witness;
     if (!expectedSet.has(key)) {
       errors.push(`${key}: file is not a public Core function`);
       continue;
@@ -354,16 +627,31 @@ function audit() {
       continue;
     }
     files.set(key, path);
-    const source = readFileSync(path, "utf8");
     errors.push(...sourceErrors(key, source).map((error) => `${key}: ${error}`));
   }
-  const exclusions = parseExclusions();
-  for (const [key, reason] of exclusions) {
+  for (const [key, reason] of Array.from(exclusions).sort(([left], [right]) => left.localeCompare(right))) {
     if (!expectedSet.has(key)) errors.push(`${key}: carve-out is not a public Core function`);
     if (!reason) errors.push(`${key}: carve-out has no reason`);
     if (files.has(key)) errors.push(`${key}: has both a program and a carve-out`);
   }
-  const missing = expected.filter((key) => !files.has(key) && !exclusions.has(key));
+  const missing = expectedRows.filter((key) => !files.has(key) && !exclusions.has(key));
+  return {
+    errors: errors.sort(),
+    exclusions,
+    files,
+    missing,
+  };
+}
+
+function audit() {
+  const expected = inventory();
+  const witnesses = walk(CORPUS).map((path) => ({
+    key: keyForPath(path),
+    path,
+    source: readFileSync(path, "utf8"),
+  }));
+  const result = auditEntries(expected, witnesses, parseExclusions());
+  const { errors, exclusions, files, missing } = result;
   console.log(`core conformance denominator: ${expected.length} public function(s); ${files.size} program(s); ${exclusions.size} carve-out(s); ${missing.length} uncovered row(s)`);
   for (const key of missing) console.log(`  ${key}`);
   for (const error of errors) console.error(`error: ${error}`);
@@ -387,44 +675,180 @@ function generate() {
 }
 
 function hostileFixtures() {
-  const fixtures = [
-    `// core-conformance: core.crypto.uuid.v4
+  const key = "core.crypto.uuid.v4";
+  const valid = `// core-conformance: ${key}
+use core.crypto.uuid as uuid
+fn run() {
+    result :: uuid.v4()
+    print(result)
+}
+`;
+  const cases = [
+    [
+      "bind-and-discard",
+      `// core-conformance: ${key}
 use core.crypto.uuid as uuid
 fn run() {
     _result :: uuid.v4()
     print("ok")
 }
 `,
-    `// core-conformance: core.crypto.uuid.v4
+      "discard name",
+    ],
+    [
+      "observerless binding",
+      `// core-conformance: ${key}
 use core.crypto.uuid as uuid
 fn run() {
     result :: uuid.v4()
+    sink(result)
+}
+`,
+      "never consumed",
+    ],
+    [
+      "direct unobserved call",
+      `// core-conformance: ${key}
+use core.crypto.uuid as uuid
+fn run() {
+    uuid.v4()
+}
+`,
+      "direct result is not consumed",
+    ],
+    [
+      "comment call ghost",
+      `// core-conformance: ${key}
+use core.crypto.uuid as uuid
+fn run() {
+    // uuid.v4()
     print("ok")
 }
 `,
-    `// core-conformance: core.crypto.uuid.v4
+      "expected one core.crypto.uuid.v4 call, found 0",
+    ],
+    [
+      "string call ghost",
+      `// core-conformance: ${key}
+use core.crypto.uuid as uuid
+fn run() {
+    print("uuid.v4()")
+}
+`,
+      "expected one core.crypto.uuid.v4 call, found 0",
+    ],
+    [
+      "comment observer ghost",
+      `// core-conformance: ${key}
 use core.crypto.uuid as uuid
 fn run() {
     result :: uuid.v4()
-    print("ok") // result
+    /* print(result) */
 }
 `,
-    `// core-conformance: core.crypto.uuid.v4
+      "never consumed",
+    ],
+    [
+      "string observer ghost",
+      `// core-conformance: ${key}
 use core.crypto.uuid as uuid
 fn run() {
     result :: uuid.v4()
     print("result")
 }
 `,
+      "never consumed",
+    ],
+    [
+      "malformed marker",
+      `// core-conformance: ${key} extra
+use core.crypto.uuid as uuid
+fn run() {
+    print(uuid.v4())
+}
+`,
+      "marker names",
+    ],
+    [
+      "malformed call shape",
+      `// core-conformance: ${key}
+use core.crypto.uuid as uuid
+fn run() {
+    print(uuid.v4)
+}
+`,
+      "expected one core.crypto.uuid.v4 call, found 0",
+    ],
+    [
+      "unbalanced call",
+      `// core-conformance: ${key}
+use core.crypto.uuid as uuid
+fn run() {
+    print(uuid.v4(}
+}
+`,
+      "malformed core.crypto.uuid.v4 call",
+    ],
+    [
+      "duplicate call",
+      `// core-conformance: ${key}
+use core.crypto.uuid as uuid
+fn run() {
+    print(uuid.v4())
+    print(uuid.v4())
+}
+`,
+      "expected one core.crypto.uuid.v4 call, found 2",
+    ],
   ];
-  const errors = fixtures.map((source) => sourceErrors("core.crypto.uuid.v4", source));
-  if (!errors[0].some((error) => error.includes("discard name"))) {
-    throw new Error("discard binding was accepted");
+  for (const [label, source, expected] of cases) {
+    const errors = sourceErrors(key, source);
+    if (!errors.some((error) => error.includes(expected))) {
+      throw new Error(`${label} fixture was accepted: ${errors.join("; ")}`);
+    }
   }
-  if (!errors.every((fixture) => fixture.some((error) => error.includes("never consumed")))) {
-    throw new Error("unused result was accepted");
+
+  const interpolated = valid.replace("print(result)", 'print("value={result}")');
+  if (sourceErrors(key, interpolated).length !== 0) {
+    throw new Error("interpolated observer fixture was rejected");
   }
-  console.log("core conformance hostile fixtures: rejected bind-and-discard result and unused binding");
+
+  const expectedRows = ["core.fake.one", "core.fake.two"];
+  const witness = (row, path) => ({ key: row, path, source: `// core-conformance: ${row}
+use core.fake as fake
+fn run() {
+    print(fake.${row.slice(row.lastIndexOf(".") + 1)}())
+}
+` });
+  const assertLedgerError = (label, result, expected) => {
+    if (!result.errors.some((error) => error.includes(expected))) {
+      throw new Error(`${label} ledger fixture was accepted: ${result.errors.join("; ")}`);
+    }
+  };
+  const missing = auditEntries(expectedRows, [witness("core.fake.one", "core/fake/one.jet")], new Map());
+  if (!missing.missing.includes("core.fake.two")) throw new Error("missing ledger row was accepted");
+  const duplicate = auditEntries(
+    expectedRows,
+    [witness("core.fake.one", "core/fake/one.jet"), witness("core.fake.one", "other/one.jet")],
+    new Map(),
+  );
+  assertLedgerError("duplicate", duplicate, "duplicate files");
+  const nonPublic = auditEntries(
+    expectedRows,
+    [witness("core.fake.ghost", "core/fake/ghost.jet")],
+    new Map(),
+  );
+  assertLedgerError("non-public", nonPublic, "not a public Core function");
+  const reasonless = auditEntries(expectedRows, [], new Map([["core.fake.one", ""]]))
+  assertLedgerError("reasonless", reasonless, "carve-out has no reason");
+  const both = auditEntries(
+    expectedRows,
+    [witness("core.fake.one", "core/fake/one.jet")],
+    new Map([["core.fake.one", "owner-approved test"]]),
+  );
+  assertLedgerError("witness-plus-exclusion", both, "both a program and a carve-out");
+
+  console.log("core conformance hostile fixtures: rejected bind-and-discard result, observerless/direct calls, comment/string ghosts, malformed marker/calls, and denominator rows");
   return 0;
 }
 

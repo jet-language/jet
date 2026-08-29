@@ -669,6 +669,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pax_logical_size_cannot_bypass_stored_payload_limit() {
+        fn header(kind: u8, stored: u64) -> [u8; 512] {
+            let mut header = [0u8; 512];
+            let field = format!("{stored:011o}\0");
+            header[124..136].copy_from_slice(field.as_bytes());
+            header[156] = kind;
+            header
+        }
+
+        let pax = b"21 GNU.sparse.size=1\n";
+        let mut archive = Vec::new();
+        archive.extend_from_slice(&header(b'x', pax.len() as u64));
+        archive.extend_from_slice(pax);
+        archive.resize(archive.len() + (512 - pax.len()), 0);
+        archive.extend_from_slice(&header(b'L', MAX_ARCHIVE_ENTRY_BYTES + 1));
+        archive.extend_from_slice(&[0u8; 1024]);
+
+        let error = inspect_tar_stream(&archive[..]).unwrap_err();
+        assert!(
+            error.contains("payload") && error.contains("per-entry limit"),
+            "unexpected PAX limit error: {error}"
+        );
+    }
+
+    #[test]
     fn missing_archive_pipe_kills_and_reaps_child() {
         let mut child = Command::new(std::env::current_exe().unwrap())
             .arg("--list")
