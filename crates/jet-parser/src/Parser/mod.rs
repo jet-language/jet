@@ -692,7 +692,7 @@ impl<'a> Parser<'a> {
                     Syntax::KW_IN
                 ),
                 format!(
-                    "choose a different identifier name, or use `{}` in a source loop",
+                    "choose a different identifier name, or use `{}` in a source loop; after `.` it is allowed as a member name",
                     Syntax::KW_IN
                 ),
                 Some(span),

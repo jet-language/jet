@@ -1090,6 +1090,7 @@
     });
     syncProjectPanels(project);
     if (typeof syncCanvasOutputs === "function") syncCanvasOutputs(project);
+    if (typeof syncCanvasServers === "function") syncCanvasServers(project, canvasSession);
     if (typeof syncCanvasSession === "function" && canvasSession) syncCanvasSession(canvasSession);
     window.__jetCanvasProjectRail = { mode: project.mode, packages: (project.packages || []).length, files: fileCount, panels: window.__jetCanvasWorkspacePanels };
   }

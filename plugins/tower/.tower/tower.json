@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2323,
-    "rev": 46603,
+    "nextNum": 2331,
+    "rev": 46623,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26,7 +26,6 @@
         "radar:e13",
         "radar:e3",
         "radar:e5",
-        "board-ideas",
         "radar:e11"
       ]
     },
@@ -157357,14 +157356,24 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "Decide rename vs grammar allowance (rename recommended: no new grammar, one mechanism); if rename, pick the name alongside the Temporal-parity total() work on the datetime plan card so the unit-conversion family lands coherently; update registry, docs, examples, goldens on all tiers.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-TIME-IN1=C carve-out ships across lexer, parser, formatter, diagnostics, grammars, spec; time_calendar green byte-identical both tiers",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "Lanes w4timecal + w6timecal: carve-out plus updated E0003 fix text, formatter, Syntax.rs registration, docs and editor grammars. time_calendar.jet (span.in(.Seconds)) under a scratch Time-authority manifest: default and release exit 0, byte-identical, golden match (sha256 2e129ab9...901). The in-repo exit 1 is the ratified E1803 ambient-authority law, not a parse/sema failure.",
+          "at": "2026-08-29T01:22:37.445Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "video-mine",
@@ -157374,8 +157383,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T18:10:56.496Z",
-      "updated": "2026-08-28T19:19:47.592Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-29T01:22:38.096Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-29T01:22:38.095Z"
     },
     {
       "id": "c0gsyvft",
@@ -157715,7 +157725,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Find where interpreter structural == recurses into nested list elements (likely compares handles/representations instead of values one level down); fix in the shared Prelude equality path per I9 (not an interpreter-local patch); land nested list/map/mixed-depth equality fixtures on all tiers.",
       "checkSteps": "nested_eq.jet prints eq true flat true on default and release;equality fixtures cover depth 2-3 lists and maps-in-lists on all tiers",
@@ -157738,7 +157748,17 @@
           "text": "Second manifestation, verified first-hand (FSPATH lane, ~/.cache/jet-test-scratch/FSPATH/f3_noabs.jet): on DEFAULT tier, option-value comparisons against .None never match ('if p.extension() == .None ->' branch silently skipped for .gitignore/name), and for Path.from(\"/\") ALL THREE comparisons (.Val and .None) fail — root:stem/root:parent lines missing entirely; release prints all branches correctly. Default-tier structural/enum equality is broken beyond nested lists: option enums with and without payload false-negative. The fix must cover the general interpreter equality path (lists, maps-in-lists, option/enum variants), and criteria now include the f3_noabs branch matrix on both tiers."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Nested container equality (map-in-list, list-in-map, tuple containers) composes on every tier; witness green byte-identical both tiers vs golden",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "Lanes w4valsem + w6valsem: recursive Map Equatable derivation (jet-foundation Traits.rs, jet-sema CheckerItems.rs/Diagnostics.rs) plus TIR value==None pattern tests and recursive PartialEq for map-containing tuples. value_semantics.jet: jet check exit 0; default and release exit 0 with identical nine-line output; tier diff 0; golden cmp 0.",
+          "at": "2026-08-29T01:22:29.668Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "sweep",
@@ -157749,8 +157769,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T20:02:38.760Z",
-      "updated": "2026-08-28T21:18:07.272Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T01:22:31.416Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-29T01:22:31.415Z"
     },
     {
       "id": "c0cif3hm",
@@ -158857,14 +158878,24 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "Check how the parser/sema classify true/false tokens in arm-pattern position (literal vs binder); make them Bool literal patterns; add exhaustiveness interplay tests (true+false = exhaustive, else then unreachable); fixtures on all tiers for bool arm-match both values, plus a binder-named-true collision diagnostic if the grammar allowed it before.",
       "checkSteps": "bool_match.jet prints false gives F and true gives T on both tiers;bool literal pattern fixtures landed;exhaustiveness behavior stated",
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Bool arm-match selects the correct arm on every tier; witness green byte-identical both tiers vs golden",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "Same witness/fix as #2290: value_semantics.jet covers the false/true arm rows (false arm 0, true arm 1), byte-identical across default and release with matching golden.",
+          "at": "2026-08-29T01:22:34.327Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "sweep",
@@ -158876,8 +158907,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T21:09:15.054Z",
-      "updated": "2026-08-28T21:09:15.054Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T01:22:36.130Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-29T01:22:36.129Z"
     },
     {
       "id": "c0d0ikxx",
@@ -159165,6 +159197,236 @@
       "needsAcceptance": false,
       "created": "2026-08-28T21:20:18.791Z",
       "updated": "2026-08-28T23:23:31.538Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0ioa8q5",
+      "num": 2323,
+      "title": "Ballot dissent pass runs on a rival model family",
+      "body": "Grill session 2026-08-28 finding: every ballot's options and recommendation are drafted by correlated models advising one owner, so consensus artifacts can survive review. Fix: the adversarial review pass must be executed by a different model family than the ballot author, and its findings recorded in reviewPasses.adversarial. This extends the existing adversarial pass; no schema change and no new mechanism. Owner verdict: accepted (cross-model dissent only; external human probes declined for now).",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "1) Amend plugins/tower/skills/tower-ballot/SKILL.md: the adversarial pass names its executing model family, which must differ from the author's; include the codex dispatch recipe (Sol attacks fable/Luna drafts and vice versa). 2) Amend docs/agents/orchestration.md dispatch section with the same rule. 3) Prove on the next minted ballot: its adversarial summary names the rival model and what it attacked or changed.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "process",
+        "ballots",
+        "grill-2026-08-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T01:19:46.561Z",
+      "updated": "2026-08-29T01:19:46.562Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0uk4f8w",
+      "num": 2324,
+      "title": "Cold-agent Jet competence: context capsule + stock-model eval",
+      "body": "External engineers' AI assistants will write their first Jet code with zero repo context; their failures read as Jet being broken. llms.text exists but is 312KB, beyond most assistant context budgets, and nothing measures whether a stock model with capsule-only context can produce working Jet. The gauntlet measured Luna WITH repo access; cold-context competence is unmeasured. Owner verdict 2026-08-28: accepted, card the eval and the capsule. Human-first positioning is untouched; this is product capability, not marketing.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "1) Distill llms.text into a budgeted capsule (target ~32KB): syntax core, the dot rule, memory verbs, effect arrows, outcome handling, top-40 stdlib verbs, ten canonical programs. 2) Build a cold-context eval harness reusing gauntlet patterns: a graded task ladder (hello, CLI, data transform, HTTP service), at least two stock model families via API, capsule-only context, compile-and-run scoring, scoreboard artifact in docs/audits. 3) Iterate the capsule against observed failure classes; keep a truncated-llms.text control to prove the capsule earns its bytes. 4) Ship the capsule with the toolchain; the exact command surface needs its own decision at implementation time (user-typeable surface). 5) Re-run per release; a pass-rate regression mints a card.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "adoption",
+        "agent-eval",
+        "grill-2026-08-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T01:19:47.280Z",
+      "updated": "2026-08-29T01:19:47.280Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0ec2l6s",
+      "num": 2325,
+      "title": "Cost transparency: hidden-copy lint + per-line cost view",
+      "body": "Value semantics plus D-MEM-COPYSEM1 implicit copies, collection spine clones (Arc::make_mut per insert), and the packed-Int bigint fallback create invisible super-linear costs: an innocent-looking loop line can be O(n^2). This is the Swift CoW cliff, inherited exactly. The gauntlet measures peak performance; nothing surfaces per-line cost, and professionals leave languages over unpredictable performance, not slow performance. Owner verdict 2026-08-28: ballot the law, card the surfaces. Gated on D-COSTLAW1.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "After ratification, per the ratified option: 1) Inventory every hidden-cost site with its TIR/lowering seam: implicit view-to-owning copy, collection clone-on-write, Int bigint fallback, per-call outcome construction. 2) Hot-path lint: a hidden copy, clone, or representation fallback inside a loop body gets a registered L-code with what/why/fix naming the concrete repair (hoist, explicit ~ copy, freeze). 3) jet explain --cost <file>: per-line annotations from TIR facts naming allocations, copies, and fallbacks, tier-labeled. 4) Record the standing law in docs/spec/performance-budget-decisions.md: no construct ships a new invisible super-linear cost without a lint or cost-view row. All diagnostics snapshot-tested per I4.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "performance",
+        "predictability",
+        "grill-2026-08-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T01:19:48.476Z",
+      "updated": "2026-08-29T01:19:48.476Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0102pc7",
+      "num": 2326,
+      "title": "Runtime failures are products: Jet-only traces + registered panic copy",
+      "body": "I4 makes compile-time diagnostics products; runtime failure has no analog. A production panic today risks leaking generated-Rust frames and free-form text, which is I2's runtime twin and useless at 3am. E2-M12 (DAP prep, panic locals, logging) is a roadmap slot, not a governing bar. Owner verdict 2026-08-28: ballot the invariant. Gated on D-RTFAIL1.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "After ratification: 1) Inventory runtime failure surfaces: panic, arithmetic/bounds traps, outcome escape at the top level, task/scheduler failure, stack overflow, FFI fault. 2) Jet-frame-only stack traces via codegen source maps; generated-Rust frames never appear on any tier. 3) Panic and trap text joins a registry with what/why/fix, snapshot-tested like diagnostics. 4) I9 parity: identical failure text and trace shape on AOT, JIT, and interpreter for the same failure. 5) Align E2-M12 cards under the ratified bar.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "runtime",
+        "diagnostics",
+        "grill-2026-08-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T01:19:49.846Z",
+      "updated": "2026-08-29T01:19:49.846Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0oakubh",
+      "num": 2327,
+      "title": "Megaproject scale canary: anchor program + continuous scale metrics",
+      "body": "The largest real Jet program is site/generate.jet at ~650 lines; scale-activated flaws (compile time stacking on rustc, error cascades, LSP latency, incremental rebuilds, module ergonomics at 20-50k LOC) are invisible to the current workflow. This card refines card 217's dogfood portfolio item 1 with one flagship-scale anchor program plus standing measurements; it does not replace the portfolio. OWNER DIRECTIVE 2026-08-28: accept and ballot the anchor choice, but WAIT to build - no construction until the owner starts it. Gated on D-MEGAPROJ1.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "After ratification and explicit owner go: 1) Structure brief for the chosen anchor (modules, packages, services). 2) Luna-fleet build plan with disjoint lanes per package. 3) Scale-metrics rig measured continuously: cold/warm compile, incremental rebuild after a one-line change, LSP request latency percentiles, error-cascade quality on seeded breakage, timed refactor tasks. 4) Gauntlet-style snapshot reporting; each regression class mints a card.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "217"
+      ],
+      "tags": [
+        "scale",
+        "dogfood",
+        "grill-2026-08-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T01:19:51.255Z",
+      "updated": "2026-08-29T01:19:51.255Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0wysso9",
+      "num": 2328,
+      "title": "Front-door claim audit: wire README and site claims to evidence",
+      "body": "The trust strategy is proof-based, which makes one refutable public overclaim more damaging than ten missing features. README claims post-v1.0 production readiness while the first gauntlet run passed 2 of 15 entries on the default tier (since carded). feature-claims.json tracks claims internally but the public front door is not wired to it. Owner verdict 2026-08-28: accepted.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "1) Extract every checkable public claim from README.md and site/ into a table. 2) Map each claim to feature-claims.json rows or measured evidence (gauntlet, goldens, suites). 3) Three buckets: evidenced (link the evidence), fixable (mint or ref the card), unsupported (reword or remove). 4) Wiring: claims in README/site carry claim IDs and a CI check flags any public claim with no evidence row. Mechanical sweep is Luna-suitable; bucket calls stay with the orchestrator.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "trust",
+        "docs",
+        "grill-2026-08-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T01:20:04.840Z",
+      "updated": "2026-08-29T01:20:04.840Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0i3acwg",
+      "num": 2329,
+      "title": "Project policy surface: team ceilings for effects, unsafe, and expert rungs",
+      "body": "Professionals adopt languages as teams, and the first thing a tech lead evaluates is whether the toolchain can enforce team rules: which effects application code may use, an unsafe budget, an expert-rung ceiling, a dependency policy. Jet has package-only contain/harden keys (D-MEM-GUARANTEE1) but no unified project policy surface, so every team would invent an unofficial style-guide dialect. Owner verdict 2026-08-28: ballot the direction. Gated on D-TEAMPOLICY1.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "After ratification, per the ratified option: 1) Policy vocabulary inventory: effect ceilings, #Unsafe allowance by path, expert-surface ceiling, dependency allow/deny, diagnostics-as-errors classes. 2) One surface extending the existing package keys, checked in sema/lint with registered diagnostics (I4). 3) jet inspect guarantees shows the effective policy and every grant. 4) Beginner default: no policy block means no new ceremony anywhere.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "teams",
+        "governance",
+        "grill-2026-08-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T01:20:12.647Z",
+      "updated": "2026-08-29T01:20:12.648Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0xwrcpy",
+      "num": 2330,
+      "title": "Warm jetpack env entry is 15s at 100% cache hit; must be near-instant",
+      "body": "Owner report 2026-08-28: 'jetpack env' took 386s on a cold-seal run and 15s warm at a 100 percent cache hit with an unchanged env.jet, and failed with E1340 'could not project bash through /nix/store'. The projection failure is FIXED (commit 47f99925b: Nix symlink-root objects are recreated as symlinks in the projected store instead of being canonicalized/stat-followed). The SPEED is not fixed and is the owner's bar: nix warm entry is effectively instant, so anything beyond reading a stamp and projecting the closure is our failure.\\n\\nEXACT PROFILE (JETPACK_TIMING=1, added in the same commit, repo's own 28-package env.dev):\\n  roots 7ms / plan-loaded 13ms / trust-gate 14ms / catalog-configured 14ms / secrets-validated 23ms\\n  step cargo (first package) 4.3-4.8s\\n  every subsequent package ~180-340ms x 27\\n  env-composed 14-16s total; announce_env_ready adds ~0.9-2.5s\\n\\nAlready ruled out: entry-list walk (memo restored — a leftover 'probe_disable = true' in Store.rs list_unlocked had hard-disabled it; worth ~65ms/package), closure graph rebuild (memoized on the WAL stamp; no further gain), Store::dir_size (du of the whole objects dir is 0.5s).\\n\\nSo the residual ~200ms/package and the 4.3s first package live INSIDE realize_ref_outcome / realize_verified: candidates are the per-package hangar lock acquisition (RuntimePolicy::with_lock per find_verified_by_reference), snapshot_lease_unlocked (creates a lease dir per entry), project_receipt_projection, per-entry seal checks, and producer/provenance validation.\\n\\nTarget: warm entry with unchanged env.jet + lock + hangar generation does no per-package verification at all — one stamp comparison, then project and exec. The env-entry receipt (ENV_ENTRY_RECEIPT_HEADER 'jetpack-env-entry-v1') is the natural place to record the activation stamp.\\n\\nSeparate defects found while measuring, worth their own criteria or cards: (1) 'jetpack env -- bash -c true' fails E1340 'not a recorded member' even though bashInteractive is in the env; (2) every run reports '27 updated' lock changes with identical versions on both sides, so the lock is rewritten on every entry.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T01:20:59.316Z",
+      "updated": "2026-08-29T01:20:59.316Z",
       "updatedBy": "fable"
     }
   ],
@@ -219773,6 +220035,125 @@
   ],
   "events": [
     {
+      "at": "2026-08-29T01:22:38.096Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0afjtup",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-29T01:22:37.445Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0afjtup",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-29T01:22:36.993Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0afjtup",
+      "note": "#1 D-TIME-IN1=C carve-out ships across lexer, parser, formatter"
+    },
+    {
+      "at": "2026-08-29T01:22:36.130Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c05100ex",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-29T01:22:34.327Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c05100ex",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-29T01:22:32.680Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05100ex",
+      "note": "#1 Bool arm-match selects the correct arm on every tier; witnes"
+    },
+    {
+      "at": "2026-08-29T01:22:31.416Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c09mwoh3",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-29T01:22:29.668Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c09mwoh3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-29T01:22:28.097Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c09mwoh3",
+      "note": "#1 Nested container equality (map-in-list, list-in-map, tuple c"
+    },
+    {
+      "at": "2026-08-29T01:20:59.317Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0xwrcpy",
+      "note": "Warm jetpack env entry is 15s at 100% cache hit; must be near-instant"
+    },
+    {
+      "at": "2026-08-29T01:20:12.648Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0i3acwg",
+      "note": "Project policy surface: team ceilings for effects, unsafe, and expert rungs"
+    },
+    {
+      "at": "2026-08-29T01:20:04.840Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0wysso9",
+      "note": "Front-door claim audit: wire README and site claims to evidence"
+    },
+    {
+      "at": "2026-08-29T01:19:51.255Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0oakubh",
+      "note": "Megaproject scale canary: anchor program + continuous scale metrics"
+    },
+    {
+      "at": "2026-08-29T01:19:49.846Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0102pc7",
+      "note": "Runtime failures are products: Jet-only traces + registered panic copy"
+    },
+    {
+      "at": "2026-08-29T01:19:48.476Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0ec2l6s",
+      "note": "Cost transparency: hidden-copy lint + per-line cost view"
+    },
+    {
+      "at": "2026-08-29T01:19:47.280Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0uk4f8w",
+      "note": "Cold-agent Jet competence: context capsule + stock-model eval"
+    },
+    {
+      "at": "2026-08-29T01:19:46.562Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0ioa8q5",
+      "note": "Ballot dissent pass runs on a rival model family"
+    },
+    {
       "at": "2026-08-29T00:48:40.316Z",
       "by": "owner",
       "action": "done.clear",
@@ -223152,125 +223533,6 @@
       "action": "card.update",
       "ref": "c095d6zw",
       "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:49.571Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0o21kte",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:49.197Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0gwdlde",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:48.823Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09lvtej",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:48.439Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c02ak3kc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:48.048Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0niggys",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:47.670Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0g69t59",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:47.300Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08xjus3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:29.038Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0nctuf1",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:13.792Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0ga42wx",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-28T00:55:13.390Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ga42wx",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:13.099Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0onvszz",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-28T00:54:45.774Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c09xsceu",
-      "note": "#5 Manifest-less program that prints and reads argv runs on eve"
-    },
-    {
-      "at": "2026-08-28T00:54:44.840Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c09xsceu",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-28T00:54:43.568Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0v5e0kd",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T00:54:42.948Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09xsceu",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-28T00:54:41.735Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0v5e0kd",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-28T00:54:12.636Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0niggys",
-      "note": "#5 Native jet run on a web-only program exits nonzero with the "
     }
   ],
   "nextNum": 368,

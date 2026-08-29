@@ -47,9 +47,11 @@ use crate::Codegen::TIR::TLambdaBody;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TMethodRef;
 use crate::Codegen::TIR::TModuleCallForm;
+use crate::Codegen::TIR::TOptionProbe;
 use crate::Codegen::TIR::TOrFallback;
 use crate::Codegen::TIR::TRequireKind;
 use crate::Codegen::TIR::TStaticOwner;
+use crate::Codegen::TIR::THostCall;
 use crate::Codegen::TIR::TNumericOp;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TStrPart;
@@ -61,7 +63,7 @@ use crate::Diagnostics::Span;
 use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, Call, CallArg, ContractClause, CtValue, EnumLitArg, Expr, IndexKind,
-    OrFallback, Pattern, Stmt, StrPart, TryConvert, Type, TypedLitBody,
+    OrFallback, Pattern, Stmt, StrPart, TryConvert, Type, TypedLitBody, UnOp,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
@@ -6270,6 +6272,31 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             subject, pattern, ..
         } if is_binding_free_user_variant_pattern_test(pattern, cx) => {
             lower_binding_free_variant_pattern_test(subject, pattern, cx, env)
+        }
+        // D-FAIL-CARRIER1: sema represents expression-position `value == None`
+        // as an absent pattern test.  Probe the same carrier used by TIR `if`
+        // conditions, then negate its presence.  The evaluator and resident JIT
+        // marshal this existing probe; the emitted program uses JetOptionalView.
+        Expr::PatternTest {
+            subject,
+            pattern: Pattern::Absent(_),
+            ..
+        } => {
+            let subject = lower_expr(subject, cx, env);
+            let present = TExpr {
+                ty: Type::Bool,
+                kind: TExprKind::HostCall(Box::new(THostCall::OptionProbe {
+                    inner: Box::new(subject),
+                    kind: TOptionProbe::IsSome,
+                })),
+            };
+            TExpr {
+                ty: Type::Bool,
+                kind: TExprKind::Unary {
+                    op: UnOp::Not,
+                    operand: Box::new(present),
+                },
+            }
         }
         // Subset/gate drift: refuse with Todo so the interpreter returns E0956
         // instead of aborting the process (I2: never panic on user programs).

@@ -506,9 +506,9 @@ fn eval_members_expr(
                 Diagnostic::error(
                     "E0996",
                     format!("`find` in `members:` needs a path argument"),
-                    "write `find(\"./packages\")` to discover all packages under that directory"
+                    "Write `find(\"./packages\")` to discover all packages under that directory"
                         .to_string(),
-                    "example: `members: find(\"./packages\")`".to_string(),
+                    "Example: `members: find(\"./packages\")`".to_string(),
                     Some(span),
                 )
             })?;
@@ -575,9 +575,9 @@ fn extract_string_list(v: crate::Comptime::CtValue, span: Span) -> Result<Vec<St
                         return Err(Diagnostic::error(
                             "E0996",
                             "`members:` list must contain strings (package paths)".to_string(),
-                            "each element should be a relative path to a package directory"
+                            "Each element should be a relative path to a package directory"
                                 .to_string(),
-                            "example: `members: [\"./packages/hello\", \"./packages/ranker\"]`"
+                            "Example: `members: [\"./packages/hello\", \"./packages/ranker\"]`"
                                 .to_string(),
                             Some(span),
                         ))
@@ -590,7 +590,7 @@ fn extract_string_list(v: crate::Comptime::CtValue, span: Span) -> Result<Vec<St
             "E0996",
             "`members:` must evaluate to a list of package paths".to_string(),
             "The `members:` value must evaluate to a `[String]` — a list of relative package directory paths".to_string(),
-            "example: `members: find(\"./packages\")` or `members: [\"./pkg/hello\"]`".to_string(),
+            "Example: `members: find(\"./packages\")` or `members: [\"./pkg/hello\"]`".to_string(),
             Some(span),
         )),
     }
@@ -689,7 +689,7 @@ fn e0997_find_dir_missing(dir: &Path, span: Span) -> Diagnostic {
         "`find` scans that directory for subdirectories containing `package.jet`; \
          the directory must exist relative to `workspace.jet`"
             .to_string(),
-        "create the directory, or fix the path so it points at your packages folder".to_string(),
+        "Create the directory, or fix the path so it points at your packages folder".to_string(),
         Some(span),
     )
 }

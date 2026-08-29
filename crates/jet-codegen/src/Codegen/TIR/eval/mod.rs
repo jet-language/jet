@@ -1143,6 +1143,7 @@ pub(super) enum Flow {
 struct EvalRecursiveBody<'a> {
     condition: Option<(&'a TIfCond, &'a TExpr)>,
     step: EvalRecursiveStep<'a>,
+    result_carrier: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1150,18 +1151,24 @@ enum EvalRecursiveStep<'a> {
     Call {
         name: &'a str,
         args: &'a [TIR::TCallArg],
+        prelude: &'a [TStmt],
+        propagate: bool,
     },
     BinaryLeft {
         op: crate::AST::BinOp,
         name: &'a str,
         args: &'a [TIR::TCallArg],
         right: &'a TExpr,
+        prelude: &'a [TStmt],
+        propagate: bool,
     },
     BinaryRight {
         op: crate::AST::BinOp,
         name: &'a str,
         args: &'a [TIR::TCallArg],
         left: &'a TExpr,
+        prelude: &'a [TStmt],
+        propagate: bool,
     },
 }
 
@@ -1178,14 +1185,18 @@ impl<'a> EvalRecursiveStep<'a> {
 
 enum EvalRecursiveContinuation<'a> {
     Root,
-    Return,
+    Return {
+        propagate: bool,
+    },
     BinaryLeft {
         op: crate::AST::BinOp,
         right: &'a TExpr,
+        propagate: bool,
     },
     BinaryRight {
         op: crate::AST::BinOp,
         left: CtValue,
+        propagate: bool,
     },
 }
 
@@ -1200,23 +1211,45 @@ fn recursive_marker(stmt: &TStmt) -> bool {
     matches!(stmt, TStmt::LineMarker(_) | TStmt::SourceSpan(_))
 }
 
-fn recursive_debug_expr(expr: &TExpr) -> &'static str {
+fn recursive_debug_expr(expr: &TExpr) -> String {
     match &expr.kind {
-        TExprKind::Binary { .. } => "binary",
-        TExprKind::Call { .. } => "call",
-        TExprKind::Local(_) => "local",
-        TExprKind::IntLit(..) => "int",
-        TExprKind::FloatLit(..) => "float",
-        TExprKind::BoolLit(..) => "bool",
-        TExprKind::CharLit(..) => "char",
-        TExprKind::Unit => "unit",
-        TExprKind::Clone(_) => "clone",
-        TExprKind::Unary { .. } => "unary",
-        TExprKind::NumericBinaryMethod { .. } => "numeric-binary",
-        TExprKind::NumericMethod { .. } => "numeric",
-        TExprKind::ConstRef(_) => "const-ref",
-        TExprKind::DefaultLit => "default",
-        _ => "other",
+        TExprKind::Ok(inner) => format!("Ok({:?}; {})", expr.ty, recursive_debug_expr(inner)),
+        TExprKind::Try { inner, .. } => format!("Try({})", recursive_debug_expr(inner)),
+        TExprKind::Call { name, args, .. } => format!("Call({name}/{})", args.len()),
+        TExprKind::InlineBlock(stmts) => format!(
+            "Inline({:?}; {})",
+            expr.ty,
+            stmts
+                .iter()
+                .filter_map(|stmt| match stmt {
+                    TStmt::ExprStmt(value) => Some(recursive_debug_expr(value)),
+                    TStmt::Let { init, .. } => {
+                        Some(format!("Let({})", recursive_debug_expr(init)))
+                    }
+                    TStmt::Return(value) => value.as_ref().map(recursive_debug_expr),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        TExprKind::StaticCall { method, args, .. } => {
+            format!("StaticCall({}/{})", method.name, args.len())
+        }
+        TExprKind::ModuleCall { args, .. } => format!("ModuleCall({})", args.len()),
+        TExprKind::MethodCall { method, args, .. } => {
+            format!("MethodCall({}/{})", method.name, args.len())
+        }
+        TExprKind::FnFieldCall { args, .. } => format!("FnFieldCall({})", args.len()),
+        TExprKind::Clone(inner) => format!("Clone({})", recursive_debug_expr(inner)),
+        TExprKind::ExplicitCopy(inner) => format!("Copy({})", recursive_debug_expr(inner)),
+        TExprKind::Binary { op, lhs, rhs, .. } => format!(
+            "Binary({op:?}; {} + {})",
+            recursive_debug_expr(lhs),
+            recursive_debug_expr(rhs)
+        ),
+        TExprKind::Local(local) => format!("Local({:?}; {:?})", local.name, expr.ty),
+        TExprKind::IntLit(value, _) => format!("Int({value}; {:?})", expr.ty),
+        _ => format!("other; {:?}", expr.ty),
     }
 }
 
@@ -1273,20 +1306,38 @@ fn recursive_call_args(args: &[TIR::TCallArg]) -> bool {
     })
 }
 
-fn recursive_call(expr: &TExpr) -> Option<(&str, &[TIR::TCallArg])> {
+fn recursive_call(expr: &TExpr) -> Option<(&str, &[TIR::TCallArg], bool)> {
     match &expr.kind {
         TExprKind::Call { name, args, .. }
             if expr.ty.is_scalar() && recursive_call_args(args) =>
         {
-            Some((name.as_str(), args.as_slice()))
+            Some((name.as_str(), args.as_slice(), false))
+        }
+        TExprKind::Try {
+            inner,
+            note: None,
+            convert: TIR::TTryConvert::None,
+            ..
+        } if expr.ty.is_scalar() => {
+            let TExprKind::Call { name, args, .. } = &inner.kind else {
+                return None;
+            };
+            if !matches!(inner.ty, Type::Result { .. }) || !recursive_call_args(args) {
+                return None;
+            }
+            Some((name.as_str(), args.as_slice(), true))
         }
         _ => None,
     }
 }
 
 fn recursive_step(expr: &TExpr) -> Option<EvalRecursiveStep<'_>> {
-    if let Some((name, args)) = recursive_call(expr) {
-        return Some(EvalRecursiveStep::Call { name, args });
+    if let Some((name, args, propagate)) = recursive_call(expr) {
+        return Some(EvalRecursiveStep::Call {
+            name,
+            args,
+            propagate,
+        });
     }
     let TExprKind::Binary { op, lhs, rhs, .. } = &expr.kind else {
         return None;
@@ -1296,32 +1347,53 @@ fn recursive_step(expr: &TExpr) -> Option<EvalRecursiveStep<'_>> {
     {
         return None;
     }
-    if let Some((name, args)) = recursive_call(lhs) {
+    if let Some((name, args, propagate)) = recursive_call(lhs) {
         if recursive_scalar_expr(rhs) {
             return Some(EvalRecursiveStep::BinaryLeft {
                 op: *op,
                 name,
                 args,
                 right: rhs,
+                propagate,
             });
         }
     }
-    if let Some((name, args)) = recursive_call(rhs) {
+    if let Some((name, args, propagate)) = recursive_call(rhs) {
         if recursive_scalar_expr(lhs) {
             return Some(EvalRecursiveStep::BinaryRight {
                 op: *op,
                 name,
                 args,
                 left: lhs,
+                propagate,
             });
         }
     }
     None
 }
 
+fn recursive_return_payload<'a>(expr: &'a TExpr, result_carrier: bool) -> Option<&'a TExpr> {
+    if result_carrier {
+        match (&expr.kind, &expr.ty) {
+            (TExprKind::Ok(inner), Type::Result { .. }) if inner.ty.is_scalar() => {
+                Some(inner)
+            }
+            _ => None,
+        }
+    } else if expr.ty.is_scalar() {
+        Some(expr)
+    } else {
+        None
+    }
+}
+
 fn recursive_body<'a>(func: &'a TFunc) -> Option<EvalRecursiveBody<'a>> {
-    if func.ret.as_ref().is_none_or(|ty| !ty.is_scalar())
-        || func.params.iter().any(|(_, ty, convention)| {
+    let result_carrier = match func.ret.as_ref() {
+        Some(Type::Result { ok, .. }) if ok.is_scalar() => true,
+        Some(ty) if ty.is_scalar() => false,
+        _ => return None,
+    };
+    if func.params.iter().any(|(_, ty, convention)| {
             !ty.is_scalar() || matches!(convention, crate::AST::AccessConvention::Write)
         })
         || !func.generics.is_empty()
@@ -1344,7 +1416,8 @@ fn recursive_body<'a>(func: &'a TFunc) -> Option<EvalRecursiveBody<'a>> {
         };
         return Some(EvalRecursiveBody {
             condition: None,
-            step: recursive_step(expr)?,
+            step: recursive_step(recursive_return_payload(expr, result_carrier)?)?,
+            result_carrier,
         });
     }
     if body.next().is_some() {
@@ -1375,15 +1448,14 @@ fn recursive_body<'a>(func: &'a TFunc) -> Option<EvalRecursiveBody<'a>> {
     let TStmt::Return(Some(base)) = one_recursive_stmt(then_body)? else {
         return None;
     };
-    if !recursive_scalar_expr(base) {
-        return None;
-    }
+    let base = recursive_return_payload(base, result_carrier)?;
     let Some(TStmt::Return(Some(step))) = second else {
         return None;
     };
     Some(EvalRecursiveBody {
         condition: Some((cond, base)),
-        step: recursive_step(step)?,
+        step: recursive_step(recursive_return_payload(step, result_carrier)?)?,
+        result_carrier,
     })
 }
 
@@ -3526,14 +3598,21 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
 
             loop {
                 if let Some(value) = completed.take() {
-                    let continuation = frames
+                    let completed_frame = frames
                         .pop()
-                        .expect("recursive evaluator completion without a frame")
-                        .continuation;
+                        .expect("recursive evaluator completion without a frame");
+                    let continuation = completed_frame.continuation;
+                    let value = if completed_frame.body.result_carrier
+                        && !matches!(&value, CtValue::Failed(_))
+                    {
+                        CtValue::Present(Box::new(value))
+                    } else {
+                        value
+                    };
                     if frames.is_empty() {
                         return match continuation {
                             EvalRecursiveContinuation::Root => Ok(value),
-                            EvalRecursiveContinuation::Return
+                            EvalRecursiveContinuation::Return { .. }
                             | EvalRecursiveContinuation::BinaryLeft { .. }
                             | EvalRecursiveContinuation::BinaryRight { .. } => {
                                 Err(unsupported("recursive evaluator root continuation", self.span()))
@@ -3546,25 +3625,52 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     self.call_depth = caller_depth + parent_index;
                     self.current_span = parent_func.source_span;
                     self.current_fn = parent_func.name.clone();
-                    completed = Some(match continuation {
+                    let (value, propagate) = match continuation {
                         EvalRecursiveContinuation::Root => {
                             return Err(unsupported(
                                 "recursive evaluator child root continuation",
                                 self.span(),
                             ));
                         }
-                        EvalRecursiveContinuation::Return => value,
-                        EvalRecursiveContinuation::BinaryLeft { op, right } => {
+                        EvalRecursiveContinuation::Return { propagate } => (value, propagate),
+                        EvalRecursiveContinuation::BinaryLeft {
+                            op,
+                            right,
+                            propagate,
+                        } => {
                             let right = self.eval_expr_child(
                                 right,
                                 &mut frames[parent_index].scope,
                             )?;
-                            self.eval_runtime_binop(op, value, right, self.span())?
+                            (
+                                self.eval_runtime_binop(op, value, right, self.span())?,
+                                propagate,
+                            )
                         }
-                        EvalRecursiveContinuation::BinaryRight { op, left } => {
-                            self.eval_runtime_binop(op, left, value, self.span())?
-                        }
-                    });
+                        EvalRecursiveContinuation::BinaryRight {
+                            op,
+                            left,
+                            propagate,
+                        } => (self.eval_runtime_binop(op, left, value, self.span())?, propagate),
+                    };
+                    if matches!(&value, CtValue::Failed(_)) {
+                        completed = Some(value);
+                    } else if propagate {
+                        completed = Some(match value {
+                            CtValue::Present(inner) => {
+                                jet_foundation::Outcome::jet_journey_reset();
+                                *inner
+                            }
+                            _ => {
+                                return Err(unsupported(
+                                    "recursive evaluator result carrier",
+                                    self.span(),
+                                ));
+                            }
+                        });
+                    } else {
+                        completed = Some(value);
+                    }
                     continue;
                 }
 
@@ -3606,24 +3712,34 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
 
                 let step = frame_body.step;
                 let (name, call_args, continuation) = match step {
-                    EvalRecursiveStep::Call { name, args } => {
-                        (name, args, EvalRecursiveContinuation::Return)
+                    EvalRecursiveStep::Call {
+                        name,
+                        args,
+                        propagate,
+                    } => {
+                        (name, args, EvalRecursiveContinuation::Return { propagate })
                     }
                     EvalRecursiveStep::BinaryLeft {
                         op,
                         name,
                         args,
                         right,
+                        propagate,
                     } => (
                         name,
                         args,
-                        EvalRecursiveContinuation::BinaryLeft { op, right },
+                        EvalRecursiveContinuation::BinaryLeft {
+                            op,
+                            right,
+                            propagate,
+                        },
                     ),
                     EvalRecursiveStep::BinaryRight {
                         op,
                         name,
                         args,
                         left,
+                        propagate,
                     } => {
                         let left = self.eval_expr_child(
                             left,
@@ -3632,7 +3748,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         (
                             name,
                             args,
-                            EvalRecursiveContinuation::BinaryRight { op, left },
+                            EvalRecursiveContinuation::BinaryRight {
+                                op,
+                                left,
+                                propagate,
+                            },
                         )
                     }
                 };
@@ -3675,59 +3795,45 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         args: Vec<CtValue>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        if func.name.contains("recurse") && self.call_depth < 3 {
-            let body_shape = func
-                .body
-                .iter()
-                .map(|stmt| match stmt {
-                    TStmt::If { .. } => "if",
-                    TStmt::Return(_) => "return",
-                    TStmt::LineMarker(_) => "line",
-                    TStmt::SourceSpan(_) => "span",
-                    _ => "other",
-                })
-                .collect::<Vec<_>>();
-            for stmt in func.body.iter().filter(|stmt| !recursive_marker(stmt)) {
-                match stmt {
-                    TStmt::If {
-                        cond,
-                        then_body,
-                        else_body,
-                        ..
-                    } => match cond {
-                        TIfCond::Plain(condition) => eprintln!(
-                            "[DEBUG-w6recurse] if cond={} ty={:?} then={:?} else={}",
-                            recursive_debug_expr(condition),
-                            condition.ty,
+        if func.name == "recurse" && self.call_depth < 2 {
+            let recursive = recursive_body(func);
+            eprintln!(
+                "[DEBUG-w6recurse] ret={:?} body={} chain={} step={} raw={}",
+                func.ret,
+                recursive.is_some(),
+                recursive_chain_supported(&self.funcs, func),
+                recursive
+                    .map(|body| body.step.name().to_string())
+                    .unwrap_or_default(),
+                func.body
+                    .iter()
+                    .filter_map(|stmt| match stmt {
+                        TStmt::If {
+                            cond: TIfCond::Plain(condition),
+                            then_body,
+                            ..
+                        } => Some(format!(
+                            "if {} then {}",
+                            match condition.kind {
+                                TExprKind::Binary { .. } => "binary",
+                                _ => "other",
+                            },
                             then_body
                                 .iter()
-                                .map(|stmt| match stmt {
-                                    TStmt::Return(Some(value)) => recursive_debug_expr(value),
-                                    TStmt::LineMarker(_) => "line",
-                                    TStmt::SourceSpan(_) => "span",
-                                    _ => "other",
+                                .filter_map(|stmt| match stmt {
+                                    TStmt::Return(Some(value)) => {
+                                        Some(recursive_debug_expr(value))
+                                    }
+                                    _ => None,
                                 })
-                                .collect::<Vec<_>>(),
-                            else_body.as_ref().map_or(0, Vec::len),
-                        ),
-                        _ => eprintln!("[DEBUG-w6recurse] if non-plain condition"),
-                    },
-                    TStmt::Return(Some(value)) => eprintln!(
-                        "[DEBUG-w6recurse] return expr={} ty={:?}",
-                        recursive_debug_expr(value),
-                        value.ty,
-                    ),
-                    _ => {}
-                }
-            }
-            eprintln!(
-                "[DEBUG-w6recurse] run_func name={} depth={} args={} body={:?} recursive={} chain={}",
-                func.name,
-                self.call_depth,
-                args.len(),
-                body_shape,
-                recursive_body(func).is_some(),
-                recursive_chain_supported(&self.funcs, func),
+                                .collect::<Vec<_>>()
+                                .join(","),
+                        )),
+                        TStmt::Return(Some(value)) => Some(recursive_debug_expr(value)),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | "),
             );
         }
         // D-MEMO1=A: the interpreter adapter marshals the argument tuple to the

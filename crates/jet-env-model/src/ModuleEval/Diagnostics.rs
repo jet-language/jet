@@ -13,7 +13,7 @@ pub(super) fn bad_source_ref(ref_text: &str, span: Option<Span>) -> Diagnostic {
         "E0968",
         format!("`{ref_text}` isn't a `target@provider` source ref or bare path"),
         "D-JPK-REF1 puts the upstream target before `@` and its provider after it; local `./`, `../`, and `/` paths stay bare".to_string(),
-        "write `NixOS/nixpkgs/nixos-24.05@github`, `nixos-unstable@nixpkgs`, or a bare path such as `../local`".to_string(),
+        "Write `NixOS/nixpkgs/nixos-24.05@github`, `nixos-unstable@nixpkgs`, or a bare path such as `../local`".to_string(),
         span,
     )
 }
@@ -38,9 +38,9 @@ pub(super) fn retired_nixpkgs_source_ref(
 pub(super) fn bad_import_directive(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0969",
-        "an `imports:` directive must be `find(\"<dir>\")`".to_string(),
-        "imports auto-discover a directory of modules (U4); discovery uses `find` with one string-literal path, while recognized first-party integrations use their typed calls".to_string(),
-        "write `imports: find(\"./modules\")`".to_string(),
+        "An `imports:` directive must be `find(\"<dir>\")`".to_string(),
+        "Imports auto-discover a directory of modules (U4); discovery uses `find` with one string-literal path, while recognized first-party integrations use their typed calls".to_string(),
+        "Write `imports: find(\"./modules\")`".to_string(),
         Some(span),
     )
 }
@@ -51,7 +51,7 @@ pub(super) fn find_dir_missing(dir: &Path, span: Span) -> Diagnostic {
         "E0970",
         format!("`find` can't read the directory `{}`", dir.display()),
         "`imports: find(\"<dir>\")` walks that directory for `.jet` modules (U4); it must exist relative to this file".to_string(),
-        "create the directory, or fix the path so it points at your modules folder".to_string(),
+        "Create the directory, or fix the path so it points at your modules folder".to_string(),
         Some(span),
     )
 }
@@ -62,11 +62,11 @@ pub(super) fn discovered_module_imports(file: &Path) -> Diagnostic {
     Diagnostic::error(
         "E0971",
         format!(
-            "the discovered module `{}` has its own `imports:`",
+            "The discovered module `{}` has its own `imports:`",
             file.display()
         ),
-        "a module found by `find(…)` may not import (the liftability law, U4) — modules only contribute to the merged whole, they never import each other; nesting `find` would make composition explode".to_string(),
-        "remove the `imports:` from this module; declare all `find(…)` directives in the top-level env.jet".to_string(),
+        "A module found by `find(…)` may not import (the liftability law, U4) — modules only contribute to the merged whole, they never import each other; nesting `find` would make composition explode".to_string(),
+        "Remove the `imports:` from this module; declare all `find(…)` directives in the top-level env.jet".to_string(),
         None,
     )
 }
@@ -74,11 +74,11 @@ pub(super) fn discovered_module_imports(file: &Path) -> Diagnostic {
 pub(super) fn not_a_namespace_literal(expected: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0966",
-        format!("a module contribution must be a `{expected}` literal"),
+        format!("A module contribution must be a `{expected}` literal"),
         format!(
-            "a contribution's value describes its namespace with a typed struct literal, e.g. `env.dev: {expected}.{{…}}`"
+            "A contribution's value describes its namespace with a typed struct literal, e.g. `env.dev: {expected}.{{…}}`"
         ),
-        format!("wrap the value in `{expected}.{{…}}`"),
+        format!("Wrap the value in `{expected}.{{…}}`"),
         Some(span),
     )
 }
@@ -86,9 +86,9 @@ pub(super) fn not_a_namespace_literal(expected: &str, span: Span) -> Diagnostic 
 pub(super) fn wrong_namespace_type(expected: &str, got: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0966",
-        format!("expected a `{expected}` literal here, found `{got}`"),
-        format!("a contribution to this namespace must use the matching type `{expected}`"),
-        format!("change `{got}.{{…}}` to `{expected}.{{…}}`"),
+        format!("Expected a `{expected}` literal here, found `{got}`"),
+        format!("A contribution to this namespace must use the matching type `{expected}`"),
+        format!("Change `{got}.{{…}}` to `{expected}.{{…}}`"),
         Some(span),
     )
 }
@@ -96,10 +96,10 @@ pub(super) fn wrong_namespace_type(expected: &str, got: &str, span: Span) -> Dia
 pub(super) fn packages_not_a_list(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0966",
-        "the `packages` field must be a list literal".to_string(),
+        "The `packages` field must be a list literal".to_string(),
         "`packages: [ … ]` lists the packages this contribution adds, using the Pkg sugar (U6)"
             .to_string(),
-        "write `packages: [ … ]`".to_string(),
+        "Write `packages: [ … ]`".to_string(),
         Some(span),
     )
 }
@@ -109,7 +109,7 @@ pub(super) fn prompt_bad_field(field: &str, span: Span) -> Diagnostic {
         "E0966",
         format!("`{field}` isn't a field of `Prompt`"),
         "`Prompt` config has fixed fields: `label`, `path`, and `strip`".to_string(),
-        "remove this field, or write `label`, `path`, or `strip`".to_string(),
+        "Remove this field, or write `label`, `path`, or `strip`".to_string(),
         Some(span),
     )
 }
@@ -118,9 +118,9 @@ pub(super) fn prompt_bad_value(field: &str, expected: &str, span: Span) -> Diagn
     Diagnostic::error(
         "E0966",
         format!("`Prompt.{field}` isn't shaped like {expected}"),
-        "the shell prompt is source-owned by `env.jet`; each prompt setting has one typed shape"
+        "The shell prompt is source-owned by `env.jet`; each prompt setting has one typed shape"
             .to_string(),
-        format!("write `{field}: {expected}`"),
+        format!("Write `{field}: {expected}`"),
         Some(span),
     )
 }
@@ -130,8 +130,8 @@ pub(super) fn unknown_record_field(ty: &str, field: &str, known: &str, span: Spa
     Diagnostic::error(
         "E0972",
         format!("`{field}` isn't a field of `{ty}`"),
-        format!("a `{ty}` has a fixed set of fields: {known}"),
-        format!("remove `{field}`, or use one of {known}"),
+        format!("A `{ty}` has a fixed set of fields: {known}"),
+        format!("Remove `{field}`, or use one of {known}"),
         Some(span),
     )
 }
@@ -142,7 +142,7 @@ pub(super) fn unknown_platform(os: &str, arch: &str, span: Span) -> Diagnostic {
         "E0973",
         format!("`{os}.{arch}` isn't a platform Jet knows"),
         "U13: a `target` is a typed platform value, not a piece of quoted text — it must be `linux.x64` or `linux.arm64`".to_string(),
-        "write `target: linux.x64` or `target: linux.arm64`".to_string(),
+        "Write `target: linux.x64` or `target: linux.arm64`".to_string(),
         Some(span),
     )
 }
@@ -151,9 +151,9 @@ pub(super) fn unknown_platform(os: &str, arch: &str, span: Span) -> Diagnostic {
 pub(super) fn missing_system_target(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0974",
-        "this `System` has no `target`".to_string(),
+        "This `System` has no `target`".to_string(),
         "U11: every machine names the platform it runs on with a typed `target` value".to_string(),
-        "add `target: linux.x64` (or `linux.arm64`)".to_string(),
+        "Add `target: linux.x64` (or `linux.arm64`)".to_string(),
         Some(span),
     )
 }
@@ -162,9 +162,9 @@ pub(super) fn missing_system_target(span: Span) -> Diagnostic {
 pub(super) fn service_enable_not_bool(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0975",
-        "a service's `enable` must be `true` or `false`".to_string(),
+        "A service's `enable` must be `true` or `false`".to_string(),
         "U12: a `Service` turns on or off with a yes/no `enable` flag".to_string(),
-        "write `enable: true` or `enable: false`".to_string(),
+        "Write `enable: true` or `enable: false`".to_string(),
         Some(span),
     )
 }
@@ -173,9 +173,9 @@ pub(super) fn service_enable_not_bool(span: Span) -> Diagnostic {
 pub(super) fn service_missing_enable(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0975",
-        format!("the service `{name}` has no `enable`"),
+        format!("The service `{name}` has no `enable`"),
         "U12: every `Service` says whether it is on with a required `enable` flag, then any further settings".to_string(),
-        format!("add `enable: true` (or `false`) to `{name}`"),
+        format!("Add `enable: true` (or `false`) to `{name}`"),
         Some(span),
     )
 }
@@ -185,8 +185,8 @@ pub(super) fn image_bad_format(word: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0976",
         format!("`{word}` isn't a disk-image format"),
-        "disk-image formats are frozen jetos research; Jetpack only builds `.Oci` images today".to_string(),
-        "use `kind: .Oci` for an active image, or keep disk-image notes in the jetos research appendix".to_string(),
+        "Disk-image formats are frozen jetos research; Jetpack only builds `.Oci` images today".to_string(),
+        "Use `kind: .Oci` for an active image, or keep disk-image notes in the jetos research appendix".to_string(),
         Some(span),
     )
 }
@@ -195,9 +195,9 @@ pub(super) fn image_bad_format(word: &str, span: Span) -> Diagnostic {
 pub(super) fn image_missing_from(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0977",
-        "this `Image` has no `from`".to_string(),
+        "This `Image` has no `from`".to_string(),
         "D-JPK-IMAGE1: active Jetpack images are OCI containers built from a package; `system.*` disk images are frozen jetos research".to_string(),
-        "add `from: packages.<name>` for an `.Oci` image".to_string(),
+        "Add `from: packages.<name>` for an `.Oci` image".to_string(),
         Some(span),
     )
 }
@@ -206,9 +206,9 @@ pub(super) fn image_missing_from(span: Span) -> Diagnostic {
 pub(super) fn image_restated_field(field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0977",
-        format!("an image doesn't restate `{field}`"),
-        "fields inherited from `system.*` belong to frozen jetos disk-image research, not active `.Oci` images".to_string(),
-        format!("remove `{field}` from the active image; use package/env inputs instead"),
+        format!("An image doesn't restate `{field}`"),
+        "Fields inherited from `system.*` belong to frozen jetos disk-image research, not active `.Oci` images".to_string(),
+        format!("Remove `{field}` from the active image; use package/env inputs instead"),
         Some(span),
     )
 }
@@ -222,9 +222,9 @@ pub(super) fn image_from_unknown_system(image: &str, system: &str, known: &[Stri
     };
     Diagnostic::error(
         "E0978",
-        format!("the image `{image}` is built from an unknown system `{system}`"),
+        format!("The image `{image}` is built from an unknown system `{system}`"),
         "`from: system.<name>` is frozen jetos disk-image research; Jetpack's active image path uses `from: packages.<name>`".to_string(),
-        format!("use `from: packages.<name>` for an `.Oci` image, or keep the system image as research capture ({hint})"),
+        format!("Use `from: packages.<name>` for an `.Oci` image, or keep the system image as research capture ({hint})"),
         None,
     )
 }
@@ -347,9 +347,9 @@ pub fn merge_error_to_diagnostic(err: &MergeError) -> Diagnostic {
     match err {
         MergeError::SourceConflict { name, a, b } => Diagnostic::error(
             "E0967",
-            format!("source `{name}` is declared with two different refs"),
-            format!("one module declares `{name}` as `{a}`, another as `{b}` — sources merge by name, so the refs must agree"),
-            "make every declaration of this source agree, or rename one of them".to_string(),
+            format!("Source `{name}` is declared with two different refs"),
+            format!("One module declares `{name}` as `{a}`, another as `{b}` — sources merge by name, so the refs must agree"),
+            "Make every declaration of this source agree, or rename one of them".to_string(),
             None,
         ),
         MergeError::FactConflict(error) => error.diagnostic().unwrap_or_else(|| {

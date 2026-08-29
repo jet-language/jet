@@ -446,10 +446,9 @@ pub fn runtime_or_exit<T>(result: Result<T, Fault>) -> T {
     match result {
         Ok(value) => value,
         Err(fault) => {
-            eprintln!("error[E2110]: automatic memory management failed");
-            eprintln!(" what: the private garbage collector could not complete an operation");
-            eprintln!(" why: {fault}");
-            eprintln!(" fix: check the GC trace path and retry with a smaller workload");
+            eprintln!("Error [E2110]: Automatic memory management failed");
+            eprintln!(" Why: The private garbage collector could not complete an operation: {fault}");
+            eprintln!(" Fix: Check the GC trace path and retry with a smaller workload");
             std::process::exit(1);
         }
     }

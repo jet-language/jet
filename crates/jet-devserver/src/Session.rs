@@ -1,8 +1,8 @@
 //! Resident `jet dev` session state shared by Canvas and application views.
 //!
-//! The session is deliberately transport-neutral.  The Canvas listener and
-//! the application listener both point at this state, while the application
-//! remains responsible for its own routes and middleware.
+//! The session is deliberately transport-neutral.  The default web host
+//! exposes one workbench listener for Canvas, preview, and diagnostics; the
+//! listener facets below keep route ownership inspectable in the payload.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -383,6 +383,43 @@ impl ResidentDevSession {
         let tests = self.test_state.lock().unwrap().clone();
         let views = self.last_good_views.lock().unwrap().clone();
         let clients = self.clients.lock().unwrap().len();
+        let shared_listener = self.canvas_port != 0
+            && self.application_port != 0
+            && self.canvas_port == self.application_port;
+        let workbench_port = if self.canvas_port != 0 {
+            self.canvas_port
+        } else {
+            self.application_port
+        };
+        let workbench_routes = if shared_listener {
+            "[\"canvas\",\"preview\",\"diagnostics\"]"
+        } else if self.canvas_port != 0 {
+            "[\"canvas\",\"diagnostics\"]"
+        } else {
+            "[\"preview\"]"
+        };
+        let listener_name = if shared_listener {
+            "workbench"
+        } else if self.canvas_port != 0 {
+            "canvas"
+        } else {
+            "application"
+        };
+        let listeners = format!(
+            "{{\"workbench\":{{\"host\":{},\"port\":{},\"transport\":\"workbench\",\"routes\":{},\"shared\":{}}},\"canvas\":{{\"host\":{},\"port\":{},\"transport\":\"canvas\",\"listener\":{},\"shared\":{}}},\"application\":{{\"host\":{},\"port\":{},\"transport\":\"application\",\"listener\":{},\"routes\":\"application-owned\",\"shared\":{}}}}}",
+            json_value(&self.canvas_host),
+            workbench_port,
+            workbench_routes,
+            shared_listener,
+            json_value(&self.canvas_host),
+            self.canvas_port,
+            json_value(listener_name),
+            shared_listener,
+            json_value(&self.canvas_host),
+            self.application_port,
+            json_value(listener_name),
+            shared_listener,
+        );
         let receipts = self
             .receipts
             .lock()
@@ -402,7 +439,7 @@ impl ResidentDevSession {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            "{{\"id\":{},\"entry\":{},\"project_context\":{{\"source_id\":{}}},\"source_revision\":{},\"accepted_revision\":{},\"last_good_revision\":{},\"last_good_program\":{},\"state\":{},\"diagnostic_code\":{},\"diagnostic\":{},\"diagnostic_revision\":{},\"last_good_views\":{{\"graph\":{},\"debugger\":{},\"runtime\":{}}},\"clients\":{},\"run\":{{\"output\":{},\"target\":{}}},\"debugger\":{{\"state\":{},\"session_id\":{},\"source_id\":{},\"revision\":{},\"tier\":{}}},\"tests\":{{\"state\":{}}},\"history\":{{\"count\":{},\"receipts\":[{}]}},\"listeners\":{{\"canvas\":{{\"host\":{},\"port\":{},\"transport\":\"canvas\"}},\"application\":{{\"host\":\"127.0.0.1\",\"port\":{},\"transport\":\"application\",\"routes\":\"application-owned\"}}}},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\"}}}}",
+            "{{\"id\":{},\"entry\":{},\"project_context\":{{\"source_id\":{}}},\"source_revision\":{},\"accepted_revision\":{},\"last_good_revision\":{},\"last_good_program\":{},\"state\":{},\"diagnostic_code\":{},\"diagnostic\":{},\"diagnostic_revision\":{},\"last_good_views\":{{\"graph\":{},\"debugger\":{},\"runtime\":{}}},\"clients\":{},\"run\":{{\"output\":{},\"target\":{}}},\"debugger\":{{\"state\":{},\"session_id\":{},\"source_id\":{},\"revision\":{},\"tier\":{}}},\"tests\":{{\"state\":{}}},\"history\":{{\"count\":{},\"receipts\":[{}]}},\"listeners\":{},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\",\"listener\":{}}}}}",
             json_value(&self.id),
             json_value(&self.entry),
             json_value(&selected_source_id),
@@ -428,9 +465,8 @@ impl ResidentDevSession {
             json_value(&tests),
             self.receipts.lock().unwrap().len(),
             receipts,
-            json_value(&self.canvas_host),
-            self.canvas_port,
-            self.application_port
+            listeners,
+            json_value(listener_name)
         )
     }
 

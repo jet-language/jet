@@ -254,6 +254,34 @@ impl JetArena {
         }
     }
 
+    pub fn map_insert_int(&mut self, map: i64, key: i64, value: i64) -> Option<()> {
+        match self.values.get_mut(map as usize) {
+            Some(JetVal::Map(entries)) => {
+                entries.insert(JetMapKey::Int(key), (key, value));
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn map_get_int(&self, map: i64, key: i64) -> Option<i64> {
+        match self.values.get(map as usize) {
+            Some(JetVal::Map(entries)) => entries
+                .get(&JetMapKey::Int(key))
+                .map(|(_, value)| *value),
+            _ => None,
+        }
+    }
+
+    pub fn map_remove_int(&mut self, map: i64, key: i64) -> Option<i64> {
+        match self.values.get_mut(map as usize) {
+            Some(JetVal::Map(entries)) => entries
+                .remove(&JetMapKey::Int(key))
+                .map(|(_, value)| value),
+            _ => None,
+        }
+    }
+
     /// Convert a generated tuple/struct record into the structural key used by
     /// the JIT map adapter. Record references recurse through the same
     /// structural carrier; the shared Prelude `jet_map_key_cmp` supplies the
@@ -898,10 +926,10 @@ impl JetArena {
     // language type is still only `Int`.
     pub const INT_SMALL_MIN: i64 = -(1i64 << 62);
     pub const INT_SMALL_MAX: i64 = (1i64 << 62) - 1;
-    const INT_BIG_TAG: i64 = i64::MIN;
+    const INT_BIG_TAG: i64 = i64::MIN + 1;
 
     fn int_is_tagged(value: i64) -> bool {
-        value < Self::INT_SMALL_MIN
+        (Self::INT_BIG_TAG..Self::INT_SMALL_MIN).contains(&value)
     }
 
     fn int_big_value(&self, value: i64) -> Option<jet_foundation::Numeric::CtBigInt> {
@@ -925,6 +953,11 @@ impl JetArena {
             if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&small) {
                 return small;
             }
+        }
+        if let Some(id) = self.values.iter().position(|existing| {
+            matches!(existing, JetVal::ExactInt(existing) if existing == &value)
+        }) {
+            return Self::INT_BIG_TAG.wrapping_add(id as i64);
         }
         let id = self.values.len() as i64;
         self.values.push(JetVal::ExactInt(value));
@@ -1142,6 +1175,21 @@ impl JetArena {
 
     pub fn int_rem(&mut self, value: i64, divisor: i64) -> Option<i64> {
         Some(self.int_div_rem(value, divisor)?.1)
+    }
+
+    pub fn int_div_rem_euclid(&mut self, value: i64, divisor: i64) -> Option<(i64, i64)> {
+        let (quotient, remainder) = self
+            .int_value(value)
+            .div_rem_euclid(&self.int_value(divisor))?;
+        Some((self.int_pack(quotient), self.int_pack(remainder)))
+    }
+
+    pub fn int_div_euclid(&mut self, value: i64, divisor: i64) -> Option<i64> {
+        Some(self.int_div_rem_euclid(value, divisor)?.0)
+    }
+
+    pub fn int_rem_euclid(&mut self, value: i64, divisor: i64) -> Option<i64> {
+        Some(self.int_div_rem_euclid(value, divisor)?.1)
     }
 
     pub fn int_floor_div(&mut self, value: i64, divisor: i64) -> Option<i64> {

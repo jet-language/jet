@@ -420,6 +420,13 @@ impl<'a> Fmt<'a> {
         leftmost.map_or(own, |child| own.min(Self::expr_start(child)))
     }
 
+    /// D-TIME-IN1=C: the lexer keeps `in` reserved for source loops. The
+    /// postfix parser stores a dot-member keyword as ordinary member text, so
+    /// every postfix spelling is emitted verbatim here.
+    fn write_postfix_member(&mut self, member: &str) {
+        self.write(member);
+    }
+
     /// True when the author wrote this value inside its own `{ … }`. It is the
     /// discriminator between `-> value` and `-> { value }`, and between
     /// `task expr` and `task { expr }`: both spellings of each pair fold to the
@@ -1459,17 +1466,17 @@ impl<'a> Fmt<'a> {
                     self.with_indent(|f| {
                         f.newline();
                         f.write(".");
-                        f.write(field);
+                        f.write_postfix_member(field);
                     });
                 } else {
                     self.write(".");
-                    self.write(field);
+                    self.write_postfix_member(field);
                 }
             }
             Expr::OptField { base, member, .. } => {
                 self.fmt_expr(base, Prec::Postfix);
                 self.write("?.");
-                self.write(member);
+                self.write_postfix_member(member);
             }
             Expr::MethodCall {
                 receiver,
@@ -1507,13 +1514,13 @@ impl<'a> Fmt<'a> {
                     self.with_indent(|f| {
                         f.newline();
                         f.write(".");
-                        f.write(method);
+                        f.write_postfix_member(method);
                         f.fmt_call_type_args(type_args);
                         f.fmt_method_args(method, args);
                     });
                 } else {
                     self.write(".");
-                    self.write(method);
+                    self.write_postfix_member(method);
                     self.fmt_call_type_args(type_args);
                     self.fmt_method_args(method, args);
                 }

@@ -269,7 +269,7 @@ pub enum HandlerKey {
     Services,
     Config,
     Toolchain,
-    Upgrade,
+    SelfUpdate,
     Doctor,
     Completions,
     Man,
@@ -324,7 +324,7 @@ impl HandlerKey {
             Self::Services => "services",
             Self::Config => "config",
             Self::Toolchain => "toolchain",
-            Self::Upgrade => "upgrade",
+            Self::SelfUpdate => "self-update",
             Self::Doctor => "doctor",
             Self::Completions => "completions",
             Self::Man => "man",
@@ -437,7 +437,7 @@ const PROJECT_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
 }];
 const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "toolchain", usage: "toolchain", summary: "Show the Jet version selected for this project", handler: HandlerKey::Toolchain, also_canonical_top_level: false },
-    NestedCommandSpec { name: "upgrade", usage: "upgrade", summary: "Show how to install a newer Jet release", handler: HandlerKey::Upgrade, also_canonical_top_level: false },
+    NestedCommandSpec { name: "update", usage: "update [--endpoint <url>] [--channel <name>] [--platform <target>] [--trust-key <file>] [--dry-run] [--apply]", summary: "Verify or install a signed Jet toolchain release", handler: HandlerKey::SelfUpdate, also_canonical_top_level: false },
     NestedCommandSpec { name: "doctor", usage: "doctor", summary: "Find and fix toolchain problems", handler: HandlerKey::Doctor, also_canonical_top_level: false },
     NestedCommandSpec { name: "completions", usage: "completions", summary: "Print shell completions", handler: HandlerKey::Completions, also_canonical_top_level: false },
     NestedCommandSpec { name: "man", usage: "man", summary: "Print the Jet manual", handler: HandlerKey::Man, also_canonical_top_level: false },
@@ -1407,6 +1407,11 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--quiet", help: "Suppress non-error status output" },
     FlagSpec { long: "--color", help: "Color: auto | always | never" },
     FlagSpec { long: "--version", help: "Print compiler version" },
+    FlagSpec { long: "--endpoint", help: "With self-update: signed toolchain channel endpoint" },
+    FlagSpec { long: "--channel", help: "With self-update: toolchain channel name" },
+    FlagSpec { long: "--platform", help: "With self-update: toolchain target triple" },
+    FlagSpec { long: "--trust-key", help: "With self-update: public trust-key file" },
+    FlagSpec { long: "--apply", help: "With self-update: install the verified artifact" },
     FlagSpec { long: "--check", help: "With fmt/learn: check without changing files (CI gate)" },
     FlagSpec { long: "--lang", help: "With fmt: delegate non-Jet files to the environment formatter for this language" },
     FlagSpec { long: "--restore-role-files", help: "With init: restore the exact pre-package.jet role files" },
@@ -1696,6 +1701,7 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "budget"
             | "perf"
             | "completions"
+            | "self-update"
     )
 }
 
@@ -2550,7 +2556,7 @@ mod tests {
             ("gc", "report", GcReport, "gc", true),
             ("project", "parts", ProjectParts, "parts", false),
             ("self", "toolchain", Toolchain, "toolchain", false),
-            ("self", "upgrade", Upgrade, "upgrade", false),
+            ("self", "update", SelfUpdate, "self-update", false),
             ("self", "doctor", Doctor, "doctor", false),
             ("self", "completions", Completions, "completions", false),
             ("self", "man", Man, "man", false),

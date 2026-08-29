@@ -152,6 +152,14 @@ impl<'a> Parser<'a> {
             self.bump();
             return Ok((Syntax::KW_MOVE.to_string(), span));
         }
+        // D-TIME-IN1=C: the lexer reclassifies `in` after `.` as an ordinary
+        // identifier. Accept the keyword too for parser clients that provide
+        // tokens directly (`duration.in(.Seconds)`).
+        if matches!(self.peek().kind, TokKind::KwIn) {
+            let span = self.peek().span;
+            self.bump();
+            return Ok((Syntax::KW_IN.to_string(), span));
+        }
         // U20: `Recipe.copy()` uses the ordinary dot-member form, while `copy`
         // is also the retired copy keyword (D-SHAPE-COPY1, now `~x`) in value
         // position. Keep the keyword reserved everywhere else; permit it only
@@ -433,6 +441,7 @@ impl<'a> Parser<'a> {
             | TokKind::DotDot
             | TokKind::DotDotLt
             | TokKind::OrOr
+            | TokKind::Pipe
             | TokKind::AndAnd
             | TokKind::EqEq
             | TokKind::NotEq
@@ -480,7 +489,7 @@ impl<'a> Parser<'a> {
     pub(in crate::Parser) fn expr_no_struct_lit_no_cmp(&mut self) -> Result<Expr, Diagnostic> {
         let span = self.peek().span;
         self.with_nesting(span, |p| {
-            let expr = p.expr_bitxor(false)?;
+            let expr = p.expr_bitor(false)?;
             if matches!(p.peek().kind, TokKind::KwIn) {
                 let span = p.bump().span;
                 return Err(Diagnostic::from_row("E0384", &[], Some(span)));

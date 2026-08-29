@@ -1,5 +1,22 @@
-// Resident session identity, output launcher, preview link, and shared view rail.
+// Resident session identity, output launcher, embedded preview, and server rail.
   let canvasSession = null;
+
+  function workbenchListener(session) {
+    const listeners = session && session.listeners;
+    return listeners && (listeners.workbench || listeners.application || listeners.canvas) || {};
+  }
+
+  function workbenchPort(session) {
+    const port = Number(workbenchListener(session).port);
+    return Number.isFinite(port) && port > 0 ? port : 0;
+  }
+
+  function workbenchPreviewUrl(port) {
+    if (!port) return "";
+    const url = new URL("/", window.location.href);
+    url.port = String(port);
+    return url.href;
+  }
 
   function syncWorkbenchContext(project = latestProject, session = canvasSession) {
     const packageName = project && (project.packages || []).find((pkg) => pkg && pkg.name)?.name;
@@ -10,10 +27,13 @@
     const outputName = selectedOutput || firstOutput || "default";
     const acceptedRevision = session && (session.accepted_revision || session.source_revision);
     const revisionName = acceptedRevision || (latestDoc && latestDoc.revision) || "pending";
+    const listener = workbenchListener(session);
+    const port = workbenchPort(session);
     const values = {
       "workbench-project": projectName,
       "workbench-output": outputName,
-      "workbench-revision": String(revisionName).slice(0, 12)
+      "workbench-revision": String(revisionName).slice(0, 12),
+      "workbench-port": port ? `${listener.host || location.hostname}:${port}` : "pending"
     };
     for (const [id, value] of Object.entries(values)) {
       const element = document.getElementById(id);
@@ -102,6 +122,51 @@
       : null;
   }
 
+  function syncCanvasServers(project = latestProject, session = canvasSession) {
+    const list = document.getElementById("server-list");
+    const count = document.getElementById("server-count");
+    if (!list) return;
+    const listener = workbenchListener(session);
+    const port = workbenchPort(session);
+    const state = session && session.state || "starting";
+    const rows = [{
+      name: "Workbench",
+      port: port ? `${listener.host || location.hostname}:${port}` : "port pending",
+      detail: `${state} · Canvas · preview · diagnostics · one session`,
+      state
+    }];
+    for (const service of (project && project.services) || []) {
+      const ports = Array.isArray(service.ports) ? service.ports.join(", ") : "";
+      const run = Array.isArray(service.run) ? service.run.join(" ") : service.run || "catalog/default";
+      rows.push({
+        name: service.name || "Custom server",
+        port: ports || "port assigned by service",
+        detail: `${service.enable === false ? "disabled" : "enabled"} · external process · ${run}${service.ready ? ` · ready: ${service.ready}` : ""}`,
+        state: service.enable === false ? "disabled" : "external"
+      });
+    }
+    list.replaceChildren();
+    for (const row of rows) {
+      const card = document.createElement("article");
+      card.className = "server-card";
+      card.dataset.state = row.state;
+      if (session && session.id) card.dataset.sessionId = session.id;
+      const head = document.createElement("div");
+      head.className = "server-card-head";
+      const title = document.createElement("b");
+      title.textContent = row.name;
+      const endpoint = document.createElement("code");
+      endpoint.textContent = row.port;
+      head.append(title, endpoint);
+      const detail = document.createElement("small");
+      detail.textContent = row.detail;
+      card.append(head, detail);
+      list.appendChild(card);
+    }
+    if (count) count.textContent = String(rows.length);
+    window.__jetCanvasServers = rows.map((row) => ({ ...row, sessionId: session && session.id || null }));
+  }
+
   function syncCanvasSession(session) {
     if (!session || !session.id) return;
     canvasSession = session;
@@ -133,10 +198,27 @@
       view.dataset.sessionState = session.state || "starting";
     });
     const preview = document.getElementById("preview-link");
-    const port = session.listeners && session.listeners.application && session.listeners.application.port;
-    if (preview && port) {
-      preview.href = `${location.protocol}//${location.hostname}:${port}/`;
-      preview.textContent = `Open App Preview · localhost:${port}`;
+    const port = workbenchPort(session);
+    const listener = workbenchListener(session);
+    const previewUrl = workbenchPreviewUrl(port);
+    if (preview) {
+      preview.href = previewUrl || "/";
+      preview.textContent = previewUrl
+        ? `Open App Preview · ${listener.host || "localhost"}:${port}`
+        : "Preview is starting";
+    }
+    const previewFrame = document.getElementById("preview-frame");
+    if (previewFrame) {
+      previewFrame.title = `App Preview · ${session.state || "starting"}`;
+      previewFrame.dataset.sessionId = session.id;
+      previewFrame.dataset.sessionState = session.state || "starting";
+      if (previewUrl && previewFrame.dataset.previewUrl !== previewUrl) {
+        previewFrame.src = previewUrl;
+        previewFrame.dataset.previewUrl = previewUrl;
+      } else if (!previewUrl && previewFrame.dataset.previewUrl) {
+        previewFrame.src = "about:blank";
+        delete previewFrame.dataset.previewUrl;
+      }
     }
     const previewState = document.getElementById("preview-status");
     if (previewState) {
@@ -157,11 +239,18 @@
       state: session.state || "starting",
       clients: session.clients || 0,
       history: session.history || { count: 0, receipts: [] },
-      listeners: session.listeners || {}
+      listeners: session.listeners || {},
+      preview: {
+        url: previewUrl || null,
+        host: listener.host || null,
+        port: port || null,
+        sameOrigin: !!previewUrl && new URL(previewUrl, window.location.href).origin === window.location.origin
+      }
     };
     syncWorkbenchContext(latestProject, session);
     syncCanvasCapabilities(latestProject);
     syncCanvasOutputs(latestProject);
+    syncCanvasServers(latestProject, session);
   }
 
   function canvasSessionPayloadFromReport(value) {

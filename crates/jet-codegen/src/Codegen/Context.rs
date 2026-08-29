@@ -5674,7 +5674,11 @@ pub(crate) fn field_type_rust_eq_compatible(
         Type::Tuple(fields) => fields
             .iter()
             .all(|(_, t)| field_type_rust_eq_compatible(t, types, param_names)),
-        Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
+        Type::Map { key, value, .. } => {
+            field_type_rust_eq_compatible(key, types, param_names)
+                && field_type_rust_eq_compatible(value, types, param_names)
+        }
+        Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => field_type_rust_eq_compatible(elem, types, param_names),
         Type::Tagged { inner, .. } => field_type_rust_eq_compatible(inner, types, param_names),
         Type::InlineRange { base, .. } => field_type_rust_eq_compatible(base, types, param_names),

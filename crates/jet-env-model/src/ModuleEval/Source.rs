@@ -1144,9 +1144,9 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
                     if existing != &kind {
                         return Err(Diagnostic::error(
                             "E0967",
-                            format!("source `{}` resolves to conflicting provider kinds", s.name),
-                            "one named source must have one deterministic realization path across the environment graph".to_string(),
-                            "make every declaration use the same source location and provider kind".to_string(),
+                            format!("Source `{}` resolves to conflicting provider kinds", s.name),
+                            "One named source must have one deterministic realization path across the environment graph".to_string(),
+                            "Make every declaration use the same source location and provider kind".to_string(),
                             span,
                         ));
                     }

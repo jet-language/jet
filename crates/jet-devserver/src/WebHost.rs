@@ -65,7 +65,7 @@ struct DevStatus {
     /// The file `jet dev` is watching — used in the `building` parity line
     /// and the `save <file> → …` verbose log lines.
     watched_file: String,
-    /// Set once, right after the Canvas listener binds — 0 until then.
+    /// Set once, right after the workbench listener binds — 0 until then.
     port: AtomicU64,
     /// Static generator previews use the application listener only and must
     /// not advertise a Canvas URL that is not bound.
@@ -583,12 +583,7 @@ pub struct WebHost {
 
 impl WebHost {
     pub fn bind(file: &str, verbose: bool, port: Option<u16>) -> Result<Self, String> {
-        let application_listener = bind_application_server(port)?;
-        let application_port = application_listener
-            .local_addr()
-            .map(|address| address.port())
-            .unwrap_or(0);
-        let listener = bind_canvas_server("127.0.0.1", None)?;
+        let listener = bind_workbench_server("127.0.0.1", port)?;
         let bound_port = listener
             .local_addr()
             .map(|address| address.port())
@@ -598,7 +593,7 @@ impl WebHost {
         let session_secret = mint_session_secret()?;
         Ok(Self {
             listener: Mutex::new(Some(listener)),
-            application_listener: Mutex::new(Some(application_listener)),
+            application_listener: Mutex::new(None),
             started: AtomicBool::new(false),
             shutdown: Arc::new(AtomicBool::new(false)),
             server_threads: Mutex::new(Vec::new()),
@@ -609,7 +604,7 @@ impl WebHost {
             session: Arc::new(crate::ResidentDevSession::new(
                 file,
                 bound_port,
-                application_port,
+                bound_port,
             )),
             canvas_file: file.to_string(),
             canvas_only: false,
@@ -678,9 +673,9 @@ impl WebHost {
         Self::bind_canvas_with_options(file, verbose, &options)
     }
 
-    /// Bind the Canvas control plane with a separate application listener.
-    /// Web-targeted development uses this form so Canvas transport settings do
-    /// not replace the program's own preview/output listener.
+    /// Bind one workbench listener for Canvas, application preview, and
+    /// diagnostics. Canvas transport settings select the host and port for the
+    /// entire session; route authorization still protects the Canvas namespace.
     pub fn bind_web_with_canvas_options(
         file: &str,
         verbose: bool,
@@ -688,13 +683,8 @@ impl WebHost {
         options: &CanvasHostOptions,
     ) -> Result<Self, String> {
         let host = validate_canvas_options(options)?;
-        let listener = bind_canvas_server(&host, options.port)?;
+        let listener = bind_workbench_server(&host, options.port.or(fallback_port))?;
         let bound_port = listener
-            .local_addr()
-            .map(|address| address.port())
-            .unwrap_or(0);
-        let application_listener = bind_application_server(fallback_port)?;
-        let application_port = application_listener
             .local_addr()
             .map(|address| address.port())
             .unwrap_or(0);
@@ -705,12 +695,12 @@ impl WebHost {
             file,
             &host,
             bound_port,
-            application_port,
+            bound_port,
         ));
         session.select_output_values(options.output.as_deref(), options.target.as_deref());
         Ok(Self {
             listener: Mutex::new(Some(listener)),
-            application_listener: Mutex::new(Some(application_listener)),
+            application_listener: Mutex::new(None),
             started: AtomicBool::new(false),
             shutdown: Arc::new(AtomicBool::new(false)),
             server_threads: Mutex::new(Vec::new()),
@@ -803,6 +793,11 @@ impl WebHost {
             let static_root = self.static_root.clone();
             let source_asset_fallback = self.source_asset_fallback;
             let shutdown = Arc::clone(&self.shutdown);
+            let listener_kind = if canvas_only {
+                ListenerKind::Canvas
+            } else {
+                ListenerKind::Shared
+            };
             let handle = thread::spawn(move || {
                 serve_forever(
                     listener,
@@ -810,7 +805,7 @@ impl WebHost {
                     debug_sessions,
                     session,
                     canvas_file,
-                    ListenerKind::Canvas,
+                    listener_kind,
                     canvas_only,
                     bind_host,
                     session_secret,
@@ -860,8 +855,9 @@ impl WebHost {
         }
         if !self.canvas_only {
             println!(
-                "App preview: http://localhost:{}/",
-                self.session_application_port()
+                "App preview: http://{}:{}/",
+                url_host(&self.bind_host),
+                self.session_application_port(),
             );
         }
         if has_canvas {
@@ -1262,6 +1258,51 @@ fn bind_application_server(port: Option<u16>) -> Result<TcpListener, String> {
     ))
 }
 
+/// Bind the unified workbench listener. An explicit port is authoritative;
+/// otherwise use the same small predictable range as application preview.
+fn bind_workbench_server(host: &str, port: Option<u16>) -> Result<TcpListener, String> {
+    if let Some(port) = port {
+        return match TcpListener::bind((host, port)) {
+            Ok(listener) => Ok(listener),
+            Err(error) => {
+                let fix = if error.kind() == std::io::ErrorKind::AddrInUse {
+                    format!(
+                        "\n fix: stop whatever's using port {}, or pick another with --port=<N> or --canvas-port=<N>",
+                        port
+                    )
+                } else {
+                    String::new()
+                };
+                Err(format!(
+                    "error: couldn't bind the workbench to {}:{}: {}{}",
+                    host, port, error, fix
+                ))
+            }
+        };
+    }
+    let mut last_err: Option<std::io::Error> = None;
+    for port in APPLICATION_PORT_RANGE {
+        match TcpListener::bind((host, port)) {
+            Ok(listener) => return Ok(listener),
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+                last_err = Some(error);
+            }
+            Err(error) => {
+                return Err(format!(
+                    "error: couldn't start the workbench on {}: {}",
+                    host, error
+                ));
+            }
+        }
+    }
+    Err(format!(
+        "error: every workbench port from {} to {} is already in use{}\n fix: free one of those ports, stop the other process using it, or pick one explicitly with --port=<N> or --canvas-port=<N>",
+        APPLICATION_PORT_RANGE.start(),
+        APPLICATION_PORT_RANGE.end(),
+        last_err.map(|error| format!(" ({})", error)).unwrap_or_default()
+    ))
+}
+
 fn bind_canvas_server(host: &str, port: Option<u16>) -> Result<TcpListener, String> {
     let requested = port.unwrap_or(0);
     match TcpListener::bind((host, requested)) {
@@ -1494,6 +1535,29 @@ fn canvas_bootstrap_path(path: &str, target: &str) -> bool {
     )
 }
 
+fn canvas_namespace_path(path: &str, target: &str) -> bool {
+    path == "/__jet_canvas"
+        || path.starts_with("/__jet_canvas/")
+        || path == "/canvas"
+        || path.starts_with("/canvas/")
+        || path == "/panel"
+        || path.starts_with("/panel/")
+        || (path == "/"
+            && (query_param(target, "jet_panel").as_deref() == Some("1")
+                || query_param(target, "jet_panel_app").as_deref() == Some("1")
+                || query_param(target, "jet_panel_graph").as_deref() == Some("1")))
+}
+
+fn requires_canvas_authorization(listener_kind: ListenerKind, path: &str, target: &str) -> bool {
+    match listener_kind {
+        ListenerKind::Canvas => true,
+        ListenerKind::Shared => {
+            !is_application_control_path(path) && canvas_namespace_path(path, target)
+        }
+        ListenerKind::Application => false,
+    }
+}
+
 fn host_header_allowed(value: &str, bind_host: &str, port: u16) -> bool {
     let value = value.trim().to_ascii_lowercase();
     if value == format!("{}:{}", url_host(bind_host), port).to_ascii_lowercase() {
@@ -1542,6 +1606,7 @@ fn unauthorized(stream: &mut TcpStream) -> std::io::Result<()> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ListenerKind {
     Canvas,
+    Shared,
     Application,
 }
 
@@ -1678,7 +1743,7 @@ fn handle_connection_with_root(
     let body = request.body.as_slice();
     let path = target.split('?').next().unwrap_or("/");
 
-    if listener_kind == ListenerKind::Canvas
+    if requires_canvas_authorization(listener_kind, path, target)
         && !canvas_request_authorized(&request, target, bind_host, status.port(), session_secret)
     {
         return unauthorized(&mut stream);

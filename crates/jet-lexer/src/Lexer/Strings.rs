@@ -250,7 +250,7 @@ impl<'a> Lexer<'a> {
         if !lit.is_empty() || parts.is_empty() {
             parts.push(StrTokPart::Lit(lit));
         }
-        let parts = if byte_literal {
+        let mut parts = if byte_literal {
             parts
                 .into_iter()
                 .map(|part| match part {
@@ -261,6 +261,16 @@ impl<'a> Lexer<'a> {
         } else {
             parts
         };
+        // D-BYTELIT1=B: an escape-only `b"…"` still needs the byte-text
+        // marker; otherwise the parser cannot distinguish it from ordinary
+        // text after the lexer has emitted only `Byte` parts.
+        if byte_literal
+            && !parts
+                .iter()
+                .any(|part| matches!(part, StrTokPart::ByteText(_)))
+        {
+            parts.push(StrTokPart::ByteText(String::new()));
+        }
         Some(Token {
             kind: TokKind::Str(parts),
             span: Span::new(start, self.pos(self.i)),
@@ -558,7 +568,7 @@ impl<'a> Lexer<'a> {
         if !lit.is_empty() || parts.is_empty() {
             parts.push(StrTokPart::Lit(lit));
         }
-        let parts = if byte_literal {
+        let mut parts = if byte_literal {
             parts
                 .into_iter()
                 .map(|part| match part {
@@ -569,6 +579,15 @@ impl<'a> Lexer<'a> {
         } else {
             parts
         };
+        // D-BYTELIT1=B: preserve the byte-text marker for bodies made only of
+        // `\xNN` parts.
+        if byte_literal
+            && !parts
+                .iter()
+                .any(|part| matches!(part, StrTokPart::ByteText(_)))
+        {
+            parts.push(StrTokPart::ByteText(String::new()));
+        }
         Some(Token {
             kind: TokKind::Str(parts),
             span: Span::new(start, self.pos(self.i)),

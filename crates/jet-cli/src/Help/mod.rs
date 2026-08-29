@@ -102,7 +102,7 @@ fn category_for(cmd: &str) -> &'static str {
         | "schema" | "gc" | "shared-store" => "Packages",
         "os" | "image" | "bind" | "push" | "trust" | "bridge" | "services" => "Jetos",
         "semindex" | "dossier" | "impact" | "codemod" | "expand" => "Reference",
-        // explain, doctor, repl, man, completions, version, upgrade, help, lsp,
+        // explain, doctor, repl, man, completions, version, self-update, help, lsp,
         // and any future command land here — a safe default, never a crash.
         _ => "Reference",
     }

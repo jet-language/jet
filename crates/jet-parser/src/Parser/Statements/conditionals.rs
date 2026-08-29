@@ -1226,8 +1226,8 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    /// Wrap a single value as a condition. Comparisons / PatternTest / Bool are
-    /// kept as-is; plain values get `subject OP value` wrapping (D-IFDIST1).
+    /// Wrap a single value as a condition. Comparisons / PatternTest are kept
+    /// as-is; plain values get `subject OP value` wrapping (D-IFDIST1).
     /// After `&&`/`||`, Ident/field/call predicates stay unwrapped.
     pub(super) fn arm_atom_to_cond(
         subject: Expr,
@@ -1241,7 +1241,8 @@ impl<'a> Parser<'a> {
             {
                 value
             }
-            Expr::PatternTest { .. } | Expr::Bool(_, _) => value,
+            Expr::PatternTest { .. } => value,
+            Expr::Bool(_, _) if prefer_predicate => value,
             Expr::Unary(crate::AST::UnOp::Not, ..) => value,
             Expr::Ident(..) | Expr::Field { .. } | Expr::Call { .. } | Expr::MethodCall { .. }
                 if prefer_predicate =>

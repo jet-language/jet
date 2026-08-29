@@ -372,7 +372,7 @@ impl<'a> Parser<'a> {
         &mut self,
         allow_struct_lit: bool,
     ) -> Result<Expr, Diagnostic> {
-        let lhs = self.expr_bitxor(allow_struct_lit)?;
+        let lhs = self.expr_bitor(allow_struct_lit)?;
         if matches!(self.peek().kind, TokKind::KwIn) {
             let span = self.bump().span;
             return Err(Diagnostic::from_row("E0384", &[], Some(span)));
@@ -399,7 +399,7 @@ impl<'a> Parser<'a> {
                 });
             }
         }
-        let rhs = self.expr_bitxor(allow_struct_lit)?;
+        let rhs = self.expr_bitor(allow_struct_lit)?;
 
         // D-CMP3WAY1=B: spaceship comparison is one binary operation, not
         // a relational chain. User-defined values are rewritten by sema
@@ -455,7 +455,7 @@ impl<'a> Parser<'a> {
                     ));
             }
             self.bump();
-            let next_rhs = self.expr_bitxor(allow_struct_lit)?;
+            let next_rhs = self.expr_bitor(allow_struct_lit)?;
             operands.push(next_rhs);
             ops.push(next_op);
         }
@@ -501,6 +501,22 @@ impl<'a> Parser<'a> {
             format!("write `a < b {} b < c`", Syntax::OP_AND),
             Some(second),
         )
+    }
+
+    /// D-BITOREXPR1=A: `|` is bitwise OR in value position. Keep it above
+    /// comparisons; type position has its own `|` union grammar.
+    pub(in crate::Parser) fn expr_bitor(
+        &mut self,
+        allow_struct_lit: bool,
+    ) -> Result<Expr, Diagnostic> {
+        let mut lhs = self.expr_bitxor(allow_struct_lit)?;
+        while matches!(self.peek().kind, TokKind::Pipe) {
+            let op_span = self.bump().span;
+            let rhs = self.expr_bitxor(allow_struct_lit)?;
+            let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
+            lhs = Expr::Binary(BinOp::BitOr, Box::new(lhs), Box::new(rhs), span);
+        }
+        Ok(lhs)
     }
 
     /// D-XORSPELL1=A: `~|` is bitwise exclusive-or, in the precedence slot

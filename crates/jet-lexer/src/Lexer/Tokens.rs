@@ -27,6 +27,8 @@ pub enum TokKind {
     KwPriv,
     KwIf,
     KwElse,
+    /// D-LOOP-IN1=A / D-TIME-IN1=C: source-loop `in`; postfix `.in` is
+    /// reclassified as `Ident` by the lexer and accepted by the parser.
     KwIn,
     KwSwitch,
     KwBreak,

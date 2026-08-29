@@ -111,6 +111,24 @@ body:not(.is-debug-active) .debug-controls > :not(#debug-start) { display: none;
 .right { border-right: 0; border-left: 1px solid #23344a; box-shadow: inset 1px 0 0 rgba(255,255,255,.03); display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; overflow: hidden; }
 #right-drawer #details { min-height: 0; overflow: auto; }
 #right-drawer #preview-panel { min-height: 0; }
+#preview-panel details { min-height: 0; }
+.preview-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.preview-toolbar .tag { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#preview-link { flex: 0 0 auto; color: #65d4ff; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+#preview-status[data-state="ready"] { color: #5eead4; }
+#preview-status[data-state="error"] { color: #fb7185; }
+#preview-frame { display: block; width: 100%; height: clamp(160px, 24vh, 260px); min-height: 160px; border: 1px solid #365a7f; border-radius: 5px; background: #f8fafc; }
+#preview-frame:focus-visible { outline: 2px solid #f6d365; outline-offset: 2px; }
+.server-list { display: grid; gap: 6px; }
+.server-card { position: relative; display: grid; gap: 3px; padding: 8px 9px; border: 1px solid #29415d; border-radius: 5px; background: #0d1723; }
+.server-card[data-state="starting"], .server-card[data-state="building"] { border-color: #806b2d; box-shadow: inset 3px 0 0 #f6d365; }
+.server-card[data-state="ready"] { border-color: #2d806f; box-shadow: inset 3px 0 0 #5eead4; }
+.server-card[data-state="error"] { border-color: #8a3f50; box-shadow: inset 3px 0 0 #fb7185; }
+.server-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.server-card-head b { min-width: 0; overflow: hidden; color: #eef7ff; text-overflow: ellipsis; white-space: nowrap; }
+.server-card-head code, .server-card small { color: #8fa7c6; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+.server-card-head code { flex: 0 0 auto; color: #fde68a; }
+.server-card small { display: block; }
 .panel { border-bottom: 1px solid #23344a; padding: clamp(9px, 1.2vw, 13px); }
 .panel h2 { margin: 0 0 10px; color: #eaf5ff; font-size: 11px; letter-spacing: .08em; }
 .component-tree-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
@@ -436,7 +454,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
   #wire-status { top: 104px; left: 10px; right: 10px; max-width: none; }
   #graph-overview { display: none; }
   .side { display: none; position: absolute; top: 0; bottom: 0; left: 0; width: min(326px, calc(100vw - 54px)); z-index: 22; border-right: 1px solid #35c2ff; background: rgba(9,15,23,.98); box-shadow: 18px 0 52px rgba(0,0,0,.58); }
-  .right { left: auto; right: 0; border-left: 1px solid #35c2ff; border-right: 0; box-shadow: -18px 0 52px rgba(0,0,0,.58); }
+  .right { left: auto; right: 0; border-left: 1px solid #35c2ff; border-right: 0; box-shadow: -18px 0 52px rgba(0,0,0,.58); overflow: auto; }
   .side.is-drawer-open { display: block; }
   #stage { grid-column: 1; }
   #jump { display: none; }
@@ -511,7 +529,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
   </header>
   <main id="workbench">
     <header id="workbench-header" aria-label="Jet Project Workbench">
-      <div class="workbench-heading"><span>Project IDE</span><strong>Canvas Workbench</strong><div class="workbench-context" aria-label="Active Project Context"><div><b>Project</b><code id="workbench-project">loading</code></div><span aria-hidden="true">·</span><div><b>Output</b><code id="workbench-output">default</code></div><span aria-hidden="true">·</span><div><b>Revision</b><code id="workbench-revision">pending</code></div></div></div>
+      <div class="workbench-heading"><span>Project IDE</span><strong>Canvas Workbench</strong><div class="workbench-context" aria-label="Active Project Context"><div><b>Project</b><code id="workbench-project">loading</code></div><span aria-hidden="true">·</span><div><b>Output</b><code id="workbench-output">default</code></div><span aria-hidden="true">·</span><div><b>Revision</b><code id="workbench-revision">pending</code></div><span aria-hidden="true">·</span><div><b>Port</b><code id="workbench-port">pending</code></div></div></div>
       <div class="workbench-map" aria-label="Workbench Regions">
         <span><b>Project</b><span>Files · Outputs</span></span>
         <span><b>Editor</b><span>Code · Graph</span></span>
@@ -533,6 +551,12 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
             <details open>
               <summary><span>Outputs</span><span id="output-count" class="count">0</span></summary>
               <div id="output-list" class="project-list" aria-label="Project Outputs"></div>
+            </details>
+          </section>
+          <section id="servers-panel" class="component-tree-section" data-canvas-panel="servers">
+            <details open>
+              <summary><span>Servers</span><span id="server-count" class="count">0</span></summary>
+              <div id="server-list" class="server-list" aria-label="Workbench Servers" aria-live="polite"></div>
             </details>
           </section>
           <section id="graphs-panel" class="component-tree-section" data-canvas-panel="graphs">
@@ -585,7 +609,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <section id="problems-panel" class="panel" data-canvas-panel="problems" data-capability="diagnostics" hidden inert><details open><summary><span>Problems</span><span id="problems-count" class="count">0</span></summary><div id="problems-list" class="problem-list"></div></details></section>
       <section id="details" class="panel" data-canvas-panel="details"></section>
       <section id="proof-panel" class="panel" data-canvas-panel="proof"><details open><summary><span>Proof</span><span id="proof-state" class="count">unknown</span></summary><div id="proof-rail" class="proof-rail"></div></details></section>
-      <section id="preview-panel" class="panel" data-canvas-panel="preview" data-capability="preview" hidden inert><details open><summary><span>App Preview</span><span class="count">Last Good</span></summary><div id="preview-status" class="tag">waiting for session</div><a id="preview-link" href="/" target="_blank" rel="noreferrer">Preview is starting</a></details></section>
+      <section id="preview-panel" class="panel" data-canvas-panel="preview" data-capability="preview" hidden inert><details open><summary><span>App Preview</span><span class="count">Last Good</span></summary><div class="preview-toolbar"><div id="preview-status" class="tag" aria-live="polite">waiting for session</div><a id="preview-link" href="/" target="_blank" rel="noreferrer">Open in new tab</a></div><iframe id="preview-frame" title="App Preview" loading="lazy" referrerpolicy="no-referrer" src="about:blank"></iframe></details></section>
     </aside>
   </main>
   <footer id="statusbar"><span id="source-id">source</span><span id="revision">revision</span><span id="session-id">session</span><span id="schema">canvas v1</span><span id="scm-state">git</span><span id="toast"></span></footer>

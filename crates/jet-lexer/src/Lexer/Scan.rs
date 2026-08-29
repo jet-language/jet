@@ -67,6 +67,22 @@ fn lex_raw_with_policy(
 }
 
 impl<'a> Lexer<'a> {
+    /// D-TIME-IN1=C: `in` stays a keyword everywhere except immediately after
+    /// a postfix dot. Reclassifying only that position keeps the parser's
+    /// source-loop diagnostic while making `value.in(...)` an ordinary member
+    /// token for lexer clients and downstream parsers.
+    fn after_postfix_dot(toks: &[Token]) -> bool {
+        toks.iter()
+            .rev()
+            .find(|token| {
+                !matches!(
+                    &token.kind,
+                    TokKind::LineComment(_) | TokKind::BlockComment(_)
+                )
+            })
+            .is_some_and(|token| matches!(&token.kind, TokKind::Dot | TokKind::QuestionDot))
+    }
+
     /// D-BOUND-RAW1=A: the quote immediately follows the opening brace of a
     /// typed head body. Only that body's literal substream changes the
     /// backslash rule; brace lexing and interpolation substreams remain
@@ -548,7 +564,11 @@ impl<'a> Lexer<'a> {
                             Some(span),
                         ));
                     }
-                    let kind = keyword(&name).unwrap_or(TokKind::Ident(name));
+                    let kind = if name == Syntax::KW_IN && Self::after_postfix_dot(&toks) {
+                        TokKind::Ident(name)
+                    } else {
+                        keyword(&name).unwrap_or(TokKind::Ident(name))
+                    };
                     toks.push(Token { kind, span });
                 }
                 other => {

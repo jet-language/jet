@@ -1282,8 +1282,8 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
             out_sink,
             "Error [E1803]: `:run` will not replay effectful turns"
         );
-        let _ = writeln!(out_sink, " Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran");
-        let _ = writeln!(out_sink, " Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`");
+        let _ = writeln!(out_sink, " Why: Replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran");
+        let _ = writeln!(out_sink, " Fix: Run each effectful turn in the REPL, or put the program in a file and use `jet run`");
         let _ = writeln!(out_sink, "More: jet-lang.dev/e/E1803");
         return;
     }
@@ -1356,7 +1356,7 @@ fn cmd_run_transcript(session: &Session) -> String {
         .iter()
         .any(|turn| turn.input.contains("#FX"))
     {
-        return "Error [E1803]: `:run` will not replay effectful turns\n Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran\n Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`\nMore: jet-lang.dev/e/E1803\n".to_string();
+        return "Error [E1803]: `:run` will not replay effectful turns\n Why: Replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran\n Fix: Run each effectful turn in the REPL, or put the program in a file and use `jet run`\nMore: jet-lang.dev/e/E1803\n".to_string();
     }
 
     let import_src = session.import_src();

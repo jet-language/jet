@@ -30,7 +30,6 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
     if expr_in_subset_inner(e, cx, locals) {
         return true;
     }
-    eprintln!("[DEBUG-2290] expr outside subset: {e:?}");
     refusal::note(refusal::EXPR, e.without_parens().span());
     false
 }
@@ -79,6 +78,14 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         Expr::PatternTest {
             subject, pattern, ..
         } if fold_typed_fact_enum_pattern(subject, pattern).is_some() => true,
+        // D-FAIL-CARRIER1: expression-position `value == None` is normalized by
+        // sema to an absent pattern test.  Lowering uses the same option probe as
+        // an `if` condition, so only the subject needs subset coverage here.
+        Expr::PatternTest {
+            subject,
+            pattern: Pattern::Absent(_),
+            ..
+        } => expr_in_subset(subject, cx, locals),
         // D-TAG1: a binding-free variant/group pattern test in EXPRESSION position
         // (`hot :: d == .Fire`, `d == .Fire.Burn` inside `&&`, …) lowers to a plain
         // Bool `matches!` (`TExprKind::PatternMatches`). Only user enums whose

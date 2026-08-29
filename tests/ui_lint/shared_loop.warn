@@ -1,26 +1,35 @@
-Warning [L0102] (unused_parameter): parameter `h` is never used.
+Warning [L0102] (unused_parameter): Parameter `h` is never used.
   --> tests/ui_lint/shared_loop.jet:1:9
     |
   1 | fn noop(h: Shared<Int>) { print(0) }
     |         ^
- Why: an unused parameter often means the function contract or implementation is incomplete; Jet keeps this warning-only so prototypes stay unblocked.
- Fix: use `h`, rename it to `_h` when it is intentionally unused, or remove it from the function contract.
+ Why: An unused parameter often means the function contract or implementation is incomplete; Jet keeps this warning-only so prototypes stay unblocked.
+ Fix: Use `h`, rename it to `_h` when it is intentionally unused, or remove it from the function contract.
 More: jet-lang.dev/e/L0102
 
-Warning [L0202] (shared_auto_clone): auto-cloned `h` inside a loop; consider hoisting or caching
+Warning [L0202] (shared_auto_clone): Auto-cloned `h` inside a loop; consider hoisting or caching
   --> tests/ui_lint/shared_loop.jet:4:18
     |
   4 |     loop -> noop(h)
     |                  ^
- Why: shared handles are cloned when used across a loop boundary
- Fix: hoist `h` before the loop, or clone once outside
+ Why: Shared handles are cloned when used across a loop boundary
+ Fix: Hoist `h` before the loop, or clone once outside
 More: jet-lang.dev/e/L0202
 
-Warning [L0104] (unused_private_fn): private function `loop_user` is never called or used as a value.
+Warning [L0508] (arrow_loop_value_drop): This arrow loop body computes a value and drops it
+  --> tests/ui_lint/shared_loop.jet:4:13
+    |
+  4 |     loop -> noop(h)
+    |             ^^^^
+ Why: A statement-position loop arrow discards its body's value; the loop takes write access (&) for items when it updates the source
+ Fix: Bind the loop with `::` to collect its values, or write `loop v in &values -> v *= 2` so it takes write access (&) for items
+More: jet-lang.dev/e/L0508
+
+Warning [L0104] (unused_private_fn): Private function `loop_user` is never called or used as a value.
   --> tests/ui_lint/shared_loop.jet:3:4
     |
   3 | fn loop_user(h: Shared<Int>) {
     |    ^^^^^^^^^
- Why: a private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.
- Fix: remove the function, or rename `loop_user` to `_loop_user` when it is intentional.
+ Why: A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.
+ Fix: Remove the function, or rename `loop_user` to `_loop_user` when it is intentional.
 More: jet-lang.dev/e/L0104
