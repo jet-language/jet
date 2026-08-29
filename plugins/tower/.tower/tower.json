@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2331,
-    "rev": 46627,
+    "rev": 46634,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -152185,6 +152185,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Case-law rows applied across all four slices (E0xxx 67 rows, E1xxx 55 rows, E2000-E3999, non-E/L rows 17) plus runtime-built text for the affected codes; #2207's checker (every_user_facing_case_source_is_checked) already covers diagnostic meaning/What/Why/Fix. Blessing pass status: UPDATE_EXPECT run over tests/diagnostic_snapshots reaches 11 of 12 green; the 12th could not be identified because concurrent lanes were mid-edit on jet-foundation/jet-codegen when the verification run started. REMAINING WORK (orchestrator, needs a quiescent tree): (1) run 'UPDATE_EXPECT=1 UPDATE_EXPECT_REASON=... cargo test --test diagnostic_snapshots', (2) re-run it clean and identify the one failing test, (3) confirm the seven tests/ui_lint .warn fixtures match with NO duplication (the lint double-emission root fix landed: cached first inference passed into infer_try_with_inner_type), noting that shared_loop legitimately gained an extra L0508 row."
+        },
+        {
           "at": "2026-08-26",
           "by": "orchestrator",
           "text": "Orchestrator finding during integration. The enforcement checker encoded the INVERSE of the ratified law: sentence_case_violation flagged an UPPERCASE first token as the violation, when D-CASE-PROSE1=A says the problem, why and fix lines capitalise their first word - the ratified sample itself reads `Fix: Drop --offline`. With the checker corrected to flag a LOWERCASE first token, the real count is 3832 violations across the diagnostic rows, not the handful the inverted checker reported. Any work aimed at the old checker was aimed at the wrong target. This card owns bringing the rows themselves into line: 3832 lines across meaning, What, Why and Fix begin with a lowercase word that is not an identifier, flag, or quoted code fragment."
@@ -152252,8 +152257,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T23:11:56.042Z",
-      "updated": "2026-08-26T10:23:03.603Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-29T01:30:38.013Z",
+      "updatedBy": "fable",
       "workOrder": 2
     },
     {
@@ -156544,6 +156549,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "Wall status: nested-call-argument E0401 closed (already fixed in d7c588f33; enums.jet green both tiers), lint double-emission root-fixed (one L2001 group, '1 problem found'), value-form if-match parse-pattern ICE closed (E0148 negative fixture exact, positive witness green both tiers). Remaining: the single diagnostic_snapshots test still red after the case-law blessing pass — identify it on a quiescent tree."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "Two of three wall slices closed with evidence. (1) Nested-call-argument E0401 (lane c2266a): root fix already in d7c588f33 — suppression is root-only (CheckerInfer/expr.rs:1332), nested args auto-propagate; examples/features/types/enums.jet passes jet check and both tiers match its golden. (2) Lint double-emission (lane w4lintdup): root fix = cached first inference passed into infer_try_with_inner_type, so the second call/lint execution never runs; deprecated_marker_l2001 now prints ONE L2001 group and '1 problem found'; seven-fixture sweep shows no duplicate code+span. (3) Value-form if-match parse-pattern (lane w4parsepat): E0148 negative fixture exact, ICE at Items.rs:3334 gone, new value-form witness green both tiers vs golden. Remaining: ui_lint .warn snapshot wording/span drift (shared_loop now emits a legitimate extra L0508) — orchestrator blessing pass owns that."
         },
         {
@@ -156613,7 +156623,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T09:12:24.047Z",
-      "updated": "2026-08-29T00:00:09.617Z",
+      "updated": "2026-08-29T01:30:38.488Z",
       "updatedBy": "fable"
     },
     {
@@ -159283,8 +159293,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T01:19:48.476Z",
-      "updated": "2026-08-29T01:23:30.288Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T01:37:51.124Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0102pc7",
@@ -159312,13 +159322,13 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T01:19:49.846Z",
-      "updated": "2026-08-29T01:23:31.401Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T01:35:27.260Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0oakubh",
       "num": 2327,
-      "title": "Megaproject scale canary: anchor program + continuous scale metrics",
+      "title": "Megaproject scale canaries: Tower board port + jetpack port (build gated on owner go)",
       "body": "The largest real Jet program is site/generate.jet at ~650 lines; scale-activated flaws (compile time stacking on rustc, error cascades, LSP latency, incremental rebuilds, module ergonomics at 20-50k LOC) are invisible to the current workflow. This card refines card 217's dogfood portfolio item 1 with one flagship-scale anchor program plus standing measurements; it does not replace the portfolio. OWNER DIRECTIVE 2026-08-28: accept and ballot the anchor choice, but WAIT to build - no construction until the owner starts it. Gated on D-MEGAPROJ1.",
       "kind": "task",
       "track": "sidequest",
@@ -159326,11 +159336,17 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": "After ratification and explicit owner go: 1) Structure brief for the chosen anchor (modules, packages, services). 2) Luna-fleet build plan with disjoint lanes per package. 3) Scale-metrics rig measured continuously: cold/warm compile, incremental rebuild after a one-line change, LSP request latency percentiles, error-cascade quality on seeded breakage, timed refactor tasks. 4) Gauntlet-style snapshot reporting; each regression class mints a card.",
+      "plan": "HARD GATE: no construction until the owner explicitly starts this card. After owner go: 1) Structure briefs for BOTH anchors: (a) Tower board port — model/store/server/board-ui/lint packages, read-only shadow against exported snapshots, parity suite vs Node renderings, never writes the canonical .tower store; (b) jetpack port — package model, lock/journal, hangar store logic, provider resolution, byte-parity suite vs shipped jetpack on recorded transcripts. 2) Luna-fleet build plan with disjoint lanes per package; jetpack anchor doubles as an e11 down payment and refs card 217. 3) Scale-metrics rig measured continuously across both anchors: cold/warm compile, incremental rebuild after a one-line edit, LSP latency percentiles, error-cascade quality on seeded breakage, timed cross-package refactor tasks. 4) Gauntlet-style snapshot reporting; each regression class mints a card.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "D-MEGAPROJ1 ratified A with owner comment adopting the jetpack port from option C as a second anchor: dogfood BOTH the Tower board port and jetpack-in-Jet under one scale-metrics rig. fmt not selected. Construction remains gated on explicit owner go."
+        }
+      ],
       "criteria": [],
       "refs": [
         "217"
@@ -159343,7 +159359,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T01:19:51.255Z",
-      "updated": "2026-08-29T01:25:04.858Z",
+      "updated": "2026-08-29T01:38:18.663Z",
       "updatedBy": "fable"
     },
     {
@@ -159401,8 +159417,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T01:20:12.647Z",
-      "updated": "2026-08-29T01:24:51.358Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T01:35:58.670Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0xwrcpy",
@@ -218035,8 +218051,11 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-29T01:23:30.287Z"
+      "status": "ratified",
+      "created": "2026-08-29T01:23:30.287Z",
+      "outcome": "A",
+      "comment": "Owner adopts A AND C together: the transparency surfaces ship, and the optimizer is a first-class killer feature, not a fallback. Hybrid clause stands: a cost the optimizer provably removes needs no lint row; everything semantic that remains gets the lint and the cost view.",
+      "ratifiedAt": "2026-08-29"
     },
     {
       "id": "D-RTFAIL1",
@@ -218109,8 +218128,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-29T01:23:31.401Z"
+      "status": "ratified",
+      "created": "2026-08-29T01:23:31.401Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-29"
     },
     {
       "id": "D-TEAMPOLICY1",
@@ -218188,8 +218209,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-29T01:24:51.357Z"
+      "status": "ratified",
+      "created": "2026-08-29T01:24:51.357Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-29"
     },
     {
       "id": "D-MEGAPROJ1",
@@ -218272,8 +218295,11 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-29T01:25:04.858Z"
+      "status": "ratified",
+      "created": "2026-08-29T01:25:04.858Z",
+      "outcome": "A",
+      "comment": "Owner adopts two anchors: A (Tower board port) AND the jetpack port from option C. Both are dogfood anchors under the same scale-metrics rig. fmt is not selected. Build still waits for explicit owner go.",
+      "ratifiedAt": "2026-08-29"
     }
   ],
   "questions": [
@@ -220355,6 +220381,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-29T01:38:18.663Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0oakubh",
+      "note": "title,plan,logEntry"
+    },
+    {
+      "at": "2026-08-29T01:37:53.790Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-MEGAPROJ1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-29T01:37:51.124Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-COSTLAW1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-29T01:35:58.670Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TEAMPOLICY1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-29T01:35:27.260Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-RTFAIL1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-29T01:30:38.488Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c05la7ri",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T01:30:38.013Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0w7rdo4",
+      "note": "logEntry"
+    },
     {
       "at": "2026-08-29T01:25:04.858Z",
       "by": "fable",
@@ -223805,55 +223880,6 @@
       "action": "card.update",
       "ref": "c0s9kjxe",
       "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-28T00:56:17.532Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0vt3izm",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:53.223Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c002uky2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:52.844Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ga42wx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:52.453Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c07rnjrs",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:52.065Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08ovzl9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:51.687Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0h7zcqi",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T00:55:51.290Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09xsceu",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
