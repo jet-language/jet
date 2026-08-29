@@ -1,0 +1,16 @@
+// core-conformance: core.data.group_sum
+use core.data as data
+
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+fn run() {
+    rows :: [Ticket]{
+        Ticket{team: "Core", minutes: 4.0},
+        Ticket{team: "Core", minutes: 8.0}
+    }
+    groups :: data.group_sum(rows, ticket -> ticket.team, ticket -> ticket.minutes) ?? panic("group sum")
+    print(groups[0].sum)
+}

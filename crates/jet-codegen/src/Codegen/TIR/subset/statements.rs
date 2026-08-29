@@ -796,6 +796,40 @@ pub(crate) fn switch_in_subset(
                 .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
         });
     }
+    // D-ENC-DYN1=A+ / card #2356: DataTree dispatch uses the same typed
+    // if-let lowering as the expression condition path, but its tags are not
+    // in `variant_owner` and therefore cannot satisfy the generic exhaustive
+    // enum branch below. Admit unit, wildcard, and bound payload slots here;
+    // `lower_switch` routes the matching table through `lower_guard_switch`.
+    if arms.iter().all(|arm| {
+        arm_variant_pattern(cx, &arm.cond, subject).is_some_and(|pattern| {
+            matches!(
+                pattern,
+                Pattern::Variant { ref variant, .. } if is_json_variant(variant)
+            )
+        })
+    }) {
+        for arm in arms {
+            let pattern = arm_variant_pattern(cx, &arm.cond, subject)
+                .expect("DataTree switch arm was checked above");
+            let mut body_locals = locals.clone();
+            add_pattern_binding_names(&pattern, &mut body_locals);
+            if !arm
+                .body
+                .iter()
+                .all(|stmt| stmt_in_subset(stmt, cx, &mut body_locals))
+            {
+                return false;
+            }
+        }
+        if let Some(body) = else_body {
+            let mut else_locals = locals.clone();
+            if !body.iter().all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals)) {
+                return false;
+            }
+        }
+        return true;
+    }
     // Shape A-GUARD: a variant-pattern switch with boolean guards on one or more
     // arms. Lowering uses the ordinary TIfCond conjunction path, so payload names
     // are bound only after the variant test and remain available to the guard and

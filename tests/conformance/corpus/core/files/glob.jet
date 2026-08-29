@@ -1,0 +1,14 @@
+// core-conformance: core.files.glob
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("files-glob")
+    path :: Path.from(root).join("fixture.txt")
+    writer :: files.create(path) ?? panic("create")
+    writer.write_line("fixture") ?? panic("write")
+    writer.flush() ?? panic("flush")
+    pattern :: Path.from(root).join("*.txt")
+    result :: files.glob(pattern) ?? panic("glob")
+    print(result.len())
+}

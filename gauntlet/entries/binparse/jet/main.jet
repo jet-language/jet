@@ -6,7 +6,7 @@ fn run() {
     args :: process.argv()
     path :: args.get(1) ?? "records.bin"
     reader :: Reader.over(fs.read_bytes(Path.from(path)) ?? return Err("cannot read input"))
-    if (reader.take(4) ?? return Err("short magic")) != b"JGB1" -> return Err("bad magic")
+    if (reader.take(4) ?? return Err("short magic")) != [U8]{"JGB1"} -> return Err("bad magic")
     count :: Int.from_u32(reader.read_u32_le() ?? return Err("short count"))
 
     sum := Float{0.0}

@@ -875,6 +875,9 @@ impl<'a> Checker<'a> {
         if preserve_result_carrier {
             self.failure_auto_depth -= 1;
         }
+        eprintln!(
+            "DEBUG direct dispatch subject={subject:?} type={subj_ty:?} preserve={preserve_result_carrier}"
+        );
         let subj_name = match &*subject {
             Expr::Ident(n, _) => Some(n.clone()),
             _ if !subjectless_guard && !matches!(&*subject, Expr::PatternTest { .. }) => {

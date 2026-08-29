@@ -1,0 +1,27 @@
+// core-conformance: core.data.line_text
+use core.data as data
+
+struct Sale {
+    month: String
+    value: Float
+}
+
+fn run() {
+    rows :: [Sale]{
+        Sale{month: "Jan", value: 4.0},
+        Sale{month: "Feb", value: 6.0}
+    }
+    groups :: data.group_mean(rows, sale -> sale.month, sale -> sale.value) ?? panic("groups")
+    options :: DataLineOptions{
+        title: "Sales",
+        x_label: "month",
+        y_label: "value",
+        markers: true,
+        reference: Val(5.0),
+        style: "solid",
+        color: "#2f6f73",
+        legend: "value"
+    }
+    result :: data.line_text(groups, options) ?? panic("line text")
+    print(result)
+}

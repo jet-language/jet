@@ -521,7 +521,9 @@ function stringInterpolatesValue(text, value) {
 }
 
 function expressionConsumesValue(text, value) {
-  const valueUse = new RegExp(`\\b${escapedRegExp(value)}\\b`);
+  const valueUse = new RegExp(
+    `(?<![A-Za-z0-9_])${escapedRegExp(value)}(?![A-Za-z0-9_])`,
+  );
   return valueUse.test(codeOnly(text)) || stringInterpolatesValue(text, value);
 }
 
@@ -569,7 +571,7 @@ function sourceErrors(key, source) {
   }
   const alias = aliases[0][1];
   const call = new RegExp(
-    `(?<![A-Za-z0-9_.])${escapedRegExp(alias)}\\s*\\.\\s*${escapedRegExp(name)}\\s*\\(`,
+    `(?<![A-Za-z0-9_.])${escapedRegExp(alias)}\\s*\\.\\s*${escapedRegExp(name)}\\s*(?:<[^{}]*>\\s*)?\\(`,
     "g",
   );
   const calls = Array.from(code.matchAll(call));
@@ -590,7 +592,7 @@ function sourceErrors(key, source) {
 
   const lineStart = code.lastIndexOf("\n", callStart) + 1;
   const beforeCall = code.slice(lineStart, callStart);
-  const binding = beforeCall.match(/(?:^|[{};])\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:::|:=)\s*$/);
+  const binding = beforeCall.match(/(?:^|[{};])\s*(@?[A-Za-z_][A-Za-z0-9_]*)\s*(?:::|:=)\s*$/);
   const observers = observerCalls(code);
   if (binding) {
     const value = binding[1];
@@ -811,6 +813,22 @@ fn run() {
   const interpolated = valid.replace("print(result)", 'print("value={result}")');
   if (sourceErrors(key, interpolated).length !== 0) {
     throw new Error("interpolated observer fixture was rejected");
+  }
+
+  const comptime = valid.replace("result ::", "@result ::").replace("print(result)", "print(@result)");
+  if (sourceErrors(key, comptime).length !== 0) {
+    throw new Error("comptime binding fixture was rejected");
+  }
+
+  const generic = `// core-conformance: core.data.csv
+use core.data as data
+fn run() {
+    result :: data.csv<Ticket>("rows")
+    print(result)
+}
+`;
+  if (sourceErrors("core.data.csv", generic).length !== 0) {
+    throw new Error("generic call fixture was rejected");
   }
 
   const expectedRows = ["core.fake.one", "core.fake.two"];

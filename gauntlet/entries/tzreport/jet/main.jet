@@ -17,11 +17,7 @@ fn parse_meeting(line: String) Meeting -> {
 
 fn run() {
     text :: files.read(process.argv().get(1) ?? "meetings.txt") ?? panic("read meetings")
-    // Loop form until #2266 c6 lands (fallible callee in a map closure AOT-leaks).
-    meetings := [Meeting]{}
-    loop line in text.lines() {
-        if line != "" -> meetings.push(parse_meeting(line))
-    }
+    meetings := text.lines().filter(line -> line != "").map(line -> parse_meeting(line))
     meetings.sort_by(meeting -> meeting.millis)
     loop position in 0..<meetings.len() {
         gap :: if position == 0 -> "-" else -> "{(meetings[position].millis - meetings[position - 1].millis) /% 60000}"

@@ -3822,6 +3822,14 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         args: Vec<CtValue>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
+        if func.name == "recurse" && self.call_depth < 3 {
+            eprintln!(
+                "[DEBUG-card2358] run_func depth={} body={} chain={}",
+                self.call_depth,
+                recursive_body(func).is_some(),
+                recursive_chain_supported(&self.funcs, func),
+            );
+        }
         // D-MEMO1=A: the interpreter adapter marshals the argument tuple to the
         // same Prelude store used by emitted Rust. Sema has already proved the
         // tuple safe to cache; this path never rechecks purity or hashability.

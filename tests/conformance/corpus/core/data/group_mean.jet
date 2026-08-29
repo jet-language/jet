@@ -1,0 +1,16 @@
+// core-conformance: core.data.group_mean
+use core.data as data
+
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+fn run() {
+    rows :: [Ticket]{
+        Ticket{team: "Core", minutes: 4.0},
+        Ticket{team: "Core", minutes: 8.0}
+    }
+    groups :: data.group_mean(rows, ticket -> ticket.team, ticket -> ticket.minutes) ?? panic("group mean")
+    print(groups[0].mean)
+}

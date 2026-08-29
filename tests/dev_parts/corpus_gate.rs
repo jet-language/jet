@@ -105,10 +105,22 @@ fn corpus_gate_ledger_audit_fires_on_a_missing_row() {
 /// #2286: generated Core witnesses use the same strict resident-JIT,
 /// interpreter, and AOT oracle as the feature corpus. Discovery is a sorted
 /// filesystem walk, so adding a witness cannot silently leave it outside the
-/// gate. The denominator check is a separate Node command because this wave
-/// intentionally lands with uncovered rows for later coverage waves.
+/// gate. The registry denominator is checked here too, before any tier run,
+/// so a missing witness fails the suite rather than becoming invisible.
 #[test]
 fn core_conformance_corpus_uses_strict_three_tier_gate() {
+    let denominator = std::process::Command::new("node")
+        .arg("scripts/agent/core-conformance.mjs")
+        .arg("--check")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("node must run the Core conformance denominator checker");
+    assert!(
+        denominator.status.success(),
+        "Core conformance denominator is incomplete or malformed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&denominator.stdout),
+        String::from_utf8_lossy(&denominator.stderr)
+    );
     with_jit_test_scope(|| {
         if skip_if_cranelift_host_unsupported() {
             return;

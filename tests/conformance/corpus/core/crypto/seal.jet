@@ -1,0 +1,9 @@
+// core-conformance: core.crypto.seal
+use core.crypto as crypto
+
+fn run() {
+    recipient :: crypto.X25519SecretKey.new_random() ?? return Err("recipient")
+    message :: [U8]{0x61, 0x62, 0x63}
+    result :: crypto.seal([recipient.public_key()], message, []) ?? return Err("seal")
+    print(result.bytes().len() == 185)
+}

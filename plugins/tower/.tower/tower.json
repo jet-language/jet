@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2357,
-    "rev": 46782,
+    "nextNum": 2359,
+    "rev": 46793,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -152219,6 +152219,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "Blessing pass blocker identified and carded as #2358: tests/ui/runtime_e3012.jet overflows the native stack in the TIR evaluator and aborts the diagnostic_snapshots binary with SIGABRT, so UPDATE_EXPECT can never complete the suite. Case-law rows themselves are applied; this card closes as soon as #2358 lets the suite run to 12 passed."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "Case-law rows applied across all four slices (E0xxx 67 rows, E1xxx 55 rows, E2000-E3999, non-E/L rows 17) plus runtime-built text for the affected codes; #2207's checker (every_user_facing_case_source_is_checked) already covers diagnostic meaning/What/Why/Fix. Blessing pass status: UPDATE_EXPECT run over tests/diagnostic_snapshots reaches 11 of 12 green; the 12th could not be identified because concurrent lanes were mid-edit on jet-foundation/jet-codegen when the verification run started. REMAINING WORK (orchestrator, needs a quiescent tree): (1) run 'UPDATE_EXPECT=1 UPDATE_EXPECT_REASON=... cargo test --test diagnostic_snapshots', (2) re-run it clean and identify the one failing test, (3) confirm the seven tests/ui_lint .warn fixtures match with NO duplication (the lint double-emission root fix landed: cached first inference passed into infer_try_with_inner_type), noting that shared_loop legitimately gained an extra L0508 row."
         },
         {
@@ -152289,7 +152294,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T23:11:56.042Z",
-      "updated": "2026-08-29T01:30:38.013Z",
+      "updated": "2026-08-29T09:50:53.809Z",
       "updatedBy": "fable",
       "workOrder": 2
     },
@@ -156469,7 +156474,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Six general-purpose items close the measured Python LOC gap; syntax is NOT the bottleneck. One syntax item was owner-gated and is now RATIFIED: D-BYTELIT1=B (2026-08-27) — reuse the ratified typed-literal head: a string body inside a [U8] literal means its ASCII bytes ([U8] \"JGB1\"). No new sigil.\n\n1. list.par_map(fn) / par_each with a limit: structured parallel map returning ordered results. Kills the hand channel+detach+receive loop (15 lines in parallel-grep). Semantics in Prelude/CoreLib (I9); generality witness: non-corpus example + golden.\n2. sort_by_key / sort_by on tuple and struct lists: first verify whether jet_list_sort_by_desc is reachable from Jet source; if reachable, this is a doc/idiom fix; if not, land the API. Prove on every tier.\n3. iter.counts() -> Map<T,Int> and map.top_n(n, by: value): the Counter/most_common pair.\n4. Date formatting: day/month names plus strftime-class codes or named methods (day_name()), riding D-FMT-INTERP3 mechanics where sensible (that family is also ratified, see #2257).\n5. Relative-path reads: determine why fs.read(path) needed the Path.from(cwd).join dance; record the verdict (bug, doc, or API fix) and eliminate the ceremony.\n6. Bytes literal per D-BYTELIT1=B: parser accepts a string body in a [U8] typed literal as ASCII bytes; reject non-ASCII code points with a registered diagnostic + snapshot (I4); I7 chores — Syntax.rs row with decision ID, syntax-decisions.md log entry, grammars regenerated, snapshots re-blessed.\n\nEvery API ships example + golden + full tier parity (I9). Corpus rewrite itself belongs to #2263; re-measure at the next gauntlet run (target jet/python median <= 1.3).\nOwned paths: CoreLib/Prelude list/map/iter/date/fs parts, parser typed-literal path, jet-foundation Syntax.rs, examples, snapshots.",
       "checkSteps": null,
@@ -156545,29 +156550,29 @@
         {
           "n": 7,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-27T23:21:14.017Z"
+          "evidence": "docs/spec/syntax-decisions.md carries D-BYTELIT1=B in both the decision body (line 681) and the dated log (line 6521), plus the D-UNIFYLIT1 amendment cross-reference at line 6519.",
+          "at": "2026-08-29T10:21:04.404Z"
         },
         {
           "n": 8,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-27T23:21:14.017Z"
+          "evidence": "scripts/agent/jet-env jet self devtools grammars: 'wrote editors/zed/languages/jet/highlights.scm' and 'regenerated editor grammar sections'.",
+          "at": "2026-08-29T10:21:11.616Z"
         },
         {
           "n": 9,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-27T23:21:14.017Z"
+          "evidence": "Lane wabrevity: witnesses parallel_iter and lists both report 'run/release/golden identical' with exit 0, so no snapshot drift remains for the brevity-pack surfaces; the byte-literal negative fixture tests/ui/byte_literal_non_ascii.jet was added from real binary output.",
+          "at": "2026-08-29T10:21:14.340Z"
         }
       ],
       "refs": [],
@@ -156580,8 +156585,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-27T22:46:48.258Z",
-      "updated": "2026-08-28T21:55:43.454Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T10:21:14.990Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-29T10:21:14.990Z"
     },
     {
       "id": "c05la7ri",
@@ -156599,6 +156605,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "THE 12TH FAILURE IS IDENTIFIED. The one test that has kept this card and #2204 from closing is ui_snapshots aborting the whole diagnostic_snapshots binary: tests/ui/runtime_e3012.jet overflows the native stack in thread 'jet-tir-eval' (SIGABRT) instead of reporting E3012. Carded as #2358 with the reproduction, the fixture, and the three things I already ruled out (both depth guards exist and look sound; the fixture takes the run_recursive_scalar trampoline; frames live in a heap Vec so frame growth alone cannot overflow). Because the binary aborts rather than failing a test, no snapshot in the suite can be blessed — that is why the blessing pass has stalled at 11 passed / 1 failed on every attempt. #2266 and #2204 both close once #2358 lands."
+        },
         {
           "at": "2026-08-29",
           "by": "fable",
@@ -156676,7 +156687,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T09:12:24.047Z",
-      "updated": "2026-08-29T01:30:38.488Z",
+      "updated": "2026-08-29T09:50:53.344Z",
       "updatedBy": "fable"
     },
     {
@@ -161544,6 +161555,93 @@
       "needsAcceptance": false,
       "created": "2026-08-29T04:26:24.011Z",
       "updated": "2026-08-29T08:35:01.546Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0dompqv",
+      "num": 2357,
+      "title": "Formatter emits L0508-invalid arrow-loop form",
+      "body": "`jet fmt` canonicalizes `run.jet` to a one-statement arrow loop, then `jet check` reports L0508 on that canonical line. Braces suppress L0508 but are removed by `fmt`. This regression makes the canary unable to be both fmt-clean and L0508-clean. Cards #1453 and #1454 are done; this is not a syntax decision.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Align the shared arrow-loop formatter and L0508 analysis so canonical one-statement loops pass lint. Preserve ratified syntax. Add general regression coverage; do not special-case `dogfood/tower`.",
+      "checkSteps": "Run `scripts/agent/jet-env jet fmt dogfood/tower/run.jet`; run `scripts/agent/jet-env jet check dogfood/tower`; run `fmt` again; run targeted formatter/linter tests for one-statement arrow loops and value-dropping loops.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`fmt` produces the canonical arrow-loop form and is idempotent.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T09:46:54.977Z"
+        },
+        {
+          "n": 2,
+          "text": "`jet check dogfood/tower` reports no L0508 for the canonical source.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T09:47:02.120Z"
+        },
+        {
+          "n": 3,
+          "text": "General regression tests pass without canary-specific handling or changes to decisions #1453 and #1454.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T09:47:09.006Z"
+        }
+      ],
+      "refs": [
+        "2327",
+        "1453",
+        "1454"
+      ],
+      "tags": [
+        "dogfood",
+        "scale",
+        "formatter",
+        "lint"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T09:46:46.793Z",
+      "updated": "2026-08-29T09:47:09.007Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c05jgd7u",
+      "num": 2358,
+      "title": "ui_snapshots aborts: E3012 fixture overflows the native stack instead of reporting",
+      "body": "This is the long-unidentified 12th failure in tests/diagnostic_snapshots that has blocked #2204 and #2266. It is PRE-EXISTING (every blessing attempt this session reported 11 passed / 1 failed) and it is not caused by the #2317 recursion work.\\n\\nReproduce:\\n  CARGO_BUILD_JOBS=6 scripts/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots -- --nocapture\\nObserved:\\n  test ui_snapshots has been running for over 60 seconds\\n  note: skipping tests/ui/ffi_no_cargo.jet ui snapshot (need no cargo for E0703)\\n  thread 'jet-tir-eval' (...) has overflowed its stack\\n  fatal runtime error: stack overflow, aborting\\n  signal: 6, SIGABRT\\nThe whole test binary aborts, so the suite cannot report and no snapshot can be blessed.\\n\\nThe fixture is tests/ui/runtime_e3012.jet:\\n  fn recurse(n: Int) Int -> { return recurse(n + 1) }\\n  fn run() { print(recurse(0)) }\\n  // @dev_interpreter\\nDeliberate unbounded recursion whose whole purpose is to prove E3012 fires. tests/ui/runtime_e3012.stderr expects 'Stop [E3012]: stack overflow in recurse'. Instead the evaluator exhausts its native stack.\\n\\nWHAT I ALREADY RULED OUT, so do not redo it:\\n- The depth guard EXISTS on both evaluator paths and both branches look sound. crates/jet-codegen/src/Codegen/TIR/eval/mod.rs:3843 guards the ordinary call path (call_depth compared to jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT, returning E3012 when runtime_execution and otherwise draining fuel via burn()). mod.rs:3688 guards the run_recursive_scalar trampoline the same way, keyed on frames.len() through 'self.call_depth = caller_depth + frame_index'.\\n- This fixture takes the run_recursive_scalar path: mod.rs:3838-3842 routes any recursive_body whose chain is recursive_chain_supported there, and a foldable 'return recurse(n + 1)' qualifies.\\n- The trampoline holds frames in a heap Vec, so frame growth alone cannot overflow a native stack. Something on that path still recurses natively — most likely argument or continuation evaluation (eval_expr_child and the BinaryLeft/BinaryRight continuations around mod.rs:3655-3677), or the guard is never reached because the native recursion happens before the frame is pushed.\\n\\nWHERE TO START: run the fixture directly under the interpreter and get a backtrace of the overflowing frame (JET_BACKTRACE or a debugger), rather than reading more code. The repeating frame names will name the native recursion immediately. Also check the stack size the 'jet-tir-eval' thread is spawned with: if it is small, a legitimate depth below JET_RUNTIME_STACK_LIMIT can overflow before the guard trips, and the honest fix is to make the guard's limit consistent with the thread's actual stack.\\n\\nEXIT CRITERIA: the fixture reports E3012 matching tests/ui/runtime_e3012.stderr on the dev interpreter; the full 'cargo test --test diagnostic_snapshots' reaches 12 passed with no abort; and the fix is a general depth guarantee, not a special case for this fixture.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T09:50:08.741Z",
+      "updated": "2026-08-29T09:50:08.741Z",
       "updatedBy": "fable"
     }
   ],
@@ -222587,6 +222685,83 @@
   ],
   "events": [
     {
+      "at": "2026-08-29T10:21:14.990Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ga42wx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-29T10:21:14.341Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0ga42wx",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-29T10:21:11.616Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0ga42wx",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-29T10:21:04.405Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0ga42wx",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-29T09:50:53.809Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0w7rdo4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T09:50:53.344Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c05la7ri",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T09:50:08.741Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c05jgd7u",
+      "note": "ui_snapshots aborts: E3012 fixture overflows the native stack instead of reporting"
+    },
+    {
+      "at": "2026-08-29T09:47:09.007Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0dompqv",
+      "note": "#3 General regression tests pass without canary-specific handli"
+    },
+    {
+      "at": "2026-08-29T09:47:02.121Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0dompqv",
+      "note": "#2 `jet check dogfood/tower` reports no L0508 for the canonical"
+    },
+    {
+      "at": "2026-08-29T09:46:54.977Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0dompqv",
+      "note": "#1 `fmt` produces the canonical arrow-loop form and is idempote"
+    },
+    {
+      "at": "2026-08-29T09:46:46.793Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0dompqv",
+      "note": "Formatter emits L0508-invalid arrow-loop form"
+    },
+    {
       "at": "2026-08-29T09:12:58.936Z",
       "by": "fable",
       "action": "card.criteria-meet",
@@ -226008,83 +226183,6 @@
       "action": "card.criteria-add",
       "ref": "c0509i8n",
       "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-28T17:35:34.665Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0509i8n",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-28T16:06:29.886Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0171611",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T16:06:29.195Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0onvszz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T16:05:01.471Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0171611",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T16:05:01.153Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0uua999",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T16:05:00.879Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0onvszz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T16:04:39.898Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-CONC-ALLNAMED1",
-      "note": "Named results for task.all"
-    },
-    {
-      "at": "2026-08-28T16:03:40.015Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0509i8n",
-      "note": "Named results for task.all (Await-Dictionary / Promise.allKeyed analog)"
-    },
-    {
-      "at": "2026-08-28T16:03:27.684Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0h2gmdx",
-      "note": "Go 1.27 stdlib parity pack: cut_last, Int Euclidean div/rem, Unicode 17, JSON map-order pin, test-server and fake-time assessments"
-    },
-    {
-      "at": "2026-08-28T16:03:25.722Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0kmju0p",
-      "note": "Task observability: blocked-at-exit tasks report nothing; TaskFailure loses child panic text and task identity"
-    },
-    {
-      "at": "2026-08-28T16:03:08.498Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0nrsx21",
-      "note": "Pin the exact rustc toolchain and regression-test the generated-Rust-rejection ICE branch"
     }
   ],
   "nextNum": 368,

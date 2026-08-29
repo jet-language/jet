@@ -1,0 +1,9 @@
+// core-conformance: core.db.policy_audit
+use core.db as db
+
+fn run() {
+    connection :: db.open_memory()
+    policy :: db.policy("items", "true") ?? panic("policy")
+    scope :: connection.with_policy(policy, "owner")
+    print(db.policy_audit(scope))
+}

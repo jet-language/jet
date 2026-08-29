@@ -1,0 +1,19 @@
+// core-conformance: core.db.row_value
+use core.db as db
+
+fn run() {
+    connection :: db.open_memory()
+    policy :: db.policy("items", "true") ?? panic("policy")
+    scope :: connection.with_policy(policy, "owner")
+    migration :: db.migrate(scope, "items-v1", ["CREATE TABLE items (i INTEGER, f REAL, t TEXT, b BOOLEAN)"])
+        ?? panic("migrate")
+    inserted :: scope.execute(
+        "INSERT INTO items (i, f, t, b) VALUES (?, ?, ?, ?)",
+        [DBValue.Int(7), DBValue.Float(1.5), DBValue.Text("jet"), DBValue.Bool(true)]
+    ) ?? panic("insert")
+    print("setup={migration}:{inserted}")
+    maybe_row :: scope.query_one("SELECT t FROM items", []) ?? panic("query")
+    row :: maybe_row ?? panic("row")
+    value :: db.row_value(row, "t") ?? panic("value")
+    print(value.text() ?? "missing")
+}

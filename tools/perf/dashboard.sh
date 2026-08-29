@@ -538,6 +538,7 @@ run_aot_trial() {
             env \
             JET_CACHE_DIR="$trial_cache/build" \
             JET_ROOT="$trial_work" \
+            JET_RECEIPT_BYPASS=1 \
             JET_TIMING=1 \
             JET_TIMING_DIR="$trial_work/timing" \
             NO_COLOR=1 \
@@ -550,6 +551,7 @@ run_aot_trial() {
         if run_timed "$trial_stats" "$trial_output.build.stdout" "$trial_output.build.stderr" \
             env \
             JET_CACHE_DIR="$trial_cache/build" \
+            JET_RECEIPT_BYPASS=1 \
             JET_TIMING=1 \
             JET_TIMING_DIR="$trial_work/timing" \
             NO_COLOR=1 \

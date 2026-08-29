@@ -1,0 +1,10 @@
+// core-conformance: core.email.envelope
+use core.email as email
+
+fn run() {
+    sender :: email.address("sender@example.com") ?? panic("sender")
+    recipient :: email.address("recipient@example.net") ?? panic("recipient")
+    message :: email.message(sender, [recipient], [], "Subject", "Body", "", []) ?? panic("message")
+    envelope :: email.envelope(sender, [recipient]) ?? panic("envelope")
+    print((email.serialize(message.with_envelope(envelope) ?? panic("with envelope")) ?? panic("serialize")).len())
+}

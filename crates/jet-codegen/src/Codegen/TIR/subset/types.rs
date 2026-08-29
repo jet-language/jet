@@ -1,6 +1,7 @@
 use crate::Codegen::alloc_handle_rust_type;
 use crate::Codegen::core_rust_type_name;
 use crate::Codegen::file_handle_rust_type;
+use crate::Codegen::is_json_type_name;
 use crate::Codegen::layout_handle_rust_type;
 use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::root_prelude_rust_type_name;
@@ -53,6 +54,13 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         return true;
     }
     if matches!(&ty, Type::Named(n) if n == "DataEvent") {
+        return true;
+    }
+    // D-ENC-DYN1=A+: DataTree and its canonical format spellings are one
+    // Clone-backed Prelude enum. Their variant construction/matching has a
+    // dedicated TIR path below; admit the type here so functions using a
+    // dynamic value do not fall back before that path can run.
+    if matches!(&ty, Type::Named(n) if is_json_type_name(n)) {
         return true;
     }
     if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError"))

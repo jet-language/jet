@@ -1,0 +1,17 @@
+// core-conformance: core.data.pivot_sum
+use core.data as data
+
+struct Ticket {
+    team: String
+    bucket: String
+    minutes: Float
+}
+
+fn run() {
+    rows :: [Ticket]{
+        Ticket{team: "Core", bucket: "short", minutes: 4.0},
+        Ticket{team: "Core", bucket: "long", minutes: 8.0}
+    }
+    cells :: data.pivot_sum(rows, ticket -> ticket.team, ticket -> ticket.bucket, ticket -> ticket.minutes) ?? panic("pivot")
+    print(cells[0].sum)
+}

@@ -1,0 +1,10 @@
+// core-conformance: core.crypto.open
+use core.crypto as crypto
+
+fn run() {
+    recipient :: crypto.X25519SecretKey.new_random() ?? return Err("recipient")
+    message :: [U8]{0x61, 0x62, 0x63}
+    box :: crypto.seal([recipient.public_key()], message, []) ?? return Err("seal")
+    result :: crypto.open(recipient, box, []) ?? return Err("open")
+    print(result == message)
+}

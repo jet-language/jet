@@ -1,0 +1,13 @@
+// core-conformance: core.files.rename
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("files-rename")
+    source :: Path.from(root).join("source.txt")
+    destination :: Path.from(root).join("destination.txt")
+    writer :: files.create(source) ?? panic("create")
+    writer.write_line("fixture") ?? panic("write")
+    writer.flush() ?? panic("flush")
+    print(files.rename(source, destination))
+}

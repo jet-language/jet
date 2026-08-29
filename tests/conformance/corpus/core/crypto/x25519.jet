@@ -1,0 +1,12 @@
+// core-conformance: core.crypto.x25519
+use core.crypto as crypto
+use core.crypto.expert as expert
+
+fn run() {
+    alice :: crypto.X25519SecretKey.new_random() ?? return Err("alice")
+    bob :: crypto.X25519SecretKey.new_random() ?? return Err("bob")
+    shared :: crypto.x25519(alice, bob.public_key()) ?? return Err("shared secret")
+    #Unsafe("inspect shared-secret length") {
+        print(expert.shared_secret_bytes(shared).len() == 32)
+    }
+}
