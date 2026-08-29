@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2347,
-    "rev": 46686,
+    "nextNum": 2356,
+    "rev": 46735,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -257,7 +257,7 @@
           "at": "2026-08-12T01:45:18.211Z"
         }
       ],
-      "status": "review-ready",
+      "status": "open",
       "created": "2026-07-26T13:03:18.629Z",
       "archived": true
     },
@@ -76377,7 +76377,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul2-tier-parity",
-      "phase": "done",
+      "phase": "ready",
       "priority": "P1",
       "plan": "Parse CBOR once into DataTree. Dispatch named and custom values through the ordinary lowered Type.encode and Type.decode functions already present in JitProgram. Share primitive and container decoding for Option, List, fixed lists, maps, bytes, F32, sized integers, chars, DataTree, distinct ranges, and exact errors. Carry a compiled migration plan with wire keys and default or converter function names; apply it through the same codec dispatch. Delete typed field-tuple encode and decode shortcuts. Prove forced per-function deopt matches AOT for rename, default, flatten, deny unknown, custom Decode, migrations, enums, maps, F32, bytes, sized bounds, and distinct values.",
       "blockedBy": [
@@ -76386,6 +76386,11 @@
       "workOrder": 95,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Reopened by jetpack scale canary: generated Codable Encode body still reaches E0956 on default jet run; prior 5-case corpus was not denominator-complete."
+        },
         {
           "at": "2026-07-29",
           "by": "e3-batch-review",
@@ -76436,11 +76441,11 @@
         {
           "n": 1,
           "text": "Forced per-function TIR deopt dispatches named, generic, enum, and custom Codable values through the same lowered Encode and Decode bodies as resident execution.",
-          "status": "verified",
-          "metBy": "e3-bd-1310",
-          "verifiedBy": "e3-batch-review",
-          "evidence": "Independent reviews and rechecks were clean. encoding_parity cbor_ passed 5 of 5, including custom, generated, generic, enum, resident, and forced-deopt paths.",
-          "at": "2026-07-29T16:42:11.589Z"
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:20:50.681Z"
         },
         {
           "n": 2,
@@ -76463,11 +76468,11 @@
         {
           "n": 4,
           "text": "An adversarial AOT, resident, and forced-deopt corpus covers markers, custom codecs, migrations, enums, maps, numeric bounds, and bytes; no field-tuple codec or JIT-gap growth remains.",
-          "status": "verified",
-          "metBy": "e3-bd-1310",
-          "verifiedBy": "e3-batch-review",
-          "evidence": "Full focused CBOR corpus passed 5 of 5. Independent adversarial reviews and material-fix rechecks were clean with no facade or fallback growth.",
-          "at": "2026-07-29T16:42:12.366Z"
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:20:51.152Z"
         }
       ],
       "refs": [
@@ -76479,8 +76484,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-29T11:57:43.059Z",
-      "updated": "2026-08-10T18:29:27.291Z",
-      "updatedBy": "e3-architect",
+      "updated": "2026-08-29T04:20:51.823Z",
+      "updatedBy": "fable",
       "tags": [],
       "parentId": null
     },
@@ -155317,6 +155322,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "Jetpack dogfood reproduces the existing core.files rows in a real package manager: default jet run failed E0956 on absolute, then canonicalize, while validating its isolated store root. The canary temporarily uses lexical validation for read-only phase 1; write phase 2 remains blocked until the shared Prelude routes exist."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "Lane w5cdeopt collected the criterion-3 evidence table with --trace-tiers under a 120s process-group timeout for binparse/csvtransform/wordfreq/datasummary/regex-logscan plus typed_entry_args. Verdict: no observed deopt cause belongs to the core-call route seam, so nothing was fixed under this card; the per-entry observations and first causes are in the lane report for carding."
         },
         {
@@ -155408,7 +155418,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-27T21:47:19.215Z",
-      "updated": "2026-08-29T01:55:02.964Z",
+      "updated": "2026-08-29T04:21:18.045Z",
       "updatedBy": "fable"
     },
     {
@@ -160830,6 +160840,483 @@
       "needsAcceptance": false,
       "created": "2026-08-29T04:06:16.324Z",
       "updated": "2026-08-29T04:06:16.324Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c05xe1a7",
+      "num": 2347,
+      "title": "Dogfood jetpack phase 1: read-only parity",
+      "body": "Port manifest and lock parsing plus plan, list, and inspect into the side-by-side Jet jetpack canary. Compare exact argv, stdout, exit status, and store tree against checked-in shipped-jetpack transcripts while writing only below the dogfood cache.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": "Keep the Rust jetpack untouched. Run the Jet port under its own package and root, preserve offline defaults, and prove checked transcript parity plus optional live-oracle parity.",
+      "checkSteps": "Run jet check on dogfood/jetpack, jet test on the parity harness, default jet run for plan/list/inspect, and an AOT build once compiler blockers are cleared.",
+      "blockedBy": [
+        "c08hj382"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "AOT criterion blocked by reproduced exit-101 generated-module defect #2350. Generated parity.rs has unqualified root helpers and JetErr/String mismatches; default-tier parity continues independently."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The Jet package parses phase fixtures and passes package-wide semantic checking.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:15:25.112Z"
+        },
+        {
+          "n": 2,
+          "text": "Plan, list, and inspect match checked-in shipped-jetpack stdout, exit status, and normalized store trees under jet test.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:15:26.510Z"
+        },
+        {
+          "n": 3,
+          "text": "The default jet run tier executes all three verbs from the phase fixture without network or real-store access.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:15:27.741Z"
+        },
+        {
+          "n": 4,
+          "text": "AOT build and execution pass after every blocking compiler defect is resolved.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:15:29.485Z"
+        }
+      ],
+      "refs": [
+        "2327"
+      ],
+      "tags": [
+        "dogfood",
+        "scale",
+        "jetpack-port"
+      ],
+      "parentId": "c0oakubh",
+      "needsAcceptance": false,
+      "created": "2026-08-29T04:15:04.003Z",
+      "updated": "2026-08-29T04:17:00.364Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0fqa0gx",
+      "num": 2348,
+      "title": "Dogfood jetpack phase 2: own-store parity",
+      "body": "Port Hangar v2 path laws, no-follow ingest, journal replay, and compaction into the Jet canary's isolated root. Match shipped jetpack accept or reject verdicts and store layout on synthetic throwaway fixtures.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Implement reserved-name, case-fold, normalization, ingest, transaction, recovery, and compaction laws without touching the real Hangar. Use recorded oracle transcripts and no network.",
+      "checkSteps": "Run the phase 2 jet test parity files, default jet run ingest and inspect flows, and AOT build and execution.",
+      "blockedBy": [
+        "c05xe1a7",
+        "c0uua999"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Default-tier safe root validation is blocked by the existing E0956 batch #2252; the jetpack canary reproduced its already logged core.files absolute and canonicalize rows."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Safe write-phase root validation requires default-tier core.files absolute and canonicalize coverage tracked by P0 #2351."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Reserved names, case-fold collisions, and non-normalized paths match shipped accept or reject verdicts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:16:01.864Z"
+        },
+        {
+          "n": 2,
+          "text": "Ingest uses no-follow writes and produces the same package projection and payload tree inside the dogfood root.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:16:02.740Z"
+        },
+        {
+          "n": 3,
+          "text": "Journal recovery and threshold or byte compaction match recorded shipped behavior on synthetic fixtures.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:16:03.353Z"
+        },
+        {
+          "n": 4,
+          "text": "Default and AOT tiers pass the phase 2 parity suite without network or real-store access.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:16:03.937Z"
+        }
+      ],
+      "refs": [
+        "2327"
+      ],
+      "tags": [
+        "dogfood",
+        "scale",
+        "jetpack-port",
+        "store"
+      ],
+      "parentId": "c0oakubh",
+      "needsAcceptance": false,
+      "created": "2026-08-29T04:15:39.424Z",
+      "updated": "2026-08-29T04:21:16.999Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0oveav3",
+      "num": 2349,
+      "title": "Dogfood jetpack phase 3: offline realization",
+      "body": "Realize local-path and pre-fetched packages end to end through the Jet canary's own store. Replay recorded provider transcripts for network-shaped providers while keeping network disabled by default.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Implement local and pre-fetched provider resolution, digest verification, store registration, and recorded provider-result replay. Extend the distinct CLI realize verb without editing shipped jetpack.",
+      "checkSteps": "Run phase 3 jet test parity, default jet run realization, recorded-provider replay, and AOT build and execution.",
+      "blockedBy": [
+        "c0fqa0gx"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Local-path and pre-fetched packages realize end to end into the dogfood store with verified digests.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:16:23.263Z"
+        },
+        {
+          "n": 2,
+          "text": "Recorded provider transcripts replay deterministically with network disabled and preserve shipped results.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:16:24.080Z"
+        },
+        {
+          "n": 3,
+          "text": "The realize CLI reports matching stdout, exit status, and store tree for the phase fixtures.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:16:25.016Z"
+        },
+        {
+          "n": 4,
+          "text": "Default and AOT tiers pass the phase 3 suite without touching shipped stores or caches.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:16:26.023Z"
+        }
+      ],
+      "refs": [
+        "2327"
+      ],
+      "tags": [
+        "dogfood",
+        "scale",
+        "jetpack-port",
+        "realize"
+      ],
+      "parentId": "c0oakubh",
+      "needsAcceptance": false,
+      "created": "2026-08-29T04:15:50.861Z",
+      "updated": "2026-08-29T04:16:26.023Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c08hj382",
+      "num": 2350,
+      "title": "P0: imported Jet modules emit unqualified root helpers in AOT tests",
+      "body": "A multi-file Jet test that imports the dogfood jetpack passes sema but exits 101 because generated module code calls root Prelude helpers without a crate or super prefix. The same generation also returns String test failures inside helper functions whose declared error is JetErr. This blocks AOT parity for real multi-file packages.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Minimize the imported-module case, route every generated root helper through the module root prefix, preserve test failure error typing inside fallible helpers, and add a multi-file AOT regression that compiles and runs.",
+      "checkSteps": "Run jet test on the minimized imported-module regression and dogfood/jetpack/tests/transcript.jet parity suite, then build and execute dogfood/jetpack AOT.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Imported modules qualify jet_journey_reset, jet_outcome_of, jet_unicode_trim, and every other root helper correctly.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:16:57.524Z"
+        },
+        {
+          "n": 2,
+          "text": "Assertions inside helpers preserve the declared Jet error family instead of generating String return mismatches.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:16:58.312Z"
+        },
+        {
+          "n": 3,
+          "text": "The minimized multi-file test and dogfood jetpack AOT parity compile and run successfully.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:16:59.268Z"
+        }
+      ],
+      "refs": [
+        "2327",
+        "2347"
+      ],
+      "tags": [
+        "dogfood",
+        "scale",
+        "compiler",
+        "aot",
+        "i9"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T04:16:42.113Z",
+      "updated": "2026-08-29T04:16:59.268Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0ndytaf",
+      "num": 2352,
+      "title": "Package outputs cannot resolve a two-directory imported entry",
+      "body": "A typed executable output naming app.cli_run fails E2105 when entry.jet imports src/cli/main as app and that file exports cli_run. The documented one-hop outputs_build shape passes, so the canary needs a weightless root runner adapter before a normal nested package layout can run.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Make typed output resolution follow the ordinary in-project quoted import graph at any safe depth. Keep uniqueness and escape checks, add the nested src/cli case, and remove the canary runner adapter after the fix.",
+      "checkSteps": "Run package output resolver tests and jet check, run, and build dogfood/jetpack with entry app.cli_run and no runner adapter.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Typed outputs resolve exported functions through safe nested quoted imports without a root adapter.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:17:57.298Z"
+        },
+        {
+          "n": 2,
+          "text": "Ambiguous, missing, and escaping nested entries still fail with the registered package diagnostic.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:17:57.885Z"
+        },
+        {
+          "n": 3,
+          "text": "Dogfood jetpack deletes runner.jet and passes check, run, and build with the direct nested entry.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:17:58.354Z"
+        }
+      ],
+      "refs": [
+        "2327",
+        "2347"
+      ],
+      "tags": [
+        "dogfood",
+        "scale",
+        "package",
+        "compiler"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T04:17:43.964Z",
+      "updated": "2026-08-29T04:17:58.354Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c09osszo",
+      "num": 2354,
+      "title": "Direct matching of struct-typed errors propagates instead of binding",
+      "body": "In the dogfood CLI, directly matching a function returning a value with a local struct error family against Ok and Err produces E2402 and missing arm binders. The same syntax works for enum error families in the shipped examples. The canary had to discard structured error messages through fallback unwrapping.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Minimize a local Error-marked struct return matched directly by Ok and Err, align its sema path with enum error families, and restore the CLI's structured error reporting without conversion shims.",
+      "checkSteps": "Run the direct-match UI regression and dogfood CLI check and transcript tests with structured errors preserved.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Ok and Err arms bind values from functions with Error-marked struct failure domains.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:18:50.026Z"
+        },
+        {
+          "n": 2,
+          "text": "Direct matching does not require conversion from the local error family to Err.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:18:50.760Z"
+        },
+        {
+          "n": 3,
+          "text": "Dogfood CLI returns the original structured parse, root, plan, and read error messages.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:18:51.691Z"
+        }
+      ],
+      "refs": [
+        "2327",
+        "2347"
+      ],
+      "tags": [
+        "dogfood",
+        "scale",
+        "compiler",
+        "errors",
+        "sema"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T04:18:41.908Z",
+      "updated": "2026-08-29T04:18:51.692Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c06v570e",
+      "num": 2355,
+      "title": "jetpack hangar list creates a lock file during read-only inspection",
+      "body": "Against an empty throwaway JETPACK_ROOT, shipped jetpack hangar list with JSON and offline flags exits successfully but creates .locks/hangar.lock. Plan and doctor leave the store absent. The parity harness must normalize this exact zero-byte artifact, which exposes a read-only command mutating state.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Route hangar list through the existing lock-free read-only store projection, keep integrity checks side-effect free, and remove the transcript normalization once the shipped oracle leaves an empty root unchanged.",
+      "checkSteps": "Run list against an absent and populated throwaway root and assert byte-identical JSON with no created or changed paths.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Hangar list on an absent root returns the same JSON without creating the root or lock file.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:19:14.468Z"
+        },
+        {
+          "n": 2,
+          "text": "Hangar list on a populated root changes no file content, metadata projection, journal, or lock path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:19:15.211Z"
+        },
+        {
+          "n": 3,
+          "text": "The dogfood transcript removes its list-lock normalization and still matches shipped output and tree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:19:15.956Z"
+        }
+      ],
+      "refs": [
+        "2327",
+        "2347"
+      ],
+      "tags": [
+        "dogfood",
+        "scale",
+        "jetpack",
+        "store",
+        "readonly"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T04:19:03.505Z",
+      "updated": "2026-08-29T04:19:15.956Z",
       "updatedBy": "fable"
     }
   ],
@@ -221870,6 +222357,349 @@
   ],
   "events": [
     {
+      "at": "2026-08-29T04:22:11.839Z",
+      "by": "fable",
+      "action": "card.delete",
+      "ref": "c0o0b4mt",
+      "note": "jet test on a package reports E0601 for every non-test source"
+    },
+    {
+      "at": "2026-08-29T04:21:19.787Z",
+      "by": "fable",
+      "action": "card.delete",
+      "ref": "c03vcrf6",
+      "note": "P0: default evaluator rejects core.files absolute and canonicalize"
+    },
+    {
+      "at": "2026-08-29T04:21:18.045Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0uua999",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T04:21:16.999Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0fqa0gx",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-08-29T04:20:51.823Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0u592bs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-29T04:20:51.152Z",
+      "by": "fable",
+      "action": "card.criteria-reopen",
+      "ref": "c0u592bs",
+      "note": "#4: The standing corpus did not cover a generated Codable error-report struct reached through a multi-file package."
+    },
+    {
+      "at": "2026-08-29T04:20:50.681Z",
+      "by": "fable",
+      "action": "card.criteria-reopen",
+      "ref": "c0u592bs",
+      "note": "#1: Dogfood jetpack default jet run fails E0956: Encode body for ErrorReport is unsupported by the canonical evaluator."
+    },
+    {
+      "at": "2026-08-29T04:19:15.956Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c06v570e",
+      "note": "#3 The dogfood transcript removes its list-lock normalization a"
+    },
+    {
+      "at": "2026-08-29T04:19:15.211Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c06v570e",
+      "note": "#2 Hangar list on a populated root changes no file content, met"
+    },
+    {
+      "at": "2026-08-29T04:19:14.468Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c06v570e",
+      "note": "#1 Hangar list on an absent root returns the same JSON without "
+    },
+    {
+      "at": "2026-08-29T04:19:03.506Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c06v570e",
+      "note": "jetpack hangar list creates a lock file during read-only inspection"
+    },
+    {
+      "at": "2026-08-29T04:18:51.692Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c09osszo",
+      "note": "#3 Dogfood CLI returns the original structured parse, root, pla"
+    },
+    {
+      "at": "2026-08-29T04:18:50.760Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c09osszo",
+      "note": "#2 Direct matching does not require conversion from the local e"
+    },
+    {
+      "at": "2026-08-29T04:18:50.026Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c09osszo",
+      "note": "#1 Ok and Err arms bind values from functions with Error-marked"
+    },
+    {
+      "at": "2026-08-29T04:18:41.909Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c09osszo",
+      "note": "Direct matching of struct-typed errors propagates instead of binding"
+    },
+    {
+      "at": "2026-08-29T04:18:30.461Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0o0b4mt",
+      "note": "#3 jet test dogfood/jetpack reports one composed pass or fail r"
+    },
+    {
+      "at": "2026-08-29T04:18:29.184Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0o0b4mt",
+      "note": "#2 An explicitly targeted testless file still reports E0601."
+    },
+    {
+      "at": "2026-08-29T04:18:28.051Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0o0b4mt",
+      "note": "#1 Package-level jet test collects every reachable package test"
+    },
+    {
+      "at": "2026-08-29T04:18:07.946Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0o0b4mt",
+      "note": "jet test on a package reports E0601 for every non-test source"
+    },
+    {
+      "at": "2026-08-29T04:17:58.354Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0ndytaf",
+      "note": "#3 Dogfood jetpack deletes runner.jet and passes check, run, an"
+    },
+    {
+      "at": "2026-08-29T04:17:57.885Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0ndytaf",
+      "note": "#2 Ambiguous, missing, and escaping nested entries still fail w"
+    },
+    {
+      "at": "2026-08-29T04:17:57.298Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0ndytaf",
+      "note": "#1 Typed outputs resolve exported functions through safe nested"
+    },
+    {
+      "at": "2026-08-29T04:17:56.357Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ndytaf",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-29T04:17:43.964Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0ndytaf",
+      "note": "Package outputs cannot resolve a two-directory imported entry"
+    },
+    {
+      "at": "2026-08-29T04:17:29.451Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0fqa0gx",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-08-29T04:17:28.776Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c03vcrf6",
+      "note": "#3 Dogfood jetpack restores canonical own-root validation and r"
+    },
+    {
+      "at": "2026-08-29T04:17:28.283Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c03vcrf6",
+      "note": "#2 Default and AOT canonicalize resolve existing paths and syml"
+    },
+    {
+      "at": "2026-08-29T04:17:27.800Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c03vcrf6",
+      "note": "#1 Default and AOT tiers return the same absolute path or IOErr"
+    },
+    {
+      "at": "2026-08-29T04:17:14.486Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c03vcrf6",
+      "note": "P0: default evaluator rejects core.files absolute and canonicalize"
+    },
+    {
+      "at": "2026-08-29T04:17:00.364Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c05xe1a7",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-08-29T04:16:59.268Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c08hj382",
+      "note": "#3 The minimized multi-file test and dogfood jetpack AOT parity"
+    },
+    {
+      "at": "2026-08-29T04:16:58.313Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c08hj382",
+      "note": "#2 Assertions inside helpers preserve the declared Jet error fa"
+    },
+    {
+      "at": "2026-08-29T04:16:57.524Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c08hj382",
+      "note": "#1 Imported modules qualify jet_journey_reset, jet_outcome_of, "
+    },
+    {
+      "at": "2026-08-29T04:16:42.113Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c08hj382",
+      "note": "P0: imported Jet modules emit unqualified root helpers in AOT tests"
+    },
+    {
+      "at": "2026-08-29T04:16:26.023Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0oveav3",
+      "note": "#4 Default and AOT tiers pass the phase 3 suite without touchin"
+    },
+    {
+      "at": "2026-08-29T04:16:25.016Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0oveav3",
+      "note": "#3 The realize CLI reports matching stdout, exit status, and st"
+    },
+    {
+      "at": "2026-08-29T04:16:24.080Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0oveav3",
+      "note": "#2 Recorded provider transcripts replay deterministically with "
+    },
+    {
+      "at": "2026-08-29T04:16:23.263Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0oveav3",
+      "note": "#1 Local-path and pre-fetched packages realize end to end into "
+    },
+    {
+      "at": "2026-08-29T04:16:03.937Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0fqa0gx",
+      "note": "#4 Default and AOT tiers pass the phase 2 parity suite without "
+    },
+    {
+      "at": "2026-08-29T04:16:03.354Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0fqa0gx",
+      "note": "#3 Journal recovery and threshold or byte compaction match reco"
+    },
+    {
+      "at": "2026-08-29T04:16:02.740Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0fqa0gx",
+      "note": "#2 Ingest uses no-follow writes and produces the same package p"
+    },
+    {
+      "at": "2026-08-29T04:16:01.864Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0fqa0gx",
+      "note": "#1 Reserved names, case-fold collisions, and non-normalized pat"
+    },
+    {
+      "at": "2026-08-29T04:15:50.861Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0oveav3",
+      "note": "Dogfood jetpack phase 3: offline realization"
+    },
+    {
+      "at": "2026-08-29T04:15:39.424Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0fqa0gx",
+      "note": "Dogfood jetpack phase 2: own-store parity"
+    },
+    {
+      "at": "2026-08-29T04:15:29.485Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05xe1a7",
+      "note": "#4 AOT build and execution pass after every blocking compiler d"
+    },
+    {
+      "at": "2026-08-29T04:15:27.742Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05xe1a7",
+      "note": "#3 The default jet run tier executes all three verbs from the p"
+    },
+    {
+      "at": "2026-08-29T04:15:26.510Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05xe1a7",
+      "note": "#2 Plan, list, and inspect match checked-in shipped-jetpack std"
+    },
+    {
+      "at": "2026-08-29T04:15:25.112Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05xe1a7",
+      "note": "#1 The Jet package parses phase fixtures and passes package-wid"
+    },
+    {
+      "at": "2026-08-29T04:15:04.003Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c05xe1a7",
+      "note": "Dogfood jetpack phase 1: read-only parity"
+    },
+    {
       "at": "2026-08-29T04:06:56.085Z",
       "by": "fable",
       "action": "card.update",
@@ -225025,349 +225855,6 @@
       "action": "acceptance.resolve",
       "ref": "D-ACCEPT-2234",
       "note": "owner-ui session=gh2jzkDkE0g challenge=smmkAogU1HU outcome=accept"
-    },
-    {
-      "at": "2026-08-28T11:54:06.142Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-28T11:54:06.142Z"
-    },
-    {
-      "at": "2026-08-28T11:03:31.932Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0vz1mba",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T11:03:31.375Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c07rnjrs",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T11:03:30.100Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c02ak3kc",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T11:03:28.741Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c08ovzl9",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-28T11:03:26.158Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0h7zcqi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T11:03:24.659Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c08xjus3",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T11:03:23.276Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0vz1mba",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-28T10:11:16.120Z",
-      "by": "fable",
-      "action": "acceptance.reject",
-      "ref": "D-ACCEPT-2234",
-      "note": "cli card update: owner-verification bypass rejected"
-    },
-    {
-      "at": "2026-08-28T10:11:07.736Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c095fntm",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T10:11:07.736Z",
-      "by": "agent",
-      "action": "decision.add",
-      "ref": "D-ACCEPT-2234",
-      "note": "Accept #2234 — Web DX epic: jet dev <file> is the entire workflow, better than bun and vite"
-    },
-    {
-      "at": "2026-08-28T10:11:06.384Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c095fntm",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T10:11:05.182Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c095fntm",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T10:10:01.974Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rdtx81",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T10:10:01.597Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08xjus3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T10:10:01.231Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c08ovzl9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T10:10:00.857Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0onvszz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T10:10:00.460Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0o21kte",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T10:10:00.102Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c02ak3kc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T10:09:59.711Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09lvtej",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T09:56:28.321Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0g69t59",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T09:56:26.009Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0qkz2fb",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T09:56:24.267Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0qkz2fb",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T09:56:22.970Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0qkz2fb",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T09:56:21.367Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0vz1mba",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T09:56:19.998Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c07rnjrs",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-28T09:56:19.610Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0gwdlde",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-28T09:56:19.232Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0gwdlde",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-28T09:56:18.528Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0gwdlde",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T09:56:17.706Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0gwdlde",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T09:56:16.578Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0g69t59",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-28T09:23:24.320Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0ga42wx",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-28T09:23:23.366Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0v5e0kd",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-28T09:23:22.379Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0v5e0kd",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-28T09:23:21.980Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0niggys",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T09:23:21.585Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0uua999",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T09:23:21.198Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0vz1mba",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-28T09:23:20.814Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0vz1mba",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T09:23:20.429Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c07rnjrs",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-28T09:23:20.044Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c07rnjrs",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T09:23:19.657Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c07rnjrs",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T09:23:19.265Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0g69t59",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-28T09:23:18.882Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0g69t59",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T09:23:18.510Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0g69t59",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T09:12:24.050Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c05la7ri",
-      "note": "Pre-existing master reds: implicit-failure E0401 poisons nested call args; exhaustive if-match value form loses totality; stale-fixture wall"
-    },
-    {
-      "at": "2026-08-28T06:14:38.929Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rdtx81",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T06:14:37.622Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0jf37me",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T06:14:37.070Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0gjcs4v",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T06:14:36.527Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0s9kjxe",
-      "note": "phase"
     }
   ],
   "nextNum": 368,
