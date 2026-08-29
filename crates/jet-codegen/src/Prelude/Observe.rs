@@ -4,6 +4,25 @@
 // writer. Channel values, task locals, environment, and credentials never enter
 // this registry.
 
+/// Optional scheduler drain installed by the Core scheduler. Keeping the hook
+/// in this fixed Prelude part lets the reusable runtime compile without naming
+/// the optional scheduler crate, while every tier still reaches one exit seam.
+pub trait JetObserveControl: Send + Sync {
+    fn cancel(&self);
+}
+
+static JET_OBSERVE_EXIT_DRAIN: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+
+pub fn jet_observe_register_exit_drain(drain: fn()) {
+    let _ = JET_OBSERVE_EXIT_DRAIN.set(drain);
+}
+
+fn jet_observe_drain_after_exit() {
+    if let Some(drain) = JET_OBSERVE_EXIT_DRAIN.get() {
+        drain();
+    }
+}
+
 #[derive(Clone)]
 struct JetObserveTask {
     parent: usize,
@@ -13,7 +32,7 @@ struct JetObserveTask {
     wait: String,
     deadline_ms: Option<i64>,
     cancelled: bool,
-    control: std::sync::Weak<JetTaskControl>,
+    control: Option<std::sync::Weak<dyn JetObserveControl>>,
 }
 
 #[derive(Clone)]
@@ -216,16 +235,31 @@ pub fn jet_observe_task_register_at(
     observe_id: &std::sync::atomic::AtomicUsize,
     spawn_site: usize,
 ) -> usize {
-    jet_observe_task_register_at_with_control(observe_id, spawn_site, None)
+    jet_observe_task_register_at_with_control_weak(observe_id, spawn_site, None)
 }
 
 /// Register one task and retain only a weak link to its cancellation control.
 /// The exit edge uses this link to quiesce detached work before an engine tears
 /// down its runtime; the registry never owns a task control or its payload.
-pub fn jet_observe_task_register_at_with_control(
+pub fn jet_observe_task_register_at_with_control<C>(
     observe_id: &std::sync::atomic::AtomicUsize,
     spawn_site: usize,
-    control: Option<&std::sync::Arc<JetTaskControl>>,
+    control: Option<&std::sync::Arc<C>>,
+) -> usize
+where
+    C: JetObserveControl + 'static,
+{
+    let control = control.map(|control| {
+        let control: std::sync::Arc<dyn JetObserveControl> = control.clone();
+        std::sync::Arc::downgrade(&control)
+    });
+    jet_observe_task_register_at_with_control_weak(observe_id, spawn_site, control)
+}
+
+fn jet_observe_task_register_at_with_control_weak(
+    observe_id: &std::sync::atomic::AtomicUsize,
+    spawn_site: usize,
+    control: Option<std::sync::Weak<dyn JetObserveControl>>,
 ) -> usize {
     use std::sync::atomic::Ordering;
     let Some(registry) = jet_observe_registry() else {
@@ -249,10 +283,7 @@ pub fn jet_observe_task_register_at_with_control(
             wait: String::new(),
             deadline_ms: None,
             cancelled: false,
-            control: match control {
-                Some(control) => std::sync::Arc::downgrade(control),
-                None => std::sync::Weak::new(),
-            },
+            control,
         },
     );
     observe_id.store(id, Ordering::Relaxed);
@@ -314,7 +345,10 @@ pub fn jet_observe_runtime_start() {
             wait: String::new(),
             deadline_ms: None,
             cancelled: false,
-            control: std::sync::Weak::new(),
+            // The root task is the program itself, not a spawned body, so no
+            // cancellation control exists to link. `None` says that; a dangling
+            // `Weak` would claim a control that was never there.
+            control: None,
         });
     }
     if !first_start || !jet_observe_live_enabled() {
@@ -374,7 +408,7 @@ fn jet_observe_cancel_live_tasks(registry: &JetObserveRegistry) {
         .unwrap()
         .iter()
         .filter(|(id, _)| **id != 1)
-        .filter_map(|(_, task)| task.control.upgrade())
+        .filter_map(|(_, task)| task.control.as_ref().and_then(|control| control.upgrade()))
         .collect();
     for control in controls {
         control.cancel();
@@ -436,6 +470,7 @@ pub fn jet_observe_parked_tasks_report() -> Option<JetRuntimeDiagnostic> {
         ));
     }
     jet_observe_cancel_live_tasks(&registry);
+    jet_observe_drain_after_exit();
     Some(jet_render_runtime_stop(
         "E3013", "", 0, "", "", 1, 1, &details, "",
     ))

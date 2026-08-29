@@ -189,6 +189,13 @@ fn jet_observe_task_register_at(
 ) -> usize {
     0
 }
+/// The registry links a task's cancellation control behind this trait, and the
+/// scheduler hands it an exit-drain hook. Both must track `Prelude/Observe.rs`
+/// because this scope stubs the Observe seam instead of including it.
+trait JetObserveControl: Send + Sync {
+    fn cancel(&self);
+}
+fn jet_observe_register_exit_drain(_drain: fn()) {}
 fn jet_observe_task_register_at_with_control(
     _observe_id: &std::sync::atomic::AtomicUsize,
     _spawn_site: usize,
