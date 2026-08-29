@@ -1267,7 +1267,9 @@ impl Type {
                     params: params.iter().map(normalize).collect(),
                     ret: ret.as_ref().map(|ret| {
                         let ret = normalize(ret);
-                        Box::new(FailureContract::from_return_type(Some(&ret)).effective_type())
+                        Box::new(
+                            super::FailureContract::from_return_type(Some(&ret)).effective_type(),
+                        )
                     }),
                     effect_bound: effect_bound.clone(),
                     param_contract: param_contract.clone(),
