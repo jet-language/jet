@@ -3233,6 +3233,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             end,
                             step,
                             exclusive,
+                            auto_vectorization: auto_vectorization.clone(),
                             body: lowered.pop().expect("range body was deferred"),
                         },
                     );
@@ -3274,6 +3275,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                     end: zero(),
                                     step,
                                     exclusive: false,
+                                    auto_vectorization: None,
                                     body: lowered.pop().expect("range body was deferred"),
                                 },
                             );

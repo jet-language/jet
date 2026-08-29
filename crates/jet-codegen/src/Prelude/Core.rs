@@ -638,10 +638,11 @@ fn jet_std_os_run_atexit() {
     jet_runtime_atexit::run();
 }
 
-fn jet_runtime_report_parked_tasks() {
-    if let Some(report) = jet_observe_parked_tasks_report() {
-        eprint!("{}", report.rendered);
-    }
+fn jet_runtime_report_parked_tasks() -> Option<i32> {
+    let report = jet_observe_parked_tasks_report()?;
+    eprint!("{}", report.rendered);
+    jet_scheduler_drain_after_exit();
+    Some(report.exit_code)
 }
 
 /// The only native process-exit boundary for generated programs. Lexical
@@ -663,7 +664,9 @@ where
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
         Ok(value) => {
             jet_std_os_run_atexit();
-            jet_runtime_report_parked_tasks();
+            if let Some(code) = jet_runtime_report_parked_tasks() {
+                std::process::exit(code);
+            }
             value
         }
         Err(payload) => {

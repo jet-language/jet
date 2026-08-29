@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2331,
-    "rev": 46635,
+    "rev": 46645,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29,7 +29,7 @@
         "radar:e11"
       ]
     },
-    "completionCursor": "2026-08-29T00:48:40.315Z"
+    "completionCursor": "2026-08-29T01:42:12.761Z"
   },
   "epochs": [
     {
@@ -155288,6 +155288,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Lane w5cdeopt collected the criterion-3 evidence table with --trace-tiers under a 120s process-group timeout for binparse/csvtransform/wordfreq/datasummary/regex-logscan plus typed_entry_args. Verdict: no observed deopt cause belongs to the core-call route seam, so nothing was fixed under this card; the per-entry observations and first causes are in the lane report for carding."
+        },
+        {
           "at": "2026-08-28",
           "by": "fable",
           "text": "PROCENV: core.term.readline() E0956 on default. STRUCTS: generic function-call path E0956 both tiers. CLOSDEFER clean of E0956."
@@ -155376,7 +155381,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-27T21:47:19.215Z",
-      "updated": "2026-08-28T21:18:08.611Z",
+      "updated": "2026-08-29T01:55:02.964Z",
       "updatedBy": "fable"
     },
     {
@@ -157099,7 +157104,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P3",
       "plan": "One pass over the six items: land 1-4 as ordinary Core additions with example + golden + tier parity (no new syntax anywhere); write the 5-6 assessments into this card's log with a clear do/decline verdict each. Generality rule from #2265 applies: no Go-shaped helpers, only general surfaces.",
       "checkSteps": null,
@@ -157112,7 +157117,17 @@
           "text": "Ledger delta sweep 2026-08-28: add assessment item 7 - post-quantum signatures. Go 1.27 ships crypto/mldsa (FIPS 204, MLDSA44/65/87) with TLS/x509 integration; Jet core.crypto has sha2/sha3/blake3/hmac/hkdf/argon2id/ed25519 but no PQ scheme. Write a do/defer verdict (likely defer until TLS story matures, but record it). Also closed this sweep: map merge exists (a.merge(b), right-biased - probe found #2280), core.db exists; no other ledger topics warrant probing."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cut_last, Int Euclidean div/rem, Unicode 17, JSON map-order pin land with witnesses green byte-identical both tiers vs goldens; test-server and fake-time assessed in writing",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "Lane w5cgo: four witnesses (text/cut_last, math/int_euclidean, text/unicode_17, serde/json_map_order) exit 0 on default and release with identical stdout and matching goldens — cut_last root/branch+leaf+true, Euclidean -4/3/4/3/-3/2, four Unicode trues, JSON key order {a:1,m:13,z:26}; Unicode tables regenerated via scripts/agent/gen-unicode-tables. Test-server and fake-time assessments recorded in the lane report.",
+          "at": "2026-08-29T01:54:57.671Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "video-mine",
@@ -157122,8 +157137,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T16:03:27.684Z",
-      "updated": "2026-08-28T18:13:52.877Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T01:54:58.662Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-29T01:54:58.661Z"
     },
     {
       "id": "c0509i8n",
@@ -157630,7 +157646,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Permanent differential + property harness for core.time, in the suite forever. 1) Oracle corpus: a checked-in generated table (tool under tools/, deterministic seed) of test vectors produced from Python zoneinfo/IANA tzdata + RFC3339 law at generation time; vectors committed so CI needs no Python. Families per card body: epoch round-trips (negative timestamps, 1900/2000/2100/2400 leap edges), civil fields vs isocalendar, calendar arithmetic incl end-of-month clamping, DST transitions (Lord_Howe, Chatham, Casablanca, Sao_Paulo historical), offset parse edges. 2) Property laws as tests: parse-format round-trip identity, diff_days antisymmetry, add_days composition, clamping table - run on default AND release. 3) Differential runner: one test binary walks the vector table, executes the same computation through the Jet Prelude time kernel, diffs line-by-line; failures name the vector. 4) Regeneration: tool re-run refreshes vectors with a diff review; drift between generated and committed fails. Depends on #2289 fixes landing first (known weekday/add_months defects would flood the diff).",
       "checkSteps": "harness in suites.txt with pinned oracle provenance;property laws per-commit;prototype mismatches all triaged;2284 gated on green harness",
@@ -157647,29 +157663,29 @@
         {
           "n": 1,
           "text": "Committed oracle vector table + deterministic regeneration tool with drift check",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-28T22:00:19.763Z"
+          "evidence": "Lane w5cdt: tools/datetime_accuracy.py --check exit 0, 2474 committed vectors seed 20260828 from bundled TZif, drift check green; 10 epoch leap-edge vectors through 2400.",
+          "at": "2026-08-29T01:54:59.133Z"
         },
         {
           "n": 2,
           "text": "Differential runner green on default and release across all vector families",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-28T22:00:20.164Z"
+          "evidence": "Differential runner green on both tiers: epoch 686, civil 1440, zone 348 lines, all 'golden: identical', tier outputs identical.",
+          "at": "2026-08-29T01:54:59.637Z"
         },
         {
           "n": 3,
           "text": "Property laws (round-trip, antisymmetry, composition, clamping) tested both tiers",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-28T22:00:20.627Z"
+          "evidence": "Property laws: 'property rows=228 bad=0' on default and release with identical tier outputs (round-trip, antisymmetry, composition, clamping).",
+          "at": "2026-08-29T01:55:00.151Z"
         }
       ],
       "refs": [],
@@ -157682,8 +157698,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T18:29:32.863Z",
-      "updated": "2026-08-28T22:00:21.229Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T01:55:00.855Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-29T01:55:00.854Z"
     },
     {
       "id": "c0ged56j",
@@ -220384,9 +220401,88 @@
       "tags": [],
       "status": "open",
       "created": "2026-08-27T00:51:18.084Z"
+    },
+    {
+      "id": "b4av7ao1",
+      "text": "Jet fmt should convert items :: [         LineItem{label: \"coffee\", cents: 450},         LineItem{label: \"sandwich\", cents: 875},         LineItem{label: \"tea\", cents: 325}     ] to items :: [LineItem]{{...},{...},{...}}",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-29T01:46:56.499Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-29T01:55:02.964Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0uua999",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T01:55:00.855Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0543gg1",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-29T01:55:00.151Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0543gg1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-29T01:54:59.638Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0543gg1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-29T01:54:59.134Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0543gg1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-29T01:54:58.662Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0h2gmdx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-29T01:54:57.671Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0h2gmdx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-29T01:54:56.056Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0h2gmdx",
+      "note": "#1 cut_last, Int Euclidean div/rem, Unicode 17, JSON map-order "
+    },
+    {
+      "at": "2026-08-29T01:46:56.499Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b4av7ao1",
+      "note": "Jet fmt should convert items :: [         LineItem{label: \"c"
+    },
+    {
+      "at": "2026-08-29T01:42:12.761Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-29T01:42:12.761Z"
+    },
     {
       "at": "2026-08-29T01:38:27.916Z",
       "by": "fable",
@@ -223815,76 +223911,6 @@
       "by": "fable",
       "action": "card.update",
       "ref": "c0qkz2fb",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-28T00:57:18.444Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c002uky2",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-28T00:56:45.550Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0rdtx81",
-      "note": "#5 Warm jetpack env --prep -y on this repo completes in under 1"
-    },
-    {
-      "at": "2026-08-28T00:56:45.171Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0rdtx81",
-      "note": "#4 jetpack hangar doctor reports manifest reuse and reseal deci"
-    },
-    {
-      "at": "2026-08-28T00:56:44.788Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0rdtx81",
-      "note": "#3 jetpack hangar verify ignores manifests and still full-hashe"
-    },
-    {
-      "at": "2026-08-28T00:56:44.408Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0jf37me",
-      "note": "#2 A producer round-trip test runs generate then manifest on th"
-    },
-    {
-      "at": "2026-08-28T00:56:44.090Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0rdtx81",
-      "note": "#2 Any stat miss, drift (touched file), or malformed manifest f"
-    },
-    {
-      "at": "2026-08-28T00:56:43.726Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0jf37me",
-      "note": "#1 generate and manifest agree on one generation-report filenam"
-    },
-    {
-      "at": "2026-08-28T00:56:43.389Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0rdtx81",
-      "note": "#1 Admission full-hashes each object once and atomically seals "
-    },
-    {
-      "at": "2026-08-28T00:56:43.095Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0jf37me",
-      "note": "phase,plan,logEntry"
-    },
-    {
-      "at": "2026-08-28T00:56:42.795Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rdtx81",
       "note": "phase,plan,logEntry"
     }
   ],

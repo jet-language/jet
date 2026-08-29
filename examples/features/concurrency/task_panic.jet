@@ -1,7 +1,7 @@
 // D-CONC-FAIL1=A / D-OBSERVE-TASK1=A / card #2277: a joined child keeps its
 // panic text and task identity on the TaskFailure rail.
 fn boom() Int -> {
-    panic("child boom")
+    panic("Child boom")
     return 0
 }
 
@@ -14,10 +14,8 @@ fn failure_text(error: TaskFailure) String -> {
 }
 
 fn run() {
-    child :: task boom()
-    result :: child.join()
-    if result == {
-        .Err(error) -> { panic(failure_text(error)) }
-        .Ok(_) -> { print("unexpected success") }
+    task.group parent {
+        child :: task boom()
+        child.join() ?? panic(failure_text(err))
     }
 }

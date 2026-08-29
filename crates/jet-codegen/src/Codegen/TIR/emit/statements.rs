@@ -788,6 +788,7 @@ fn emit_reader_region_range(
         "{}{}for ({}, {}) in ({}..{}).zip(({}).buf[{}..{}].iter().copied()) {{\n",
         body_pad, lbl, loop_var, region_byte, start, region_count, reader, region_start, region_end
     ));
+    emit_scalar_loop_barrier(cx, out, indent + 3, Some(&loop_var));
     emit_reader_region_stmts(
         body,
         &plan,
@@ -804,6 +805,7 @@ fn emit_reader_region_range(
         "{}{}for {} in ({}..{}) {{\n",
         body_pad, lbl, loop_var, start, region_count
     ));
+    emit_scalar_loop_barrier(cx, out, indent + 3, Some(&loop_var));
     emit_tir_stmts_nested(body, cx, out, indent + 3, active_deferred_closes);
     out.push_str(&format!("{}}}\n", body_pad));
     out.push_str(&format!("{}}}\n", inner_pad));
@@ -949,6 +951,34 @@ fn emit_tir_stmts_nested(
 ) {
     let mut active = inherited_cleanups.to_vec();
     emit_tir_stmts_inline(stmts, cx, out, indent, &mut active);
+}
+
+/// D-SIMD3=B: make `#Scalar` authoritative at the generated-loop boundary.
+/// The shared Prelude helper is opaque and compiler-fenced, so LLVM cannot
+/// legally turn the surrounding loop into a packed vector loop. Range indices
+/// are shadowed with the unchanged returned value; other loop kinds use a unit
+/// token and therefore never consume or alter the user's binding.
+fn emit_scalar_loop_barrier(
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    loop_var: Option<&str>,
+) {
+    if !cx.scalar_function.get() {
+        return;
+    }
+    let pad = "    ".repeat(indent);
+    out.push_str(&format!(
+        "{pad}// D-SIMD3=B: #Scalar scalar-loop barrier\n"
+    ));
+    match loop_var {
+        Some(loop_var) => out.push_str(&format!(
+            "{pad}let {loop_var} = jet_scalar_loop_barrier({loop_var});\n"
+        )),
+        None => out.push_str(&format!(
+            "{pad}let _ = jet_scalar_loop_barrier(());\n"
+        )),
+    }
 }
 
 fn branch_int_literal(cond: &crate::Codegen::TIR::TExpr) -> i64 {
@@ -1983,6 +2013,7 @@ fn emit_tir_stmt(
         // (Statement.rs) byte-for-byte; all decisions are read off the TIR.
         TStmt::Loop { label, body } => {
             out.push_str(&format!("{}{}loop {{\n", pad, tir_label_prefix(label)));
+            emit_scalar_loop_barrier(cx, out, indent + 1, None);
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
@@ -1997,6 +2028,7 @@ fn emit_tir_stmt(
                 tir_label_prefix(label),
                 condition
             ));
+            emit_scalar_loop_barrier(cx, out, indent + 1, None);
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
@@ -2046,6 +2078,7 @@ fn emit_tir_stmt(
                 )
                 .0
             ));
+            emit_scalar_loop_barrier(cx, out, indent + 2, None);
             emit_tir_stmts_nested(body, cx, out, indent + 2, &counted_deferred);
             out.push_str(&format!("{}}}\n", inner_pad));
             out.push_str(&format!("{}}}\n", pad));
@@ -2058,9 +2091,22 @@ fn emit_tir_stmt(
             end,
             step,
             exclusive,
+            auto_vectorization,
             body,
         } => {
             let lbl = tir_label_prefix(label);
+            if !cx.scalar_function.get() {
+                if let Some(facts) = auto_vectorization.as_ref() {
+                    out.push_str(&format!(
+                        "{pad}/* jet-auto-vectorize-loop: element={} no_aliasing={} no_early_exit={} effect_free_body={} no_cross_iteration_deps={} */\n",
+                        facts.element_type.name(),
+                        facts.no_aliasing,
+                        facts.no_early_exit,
+                        facts.effect_free_body,
+                        facts.no_cross_iteration_deps,
+                    ));
+                }
+            }
             if let Some(source) = source {
                 let source = emit_expr_with_cleanups(source, cx, active_deferred_closes);
                 out.push_str(&jet_format!(
@@ -2101,6 +2147,8 @@ fn emit_tir_stmt(
                         lbl,
                         mangle(var)
                     ));
+                    let loop_var = mangle(var);
+                    emit_scalar_loop_barrier(cx, out, indent + 3, Some(&loop_var));
                     emit_tir_stmts_nested(body, cx, out, indent + 3, active_deferred_closes);
                     out.push_str(&format!("{}}}\n", body_pad));
                 }
@@ -2165,6 +2213,8 @@ fn emit_tir_stmt(
                     ));
                 }
             }
+            let loop_var = mangle(var);
+            emit_scalar_loop_barrier(cx, out, indent + 1, Some(&loop_var));
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
             if step.is_some() {
@@ -2494,6 +2544,7 @@ fn emit_tir_stmt(
                         "{pad}    let {} = {item};\n",
                         mangle(var)
                     ));
+                    emit_scalar_loop_barrier(cx, out, indent + 1, None);
                     emit_tir_stmts_nested(
                         body,
                         cx,
@@ -2728,6 +2779,7 @@ fn emit_tir_stmt(
                                 mangle("key"),
                                 mangle("value")
                             ));
+                            emit_scalar_loop_barrier(cx, out, indent + 1, None);
                             emit_tir_stmts_nested(
                                 body,
                                 cx,
@@ -2783,6 +2835,7 @@ fn emit_tir_stmt(
                     }
                 },
             }
+            emit_scalar_loop_barrier(cx, out, indent + 1, None);
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
             // D-STDIN1=A: close the outer block holding the JetStdinReader local.

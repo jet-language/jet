@@ -1306,36 +1306,50 @@ fn recursive_call_args(args: &[TIR::TCallArg]) -> bool {
     })
 }
 
-fn recursive_call(expr: &TExpr) -> Option<(&str, &[TIR::TCallArg], bool)> {
-    match &expr.kind {
-        TExprKind::Call { name, args, .. }
-            if expr.ty.is_scalar() && recursive_call_args(args) =>
-        {
-            Some((name.as_str(), args.as_slice(), false))
-        }
+fn recursive_call_prelude(stmts: &[TStmt]) -> bool {
+    stmts.iter().all(|stmt| match stmt {
+        TStmt::Let { init, .. } => recursive_scalar_expr(init),
+        stmt if recursive_marker(stmt) => true,
+        _ => false,
+    })
+}
+
+fn recursive_call(expr: &TExpr) -> Option<(&str, &[TIR::TCallArg], &[TStmt], bool)> {
+    let (expr, propagate) = match &expr.kind {
         TExprKind::Try {
             inner,
             note: None,
             convert: TIR::TTryConvert::None,
             ..
-        } if expr.ty.is_scalar() => {
-            let TExprKind::Call { name, args, .. } = &inner.kind else {
+        } if expr.ty.is_scalar() => (inner.as_ref(), true),
+        _ => (expr, false),
+    };
+    let (call, prelude) = match &expr.kind {
+        TExprKind::Call { .. } if expr.ty.is_scalar() => (expr, &[][..]),
+        TExprKind::InlineBlock(stmts) if expr.ty.is_scalar() => {
+            let (tail, prelude) = stmts.split_last()?;
+            let TStmt::ExprStmt(call) = tail else {
                 return None;
             };
-            if !matches!(inner.ty, Type::Result { .. }) || !recursive_call_args(args) {
-                return None;
-            }
-            Some((name.as_str(), args.as_slice(), true))
+            (call, prelude)
         }
-        _ => None,
+        _ => return None,
+    };
+    let TExprKind::Call { name, args, .. } = &call.kind else {
+        return None;
+    };
+    if !recursive_call_prelude(prelude) || !recursive_call_args(args) {
+        return None;
     }
+    Some((name.as_str(), args.as_slice(), prelude, propagate))
 }
 
 fn recursive_step(expr: &TExpr) -> Option<EvalRecursiveStep<'_>> {
-    if let Some((name, args, propagate)) = recursive_call(expr) {
+    if let Some((name, args, prelude, propagate)) = recursive_call(expr) {
         return Some(EvalRecursiveStep::Call {
             name,
             args,
+            prelude,
             propagate,
         });
     }
@@ -1347,24 +1361,26 @@ fn recursive_step(expr: &TExpr) -> Option<EvalRecursiveStep<'_>> {
     {
         return None;
     }
-    if let Some((name, args, propagate)) = recursive_call(lhs) {
+    if let Some((name, args, prelude, propagate)) = recursive_call(lhs) {
         if recursive_scalar_expr(rhs) {
             return Some(EvalRecursiveStep::BinaryLeft {
                 op: *op,
                 name,
                 args,
                 right: rhs,
+                prelude,
                 propagate,
             });
         }
     }
-    if let Some((name, args, propagate)) = recursive_call(rhs) {
+    if let Some((name, args, prelude, propagate)) = recursive_call(rhs) {
         if recursive_scalar_expr(lhs) {
             return Some(EvalRecursiveStep::BinaryRight {
                 op: *op,
                 name,
                 args,
                 left: lhs,
+                prelude,
                 propagate,
             });
         }
@@ -1384,6 +1400,24 @@ fn recursive_return_payload<'a>(expr: &'a TExpr, result_carrier: bool) -> Option
         Some(expr)
     } else {
         None
+    }
+}
+
+fn recursive_unwrap_result(
+    value: CtValue,
+    propagate: bool,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    if !propagate {
+        return Ok(value);
+    }
+    match value {
+        CtValue::Present(inner) => {
+            jet_foundation::Outcome::jet_journey_reset();
+            Ok(*inner)
+        }
+        CtValue::Failed(report) => Ok(CtValue::Failed(report)),
+        _ => Err(unsupported("recursive evaluator result carrier", span)),
     }
 }
 
@@ -2212,6 +2246,18 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
     }
 
     fn with_task_dispatcher<R>(&mut self, run: impl FnOnce(&mut Self) -> R) -> R {
+        self.with_task_dispatcher_inner(run, false)
+    }
+
+    fn with_task_dispatcher_at_exit<R>(&mut self, run: impl FnOnce(&mut Self) -> R) -> R {
+        self.with_task_dispatcher_inner(run, true)
+    }
+
+    fn with_task_dispatcher_inner<R>(
+        &mut self,
+        run: impl FnOnce(&mut Self) -> R,
+        at_exit: bool,
+    ) -> R {
         if self.task_sender.is_some() {
             return run(self);
         }
@@ -2253,6 +2299,15 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 })
                 .expect("evaluator task dispatcher");
             let result = run(self);
+            if at_exit {
+                if let Some(report) = crate::scheduler::jet_observe_parked_tasks_report() {
+                    if let Some(sink) = self.sink.as_ref() {
+                        let mut sink = sink.lock().expect("evaluator sink poisoned");
+                        sink.stderr.push_str(&report.rendered);
+                        sink.exit_code = Some(report.exit_code);
+                    }
+                }
+            }
             drop(self.task_sender.take());
             dispatcher
                 .join()
@@ -2454,9 +2509,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             None => None,
         };
         drop(_deadline);
-        let observe_id = crate::scheduler::jet_observe_task_register_at(
+        let observe_id = crate::scheduler::jet_observe_task_register_at_with_control(
             control.observe_id_slot(),
             site,
+            Some(&control),
         );
         let identity = crate::scheduler::jet_observe_task_identity(observe_id);
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
@@ -3625,52 +3681,44 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     self.call_depth = caller_depth + parent_index;
                     self.current_span = parent_func.source_span;
                     self.current_fn = parent_func.name.clone();
-                    let (value, propagate) = match continuation {
+                    if matches!(&value, CtValue::Failed(_)) {
+                        completed = Some(value);
+                        continue;
+                    }
+                    let value = match continuation {
                         EvalRecursiveContinuation::Root => {
                             return Err(unsupported(
                                 "recursive evaluator child root continuation",
                                 self.span(),
                             ));
                         }
-                        EvalRecursiveContinuation::Return { propagate } => (value, propagate),
+                        EvalRecursiveContinuation::Return { propagate } => {
+                            recursive_unwrap_result(value, propagate, self.span())?
+                        }
                         EvalRecursiveContinuation::BinaryLeft {
                             op,
                             right,
                             propagate,
                         } => {
+                            let value =
+                                recursive_unwrap_result(value, propagate, self.span())?;
                             let right = self.eval_expr_child(
                                 right,
                                 &mut frames[parent_index].scope,
                             )?;
-                            (
-                                self.eval_runtime_binop(op, value, right, self.span())?,
-                                propagate,
-                            )
+                            self.eval_runtime_binop(op, value, right, self.span())?
                         }
                         EvalRecursiveContinuation::BinaryRight {
                             op,
                             left,
                             propagate,
-                        } => (self.eval_runtime_binop(op, left, value, self.span())?, propagate),
+                        } => {
+                            let value =
+                                recursive_unwrap_result(value, propagate, self.span())?;
+                            self.eval_runtime_binop(op, left, value, self.span())?
+                        }
                     };
-                    if matches!(&value, CtValue::Failed(_)) {
-                        completed = Some(value);
-                    } else if propagate {
-                        completed = Some(match value {
-                            CtValue::Present(inner) => {
-                                jet_foundation::Outcome::jet_journey_reset();
-                                *inner
-                            }
-                            _ => {
-                                return Err(unsupported(
-                                    "recursive evaluator result carrier",
-                                    self.span(),
-                                ));
-                            }
-                        });
-                    } else {
-                        completed = Some(value);
-                    }
+                    completed = Some(value);
                     continue;
                 }
 
@@ -3711,23 +3759,31 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 }
 
                 let step = frame_body.step;
-                let (name, call_args, continuation) = match step {
+                let (name, call_args, call_prelude, continuation) = match step {
                     EvalRecursiveStep::Call {
                         name,
                         args,
+                        prelude,
                         propagate,
                     } => {
-                        (name, args, EvalRecursiveContinuation::Return { propagate })
+                        (
+                            name,
+                            args,
+                            prelude,
+                            EvalRecursiveContinuation::Return { propagate },
+                        )
                     }
                     EvalRecursiveStep::BinaryLeft {
                         op,
                         name,
                         args,
                         right,
+                        prelude,
                         propagate,
                     } => (
                         name,
                         args,
+                        prelude,
                         EvalRecursiveContinuation::BinaryLeft {
                             op,
                             right,
@@ -3739,6 +3795,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         name,
                         args,
                         left,
+                        prelude,
                         propagate,
                     } => {
                         let left = self.eval_expr_child(
@@ -3748,6 +3805,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         (
                             name,
                             args,
+                            prelude,
                             EvalRecursiveContinuation::BinaryRight {
                                 op,
                                 left,
@@ -3756,11 +3814,23 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         )
                     }
                 };
+                let mut call_scope = frames[frame_index].scope.clone();
+                if !call_prelude.is_empty() {
+                    match self.exec_stmts_synthetic(call_prelude, &mut call_scope)? {
+                        Flow::Normal => {}
+                        _ => {
+                            return Err(unsupported(
+                                "control flow in recursive call prelude",
+                                self.span(),
+                            ));
+                        }
+                    }
+                }
                 let mut child_args = Vec::with_capacity(call_args.len());
                 for arg in call_args {
                     child_args.push(self.eval_expr_child(
                         &arg.value,
-                        &mut frames[frame_index].scope,
+                        &mut call_scope,
                     )?);
                 }
                 let child_func = self
@@ -5247,15 +5317,17 @@ fn run_program_with_structs_on_stack(
         | Some(cli::Dispatch::Version(_))
         | Some(cli::Dispatch::Error(_)) => Vec::new(),
     };
-    let result = ctx.with_task_dispatcher(|ctx| {
+    let (result, atexit) = ctx.with_task_dispatcher_at_exit(|ctx| {
         let result = ctx.run_func(entry, entry_args, &mut scope);
-        if entry.ret.as_ref().is_some_and(crate::AST::type_is_app) {
+        let result = if entry.ret.as_ref().is_some_and(crate::AST::type_is_app) {
             result.and_then(|value| serve_entry_value(ctx, value))
         } else {
             result
-        }
+        };
+        let atexit = ctx.run_atexit_handlers();
+        (result, atexit)
     });
-    let result = match (result, ctx.run_atexit_handlers()) {
+    let result = match (result, atexit) {
         (Err(error), _) | (Ok(_), Err(error)) => Err(error),
         (Ok(value), Ok(())) => Ok(value),
     };

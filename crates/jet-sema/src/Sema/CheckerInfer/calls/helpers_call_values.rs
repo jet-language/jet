@@ -1,4 +1,5 @@
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::type_fix_hint;
 use crate::AST::{AccessConvention, Expr, StrPart, Type};
@@ -322,10 +323,13 @@ impl<'a> Checker<'a> {
                     let got =
                         self.widen_numeric_argument(&mut arg.expr, got, param_ty, param_convention);
                     let boxes_as_trait = self.trait_slot_accepts(param_ty, &got);
+                    let callable_compatible = matches!(param_ty, Type::Fn { .. })
+                        && matches!(&got, Type::Fn { .. })
+                        && fn_types_compatible(param_ty, &got);
                     if boxes_as_trait {
                         self.note_move_if_direct_ident(&arg.expr);
                     }
-                    if got != *param_ty && !boxes_as_trait {
+                    if got != *param_ty && !boxes_as_trait && !callable_compatible {
                         self.diags.push(Diagnostic::error(
                             "E0112",
                             format!(

@@ -2649,6 +2649,10 @@ pub struct TFunc {
     /// D-SIMD3=B: `#Scalar` is the explicit native auto-vectorization opt-out.
     /// It is a codegen boundary hint; semantics remain in the shared Prelude.
     pub is_scalar: bool,
+    /// D-SIMD3=B: sema-proven elementwise-loop facts found in this function.
+    /// The emitter uses this only to select the native vectorizable target
+    /// feature; it never reconstructs safety from lowered expressions.
+    pub auto_vectorization: Option<crate::AST::AutoVectorizationFacts>,
     /// D-COMPUTE-KERNEL-SURFACE1=B: sema's complete safe-kernel proof. The
     /// emitter and interpreter carry this fact without re-deriving it.
     pub kernel_proof: Option<crate::AST::KernelProof>,
@@ -3348,6 +3352,8 @@ pub enum TStmt {
         end: TExpr,
         step: Option<TExpr>,
         exclusive: bool,
+        /// D-SIMD3=B: sema's complete proof for the loop's vectorizable shape.
+        auto_vectorization: Option<crate::AST::AutoVectorizationFacts>,
         body: Vec<TStmt>,
     },
     /// `break` / `break(name)` (label resolved at lowering).

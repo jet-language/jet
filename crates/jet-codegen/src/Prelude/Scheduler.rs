@@ -3092,7 +3092,11 @@ fn jet_scheduler_spawn_with_control_kind<F,T>(
 )->JetSchedulerJoin<T>
 where F:FnOnce()->T+Send+'static,T:Send+'static,
 {
-    let observe_id = jet_observe_task_register_at(&control.observe_id, spawn_site);
+    let observe_id = jet_observe_task_register_at_with_control(
+        &control.observe_id,
+        spawn_site,
+        Some(&control),
+    );
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     let completion_order = Arc::new(OnceLock::new());
     let task_completion_order = completion_order.clone();
@@ -3179,6 +3183,30 @@ pub fn jet_scheduler_drain() {
             }
         }
         thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Finish the exit transition after the common observer has cancelled live
+/// children. Unlike the normal drain, a parked task is no longer a reason to
+/// return: its cancellation wake must be observed before an engine tears down
+/// runtime state underneath its worker.
+pub fn jet_scheduler_drain_after_exit() {
+    let sched = scheduler();
+    loop {
+        if sched.live.load(Ordering::Relaxed) == 0 {
+            let g = sched.global.lock().unwrap();
+            let pending_local = sched
+                .workers
+                .iter()
+                .any(|w| !w.queue.lock().unwrap().is_empty());
+            let io_drained = METRIC_IO_ACTIVE.load(Ordering::Acquire) == 0
+                && METRIC_IO_ALLOCATED.load(Ordering::Acquire)
+                    == METRIC_IO_RETIRED.load(Ordering::Acquire);
+            if g.is_empty() && !pending_local && io_drained {
+                return;
+            }
+        }
+        thread::yield_now();
     }
 }
 

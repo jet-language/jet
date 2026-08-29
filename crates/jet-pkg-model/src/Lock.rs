@@ -2726,6 +2726,17 @@ pub fn write_lock_atomically(path: &Path, contents: &str) -> Result<(), String> 
             contents.len()
         ));
     }
+    match std::fs::read(path) {
+        Ok(existing) if existing == contents.as_bytes() => return Ok(()),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "could not inspect existing project lock `{}`: {error}",
+                path.display()
+            ));
+        }
+    }
     let parent = path
         .parent()
         .ok_or_else(|| format!("project lock `{}` has no parent directory", path.display()))?;

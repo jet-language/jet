@@ -2566,6 +2566,9 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
 }
 
 pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
+    let want = want.with_effective_fn_returns();
+    let got = got.with_effective_fn_returns();
+
     fn carrier_compatible(want: &Type, got: &Type) -> bool {
         let mut compatible = true;
         let shape = Type::for_each_composite_pair(want, got, &mut |want, got| {
@@ -2612,7 +2615,7 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
             effect_bound: ge,
             ..
         },
-    ) = (want, got)
+    ) = (&want, &got)
     else {
         return false;
     };

@@ -1918,6 +1918,7 @@ fn for_each_map(var: &str, var2: &str, collection: Expr, body: Vec<Stmt>, span: 
         span,
         arrow_body: false,
         label: None,
+        auto_vectorization: None,
     }
 }
 
@@ -1934,6 +1935,7 @@ fn for_each(var: &str, collection: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
         span,
         arrow_body: false,
         label: None,
+        auto_vectorization: None,
     }
 }
 

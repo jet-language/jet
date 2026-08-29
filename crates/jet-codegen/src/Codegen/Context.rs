@@ -337,6 +337,10 @@ pub(crate) struct Cx {
     /// E2-M12 D-OBS1: name of the Jet function currently being emitted, so
     /// jet_panic_rich can include the function name in the panic report.
     pub(crate) current_fn: std::cell::RefCell<String>,
+    /// D-SIMD3=B: active `#Scalar` codegen boundary. Loop emitters use this
+    /// only to insert the shared scalar compiler barrier; it is not a runtime
+    /// semantic fact.
+    pub(crate) scalar_function: std::cell::Cell<bool>,
     /// D-MEM-SENTRY1: module/package policy facts carried into TIR lowering.
     pub(crate) policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// D-MEM-GUARANTEE1: package hardening is a build-profile fact, not a
@@ -4252,6 +4256,7 @@ pub(crate) fn build_cx_items(
         iterable_hooks: HashMap::new(),
         index_hooks: HashMap::new(),
         current_fn: std::cell::RefCell::new(String::new()),
+        scalar_function: std::cell::Cell::new(false),
         policy_declarations: Vec::new(),
         package_hardened: false,
         dependency_fenced: false,

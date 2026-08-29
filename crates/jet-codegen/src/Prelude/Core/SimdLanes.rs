@@ -5,6 +5,17 @@
 // Keep lane order, scalar narrowing, and reduction order here; those are
 // language semantics, not engine behavior.
 
+/// D-SIMD3=B: an authoritative scalar-loop boundary. `black_box` keeps the
+/// iteration opaque to LLVM and the compiler fence prevents loop motion or
+/// vector packing across the boundary. The value is unchanged, so this is a
+/// codegen control point rather than a Jet semantic operation.
+#[inline(never)]
+fn jet_scalar_loop_barrier<T>(value: T) -> T {
+    let value = std::hint::black_box(value);
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+    value
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum JetSimdBinaryOp {
     Add,

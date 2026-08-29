@@ -1085,8 +1085,15 @@ pub fn find_verified_by_reference(
     reference: &str,
     expectation: &CacheExpectation,
 ) -> std::io::Result<Option<VerifiedCacheHit>> {
-    crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+    let phase_started = std::time::Instant::now();
+    let result = crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        let phase_started = std::time::Instant::now();
         let graph = Closure::closure_graph_structure_unlocked(roots)?;
+        super::timing(
+            &format!("verify {reference} closure-structure"),
+            phase_started.elapsed(),
+        );
+        let phase_started = std::time::Instant::now();
         let entry = list_unlocked(roots)?
             .into_iter()
             .filter(|entry| entry.reference == reference)
@@ -1095,12 +1102,26 @@ pub fn find_verified_by_reference(
                     .trusted()
             })
             .max_by_key(|entry| entry.last_used_at);
+        super::timing(
+            &format!("verify {reference} entry-check"),
+            phase_started.elapsed(),
+        );
         let Some(entry) = entry else {
             return Ok(None);
         };
+        let phase_started = std::time::Instant::now();
         let lease = snapshot_lease_unlocked(roots, &entry)?;
+        super::timing(
+            &format!("verify {reference} lease"),
+            phase_started.elapsed(),
+        );
         Ok(Some(VerifiedCacheHit { entry, lease }))
-    })
+    });
+    super::timing(
+        &format!("verify {reference} total"),
+        phase_started.elapsed(),
+    );
+    result
 }
 
 /// Reuse the exact user-profile realization for a package ref. User-profile
@@ -1205,6 +1226,7 @@ fn snapshot_lease_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result
     } else {
         lease_snapshot_root.clone()
     };
+    let phase_started = std::time::Instant::now();
     let result = (|| {
         if !Path::new(&entry.out).exists() {
             Ingest::ensure_real_directory(&snapshot_root, "cache lease snapshot")?;
@@ -1277,7 +1299,16 @@ fn snapshot_lease_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result
             open_snapshot_files(&snapshot_root, &snapshot_root, &mut files)?;
             (sealed_digest, snapshot_dir_handle, files)
         };
+        super::timing(
+            &format!("lease {} snapshot", entry.reference),
+            phase_started.elapsed(),
+        );
+        let phase_started = std::time::Instant::now();
         let projections = nix_store_projection_for_entry(roots, entry, &snapshot_root)?;
+        super::timing(
+            &format!("lease {} projections", entry.reference),
+            phase_started.elapsed(),
+        );
         let mut output_sources = vec![(PathBuf::from(&entry.out), snapshot_root.clone())];
         let mut seen_output_digests = BTreeSet::from([entry.envelope.output_hash.clone()]);
         for digest in entry.named_outputs.values() {
@@ -1356,6 +1387,10 @@ fn snapshot_lease_unlocked(roots: &Roots, entry: &StoreEntry) -> std::io::Result
             projected_bin_root.as_deref().unwrap_or(&snapshot_root),
             bin_relative.as_deref(),
         )?;
+        super::timing(
+            &format!("lease {} executable-open", entry.reference),
+            phase_started.elapsed(),
+        );
         let wrappers = create_exec_wrappers(&lease_snapshot_root, &executables)?;
         let (protocol_lease_id, protocol_generation, protocol_owner_scope, protocol_owner_lock) =
             if direct_cas {

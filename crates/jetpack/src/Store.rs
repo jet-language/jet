@@ -114,6 +114,12 @@ pub(crate) fn current_progress() -> Option<ProgressHandle> {
     CURRENT_PROGRESS.with(|current| current.borrow().clone())
 }
 
+pub(crate) fn timing(label: &str, elapsed: Duration) {
+    if std::env::var_os("JETPACK_TIMING").is_some() {
+        eprintln!("TIMING {label}: {elapsed:?}");
+    }
+}
+
 /// Process cache of the parsed, receipt-authenticated entry list, keyed by
 /// the same WAL identity stamp as the closure structure cache. One warm env
 /// command replayed and re-authenticated all metas ~30 times (37% of its CPU
@@ -1237,7 +1243,9 @@ pub fn realize_verified(
     }
     // WAL is authority. Recover package projections before cache verification;
     // selected-candidate proofs run below so invalid bytes can be quarantined.
+    let phase_started = std::time::Instant::now();
     Closure::closure_graph_structure(roots).map_err(RealizeError::Store)?;
+    timing("realize closure-structure", phase_started.elapsed());
     let (reference, expectation) = match &request {
         RealizeRequest::Package { spec, table } => {
             super::Provider::validate_cache_authority(spec, table, ctx)
@@ -1266,9 +1274,14 @@ pub fn realize_verified(
         RealizeRequest::Adapter { .. } => false,
     };
 
-    if let (Some(candidate), Some(expectation)) =
-        (find_by_reference(roots, &reference), expectation.as_ref())
-    {
+    let phase_started = std::time::Instant::now();
+    let candidate = find_by_reference(roots, &reference);
+    timing(
+        &format!("realize {reference} candidate-list"),
+        phase_started.elapsed(),
+    );
+    if let (Some(candidate), Some(expectation)) = (candidate, expectation.as_ref()) {
+        let phase_started = std::time::Instant::now();
         match find_verified_by_reference(roots, &reference, expectation)
             .map_err(RealizeError::Store)?
         {
@@ -1277,7 +1290,16 @@ pub fn realize_verified(
                     validate_cached_adapter_hook(&hit.entry, plan, table, expectation)
                         .map_err(RealizeError::Store)?;
                 }
+                timing(
+                    &format!("realize {reference} verified-lookup"),
+                    phase_started.elapsed(),
+                );
+                let phase_started = std::time::Instant::now();
                 project_receipt_projection(ctx, &hit.entry)?;
+                timing(
+                    &format!("realize {reference} receipt-projection"),
+                    phase_started.elapsed(),
+                );
                 return Ok(VerifiedRealization {
                     entry: hit.entry,
                     source_state: super::Provider::SourceState::Cached,
@@ -1285,6 +1307,10 @@ pub fn realize_verified(
                 });
             }
             None => {
+                timing(
+                    &format!("realize {reference} verified-lookup"),
+                    phase_started.elapsed(),
+                );
                 let proof = verify_cache_entry(roots, &candidate, &reference, expectation);
                 if !cache_bindings.is_empty()
                     && try_substitute_invalid_candidate(

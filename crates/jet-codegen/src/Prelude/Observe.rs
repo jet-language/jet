@@ -13,6 +13,7 @@ struct JetObserveTask {
     wait: String,
     deadline_ms: Option<i64>,
     cancelled: bool,
+    control: std::sync::Weak<JetTaskControl>,
 }
 
 #[derive(Clone)]
@@ -215,6 +216,17 @@ pub fn jet_observe_task_register_at(
     observe_id: &std::sync::atomic::AtomicUsize,
     spawn_site: usize,
 ) -> usize {
+    jet_observe_task_register_at_with_control(observe_id, spawn_site, None)
+}
+
+/// Register one task and retain only a weak link to its cancellation control.
+/// The exit edge uses this link to quiesce detached work before an engine tears
+/// down its runtime; the registry never owns a task control or its payload.
+pub fn jet_observe_task_register_at_with_control(
+    observe_id: &std::sync::atomic::AtomicUsize,
+    spawn_site: usize,
+    control: Option<&std::sync::Arc<JetTaskControl>>,
+) -> usize {
     use std::sync::atomic::Ordering;
     let Some(registry) = jet_observe_registry() else {
         observe_id.store(0, Ordering::Relaxed);
@@ -237,6 +249,10 @@ pub fn jet_observe_task_register_at(
             wait: String::new(),
             deadline_ms: None,
             cancelled: false,
+            control: match control {
+                Some(control) => std::sync::Arc::downgrade(control),
+                None => std::sync::Weak::new(),
+            },
         },
     );
     observe_id.store(id, Ordering::Relaxed);
@@ -298,6 +314,7 @@ pub fn jet_observe_runtime_start() {
             wait: String::new(),
             deadline_ms: None,
             cancelled: false,
+            control: std::sync::Weak::new(),
         });
     }
     if !first_start || !jet_observe_live_enabled() {
@@ -350,6 +367,20 @@ fn jet_observe_parked_tasks(
     tasks
 }
 
+fn jet_observe_cancel_live_tasks(registry: &JetObserveRegistry) {
+    let controls: Vec<_> = registry
+        .tasks
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(id, _)| **id != 1)
+        .filter_map(|(_, task)| task.control.upgrade())
+        .collect();
+    for control in controls {
+        control.cancel();
+    }
+}
+
 pub fn jet_observe_has_parked_tasks() -> bool {
     jet_observe_registry().is_some_and(|registry| {
         registry
@@ -390,6 +421,7 @@ pub fn jet_observe_parked_tasks_report() -> Option<JetRuntimeDiagnostic> {
         }
     }
     if parked.is_empty() {
+        jet_observe_cancel_live_tasks(&registry);
         return None;
     }
 
@@ -403,6 +435,7 @@ pub fn jet_observe_parked_tasks_report() -> Option<JetRuntimeDiagnostic> {
             if task.wait.is_empty() { "unknown" } else { &task.wait },
         ));
     }
+    jet_observe_cancel_live_tasks(&registry);
     Some(jet_render_runtime_stop(
         "E3013", "", 0, "", "", 1, 1, &details, "",
     ))

@@ -2015,6 +2015,7 @@ impl<'a> Checker<'a> {
                 span: _,
                 arrow_body,
                 label,
+                auto_vectorization,
             } => {
                 let memory_multiplier = self.memory_control_multiplier;
                 self.memory_control_multiplier = None;
@@ -2168,10 +2169,21 @@ impl<'a> Checker<'a> {
                         self.memory_control_multiplier = loop_multiplier;
                         let previous_arrow_loop_body = self.arrow_loop_body;
                         self.arrow_loop_body = *arrow_body;
+                        let before_auto_direct = self.fx_direct.clone();
+                        let before_auto_edges = self.fx_edges.clone();
+                        let before_auto_maximal = self.fx_maximal;
                         for s in body.iter_mut() {
                             self.check_stmt(s);
                         }
                         self.arrow_loop_body = previous_arrow_loop_body;
+                        *auto_vectorization = self.prove_auto_vectorization_loop(
+                            kind,
+                            var,
+                            body,
+                            &before_auto_direct,
+                            &before_auto_edges,
+                            before_auto_maximal,
+                        );
                         // D-RANGE-EXCL1=C: teach when inclusive `….xs.len()` indexes that same xs
                         // with this loop's index name (the provable 0..len trap).
                         if !*exclusive {

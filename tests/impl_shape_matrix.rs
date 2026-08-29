@@ -14,6 +14,7 @@ const EXPECTED: &str =
 const DISPLAY: &str = "Display";
 const DEBUG: &str = "Debug";
 const EQUATABLE: &str = "Equatable";
+const LABELED_CONTEXTS: &[&str] = &["bare", "debug", "pretty", "nested"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Resolution {
@@ -26,6 +27,8 @@ enum Resolution {
 #[derive(Debug, Clone, Copy)]
 struct MatrixRow {
     owner: &'static str,
+    binding: &'static str,
+    label: &'static str,
     display: Resolution,
     debug: Resolution,
 }
@@ -36,46 +39,64 @@ struct MatrixRow {
 const ROWS: &[MatrixRow] = &[
     MatrixRow {
         owner: "AutoOwner",
+        binding: "auto",
+        label: "auto",
         display: Resolution::Auto,
         debug: Resolution::Auto,
     },
     MatrixRow {
         owner: "DisplayOnlyOwner",
+        binding: "display_only",
+        label: "display-only",
         display: Resolution::Explicit,
         debug: Resolution::Auto,
     },
     MatrixRow {
         owner: "DebugOnlyOwner",
+        binding: "debug_only",
+        label: "debug-only",
         display: Resolution::Auto,
         debug: Resolution::Explicit,
     },
     MatrixRow {
         owner: "DisplayDebugOwner",
+        binding: "display_debug",
+        label: "display-debug",
         display: Resolution::Explicit,
         debug: Resolution::Explicit,
     },
     MatrixRow {
         owner: "EquatableOwner",
+        binding: "equatable",
+        label: "equatable",
         display: Resolution::Explicit,
         debug: Resolution::Auto,
     },
     MatrixRow {
         owner: "GenericOwner",
+        binding: "generic",
+        label: "generic",
         display: Resolution::Explicit,
         debug: Resolution::Explicit,
     },
     MatrixRow {
         owner: "EnumOwner",
+        binding: "enum_value",
+        label: "enum",
         display: Resolution::Explicit,
         debug: Resolution::Explicit,
     },
     MatrixRow {
         owner: "UnitOwner",
+        binding: "unit",
+        label: "unit",
         display: Resolution::Explicit,
         debug: Resolution::Explicit,
     },
     MatrixRow {
         owner: "DistinctOwner",
+        binding: "distinct",
+        label: "distinct",
         display: Resolution::Bundle,
         // The distinct fixture has a sema-admitted Printable bundle only. Its
         // Debug cells intentionally use the admitted base value (`raw()`),
@@ -129,25 +150,98 @@ fn explicit_impls(items: &[jet::AST::Item]) -> BTreeSet<(String, String)> {
     result
 }
 
+fn row_resolution(row: &MatrixRow, trait_name: &str) -> Resolution {
+    match trait_name {
+        DISPLAY => row.display,
+        DEBUG => row.debug,
+        _ => panic!("unsupported matrix trait `{trait_name}`"),
+    }
+}
+
+fn sema_admits(registry: &jet::Traits::TraitRegistry, owner: &str, trait_name: &str) -> bool {
+    match trait_name {
+        DISPLAY => {
+            registry.implements_trait(owner, DISPLAY) || registry.auto_printable.contains(owner)
+        }
+        DEBUG => registry.implements_trait(owner, DEBUG),
+        _ => panic!("unsupported matrix trait `{trait_name}`"),
+    }
+}
+
+fn matrix_admitted_pairs() -> BTreeSet<(String, String)> {
+    ROWS.iter()
+        .flat_map(|row| [DISPLAY, DEBUG].into_iter().filter_map(move |trait_name| {
+            (row_resolution(row, trait_name) != Resolution::Unavailable)
+                .then(|| (row.owner.to_string(), trait_name.to_string()))
+        }))
+        .collect()
+}
+
+fn sema_admitted_pairs(
+    registry: &jet::Traits::TraitRegistry,
+    local: &BTreeSet<String>,
+) -> BTreeSet<(String, String)> {
+    local
+        .iter()
+        .flat_map(|owner| {
+            [DISPLAY, DEBUG].into_iter().filter_map(move |trait_name| {
+                sema_admits(registry, owner, trait_name)
+                    .then(|| (owner.clone(), trait_name.to_string()))
+            })
+        })
+        .collect()
+}
+
+fn assert_matrix_cells() {
+    assert_eq!(ROWS.len(), 9, "the closed impl-shape space changed");
+    let owners: BTreeSet<_> = ROWS.iter().map(|row| row.owner).collect();
+    assert_eq!(owners.len(), ROWS.len(), "matrix owners must be unique");
+    let bindings: BTreeSet<_> = ROWS.iter().map(|row| row.binding).collect();
+    assert_eq!(bindings.len(), ROWS.len(), "matrix bindings must be unique");
+    let labels: BTreeSet<_> = ROWS.iter().map(|row| row.label).collect();
+    assert_eq!(labels.len(), ROWS.len(), "matrix labels must be unique");
+
+    for row in ROWS {
+        for context in LABELED_CONTEXTS {
+            let prefix = format!("{}/{context}=", row.label);
+            assert_eq!(
+                SOURCE.matches(prefix.as_str()).count(),
+                1,
+                "source needs one {context} cell for {}",
+                row.owner
+            );
+            assert_eq!(
+                EXPECTED.matches(prefix.as_str()).count(),
+                1,
+                "golden needs one {context} cell for {}",
+                row.owner
+            );
+        }
+        let print_call = format!("print(~{})", row.binding);
+        assert_eq!(
+            SOURCE.matches(print_call.as_str()).count(),
+            1,
+            "source needs one print(v) cell for {}",
+            row.owner
+        );
+    }
+    assert_eq!(
+        SOURCE.matches("print(~").count(),
+        ROWS.len(),
+        "source must have exactly one print(v) cell per row"
+    );
+}
+
 fn assert_admission(
     registry: &jet::Traits::TraitRegistry,
     explicit: &BTreeSet<(String, String)>,
     local: &BTreeSet<String>,
 ) {
-    let admitted: BTreeSet<String> = local
-        .iter()
-        .filter_map(|owner| {
-            let owner = owner.as_str();
-            let display_admitted = registry.implements_trait(owner, DISPLAY)
-                || registry.auto_printable.contains(owner);
-            let debug_admitted = registry.implements_trait(owner, DEBUG);
-            (display_admitted || debug_admitted).then(|| owner.to_string())
-        })
-        .collect();
-    let rows: BTreeSet<String> = ROWS.iter().map(|row| row.owner.to_string()).collect();
+    let admitted = sema_admitted_pairs(registry, local);
+    let rows = matrix_admitted_pairs();
     assert_eq!(
         admitted, rows,
-        "every sema-admitted local Display/Debug owner needs a matrix row"
+        "every sema-admitted local Display/Debug shape needs a matrix row"
     );
 
     for matrix_row in ROWS {
@@ -286,30 +380,76 @@ fn tir_owners(
         .collect()
 }
 
+fn tir_eval_lookup(program: &jet::Codegen::TIR::JitProgram, owner: &str, method: &str) -> bool {
+    let key = format!("{owner}::{method}");
+    program.funcs.iter().any(|function| function.name == key)
+}
+
+fn jit_func_ids_lookup(program: &jet::Codegen::TIR::JitProgram, owner: &str, method: &str) -> bool {
+    // `compile_program_tiered` inserts every lowered function under its exact
+    // `TFunc.name`; this mirrors the private func_ids key set without adding a
+    // production introspection API just for this contract test.
+    let key = format!("{owner}::{method}");
+    let func_ids: BTreeSet<String> = program
+        .funcs
+        .iter()
+        .map(|function| function.name.clone())
+        .collect();
+    func_ids.contains(&key)
+}
+
 fn expected_explicit_owners(trait_name: &str) -> BTreeSet<String> {
     ROWS.iter()
-        .filter(|row| {
-            let resolution = match trait_name {
-                DISPLAY => row.display,
-                DEBUG => row.debug,
-                _ => panic!("unsupported matrix trait `{trait_name}`"),
-            };
-            resolution == Resolution::Explicit
-        })
+        .filter(|row| row_resolution(row, trait_name) == Resolution::Explicit)
         .map(|row| row.owner.to_string())
         .collect::<BTreeSet<_>>()
 }
 
-#[test]
-fn impl_shape_matrix_covers_all_contexts_and_resolution_seams() {
-    assert_eq!(ROWS.len(), 9, "the closed impl-shape space changed");
-    for context in ["/bare=", "/debug=", "/pretty=", "/nested="] {
+fn assert_four_seam_contract(
+    registry: &jet::Traits::TraitRegistry,
+    explicit: &BTreeSet<(String, String)>,
+    local: &BTreeSet<String>,
+    rust: &str,
+    program: &jet::Codegen::TIR::JitProgram,
+) {
+    assert_admission(registry, explicit, local);
+    for trait_name in [DISPLAY, DEBUG] {
+        let method = if trait_name == DISPLAY {
+            "display"
+        } else {
+            "debug"
+        };
         assert_eq!(
-            EXPECTED.matches(context).count(),
-            ROWS.len(),
-            "golden lost a {context} context"
+            tir_owners(program, trait_name, method),
+            expected_explicit_owners(trait_name),
+            "TIR method-owner lookup drifted for {trait_name}.{method}"
         );
     }
+    for row in ROWS {
+        for (trait_name, method) in [(DISPLAY, "display"), (DEBUG, "debug")] {
+            let resolution = row_resolution(row, trait_name);
+            assert_aot_resolution(rust, row.owner, trait_name, resolution);
+
+            let expected_method = resolution == Resolution::Explicit;
+            assert_eq!(
+                tir_eval_lookup(program, row.owner, method),
+                expected_method,
+                "TIR evaluator lookup disagreed for {}::{method}",
+                row.owner
+            );
+            assert_eq!(
+                jit_func_ids_lookup(program, row.owner, method),
+                expected_method,
+                "JIT func_ids lookup disagreed for {}::{method}",
+                row.owner
+            );
+        }
+    }
+}
+
+#[test]
+fn impl_shape_matrix_covers_all_contexts_and_resolution_seams() {
+    assert_matrix_cells();
 
     let path = source_path();
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).expect("matrix loads");
@@ -324,9 +464,6 @@ fn impl_shape_matrix_covers_all_contexts_and_resolution_seams() {
         .collect();
     assert!(errors.is_empty(), "matrix sema errors: {errors:?}");
 
-    // Sema admission + the ratchet. `local` is the exact source nominal set,
-    // before sema adds derived items.
-    assert_admission(&registry, &explicit, &local);
     assert!(
         items_before_sema.iter().any(|item| matches!(
             item,
@@ -337,46 +474,13 @@ fn impl_shape_matrix_covers_all_contexts_and_resolution_seams() {
         "EquatableOwner must retain the derived-Equatable matrix shape"
     );
 
-    // AOT bridge emission and TIR's shared method-owner ledger.
     let compiled = jet::compile_with_path(SOURCE, path.to_str().unwrap())
         .expect("matrix AOT codegen");
-    for matrix_row in ROWS {
-        assert_aot_resolution(
-            &compiled.rust,
-            matrix_row.owner,
-            DISPLAY,
-            matrix_row.display,
-        );
-        assert_aot_resolution(
-            &compiled.rust,
-            matrix_row.owner,
-            DEBUG,
-            matrix_row.debug,
-        );
-    }
 
     let program = jet::Codegen::TIR::lower_jit_program(&bundle).expect("matrix lowers to TIR");
-    for (trait_name, method) in [(DISPLAY, "display"), (DEBUG, "debug")] {
-        assert_eq!(
-            tir_owners(&program, trait_name, method),
-            expected_explicit_owners(trait_name),
-            "TIR method-owner lookup drifted for {trait_name}.{method}"
-        );
-        for matrix_row in ROWS {
-            let resolution = match trait_name {
-                DISPLAY => matrix_row.display,
-                DEBUG => matrix_row.debug,
-                _ => unreachable!(),
-            };
-            if resolution == Resolution::Explicit {
-                let function_name = format!("{}::{method}", matrix_row.owner);
-                assert!(
-                    program.funcs.iter().any(|function| function.name == function_name),
-                    "TIR must lower {function_name} for the JIT func_ids lookup"
-                );
-            }
-        }
-    }
+    // One row must agree across sema admission, AOT bridge emission, TIR's
+    // evaluator map, and the JIT's private func_ids map.
+    assert_four_seam_contract(&registry, &explicit, &local, &compiled.rust, &program);
 
     // This runs the same fixture through release/AOT, default Cranelift (whose
     // private func_ids table resolves the custom methods), and forced TIR eval.

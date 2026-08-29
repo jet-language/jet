@@ -50,6 +50,25 @@ fn emit_sentry_gate(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
     ));
 }
 
+/// D-SIMD3=B: render the vectorizable inline boundary only when sema supplied
+/// the complete elementwise proof. `#Scalar` suppresses it; its loop barrier is
+/// emitted instead. This is a native codegen hint, not a second semantic check.
+fn auto_vectorization_attr(tir: &TFunc, indent: usize) -> String {
+    let Some(facts) = tir.auto_vectorization.as_ref().filter(|_| !tir.is_scalar) else {
+        return String::new();
+    };
+    let pad = "    ".repeat(indent);
+    format!(
+        "{pad}/* jet-auto-vectorize: element={} no_aliasing={} no_early_exit={} effect_free_body={} no_cross_iteration_deps={} */\n\
+{pad}#[inline(always)]\n",
+        facts.element_type.name(),
+        facts.no_aliasing,
+        facts.no_early_exit,
+        facts.effect_free_body,
+        facts.no_cross_iteration_deps,
+    )
+}
+
 /// D-CMD-OVERRIDE1=C: `TestSuite` is a `Copy` snapshot, and the
 /// ratified override signature binds one by value — `fn test(suite: TestSuite)`.
 /// Their one method, `run`, mutates the receiver, which the shared-reference
@@ -187,6 +206,7 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     } else {
         ""
     };
+    let auto_vectorization = auto_vectorization_attr(tir, 0);
     let kernel_proof = tir
         .kernel_proof
         .map(|proof| {
@@ -234,7 +254,7 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
         return;
     }
     out.push_str(&format!(
-        "{kernel_proof}{inline_attr}{vis}{unsafe_kw}{abi}fn {name}{gen}({params}){ret} {{\n",
+        "{auto_vectorization}{kernel_proof}{inline_attr}{vis}{unsafe_kw}{abi}fn {name}{gen}({params}){ret} {{\n",
         name = cx.mangle_name(&tir.name),
         gen = generics,
         params = params,
@@ -352,6 +372,7 @@ fn memo_key_expr(tir: &TFunc, cx: &Cx) -> String {
 }
 
 fn emit_tir_function_body(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
+    let previous_scalar = cx.scalar_function.replace(tir.is_scalar);
     emit_stack_guard(tir, cx, out, indent);
     emit_sentry_gate(tir, cx, out, indent);
     emit_owned_snapshot_params(tir, cx, out, indent);
@@ -374,6 +395,7 @@ fn emit_tir_function_body(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize)
     if is_fallible_void_return(&tir.ret) {
         out.push_str(&format!("{}Ok(())\n", "    ".repeat(indent)));
     }
+    cx.scalar_function.set(previous_scalar);
 }
 
 fn add_hidden_view_lifetime(rust_type: String) -> String {
@@ -522,6 +544,8 @@ pub(crate) fn emit_tir_method(
     } else {
         String::new()
     };
+    let auto_vectorization = auto_vectorization_attr(tir, indent);
+    let previous_scalar = cx.scalar_function.replace(tir.is_scalar);
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     for line in &tir.reactive_upgrades {
@@ -548,7 +572,7 @@ pub(crate) fn emit_tir_method(
         format!(" where {method_where}")
     };
     out.push_str(&format!(
-        "{inline_attr}{pad}pub {unsafe_kw}fn {name}{method_generics}({params}){ret}{method_where} {{\n",
+        "{auto_vectorization}{inline_attr}{pad}pub {unsafe_kw}fn {name}{method_generics}({params}){ret}{method_where} {{\n",
         name = mangle(&tir.name),
         params = params.join(", "),
         ret = ret_clause,
@@ -589,6 +613,7 @@ pub(crate) fn emit_tir_method(
     } else {
         emit_tir_stmts(&tir.body, cx, out, indent + 1);
     }
+    cx.scalar_function.set(previous_scalar);
     out.push_str(&format!("{pad}}}\n"));
 }
 
@@ -685,10 +710,11 @@ pub(crate) fn emit_tir_trait_method(
     } else {
         String::new()
     };
+    let auto_vectorization = auto_vectorization_attr(tir, indent);
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     out.push_str(&format!(
-        "{scalar_attr}{pad}{unsafe_kw}fn {name}{generics}{view_generic}({params}){ret} {{\n",
+        "{auto_vectorization}{scalar_attr}{pad}{unsafe_kw}fn {name}{generics}{view_generic}({params}){ret} {{\n",
         name = tir.name,
         generics = tir.generics,
         view_generic = if has_view_return {
@@ -706,7 +732,9 @@ pub(crate) fn emit_tir_trait_method(
     if cx.coverage {
         out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
     }
+    let previous_scalar = cx.scalar_function.replace(tir.is_scalar);
     emit_tir_stmts(&tir.body, cx, out, indent + 1);
+    cx.scalar_function.set(previous_scalar);
     out.push_str(&format!("{pad}}}\n"));
 }
 
@@ -747,10 +775,12 @@ pub(crate) fn emit_tir_serde_method_named(
     } else {
         String::new()
     };
+    let auto_vectorization = auto_vectorization_attr(tir, indent);
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
     match codec {
         SerdeCodec::Encode => {
+            out.push_str(&auto_vectorization);
             out.push_str(&scalar_attr);
             out.push_str(&format!("{pad}fn {name}(&self) -> jet_std::DataTree {{\n"));
             emit_stack_guard(tir, cx, out, indent + 1);
@@ -758,7 +788,9 @@ pub(crate) fn emit_tir_serde_method_named(
             if cx.coverage {
                 out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
             }
+            let previous_scalar = cx.scalar_function.replace(tir.is_scalar);
             emit_tir_stmts(&tir.body, cx, out, indent + 1);
+            cx.scalar_function.set(previous_scalar);
             out.push_str(&format!("{pad}}}\n"));
         }
         SerdeCodec::Decode => {
@@ -774,6 +806,7 @@ pub(crate) fn emit_tir_serde_method_named(
                 Some(t) => rust_return_type(cx, t),
                 None => "Result<Self, Vec<jet_std::FieldError>>".to_string(),
             };
+            out.push_str(&auto_vectorization);
             out.push_str(&scalar_attr);
             out.push_str(&format!(
                 "{pad}fn {name}({tree}: &jet_std::DataTree) -> {ret} {{\n"
@@ -784,7 +817,9 @@ pub(crate) fn emit_tir_serde_method_named(
                 out.push_str(&format!("{pad}    jet_cov({});\n", tir.line));
             }
             out.push_str(&format!("{pad}    let {tree} = ({tree}).clone();\n"));
+            let previous_scalar = cx.scalar_function.replace(tir.is_scalar);
             emit_tir_stmts(&tir.body, cx, out, indent + 1);
+            cx.scalar_function.set(previous_scalar);
             out.push_str(&format!("{pad}}}\n"));
         }
     }

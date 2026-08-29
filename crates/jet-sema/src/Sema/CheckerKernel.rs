@@ -8,7 +8,10 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::SendCrossing;
-use crate::AST::{AccessConvention, Binding, Expr, Func, KernelMode, KernelProof, Stmt};
+use crate::AST::{
+    AccessConvention, AutoVectorizationFacts, BinOp, Binding, Expr, ForKind, Func, KernelMode,
+    KernelProof, LValue, Stmt, Type, UnOp,
+};
 
 const SAFE_COMPUTE_CALLS: &[&str] = &[
     "abs",
@@ -47,6 +50,182 @@ struct KernelFailure {
 }
 
 impl<'a> super::Checker<'a> {
+    /// D-SIMD3=B: prove the deliberately small source shape that the native
+    /// backend may mark as vectorizable. The proof is conservative: one
+    /// half-open, unit-stride fixed-list range; one indexed store; and an
+    /// expression made only from same-lane fixed-list reads and scalar
+    /// arithmetic. Calls, control flow, aliases, and cross-lane reads stay
+    /// scalar until a later proof adds them.
+    pub(crate) fn prove_auto_vectorization_loop(
+        &self,
+        kind: &ForKind,
+        loop_var: &str,
+        body: &[Stmt],
+        before_direct: &std::collections::BTreeSet<String>,
+        before_edges: &std::collections::BTreeSet<String>,
+        before_maximal: bool,
+    ) -> Option<AutoVectorizationFacts> {
+        let ForKind::Range {
+            start,
+            end,
+            step,
+            exclusive,
+        } = kind
+        else {
+            return None;
+        };
+        if !*exclusive || step.is_some() {
+            return None;
+        }
+        if !matches!(start.without_parens(), Expr::Int(0, ..)) {
+            return None;
+        }
+        let end = match end.without_parens() {
+            Expr::Int(value, ..) if *value >= 0 => u64::try_from(*value).ok()?,
+            _ => return None,
+        };
+        let [Stmt::Assign {
+            target,
+            op: None,
+            value,
+            ..
+        }] = body
+        else {
+            return None;
+        };
+        let LValue::Index { base, index, .. } = target else {
+            return None;
+        };
+        let Expr::Ident(output, _) = base.without_parens() else {
+            return None;
+        };
+        if !matches!(index.without_parens(), Expr::Ident(name, _) if name == loop_var) {
+            return None;
+        }
+
+        let output_info = self.lookup(output)?;
+        let Type::FixedList {
+            elem: output_elem,
+            len: output_len,
+        } = &output_info.ty
+        else {
+            return None;
+        };
+        let length = output_len.literal_value()?;
+        if length != end || !is_auto_vectorizable_scalar(output_elem) {
+            return None;
+        }
+        // The write target must be a local value, not a borrowed parameter.
+        // Fixed-list scalar values have no interior references, so distinct
+        // local roots are disjoint storage by construction.
+        if output_info.param_conv.is_some() || !output_info.mutable {
+            return None;
+        }
+
+        let mut inputs = std::collections::BTreeSet::new();
+        if !self.prove_auto_element_expr(
+            value,
+            loop_var,
+            output_elem,
+            length,
+            output,
+            &mut inputs,
+        ) {
+            return None;
+        }
+        if inputs.is_empty() || inputs.contains(output) {
+            return None;
+        }
+        // Two shared parameter roots could name the same backing storage. A
+        // single input is safe; multiple inputs must be owned local arrays.
+        if inputs.len() > 1
+            && inputs.iter().any(|name| {
+                self.lookup(name)
+                    .is_some_and(|info| info.param_conv == Some(AccessConvention::Read))
+            })
+        {
+            return None;
+        }
+
+        let effect_free_body = self.fx_direct.difference(before_direct).next().is_none()
+            && self.fx_edges.difference(before_edges).next().is_none()
+            && self.fx_maximal == before_maximal;
+        if !effect_free_body {
+            return None;
+        }
+
+        Some(AutoVectorizationFacts {
+            element_type: (**output_elem).clone(),
+            no_aliasing: true,
+            no_early_exit: true,
+            effect_free_body,
+            no_cross_iteration_deps: true,
+        })
+    }
+
+    fn prove_auto_element_expr(
+        &self,
+        expr: &Expr,
+        loop_var: &str,
+        element_type: &Type,
+        length: u64,
+        output: &str,
+        inputs: &mut std::collections::BTreeSet<String>,
+    ) -> bool {
+        match expr.without_parens() {
+            Expr::Int(..) | Expr::Float(..) => true,
+            Expr::Unary(UnOp::Neg, inner, ..) => self.prove_auto_element_expr(
+                inner,
+                loop_var,
+                element_type,
+                length,
+                output,
+                inputs,
+            ),
+            Expr::Binary(op, left, right, ..)
+                if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div) =>
+            {
+                self.prove_auto_element_expr(
+                    left,
+                    loop_var,
+                    element_type,
+                    length,
+                    output,
+                    inputs,
+                ) && self.prove_auto_element_expr(
+                    right,
+                    loop_var,
+                    element_type,
+                    length,
+                    output,
+                    inputs,
+                )
+            }
+            Expr::Index { base, index, .. } => {
+                let Expr::Ident(root, _) = base.without_parens() else {
+                    return false;
+                };
+                if root == output
+                    || !matches!(index.without_parens(), Expr::Ident(name, _) if name == loop_var)
+                {
+                    return false;
+                }
+                let Some(info) = self.lookup(root) else {
+                    return false;
+                };
+                let Type::FixedList { elem, len } = &info.ty else {
+                    return false;
+                };
+                if elem.as_ref() != element_type || len.literal_value() != Some(length) {
+                    return false;
+                }
+                inputs.insert(root.clone());
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Attach a proof only after the ordinary function body has been checked.
     /// The TIR and every execution tier then receive the same proof record.
     pub(crate) fn check_kernel_marker(&mut self, f: &mut Func, owner_type: Option<&str>) {
@@ -259,6 +438,10 @@ impl<'a> super::Checker<'a> {
             }),
         }
     }
+}
+
+fn is_auto_vectorizable_scalar(ty: &Type) -> bool {
+    matches!(ty, Type::Float | Type::Float32)
 }
 
 fn kernel_failure(obligation: &str, span: Span) -> Diagnostic {

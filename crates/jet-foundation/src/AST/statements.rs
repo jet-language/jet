@@ -1,4 +1,4 @@
-use super::{BinOp, Binding, Expr, ForKind, LValue, Marker};
+use super::{BinOp, Binding, Expr, ForKind, LValue, Marker, Type};
 use crate::Diagnostics::Span;
 
 /// D-CANVASSTATE1=D: which statement switch a `Stmt::Switched` carries. `#Off`
@@ -128,6 +128,18 @@ pub fn uses_classic_if_spelling(src: &str, if_span: Span, first_condition: Span)
     true
 }
 
+/// D-SIMD3=B: sema's proof that one fixed-width range loop is an independent,
+/// effect-free elementwise loop. Codegen may use this fact to select the
+/// native vectorizable shape; it must not rediscover the proof from syntax.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoVectorizationFacts {
+    pub element_type: Type,
+    pub no_aliasing: bool,
+    pub no_early_exit: bool,
+    pub effect_free_body: bool,
+    pub no_cross_iteration_deps: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum Stmt {
     /// A call used for its effect, e.g. `print(x);`.
@@ -166,6 +178,8 @@ pub enum Stmt {
         arrow_body: bool,
         /// D-LOOPLABEL3: optional compile-time loop name.
         label: Option<(String, Span)>,
+        /// D-SIMD3=B: sema-proven safe elementwise-loop facts.
+        auto_vectorization: Option<AutoVectorizationFacts>,
     },
     Switch {
         subject: Expr,

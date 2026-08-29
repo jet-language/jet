@@ -267,6 +267,7 @@ impl<'a> Parser<'a> {
                         span: start,
                         arrow_body: false,
                         label: None,
+                        auto_vectorization: None,
                     }];
                 }
                 nested.pop().expect("a value loop has a source clause")
@@ -378,6 +379,7 @@ impl<'a> Parser<'a> {
                     span: start,
                     arrow_body: false,
                     label: (index + 1 == clause_count).then(|| (collect_label.clone(), start)),
+                    auto_vectorization: None,
                 }];
             }
             nested.pop().expect("a yielding loop has a source clause")
@@ -1463,6 +1465,7 @@ impl<'a> Parser<'a> {
                 span,
                 arrow_body,
                 label,
+                auto_vectorization: None,
             })
         } else if matches!(self.peek().kind, TokKind::LBrace) {
             // Infinite loop

@@ -1194,6 +1194,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 exclusive,
                 body,
                 label,
+                auto_vectorization: _,
             } => {
                 let loop_span = self.current_span;
                 let (mut i, end_v, exclusive_v) = if let Some(source) = source {

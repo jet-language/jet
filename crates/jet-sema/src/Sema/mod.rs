@@ -688,10 +688,11 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
             .params
             .iter()
             .map(|p| {
+                let base = p.ty.with_effective_fn_returns();
                 let ty = if p.variadic {
-                    Type::List(Box::new(p.ty.clone()))
+                    Type::List(Box::new(base))
                 } else {
-                    p.ty.clone()
+                    base
                 };
                 (p.convention, ty)
             })
@@ -735,10 +736,11 @@ pub(crate) fn func_to_sig(f: &Func) -> FuncSig {
             .params
             .iter()
             .map(|p| {
+                let base = p.ty.with_effective_fn_returns();
                 let ty = if p.variadic {
-                    Type::List(Box::new(p.ty.clone()))
+                    Type::List(Box::new(base))
                 } else {
-                    p.ty.clone()
+                    base
                 };
                 (p.convention, ty)
             })

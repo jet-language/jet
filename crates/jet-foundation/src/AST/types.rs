@@ -1232,6 +1232,95 @@ fn fn_param_names(params: &[Type], contract: Option<&[(String, super::ParamZone)
 }
 
 impl Type {
+    /// Project every nested Jet function value onto the shared callable return
+    /// carrier. A written `fn(T) U` describes the same callable shape as an
+    /// ordinary `fn` declaration returning `U`, whose executable return is
+    /// `Result<U, Err>` by default. Keep C++ callback ABI tags raw: that tag is
+    /// an already-decided foreign boundary, not an ordinary Jet callable.
+    pub fn with_effective_fn_returns(&self) -> Type {
+        fn normalize(ty: &Type) -> Type {
+            match ty {
+                Type::List(inner) => Type::List(Box::new(normalize(inner))),
+                Type::Map {
+                    key,
+                    key_span,
+                    value,
+                } => Type::Map {
+                    key: Box::new(normalize(key)),
+                    key_span: *key_span,
+                    value: Box::new(normalize(value)),
+                },
+                Type::Shared(inner) => Type::Shared(Box::new(normalize(inner))),
+                Type::Option(inner) => Type::Option(Box::new(normalize(inner))),
+                Type::Result { ok, err } => Type::Result {
+                    ok: Box::new(normalize(ok)),
+                    err: Box::new(normalize(err)),
+                },
+                Type::Fn {
+                    params,
+                    ret,
+                    effect_bound,
+                    param_contract,
+                    call_metadata,
+                    return_view_provenance,
+                } => Type::Fn {
+                    params: params.iter().map(normalize).collect(),
+                    ret: ret.as_ref().map(|ret| {
+                        let ret = normalize(ret);
+                        Box::new(FailureContract::from_return_type(Some(&ret)).effective_type())
+                    }),
+                    effect_bound: effect_bound.clone(),
+                    param_contract: param_contract.clone(),
+                    call_metadata: call_metadata.clone(),
+                    return_view_provenance: return_view_provenance.clone(),
+                },
+                Type::Apply { name, args } => Type::Apply {
+                    name: name.clone(),
+                    args: args.iter().map(normalize).collect(),
+                },
+                Type::Tuple(fields) => Type::Tuple(
+                    fields
+                        .iter()
+                        .map(|(name, ty)| (name.clone(), Box::new(normalize(ty))))
+                        .collect(),
+                ),
+                Type::FixedList { elem, len } => Type::FixedList {
+                    elem: Box::new(normalize(elem)),
+                    len: len.clone(),
+                },
+                Type::InlineRange { base, lo, hi } => Type::InlineRange {
+                    base: Box::new(normalize(base)),
+                    lo: *lo,
+                    hi: *hi,
+                },
+                Type::Tagged { marker, inner }
+                    if matches!(
+                        marker,
+                        TagMarker::Internal(InternalTag::CppCallbackAbi)
+                    ) => self_tagged_clone(marker, inner),
+                Type::Tagged { marker, inner } => Type::Tagged {
+                    marker: marker.clone(),
+                    inner: Box::new(normalize(inner)),
+                },
+                Type::Union(members) => Type::Union(members.iter().map(normalize).collect()),
+                Type::Quantity { base, dimension } => Type::Quantity {
+                    base: Box::new(normalize(base)),
+                    dimension: dimension.clone(),
+                },
+                other => other.clone(),
+            }
+        }
+
+        fn self_tagged_clone(marker: &TagMarker, inner: &Type) -> Type {
+            Type::Tagged {
+                marker: marker.clone(),
+                inner: Box::new(inner.clone()),
+            }
+        }
+
+        normalize(self)
+    }
+
     /// Replace only the callable policy chain. Every other `Type::Fn` field is
     /// cloned unchanged, so labels, defaults, access, effects, variadics, and
     /// returned-view provenance cannot be laundered by `apply`.

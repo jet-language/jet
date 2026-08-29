@@ -99,6 +99,23 @@ fn assert_corpus_shape(rows: &[Vector]) {
             "missing century/leap edge vector: {id}"
         );
     }
+    for id in [
+        "f1_edge_1900_feb28",
+        "f1_edge_1900_mar01",
+        "f1_edge_2000_feb28",
+        "f1_edge_2000_feb29",
+        "f1_edge_2000_mar01",
+        "f1_edge_2100_feb28",
+        "f1_edge_2100_mar01",
+        "f1_edge_2400_feb28",
+        "f1_edge_2400_feb29",
+        "f1_edge_2400_mar01",
+    ] {
+        assert!(
+            rows.iter().any(|row| row.ident == id),
+            "missing epoch century/leap edge vector: {id}"
+        );
+    }
     for operation in [
         "parse_format_round_trip",
         "diff_days_antisymmetry",
@@ -152,6 +169,33 @@ fn expected_output(rows: &[Vector], batch: &str) -> Vec<u8> {
         output.push('\n');
     }
     output.into_bytes()
+}
+
+fn assert_output(batch: &str, tier: &str, actual: &[u8], expected: &[u8]) {
+    let actual = std::str::from_utf8(actual)
+        .unwrap_or_else(|error| panic!("{tier} datetime accuracy output is not UTF-8: {error}"));
+    let expected = std::str::from_utf8(expected)
+        .expect("generated datetime accuracy oracle must be UTF-8");
+    let actual_lines: Vec<_> = actual.split('\n').collect();
+    let expected_lines: Vec<_> = expected.split('\n').collect();
+    assert_eq!(
+        actual_lines.len(),
+        expected_lines.len(),
+        "{tier} datetime accuracy line count differs for {batch}: expected {}, got {}",
+        expected_lines.len().saturating_sub(1),
+        actual_lines.len().saturating_sub(1)
+    );
+    for (index, (actual_line, expected_line)) in
+        actual_lines.iter().zip(&expected_lines).enumerate()
+    {
+        if actual_line != expected_line {
+            let vector = expected_line.split('\t').nth(1).unwrap_or("unknown");
+            panic!(
+                "{tier} datetime accuracy mismatch for {batch}, line {}, vector {vector}:\nexpected: {expected_line:?}\nactual:   {actual_line:?}",
+                index + 1
+            );
+        }
+    }
 }
 
 fn run_witness(
@@ -208,10 +252,7 @@ fn datetime_accuracy_differential_and_properties() {
             "default datetime accuracy witness failed for {batch}:\n{}",
             String::from_utf8_lossy(&default.stderr)
         );
-        assert_eq!(
-            default.stdout, expected,
-            "default datetime accuracy witness disagrees with oracle for {batch}"
-        );
+        assert_output(batch, "default", &default.stdout, &expected);
 
         let release = run_witness(&root, &scratch.join(batch), &source, true);
         assert!(
@@ -219,14 +260,8 @@ fn datetime_accuracy_differential_and_properties() {
             "release datetime accuracy witness failed for {batch}:\n{}",
             String::from_utf8_lossy(&release.stderr)
         );
-        assert_eq!(
-            release.stdout, expected,
-            "release datetime accuracy witness disagrees with oracle for {batch}"
-        );
-        assert_eq!(
-            default.stdout, release.stdout,
-            "default and release datetime accuracy output differ for {batch}"
-        );
+        assert_output(batch, "release", &release.stdout, &expected);
+        assert_output(batch, "default-vs-release", &release.stdout, &default.stdout);
     }
 
     let _ = fs::remove_dir_all(&scratch);

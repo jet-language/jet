@@ -357,6 +357,36 @@ def make_epoch_and_parse(corpus: Corpus, rng: random.Random) -> tuple[list[tuple
     return parse_values, malformed_inputs
 
 
+def add_epoch_edges(corpus: Corpus) -> None:
+    epoch_edges = [
+        ("1900_feb28", datetime(1900, 2, 28, 12, 34, 56, 789000, tzinfo=UTC)),
+        ("1900_mar01", datetime(1900, 3, 1, 12, 34, 56, 789000, tzinfo=UTC)),
+        ("2000_feb28", datetime(2000, 2, 28, 12, 34, 56, 789000, tzinfo=UTC)),
+        ("2000_feb29", datetime(2000, 2, 29, 12, 34, 56, 789000, tzinfo=UTC)),
+        ("2000_mar01", datetime(2000, 3, 1, 12, 34, 56, 789000, tzinfo=UTC)),
+        ("2100_feb28", datetime(2100, 2, 28, 12, 34, 56, 789000, tzinfo=UTC)),
+        ("2100_mar01", datetime(2100, 3, 1, 12, 34, 56, 789000, tzinfo=UTC)),
+        ("2400_feb28", datetime(2400, 2, 28, 12, 34, 56, 789000, tzinfo=UTC)),
+        ("2400_feb29", datetime(2400, 2, 29, 12, 34, 56, 789000, tzinfo=UTC)),
+        ("2400_mar01", datetime(2400, 3, 1, 12, 34, 56, 789000, tzinfo=UTC)),
+    ]
+    for suffix, value in epoch_edges:
+        milliseconds = epoch_ms(value)
+        ident = f"f1_edge_{suffix}"
+        dt = corpus.declare(f"dt_{ident}", f"time.from_unix_ms({milliseconds})")
+        metadata = input_text(epoch_ms=milliseconds, edge=suffix)
+        corpus.add("F1", ident, "format", format_epoch_ms(milliseconds), f"{dt}.format_rfc3339()", metadata)
+        corpus.add("F1", ident, "to_timestamp", milliseconds // 1000, f"{dt}.to_timestamp()", metadata)
+        corpus.add(
+            "F1",
+            ident,
+            "roundtrip_ms",
+            milliseconds,
+            f"time.from_unix_ms({dt}.to_unix_ms()).to_unix_ms()",
+            metadata,
+        )
+
+
 def make_civil_and_arithmetic(
     corpus: Corpus,
     rng: random.Random,
@@ -672,6 +702,7 @@ def build_corpora() -> tuple[list[Corpus], str]:
     epoch = Corpus("epoch_parse")
     parse_values, _ = make_epoch_and_parse(epoch, rng)
     add_properties(epoch, parse_values, [], [], [])
+    add_epoch_edges(epoch)
     epoch.finish()
 
     civil = Corpus("civil_arithmetic")

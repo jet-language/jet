@@ -409,7 +409,9 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         super::runtime_host::run_jit_atexit_handlers(runtime);
         if let Some(report) = jet_codegen::scheduler::jet_observe_parked_tasks_report() {
             runtime.stderr.push_str(&report.rendered);
+            runtime.exit_code = Some(report.exit_code);
         }
+        jet_codegen::scheduler::jet_scheduler_drain_after_exit();
         jet_codegen::task_group::jet_task_deadline_clear_pending();
         Concurrency::set_active_runtime(None);
         if let Some(rendered) = runtime.deadline_exceeded.take() {
