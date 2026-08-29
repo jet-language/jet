@@ -189,6 +189,13 @@ fn jet_observe_task_register_at(
 ) -> usize {
     0
 }
+fn jet_observe_task_register_at_with_control(
+    _observe_id: &std::sync::atomic::AtomicUsize,
+    _spawn_site: usize,
+    _control: Option<&std::sync::Arc<JetTaskControl>>,
+) -> usize {
+    0
+}
 fn jet_observe_task_failure_message(_id: usize, reason: String) -> String {
     reason
 }
