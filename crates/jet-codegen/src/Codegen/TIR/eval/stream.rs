@@ -36,17 +36,32 @@ pub(super) fn eval(
         THandleOp::ReaderReadU8 => {
             read(recv, span, |r| kernel::jet_reader_read_u8(r).map(i64::from))
         }
+        THandleOp::ReaderReadI8 => {
+            read(recv, span, |r| kernel::jet_reader_read_i8(r).map(i64::from))
+        }
         THandleOp::ReaderReadU16Le => read(recv, span, |r| {
             kernel::jet_reader_read_u16_le(r).map(i64::from)
         }),
         THandleOp::ReaderReadU16Be => read(recv, span, |r| {
             kernel::jet_reader_read_u16_be(r).map(i64::from)
         }),
+        THandleOp::ReaderReadI16Le => read(recv, span, |r| {
+            kernel::jet_reader_read_i16_le(r).map(i64::from)
+        }),
+        THandleOp::ReaderReadI16Be => read(recv, span, |r| {
+            kernel::jet_reader_read_i16_be(r).map(i64::from)
+        }),
         THandleOp::ReaderReadU32Le => read(recv, span, |r| {
             kernel::jet_reader_read_u32_le(r).map(i64::from)
         }),
         THandleOp::ReaderReadU32Be => read(recv, span, |r| {
             kernel::jet_reader_read_u32_be(r).map(i64::from)
+        }),
+        THandleOp::ReaderReadI32Le => read(recv, span, |r| {
+            kernel::jet_reader_read_i32_le(r).map(i64::from)
+        }),
+        THandleOp::ReaderReadI32Be => read(recv, span, |r| {
+            kernel::jet_reader_read_i32_be(r).map(i64::from)
         }),
         // U64 exceeds `Int`'s range; AOT's `as i64` host cast wraps the same way.
         THandleOp::ReaderReadU64Le => read(recv, span, |r| {
@@ -55,12 +70,41 @@ pub(super) fn eval(
         THandleOp::ReaderReadU64Be => read(recv, span, |r| {
             kernel::jet_reader_read_u64_be(r).map(|v| v as i64)
         }),
+        THandleOp::ReaderReadI64Le => read(recv, span, kernel::jet_reader_read_i64_le),
+        THandleOp::ReaderReadI64Be => read(recv, span, kernel::jet_reader_read_i64_be),
         THandleOp::ReaderReadF32Le => read_float(recv, span, |r| {
             kernel::jet_reader_read_f32_le(r).map(CtFloat::f32)
+        }),
+        THandleOp::ReaderReadF32Be => read_float(recv, span, |r| {
+            kernel::jet_reader_read_f32_be(r).map(CtFloat::f32)
         }),
         THandleOp::ReaderReadF64Le => read_float(recv, span, |r| {
             kernel::jet_reader_read_f64_le(r).map(CtFloat::f64)
         }),
+        THandleOp::ReaderReadF64Be => read_float(recv, span, |r| {
+            kernel::jet_reader_read_f64_be(r).map(CtFloat::f64)
+        }),
+        THandleOp::ReaderPeek => {
+            let r = reader_of(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
+            kernel::jet_reader_peek(&r)
+                .map(i64::from)
+                .map(CtValue::Int)
+                .map_err(|message| unsupported(&message, span))
+        }
+        THandleOp::ReaderSeek | THandleOp::ReaderSkip => {
+            let n = match arg(args, 0, span)? {
+                CtValue::Int(n) => *n,
+                _ => return Err(unsupported("Reader cursor position", span)),
+            };
+            with_reader(recv, span, |r| {
+                let result = match op {
+                    THandleOp::ReaderSeek => kernel::jet_reader_seek(r, n),
+                    THandleOp::ReaderSkip => kernel::jet_reader_skip(r, n),
+                    _ => unreachable!(),
+                };
+                result.map(|()| CtValue::Unit)
+            })
+        }
         THandleOp::ReaderTake => {
             let CtValue::Int(n) = arg(args, 0, span)? else {
                 return Err(unsupported("Reader.take length", span));

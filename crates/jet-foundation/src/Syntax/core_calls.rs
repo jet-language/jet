@@ -49,12 +49,15 @@ const fn effect_for(module: &str, method: &str) -> Option<Effect> {
             &[
                 "clock",
                 "time",
+                "local_time",
                 "parse_time",
                 "period",
                 "period_days",
                 "period_months",
                 "period_years",
                 "parse_rfc3339",
+                "from_unix_ms",
+                "datetime",
                 "zone",
                 "utc",
                 "zoned",
@@ -343,7 +346,17 @@ impl CoreCallCoverage {
         | Self::INTERPRETER
         | Self::COMPTIME
         | Self::JIT;
-    pub const ALL: Self = Self(Self::KNOWN);
+
+    /// The table-driven compiler projections. Interpreter coverage is added
+    /// only when the row has a real route below, or when a pure/ambient route
+    /// builder explicitly supplies one.
+    const fn compiler_projections() -> Self {
+        Self::from_bits(Self::KNOWN & !Self::INTERPRETER)
+    }
+
+    const fn with_projection(self, projection: u8) -> Self {
+        Self::from_bits(self.bits() | projection)
+    }
 
     pub const fn contains(self, projection: u8) -> bool {
         self.0 & projection == projection
@@ -398,7 +411,7 @@ pub enum CoreCallPureRoute {
 /// The executable route for a row's interpreter projection.  `Pure` names
 /// the shared CorePureParity family; the other two variants select the
 /// existing ambient or typed evaluator adapters.  `None` is a deliberate
-/// incomplete-row marker and is rejected by the coverage guard.
+/// incomplete-row marker and must not coexist with interpreter coverage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreCallInterpreterRoute {
     None,
@@ -410,6 +423,162 @@ pub enum CoreCallInterpreterRoute {
 impl CoreCallInterpreterRoute {
     pub const fn is_executable(self) -> bool {
         !matches!(self, Self::None | Self::Pure(CoreCallPureRoute::None))
+    }
+}
+
+/// Registry-facing arms in the interpreter ambient dispatcher.
+///
+/// This is an adjacency list for the current hand-written dispatcher and the
+/// public file arms in `jet-jit::enc_stream`. It contains only rows that can
+/// pass the ambient route gate; pure and typed-intrinsic rows are handled by
+/// their named consumers instead. Private carrier arms without a
+/// `CoreCallRecord` stay outside this public registry until they are promoted.
+///
+/// Endgame verdict (#2285): replace this list and the dispatcher arms with one
+/// macro/table that emits both the `(module, member)` arm and this set entry.
+/// That makes row/arm divergence unrepresentable. Until that rewrite is
+/// practical, `tests/core_call_table.rs` is the executable reconciliation.
+pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[
+    ("core.task", "timeout"),
+    ("core.files", "rename"),
+    ("core.files", "walk"),
+    ("core.files", "walk_parallel"),
+    ("core.files", "glob"),
+    ("core.files", "open"),
+    ("core.files", "create"),
+    ("core.files", "append"),
+    ("core.term", "confirm"),
+    ("core.term", "choose"),
+    ("core.term", "input_secret"),
+    ("core.term", "read_all_input"),
+    ("core.term", "readline"),
+    ("core.term", "stdin"),
+    ("core.term", "stdout"),
+    ("core.term", "stderr"),
+    ("core.term", "terminal_width"),
+    ("core.term", "terminal_height"),
+    ("core.term", "style"),
+    ("core.sys", "get"),
+    ("core.sys", "set"),
+    ("core.sys", "home_dir"),
+    ("core.process", "workspace"),
+    ("core.process", "run"),
+    ("core.process", "cmd"),
+    ("core.process", "pipeline"),
+    ("core.plugin", "load"),
+    ("core.mod", "load"),
+    ("core.math", "from_bits"),
+    ("core.math.random", "int"),
+    ("core.math.random", "float"),
+    ("core.math.random", "float_range"),
+    ("core.math.random", "bool"),
+    ("core.math.random", "normal"),
+    ("core.math.random", "exponential"),
+    ("core.math.random", "seed"),
+    ("core.math.random", "bytes"),
+    ("core.math.random", "split"),
+    ("core.math.random", "pick"),
+    ("core.math.random", "weighted_pick"),
+    ("core.math.random", "sample"),
+    ("core.crypto.random", "bytes"),
+    ("core.time", "now"),
+    ("core.time", "sleep"),
+    ("core.time", "start"),
+    ("core.time", "now_utc"),
+    ("core.time", "today"),
+    ("core.time", "parse_rfc3339"),
+    ("core.time", "new"),
+    ("core.crypto.uuid", "v4"),
+    ("core.log", "info"),
+    ("core.log", "warn"),
+    ("core.log", "error"),
+    ("core.log", "debug"),
+    ("core.log", "disable"),
+    ("core.log", "flush"),
+    ("core.log", "field"),
+    ("core.log", "int"),
+    ("core.log", "bool"),
+    ("core.log", "counter"),
+    ("core.log", "redact"),
+    ("core.log", "info_fields"),
+    ("core.log", "warn_fields"),
+    ("core.log", "error_fields"),
+    ("core.log", "debug_fields"),
+    ("core.log", "set_sink"),
+    ("core.log", "sample_every"),
+    ("core.log", "otlp_file"),
+    ("core.auth", "session_validate"),
+    ("core.auth", "session_show"),
+    ("core.auth", "session_user"),
+    ("core.auth", "session_cookie"),
+    ("core.auth", "session_id"),
+    ("core.net", "socket_addr"),
+    ("core.net", "tcp_listen"),
+    ("core.net", "tcp_listen_addr"),
+    ("core.net", "tcp_accept"),
+    ("core.net", "tcp_connect"),
+    ("core.net", "tcp_connect_addr"),
+    ("core.net", "tcp_connect_timeout"),
+    ("core.net", "tcp_connect_happy"),
+    ("core.net", "listener_local_socket_addr"),
+    ("core.net", "nodelay"),
+    ("core.net", "set_nodelay"),
+    ("core.net", "ttl"),
+    ("core.net", "set_ttl"),
+    ("core.net", "socket_type"),
+    ("core.net", "udp_bind"),
+    ("core.net", "udp_bind_addr"),
+    ("core.net", "udp_local_addr"),
+    ("core.net", "udp_set_timeout"),
+    ("core.net", "udp_send_to"),
+    ("core.net", "udp_recv_from"),
+    ("core.net", "udp_send_bytes_to"),
+    ("core.net", "udp_receive"),
+    ("core.db", "transaction"),
+    ("core.db", "migrate"),
+    ("app", "live_get"),
+    ("core.web", "live_get"),
+    ("app", "live_show"),
+    ("core.web", "live_show"),
+    ("app", "live_stats"),
+    ("core.web", "live_stats"),
+    ("app", "auth_routes"),
+    ("core.web", "auth_routes"),
+    ("app", "auth_show"),
+    ("core.web", "auth_show"),
+    ("core.http.server", "mux"),
+    ("core.http.server", "response"),
+    ("core.http.server", "tls"),
+    ("core.http.server", "sse"),
+    ("core.http.server", "json"),
+    ("core.http.server", "cors"),
+    ("core.http.server", "access_log"),
+    ("core.http.server", "request_id"),
+];
+
+pub fn core_call_ambient_routes() -> &'static [(&'static str, &'static str)] {
+    CORE_CALL_AMBIENT_ROUTES
+}
+
+const fn uses_ambient_route(module: &str, member: &str) -> bool {
+    let mut index = 0;
+    while index < CORE_CALL_AMBIENT_ROUTES.len() {
+        let (known_module, known_member) = CORE_CALL_AMBIENT_ROUTES[index];
+        if same_text(module, known_module) && same_text(member, known_member) {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+const fn default_interpreter_route(module: &str, member: &str) -> CoreCallInterpreterRoute {
+    if uses_ambient_route(module, member) {
+        CoreCallInterpreterRoute::Ambient
+    } else if effect_for(module, member).is_none() {
+        CoreCallInterpreterRoute::TypedIntrinsic
+    } else {
+        CoreCallInterpreterRoute::None
     }
 }
 
@@ -498,6 +667,12 @@ impl CoreCallRecord {
         prelude: bool,
         borrow_mask: &'static [bool],
     ) -> Self {
+        let interpreter_route = default_interpreter_route(module, member);
+        let coverage = if interpreter_route.is_executable() {
+            CoreCallCoverage::compiler_projections().with_projection(CoreCallCoverage::INTERPRETER)
+        } else {
+            CoreCallCoverage::compiler_projections()
+        };
         Self {
             module,
             member,
@@ -511,16 +686,13 @@ impl CoreCallRecord {
             effect: effect_for(module, member),
             sink_class: sink_for(module, member),
             pure_route: CoreCallPureRoute::None,
-            interpreter_route: match effect_for(module, member) {
-                Some(_) => CoreCallInterpreterRoute::Ambient,
-                None => CoreCallInterpreterRoute::TypedIntrinsic,
-            },
+            interpreter_route,
             symbol: if prelude {
                 CoreCallSymbol::Prelude(symbol)
             } else {
                 CoreCallSymbol::Rust(symbol)
             },
-            coverage: CoreCallCoverage::ALL,
+            coverage,
             aot_direct: true,
             jit_direct: true,
             jit_symbol: None,
@@ -528,9 +700,9 @@ impl CoreCallRecord {
         }
     }
 
-    /// Construct a row with an explicit consumer projection set. The compact
-    /// five-argument constructor remains the normal all-tier row spelling;
-    /// this form makes a tier omission reviewable at the table edit.
+    /// Construct a row with an explicit consumer projection set. Use this for
+    /// fixtures and deliberate exceptions so a tier omission is reviewable at
+    /// the table edit instead of being hidden by a universal marker.
     pub const fn new_with_coverage(
         module: &'static str,
         member: &'static str,
@@ -565,7 +737,8 @@ impl CoreCallRecord {
             pure_route: CoreCallPureRoute::None,
             interpreter_route: CoreCallInterpreterRoute::TypedIntrinsic,
             symbol: CoreCallSymbol::Rust(""),
-            coverage: CoreCallCoverage::ALL,
+            coverage: CoreCallCoverage::compiler_projections()
+                .with_projection(CoreCallCoverage::INTERPRETER),
             aot_direct: false,
             jit_direct: false,
             jit_symbol: None,
@@ -590,11 +763,21 @@ impl CoreCallRecord {
     pub const fn with_pure_route(mut self, route: CoreCallPureRoute) -> Self {
         self.pure_route = route;
         self.interpreter_route = CoreCallInterpreterRoute::Pure(route);
+        if !matches!(route, CoreCallPureRoute::None) {
+            self.coverage = self
+                .coverage
+                .with_projection(CoreCallCoverage::INTERPRETER);
+        }
         self
     }
 
     pub const fn with_interpreter_route(mut self, route: CoreCallInterpreterRoute) -> Self {
         self.interpreter_route = route;
+        if route.is_executable() {
+            self.coverage = self
+                .coverage
+                .with_projection(CoreCallCoverage::INTERPRETER);
+        }
         self
     }
 
@@ -731,6 +914,10 @@ impl CoreCallRecord {
 }
 
 /// Every Core call whose form is a plain symbol call.
+///
+/// The ambient route manifest above is the only interpreter coverage
+/// declaration for effectful plain rows. Rows without an ambient arm remain
+/// explicit no-route gaps until their consumer is implemented.
 pub const CORE_CALLS: &[CoreCallRecord] = &[
     // D-BENCH-KEEP1=A: one generic identity sink. AOT projects this row to
     // the Prelude black-box kernel; resident tiers preserve the same identity
@@ -1320,7 +1507,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     CoreCallRecord::new("core.math", "to_bits", "jet_std_math_to_bits", true, &[false])
         .with_pure_route(CoreCallPureRoute::Math),
     CoreCallRecord::new("core.math", "from_bits", "jet_std_math_from_bits", true, &[false])
-        .with_pure_route(CoreCallPureRoute::Math),
+        .with_pure_route(CoreCallPureRoute::Math)
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new("core.math", "isqrt", "jet_std_math_isqrt", true, &[false]),
     CoreCallRecord::new(
         "core.math",
@@ -1520,7 +1708,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         true,
         &[true],
     )
-    .with_pure_route(CoreCallPureRoute::Time),
+    .with_pure_route(CoreCallPureRoute::Time)
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient),
     CoreCallRecord::new(
         "core.time",
         "datetime",
@@ -2426,7 +2615,8 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         true,
         &[true],
     ),
-    CoreCallRecord::new("core.crypto.uuid", "v4", "jet_std_uuid_v4", true, &[]), // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
+    CoreCallRecord::new("core.crypto.uuid", "v4", "jet_std_uuid_v4", true, &[])
+        .with_interpreter_route(CoreCallInterpreterRoute::Ambient), // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
     CoreCallRecord::new("core.crypto.uuid", "v7", "jet_std_uuid_v7", true, &[true]),
     CoreCallRecord::new(
         "core.crypto.uuid",
@@ -3459,6 +3649,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
     ),
     CoreCallRecord::new(
         "core.regex",
+        "replace_first",
+        "jet_std::jet_regex_replace_first",
+        true,
+        &[true, true, true],
+    ),
+    CoreCallRecord::new(
+        "core.regex",
         "replace_all",
         "jet_std::jet_regex_replace_all",
         true,
@@ -3911,6 +4108,7 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
         &[false, false, false],
     )
     .with_pure_route(CoreCallPureRoute::Date)
+    .with_interpreter_route(CoreCallInterpreterRoute::Ambient)
     .without_direct_aot(), // D-TIMEDEPTH1=A: civil-time constructors.
     CoreCallRecord::new(
         "core.time",
@@ -4310,13 +4508,13 @@ pub const CORE_CALLS: &[CoreCallRecord] = &[
 ];
 
 /// Build gate for the one Core-call registry. A row may use a typed adapter,
-/// but it cannot quietly disappear from one execution tier.
+/// but it cannot claim an interpreter tier without an executable route.
 const fn assert_core_call_coverage() {
     let mut index = 0;
     while index < CORE_CALLS.len() {
         assert!(
-            CORE_CALLS[index].coverage.is_complete(),
-            "Core-call registry row misses required execution-tier coverage"
+            CORE_CALLS[index].coverage.bits() & !CoreCallCoverage::KNOWN == 0,
+            "Core-call registry row declares unknown coverage bits"
         );
         if CORE_CALLS[index]
             .coverage
@@ -4325,6 +4523,14 @@ const fn assert_core_call_coverage() {
             assert!(
                 CORE_CALLS[index].interpreter_route.is_executable(),
                 "Core-call registry row declares interpreter coverage without an executable route"
+            );
+        }
+        if CORE_CALLS[index].interpreter_route.is_executable() {
+            assert!(
+                CORE_CALLS[index]
+                    .coverage
+                    .contains(CoreCallCoverage::INTERPRETER),
+                "Core-call registry row has an executable route without interpreter coverage"
             );
         }
         index += 1;

@@ -567,7 +567,11 @@ impl<'a> Checker<'a> {
             BinOp::Eq | BinOp::Ne => {
                 let has_comparable = ty.as_ref().is_some_and(|ty| match ty {
                     Type::Named(name) => {
-                        (self.type_implements_trait_for_name(name, crate::Syntax::TRAIT_COMPARABLE)
+                        Self::comparable_equality_hook(name)
+                            && (self.type_implements_trait_for_name(
+                                name,
+                                crate::Syntax::TRAIT_COMPARABLE,
+                            )
                             || self.type_param_has_bound(ty, crate::Syntax::TRAIT_COMPARABLE))
                             && (self.type_implements_trait_for_name(
                                 name,
@@ -594,6 +598,12 @@ impl<'a> Checker<'a> {
             }
             _ => false,
         })
+    }
+
+    fn comparable_equality_hook(type_name: &str) -> bool {
+        // D-TIME-ORDER1: ZonedDateTime equality includes zone identity, while
+        // its Comparable hook remains the exact-instant ordering operation.
+        Self::split_type_name(type_name).1 != "ZonedDateTime"
     }
 
     fn is_measurement_type(ty: &Type) -> bool {
@@ -979,8 +989,11 @@ impl<'a> Checker<'a> {
             self.unit_fact_for_type(&lt).is_some() || self.unit_fact_for_type(&rt).is_some();
         if lt == rt && !dimensional_multiplicative && !unit_operator {
             if let Type::Named(type_name) = &lt {
-                let comparable_hook = (self
-                    .type_implements_trait_for_name(type_name, crate::Syntax::TRAIT_COMPARABLE)
+                let comparable_hook = Self::comparable_equality_hook(type_name)
+                    && (self.type_implements_trait_for_name(
+                        type_name,
+                        crate::Syntax::TRAIT_COMPARABLE,
+                    )
                     || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_COMPARABLE))
                     && (self
                         .type_implements_trait_for_name(type_name, crate::Syntax::TRAIT_EQUATABLE)
@@ -1118,6 +1131,25 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
+            }
+        }
+
+        // D-TIMERES1=A: Duration scaling stays on the canonical nanosecond
+        // carrier. Handle it before the general quantity algebra, whose
+        // scalar path intentionally produces Float quantities.
+        {
+            let left_duration = matches!(
+                &lt,
+                Type::Named(name) if name == crate::Syntax::DURATION_TYPE
+            );
+            let right_duration = matches!(
+                &rt,
+                Type::Named(name) if name == crate::Syntax::DURATION_TYPE
+            );
+            let valid = (left_duration && rt == Type::Int)
+                || (right_duration && lt == Type::Int && op == BinOp::Mul);
+            if valid && matches!(op, BinOp::Mul | BinOp::Div) {
+                return Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()));
             }
         }
 

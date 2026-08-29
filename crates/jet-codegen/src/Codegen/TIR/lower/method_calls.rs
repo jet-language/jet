@@ -145,6 +145,7 @@ use crate::Codegen::TIR::wrap_foreign_undo;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TBuiltinOp;
 use crate::Codegen::TIR::TCallArg;
+use crate::Codegen::TIR::TClosureOp;
 use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TEnumArg;
 use crate::Codegen::TIR::TEnumPayload;
@@ -1463,6 +1464,7 @@ fn lower_method_call_impl(
                         | "split"
                         | "split_limit"
                         | "replace"
+                        | "replace_first"
                         | "replace_all"
                 )
             {
@@ -3258,6 +3260,11 @@ fn lower_method_call_impl(
     // emit makes no type decision (I3). The result type comes from the builtin's
     // sema return (`Collections::builtin_method_return`) for totality.
     if recv_type.is_none()
+        // Parenthesized/fallible String receivers retain their nominal sema
+        // name. They are still the same builtin String surface; keep `.len()`
+        // and its siblings on the shared Prelude path instead of Rust's byte
+        // length method.
+        || matches!(recv_type.as_deref(), Some("String"))
         || matches!(
             recv_type.as_deref(),
             Some("Set") | Some(crate::Syntax::TYPE_RANK)
@@ -3267,20 +3274,21 @@ fn lower_method_call_impl(
             resolve_builtin_op(receiver, method, method_span, args, resolved_ret, env, cx)
         {
             return in_own_frame(|| {
-                // D-MEM1 S6: a mutating builtin (`.push()` etc.) on a place rooted in
-                // a `Pool` index (`tree[root].children.push(child)`) needs the SAME
-                // genuine-mutable-place treatment `LValue::Field`/`LValue::Index`
-                // get above — the ordinary receiver lowering reads `pool[id]` as an
-                // owned CLONE (`jet_pool_get`), so mutating it would silently edit a
-                // throwaway copy instead of the real slot.
+                // D-MEM1 S6: a mutating builtin (`.push()` etc.) on an indexed
+                // place needs the same genuine-mutable-place treatment as
+                // `LValue::Field`/`LValue::Index`. The resolved op carries this
+                // fact even when the AST receiver type is an index or field, so
+                // the ordinary value-clone path cannot discard the mutation.
                 let recv_ast_ty = tir_recv_jet_ty(receiver, env);
                 let recv_mut_ty_hint = recv_ast_ty
                     .clone()
                     .or_else(|| pool_field_ty_hint(receiver, cx, env));
-                let recv_t = if crate::Collections::builtin_needs_mut_receiver(
-                    recv_mut_ty_hint.as_ref().unwrap_or(&Type::Int),
-                    method,
-                ) {
+                let recv_t = if op.needs_mut_receiver_place()
+                    || crate::Collections::builtin_needs_mut_receiver(
+                        recv_mut_ty_hint.as_ref().unwrap_or(&Type::Int),
+                        method,
+                    )
+                {
                     lower_expr_as_mut_place(receiver, cx, env)
                 } else {
                     lower_expr(receiver, cx, env)
@@ -4281,6 +4289,16 @@ fn lower_method_call_impl(
                 ("Date" | "LocalDate", "to_string" | "format") => Type::String,
                 ("LocalTime", "hour" | "minute" | "second") => Type::Int,
                 ("LocalTime", "to_string") => Type::String,
+                (
+                    "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant"
+                    | "ZonedDateTime",
+                    "equal",
+                ) => Type::Bool,
+                (
+                    "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant"
+                    | "ZonedDateTime",
+                    "compare",
+                ) => Type::Named(crate::Syntax::TYPE_ORDERING.to_string()),
                 ("DateTime", "hour")
                 | ("DateTime", "minute")
                 | ("DateTime", "second")
@@ -4327,6 +4345,27 @@ fn lower_method_call_impl(
                 },
             };
         });
+    }
+    // D-TIMEDEPTH1=A: Duration is represented as raw nanoseconds in TIR/JIT,
+    // so its comparison hook reuses the typed binary node. The node's Compare
+    // form emits the same Prelude Comparable symbol as the release hook, while
+    // evaluator and JIT already marshal Duration comparisons there.
+    if recv_type.as_deref() == Some(crate::Syntax::DURATION_TYPE)
+        && matches!(method, "equal" | "compare")
+        && args.len() == 1
+    {
+        let op = if method == "equal" {
+            crate::AST::BinOp::Eq
+        } else {
+            crate::AST::BinOp::Compare
+        };
+        let operator = Expr::Binary(
+            op,
+            Box::new(receiver.clone()),
+            Box::new(args[0].expr.clone()),
+            method_span,
+        );
+        return lower_expr(&operator, cx, env);
     }
     // D-APPROX1=A: a sketch method (gate shape d8).
     if is_sketch_type(recv_type.as_deref()) && is_sketch_method_name(recv_type.as_deref(), method) {
@@ -4868,7 +4907,6 @@ fn lower_method_call_impl(
         }
         if !skip_closure {
             return in_own_frame(|| {
-                let op = resolve_closure_op(&recv_ty, method, args, cx);
                 let result_ty = resolved_ret
                     .cloned()
                     .unwrap_or_else(|| builtin_result_ty(method, args.len(), Some(&recv_ty)));
@@ -4929,7 +4967,7 @@ fn lower_method_call_impl(
                 } else {
                     None
                 };
-                let targs = args
+                let targs: Vec<TExpr> = args
                     .iter()
                     .enumerate()
                     .map(|(index, a)| {
@@ -4948,7 +4986,7 @@ fn lower_method_call_impl(
                             return TExpr {
                                 ty: Type::Fn {
                                     params: params.clone(),
-                                    ret: None,
+                                    ret: tl.ret.clone().map(Box::new),
                                     effect_bound: None,
                                     return_view_provenance: None,
                                     param_contract: None,
@@ -4957,7 +4995,24 @@ fn lower_method_call_impl(
                                 kind: TExprKind::Lambda(Box::new(tl)),
                             };
                         }
-                        if method.starts_with("para_") {
+                        // A function parameter is already a checked Jet callable,
+                        // but collection helpers lend each item as `&T`. Adapt
+                        // that local callable to the helper's host-borrow shape,
+                        // just as the literal-lambda path does above.
+                        if method == "map"
+                            && matches!(&a.expr, Expr::Ident(_, _))
+                            && params.is_some()
+                        {
+                            let callable = lower_expr(&a.expr, cx, env);
+                            return TExpr {
+                                ty: callable.ty.clone(),
+                                kind: TExprKind::HostBorrowCallback {
+                                    callable: Box::new(callable),
+                                    params: params.cloned().unwrap_or_default(),
+                                },
+                            };
+                        }
+                        if method.starts_with("para_") && !(method == "para_map" && index != 0) {
                             if let Some(params) = params {
                                 let callable = lower_expr(&a.expr, cx, env);
                                 return TExpr {
@@ -4972,6 +5027,30 @@ fn lower_method_call_impl(
                         lower_expr(&a.expr, cx, env)
                     })
                     .collect();
+                let fallible_callback = targs.first().is_some_and(|arg| {
+                    matches!(
+                        &arg.ty,
+                        Type::Fn {
+                            ret: Some(ret), ..
+                        } if matches!(ret.as_ref(), Type::Result { .. })
+                    )
+                });
+                let op = resolve_closure_op(&recv_ty, method, args, cx, fallible_callback);
+                let lazy_or_view_receiver = matches!(
+                    &recv_ty,
+                    Type::Apply { name, .. }
+                        if name == crate::Syntax::TYPE_ITER
+                            || matches!(
+                                name.as_str(),
+                                "View" | "ViewMut" | "ComputeViewMut"
+                            )
+                );
+                if matches!(op, TClosureOp::Map | TClosureOp::MapMut) && !lazy_or_view_receiver {
+                    // The eager list helper owns a cloned receiver. Publish the
+                    // resulting generic `T: Clone` requirement with the TIR
+                    // function instead of letting rustc discover it downstream.
+                    env.note_clone(&recv_ty);
+                }
                 return TExpr {
                     ty: result_ty,
                     kind: TExprKind::ClosureMethod {
@@ -5032,10 +5111,10 @@ fn lower_method_call_impl(
         });
     }
 
-    // c109 Phase 12: a numeric predicate / bit-pop query
-    // (`is_nan`/`count_ones`/…). The gate proved `recv_type ==
-    // Some(<numeric name>)` + a covered nullary numeric op. Resolve the receiver
-    // operation HERE into a total `TNumericOp`, so emit makes no decision (I3).
+    // c109 Phase 12 / D-GO127-STDLIB1=A: numeric queries and exact-Int
+    // Euclidean methods. The gate proved `recv_type == Some(<numeric name>)`
+    // plus a covered operation. Resolve the operation HERE into a total
+    // `TNumericOp`, so emit makes no decision (I3).
     // The result type comes from
     // `numeric_method_return` (the sema table), keyed on the receiver type recovered
     // from `recv_type` (the total width source — `src = recv_type.or_else(rty.name())`
@@ -5068,7 +5147,8 @@ fn lower_method_call_impl(
                     });
                 }
             }
-            let resolved_op = resolve_numeric_op(method, numeric_name);
+            let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32;
+            let resolved_op = resolve_numeric_op(method, numeric_name, line);
             if let Some(op) = resolved_op {
                 return in_own_frame(|| {
                     let mut recv_t = lower_expr(receiver, cx, env);
@@ -5076,6 +5156,20 @@ fn lower_method_call_impl(
                     // fall back to Unit/Int and would silently widen bit queries.
                     recv_t.ty = recv_ty.clone();
                     let result_ty = builtin_result_ty(method, args.len(), Some(&recv_ty));
+                    if matches!(
+                        op,
+                        TNumericOp::EuclideanDiv { .. } | TNumericOp::EuclideanRem { .. }
+                    ) {
+                        let arg = lower_expr(&args[0].expr, cx, env);
+                        return TExpr {
+                            ty: result_ty,
+                            kind: TExprKind::NumericBinaryMethod {
+                                recv: Box::new(recv_t),
+                                op,
+                                arg: Box::new(arg),
+                            },
+                        };
+                    }
                     return TExpr {
                         ty: result_ty,
                         kind: TExprKind::NumericMethod {
@@ -5158,7 +5252,8 @@ fn lower_method_call_impl(
         {
             let known = matches!(
                 (handle.as_str(), method, args.len()),
-                ("Decimal", "add" | "sub" | "mul" | "equal", 1)
+                ("Decimal", "add" | "sub" | "mul" | "div" | "equal", 1)
+                    | ("Decimal", "round" | "floor" | "ceil", 0)
                     | ("Decimal", "to_string", 0)
                     | ("Fraction", "add" | "sub" | "mul" | "div" | "equal", 1)
                     | (
@@ -5174,6 +5269,7 @@ fn lower_method_call_impl(
                     value_args.extend(args.iter().map(|a| lower_expr(&a.expr, cx, env)));
                     let ty = match method {
                         "to_string" => Type::String,
+                        "div" => Type::Named(Syntax::TYPE_FRACTION.to_string()),
                         "numerator" | "denominator" => Type::Int,
                         "to_float" => Type::Float,
                         "is_zero" | "equal" => Type::Bool,
@@ -5879,6 +5975,39 @@ fn lower_method_call_impl(
                                 args: vec![],
                             },
                         };
+                    });
+                }
+            }
+            // D-BYTESDECODE1: UTF-8 decoding is a String static method, but
+            // its value argument is the builtin receiver so every engine uses
+            // the same Prelude-backed TIR operation.
+            if let ("String", method @ ("from_bytes" | "from_bytes_lossy"), Some(arg)) =
+                (type_name.as_str(), method, args.first())
+            {
+                if args.len() == 1 {
+                    let (op, ty) = if method == "from_bytes" {
+                        (
+                            TBuiltinOp::StringFromBytes,
+                            resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                                ok: Box::new(Type::String),
+                                err: Box::new(Type::Named(
+                                    crate::Syntax::TYPE_UTF8_ERROR.to_string(),
+                                )),
+                            }),
+                        )
+                    } else {
+                        (
+                            TBuiltinOp::StringFromBytesLossy,
+                            resolved_ret.cloned().unwrap_or(Type::String),
+                        )
+                    };
+                    return in_own_frame(|| TExpr {
+                        ty,
+                        kind: TExprKind::BuiltinMethod {
+                            recv: Box::new(lower_expr(&arg.expr, cx, env)),
+                            op,
+                            args: vec![],
+                        },
                     });
                 }
             }

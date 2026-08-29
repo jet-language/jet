@@ -21,6 +21,23 @@ use crate::Codegen::TIR::TStrPart;
 use crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER;
 use crate::AST::Type;
 
+/// A chain rooted at `#Todo` diverges before any adapter can run. Emit that
+/// carrier directly so Rust does not try to type-check collection wrappers
+/// around its never value.
+pub(crate) fn emit_tir_stopping_receiver(recv: &TExpr, cx: &Cx) -> Option<String> {
+    match &recv.kind {
+        TExprKind::Todo { .. } => Some(emit_tir_expr(recv, cx)),
+        TExprKind::BuiltinMethod { recv, .. } | TExprKind::ClosureMethod { recv, .. } => {
+            emit_tir_stopping_receiver(recv, cx)
+        }
+        TExprKind::StrLit(parts) => parts.iter().find_map(|part| match part {
+            TStrPart::Interp(expr, _) => emit_tir_stopping_receiver(expr, cx),
+            TStrPart::Lit(_) => None,
+        }),
+        _ => None,
+    }
+}
+
 /// The Rust pattern a `TPattern` spells. The position decides which of codegen's
 /// three pattern shapes applies; the pattern and its owning enum are the only
 /// other facts, both already resolved at lowering.
@@ -191,6 +208,9 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                 fmt.push_str(&escaped[1..escaped.len() - 1]);
             }
             TStrPart::Interp(e, format) => {
+                if let Some(stop) = emit_tir_stopping_receiver(e, cx) {
+                    return stop;
+                }
                 if matches!(e.ty, crate::AST::Type::Int) {
                     fmt.push_str("{}");
                     args.push(format!(

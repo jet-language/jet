@@ -1738,9 +1738,9 @@ pub fn jet_render_diagnostic_template(template: &str, holes: &[(&str, &str)]) ->
     out
 }
 
-/// Keep the first ordinary prose word in sentence case while preserving the
-/// case of a leading flag, identifier, ref, path, keyword, or code fragment.
-/// Runtime-built diagnostic facts use this same product rule as table rows.
+/// Capitalize the first ordinary prose word while preserving the case of a
+/// leading flag, identifier, ref, path, keyword, or code fragment. Runtime-
+/// built diagnostic facts use this same product rule as table rows.
 pub fn jet_sentence_case_line(input: &str) -> String {
     let Some((start, end)) = first_diagnostic_prose_token(input) else {
         return input.to_string();
@@ -1748,11 +1748,11 @@ pub fn jet_sentence_case_line(input: &str) -> String {
     let Some(first) = input[start..end].chars().next() else {
         return input.to_string();
     };
-    if !first.is_ascii_uppercase() {
+    if !first.is_ascii_lowercase() {
         return input.to_string();
     }
     let mut output = input.to_string();
-    output.replace_range(start..start + first.len_utf8(), &first.to_ascii_lowercase().to_string());
+    output.replace_range(start..start + first.len_utf8(), &first.to_ascii_uppercase().to_string());
     output
 }
 
@@ -1772,18 +1772,8 @@ fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {
             offset += ch.len_utf8();
             continue;
         }
-        if matches!(ch, '`' | '"' | '\'') {
-            let after = &rest[ch.len_utf8()..];
-            if let Some(close) = after.find(ch) {
-                offset += ch.len_utf8() + close + ch.len_utf8();
-                continue;
-            }
-        }
-        if ch == '{' {
-            if let Some(close) = rest.find('}') {
-                offset += close + 1;
-                continue;
-            }
+        if matches!(ch, '`' | '"' | '\'') || ch == '{' {
+            return None;
         }
         let start = offset;
         let mut end = 0;
@@ -1813,13 +1803,8 @@ fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {
         }
         let end = offset + end;
         let token = &input[start..end];
-        if token.is_empty() {
-            offset += ch.len_utf8();
-            continue;
-        }
-        offset = end;
-        if diagnostic_token_keeps_case(token) {
-            continue;
+        if token.is_empty() || diagnostic_token_keeps_case(token) {
+            return None;
         }
         return Some((start, end));
     }
@@ -1974,7 +1959,7 @@ pub fn jet_loop_stride_message() -> &'static str {
 // The evaluator keeps a larger Rust frame than generated Jet code. Keep the
 // shared limit below the smallest native worker stack so it can report the
 // stop before the host stack aborts.
-pub const JET_RUNTIME_STACK_LIMIT: usize = 6;
+pub const JET_RUNTIME_STACK_LIMIT: usize = 1024;
 
 /// Whether a runtime row carries the rich source context frame.
 pub fn jet_runtime_stop_has_context(code: &str) -> bool {
@@ -2136,24 +2121,24 @@ pub fn jet_render_runtime_sentry(
     };
     let (what, why, fix) = match code {
         "R0801" => (
-            format!("raw {operation} outside `{gate}`'s storage"),
-            format!("the pointer is outside allocation provenance tracked for `{gate}` ({detail})"),
-            format!("bound the raw {operation} before it reaches storage — obligation `{obligation}` was not met on this run"),
+            format!("Raw {operation} outside `{gate}`'s storage"),
+            format!("The pointer is outside allocation provenance tracked for `{gate}` ({detail})"),
+            format!("Bound the raw {operation} before it reaches storage — obligation `{obligation}` was not met on this run"),
         ),
         "R0802" => (
-            format!("use of freed storage in `{gate}`"),
-            format!("the allocation was quarantined and poisoned before this {operation} ({detail})"),
-            format!("do not use the pointer after release — obligation `{obligation}` was not met on this run"),
+            format!("Use of freed storage in `{gate}`"),
+            format!("The allocation was quarantined and poisoned before this {operation} ({detail})"),
+            format!("Do not use the pointer after release — obligation `{obligation}` was not met on this run"),
         ),
         "R0803" => (
-            format!("misaligned raw {operation} in `{gate}`"),
-            format!("the pointer alignment does not satisfy the allocation provenance ({detail})"),
-            format!("align the raw {operation} before access — obligation `{obligation}` was not met on this run"),
+            format!("Misaligned raw {operation} in `{gate}`"),
+            format!("The pointer alignment does not satisfy the allocation provenance ({detail})"),
+            format!("Align the raw {operation} before access — obligation `{obligation}` was not met on this run"),
         ),
         _ => (
-            format!("raw {operation} violated `{gate}`'s sentry"),
+            format!("Raw {operation} violated `{gate}`'s sentry"),
             detail.to_string(),
-            format!("satisfy obligation `{obligation}` before the raw access"),
+            format!("Satisfy obligation `{obligation}` before the raw access"),
         ),
     };
     let what = jet_sentence_case_line(&what);

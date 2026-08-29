@@ -1,0 +1,22 @@
+struct Snapshot {
+    left: Int
+    right: String
+}
+
+fn left(s: Snapshot) Int -> s.left
+fn text_len(s: Snapshot) Int -> s.right.len()
+fn combined(s: Snapshot) Int -> s.left + s.right.len()
+
+fn run() {
+    source := Snapshot{left: 41, right: "stable"}
+    frozen :: freeze(source)
+    task.group g {
+        results :: task.all {
+            left(frozen),
+            left(frozen),
+            text_len(frozen),
+            combined(frozen)
+        } ?? panic("task.all failed")
+        print(results[0], results[1], results[2], results[3])
+    }
+}

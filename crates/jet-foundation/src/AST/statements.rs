@@ -66,8 +66,16 @@ pub fn is_subjectless_guard(subject: &Expr, span: Span) -> bool {
 /// `Expr::NoElse` marker (an else-less all-pattern value dispatch)?
 pub fn noelse_terminated(e: &Expr) -> bool {
     let mut cur = e;
-    while let Expr::If { else_value, .. } = cur {
-        if matches!(else_value.as_ref(), Expr::NoElse(_)) {
+    while let Expr::If {
+        else_body,
+        else_value,
+        ..
+    } = cur
+    {
+        // A user-authored diverging `else -> { return ... }` also has a
+        // `NoElse` tail marker, but its body is still a real fallback. Only
+        // the parser's empty-body marker denotes an omitted `else`.
+        if else_body.is_empty() && matches!(else_value.as_ref(), Expr::NoElse(_)) {
             return true;
         }
         cur = else_value;

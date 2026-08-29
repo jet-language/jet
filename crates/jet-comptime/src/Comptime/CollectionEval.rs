@@ -82,6 +82,7 @@ mod collection_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/Values.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
     include!("../../../jet-codegen/src/Prelude/Memo.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/CollectionFailure.rs");
     include!("../../../jet-codegen/src/Prelude/Core/Collections.rs");
 
     pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
@@ -171,6 +172,14 @@ mod collection_semantics {
     pub(super) fn iter_skip<T: 'static>(values: Vec<T>, n: i64) -> Vec<T> {
         jet_iter_skip(jet_iter_from_vec(values), n).to_list()
     }
+
+    pub(super) fn sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
+        jet_sequence_argument_message(method, value)
+    }
+
+    pub(super) fn zip_row_count(lengths: &[usize], mode: u8) -> Option<usize> {
+        jet_zip_row_count(lengths, mode)
+    }
 }
 
 pub(super) fn iter_first<T: 'static>(values: Vec<T>) -> Option<T> {
@@ -179,6 +188,14 @@ pub(super) fn iter_first<T: 'static>(values: Vec<T>) -> Option<T> {
 
 pub(super) fn iter_skip<T: 'static>(values: Vec<T>, n: i64) -> Vec<T> {
     collection_semantics::iter_skip(values, n)
+}
+
+pub(super) fn sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
+    collection_semantics::sequence_argument_message(method, value)
+}
+
+pub(super) fn zip_row_count(lengths: &[usize], mode: u8) -> Option<usize> {
+    collection_semantics::zip_row_count(lengths, mode)
 }
 
 pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
@@ -560,10 +577,21 @@ pub fn apply_mutating(
                     | "write_u8"
                     | "write_u16_le"
                     | "write_u16_be"
+                    | "write_i8"
+                    | "write_i16_le"
+                    | "write_i16_be"
                     | "write_u32_le"
                     | "write_u32_be"
+                    | "write_i32_le"
+                    | "write_i32_be"
                     | "write_u64_le"
                     | "write_u64_be"
+                    | "write_i64_le"
+                    | "write_i64_be"
+                    | "write_f32_le"
+                    | "write_f32_be"
+                    | "write_f64_le"
+                    | "write_f64_be"
                     | "write_bytes"
             )
     );
@@ -1557,6 +1585,22 @@ fn byte_buffer_mutating(
             );
             CtValue::Unit
         }
+        "write_i8" => {
+            bytes.push(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i8 as u8);
+            CtValue::Unit
+        }
+        "write_i16_le" => {
+            bytes.extend_from_slice(
+                &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i16).to_le_bytes(),
+            );
+            CtValue::Unit
+        }
+        "write_i16_be" => {
+            bytes.extend_from_slice(
+                &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i16).to_be_bytes(),
+            );
+            CtValue::Unit
+        }
         "write_u32_le" => {
             bytes.extend_from_slice(
                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u32).to_le_bytes(),
@@ -1566,6 +1610,18 @@ fn byte_buffer_mutating(
         "write_u32_be" => {
             bytes.extend_from_slice(
                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u32).to_be_bytes(),
+            );
+            CtValue::Unit
+        }
+        "write_i32_le" => {
+            bytes.extend_from_slice(
+                &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i32).to_le_bytes(),
+            );
+            CtValue::Unit
+        }
+        "write_i32_be" => {
+            bytes.extend_from_slice(
+                &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i32).to_be_bytes(),
             );
             CtValue::Unit
         }
@@ -1579,6 +1635,42 @@ fn byte_buffer_mutating(
             bytes.extend_from_slice(
                 &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u64).to_be_bytes(),
             );
+            CtValue::Unit
+        }
+        "write_i64_le" => {
+            bytes.extend_from_slice(
+                &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i64).to_le_bytes(),
+            );
+            CtValue::Unit
+        }
+        "write_i64_be" => {
+            bytes.extend_from_slice(
+                &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as i64).to_be_bytes(),
+            );
+            CtValue::Unit
+        }
+        "write_f32_le" | "write_f32_be" => {
+            let Some(CtValue::Float(value)) = args.first() else {
+                return Err(unsupported("Bytes.write_f32 expects Float", span));
+            };
+            let bytes_value = value.as_f32();
+            if method == "write_f32_le" {
+                bytes.extend_from_slice(&bytes_value.to_le_bytes());
+            } else {
+                bytes.extend_from_slice(&bytes_value.to_be_bytes());
+            }
+            CtValue::Unit
+        }
+        "write_f64_le" | "write_f64_be" => {
+            let Some(CtValue::Float(value)) = args.first() else {
+                return Err(unsupported("Bytes.write_f64 expects Float", span));
+            };
+            let bytes_value = value.as_f64();
+            if method == "write_f64_le" {
+                bytes.extend_from_slice(&bytes_value.to_le_bytes());
+            } else {
+                bytes.extend_from_slice(&bytes_value.to_be_bytes());
+            }
             CtValue::Unit
         }
         "read_byte" | "next" => {

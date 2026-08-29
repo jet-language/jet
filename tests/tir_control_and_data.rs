@@ -205,7 +205,7 @@ fn assignment() Int -> {
     value = 1
 }
 "#;
-    let diagnostics = jet::compile_with_path(invalid, "tail_value_errors.jet")
+    let diagnostics = tir_support::compile_source("tail_value_errors.jet", invalid)
         .expect_err("unit-valued tails must be rejected in value blocks");
     let missing_values: Vec<_> = diagnostics.iter().filter(|d| d.code == "E0114").collect();
     assert_eq!(missing_values.len(), 3, "diagnostics: {diagnostics:?}");
@@ -223,7 +223,7 @@ fn label(value: Int) String -> {
     return "other" // Keep the tail comment.
 }
 "#;
-    let output = jet::compile_with_path(lintable, "redundant_tail_return.jet")
+    let output = tir_support::compile_source("redundant_tail_return.jet", lintable)
         .expect("the old arm-table spelling should still compile");
     let lint = output
         .lints
@@ -263,9 +263,9 @@ fn label(value: Int) String -> {
     return "other";
 }
 "#;
-    let semicolon_output = jet::compile_with_path(
-        semicolon_lintable,
+    let semicolon_output = tir_support::compile_source(
         "redundant_tail_return_semicolons.jet",
+        semicolon_lintable,
     )
     .expect("semicolon-terminated direct returns should still be lintable");
     let semicolon_lint = semicolon_output
@@ -280,7 +280,7 @@ fn label(value: Int) String -> {
     .expect("the semicolon-shaped L0513 edit must apply");
     assert!(!semicolon_fixed.contains("return"), "fixed source:\n{semicolon_fixed}");
     assert!(!semicolon_fixed.contains(';'), "fixed source:\n{semicolon_fixed}");
-    jet::compile_with_path(&semicolon_fixed, "redundant_tail_return_semicolons_fixed.jet")
+    tir_support::compile_source("redundant_tail_return_semicolons_fixed.jet", &semicolon_fixed)
         .expect("the generated value table must compile after semicolon removal");
 
     let effectful = r#"
@@ -291,7 +291,7 @@ fn label(value: Int) String -> {
     return "other"
 }
 "#;
-    let effectful_output = jet::compile_with_path(effectful, "effectful_tail_return.jet")
+    let effectful_output = tir_support::compile_source("effectful_tail_return.jet", effectful)
         .expect("effectful arm-table source should compile");
     assert!(!effectful_output
         .lints
@@ -347,7 +347,7 @@ fn run() {}
 "#,
         ),
     ] {
-        let diagnostics = jet::compile_with_path(source, name).expect_err(name);
+        let diagnostics = tir_support::compile_source(name, source).expect_err(name);
         let diagnostic = diagnostics
             .iter()
             .find(|diagnostic| diagnostic.code == "E0114")
@@ -410,7 +410,7 @@ fn unit_loop() () {
 
 fn run() {}
 "#;
-    jet::compile_with_path(valid, "tail_divergence_valid.jet")
+    tir_support::compile_source("tail_divergence_valid.jet", valid)
         .expect("diverging and unreachable tails should compile");
 
     let finite = r#"
@@ -421,7 +421,7 @@ fn finite() Int -> {
 }
 fn run() {}
 "#;
-    let diagnostics = jet::compile_with_path(finite, "tail_divergence_finite.jet")
+    let diagnostics = tir_support::compile_source("tail_divergence_finite.jet", finite)
         .expect_err("a reachable loop break leaves a unit tail");
     let diagnostic = diagnostics
         .iter()
@@ -511,9 +511,14 @@ fn run() {
 #[test]
 fn typed_error_union_widening_runs_on_jit_and_interpreter() {
     let src = r#"
-fn narrow() Int !String -> Err("narrow")
+#Error
+enum NarrowError { Narrow }
+#Error
+enum OtherError { Other }
 
-fn widen() Int !(String | Bool) -> narrow()
+fn narrow() Int !NarrowError -> Err(NarrowError.Narrow)
+
+fn widen() Int !(NarrowError | OtherError) -> narrow()
 
 fn run() {
     print(widen() ?? 7)

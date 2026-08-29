@@ -37,7 +37,7 @@ pub(crate) fn jet_runtime_stop_report(
 /// in the shared Prelude so AOT, JIT, and the interpreter use one boundary.
 pub(crate) const JET_C_INT_RANGE_CODE: &str = "E1003";
 pub(crate) const JET_C_INT_RANGE_MESSAGE: &str =
-    "a default Int value does not fit in the C i64 range";
+    "A default Int value does not fit in the C i64 range";
 
 pub(crate) fn jet_c_int_range_message() -> &'static str {
     JET_C_INT_RANGE_MESSAGE
@@ -81,23 +81,23 @@ pub(crate) fn jet_contract_report(
 // boundary. The code and wording do not live in a host adapter.
 pub(crate) const JET_ARITHMETIC_CODE: &str = "E3010";
 pub(crate) const JET_ARITHMETIC_ADD_OVERFLOW: &str =
-    "this addition overflows the value's type (the result is outside its range)";
+    "This addition overflows the value's type (the result is outside its range)";
 pub(crate) const JET_ARITHMETIC_SUB_OVERFLOW: &str =
-    "this subtraction overflows the value's type (the result is outside its range)";
+    "This subtraction overflows the value's type (the result is outside its range)";
 pub(crate) const JET_ARITHMETIC_MUL_OVERFLOW: &str =
-    "this multiplication overflows the value's type (the result is outside its range)";
-pub(crate) const JET_ARITHMETIC_DIVIDE_ZERO: &str = "divided by zero";
+    "This multiplication overflows the value's type (the result is outside its range)";
+pub(crate) const JET_ARITHMETIC_DIVIDE_ZERO: &str = "Divided by zero";
 pub(crate) const JET_ARITHMETIC_DIVISION_ERROR: &str =
-    "this division can't be done (dividing by zero, or overflow)";
+    "This division can't be done (dividing by zero, or overflow)";
 pub(crate) const JET_ARITHMETIC_DIVIDE_OVERFLOW: &str =
-    "this division overflows the value's type (the result is outside its range)";
+    "This division overflows the value's type (the result is outside its range)";
 pub(crate) const JET_ARITHMETIC_POWER_NEGATIVE: &str =
-    "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)";
+    "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)";
 pub(crate) const JET_ARITHMETIC_POWER_OVERFLOW: &str =
-    "this power overflows the value's type (the result is outside its range)";
-pub(crate) const JET_ARITHMETIC_ROTATE_NEGATIVE: &str = "a rotation count cannot be negative";
+    "This power overflows the value's type (the result is outside its range)";
+pub(crate) const JET_ARITHMETIC_ROTATE_NEGATIVE: &str = "A rotation count cannot be negative";
 pub(crate) const JET_ARITHMETIC_REMAINDER_OVERFLOW: &str =
-    "attempt to calculate the remainder with overflow";
+    "Attempt to calculate the remainder with overflow";
 
 pub(crate) fn jet_arithmetic_message(kind: &str) -> &'static str {
     match kind {
@@ -111,7 +111,7 @@ pub(crate) fn jet_arithmetic_message(kind: &str) -> &'static str {
         "pow" => JET_ARITHMETIC_POWER_OVERFLOW,
         "rotate_negative" => JET_ARITHMETIC_ROTATE_NEGATIVE,
         "remainder" => JET_ARITHMETIC_REMAINDER_OVERFLOW,
-        _ => "this operation overflows the value's type (the result is outside its range)",
+        _ => "This operation overflows the value's type (the result is outside its range)",
     }
 }
 
@@ -124,6 +124,6 @@ pub(crate) fn jet_arithmetic_shift_message(
         return None;
     }
     Some(format!(
-        "shifting {direction} by {count} bits is out of range (this type is {bits} bits wide)"
+        "Shifting {direction} by {count} bits is out of range (this type is {bits} bits wide)"
     ))
 }

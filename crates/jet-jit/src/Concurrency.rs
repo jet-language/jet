@@ -7,7 +7,8 @@ use jet_codegen::scheduler::{
     jet_scheduler_propagate_deadline, jet_scheduler_race, jet_scheduler_select_int_channels_tagged,
     jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
     jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
-    jet_scheduler_spawn_blocking_with_control, jet_scheduler_task_completion_register,
+    jet_scheduler_spawn_blocking_with_control_at,
+    jet_scheduler_task_completion_register,
     jet_scheduler_task_group_wait, jet_scheduler_try_select_int_channels_tagged,
     jet_scheduler_wait_without_unwind, jet_scheduler_yield_now, jet_std_time_duration_to_millis,
     jet_task_delay_ms_defaulted, jet_task_interval_ms_defaulted, jet_task_join_deadline_check,
@@ -887,6 +888,13 @@ fn spawn_with_runtime<F>(f: F) -> i64
 where
     F: FnOnce() -> i64 + Send + 'static,
 {
+    spawn_with_runtime_at(0, f)
+}
+
+fn spawn_with_runtime_at<F>(spawn_site: usize, f: F) -> i64
+where
+    F: FnOnce() -> i64 + Send + 'static,
+{
     let Some(rt_ptr) = active_runtime_ptr() else {
         host_fault("jit spawn without active runtime");
         return 0;
@@ -903,7 +911,8 @@ where
     let start_gate = ParkSlot::new();
     let worker_start = start_gate.clone();
     let permit = take_pending_task_group_permit();
-    let join = jet_scheduler_spawn_blocking_with_control(
+    let join = jet_scheduler_spawn_blocking_with_control_at(
+        spawn_site,
         move || {
             worker_start.park(None);
             let _task_scope = enter_jit_task();
@@ -972,24 +981,24 @@ fn jet_jit_shield_leave() -> i64 {
     i64::from(!matches!(exit, JetShieldExit::None))
 }
 
-fn jet_jit_spawn0(f: SpawnFn0) -> i64 {
-    spawn_with_runtime(move || f())
+fn jet_jit_spawn0(spawn_site: i64, f: SpawnFn0) -> i64 {
+    spawn_with_runtime_at(spawn_site as usize, move || f())
 }
 
-fn jet_jit_spawn1(f: SpawnFn1, c0: i64) -> i64 {
-    spawn_with_runtime(move || f(c0))
+fn jet_jit_spawn1(spawn_site: i64, f: SpawnFn1, c0: i64) -> i64 {
+    spawn_with_runtime_at(spawn_site as usize, move || f(c0))
 }
 
-fn jet_jit_spawn2(f: SpawnFn2, c0: i64, c1: i64) -> i64 {
-    spawn_with_runtime(move || f(c0, c1))
+fn jet_jit_spawn2(spawn_site: i64, f: SpawnFn2, c0: i64, c1: i64) -> i64 {
+    spawn_with_runtime_at(spawn_site as usize, move || f(c0, c1))
 }
 
-fn jet_jit_spawn3(f: SpawnFn3, c0: i64, c1: i64, c2: i64) -> i64 {
-    spawn_with_runtime(move || f(c0, c1, c2))
+fn jet_jit_spawn3(spawn_site: i64, f: SpawnFn3, c0: i64, c1: i64, c2: i64) -> i64 {
+    spawn_with_runtime_at(spawn_site as usize, move || f(c0, c1, c2))
 }
 
-fn jet_jit_spawn4(f: SpawnFn4, c0: i64, c1: i64, c2: i64, c3: i64) -> i64 {
-    spawn_with_runtime(move || f(c0, c1, c2, c3))
+fn jet_jit_spawn4(spawn_site: i64, f: SpawnFn4, c0: i64, c1: i64, c2: i64, c3: i64) -> i64 {
+    spawn_with_runtime_at(spawn_site as usize, move || f(c0, c1, c2, c3))
 }
 
 fn jet_jit_task_group_new(limit: i64, bounded: i64) -> i64 {
@@ -1355,7 +1364,8 @@ fn jet_jit_after_value(duration_ns: i64, value: i64) -> i64 {
     let delay = jet_task_delay_ms_defaulted(jet_std_time_duration_to_millis(duration_ns));
     let inherited_deadline = jet_ctx_deadline_ms();
     let control = JetTaskControl::new();
-    let _join = jet_scheduler_spawn_blocking_with_control(
+    let _join = jet_scheduler_spawn_blocking_with_control_at(
+        0,
         move || {
             let _deadline = inherited_deadline.map(jet_ctx_push_deadline);
             let _ = wait_status(|| {
@@ -1443,6 +1453,7 @@ host_fns! {
         sig_send.returns.push(AbiParam::new(types::I64));
         sig_send.params.push(AbiParam::new(types::I64));
         let mut sig_spawn0 = Signature::new(cc);
+        sig_spawn0.params.push(AbiParam::new(types::I64));
         sig_spawn0.params.push(AbiParam::new(types::I64));
         sig_spawn0.returns.push(AbiParam::new(types::I64));
         let mut sig_void_i64 = Signature::new(cc);
@@ -1545,7 +1556,8 @@ mod tests {
         let release = std::sync::Arc::new(AtomicBool::new(false));
         let release_for_child = release.clone();
         let control = JetTaskControl::new();
-        let child = jet_scheduler_spawn_blocking_with_control(
+        let child = jet_scheduler_spawn_blocking_with_control_at(
+            0,
             move || {
                 let _outer_permit = outer_permit;
                 ACTIVE_RUNTIME.with(|slot| {
@@ -1566,7 +1578,11 @@ mod tests {
                     );
                     let nested_control = JetTaskControl::new();
                     let nested_join =
-                        jet_scheduler_spawn_blocking_with_control(|| 0, nested_control.clone());
+                        jet_scheduler_spawn_blocking_with_control_at(
+                            0,
+                            || 0,
+                            nested_control.clone(),
+                        );
                     let nested = with_runtime_mut(|rt| {
                         let id = rt.tasks.len() as i64;
                         rt.tasks.push(Some(nested_join));

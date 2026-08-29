@@ -111,7 +111,7 @@ pub fn core_usage_layer(usage: &str) -> Option<RuntimeLayer> {
         return Some(match rest {
             "json" => RuntimeLayer::Alloc,
             "bytes" => RuntimeLayer::Alloc,
-            "from_bytes" => RuntimeLayer::Core,
+            "from_bytes" | "from_bytes_lossy" => RuntimeLayer::Core,
             "elapsed_millis" => RuntimeLayer::Std,
             _ => RuntimeLayer::Std,
         });

@@ -1144,6 +1144,17 @@ fn web_wasm_expr_supported(
                 | TIR::TNumericOp::CheckedIntToFixed { .. }
                 | TIR::TNumericOp::InlineRange { .. },
         } => web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions),
+        TIR::TExprKind::NumericBinaryMethod {
+            recv,
+            arg,
+            op: TIR::TNumericOp::EuclideanDiv { .. }
+                | TIR::TNumericOp::EuclideanRem { .. },
+        } => {
+            matches!(&recv.ty, Type::Int)
+                && matches!(&arg.ty, Type::Int)
+                && web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(arg, bundle, file_prefix, reconstructions)
+        }
         TIR::TExprKind::BuiltinMethod {
             recv,
             op: TIR::TBuiltinOp::LenList,
@@ -1633,6 +1644,7 @@ fn web_js_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
         TIR::THandleOp::DurationIsZero | TIR::THandleOp::DurationTotalSeconds => argc == 0,
         TIR::THandleOp::DurationDifference => argc == 1,
         TIR::THandleOp::DurationSecondsValue => argc == 0,
+        TIR::THandleOp::DurationScale | TIR::THandleOp::DurationDivide => argc == 1,
         TIR::THandleOp::CivilTimeMethod { kind, method } => {
             kind == "Instant"
                 && argc == 0
@@ -1673,6 +1685,7 @@ fn web_wasm_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
         TIR::THandleOp::DurationIsZero | TIR::THandleOp::DurationTotalSeconds => argc == 0,
         TIR::THandleOp::DurationDifference => argc == 1,
         TIR::THandleOp::DurationSecondsValue => argc == 0,
+        TIR::THandleOp::DurationScale | TIR::THandleOp::DurationDivide => argc == 1,
         TIR::THandleOp::CivilTimeMethod { kind, method } => {
             kind == "Instant"
                 && argc == 0
@@ -1984,7 +1997,11 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::ClosureMethod { recv, op, args } => {
             matches!(
                 op,
-                TIR::TClosureOp::Map | TIR::TClosureOp::MapMut | TIR::TClosureOp::Filter
+                TIR::TClosureOp::Map
+                    | TIR::TClosureOp::MapMut
+                    | TIR::TClosureOp::TryMap
+                    | TIR::TClosureOp::Filter
+                    | TIR::TClosureOp::TryFilter
             ) && web_expr_supported(recv)
                 && args.iter().all(web_expr_supported)
         }
@@ -2062,6 +2079,17 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
                 | TIR::TNumericOp::FloatToInt { .. }
                 | TIR::TNumericOp::InlineRange { .. },
         } => web_expr_supported(recv),
+        E::NumericBinaryMethod {
+            recv,
+            arg,
+            op: TIR::TNumericOp::EuclideanDiv { .. }
+                | TIR::TNumericOp::EuclideanRem { .. },
+        } => {
+            matches!(&recv.ty, Type::Int)
+                && matches!(&arg.ty, Type::Int)
+                && web_expr_supported(recv)
+                && web_expr_supported(arg)
+        }
         E::OrFallback {
             value,
             fallback: TIR::TOrFallback::Value(fallback),
@@ -3672,7 +3700,9 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
     }
     out.push_str(
         "trait __jet_Display { fn display(&self) -> String; }\n\
-         trait JetDisplay { fn jet_display(&self) -> String; }\n\n",
+         trait __jet_Debug { fn debug(&self) -> String; }\n\
+         trait JetDisplay { fn jet_display(&self) -> String; }\n\
+         trait JetDebug { fn jet_debug(&self) -> String; }\n\n",
     );
     out.push_str(WASM_ARITH_PRELUDE);
     let authority_funcs = wasm_funcs
@@ -6539,6 +6569,20 @@ fn wasm_emit_expr(
                 TIR::THandleOp::DurationSecondsValue => {
                     format!("({recv}) as f64 / 1000000000.0")
                 }
+                TIR::THandleOp::DurationScale | TIR::THandleOp::DurationDivide => {
+                    let factor = wasm_emit_expr(
+                        args.first().ok_or(())?,
+                        funcs,
+                        file_prefix,
+                        reconstructions,
+                    )?;
+                    let helper = match op {
+                        TIR::THandleOp::DurationScale => "jet_web_duration_scale",
+                        TIR::THandleOp::DurationDivide => "jet_web_duration_divide",
+                        _ => unreachable!(),
+                    };
+                    format!("{helper}({recv}, {factor})")
+                }
                 TIR::THandleOp::CivilTimeMethod { kind, method }
                     if kind == "Instant" && method == "elapsed_millis" => {
                         format!("jet_time_monotonic_now_ns().saturating_sub({recv}).saturating_div(1000000)")
@@ -7163,6 +7207,20 @@ fn wasm_emit_expr(
                 format!("(({value}) as {dst_rust})")
             }
         },
+        TIR::TExprKind::NumericBinaryMethod { recv, arg, op } => {
+            let left = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
+            let right = wasm_emit_expr(arg, funcs, file_prefix, reconstructions)?;
+            let file = mangle_generated("source_file");
+            match op {
+                TIR::TNumericOp::EuclideanDiv { line } => {
+                    format!("jet_wasm_int_div_euclid({left}, {right}, {file}, {line})")
+                }
+                TIR::TNumericOp::EuclideanRem { line } => {
+                    format!("jet_wasm_int_rem_euclid({left}, {right}, {file}, {line})")
+                }
+                _ => return Err(()),
+            }
+        }
         TIR::TExprKind::NumericMethod {
             recv,
             op: TIR::TNumericOp::CheckedIntToFixed {
@@ -7175,7 +7233,7 @@ fn wasm_emit_expr(
             let input = wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?;
             let (lo, hi) = js_host_int_bounds(*host_kind).ok_or(())?;
             let file = mangle_generated("source_file");
-            let error = format!("value doesn't fit in {dst_spelling}");
+            let error = format!("Value doesn't fit in {dst_spelling}");
             format!(
                 "{{ let value = ({input}); if value >= JetWasmInt::from_decimal({lo:?}).expect(\"valid fixed-width lower bound\") && value <= JetWasmInt::from_decimal({hi:?}).expect(\"valid fixed-width upper bound\") {{ value.to_string().parse::<{dst_rust}>().expect(\"checked fixed-width conversion\") }} else {{ jet_arithmetic_stop({file}, {line}, &{error:?}.to_string()) }} }}"
             )
@@ -9562,7 +9620,9 @@ fn tir_js_expr(
         E::ClosureMethod { recv, op, args } => {
             let kernel = match op {
                 TIR::TClosureOp::Map | TIR::TClosureOp::MapMut => "jet_list_map",
+                TIR::TClosureOp::TryMap => "jet_list_try_map",
                 TIR::TClosureOp::Filter => "jet_list_filter",
+                TIR::TClosureOp::TryFilter => "jet_list_try_filter",
                 _ => return Err(()),
             };
             let args = args
@@ -9743,6 +9803,15 @@ fn tir_js_expr(
                 TIR::THandleOp::DurationSecondsValue => {
                     format!("Number({recv}) / 1000000000")
                 }
+                TIR::THandleOp::DurationScale | TIR::THandleOp::DurationDivide => {
+                    let factor = a.first().ok_or(())?;
+                    let helper = match op {
+                        TIR::THandleOp::DurationScale => "jet_duration_scale",
+                        TIR::THandleOp::DurationDivide => "jet_duration_divide",
+                        _ => unreachable!(),
+                    };
+                    format!("{helper}({recv}, {factor})")
+                }
                 TIR::THandleOp::CivilTimeMethod { kind, method }
                     if kind == "Instant" && method == "elapsed_millis" =>
                 {
@@ -9766,10 +9835,18 @@ fn tir_js_expr(
             TIR::TNumericOp::CastAs { dst_rust }
                 if dst_rust.contains("i") || dst_rust.contains("u") =>
             {
-                format!(
-                    "BigInt(Math.trunc(Number({})))",
-                    tir_js_expr(recv, funcs, file_prefix)?
-                )
+                let value = tir_js_expr(recv, funcs, file_prefix)?;
+                if matches!(
+                    recv.ty.without_user_tags(),
+                    Type::IntN { signed: false, .. }
+                ) {
+                    // U64 values are already exact JS BigInts. Passing one
+                    // through Number loses the high bits before Int.from_u64
+                    // can preserve them.
+                    format!("BigInt({value})")
+                } else {
+                    format!("BigInt(Math.trunc(Number({value})))")
+                }
             }
             // Float cast leaves BigInt land.
             TIR::TNumericOp::CastAs { .. } => {
@@ -9786,7 +9863,7 @@ fn tir_js_expr(
                 let file = mangle_generated("source_file");
                 format!(
                     "(() => {{ const value = BigInt({input}); return value >= {lo}n && value <= {hi}n ? value : jet_runtime_stop(\"E3010\", {file}, {line}, {msg}); }})()",
-                    msg = json_quote(&format!("value doesn't fit in {dst_spelling}")),
+                    msg = json_quote(&format!("Value doesn't fit in {dst_spelling}")),
                 )
             }
             TIR::TNumericOp::FloatToInt {
@@ -9809,6 +9886,20 @@ fn tir_js_expr(
             }
             _ => return Err(()),
         },
+        E::NumericBinaryMethod { recv, arg, op } => {
+            let left = tir_js_expr(recv, funcs, file_prefix)?;
+            let right = tir_js_expr(arg, funcs, file_prefix)?;
+            let file = mangle_generated("source_file");
+            match op {
+                TIR::TNumericOp::EuclideanDiv { line } => {
+                    format!("jet_div_euclid_int({left}, {right}, {file}, {line})")
+                }
+                TIR::TNumericOp::EuclideanRem { line } => {
+                    format!("jet_rem_euclid_int({left}, {right}, {file}, {line})")
+                }
+                _ => return Err(()),
+            }
+        }
         E::OrFallback {
             value,
             fallback: TIR::TOrFallback::Value(fallback),
@@ -10721,6 +10812,12 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "fn jet_web_duration_from_float(value: f64, scale: i64) -> Result<i64, JetRangeError> {\n",
     "    jet_duration_kernel_from_float(value, scale).ok_or_else(|| JetRangeError { reason: jet_duration_kernel_float_error_reason().to_string() })\n",
     "}\n\n",
+    "fn jet_web_duration_scale(value: i64, factor: i64) -> i64 {\n",
+    "    jet_duration_kernel_scale(value, factor).unwrap_or_else(|| panic!(\"{}\", jet_duration_kernel_scale_error_reason()))\n",
+    "}\n\n",
+    "fn jet_web_duration_divide(value: i64, factor: i64) -> i64 {\n",
+    "    jet_duration_kernel_divide(value, factor).unwrap_or_else(|| panic!(\"{}\", jet_duration_kernel_scale_error_reason()))\n",
+    "}\n\n",
     include_str!("../Prelude/Core/Contracts.rs"),
     "\n",
     "fn jet_todo_stop(file: &str, line: u32, expected_type: &str) -> ! {\n",
@@ -10841,10 +10938,10 @@ const JS_POWER_PRELUDE: &str = concat!(
     "function jet_pow_i64(base, exponent, file, line) {\n",
     "  const e = BigInt(exponent);\n",
     "  if (e < 0n) {\n",
-    "    jet_runtime_stop(\"E3010\", file, line, \"a negative exponent has no whole-number result ",
+    "    jet_runtime_stop(\"E3010\", file, line, \"A negative exponent has no whole-number result ",
     "(make the base a Float to raise it to a negative power)\");\n",
     "  }\n",
-    "  const overflow = \"this power overflows the value's type ",
+    "  const overflow = \"This power overflows the value's type ",
     "(the result is outside its range)\";\n",
     "  const b = BigInt(base);\n",
     "  if (b !== 0n && b !== 1n && b !== -1n && e > 63n) {\n",
@@ -10856,7 +10953,7 @@ const JS_POWER_PRELUDE: &str = concat!(
     // negative-exponent trap, but let the JS BigInt carrier retain every bit.
     "function jet_pow_int(base, exponent, file, line) {\n",
     "  const e = BigInt(exponent);\n",
-    "  if (e < 0n) jet_runtime_stop(\"E3010\", file, line, \"a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)\");\n",
+    "  if (e < 0n) jet_runtime_stop(\"E3010\", file, line, \"A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)\");\n",
     "  return BigInt(base) ** e;\n",
     "}\n\n",
     // D-BITNOT1=A: `!` on a whole number turns over every one of its 64 bits.
@@ -10874,24 +10971,40 @@ const JS_POWER_PRELUDE: &str = concat!(
     "function jet_floordiv_i64(left, right, file, line) {\n",
     "  const a = BigInt(left);\n",
     "  const b = BigInt(right);\n",
-    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"Divided by zero\");\n",
     "  let quotient = a / b;\n",
     "  if (a % b !== 0n && (a < 0n) !== (b < 0n)) quotient -= 1n;\n",
-    "  return jet_i64(quotient, \"this division overflows the value's type ",
+    "  return jet_i64(quotient, \"This division overflows the value's type ",
     "(the result is outside its range)\", file, line);\n",
     "}\n\n",
     "function jet_floordiv_int(left, right, file, line) {\n",
     "  const a = BigInt(left);\n",
     "  const b = BigInt(right);\n",
-    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"Divided by zero\");\n",
     "  let quotient = a / b;\n",
     "  if (a % b !== 0n && (a < 0n) !== (b < 0n)) quotient -= 1n;\n",
     "  return quotient;\n",
     "}\n\n",
     "function jet_div_int(left, right, file, line) {\n",
     "  const b = BigInt(right);\n",
-    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"Divided by zero\");\n",
     "  return BigInt(left) / b;\n",
+    "}\n\n",
+    "function jet_div_euclid_int(left, right, file, line) {\n",
+    "  const a = BigInt(left);\n",
+    "  const b = BigInt(right);\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"Divided by zero\");\n",
+    "  let quotient = a / b;\n",
+    "  if (a % b < 0n) quotient += b < 0n ? 1n : -1n;\n",
+    "  return quotient;\n",
+    "}\n\n",
+    "function jet_rem_euclid_int(left, right, file, line) {\n",
+    "  const a = BigInt(left);\n",
+    "  const b = BigInt(right);\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"Divided by zero\");\n",
+    "  let remainder = a % b;\n",
+    "  if (remainder < 0n) remainder += b < 0n ? -b : b;\n",
+    "  return remainder;\n",
     "}\n\n",
     // Floats round down with no trap: a zero divisor gives an infinity, exactly
     // as `/` does.
@@ -10904,7 +11017,7 @@ const JS_POWER_PRELUDE: &str = concat!(
     "function jet_mod_i64(left, right, file, line) {\n",
     "  const a = BigInt(left);\n",
     "  const b = BigInt(right);\n",
-    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"Divided by zero\");\n",
     "  let remainder = a % b;\n",
     "  if (remainder !== 0n && (remainder < 0n) !== (b < 0n)) remainder += b;\n",
     "  return BigInt.asIntN(64, remainder);\n",
@@ -10912,7 +11025,7 @@ const JS_POWER_PRELUDE: &str = concat!(
     "function jet_mod_int(left, right, file, line) {\n",
     "  const a = BigInt(left);\n",
     "  const b = BigInt(right);\n",
-    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"Divided by zero\");\n",
     "  let remainder = a % b;\n",
     "  if (remainder !== 0n && (remainder < 0n) !== (b < 0n)) remainder += b;\n",
     "  return remainder;\n",
@@ -10921,17 +11034,17 @@ const JS_POWER_PRELUDE: &str = concat!(
     // `%` already gives — this adds the zero-divisor trap and the 64-bit range.
     "function jet_trunc_rem_i64(left, right, file, line) {\n",
     "  const b = BigInt(right);\n",
-    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"Divided by zero\");\n",
     "  return BigInt.asIntN(64, BigInt(left) % b);\n",
     "}\n\n",
     "function jet_trunc_rem_int(left, right, file, line) {\n",
     "  const b = BigInt(right);\n",
-    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"divided by zero\");\n",
+    "  if (b === 0n) jet_runtime_stop(\"E3010\", file, line, \"Divided by zero\");\n",
     "  return BigInt(left) % b;\n",
     "}\n\n",
     "function jet_shift_int(left, right, file, line, left_shift) {\n",
     "  const count = BigInt(right);\n",
-    "  if (count < 0n) jet_runtime_stop(\"E3010\", file, line, \"invalid shift count\");\n",
+    "  if (count < 0n) jet_runtime_stop(\"E3010\", file, line, \"Invalid shift count\");\n",
     "  return left_shift ? (BigInt(left) << count) : (BigInt(left) >> count);\n",
     "}\n\n",
 );

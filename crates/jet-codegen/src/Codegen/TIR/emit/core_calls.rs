@@ -878,27 +878,6 @@ pub(crate) fn emit_tir_core_call(
                 arg(0),
                 arg(1)
             )),
-            // D-INTBIG1: exact Int has no finite width, so its former
-            // wrapping aliases were removed. Keep the public core.math
-            // spelling as exact arithmetic during migration.
-            "wrapping_add" => Some(format!(
-                "{}jet_std::jet_int_add({}, {})",
-                cx.root_prefix,
-                arg(0),
-                arg(1)
-            )),
-            "wrapping_sub" => Some(format!(
-                "{}jet_std::jet_int_sub({}, {})",
-                cx.root_prefix,
-                arg(0),
-                arg(1)
-            )),
-            "wrapping_mul" => Some(format!(
-                "{}jet_std::jet_int_mul({}, {})",
-                cx.root_prefix,
-                arg(0),
-                arg(1)
-            )),
             "checked_div" | "checked_rem" => Some(format!(
                 "{}jet_std::jet_int_{}({}, {}, \"core.math\", 0)",
                 cx.root_prefix,
@@ -1501,9 +1480,6 @@ pub(crate) fn emit_tir_core_call(
         ("core.math", "saturating_add") => format!("({}).saturating_add({})", arg(0), arg(1)),
         ("core.math", "saturating_sub") => format!("({}).saturating_sub({})", arg(0), arg(1)),
         ("core.math", "saturating_mul") => format!("({}).saturating_mul({})", arg(0), arg(1)),
-        ("core.math", "wrapping_add") => format!("({}).wrapping_add({})", arg(0), arg(1)),
-        ("core.math", "wrapping_sub") => format!("({}).wrapping_sub({})", arg(0), arg(1)),
-        ("core.math", "wrapping_mul") => format!("({}).wrapping_mul({})", arg(0), arg(1)),
         
         
         

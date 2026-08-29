@@ -185,6 +185,7 @@ pub fn is_iter_terminal(method: &str) -> bool {
             | "position"
             | "group_by"
             | "count_by"
+            | "counts"
             | "partition"
             | "unzip"
             | "try_collect"
@@ -227,13 +228,14 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "a accepted action active_count add add_asset_bundle add_doc add_executable add_install add_library add_new ",
     "add_package add_publish add_test advance after all any average b before binary_search binary_search_by ",
     "blocked_count bool buffer bytes cancel capacity capitalize chars chunk_while chunks clear clone ",
-    "close collect compare concat contains contains_value copy copy_to count count_by count_ones count_zeros ",
+    "close collect compare concat contains contains_value copy copy_to count count_by counts count_ones count_zeros ",
     "cycle contribute dedup dedup_by delete delivered delivered_handlers diagnostics difference digest downgrade ",
     "drop_last dropped each edit edit_disjoint effects elapsed_millis embed emit emit_async ends_with eof ",
     "equal error events exponential extend failure_count failures fetch filter filter_map find first ",
+    "cut_last div_euclid rem_euclid ",
     "checked_add checked_sub checked_mul checked_div checked_rem saturating_add saturating_sub saturating_mul ",
     "wrapping_add wrapping_sub wrapping_mul ",
-    "flat_map flatten float float_range flush fold from from_bytes from_keys from_text functions generate ",
+    "flat_map flatten float float_range flush fold from from_bytes from_bytes_lossy from_keys from_text functions generate ",
     "generated_lines get get_buffer get_disjoint_write get_or_set group_by guard_edit guard_read has has_key has_method hex ",
     "hole home ids implements index_of indexed indexes init insert int intersection intersperse ",
     "is_active is_alphabetic is_ascii is_disjoint is_empty is_finite is_infinite is_lower is_nan is_numeric is_sorted is_sorted_by ",
@@ -243,15 +245,15 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "now on on_priority once or_err origin packages pad_end pad_start para_filter para_fold para_map ",
     "para_partition parse partial partition peek peek_back peek_front pick plan plugin poll pop ",
     "pop_back pop_first pop_front position probe product public_key push push_back push_front queued queued_count ",
-    "random reaches_panic read read_byte read_bytes read_string receive reduce remove remove_prefix remove_suffix repeat ",
+    "random reaches_panic read read_byte read_bytes read_f32_be read_f32_le read_f64_be read_f64_le read_i8 read_i16_be read_i16_le read_i32_be read_i32_le read_i64_be read_i64_le read_string receive reduce remove remove_prefix remove_suffix repeat ",
     "replace require reverse rewind right rsplit run running_count sample scan second seek ",
     "semantic_index send set shuffle shutdown signing skip skip_while slice sort sort_desc sort_by sort_by_desc source ",
     "sources split split_once split_write starts_with state status step_by string strong_count sum summary ",
     "swapcase symmetric_difference syntax system take take_while text then tick title to_bytes to_float ",
-    "to_int to_list to_lower to_set to_sorted_list to_string to_title to_upper today tokens toolchain trace ",
-    "trailing_zeros trim trim_end trim_start true_ try_collect try_insert try_push try_reserve types union unsubscribe unzip update upgrade without ",
+    "to_int to_list to_lower to_radix to_set to_sorted_list to_string to_title to_upper today tokens toolchain trace ",
+    "top_n trailing_zeros trim trim_end trim_start true_ try_collect try_insert try_push try_reserve types union unsubscribe unzip update upgrade without from_radix round floor ceil hmac_sha256 ",
     "value values view wait weighted_pick why windows with_capacity write write_byte write_bytes write_to ",
-    "write_u16_be write_u16_le write_u32_be write_u32_le write_u64_be write_u64_le write_u8 zip zip_pad zip_short",
+    "write_f32_be write_f32_le write_f64_be write_f64_le write_i16_be write_i16_le write_i32_be write_i32_le write_i64_be write_i64_le write_i8 write_u16_be write_u16_le write_u32_be write_u32_le write_u64_be write_u64_le write_u8 zip zip_pad zip_short",
 );
 
 /// Return the names accepted by the receiver's canonical built-in method
@@ -1000,6 +1002,17 @@ fn numeric_method_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
             return Some(Some(Type::Int));
         }
     }
+    // D-GO127-STDLIB1=A: exact Int exposes Euclidean quotient and remainder;
+    // both preserve the exact Int carrier and accept one exact Int divisor.
+    if matches!(ty, Type::Int)
+        && nargs == 1
+        && matches!(method, crate::Syntax::METHOD_DIV_EUCLID | crate::Syntax::METHOD_REM_EUCLID)
+    {
+        return Some(Some(Type::Int));
+    }
+    if matches!(ty, Type::Int) && method == "to_radix" && nargs == 1 {
+        return Some(Some(Type::String));
+    }
     None
 }
 
@@ -1009,6 +1022,9 @@ pub fn numeric_conversion_return(
     method: &str,
     nargs: usize,
 ) -> Option<Option<Type>> {
+    if let Some(ret) = crate::Numeric::precise_conversion_return(target, method, nargs) {
+        return Some(ret);
+    }
     if nargs != 1 || !target.is_numeric() {
         return None;
     }
@@ -1073,6 +1089,7 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
             ok: Box::new(Type::Int),
             err: Box::new(Type::Named("ParseError".to_string())),
         })),
+        (Type::Int, "from_radix", 2) => Some(Some(Type::Int)),
         (Type::Float, "parse", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Float),
             err: Box::new(Type::Named("ParseError".to_string())),
@@ -1081,6 +1098,7 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
             ok: Box::new(Type::String),
             err: Box::new(Type::Named(crate::Syntax::TYPE_UTF8_ERROR.to_string())),
         })),
+        (Type::String, "from_bytes_lossy", 1) => Some(Some(Type::String)),
         (Type::Named(n), "new", 1) if n == crate::Syntax::SOLVER_TYPE => {
             Some(Some(Type::Named(crate::Syntax::SOLVER_TYPE.to_string())))
         }
@@ -1252,6 +1270,11 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         ("remove", 1 | 2) => Some(Some(Type::Option(Box::new(inner.clone())))),
         ("count", 1) => Some(Some(Type::Int)),
+        ("counts", 0) => Some(Some(Type::Map {
+            key: Box::new(inner.clone()),
+            key_span: None,
+            value: Box::new(Type::Int),
+        })),
         ("extend", 1) => Some(None),
         ("concat", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("pop" | "get" | "first" | "last" | "index_of", 0 | 1) => {
@@ -1402,6 +1425,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         // D-PARCAPTURE1=D: parallel adapters stay eager lists.
         ("para_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))), // sema refines V
+        ("para_map", 2) => Some(Some(Type::List(Box::new(Type::Int)))), // sema refines V
         ("para_filter", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("para_partition", 1) => Some(Some(partition_ret_ty(inner))),
         ("para_fold", 3) => Some(Some(Type::Int)), // sema refines from seed factory
@@ -1481,6 +1505,11 @@ fn iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         ("count_by", 1) => Some(Some(Type::Map {
             key: Box::new(Type::String),
+            key_span: None,
+            value: Box::new(Type::Int),
+        })),
+        ("counts", 0) => Some(Some(Type::Map {
+            key: Box::new(inner.clone()),
             key_span: None,
             value: Box::new(Type::Int),
         })),
@@ -1609,6 +1638,10 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
             ("key".to_string(), Box::new(key.clone())),
             ("value".to_string(), Box::new(value.clone())),
         ]))))),
+        ("top_n", 1) => Some(Some(Type::List(Box::new(Type::Tuple(vec![
+            ("key".to_string(), Box::new(key.clone())),
+            ("value".to_string(), Box::new(value.clone())),
+        ]))))),
         ("any" | "all", 1) => Some(Some(Type::Bool)),
         ("map", 1) => Some(Some(Type::Map {
             key: Box::new(key.clone()),
@@ -1659,10 +1692,11 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("rsplit", 1) => Some(Some(iter_ty(Type::String))),
         ("bytes", 0) => Some(Some(Type::List(Box::new(u8t())))),
         ("replace" | "slice", 2) => Some(Some(Type::String)),
+        ("slice", 1) => Some(Some(Type::String)),
         ("pad_start" | "pad_end", 2) => Some(Some(Type::String)),
         ("index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         ("count", 1) => Some(Some(Type::Int)),
-        ("split_once", 1) => Some(Some(Type::Option(Box::new(Type::Tuple(vec![
+        ("split_once" | crate::Syntax::METHOD_CUT_LAST, 1) => Some(Some(Type::Option(Box::new(Type::Tuple(vec![
             ("before".to_string(), Box::new(Type::String)),
             ("after".to_string(), Box::new(Type::String)),
         ]))))),
@@ -2325,8 +2359,11 @@ fn byte_buffer_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
             err: Box::new(Type::String),
         })),
         (
-            "write_u8" | "write_byte" | "write_u16_le" | "write_u16_be" | "write_u32_le"
-            | "write_u32_be" | "write_u64_le" | "write_u64_be" | "write_bytes" | "write",
+            "write_u8" | "write_byte" | "write_i8" | "write_u16_le" | "write_u16_be"
+            | "write_i16_le" | "write_i16_be" | "write_u32_le" | "write_u32_be"
+            | "write_i32_le" | "write_i32_be" | "write_u64_le" | "write_u64_be"
+            | "write_i64_le" | "write_i64_be" | "write_f32_le" | "write_f32_be"
+            | "write_f64_le" | "write_f64_be" | "write_bytes" | "write",
             1,
         ) => Some(None),
         _ => None,
@@ -2419,12 +2456,23 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             method,
             "write_u8"
                 | "write_byte"
+                | "write_i8"
                 | "write_u16_le"
                 | "write_u16_be"
+                | "write_i16_le"
+                | "write_i16_be"
                 | "write_u32_le"
                 | "write_u32_be"
+                | "write_i32_le"
+                | "write_i32_be"
                 | "write_u64_le"
                 | "write_u64_be"
+                | "write_i64_le"
+                | "write_i64_be"
+                | "write_f32_le"
+                | "write_f32_be"
+                | "write_f64_le"
+                | "write_f64_be"
                 | "write_bytes"
                 | "write"
                 | "write_to"
@@ -2495,6 +2543,19 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
 pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type>> {
     if let Type::Tagged { inner, .. } = recv_ty {
         return builtin_method_arg_types(inner, method);
+    }
+    if let Some(source_name) = crate::Syntax::numeric_conversion_source(method) {
+        if crate::Numeric::precise_conversion_return(recv_ty, method, 1).is_some() {
+            let source = match source_name {
+                "Int" => Type::Int,
+                "Float" => Type::Float,
+                name if crate::Numeric::is_exact_type_name(name) => {
+                    Type::Named(name.to_string())
+                }
+                _ => return None,
+            };
+            return Some(vec![source]);
+        }
     }
     if recv_ty.is_numeric() {
         if matches!(recv_ty, Type::IntN { .. }) && numeric_overflow_method(method, 1).is_some() {
@@ -2717,7 +2778,17 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 param_contract: None,
                 call_metadata: None,
             }]),
-            "filter" | "find" | "any" | "all"
+            // A filter callback may carry the same implicit failure row as a
+            // map callback. Sema refines Bool versus Result<Bool, E> after
+            // checking the open callback.
+            "filter" => Some(vec![Type::Fn {
+                params: vec![(**inner).clone()],
+                ret: None,
+                effect_bound: None, return_view_provenance: None,
+                param_contract: None,
+                call_metadata: None,
+            }]),
+            "find" | "any" | "all"
             // D-ITER1: closure bool predicates.
             | "take_while" | "skip_while" | "position" | "partition" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
@@ -2840,7 +2911,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             | "is_sorted"
             | "shuffle"
             | "average"
-            | "to_set" | "copy" | "random" | "min_max" => Some(vec![]),
+            | "to_set"
+            | "copy"
+            | "random"
+            | "min_max"
+            | "counts" => Some(vec![]),
             "dedup_by" | "is_sorted_by" | "binary_search_by" | "min_max_by" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: None,
@@ -2872,6 +2947,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 value: Box::new((**value).clone()),
             }]),
             "slice" => Some(vec![Type::List(Box::new((**key).clone()))]),
+            "top_n" => Some(vec![Type::Int]),
             "any" | "all" | "filter" => Some(vec![Type::Fn {
                 params: vec![(**key).clone(), (**value).clone()],
                 ret: Some(Box::new(Type::Bool)),
@@ -2912,8 +2988,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::String => match method {
             "try_push" => Some(vec![Type::String]),
             "contains" | "starts_with" | "ends_with" | "split" | "index_of" | "count"
-            | "split_once" => Some(vec![Type::String]),
-            "from_bytes" => Some(vec![Type::List(Box::new(u8t()))]),
+            | "split_once" | crate::Syntax::METHOD_CUT_LAST => Some(vec![Type::String]),
+            "from_bytes" | "from_bytes_lossy" => Some(vec![Type::List(Box::new(u8t()))]),
             "replace" => Some(vec![Type::String, Type::String]),
             "pad_start" | "pad_end" => Some(vec![Type::Int, Type::String]),
             "slice" => Some(vec![Type::Int, Type::Int]),
@@ -2922,6 +2998,15 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         },
         Type::Int | Type::Float => match method {
             "parse" => Some(vec![Type::String]),
+            _ if matches!(recv_ty, Type::Int)
+                && matches!(method, crate::Syntax::METHOD_DIV_EUCLID | crate::Syntax::METHOD_REM_EUCLID) =>
+            {
+                Some(vec![Type::Int])
+            }
+            _ if matches!(recv_ty, Type::Int) && method == "to_radix" => Some(vec![Type::Int]),
+            _ if matches!(recv_ty, Type::Int) && method == "from_radix" => {
+                Some(vec![Type::String, Type::Int])
+            }
             _ => None,
         },
         // D-HOLE1: `opt.map(f: T -> R)`. `.zip` isn't listed — it's checked directly
@@ -3037,18 +3122,36 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Named(n) if n == Syntax::TYPE_BYTES => match method {
             "write_bytes" | "write" => Some(vec![Type::List(Box::new(u8t()))]),
             "write_u8" | "write_byte" => Some(vec![u8t()]),
+            "write_i8" => Some(vec![Type::IntN {
+                signed: true,
+                bits: 8,
+            }]),
             "write_u16_le" | "write_u16_be" => Some(vec![Type::IntN {
                 signed: false,
+                bits: 16,
+            }]),
+            "write_i16_le" | "write_i16_be" => Some(vec![Type::IntN {
+                signed: true,
                 bits: 16,
             }]),
             "write_u32_le" | "write_u32_be" => Some(vec![Type::IntN {
                 signed: false,
                 bits: 32,
             }]),
+            "write_i32_le" | "write_i32_be" => Some(vec![Type::IntN {
+                signed: true,
+                bits: 32,
+            }]),
             "write_u64_le" | "write_u64_be" => Some(vec![Type::IntN {
                 signed: false,
                 bits: 64,
             }]),
+            "write_i64_le" | "write_i64_be" => Some(vec![Type::IntN {
+                signed: true,
+                bits: 64,
+            }]),
+            "write_f32_le" | "write_f32_be" => Some(vec![Type::Float32]),
+            "write_f64_le" | "write_f64_be" => Some(vec![Type::Float]),
             "seek" | "read_bytes" | "read_string" | "get" => Some(vec![Type::Int]),
             "contains" | "starts_with" | "ends_with" | "split" | "index_of" | "last_index_of" => {
                 Some(vec![Type::String])
@@ -3246,7 +3349,15 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                     args: vec![elem.clone()],
                 }]),
                 "pop" => Some(vec![elem.clone()]),
-                "filter" | "all" => Some(vec![Type::Fn {
+                "filter" => Some(vec![Type::Fn {
+                    params: vec![elem.clone()],
+                    ret: None,
+                    effect_bound: None,
+                    return_view_provenance: None,
+                    param_contract: None,
+                    call_metadata: None,
+                }]),
+                "all" => Some(vec![Type::Fn {
                     params: vec![elem.clone()],
                     ret: Some(Box::new(Type::Bool)),
                     effect_bound: None,

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Card #298: offline, checksum-verified Unicode 16.0.0 UCD table generator.
+// Card #298: offline, checksum-verified Unicode 17.0.0 UCD table generator.
 // No network at build/compile time — this script is run by hand (or by a
 // maintainer script) against a local UCD snapshot dir, and its Rust output is
 // committed to the repo. No external crates (I6): plain Node + plain Rust.
@@ -7,7 +7,7 @@
 // Usage:
 //   node scripts/agent/gen-unicode-tables.mjs [--check] [ucd-dir]
 //
-// <ucd-dir> must contain (fetched from https://www.unicode.org/Public/16.0.0/ucd/):
+// <ucd-dir> must contain (fetched from https://www.unicode.org/Public/17.0.0/ucd/):
 //   UnicodeData.txt, CaseFolding.txt, SpecialCasing.txt, PropList.txt,
 //   CompositionExclusions.txt,
 //   DerivedNormalizationProps.txt, EastAsianWidth.txt, emoji/emoji-data.txt,
@@ -25,22 +25,22 @@
 //     jet-foundation crate, so this copy carries the same data as literal
 //     prelude source)
 //
-// Pinned Unicode release: 16.0.0. Pinned sha256 of each input file (verified
+// Pinned Unicode release: 17.0.0. Pinned sha256 of each input file (verified
 // before generating — mismatch aborts):
 const PINNED_SHA256 = {
-  "UnicodeData.txt": "ff58e5823bd095166564a006e47d111130813dcf8bf234ef79fa51a870edb48f",
-  "CaseFolding.txt": "6f1f9c588eb4a5c718d9e8f93b782685e5c7fec872cf05e8e6878053599e09bb",
-  "SpecialCasing.txt": "8d5de354eef79f2395a54c9c7dcebbaf3d30fc962d0f85611ea97aa973a0c451",
-  "CompositionExclusions.txt": "89e83cf9cc8bef6c1f8bf77e42cf6f0341dfa42e66261f4dbe9b492e7a23c8ee",
-  "EastAsianWidth.txt": "43adc76c0686a42cb370764eb8cfe2b2a45b10b855e5572a2db4a0eecce15d5b",
-  "DerivedNormalizationProps.txt": "4d4c03892dea9146d674b686e495df2d55a28d071ac474041d73518f887abddc",
-  "emoji/emoji-data.txt": "f1365a5173eee18e1f98b240cdc492e84a25f1ce7e0c9d1094eb29c41a22696a",
-  "auxiliary/GraphemeBreakProperty.txt": "c29360bd6f7132811d701d29069541e827eb44bfc4c8fbde8c370d6982689dc1",
-  "auxiliary/WordBreakProperty.txt": "476464e71a4b7b779b8ba7c5671f4338fea77da8e6b6b05fb82b3fdd14603779",
-  "auxiliary/SentenceBreakProperty.txt": "20aab5eca3842c7a27cc6756d74488a4a5f744c8dca2948ec1128f26a60d1f79",
+  "UnicodeData.txt": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
+  "CaseFolding.txt": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183",
+  "SpecialCasing.txt": "efc25faf19de21b92c1194c111c932e03d2a5eaf18194e33f1156e96de4c9588",
+  "CompositionExclusions.txt": "2f239196ef3b5b61db5cc476e9bd80f534d15aa1b74e1be1dea5d042a344c85f",
+  "EastAsianWidth.txt": "ea7ce50f3444a050333448dffef1cadd9325af55cbb764b4a2280faf52170a33",
+  "DerivedNormalizationProps.txt": "71fd6a206a2c0cdd41feb6b7f656aa31091db45e9cedc926985d718397f9e488",
+  "emoji/emoji-data.txt": "2cb2bb9455cda83e8481541ecf5b6dfda66a3bb89efa3fa7c5297eccf607b72b",
+  "auxiliary/GraphemeBreakProperty.txt": "d6b51d1d2ae5c33b451b7ed994b48f1f4dc62b2272a5831e7fd418514a6bae89",
+  "auxiliary/WordBreakProperty.txt": "72274cac1e6b919507db35655c3e175aa27274668a1ece95c28d2069f2ad9852",
+  "auxiliary/SentenceBreakProperty.txt": "871c0c985ad95125e25b302414065a10839d068970bceb383ecec138f22a0a18",
   // GB9c (Indic conjunct clusters — Unicode 15+): Indic_Conjunct_Break.
-  "DerivedCoreProperties.txt": "39d35161f2954497f69e08bdb9e701493f476a3d30222de20028feda36c1dabd",
-  "PropList.txt": "53d614508e2a0b2305a8aa21cd60d993de9326cdf65993660dfcce4503548583",
+  "DerivedCoreProperties.txt": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
+  "PropList.txt": "130dcddcaadaf071008bdfce1e7743e04fdfbc910886f017d9f9ac931d8c64dd",
 };
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -421,7 +421,7 @@ const title = mappingPool(simpleTitle);
 const unicodeNameIndex = [...unicodeNames.entries()].sort((a, b) => a[0] - b[0]);
 
 const HEADER_COMMENT = `// GENERATED FILE — do not hand-edit.
-// Source: scripts/agent/gen-unicode-tables.mjs against pinned Unicode 16.0.0 UCD.
+// Source: scripts/agent/gen-unicode-tables.mjs against pinned Unicode 17.0.0 UCD.
 // Regenerate: node scripts/agent/gen-unicode-tables.mjs <ucd-dir-with-checksummed-files>
 // Foundation modules and AOT-prelude copies are emitted from this one run.
 `;
@@ -435,7 +435,7 @@ const MODULE_HEADER = HEADER_COMMENT + "#![allow(dead_code)]\n";
 const FLAT_HEADER = HEADER_COMMENT;
 
 const stringBody = `
-pub const UNICODE_STRING_VERSION: &str = "16.0.0";
+pub const UNICODE_STRING_VERSION: &str = "17.0.0";
 
 pub static UNICODE_LOWER_POOL: &[u32] = &[${lower.pool.join(",")}];
 pub static UNICODE_LOWER_INDEX: &[(u32,u32,u32)] = &[${lower.index
@@ -572,10 +572,17 @@ pub fn jet_unicode_split_once(s: &String, sep: &String) -> Option<(String, Strin
         s[at + sep.len()..].to_string(),
     ))
 }
+
+pub fn jet_unicode_cut_last(s: &String, sep: &String) -> Option<(String, String)> {
+    s.rfind(sep).map(|at| (
+        s[..at].to_string(),
+        s[at + sep.len()..].to_string(),
+    ))
+}
 `;
 
 const tablesBody = `
-pub const UNICODE_VERSION: &str = "16.0.0";
+pub const UNICODE_VERSION: &str = "17.0.0";
 
 // (codepoint, Unicode name; control rows use their Unicode 1.0 names)
 pub static UNICODE_NAME_INDEX: &[(u32, &str)] = &[${fmtU32StringPairs(unicodeNameIndex)}];
@@ -647,7 +654,7 @@ for (const [rel, text] of outPaths) {
   const full = path.join(process.cwd(), rel);
   if (checkOnly) {
     const current = readFileSync(full, "utf8");
-    if (current !== text) throw new Error(`${rel} is stale; regenerate from pinned Unicode 16.0.0`);
+    if (current !== text) throw new Error(`${rel} is stale; regenerate from pinned Unicode 17.0.0`);
     console.log(`ok ${rel} (${text.length} bytes)`);
   } else {
     writeFileSync(full, text);

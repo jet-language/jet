@@ -32,6 +32,20 @@ pub fn jet_int_to_i64(value: i64) -> Option<i64> {
     Some(value)
 }
 
+pub fn jet_int_to_string(value: i64) -> String {
+    value.to_string()
+}
+
+pub fn jet_int_to_f64(value: i64) -> f64 {
+    jet_int_to_string(value).parse::<f64>().unwrap_or_else(|_| {
+        if jet_int_to_string(value).starts_with('-') {
+            f64::NEG_INFINITY
+        } else {
+            f64::INFINITY
+        }
+    })
+}
+
 fn quote_json(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
@@ -55,8 +69,11 @@ pub fn render_datatree_json(tree: &DataTree, pretty: bool, depth: usize) -> Stri
     match tree {
         DataTree::Null => "null".to_string(),
         DataTree::Bool(value) => value.to_string(),
-        DataTree::Int(value) => value.to_string(),
-        DataTree::Float(value) => format!("{:?}", value),
+        DataTree::Int(value) => jet_int_to_string(*value),
+        DataTree::Float(value) => {
+            assert!(value.is_finite(), "JSON cannot encode a non-finite Float");
+            format!("{:?}", value)
+        }
         DataTree::Number(text) => text.clone(),
         DataTree::TypedText(text) => quote_json(text),
         DataTree::Text(value) => quote_json(value),

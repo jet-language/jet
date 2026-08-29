@@ -138,6 +138,17 @@ impl<'a> Checker<'a> {
         convert: &mut TryConvert,
         note: &mut Option<Box<Expr>>,
     ) -> Option<Type> {
+        self.infer_try_with_inner_type(inner, span, convert, note, None)
+    }
+
+    pub(crate) fn infer_try_with_inner_type(
+        &mut self,
+        inner: &mut Box<Expr>,
+        span: Span,
+        convert: &mut TryConvert,
+        note: &mut Option<Box<Expr>>,
+        checked_inner_type: Option<Type>,
+    ) -> Option<Type> {
         if let Some(note) = note.as_mut() {
             let saved = self.expected_type.clone();
             self.expected_type = Some(Type::String);
@@ -152,11 +163,18 @@ impl<'a> Checker<'a> {
                 call.range_checked = true;
             }
         }
-        // The explicit operator owns this call. Do not let the default
-        // callable rule insert a second `Try` around its operand.
-        self.failure_auto_depth += 1;
-        let inner_ty = self.infer_without_auto_propagation(inner);
-        self.failure_auto_depth -= 1;
+        // Explicit `?` infers its operand here. Automatic propagation passes
+        // the type already returned by `infer_checked`; re-inference would
+        // run call-owned diagnostics a second time.
+        let inner_ty = match checked_inner_type {
+            Some(inner_ty) => Some(inner_ty),
+            None => {
+                self.failure_auto_depth += 1;
+                let inner_ty = self.infer_without_auto_propagation(inner);
+                self.failure_auto_depth -= 1;
+                inner_ty
+            }
+        };
         let inner_ty = inner_ty?;
         match inner_ty {
             Type::Result { ok, err } => {
@@ -561,6 +579,18 @@ impl<'a> Checker<'a> {
         )
     }
 
+    /// A fallible unit return still has a `Result<Unit, E>` carrier in sema,
+    /// but its `return` route is the ordinary bare exit. Keep the carrier for
+    /// inference while removing only the value demand from return fallbacks.
+    fn return_route_type(&self) -> Option<Type> {
+        let ret = self.ret.clone()?;
+        match &ret {
+            Type::Result { ok, .. } if self.is_unit_type(ok) => None,
+            ty if self.is_unit_type(ty) => None,
+            _ => Some(ret),
+        }
+    }
+
     pub(crate) fn infer_or_fallback(
         &mut self,
         value: &mut Box<Expr>,
@@ -723,7 +753,7 @@ impl<'a> Checker<'a> {
                 Some(payload)
             }
             OrFallback::Return(ret_expr, ret_span) => {
-                let ret = self.ret.clone();
+                let ret = self.return_route_type();
                 match (&ret, ret_expr) {
                     // `?? return value` in a value-returning fn — the value must match.
                     (Some(rt), Some(e)) => {
@@ -920,7 +950,7 @@ impl<'a> Checker<'a> {
                 }
             }
             OrFallback::Return(ret_expr, ret_span) => {
-                let ret = self.ret.clone();
+                let ret = self.return_route_type();
                 match (&ret, ret_expr.as_mut()) {
                     (Some(ret_ty), Some(expr)) => {
                         let saved = self.expected_type.clone();

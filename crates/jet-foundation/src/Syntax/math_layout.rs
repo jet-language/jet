@@ -354,8 +354,9 @@ pub const TYPE_CONDITION: &str = "Condition";
 /// ordered subjectless statement/value guard tables.
 pub const KW_IF: &str = "if";
 pub const KW_ELSE: &str = "else";
-/// D-LOOP-IN1=A (ratified 2026-08-21, card #2153): source-loop binding/source
-/// separator. Expression-position `in` is not a membership operator.
+/// D-LOOP-IN1=A / D-TIME-IN1=C (ratified 2026-08-28, card #2283): bare `in` is
+/// the source-loop binding/source separator and is not a membership operator
+/// in value position; the postfix lexer/parser admits it only after `.`.
 pub const KW_IN: &str = "in";
 
 /// S22 (ratified): inclusive range between two `Int` ends — `1..10`.
@@ -409,8 +410,9 @@ pub const OP_PERCENT: &str = "%";
 /// answer takes the dividend's sign, so `-7 %% 2` is -1. It partners `/`.
 pub const OP_PERCENT_PERCENT: &str = "%%";
 pub const OP_AMP: &str = "&";
-/// D-PATO / D-SHAPE-PIPE1=C (ratified 2026-07-15): peer alternatives only.
-/// General expressions and reusable flows do not use a single bar.
+/// D-PATO / D-SHAPE-PIPE1=C / D-BITOREXPR1=A (ratified 2026-08-28): peer
+/// alternatives and value-position bitwise OR use the single bar; it is not
+/// a general flow operator.
 pub const OP_PIPE: &str = "|";
 /// D-EXPOP1=A (ratified 2026-08-05): infix `^` raises to a power. Prefix `^`
 /// stays the take sigil (D-MEM1); parser position tells them apart.
@@ -480,11 +482,13 @@ pub const PAT_WILDCARD_SLOT: &str = "_";
 // D-PATR (ratified 2026-06-19): range patterns (`lo..hi`) reuse OP_RANGE (S22) at arm-head
 // level and inside variant payload slots. Open Int/Char subjects always still require `else`.
 
-// D-PATO (ratified 2026-06-19) and D-SHAPE-PIPE1=C (ratified 2026-07-15):
+// D-PATO (ratified 2026-06-19), D-SHAPE-PIPE1=C (ratified 2026-07-15), and
+// D-BITOREXPR1=A (ratified 2026-08-28):
 // structural or-patterns and choice alternatives use OP_PIPE (single `|`).
 // `Active(id) | Reconnecting(id) -> …`; alternatives must bind the same names at the same types.
-// No general single-bar expression or flow operator exists. `||` remains value-or / boolean-or;
-// `|=` remains bitwise-or-assign under S17.
+// Value-position `|` is bitwise OR and binds above comparisons. No general bar
+// flow operator exists. `||` remains value-or / boolean-or; `|=` remains
+// bitwise-or-assign under S17.
 
 // D-ENUMDOT1 (ratified 2026-06-26, implemented): a leading `.` before a variant name in pattern
 // position (`.Circle(r)`, `.Empty`) is now accepted everywhere a variant pattern is written —

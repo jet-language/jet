@@ -70,6 +70,7 @@ pub use jet_driver::{
     RBind,
     RubyBind,
     ScriptDeps,
+    scheduler,
     Sema,
     Store as PkgStore,
     Syntax,

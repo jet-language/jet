@@ -26,6 +26,9 @@ mod loadable_semantics {
 mod string_concat_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/StringConcat.rs");
 }
+mod string_bytes_semantics {
+    include!("../../../jet-codegen/src/Prelude/Core/StringBytes.rs");
+}
 mod authority_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/Authority.rs");
 }
@@ -70,6 +73,41 @@ pub fn exact_int_value(value: crate::Numeric::CtBigInt) -> CtValue {
     }
 }
 
+fn list_values_equal(left: &[CtValue], right: &[CtValue]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| values_equal(left, right))
+}
+
+fn map_values_equal(
+    left: &std::collections::BTreeMap<CtKey, CtValue>,
+    right: &std::collections::BTreeMap<CtKey, CtValue>,
+) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|((left_key, left), (right_key, right))| {
+            left_key == right_key && values_equal(left, right)
+        })
+}
+
+fn fields_equal(left: &[(String, CtValue)], right: &[(String, CtValue)]) -> bool {
+    let mut left = left
+        .iter()
+        .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name));
+    let mut right = right
+        .iter()
+        .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name));
+    loop {
+        match (left.next(), right.next()) {
+            (None, None) => return true,
+            (Some((left_name, left)), Some((right_name, right)))
+                if left_name == right_name && values_equal(left, right) => {}
+            _ => return false,
+        }
+    }
+}
+
 fn values_equal(left: &CtValue, right: &CtValue) -> bool {
     fn bytes_equal_list(bytes: &[u8], values: &[CtValue]) -> bool {
         bytes.len() == values.len()
@@ -85,6 +123,42 @@ fn values_equal(left: &CtValue, right: &CtValue) -> bool {
         (left, right) if exact_big(left).is_some() && exact_big(right).is_some() => {
             exact_big(left).expect("whole-number equality")
                 == exact_big(right).expect("whole-number equality")
+        }
+        (CtValue::List(left), CtValue::List(right)) => list_values_equal(left, right),
+        (CtValue::Map(left), CtValue::Map(right)) => map_values_equal(left, right),
+        (
+            CtValue::Struct {
+                type_name: left_type,
+                fields: left_fields,
+            },
+            CtValue::Struct {
+                type_name: right_type,
+                fields: right_fields,
+            },
+        ) => left_type == right_type && fields_equal(left_fields, right_fields),
+        (
+            CtValue::Enum {
+                type_name: left_type,
+                variant: left_variant,
+                args: left_args,
+            },
+            CtValue::Enum {
+                type_name: right_type,
+                variant: right_variant,
+                args: right_args,
+            },
+        ) => {
+            left_type == right_type
+                && left_variant == right_variant
+                && left_args.len() == right_args.len()
+                && left_args.iter().zip(right_args).all(|((left_name, left), (right_name, right))| {
+                    left_name == right_name && values_equal(left, right)
+                })
+        }
+        (CtValue::Present(left), CtValue::Present(right)) => values_equal(left, right),
+        (CtValue::Failed(CtReport::Clean(_)), CtValue::Failed(CtReport::Clean(_))) => true,
+        (CtValue::Failed(CtReport::Told(left)), CtValue::Failed(CtReport::Told(right))) => {
+            values_equal(left, right)
         }
         _ => left == right,
     }
@@ -711,6 +785,26 @@ mod tests {
 
 pub fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
     use CtValue::*;
+    if matches!(
+        (&a, &b),
+        (
+            Struct {
+                type_name: left_name,
+                ..
+            },
+            Struct {
+                type_name: right_name,
+                ..
+            },
+        ) if left_name == crate::Syntax::TYPE_FRACTION
+            && right_name == crate::Syntax::TYPE_FRACTION
+    ) {
+        let left = crate::Numeric::CtFraction::from_value(&a)
+            .map_err(|error| unsupported(&error, span))?;
+        let right = crate::Numeric::CtFraction::from_value(&b)
+            .map_err(|error| unsupported(&error, span))?;
+        return Ok(left.cmp(&right));
+    }
     match (a, b) {
         (Int(a), Int(b)) => Ok(a.cmp(&b)),
         (Float(a), Float(b)) => a
@@ -895,7 +989,8 @@ pub fn apply_static_type_method(
                 )))),
             }))
         }
-        ("String", "from_bytes") => {
+        ("String", method @ ("from_bytes" | "from_bytes_lossy")) => {
+            let lossy = method == "from_bytes_lossy";
             let bytes = match args.into_iter().next() {
                 Some(CtValue::Bytes(bytes)) => bytes,
                 Some(CtValue::List(items)) => {
@@ -903,13 +998,21 @@ pub fn apply_static_type_method(
                     for item in items {
                         let CtValue::Int(n) = item else {
                             return Some(Err(unsupported(
-                                "String.from_bytes expects a [U8] byte list",
+                                if lossy {
+                                    "String.from_bytes_lossy expects a [U8] byte list"
+                                } else {
+                                    "String.from_bytes expects a [U8] byte list"
+                                },
                                 span,
                             )));
                         };
                         if !(0..=255).contains(&n) {
                             return Some(Err(unsupported(
-                                "String.from_bytes expects bytes in 0..255",
+                                if lossy {
+                                    "String.from_bytes_lossy expects bytes in 0..255"
+                                } else {
+                                    "String.from_bytes expects bytes in 0..255"
+                                },
                                 span,
                             )));
                         }
@@ -919,18 +1022,28 @@ pub fn apply_static_type_method(
                 }
                 _ => {
                     return Some(Err(unsupported(
-                        "String.from_bytes with a non-bytes argument",
+                        if lossy {
+                            "String.from_bytes_lossy with a non-bytes argument"
+                        } else {
+                            "String.from_bytes with a non-bytes argument"
+                        },
                         span,
                     )))
                 }
             };
-            Some(Ok(match String::from_utf8(bytes) {
-                Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
-                Err(error) => CtValue::failed(Box::new(CtValue::Struct {
-                    type_name: "UTF8Error".to_string(),
-                    fields: vec![("message".to_string(), CtValue::Str(error.to_string()))],
-                })),
-            }))
+            if lossy {
+                Some(Ok(CtValue::Str(
+                    string_bytes_semantics::jet_string_decode_utf8_lossy(&bytes),
+                )))
+            } else {
+                Some(Ok(match string_bytes_semantics::jet_string_decode_utf8(&bytes) {
+                    Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+                    Err(message) => CtValue::failed(Box::new(CtValue::Struct {
+                        type_name: "UTF8Error".to_string(),
+                        fields: vec![("message".to_string(), CtValue::Str(message))],
+                    })),
+                }))
+            }
         }
         ("Secret", "from_bytes") => {
             let bytes = match args.into_iter().next() {
@@ -1483,6 +1596,19 @@ pub fn apply_method(
                 xs.iter().filter(|item| *item == &needle).count() as i64,
             ))
         }
+        (CtValue::List(xs), "counts") => {
+            let mut out = std::collections::BTreeMap::new();
+            for value in xs {
+                let key = CtKey::from_value(value.clone())
+                    .ok_or_else(|| unsupported("this map key type", span))?;
+                let count = out.entry(key).or_insert(CtValue::Int(0));
+                let CtValue::Int(count) = count else {
+                    unreachable!()
+                };
+                *count += 1;
+            }
+            Ok(CtValue::Map(out))
+        }
         (CtValue::List(xs), "concat") => {
             let Some(CtValue::List(other)) = args.into_iter().next() else {
                 return Err(unsupported("List.concat expects a list", span));
@@ -1503,23 +1629,32 @@ pub fn apply_method(
         // identity. Non-closure adapters mirror SequenceParity so JIT deopt works.
         (CtValue::List(xs), "to_list" | "collect" | "lazy") => Ok(CtValue::List(xs.clone())),
         (CtValue::List(xs), "take") => {
-            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
-            Ok(CtValue::List(xs.iter().take(n).cloned().collect()))
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            if let Some(message) = super::CollectionEval::sequence_argument_message("take", n) {
+                return Err(comptime_panic(message, span));
+            }
+            Ok(CtValue::List(xs.iter().take(n as usize).cloned().collect()))
         }
         (CtValue::List(xs), "skip") => {
-            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            if let Some(message) = super::CollectionEval::sequence_argument_message("skip", n) {
+                return Err(comptime_panic(message, span));
+            }
             Ok(CtValue::List(super::CollectionEval::iter_skip(
                 xs.clone(),
-                n as i64,
+                n,
             )))
         }
         (CtValue::List(xs), "step_by") => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-            Ok(CtValue::List(if n <= 0 {
-                Vec::new()
-            } else {
-                xs.iter().step_by(n as usize).cloned().collect()
-            }))
+            if let Some(message) =
+                super::CollectionEval::sequence_argument_message("step_by", n)
+            {
+                return Err(comptime_panic(message, span));
+            }
+            Ok(CtValue::List(
+                xs.iter().step_by(n as usize).cloned().collect(),
+            ))
         }
         (CtValue::List(xs), "dedup") => {
             let mut out = Vec::new();
@@ -1646,17 +1781,27 @@ pub fn apply_method(
             Ok(CtValue::Map(out))
         }
         (CtValue::List(xs), "chunks") => {
-            let n = as_int(args.first().unwrap_or(&CtValue::Int(1)), span)?.max(1) as usize;
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(1)), span)?;
+            if let Some(message) =
+                super::CollectionEval::sequence_argument_message("chunks", n)
+            {
+                return Err(comptime_panic(message, span));
+            }
             Ok(CtValue::List(
-                xs.chunks(n)
+                xs.chunks(n as usize)
                     .map(|chunk| CtValue::List(chunk.to_vec()))
                     .collect(),
             ))
         }
         (CtValue::List(xs), "windows") => {
-            let n = as_int(args.first().unwrap_or(&CtValue::Int(1)), span)?.max(1) as usize;
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(1)), span)?;
+            if let Some(message) =
+                super::CollectionEval::sequence_argument_message("windows", n)
+            {
+                return Err(comptime_panic(message, span));
+            }
             Ok(CtValue::List(
-                xs.windows(n)
+                xs.windows(n as usize)
                     .map(|window| CtValue::List(window.to_vec()))
                     .collect(),
             ))
@@ -1780,6 +1925,15 @@ pub fn apply_method(
             let CtValue::List(other) = args.into_iter().next().unwrap_or(CtValue::Unit) else {
                 return Err(unsupported("zip with a non-list argument", span));
             };
+            if super::CollectionEval::zip_row_count(&[xs.len(), other.len()], 1).is_none() {
+                return Err(Diagnostic::error(
+                    "E0128",
+                    "zip inputs have different lengths".to_string(),
+                    "strict `zip` requires every input to end on the same row".to_string(),
+                    "use `zip_short` or `zip_pad` when lengths may differ".to_string(),
+                    Some(span),
+                ));
+            }
             Ok(CtValue::List(
                 xs.iter()
                     .zip(other)
@@ -1829,7 +1983,7 @@ pub fn apply_method(
             let Some(CtValue::List(other)) = args.into_iter().next() else {
                 return Err(unsupported("equal needs a list", span));
             };
-            Ok(CtValue::Bool(xs == &other))
+            Ok(CtValue::Bool(list_values_equal(xs, &other)))
         }
         (CtValue::List(xs), "slice") => {
             let start = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
@@ -1963,7 +2117,7 @@ pub fn apply_method(
             let Some(CtValue::Map(other)) = args.into_iter().next() else {
                 return Err(unsupported("equal needs a map", span));
             };
-            Ok(CtValue::Bool(m == &other))
+            Ok(CtValue::Bool(map_values_equal(m, &other)))
         }
         (CtValue::Map(m), "first") => Ok(match m.keys().next() {
             Some(k) => CtValue::Present(Box::new(k.to_value())),
@@ -1977,6 +2131,28 @@ pub fn apply_method(
                 })
                 .collect(),
         )),
+        (CtValue::Map(m), "top_n") => {
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
+            let mut entries = m.iter().collect::<Vec<_>>();
+            entries.sort_by(|(left_key, left_value), (right_key, right_value)| {
+                cmp((*right_value).clone(), (*left_value).clone(), span)
+                    .unwrap_or_else(|_| right_value.jet_show().cmp(&left_value.jet_show()))
+                    .then_with(|| left_key.cmp(right_key))
+            });
+            Ok(CtValue::List(
+                entries
+                    .into_iter()
+                    .take(n)
+                    .map(|(key, value)| CtValue::Struct {
+                        type_name: String::new(),
+                        fields: vec![
+                            ("key".into(), key.to_value()),
+                            ("value".into(), value.clone()),
+                        ],
+                    })
+                    .collect(),
+            ))
+        }
         (CtValue::Map(m), "min") => Ok(
             match m.values().min_by(|a, b| a.jet_show().cmp(&b.jet_show())) {
                 Some(v) => CtValue::Present(Box::new(v.clone())),
@@ -2122,22 +2298,20 @@ pub fn apply_method(
             Some(CtValue::Str(other)) => Ok(CtValue::Bool(s == other.as_str())),
             _ => Err(unsupported("equal with a non-text argument", span)),
         },
-        // D-STR-DECLINE1=C: `matches`/`match` — the same RegexLite engine
+        // D-STR-DECLINE1=C: `matches`/`match` — the same shared regex kernel
         // `core.regex.compile`/`is_match`/`find` already run (`regex_is_match`/
         // `regex_find` in Methods/core_calls.rs), composed for a String receiver.
         (CtValue::Str(s), "matches") => match args.into_iter().next() {
-            Some(CtValue::Str(pattern)) => Ok(match super::RegexLite::RegexLite::parse(&pattern) {
+            Some(CtValue::Str(pattern)) => Ok(match super::regex_kernel::JetRegex::parse(&pattern) {
                 Ok(re) => CtValue::Present(Box::new(CtValue::Bool(re.is_match(s)))),
                 Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
             }),
             _ => Err(unsupported("matches with a non-text argument", span)),
         },
         (CtValue::Str(s), "match") => match args.into_iter().next() {
-            Some(CtValue::Str(pattern)) => Ok(match super::RegexLite::RegexLite::parse(&pattern) {
-                Ok(re) => CtValue::Present(Box::new(match re.find(s) {
-                    Some(m) => {
-                        CtValue::Present(Box::new(CtValue::Str(s[m.start..m.end].to_string())))
-                    }
+            Some(CtValue::Str(pattern)) => Ok(match super::regex_kernel::JetRegex::parse(&pattern) {
+                Ok(re) => CtValue::Present(Box::new(match re.find(s).ok() {
+                    Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
                     None => CtValue::absent(Type::String),
                 })),
                 Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
@@ -2178,6 +2352,25 @@ pub fn apply_method(
                 ])),
             }),
             _ => Err(unsupported("split_once with a non-text argument", span)),
+        },
+        (CtValue::Str(s), "cut_last") => match args.into_iter().next() {
+            Some(CtValue::Str(sep)) => Ok(match s.rfind(&sep) {
+                Some(at) => CtValue::Present(Box::new(CtValue::Struct {
+                    type_name: "(before,after)".to_string(),
+                    fields: vec![
+                        ("before".to_string(), CtValue::Str(s[..at].to_string())),
+                        (
+                            "after".to_string(),
+                            CtValue::Str(s[at + sep.len()..].to_string()),
+                        ),
+                    ],
+                })),
+                None => CtValue::absent(Type::Tuple(vec![
+                    ("before".to_string(), Box::new(Type::String)),
+                    ("after".to_string(), Box::new(Type::String)),
+                ])),
+            }),
+            _ => Err(unsupported("cut_last with a non-text argument", span)),
         },
         (CtValue::Str(s), "contains") => match args.into_iter().next() {
             Some(CtValue::Str(n)) => Ok(CtValue::Bool(s.contains(&n))),
@@ -2375,7 +2568,13 @@ pub fn apply_method(
             if type_name == "Match"
                 && matches!(
                     method,
-                    "group" | "name" | "start" | "end" | "group_start" | "group_end"
+                    "group"
+                        | "name"
+                        | "start"
+                        | "end"
+                        | "group_start"
+                        | "group_end"
+                        | "named_captures"
                 ) =>
         {
             let list_field = |name: &str| {
@@ -2435,6 +2634,34 @@ pub fn apply_method(
                 }
                 "start" => Ok(CtValue::Int(span_value(0, "start").unwrap_or(-1))),
                 "end" => Ok(CtValue::Int(span_value(0, "end").unwrap_or(-1))),
+                "named_captures" => {
+                    let groups = list_field("groups").unwrap_or_default();
+                    Ok(CtValue::List(
+                        list_field("names")
+                            .unwrap_or_default()
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, name)| {
+                                let CtValue::Present(name) = name else {
+                                    return None;
+                                };
+                                let CtValue::Str(name) = name.as_ref() else {
+                                    return None;
+                                };
+                                let CtValue::Present(value) = groups.get(index)? else {
+                                    return None;
+                                };
+                                let CtValue::Str(value) = value.as_ref() else {
+                                    return None;
+                                };
+                                Some(CtValue::List(vec![
+                                    CtValue::Str(name.clone()),
+                                    CtValue::Str(value.clone()),
+                                ]))
+                            })
+                            .collect(),
+                    ))
+                }
                 "group_start" | "group_end" => {
                     let field = if method == "group_start" {
                         "start"

@@ -1,5 +1,5 @@
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
-use crate::Generics::{e0904, e0905};
+use crate::Generics::{e0904, e0905, substitute_type, unify_types};
 use crate::Sema::Bundle::{fn_types_compatible, func_sig_to_fn_type};
 use crate::Sema::CheckerCoreLib::{
     io_error_ty, is_simd_lane_type, math_constructor_arg_types, overflow_opt_in_error, result_ty,
@@ -16,7 +16,174 @@ use crate::Sema::{Checker, KnowledgeGate};
 use crate::Syntax;
 use crate::AST::{AccessConvention, BinOp, Call, CallablePolicyChain, Expr, StrPart, Type};
 use jet_foundation::Prelude as CorePrelude;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+#[derive(Clone)]
+struct GenericInferenceConflict {
+    param: String,
+    first: Type,
+    first_source: String,
+    second: Type,
+    second_source: String,
+}
+
+fn bind_inferred_type(
+    param: &str,
+    found: &Type,
+    source: &str,
+    type_params: &HashSet<String>,
+    subst: &mut HashMap<String, Type>,
+    origins: &mut HashMap<String, (Type, String)>,
+    conflict: &mut Option<GenericInferenceConflict>,
+) -> bool {
+    if !type_params.contains(param) {
+        return false;
+    }
+    let found = substitute_type(found, subst);
+    if let Some(previous) = subst.get(param) {
+        if previous == &found {
+            return true;
+        }
+        if conflict.is_none() {
+            let (first, first_source) = origins
+                .get(param)
+                .cloned()
+                .unwrap_or_else(|| (previous.clone(), "an earlier argument".to_string()));
+            *conflict = Some(GenericInferenceConflict {
+                param: param.to_string(),
+                first,
+                first_source,
+                second: found,
+                second_source: source.to_string(),
+            });
+        }
+        return false;
+    }
+    subst.insert(param.to_string(), found.clone());
+    origins.insert(param.to_string(), (found, source.to_string()));
+    true
+}
+
+/// Seed ordinary generic inference with the concrete slots of a typed
+/// callable argument. `unify_types` already owns the ordinary structural
+/// cases; this wrapper adds the missing `Fn` recursion and provenance for a
+/// useful conflict fix.
+fn seed_generic_type(
+    expected: &Type,
+    found: &Type,
+    source: &str,
+    type_params: &HashSet<String>,
+    subst: &mut HashMap<String, Type>,
+    origins: &mut HashMap<String, (Type, String)>,
+    conflict: &mut Option<GenericInferenceConflict>,
+) -> bool {
+    if expected == found {
+        return true;
+    }
+    if let Type::Named(param) = expected {
+        if type_params.contains(param) {
+            return bind_inferred_type(
+                param,
+                found,
+                source,
+                type_params,
+                subst,
+                origins,
+                conflict,
+            );
+        }
+    }
+    if let Type::Named(param) = found {
+        if type_params.contains(param) {
+            return bind_inferred_type(
+                param,
+                expected,
+                source,
+                type_params,
+                subst,
+                origins,
+                conflict,
+            );
+        }
+    }
+
+    match (expected, found) {
+        (
+            Type::Fn {
+                params: expected_params,
+                ret: expected_ret,
+                ..
+            },
+            Type::Fn {
+                params: found_params,
+                ret: found_ret,
+                ..
+            },
+        ) => {
+            let params_ok = expected_params.len() == found_params.len()
+                && expected_params
+                    .iter()
+                    .zip(found_params)
+                    .all(|(expected, found)| {
+                        seed_generic_type(
+                            expected,
+                            found,
+                            "the lambda parameter",
+                            type_params,
+                            subst,
+                            origins,
+                            conflict,
+                        )
+                    });
+            let ret_ok = match (expected_ret, found_ret) {
+                (Some(expected), Some(found)) => seed_generic_type(
+                    expected,
+                    found,
+                    "the lambda return",
+                    type_params,
+                    subst,
+                    origins,
+                    conflict,
+                ),
+                (None, None) => true,
+                _ => false,
+            };
+            params_ok && ret_ok
+        }
+        _ => {
+            let already_bound: HashSet<String> = subst.keys().cloned().collect();
+            let compatible = unify_types(expected, found, subst, type_params);
+            for param in type_params {
+                if !already_bound.contains(param) {
+                    if let Some(ty) = subst.get(param) {
+                        origins
+                            .entry(param.clone())
+                            .or_insert_with(|| (ty.clone(), source.to_string()));
+                    }
+                }
+            }
+            compatible
+        }
+    }
+}
+
+fn generic_conflict_diagnostic(span: Span, conflict: &GenericInferenceConflict) -> Diagnostic {
+    Diagnostic::error(
+        "E0904",
+        format!("can't figure out what `{}` should be here", conflict.param),
+        "one generic type parameter received incompatible concrete types".to_string(),
+        format!(
+            "{} is {} from {} but {} from {}; make those types agree",
+            conflict.param,
+            conflict.first.name(),
+            conflict.first_source,
+            conflict.second.name(),
+            conflict.second_source,
+        ),
+        Some(span),
+    )
+}
+
 impl<'a> Checker<'a> {
     /// D-STRUCT-POLICY1=A: user policy calls use the same declaration-order
     /// binder as ordinary functions, including default expressions and
@@ -471,7 +638,35 @@ impl<'a> Checker<'a> {
         Some(result)
     }
 
-    pub(crate) fn check_call(&mut self, call: &mut Call, _as_value: bool) -> Option<Option<Type>> {
+    pub(crate) fn check_call(&mut self, call: &mut Call, as_value: bool) -> Option<Option<Type>> {
+        let diagnostics_start = self.diags.len();
+        let result = self.check_call_inner(call, as_value);
+        if self.failure_auto_depth > 0 {
+            let recheck = self.diags.split_off(diagnostics_start);
+            let mut kept = Vec::with_capacity(recheck.len());
+            for diagnostic in recheck {
+                let duplicate_generic_call_diagnostic =
+                    matches!(diagnostic.code.as_str(), "E0904" | "E0112" | "E0113")
+                        && self
+                            .diags
+                            .iter()
+                            .chain(kept.iter())
+                            .any(|previous| {
+                                previous.code == diagnostic.code
+                                    && previous.span == diagnostic.span
+                                    && previous.what == diagnostic.what
+                            });
+                if duplicate_generic_call_diagnostic {
+                    continue;
+                }
+                kept.push(diagnostic);
+            }
+            self.diags.extend(kept);
+        }
+        result
+    }
+
+    fn check_call_inner(&mut self, call: &mut Call, _as_value: bool) -> Option<Option<Type>> {
         if call.name == "measurement"
             && self.funcs.get(&call.name).is_none()
             && self.lookup(&call.name).is_none()
@@ -1572,27 +1767,113 @@ impl<'a> Checker<'a> {
             }
             let arg_types: Vec<Type> = pre_inferred.iter().filter_map(|t| t.clone()).collect();
             if arg_types.len() == call.args.len() {
-                match self.trait_reg.infer_fn_subst_without_bounds(
-                    &sig,
-                    &arg_types,
-                    &fn_type_params,
-                    self.expected_type.as_ref(),
-                ) {
-                    Ok(s) => {
-                        if let Some((ty, bound)) = fn_type_params.iter().find_map(|param| {
-                            let ty = s.get(&param.name)?;
-                            param
-                                .bounds
-                                .iter()
-                                .find(|bound| !self.type_satisfies_bound(ty, bound))
-                                .map(|bound| (ty, bound))
-                        }) {
-                            self.diags
-                                .push(e0905(&ty.name(), bound, call.name_span, false));
-                        }
-                        generic_subst = s;
+                let type_param_names: HashSet<String> =
+                    fn_type_params.iter().map(|param| param.name.clone()).collect();
+                let mut inferred_subst = HashMap::new();
+                let mut origins = HashMap::new();
+                let mut conflict = None;
+
+                // Ordinary arguments establish the first concrete candidate.
+                // This makes a later lambda return report the actual argument
+                // that disagrees with it, instead of suggesting a generic
+                // annotation that cannot repair the call.
+                for (index, arg_ty) in arg_types.iter().enumerate() {
+                    let Some((_, param_ty)) = sig.params.get(index) else {
+                        continue;
+                    };
+                    if !matches!(param_ty, Type::Fn { .. }) {
+                        seed_generic_type(
+                            param_ty,
+                            arg_ty,
+                            &format!("argument {}", index + 1),
+                            &type_param_names,
+                            &mut inferred_subst,
+                            &mut origins,
+                            &mut conflict,
+                        );
                     }
-                    Err(p) => self.diags.push(e0904(call.name_span, &p)),
+                }
+
+                // Function types are structural inference sources too. The
+                // lambda prepass has already made both its annotated
+                // parameter and return types concrete, so use those slots to
+                // bind the callee's generic parameters.
+                for (index, arg_ty) in arg_types.iter().enumerate() {
+                    let Some((_, param_ty)) = sig.params.get(index) else {
+                        continue;
+                    };
+                    if matches!(param_ty, Type::Fn { .. })
+                        && matches!(arg_ty, Type::Fn { .. })
+                    {
+                        seed_generic_type(
+                            param_ty,
+                            arg_ty,
+                            "the lambda",
+                            &type_param_names,
+                            &mut inferred_subst,
+                            &mut origins,
+                            &mut conflict,
+                        );
+                    }
+                }
+
+                if let Some(conflict) = conflict {
+                    self.diags
+                        .push(generic_conflict_diagnostic(call.name_span, &conflict));
+                    // Keep the non-conflicting candidates so the final pass
+                    // checks each argument once against the most informative
+                    // partial signature.
+                    generic_subst = inferred_subst;
+                } else {
+                    let remaining_params: Vec<_> = fn_type_params
+                        .iter()
+                        .filter(|param| !inferred_subst.contains_key(&param.name))
+                        .cloned()
+                        .collect();
+                    let mut inference_sig = sig.clone();
+                    for (index, (_, param_ty)) in sig.params.iter().enumerate() {
+                        let Some(arg_ty) = arg_types.get(index) else {
+                            continue;
+                        };
+                        if matches!(param_ty, Type::Fn { .. })
+                            && matches!(arg_ty, Type::Fn { .. })
+                        {
+                            inference_sig.params[index].1 = arg_ty.clone();
+                        } else {
+                            inference_sig.params[index].1 =
+                                substitute_type(param_ty, &inferred_subst);
+                        }
+                    }
+                    inference_sig.return_type = sig
+                        .return_type
+                        .as_ref()
+                        .map(|ret| substitute_type(ret, &inferred_subst));
+                    match self.trait_reg.infer_fn_subst_without_bounds(
+                        &inference_sig,
+                        &arg_types,
+                        &remaining_params,
+                        self.expected_type.as_ref(),
+                    ) {
+                        Ok(s) => {
+                            inferred_subst.extend(s);
+                            if let Some((ty, bound)) = fn_type_params.iter().find_map(|param| {
+                                let ty = inferred_subst.get(&param.name)?;
+                                param
+                                    .bounds
+                                    .iter()
+                                    .find(|bound| !self.type_satisfies_bound(ty, bound))
+                                    .map(|bound| (ty, bound))
+                            }) {
+                                self.diags
+                                    .push(e0905(&ty.name(), bound, call.name_span, false));
+                            }
+                            generic_subst = inferred_subst;
+                        }
+                        Err(p) => {
+                            self.diags.push(e0904(call.name_span, &p));
+                            generic_subst = inferred_subst;
+                        }
+                    }
                 }
             }
         } else if !call.type_args.is_empty() {
@@ -1605,6 +1886,25 @@ impl<'a> Checker<'a> {
                 Some(call.name_span),
             ));
         }
+        // D-GENERIC-CALL1=A: carry a successful inferred instantiation on the
+        // call node exactly like an explicit `call<T>(...)` spelling. Codegen
+        // and the resident TIR use this one resolved fact to record and lower
+        // the concrete call shape; leaving it local to sema makes a callable
+        // parameter retain `Fn(T) U` and loses the inferred `U` downstream.
+        if call.type_args.is_empty()
+            && generic_subst.len() == fn_type_params.len()
+            && !generic_subst.is_empty()
+        {
+            call.type_args = fn_type_params
+                .iter()
+                .map(|param| {
+                    generic_subst
+                        .get(&param.name)
+                        .cloned()
+                        .expect("complete generic substitution has every type parameter")
+                })
+                .collect();
+        }
         let effective_params: Vec<(AccessConvention, Type)> = if generic_subst.is_empty() {
             sig.params.clone()
         } else {
@@ -1613,7 +1913,7 @@ impl<'a> Checker<'a> {
                 .map(|(c, t)| (*c, self.trait_reg.instantiate_type(t, &generic_subst)))
                 .collect()
         };
-        let args_pre_inferred = !generic_subst.is_empty() && pre_inferred.len() == call.args.len();
+        let args_pre_inferred = !fn_type_params.is_empty() && pre_inferred.len() == call.args.len();
 
         for (i, arg) in call.args.iter_mut().enumerate() {
             if !sig.is_extern {

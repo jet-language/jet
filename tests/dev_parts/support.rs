@@ -1056,6 +1056,49 @@ fn all_example_stems() -> Vec<String> {
     stems
 }
 
+/// Every generated Core conformance witness, including nested module paths.
+/// Keep this walk separate from `all_example_stems`: the ordinary example
+/// batteries have their own denominator and must not silently absorb the
+/// registry corpus. The strict gate below is the single consumer.
+fn core_conformance_corpus_entries() -> Vec<(String, String)> {
+    fn walk(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap_or_else(|error| {
+            panic!("Core conformance corpus directory `{}` unreadable: {error}", dir.display())
+        }) {
+            let path = entry.expect("Core conformance corpus entry").path();
+            if path.is_dir() {
+                walk(&path, files);
+            } else if path.extension().and_then(|value| value.to_str()) == Some("jet") {
+                files.push(path);
+            }
+        }
+    }
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let corpus = root.join("tests/conformance/corpus");
+    if !corpus.is_dir() {
+        return Vec::new();
+    }
+    let mut files = Vec::new();
+    walk(&corpus, &mut files);
+    let mut entries: Vec<(String, String)> = files
+        .into_iter()
+        .map(|path| {
+            let relative = path
+                .strip_prefix(&corpus)
+                .expect("conformance path belongs to conformance corpus")
+                .with_extension("");
+            let stem = format!(
+                "conformance/{}",
+                relative.to_string_lossy().replace('\\', "/")
+            );
+            (stem, path.to_string_lossy().into_owned())
+        })
+        .collect();
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    entries
+}
+
 /// The same weighted LPT shard used by `tools/ci/test-shards.sh`, applied to
 /// corpus stems when the gate is split for a bounded run.
 fn corpus_gate_shard_config() -> Option<(usize, usize)> {

@@ -194,6 +194,7 @@ reports, not compiler warnings.
 | `` `fun` is a function declaration keyword; Jet writes `fn` ``. | Jet uses one function declaration spelling so every declaration has one shape. | Replace `fun` with `fn`; the same rule covers `func`, `def`, and `function`. |
 | `` `var` is a foreign binding keyword; Jet writes `:=` ``. | Jet puts binding mutability on `:=` or `::`, not on a declaration keyword. | Write `name := value`; `let`, `const`, and `val` use `name :: value`. |
 | `a function return type uses :`. | Jet uses `:` for parameter and field types; callable results use `->` after the return type. | Write `fn name(...) Type -> body`. |
+| `` `in` is reserved as the source-loop keyword ``. | `in` marks the boundary between a loop binding and its source, but the lexer still classifies it as a keyword in ordinary value position. | Choose another identifier, or use `in` after `.` as a member name, such as `duration.in(.Seconds)`. |
 
 ### D-RESULT-DECON2 handler diagnostics
 
@@ -637,6 +638,7 @@ generated projection in `docs/spec/diagnostic-rows.md`.
 | E3010 | runtime | an arithmetic or bounds operation has no valid result |
 | E3011 | runtime | a `#Todo` goal was reached at runtime |
 | E3012 | runtime | call depth exceeded Jet's safe runtime limit |
+| E3013 | runtime | a task remained parked at the process exit boundary (D-OBSERVE-TASK1) |
 | R0801 | runtime | a raw access used an address outside the allocation provenance tracked by its active `#Unsafe` gate (D-MEM-SENTRY1) |
 | R0802 | runtime | a raw access used storage after the allocator quarantined and poisoned it (D-MEM-SENTRY1) |
 | R0803 | runtime | a raw access used an address with an alignment the allocation cannot satisfy (D-MEM-SENTRY1) |
@@ -1078,7 +1080,7 @@ member with the qualified path's final name).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E2001 | This package needs a newer Jet. | Editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. | Upgrade with `jet self upgrade`, or set `edition: "2026"` in `package.jet`. |
+| E2001 | This package needs a newer Jet. | Editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. | Update with `jet self update`, or set `edition: "2026"` in `package.jet`. |
 | E2002 | A deprecated item was used past its migration window. | The item was deprecated in an earlier edition and no longer exists in this one; it has reached the end of its migration window. | Use the named replacement, or run `jet fix` to migrate automatically. |
 | L2001 | An item is deprecated in this edition. | It still works during its migration window but will be removed in a later edition. | Use the named replacement, or run `jet fix` to migrate automatically. |
 
@@ -1616,6 +1618,7 @@ safe-locals policy.
 | E3010 | `{msg}` | The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data. | Check the operands or bounds before the operation, or use a checked operation that returns an outcome. |
 | E3011 | `#Todo at {file}:{line} — expected {type}`. | This code is deliberately incomplete and reached a running program. | Implement this code before running the program. |
 | E3012 | `stack overflow in {fn}` | The call stack kept growing without reaching a safe return. | End the recursion or make progress toward a base case. |
+| E3013 | `Parked tasks remain at process exit: {msg}` | The scheduler reached process exit while one or more tasks were blocked on a wait target. | Join each task or make its wait reachable before process exit. |
 | R0801 | `raw {operation} outside {gate}'s storage`. | The pointer is outside the allocation provenance tracked by the active `#Unsafe` gate. Sentry evidence is a runtime witness; it never replaces a required static unsafe obligation. | Bound the raw access before it reaches storage, and satisfy obligation `{obligation}`. |
 | R0802 | `use of freed storage in {gate}`. | The allocation was quarantined and poisoned before this raw operation. | Do not use the pointer after release, and satisfy obligation `{obligation}`. |
 | R0803 | `misaligned raw {operation} in {gate}`. | The pointer alignment does not satisfy the tracked allocation provenance. | Align the raw access before it reaches storage, and satisfy obligation `{obligation}`. |
@@ -2350,7 +2353,7 @@ diagnostic.
 
 | What | Why | Fix |
 |------|-----|-----|
-| Unknown interpolation selector `:…`. | String interpolation supports a closed selector set: `:Debug`, `:Pretty`, `:Fixed(n)`, `:Hex(n)`, `:Unit(name)`, and `:Unit(bare)`. | Write `{value:Debug}`, `{value:Pretty}`, `{value:Fixed(2)}`, `{value:Hex(16)}`, `{value:Unit(name)}`, `{value:Unit(bare)}`, or `{value}`. |
+| Unknown interpolation selector `:…`. | String interpolation supports a closed selector set: `:Debug`, `:Pretty`, `:Fixed(n)`, `:Hex(n)`, `:Pad(n[, "fill"])`, `:PadLeft(n[, "fill"])`, `:Sci(n)`, `:Percent(n)`, `:Bin`, `:Oct`, `:Unit(name)`, and `:Unit(bare)`. | Write `{value:Debug}`, `{value:Pretty}`, `{value:Fixed(2)}`, `{value:Hex(2)}`, `{value:Pad(2, " ")}`, `{value:PadLeft(2, " ")}`, `{value:Sci(2)}`, `{value:Percent(2)}`, `{value:Bin}`, `{value:Oct}`, `{value:Unit(name)}`, `{value:Unit(bare)}`, or `{value}`. |
 
 ### E0915 — No Display implementation (D-DISPLAY-SHAPE)
 

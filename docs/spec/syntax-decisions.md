@@ -289,7 +289,9 @@ available where the type cannot be inferred.
 
 **S47 — Function types & captures**: fn type `fn(T1, T2) R`; each unmarked
 parameter has plain read access (D-MEM-PARAM1). Named `fn`s coerce to function
-values only when every parameter also has plain read access. A named function
+values only when every parameter also has plain read access. Declaration-local
+parameter names are documentation, not function-value identity; explicit
+public labels and parameter zones remain callable obligations. A named function
 with a write (`&`) or move (`^`) parameter stays direct-call-only because S47
 has no function-type spelling that could preserve that requirement. Captures follow M2: shared read for read-only
 names, mutable borrow for written names. Escaping closures own captures.
@@ -415,11 +417,12 @@ D-ONELINE-BODY1=B's typed `fn f() T -> expr`; the earlier general-pipe
 proposal (D-SUGAR2), superseded by D-SHAPE-PIPE1=C.
 
 **D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow** *(ratified
-2026-07-15, card #552)*: single `|` is legal only in alternative-list grammar,
-including structural or-patterns and choice arms. Jet assigns no general flow
-operator or other bar operator. Reusable flows use ordinary calls, named
-intermediate values, and ordinary named composition helpers. `||` and the
-separately ratified `|=` compound assignment keep their existing meanings.
+2026-07-15, card #552; amended by D-BITOREXPR1=A)*: single `|` remains legal
+in alternative-list grammar, including structural or-patterns and choice arms,
+and is also the value-position bitwise OR operator. Jet assigns no general flow
+meaning to a bar. Reusable flows use ordinary calls, named intermediate
+values, and ordinary named composition helpers. `||` and the separately
+ratified `|=` compound assignment keep their existing meanings.
 
 ### Control flow
 
@@ -692,6 +695,11 @@ use `filter_map`/`try_collect` (D-FAILCOMP1). S25 comparison distribution is
 
 **S13 — Logic & comparison**: `&&` `||` `!`; `==` `!=` `<` `>` `<=` `>=`.
 Word forms are not operators.
+
+**D-BITOREXPR1=A** *(ratified 2026-08-28, card #2299)*: value-position `|`
+is bitwise OR. It binds tighter than comparisons and remains distinct from
+type-position `|`, which is the anonymous-union separator under D-UNIONTYPE1.
+The existing `|=` compound assignment remains separate.
 
 **D-CHAINCMP1 — Chained comparisons**: `0 <= sev < 10` desugars to
 `0 <= sev && sev < 10`, middle operand evaluated once. Same-direction chains
@@ -1219,10 +1227,18 @@ Grapheme clusters + NFC/NFD live in opt-in `core.text.unicode` (D-GRAPHEME1).
 `sep`; `s.before(sep)` the substring strictly before it. `sep` absent -> the
 whole original string on both sides (symmetric identity fallback, matching
 `.replace`'s no-match-is-unchanged convention — no `Option`/error to
-unwrap; I8, one way to mean it). No `.after_last`/`.before_last`: the
-ratified set covers only the first-occurrence case actually needed
-(email/path-prefix splitting); a last-occurrence sibling is unrequested
-surface growth without a driving example.
+unwrap; I8, one way to mean it). No `.after_last`/`.before_last`: `after` and
+`before` remain first-occurrence projections. The separately requested
+`String.cut_last(sep)` operation returns both sides at the terminal separator
+for Go 1.27 parity; it is one root operation, with no `cut_last_*` sibling.
+
+**D-GO127-STDLIB1=A** *(card #2278, 2026-08-28)*: register the Go 1.27
+stdlib parity roots `String.cut_last`, `Int.div_euclid`, and `Int.rem_euclid`.
+`cut_last` returns the existing `?(before: String, after: String)` split
+shape. The two Int methods return exact `Int`; Euclidean remainder is
+non-negative and strictly below the divisor magnitude, including for a
+negative divisor. The names follow stdlib Law 9: each is a root semantic
+operation, and no same-signature variant family is added around it.
 
 **S67 — Numeric literals**: `_` separators (`1_000_000`); `0x`/`0o`/`0b`
 prefixes (E0001 if empty); float exponent `6.022e23`; `1..10` still lexes as
@@ -3695,7 +3711,13 @@ index, not a substitute for that law.
   including captures, named groups, replace, split, flags, and Unicode
   classes. It is std-only in the generated prelude; the old bootstrap `regex`
   crate bridge is retired. Any PCRE/backtracking compatibility is explicit and
-  never the default.
+  never the default. The dialect pins `\d` and `\w` to ASCII, `$` to absolute
+  end-of-text, capture spans to zero-based Unicode-character positions, and
+  `split` to omit captures. Empty matches advance one Unicode character while
+  preserving intervening text. `replace` replaces all matches; `replace_first`
+  is the explicit one-match operation; `replace_all` is the named all-match
+  spelling. The Thompson/Pike VM's work is bounded by pattern size times input
+  length, so nested quantifiers do not expose recursive-backtracking ReDoS.
 - **D-NETSOCKET1=A**: `core.net` exposes typed blocking-looking
   TCP/UDP/Unix/DNS/TLS APIs over handles compatible with the task runtime, so
   deadlines, cancellation, readiness, and high-concurrency serving stay one
@@ -5995,7 +6017,7 @@ binaries:
 (publish, yank, keygen, key backup, vendor), `jet inspect` (graph, query,
 explain-build, impact, dossier, semindex, expand, schema, codemod, audit,
 sbom, bind, plus D-CLI-SURFACE3's logs), `jetpack hangar` (physical store verbs
-per D-CLI-STORE2), `jet self` (toolchain, upgrade, doctor, completions, man,
+per D-CLI-STORE2), `jet self` (toolchain, update, doctor, completions, man,
 devtools). The bare ungrouped spelling of a moved verb is a teaching error
 naming the grouped form, never a silent alias (I8).
 
@@ -8192,7 +8214,26 @@ D-LOOP-STMT-ARROW1=C, and the stride rule of S19/S22 are untouched, as are
 infinite, conditional, bindingless-subject, and explicit-state loops. `in` is
 a reserved keyword (I7). The retired comma join is a teaching diagnostic.
 Expression-position membership `x in xs` is a teaching diagnostic pointing at
-`.has(x)`; no membership operator ships (I8).
+`.has(x)`; no membership operator ships (I8). D-TIME-IN1=C also admits the
+reserved word after a dot as a postfix member name, so `duration.in(.Seconds)`
+is an ordinary method call while bare `in` remains reserved.
+
+**2026-08-28 — D-BITOREXPR1=A / D-TIME-IN1=C** *(cards #2299/#2283)*:
+value-position `|` is bitwise OR, above comparisons and separate from the
+type-position union separator. The lexer continues to reserve bare `in` for
+source loops, while the postfix lexer/parser carve-out accepts it after `.` as
+an ordinary member; formatter and editor grammar surfaces preserve
+`duration.in(.Seconds)`.
+
+**2026-08-28 — D-BREVITY1=A** *(card #2265)*: the brevity pack closes common
+Python line-count gaps by naming operations in the standard library. The
+canonical forms are `para_map(f, limit: n)` for an ordered map with a bounded
+worker limit, `counts()` for a frequency map, and `top_n(n)` for rows ordered
+by descending map value with ascending-key ties. Date format accepts strftime
+codes such as `%a`, `%A`, `%b`, `%B`, `%Y`, and `%j`, plus the existing Jet
+tokens. Relative file paths resolve from the process working directory; the
+gauntlet runner sets that directory to each entry, so corpus entries use a
+direct relative path and do not join it with `current_dir()`.
 
 ## Ratified decision index
 

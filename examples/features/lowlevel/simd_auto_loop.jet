@@ -1,0 +1,24 @@
+// D-SIMD3=B / Card #2261: fixed-size, effect-free elementwise loops use the
+// native default pipeline. #Scalar marks the explicit expert boundary; both
+// paths must preserve the same element order and results.
+#Scalar fn scalar_loop(values: [Float#8]) [Float#8] -> {
+    output := [Float#8]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    loop i in 0..<8 {
+        output[i] = values[i] * 2.0 + 1.0
+    }
+    return output
+}
+
+fn auto_loop(values: [Float#8]) [Float#8] -> {
+    output := [Float#8]{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}
+    loop i in 0..<8 {
+        output[i] = values[i] * 2.0 + 1.0
+    }
+    return output
+}
+
+fn run() {
+    values :: [Float#8]{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}
+    print(auto_loop(values))
+    print(scalar_loop(values))
+}

@@ -5,7 +5,7 @@ pub(crate) fn jet_fmt_number(value: i64) -> String {
 }
 
 pub(crate) fn jet_fmt_decimal(value: f64, precision: i64) -> String {
-    let precision = precision.clamp(0, 9) as usize;
+    let precision = precision.max(0) as usize;
     comma_decimal(format!("{:.*}", precision, value))
 }
 
@@ -13,7 +13,7 @@ pub(crate) fn jet_fmt_decimal(value: f64, precision: i64) -> String {
 /// caller supplies the carrier's decimal spelling so native and spilled `Int`
 /// values use one kernel without a lossy float conversion.
 pub(crate) fn jet_fmt_decimal_int(value: &str, precision: i64) -> String {
-    let precision = precision.clamp(0, 9) as usize;
+    let precision = precision.max(0) as usize;
     let value = value.trim();
     let (negative, digits) = if let Some(rest) = value.strip_prefix('-') {
         (true, rest)
@@ -102,7 +102,7 @@ fn jet_fmt_radix_decimal(value: &str, radix: u16, width: i64) -> String {
 }
 
 pub(crate) fn jet_fmt_sci(value: f64, precision: i64) -> String {
-    let precision = precision.clamp(0, 9) as usize;
+    let precision = precision.max(0) as usize;
     format!("{:.*e}", precision, value)
 }
 
@@ -397,8 +397,10 @@ fn comma_decimal(raw: String) -> String {
     let mut split = rest.splitn(2, '.');
     let whole = split.next().unwrap_or("0");
     let frac = split.next();
-    let whole_value = whole.parse::<i64>().unwrap_or(0);
-    let whole_text = comma_int(whole_value);
+    // Keep the formatted value as decimal text. Parsing the whole part as an
+    // i64 turns values above i64::MAX into zero, which made 1e21 render as
+    // 0.00 and also discarded large exact integer spellings.
+    let whole_text = group_decimal_digits(whole);
     match frac {
         Some(frac) => format!("{}{}.{}", sign, whole_text, frac),
         None => format!("{}{}", sign, whole_text),

@@ -1421,9 +1421,14 @@ fn language_symbols() -> Vec<SemanticSymbol> {
         ] {
             let target = AST::numeric_type_from_name(target_name)
                 .expect("numeric catalog target names a numeric type");
-            let ret = Collections::numeric_conversion_return(&target, method, 1)
-                .flatten()
-                .expect("numeric conversion catalog entry has a return type");
+            // D-TYPE2-EXACT-CONVERT1: exact-number sources (Decimal, Fraction)
+            // convert only to Int/Float and the exact family — the source ×
+            // target cross-product is intentionally sparse. A pair without a
+            // conversion is skipped, not a catalog defect.
+            let Some(ret) = Collections::numeric_conversion_return(&target, method, 1).flatten()
+            else {
+                continue;
+            };
             let result = match ret {
                 AST::Type::Result { .. } => format!("{target_name} !String"),
                 _ => target_name.to_string(),

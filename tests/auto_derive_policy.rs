@@ -889,8 +889,8 @@ true\n\
 true\n\
 {\"badge\":{\"value\":9}}\n\
 true\n\
-MapEnvelope { values: [:\"one\": 1] }\n\
-MapEnvelope { values: [:\"one\": 1] }\n\
+MapEnvelope { values: [\"one\": 1] }\n\
+MapEnvelope { values: [\"one\": 1] }\n\
 UnionEnvelope { value: 3 }\n\
 UnionEnvelope { value: 3 }\n\
 true\n";

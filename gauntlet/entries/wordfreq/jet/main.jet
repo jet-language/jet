@@ -1,24 +1,11 @@
 use core.files as fs
 use core.process as process
-use core.sys as sys
 
-fn run() !IOError {
-    cwd :: sys.current_dir() ?? panic("no cwd")
-    path :: Path.from(cwd).join(process.argv().get(1) ?? "input.txt").to_string()
-    contents :: fs.read(path) ?? panic("read failed")
-    counts := [String:Int]{}
-    total := 0
-    loop line in contents.lines() {
-        loop word in line.split(" ") {
-            counts[word] = (counts.get(word) ?? 0) + 1
-            total += 1
-        }
-    }
-
-    ranked := counts.keys().to_list()
-    sort_counts :: ~counts
-    ranked.sort_by_desc((word: String) -> sort_counts.get(word) ?? 0)
-    limit :: if ranked.len() < 20 -> ranked.len() else -> 20
-    loop i in 0..<limit -> print("{counts.get(ranked[i]) ?? 0} {ranked[i]}")
+fn run() {
+    contents :: fs.read(process.argv().get(1) ?? "input.txt") ?? panic("read failed")
+    words :: contents.lines().map((line: String) -> line.split(" ").to_list()).flatten()
+    counts :: words.counts()
+    total :: counts.values().sum()
+    loop item in counts.top_n(20) -> print("{item.value} {item.key}")
     print("distinct {counts.len()} total {total}")
 }

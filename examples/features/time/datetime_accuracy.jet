@@ -1,0 +1,13 @@
+// Differential datetime accuracy witnesses: Gregorian weekday, negative month
+// arithmetic, and RFC 3339 offset validation.
+use core.time as time
+
+fn run() {
+    date :: DateTime{"2024-02-29T00:00:00Z"}.date()
+    print(date.weekday())
+    print(date.iso_weekday())
+    print(date.add_months(-12).to_string())
+
+    parsed :: time.parse_rfc3339("2024-01-01T00:00:00+24:00") ?? DateTime{"2000-01-01T00:00:00Z"}
+    print("offset:{parsed.to_string()}")
+}

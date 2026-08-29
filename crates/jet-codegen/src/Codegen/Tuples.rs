@@ -561,6 +561,62 @@ fn is_move_only_cell_guard(ty: &Type) -> bool {
     )
 }
 
+fn tuple_render_body(fields: &[(String, Type)], method: &str) -> String {
+    if fields.is_empty() {
+        return "\"()\".to_string()".to_string();
+    }
+    let label = format!(
+        "({})",
+        fields
+            .iter()
+            .map(|(field, _)| field.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let field_specs = fields
+        .iter()
+        .map(|(field, _)| format!("{field}: {{}}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let values = fields
+        .iter()
+        .map(|(field, _)| format!("(self).{}.{}()", mangle(field), method))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let format_string = format!("{label} {{{{ {field_specs} }}}}");
+    format!("format!({format_string:?}, {values})")
+}
+
+fn emit_tuple_protocol_impls(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut String) {
+    if fields
+        .iter()
+        .all(|(_, field)| crate::Codegen::jet_showable_type(cx, field))
+    {
+        out.push_str(&format!(
+            "impl JetShow for {name} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
+            tuple_render_body(fields, "jet_show")
+        ));
+    }
+    if fields
+        .iter()
+        .all(|(_, field)| crate::Codegen::jet_displayable_type(cx, field))
+    {
+        out.push_str(&format!(
+            "impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{ {} }}\n}}\n\n",
+            tuple_render_body(fields, "jet_display")
+        ));
+    }
+    if fields
+        .iter()
+        .all(|(_, field)| crate::Codegen::jet_debuggable_type(cx, field))
+    {
+        out.push_str(&format!(
+            "impl JetDebug for {name} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
+            tuple_render_body(fields, "jet_debug")
+        ));
+    }
+}
+
 fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut String) {
     // Tuples are structural types with no type-parameter scope of their own.
     let no_params: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -623,6 +679,7 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
             .collect();
         emit_map_key_impls(name, &key_fields, out);
     }
+    emit_tuple_protocol_impls(cx, name, fields, out);
 }
 
 pub(crate) fn emit_tuple_structs(

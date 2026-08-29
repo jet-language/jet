@@ -1,10 +1,8 @@
 use core.files as fs
 use core.process as process
-use core.sys as sys
 
 fn run() {
-    cwd :: sys.current_dir() ?? "."
-    path :: Path.from(cwd).join(process.argv().get(1) ?? "notes.txt").to_string()
+    path :: process.argv().get(1) ?? "notes.txt"
     input :: fs.read(path) ?? panic("read failed")
     lines := [String]{}
     loop line in input.lines() {

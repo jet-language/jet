@@ -265,7 +265,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "GameInputSnapshot" | "GameSceneType" | "GameReplayType" | "GameBackendType"
         | "RaylibWindow" | "RaylibColor" | "RaylibSound"
         // D-DECIMAL1: exact decimal arithmetic.
-        | "Decimal"
+        | "Decimal" | "Fraction"
         // D-TYPE2-IMAG1=A: imaginary literals construct the shared Complex value.
         | "Complex"
         // D-DBDRIVER1 / D-EFFDBREAD1=A: the `core.db` connection handle and its

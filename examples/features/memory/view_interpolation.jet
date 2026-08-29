@@ -1,0 +1,47 @@
+// #2311 / D-MEM: a view is a value at the surface and renders its elements.
+fn show_read(values: &[Int]) {
+    read :: values[0..1]
+    print("read-before={read}")
+}
+
+fn show_write_before(values: &[Int]) {
+    write :: &values[0..2]
+    print("write-before={write}")
+}
+
+fn mutate(values: &[Int]) {
+    write :: &values[0..2]
+    write[0] = 9
+}
+
+fn show_write_after(values: &[Int]) {
+    write :: &values[0..2]
+    print("write-after={write}")
+}
+
+fn show_read_after(values: &[Int]) {
+    read :: values[0..1]
+    print("read-after={read}")
+}
+
+fn show_singleton_before(values: &[Int]) {
+    singleton :: values[1..1]
+    print("singleton-before={singleton}")
+}
+
+fn show_singleton_after(values: &[Int]) {
+    singleton :: values[1..1]
+    print("singleton-after={singleton}")
+}
+
+fn run() {
+    values := [1, 2, 3]
+    show_read(&values)
+    show_write_before(&values)
+    show_singleton_before(&values)
+    mutate(&values)
+    show_read_after(&values)
+    show_write_after(&values)
+    show_singleton_after(&values)
+    print("owner={values}")
+}

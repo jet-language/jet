@@ -152,7 +152,7 @@ value-arm-body = expr | value-block ;
 value-block = "{" { stmt } expr "}" ;
 expr     = precedence climbing over:
            "||"  >  "&&"  >  "==" "!=" "<" ">" "<=" ">="
-           >  "|"  >  "~|"  >  "&"  >  "<<" ">>"      // D-XORSPELL1: "~|" is xor
+           >  "|"  >  "~|"  >  "&"  >  "<<" ">>"      // D-BITOREXPR1: "|" is OR; D-XORSPELL1: "~|" is xor
            >  "+" "-"  >  "*" "/" "/%" "%" "%%"  >  unary "-" "!"
            >  "^"                                     // D-EXPSEM1: power, groups right
            >  call | ident | literal | "(" expr ")" ;
@@ -183,7 +183,8 @@ expr     = precedence climbing over:
   D-TRACK-ORIGIN1 provenance. Read it only as the typed comptime fact
   `value.@origin -> ?OriginInfo`; there is no runtime origin projection.
 - Arithmetic: `+ - * /` widen one numeric operand to the other when the ruled
-  numeric widening law permits it; `% & | ^ << >>` remain integer-only.
+  numeric widening law permits it; `% & | ~| << >>` remain integer-only.
+  Bitwise OR is `|`, bitwise AND is `&`, and bitwise XOR is `~|`.
   `+` on `String` is a teaching error pointing at interpolation. Compound
   assignment (S17) mirrors the binary operators.
 - Comparisons (`== != < > <= >=`) use the same numeric widening law and yield
@@ -2338,12 +2339,13 @@ concrete list/map/set `map` and `filter` are eager under D-CORE-EAGER1,
 and `.lazy()` enters the deferred plane explicitly.
 `first()` is the consuming positional terminal: use `skip(n).first()` for a
 zero-based pick, yielding `?T`; an index past the end returns `None`. This is
-the only positional-pick path; `nth` is not part of the API.
+the only positional-pick path; `nth` is not part of the API. `min_by` and
+`max_by` keep the last source item when keys compare equal.
 
 D-S14-PAUSE: retired `lambda` / anonymous-function spellings get ordinary
 parse errors. Current lambda syntax is `(x) -> …`. D-SHAPE-PIPE1=C assigns a
-single bar only to pattern and choice alternatives; it has no lambda or flow
-alias.
+single bar to pattern and choice alternatives there; D-BITOREXPR1=A assigns it
+to bitwise OR in value position. It has no lambda or flow alias.
 
 Examples: `examples/features/basics/closures.jet`, `examples/features/basics/callbacks.jet`,
 `examples/features/collections/iter_adapters.jet`. Ui:
@@ -2411,6 +2413,10 @@ Jet ships:
   integer families
 - exact ratios: `fraction(n, d) -> ?Fraction` with `.numerator()`,
   `.denominator()`, `.to_string()`, `.to_float()`, `.is_zero()`, and arithmetic
+
+`round` returns the nearest integer, with an exact half rounded away from zero
+(`-2.5` becomes `-3`; `2.5` becomes `3`). For `min` and `max`, one NaN
+operand yields the non-NaN operand; two NaN operands yield NaN.
 
 Examples: `examples/features/math/math_audit.jet`,
 `examples/features/math/more_math.jet`, `examples/features/math/fraction.jet`.

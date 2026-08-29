@@ -1,10 +1,14 @@
-// D-OBSERVE-LIVE1=A: one live, payload-free runtime snapshot source. Generated
-// programs publish bounded runtime facts only when JET_OBSERVE=1. Channel
-// values, task locals, environment, and credentials never enter this registry.
+// D-OBSERVE-LIVE1=A / D-OBSERVE-TASK1=A: one live, payload-free runtime
+// snapshot source. The bounded task registry is always present so the shared
+// exit boundary can name parked tasks; JET_OBSERVE=1 only enables the live file
+// writer. Channel values, task locals, environment, and credentials never enter
+// this registry.
 
 #[derive(Clone)]
 struct JetObserveTask {
     parent: usize,
+    label: String,
+    spawn_site: usize,
     state: &'static str,
     wait: String,
     deadline_ms: Option<i64>,
@@ -40,6 +44,7 @@ struct JetObserveEvent {
 }
 
 const JET_OBSERVE_EVENT_LIMIT: usize = 256;
+const JET_OBSERVE_TASK_LIMIT: usize = 4096;
 
 struct JetObserveRegistry {
     next_task: std::sync::atomic::AtomicUsize,
@@ -53,6 +58,8 @@ struct JetObserveRegistry {
 static JET_OBSERVE: std::sync::OnceLock<Option<std::sync::Arc<JetObserveRegistry>>> =
     std::sync::OnceLock::new();
 static JET_OBSERVE_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+static JET_OBSERVE_EXIT_REPORTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 static JET_OBSERVE_ARENAS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 static JET_OBSERVE_ARENA_ALLOCS: std::sync::atomic::AtomicUsize =
@@ -83,7 +90,7 @@ thread_local! {
 fn jet_observe_registry() -> Option<&'static std::sync::Arc<JetObserveRegistry>> {
     JET_OBSERVE
         .get_or_init(|| {
-            (std::env::var("JET_OBSERVE").ok().as_deref() == Some("1")).then(|| {
+            Some({
                 std::sync::Arc::new(JetObserveRegistry {
                     next_task: std::sync::atomic::AtomicUsize::new(2),
                     next_channel: std::sync::atomic::AtomicUsize::new(1),
@@ -95,6 +102,10 @@ fn jet_observe_registry() -> Option<&'static std::sync::Arc<JetObserveRegistry>>
             })
         })
         .as_ref()
+}
+
+fn jet_observe_live_enabled() -> bool {
+    std::env::var("JET_OBSERVE").ok().as_deref() == Some("1")
 }
 
 fn jet_observe_escape(value: &str) -> String {
@@ -194,6 +205,16 @@ fn jet_observe_event(mut event: JetObserveEvent) {
 }
 
 pub fn jet_observe_task_register(observe_id: &std::sync::atomic::AtomicUsize) -> usize {
+    jet_observe_task_register_at(observe_id, 0)
+}
+
+/// Register one bounded task identity. The compiler's existing spawn-site
+/// index is the stable cross-tier label; no second user-facing spawn syntax is
+/// needed to carry it through AOT, JIT, and the evaluator.
+pub fn jet_observe_task_register_at(
+    observe_id: &std::sync::atomic::AtomicUsize,
+    spawn_site: usize,
+) -> usize {
     use std::sync::atomic::Ordering;
     let Some(registry) = jet_observe_registry() else {
         observe_id.store(0, Ordering::Relaxed);
@@ -201,10 +222,17 @@ pub fn jet_observe_task_register(observe_id: &std::sync::atomic::AtomicUsize) ->
     };
     let parent = JET_OBSERVE_TASK_ID.with(|current| current.get());
     let id = registry.next_task.fetch_add(1, Ordering::Relaxed);
-    registry.tasks.lock().unwrap().insert(
+    let mut tasks = registry.tasks.lock().unwrap();
+    if tasks.len() >= JET_OBSERVE_TASK_LIMIT {
+        observe_id.store(0, Ordering::Relaxed);
+        return 0;
+    }
+    tasks.insert(
         id,
         JetObserveTask {
             parent,
+            label: format!("task@{spawn_site}"),
+            spawn_site,
             state: "queued",
             wait: String::new(),
             deadline_ms: None,
@@ -213,6 +241,26 @@ pub fn jet_observe_task_register(observe_id: &std::sync::atomic::AtomicUsize) ->
     );
     observe_id.store(id, Ordering::Relaxed);
     id
+}
+
+/// Stable text for a task failure. The id makes the identity unique and the
+/// spawn-site label makes it actionable when several tasks share a body.
+pub fn jet_observe_task_identity(id: usize) -> String {
+    let Some(registry) = jet_observe_registry() else {
+        return format!("task #{id}");
+    };
+    let Some(task) = registry.tasks.lock().unwrap().get(&id).cloned() else {
+        return format!("task #{id}");
+    };
+    format!("task #{id} ({}, spawn site {})", task.label, task.spawn_site)
+}
+
+pub fn jet_observe_task_failure_message(id: usize, reason: String) -> String {
+    jet_observe_task_failure_message_for_identity(&jet_observe_task_identity(id), reason)
+}
+
+pub fn jet_observe_task_failure_message_for_identity(identity: &str, reason: String) -> String {
+    format!("{identity}: {reason}")
 }
 
 pub fn jet_observe_task_enter(id: usize) {
@@ -238,12 +286,23 @@ pub fn jet_observe_task_finish(id: usize) {
 
 pub fn jet_observe_runtime_start() {
     let Some(registry) = jet_observe_registry().cloned() else { return };
-    if JET_OBSERVE_STARTED.set(()).is_err() {
+    use std::sync::atomic::Ordering;
+    JET_OBSERVE_EXIT_REPORTED.store(false, Ordering::Release);
+    let first_start = JET_OBSERVE_STARTED.set(()).is_ok();
+    if first_start {
+        registry.tasks.lock().unwrap().insert(1, JetObserveTask {
+            parent: 0,
+            label: String::from("root"),
+            spawn_site: 0,
+            state: "running",
+            wait: String::new(),
+            deadline_ms: None,
+            cancelled: false,
+        });
+    }
+    if !first_start || !jet_observe_live_enabled() {
         return;
     }
-    registry.tasks.lock().unwrap().insert(1, JetObserveTask {
-        parent: 0, state: "running", wait: String::new(), deadline_ms: None, cancelled: false,
-    });
     std::thread::spawn(move || {
         use std::io::Write;
         let pid = std::process::id();
@@ -274,6 +333,79 @@ pub fn jet_observe_runtime_start() {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
     });
+}
+
+fn jet_observe_parked_tasks(
+    registry: &JetObserveRegistry,
+) -> Vec<(usize, JetObserveTask)> {
+    let mut tasks: Vec<_> = registry
+        .tasks
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, task)| task.state == "blocked")
+        .map(|(id, task)| (*id, task.clone()))
+        .collect();
+    tasks.sort_by_key(|(id, _)| *id);
+    tasks
+}
+
+pub fn jet_observe_has_parked_tasks() -> bool {
+    jet_observe_registry().is_some_and(|registry| {
+        registry
+            .tasks
+            .lock()
+            .unwrap()
+            .values()
+            .any(|task| task.state == "blocked")
+    })
+}
+
+/// Render the bounded parked-task snapshot at the common process exit edge.
+/// The short observation window lets a just-submitted child publish its first
+/// wait state without making normal programs pay a scheduler drain timeout.
+pub fn jet_observe_parked_tasks_report() -> Option<JetRuntimeDiagnostic> {
+    use std::sync::atomic::Ordering;
+    let registry = jet_observe_registry()?.clone();
+    if JET_OBSERVE_EXIT_REPORTED.swap(true, Ordering::AcqRel) {
+        return None;
+    }
+    let mut parked = jet_observe_parked_tasks(&registry);
+    if parked.is_empty() {
+        for _ in 0..25 {
+            let has_live_child = registry
+                .tasks
+                .lock()
+                .unwrap()
+                .keys()
+                .any(|id| *id != 1);
+            if !has_live_child {
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            parked = jet_observe_parked_tasks(&registry);
+            if !parked.is_empty() {
+                break;
+            }
+        }
+    }
+    if parked.is_empty() {
+        return None;
+    }
+
+    let mut details = String::new();
+    for (id, task) in parked {
+        details.push_str(&format!(
+            "\n  task #{id} ({}, spawn site {})\n    state: {}\n    wait target: {}",
+            task.label,
+            task.spawn_site,
+            task.state,
+            if task.wait.is_empty() { "unknown" } else { &task.wait },
+        ));
+    }
+    Some(jet_render_runtime_stop(
+        "E3013", "", 0, "", "", 1, 1, &details, "",
+    ))
 }
 
 fn jet_observe_task_update(state: &'static str, wait: &str, deadline_ms: Option<i64>) {

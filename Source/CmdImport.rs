@@ -1015,9 +1015,13 @@ fn usage_error(what: &str, fix: &str, json: bool) -> i32 {
             .json()
         );
     } else {
-        eprintln!("error[E2102]: {what}");
-        eprintln!("  why: D-MIGRATE-SRC1 keeps source import arguments explicit");
-        eprintln!("  fix: {fix}");
+        crate::emit_cli_report(
+            "E2102",
+            what.to_string(),
+            "D-MIGRATE-SRC1 keeps source import arguments explicit".to_string(),
+            fix.to_string(),
+            false,
+        );
     }
     ExitCodes::USAGE
 }

@@ -202,6 +202,7 @@ pub mod Toolchain;
 pub mod Transition;
 pub mod Trust;
 pub mod TrustRoot;
+pub mod ToolchainUpdate;
 pub mod WorkspaceFile;
 pub mod WorkspaceLock;
 

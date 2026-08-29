@@ -1,12 +1,10 @@
 use core.files as fs
 use core.process as process
-use core.sys as env
 
 fn run() {
     args :: process.argv()
     dir :: args.get(1) ?? "photos"
-    cwd :: env.current_dir() ?? panic("cannot resolve directory")
-    root :: Path.from(cwd).join(dir).to_string()
+    root :: dir
     entries :: fs.list_dir(root) ?? panic("cannot list directory")
     photos := [String]{}
     files := 0

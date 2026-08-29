@@ -15,6 +15,61 @@ pub fn type_is_decimal(ty: &Type) -> bool {
     matches!(ty, Type::Named(n) if is_decimal_type_name(n))
 }
 
+pub fn is_exact_type_name(name: &str) -> bool {
+    matches!(name, Syntax::TYPE_DECIMAL | Syntax::TYPE_FRACTION)
+}
+
+pub fn exact_type_from_name(name: &str) -> Option<Type> {
+    is_exact_type_name(name).then(|| Type::Named(name.to_string()))
+}
+
+/// D-SHAPE-CONVERT1=A: exact-number conversion routing. The returned owner
+/// and function name describe the shared precise carrier that performs the
+/// conversion; source-owned `to_*` spellings never enter this table.
+pub fn precise_conversion_route(
+    target_name: &str,
+    source_name: &str,
+) -> Option<(&'static str, &'static str)> {
+    match (target_name, source_name) {
+        (Syntax::TYPE_DECIMAL, "Int") => Some((Syntax::TYPE_DECIMAL, "from_int")),
+        (Syntax::TYPE_DECIMAL, "Float") => Some((Syntax::TYPE_DECIMAL, "from_float")),
+        (Syntax::TYPE_DECIMAL, Syntax::TYPE_FRACTION) => {
+            Some((Syntax::TYPE_DECIMAL, "from_fraction"))
+        }
+        (Syntax::TYPE_FRACTION, "Int") => Some((Syntax::TYPE_FRACTION, "from_int")),
+        (Syntax::TYPE_FRACTION, "Float") => Some((Syntax::TYPE_FRACTION, "from_float")),
+        (Syntax::TYPE_FRACTION, Syntax::TYPE_DECIMAL) => {
+            Some((Syntax::TYPE_FRACTION, "from_decimal"))
+        }
+        ("Float", Syntax::TYPE_DECIMAL) => Some((Syntax::TYPE_DECIMAL, "to_float")),
+        ("Float", Syntax::TYPE_FRACTION) => Some((Syntax::TYPE_FRACTION, "to_float")),
+        ("Int", Syntax::TYPE_DECIMAL) => Some((Syntax::TYPE_DECIMAL, "to_int")),
+        ("Int", Syntax::TYPE_FRACTION) => Some((Syntax::TYPE_FRACTION, "to_int")),
+        _ => None,
+    }
+}
+
+/// Return the exact conversion result shape. Exact-number conversions are
+/// explicit and total for representable values; an impossible conversion
+/// stops loudly at runtime rather than rounding or changing the type.
+pub fn precise_conversion_return(
+    target: &Type,
+    method: &str,
+    nargs: usize,
+) -> Option<Option<Type>> {
+    if nargs != 1 {
+        return None;
+    }
+    let source_name = Syntax::numeric_conversion_source(method)?;
+    let target_name = match target {
+        Type::Int => "Int",
+        Type::Float => "Float",
+        Type::Named(name) if is_exact_type_name(name) => name.as_str(),
+        _ => return None,
+    };
+    precise_conversion_route(target_name, source_name).map(|_| Some(target.clone()))
+}
+
 pub fn is_money_like_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     MONEY_LINT_NAMES.iter().any(|m| lower.contains(m))
@@ -52,6 +107,8 @@ pub fn decimal_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
     let decimal = || Type::Named(Syntax::TYPE_DECIMAL.to_string());
     match (method, nargs) {
         ("add" | "sub" | "mul", 1) => Some(Some(decimal())),
+        ("div", 1) => Some(Some(Type::Named(Syntax::TYPE_FRACTION.to_string()))),
+        ("round" | "floor" | "ceil", 0) => Some(Some(decimal())),
         ("equal", 1) => Some(Some(Type::Bool)),
         ("to_string", 0) => Some(Some(Type::String)),
         _ => None,
@@ -81,6 +138,20 @@ pub fn fraction_method_return(method: &str, nargs: usize) -> Option<Option<Type>
 pub struct CtFraction {
     pub numerator: i64,
     pub denominator: i64,
+}
+
+impl PartialOrd for CtFraction {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for CtFraction {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        ((self.numerator as i128) * (other.denominator as i128)).cmp(
+            &((other.numerator as i128) * (self.denominator as i128)),
+        )
+    }
 }
 
 impl CtFraction {
@@ -137,6 +208,56 @@ impl CtFraction {
             self.numerator.checked_mul(other.denominator)?,
             self.denominator.checked_mul(other.numerator)?,
         )
+    }
+
+    /// Exact conversion from a finite binary64 value. Values whose exact
+    /// denominator or numerator does not fit the resident Fraction carrier
+    /// stay unavailable; no binary-to-decimal detour is allowed here.
+    pub fn from_float(value: f64) -> Option<Self> {
+        if !value.is_finite() {
+            return None;
+        }
+        if value == 0.0 {
+            return Some(Self {
+                numerator: 0,
+                denominator: 1,
+            });
+        }
+        let bits = value.to_bits();
+        let negative = (bits >> 63) != 0;
+        let exponent = ((bits >> 52) & 0x7ff) as i32;
+        let fraction = bits & ((1u64 << 52) - 1);
+        let (significand, power) = if exponent == 0 {
+            (fraction, -1074)
+        } else {
+            (fraction | (1u64 << 52), exponent - 1023 - 52)
+        };
+        let magnitude = i128::from(significand);
+        let (numerator, denominator) = if power >= 0 {
+            let numerator = magnitude.checked_shl(power as u32)?;
+            (numerator, 1i128)
+        } else {
+            let denominator = 1i128.checked_shl((-power) as u32)?;
+            (magnitude, denominator)
+        };
+        let numerator = if negative { numerator.checked_neg()? } else { numerator };
+        Self::new(i64::try_from(numerator).ok()?, i64::try_from(denominator).ok()?)
+    }
+
+    pub fn to_int_exact(&self) -> Option<i64> {
+        (self.denominator == 1).then_some(self.numerator)
+    }
+
+    pub fn from_int(value: i64) -> Option<Self> {
+        Self::new(value, 1)
+    }
+
+    pub fn from_decimal(value: &CtDecimal) -> Option<Self> {
+        value.to_fraction()
+    }
+
+    pub fn to_decimal(&self) -> Option<CtDecimal> {
+        CtDecimal::from_fraction(self)
     }
 
     pub fn to_string_rep(&self) -> String {
@@ -936,6 +1057,23 @@ impl CtBigInt {
         Some((quotient, remainder.normalize()))
     }
 
+    /// Euclidean quotient and remainder. The remainder is always
+    /// non-negative and smaller than the divisor magnitude; the quotient is
+    /// adjusted from the truncating pair when the dividend is negative.
+    pub fn div_rem_euclid(&self, other: &CtBigInt) -> Option<(CtBigInt, CtBigInt)> {
+        let (mut quotient, mut remainder) = self.div_rem(other)?;
+        if remainder.negative {
+            remainder = remainder.add(&other.abs());
+            let one = CtBigInt::from_int(1);
+            quotient = if other.negative {
+                quotient.add(&one)
+            } else {
+                quotient.sub(&one)
+            };
+        }
+        Some((quotient, remainder))
+    }
+
     pub fn abs(&self) -> CtBigInt {
         CtBigInt {
             negative: false,
@@ -988,6 +1126,44 @@ impl CtDecimal {
             scale,
         }
         .normalize())
+    }
+
+    pub fn from_int(value: i64) -> Self {
+        Self::from_bigint(CtBigInt::from_int(value), 0, value < 0)
+    }
+
+    /// Preserve the exact binary64 value as a finite decimal. A binary value
+    /// has a denominator that is a power of two, so multiplying by the same
+    /// power of five gives an exact base-10 representation.
+    pub fn from_float(value: f64) -> Option<Self> {
+        if !value.is_finite() {
+            return None;
+        }
+        if value == 0.0 {
+            return Some(Self::from_int(0));
+        }
+        let bits = value.to_bits();
+        let negative = (bits >> 63) != 0;
+        let exponent = ((bits >> 52) & 0x7ff) as i32;
+        let fraction = bits & ((1u64 << 52) - 1);
+        let (significand, power) = if exponent == 0 {
+            (fraction, -1074)
+        } else {
+            (fraction | (1u64 << 52), exponent - 1023 - 52)
+        };
+        let mut numerator = CtBigInt::from_u64(significand);
+        if power >= 0 {
+            for _ in 0..power {
+                numerator = numerator.mul(&CtBigInt::from_int(2));
+            }
+            Some(Self::from_bigint(numerator, 0, negative))
+        } else {
+            let scale = u32::try_from(-power).ok()?;
+            for _ in 0..scale {
+                numerator = numerator.mul(&CtBigInt::from_int(5));
+            }
+            Some(Self::from_bigint(numerator, scale, negative))
+        }
     }
 
     /// Project one JSON number token into an exact base-10 value. Unlike the
@@ -1084,6 +1260,132 @@ impl CtDecimal {
             self.scale + other.scale,
             self.negative != other.negative,
         )
+    }
+
+    fn signed_bigint(&self) -> CtBigInt {
+        let value = self.to_bigint();
+        if self.negative {
+            value.neg()
+        } else {
+            value
+        }
+    }
+
+    fn scale_factor(scale: u32) -> CtBigInt {
+        let ten = CtBigInt::from_int(10);
+        let mut factor = CtBigInt::from_int(1);
+        for _ in 0..scale {
+            factor = factor.mul(&ten);
+        }
+        factor
+    }
+
+    fn from_signed_bigint(value: CtBigInt, scale: u32) -> CtDecimal {
+        let negative = value.negative;
+        CtDecimal::from_bigint(value.abs(), scale, negative)
+    }
+
+    /// Exact quotient in the shared rational carrier. The resident Fraction
+    /// keeps word-sized parts, so callers must handle a value that cannot be
+    /// represented instead of silently narrowing it.
+    pub fn to_fraction(&self) -> Option<CtFraction> {
+        let numerator = self.signed_bigint().try_i64()?;
+        let denominator = Self::scale_factor(self.scale).try_i64()?;
+        CtFraction::new(numerator, denominator)
+    }
+
+    pub fn div(&self, other: &CtDecimal) -> Option<CtFraction> {
+        self.to_fraction()?.div(&other.to_fraction()?)
+    }
+
+    fn quotient_remainder(&self) -> (CtBigInt, CtBigInt, CtBigInt) {
+        let denominator = Self::scale_factor(self.scale);
+        let (quotient, remainder) = self
+            .signed_bigint()
+            .div_rem(&denominator)
+            .expect("Decimal scale denominator is nonzero");
+        (quotient, remainder, denominator)
+    }
+
+    /// Exact integral projection. Fractional input has no integral result.
+    pub fn to_int_exact(&self) -> Option<CtBigInt> {
+        let (quotient, remainder, _) = self.quotient_remainder();
+        remainder.is_zero().then_some(quotient)
+    }
+
+    /// Floor, ceiling, and nearest rounding all operate on the full decimal
+    /// digits. Nearest ties go away from zero, matching `Float.round()`.
+    pub fn floor_int(&self) -> CtBigInt {
+        let (quotient, remainder, _) = self.quotient_remainder();
+        if self.negative && !remainder.is_zero() {
+            quotient.sub(&CtBigInt::from_int(1))
+        } else {
+            quotient
+        }
+    }
+
+    pub fn ceil_int(&self) -> CtBigInt {
+        let (quotient, remainder, _) = self.quotient_remainder();
+        if !self.negative && !remainder.is_zero() {
+            quotient.add(&CtBigInt::from_int(1))
+        } else {
+            quotient
+        }
+    }
+
+    pub fn round_int(&self) -> CtBigInt {
+        let (quotient, remainder, denominator) = self.quotient_remainder();
+        let magnitude_remainder = remainder.abs();
+        let doubled = magnitude_remainder.mul(&CtBigInt::from_int(2));
+        let mut magnitude = quotient.abs();
+        if doubled.compare(&denominator) != std::cmp::Ordering::Less {
+            magnitude = magnitude.add(&CtBigInt::from_int(1));
+        }
+        if self.negative {
+            magnitude.neg()
+        } else {
+            magnitude
+        }
+    }
+
+    pub fn floor(&self) -> CtDecimal {
+        Self::from_signed_bigint(self.floor_int(), 0)
+    }
+
+    pub fn ceil(&self) -> CtDecimal {
+        Self::from_signed_bigint(self.ceil_int(), 0)
+    }
+
+    pub fn round(&self) -> CtDecimal {
+        Self::from_signed_bigint(self.round_int(), 0)
+    }
+
+    /// Build the exact finite decimal represented by a reduced Fraction.
+    /// A repeating denominator has no finite Decimal value and returns None.
+    pub fn from_fraction(fraction: &CtFraction) -> Option<Self> {
+        let mut factors = fraction.denominator as u64;
+        let mut twos = 0u32;
+        while factors % 2 == 0 {
+            factors /= 2;
+            twos += 1;
+        }
+        let mut fives = 0u32;
+        while factors % 5 == 0 {
+            factors /= 5;
+            fives += 1;
+        }
+        if factors != 1 {
+            return None;
+        }
+        let scale = twos.max(fives);
+        let denominator = CtBigInt::from_int(fraction.denominator);
+        let numerator = CtBigInt::from_int(fraction.numerator);
+        let scaled = numerator.mul(&Self::scale_factor(scale));
+        let (digits, remainder) = scaled.div_rem(&denominator)?;
+        if !remainder.is_zero() {
+            return None;
+        }
+        Some(Self::from_signed_bigint(digits, scale))
     }
 
     pub fn to_string_rep(&self) -> String {

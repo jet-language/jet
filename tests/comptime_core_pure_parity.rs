@@ -238,13 +238,13 @@ fn rng_view() String {
     after_split :: rng.int(1, 100)
     return "{int_draw}|{float_draw}|{range_draw}|{coin}|{chance}|{normal}|{exponential}|{bytes}|{picked}|{weighted}|{sample}|{deck}|{child_draw}|{after_split}"
 }"#;
-const RNG_EXPECTED: &str = "4|0.0316577610861849|1.3390388981797772|true|true|-0.6237918784672982|0.21210139132324568|[62, 20, 83, 254]|b|c|[c, a]|[1, 2, 5, 3, 4]|71|87";
+const RNG_EXPECTED: &str = "27|0.0316577610861849|1.3390388981797772|true|true|-0.6237918784672982|0.21210139132324568|[62, 20, 83, 254]|b|c|[a, d]|[4, 3, 1, 5, 2]|45|6";
 const TESTING_FAKE_RNG_FN: &str = r#"fn testing_fake_rng_view() String {
     first := testing.fake_rng(99)
     second := testing.fake_rng(99)
     return "{first.int(1, 100)}|{second.int(1, 100)}|{first.float()}|{second.float()}"
 }"#;
-const TESTING_FAKE_RNG_EXPECTED: &str = "4|4|0.0316577610861849|0.0316577610861849";
+const TESTING_FAKE_RNG_EXPECTED: &str = "27|27|0.0316577610861849|0.0316577610861849";
 const TESTING_FAKE_CLOCK_FN: &str = r#"fn testing_fake_clock_view() String {
     clock := testing.fake_clock(42)
     canonical := Clock.new(42)

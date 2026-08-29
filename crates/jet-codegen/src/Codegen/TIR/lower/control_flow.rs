@@ -444,6 +444,54 @@ fn lower_if_cond_atom(
         let subj = lower_if_expr(subject, cx, env, cached);
         return (TIfCond::IsNone { subj }, Vec::new(), Vec::new());
     }
+    // D-PARSESTR1: value-form dispatch stores the string subject in a local,
+    // then reuses that local for both the scan and the hole projections. The
+    // prelude is required because the condition and the selected arm both
+    // consume the same source value.
+    if let Expr::PatternTest {
+        subject,
+        pattern: pattern @ Pattern::StrMatch { .. },
+        ..
+    } = cond
+    {
+        let subject_value = lower_if_expr(subject, cx, env, cached);
+        let subject_ty = subject_value.ty.clone();
+        let temp = jet_format!("{jet_prefix}if_str_{}", subject.span().start);
+        let local = TLocal::generated(&temp);
+        let local_expr = || TExpr {
+            ty: subject_ty.clone(),
+            kind: TExprKind::Local(local.clone()),
+        };
+        let condition = str_match_pattern_cond_expr(pattern, local_expr(), cx);
+        let prefix = lower_str_match_pattern_bindings(pattern, local_expr(), cx, env);
+        let (_, holes) = str_match_scan_closure(pattern, cx);
+        let bindings = holes
+            .into_iter()
+            .map(|(name, ty)| {
+                let place = if ty.is_allocator_view() {
+                    TLocal::user(&name).through_ref()
+                } else {
+                    TLocal::user(&name)
+                };
+                (name, place, Some(ty))
+            })
+            .collect();
+        return (
+            TIfCond::WithPrelude {
+                prelude: vec![TStmt::Let {
+                    name: temp,
+                    kw: "let",
+                    let_ty: crate::Codegen::TIR::TLetTy::plain(subject_ty),
+                    init: subject_value,
+                    gc_promotion: None,
+                    gc_transferred: false,
+                }],
+                cond: Box::new(TIfCond::Plain(condition)),
+            },
+            bindings,
+            prefix,
+        );
+    }
     // D-ENC-DYN1=A+: a dynamic `Data` variant if-let (`if data == Object(entries)` /
     // `if n == Int(v)`). The Rust if-let pattern is `{root}jet_std::DataTree::<Variant>(…)`;
     // the binding's type comes from `core_json_pattern_types`. Scalars/`Array` bind their
@@ -1549,7 +1597,11 @@ pub(crate) fn lower_mixed_switch<'a>(
                 } else if let Some(pattern) = struct_pat.as_ref() {
                     struct_pattern_cond_expr(pattern, &subject_ty, cx, branch)
                 } else if let Some(pattern) = str_match_pat.as_ref() {
-                    str_match_pattern_cond_expr(pattern, cx)
+                    str_match_pattern_cond_expr(
+                        pattern,
+                        switch_subject_expr(subject_ty.clone()),
+                        cx,
+                    )
                 } else if let Some(pattern) = bin_match_pat.as_ref() {
                     bin_match_pattern_cond_expr(pattern, cx)
                 } else {
@@ -1558,7 +1610,12 @@ pub(crate) fn lower_mixed_switch<'a>(
                 let prefix = if let Some(pattern) = struct_pat.as_ref() {
                     lower_struct_pattern_bindings(pattern, &subject_ty, cx, branch)
                 } else if let Some(pattern) = str_match_pat.as_ref() {
-                    lower_str_match_pattern_bindings(pattern, cx, branch)
+                    lower_str_match_pattern_bindings(
+                        pattern,
+                        switch_subject_expr(subject_ty.clone()),
+                        cx,
+                        branch,
+                    )
                 } else if let Some(pattern) = bin_match_pat.as_ref() {
                     lower_bin_match_pattern_bindings(pattern, cx, branch)
                 } else {

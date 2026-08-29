@@ -76,6 +76,7 @@ pub(crate) mod json_rt {
         Boolean(bool),
         Number(f64),
         Integer(i64),
+        ExactInteger(String),
         Text(String),
         Array(Vec<JSON>),
         Object(std::collections::BTreeMap<String, JSON>),
@@ -163,8 +164,16 @@ pub(crate) mod json_rt {
         crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_i64(value))
     }
 
+    pub fn jet_int_to_string(value: i64) -> String {
+        crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_string(value))
+    }
+
+    pub fn jet_int_to_f64(value: i64) -> f64 {
+        crate::Concurrency::with_runtime_mut(|rt| rt.heap.int_to_f64(value))
+    }
+
     pub fn parse_datatree(text: &str) -> Result<DataTree, JSONError> {
-        parse_json(text).map(|j| datatree_from_json(&j))
+        parse_json_datatree(text)
     }
 
     pub fn parse_datatree_ordered(text: &str) -> Result<DataTree, JSONError> {

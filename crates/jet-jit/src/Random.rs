@@ -315,8 +315,8 @@ fn rng_float(r: &mut RngState) -> f64 {
     seeded_random_kernel::jet_seeded_rng_float(&mut r.state)
 }
 
-fn rng_int(r: &mut RngState, lo: i64, hi: i64) -> i64 {
-    seeded_random_kernel::jet_seeded_rng_int(&mut r.state, lo, hi)
+fn rng_int(r: &mut RngState, lo: i64, hi: i64) -> Result<i64, &'static str> {
+    seeded_random_kernel::jet_seeded_rng_int_checked(&mut r.state, lo, hi)
 }
 
 fn with_rng<T: Default>(handle: i64, f: impl FnOnce(&mut RngState) -> T) -> T {
@@ -337,7 +337,34 @@ fn jet_jit_rng_new(seed: i64) -> i64 {
 }
 
 fn jet_jit_rng_int(handle: i64, lo: i64, hi: i64) -> i64 {
-    with_rng(handle, |r| rng_int(r, lo, hi))
+    let bounds = Concurrency::with_runtime_mut(|rt| {
+        Some((rt.heap.int_to_i64(lo)?, rt.heap.int_to_i64(hi)?))
+    });
+    let Some((lo, hi)) = bounds else {
+        let report = crate::runtime_host::contract_kernel::jet_c_int_range_report();
+        Concurrency::with_runtime_mut(|rt| rt.set_rendered_runtime_stop(report, 1));
+        std::panic::resume_unwind(Box::new(crate::runtime_host::JitRuntimeStop));
+    };
+    let result = Concurrency::with_runtime_mut(|rt| {
+        let r = rt
+            .rngs
+            .get_mut(handle.saturating_sub(1) as usize)
+            .expect("jit rng: bad handle");
+        Some(rng_int(r, lo, hi))
+    });
+    match result {
+        Some(Ok(value)) => Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(value)),
+        Some(Err(message)) => {
+            let report = crate::runtime_host::contract_kernel::jet_runtime_stop_report(
+                "E3010", "", 0, "", "", 1, 1, message, "",
+            );
+            let rendered = report.rendered;
+            let exit_code = report.exit_code;
+            Concurrency::with_runtime_mut(|rt| rt.set_rendered_runtime_stop(rendered, exit_code));
+            std::panic::resume_unwind(Box::new(crate::runtime_host::JitRuntimeStop));
+        }
+        None => 0,
+    }
 }
 
 fn jet_jit_rng_float(handle: i64) -> f64 {

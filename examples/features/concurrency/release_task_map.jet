@@ -1,0 +1,16 @@
+fn make(first: Int, last: Int) [Int:Int] -> {
+    out := [Int:Int]{}
+    loop n in first..last -> out[n] = n * 3
+    return out
+}
+
+fn run() {
+    maps :: task.all {
+        make(1, 25),
+        make(26, 50),
+        make(51, 75),
+        make(76, 100)
+    } ?? panic("task.all failed")
+    merged :: maps[0].merge(maps[1]).merge(maps[2]).merge(maps[3])
+    print(merged.len(), merged.get(1) ?? -1, merged.get(100) ?? -1, merged.get(55) ?? -1)
+}

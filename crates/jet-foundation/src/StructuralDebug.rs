@@ -149,7 +149,13 @@ pub fn jet_debug_map(entries: impl IntoIterator<Item = (String, String)>) -> Str
         .into_iter()
         .map(|(key, value)| format!("{key}: {value}"))
         .collect::<Vec<_>>();
-    format!("[:{}]", entries.join(", "))
+    if entries.is_empty() {
+        // `[:]` is the canonical empty-map render, but it is not valid input
+        // syntax. This is a deliberate parse round-trip asymmetry.
+        "[:]".to_string()
+    } else {
+        format!("[{}]", entries.join(", "))
+    }
 }
 
 /// A structural union renders as its active payload, without a host tag.
@@ -224,9 +230,21 @@ pub fn jet_task_control_trace(paused: bool, cancel: bool) -> String {
 #[cfg(test)]
 mod structural_debug_tests {
     use super::{
-        jet_debug_field_metadata, jet_debug_record, jet_debug_record_fields, jet_debug_variant,
-        jet_task_control_trace, JetDebugField,
+        jet_debug_field_metadata, jet_debug_map, jet_debug_record, jet_debug_record_fields,
+        jet_debug_variant, jet_task_control_trace, JetDebugField,
     };
+
+    #[test]
+    fn map_debug_shape_is_symmetric() {
+        assert_eq!(
+            jet_debug_map([
+                ("x".to_string(), "1".to_string()),
+                ("y".to_string(), "2".to_string()),
+            ]),
+            "[x: 1, y: 2]"
+        );
+        assert_eq!(jet_debug_map(std::iter::empty()), "[:]");
+    }
 
     #[test]
     fn io_context_debug_fields_use_canonical_order() {

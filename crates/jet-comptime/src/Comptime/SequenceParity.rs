@@ -7,7 +7,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{BinOp, CtFloat, CtKey, CtReport, CtValue, Type};
 
 use super::super::super::Builtins::{as_bool, as_int, cmp};
-use super::super::super::Diagnostics::{index_oob, unsupported};
+use super::super::super::Diagnostics::{comptime_panic, index_oob, unsupported};
 use super::super::super::Interpreter::Interp;
 
 pub(super) enum SequenceOutcome {
@@ -34,6 +34,7 @@ pub(super) fn eval_sequence_method(
             | "any"
             | "chunks"
             | "count_by"
+            | "counts"
             | "dedup"
             | "indexed"
             | "indexes"
@@ -141,7 +142,13 @@ fn eval(
             CtValue::Bool(false)
         }
         ("chunks", [n]) => {
-            let n = as_int(n, span)?.max(1) as usize;
+            let n = as_int(n, span)?;
+            if let Some(message) = crate::Comptime::CollectionEval::sequence_argument_message(
+                "chunks", n,
+            ) {
+                return Err(comptime_panic(message, span));
+            }
+            let n = n as usize;
             CtValue::List(
                 xs.chunks(n)
                     .map(|chunk| CtValue::List(chunk.to_vec()))
@@ -155,6 +162,18 @@ fn eval(
                     interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
                     span,
                 )?;
+                let count = out.entry(key).or_insert(CtValue::Int(0));
+                let CtValue::Int(count) = count else {
+                    unreachable!()
+                };
+                *count += 1;
+            }
+            CtValue::Map(out)
+        }
+        ("counts", []) => {
+            let mut out = BTreeMap::new();
+            for x in xs {
+                let key = key(x.clone(), span)?;
                 let count = out.entry(key).or_insert(CtValue::Int(0));
                 let CtValue::Int(count) = count else {
                     unreachable!()
@@ -304,7 +323,7 @@ fn eval(
             }
             CtValue::List(out)
         }
-        ("para_map", [f]) => {
+        ("para_map", [f, ..]) => {
             let mut out = Vec::with_capacity(xs.len());
             for x in xs {
                 out.push(interp.call_closure(f, vec![x.clone()], span)?);
@@ -354,11 +373,23 @@ fn eval(
             CtValue::List(out)
         }
         ("take", [n]) => {
-            let n = as_int(n, span)?.max(0) as usize;
+            let n = as_int(n, span)?;
+            if let Some(message) = crate::Comptime::CollectionEval::sequence_argument_message(
+                "take", n,
+            ) {
+                return Err(comptime_panic(message, span));
+            }
+            let n = n as usize;
             CtValue::List(xs.iter().take(n).cloned().collect())
         }
         ("skip", [n]) => {
-            let n = as_int(n, span)?.max(0) as usize;
+            let n = as_int(n, span)?;
+            if let Some(message) = crate::Comptime::CollectionEval::sequence_argument_message(
+                "skip", n,
+            ) {
+                return Err(comptime_panic(message, span));
+            }
+            let n = n as usize;
             CtValue::List(crate::Comptime::CollectionEval::iter_skip(
                 xs.to_vec(),
                 n as i64,
@@ -366,11 +397,12 @@ fn eval(
         }
         ("step_by", [n]) => {
             let n = as_int(n, span)?;
-            CtValue::List(if n <= 0 {
-                Vec::new()
-            } else {
-                xs.iter().step_by(n as usize).cloned().collect()
-            })
+            if let Some(message) = crate::Comptime::CollectionEval::sequence_argument_message(
+                "step_by", n,
+            ) {
+                return Err(comptime_panic(message, span));
+            }
+            CtValue::List(xs.iter().step_by(n as usize).cloned().collect())
         }
         ("take_while", [f]) => {
             let mut out = Vec::new();
@@ -443,7 +475,13 @@ fn eval(
             ])
         }
         ("windows", [n]) => {
-            let n = as_int(n, span)?.max(1) as usize;
+            let n = as_int(n, span)?;
+            if let Some(message) = crate::Comptime::CollectionEval::sequence_argument_message(
+                "windows", n,
+            ) {
+                return Err(comptime_panic(message, span));
+            }
+            let n = n as usize;
             CtValue::List(if n > xs.len() {
                 Vec::new()
             } else {
@@ -484,11 +522,15 @@ fn eval_zip(
         }
     }
 
-    if method == "zip"
-        && columns
-            .iter()
-            .any(|column| column.len() != columns[0].len())
-    {
+    let mode = match method {
+        "zip" => 1,
+        "zip_pad" => 2,
+        _ => 0,
+    };
+    let Some(row_count) = crate::Comptime::CollectionEval::zip_row_count(
+        &columns.iter().map(Vec::len).collect::<Vec<_>>(),
+        mode,
+    ) else {
         return Err(Diagnostic::error(
             "E0128",
             "zip inputs have different lengths".to_string(),
@@ -496,11 +538,6 @@ fn eval_zip(
             "use `zip_short` or `zip_pad` when lengths may differ".to_string(),
             Some(span),
         ));
-    }
-
-    let row_count = match method {
-        "zip_pad" => columns.iter().map(Vec::len).max().unwrap_or(0),
-        _ => columns.iter().map(Vec::len).min().unwrap_or(0),
     };
     if columns.len() == 1 {
         return Ok(CtValue::List(columns.pop().unwrap_or_default()));
@@ -620,7 +657,7 @@ fn extreme_by(
     for candidate in &xs[1..] {
         let candidate_key = interp.call_inline_closure(f, vec![candidate.clone()], span, scope)?;
         let order = cmp(best_key.clone(), candidate_key.clone(), span)?;
-        if (maximum && order != Ordering::Greater) || (!maximum && order == Ordering::Greater) {
+        if (maximum && order != Ordering::Greater) || (!maximum && order != Ordering::Less) {
             best = candidate.clone();
             best_key = candidate_key;
         }

@@ -3585,8 +3585,8 @@ impl<'a> Checker<'a> {
         if let Type::Named(handle_ty) = &recv_ty {
             if let Some(ret) = binary_reader_method_return(handle_ty, method, args.len()) {
                 for a in args.iter_mut() {
-                    if method == "take" {
-                        self.check_shift_arg("Reader.take", &Type::Int, a);
+                    if matches!(method, "take" | "seek" | "skip") {
+                        self.check_shift_arg(&format!("Reader.{method}"), &Type::Int, a);
                     } else {
                         self.infer(&mut a.expr);
                     }
@@ -3895,7 +3895,7 @@ impl<'a> Checker<'a> {
                 ) => {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                 }
-                ("Regex", "replace" | "replace_all", 2) => {
+                ("Regex", "replace" | "replace_first" | "replace_all", 2) => {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                     self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
                 }
@@ -5076,6 +5076,11 @@ impl<'a> Checker<'a> {
                 *recv_type_out = Some(recv_ty.name());
             }
             let declared_ret = ret.clone();
+            // S40: retain the receiver fact so the caller can lower the
+            // Range spelling through the existing Slice expression path.
+            if matches!(&recv_ty, Type::String) && method == "slice" && args.len() == 1 {
+                *recv_type_out = Some(crate::Syntax::TYPE_STRING.to_string());
+            }
             let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
             // Preserve only exact facts the generic table could not express:
             // callback/argument-refined results, tuple shapes, and numeric

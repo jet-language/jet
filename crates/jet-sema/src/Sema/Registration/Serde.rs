@@ -841,15 +841,19 @@ fn ordered_encode_fields(
         ordered_encode_fields(container_markers, fields, index + 1, next, span)
     };
     if matches!(field.ty, Type::Option(_)) {
+        let binding_name = format!(
+            "jet_serde_option_value_{}",
+            field.name.replace('.', "_")
+        );
         let present = next_pairs(method(
-            ident("jet_serde_option_value", span),
+            ident(&binding_name, span),
             "encode",
             Vec::new(),
             span,
         ));
         vec![option_switch(
             copy(field_read("self", &field.name, span), span),
-            "jet_serde_option_value",
+            &binding_name,
             present,
             ordered_encode_fields(container_markers, fields, index + 1, pairs, span),
             span,
@@ -1427,14 +1431,24 @@ fn enum_decode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
     for variant in &e.variants {
         let wire = serde_enum_variant_key(variant);
         if matches!(variant.payload, VariantPayload::Unit) {
-            body.push(pattern_switch(
+            let binding_name = format!(
+                "jet_serde_enum_variant_name_{}",
+                variant.name.replace('.', "_")
+            );
+            let decoded = method_with_type_args(
                 copy(ident("tree", span), span),
-                "Text",
-                vec!["variant_name".to_string()],
+                "decode",
+                vec![Type::String],
+                span,
+            );
+            body.push(pattern_switch(
+                decoded,
+                "Ok",
+                vec![binding_name.clone()],
                 vec![if_stmt(
                     binary(
                         BinOp::Eq,
-                        ident("variant_name", span),
+                        ident(&binding_name, span),
                         string_expr(&wire, span),
                         span,
                     ),
@@ -1865,15 +1879,21 @@ fn option_switch(
 }
 
 fn option_encode(subject: Expr, key: &str, field_names: Vec<String>, span: Span) -> Stmt {
-    let _ = field_names.first().expect("one field for option encode");
+    let binding_name = format!(
+        "jet_serde_option_value_{}",
+        field_names
+            .first()
+            .expect("one field for option encode")
+            .replace('.', "_")
+    );
     option_switch(
         subject,
-        "jet_serde_option_value",
+        &binding_name,
         vec![assign_index(
             "out",
             string_expr(key, span),
             method(
-                ident("jet_serde_option_value", span),
+                ident(&binding_name, span),
                 "encode",
                 Vec::new(),
                 span,

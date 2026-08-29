@@ -1,0 +1,20 @@
+struct Resource {
+    name: String
+}
+
+impl Resource.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+fn fail() {
+    first := Resource{name: "first"}
+    defer close(^first)
+    second := Resource{name: "second"}
+    defer close(^second)
+    print("body")
+    panic("stop")
+}
+
+fn run() {
+    fail()
+}

@@ -17,9 +17,6 @@ fn jet_std_math_floor(x: f64) -> f64 {
 fn jet_std_math_ceil(x: f64) -> f64 {
     x.ceil()
 }
-fn jet_std_math_round(x: f64) -> i64 {
-    x.round() as i64
-}
 fn jet_std_math_sign(x: f64) -> i64 {
     if x > 0.0 {
         1

@@ -1347,8 +1347,7 @@ impl TraitRegistry {
                 if trait_name == COMPARABLE {
                     false
                 } else {
-                    trait_name != EQUATABLE
-                        && (!matches!(trait_name, ENCODE | DECODE) || matches!(**key, Type::String))
+                    (!matches!(trait_name, ENCODE | DECODE) || matches!(**key, Type::String))
                         && self.auto_derive_type_ready(
                             key,
                             trait_name,
@@ -1557,6 +1556,10 @@ impl TraitRegistry {
                 if trait_name == EQUATABLE =>
             {
                 self.type_implements_trait(inner, trait_name)
+            }
+            Type::Map { key, value, .. } if trait_name == EQUATABLE => {
+                self.type_implements_trait(key, trait_name)
+                    && self.type_implements_trait(value, trait_name)
             }
             Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. }
                 if trait_name == COMPARABLE =>
@@ -2122,24 +2125,45 @@ impl TraitRegistry {
             "Clock",
             "Decimal",
             "DataTree",
+            // Core time carriers have real Prelude JetDebug impls. Keep them
+            // in the registry so nested auto-derived Debug uses that hook too.
+            "Date",
+            "DateTime",
+            "Duration",
             "GameImage",
             "GameSound",
             "Id",
             "IOError",
+            "Instant",
+            "LocalDate",
+            "LocalTime",
             "Cache",
             "Mat3",
             "Mat4",
+            "Period",
             "Quat",
             "Range",
             "Vec2",
             "Vec3",
             "Vec4",
+            "Zone",
+            "ZonedDateTime",
         ] {
             self.auto_debug.insert(ty.to_string());
         }
-        // D-TIME-CALENDAR1: LocalDate is a value type backed by the Prelude's
-        // `JetDate`, whose civil date fields define ordinary equality.
-        self.auto_equatable.insert("LocalDate".to_string());
+        // D-TIME-ORDER1=A: time protocol hooks use the Prelude carrier's
+        // canonical equality and order semantics on every execution tier.
+        for ty in [
+            "DateTime",
+            "LocalDate",
+            "LocalTime",
+            "Duration",
+            "Instant",
+            "ZonedDateTime",
+        ] {
+            self.auto_equatable.insert(ty.to_string());
+            self.auto_comparable.insert(ty.to_string());
+        }
         // D-RANGE-VALUE1=A: Range uses the same structural value contracts as
         // an ordinary record. Values.rs owns the matching runtime protocols.
         self.auto_equatable.insert(Syntax::TYPE_RANGE.to_string());

@@ -2,12 +2,10 @@ use core.encoding as encoding
 use core.files as files
 use core.process as process
 use core.regex as re
-use core.sys as sys
 
 fn run() {
     args :: process.argv()
-    cwd :: sys.current_dir() ?? "."
-    path :: if args.len() > 1 -> args.get(1) ?? "sales.csv" else -> Path.from(cwd).join("sales.csv").to_string()
+    path :: args.get(1) ?? "sales.csv"
     text :: files.read(path) ?? panic("read failed")
     rows :: encoding.csv.parse(text) ?? panic("csv failed")
     counts := [String:Int]{}

@@ -242,8 +242,11 @@ pub(crate) fn resolve_builtin_op(
     if is_byte_buffer {
         let op = match (method, args.len()) {
             (
-                "write_u8" | "write_byte" | "write_u16_le" | "write_u16_be" | "write_u32_le"
-                | "write_u32_be" | "write_u64_le" | "write_u64_be" | "write_bytes" | "write",
+                "write_u8" | "write_byte" | "write_i8" | "write_u16_le" | "write_u16_be"
+                | "write_i16_le" | "write_i16_be" | "write_u32_le" | "write_u32_be"
+                | "write_i32_le" | "write_i32_be" | "write_u64_le" | "write_u64_be"
+                | "write_i64_le" | "write_i64_be" | "write_f32_le" | "write_f32_be"
+                | "write_f64_le" | "write_f64_be" | "write_bytes" | "write",
                 1,
             ) => TBuiltinOp::ByteBufferWrite {
                 method: method.to_string(),
@@ -558,6 +561,10 @@ pub(crate) fn resolve_builtin_op(
         ("pad_end", 2) => TBuiltinOp::PadEnd,
         ("count", 1) if is_list => TBuiltinOp::CountList,
         ("count", 1) if is_string => TBuiltinOp::StringCount,
+        ("counts", 0)
+            if is_list
+                || matches!(&rty, Some(Type::FixedList { .. }))
+                || is_iter => TBuiltinOp::Counts,
         ("extend", 1) if is_list => TBuiltinOp::ExtendList,
         // D-TYPE2-MEASURE1=A: fixed lists join through the same builtin; emit
         // picks the const-generic fixed shape from the FixedList types.
@@ -596,6 +603,17 @@ pub(crate) fn resolve_builtin_op(
                 ]
             });
             TBuiltinOp::StringSplitOnce {
+                tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
+            }
+        }
+        ("cut_last", 1) if is_string => {
+            let fields = option_tuple_fields(resolved_ret).unwrap_or_else(|| {
+                vec![
+                    ("before".to_string(), Type::String),
+                    ("after".to_string(), Type::String),
+                ]
+            });
+            TBuiltinOp::StringCutLast {
                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
             }
         }
@@ -650,6 +668,21 @@ pub(crate) fn resolve_builtin_op(
                 ],
             });
             TBuiltinOp::MapToList {
+                tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
+            }
+        }
+        ("top_n", 1) if is_map => {
+            let fields = tuple_list_elem_fields(resolved_ret).unwrap_or_else(|| match &rty {
+                Some(Type::Map { key, value, .. }) => vec![
+                    ("key".to_string(), (**key).clone()),
+                    ("value".to_string(), (**value).clone()),
+                ],
+                _ => vec![
+                    ("key".to_string(), Type::Int),
+                    ("value".to_string(), Type::Int),
+                ],
+            });
+            TBuiltinOp::MapTopN {
                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
             }
         }
@@ -844,8 +877,11 @@ pub(crate) fn resolve_builtin_op(
         ("capacity", 0) if is_lru => TBuiltinOp::LruCapacity,
         ("count", 0) if is_bit_set => TBuiltinOp::BitSetCount,
         (
-            "write_u8" | "write_u16_le" | "write_u16_be" | "write_u32_le" | "write_u32_be"
-            | "write_u64_le" | "write_u64_be" | "write_bytes",
+            "write_u8" | "write_i8" | "write_u16_le" | "write_u16_be" | "write_i16_le"
+            | "write_i16_be" | "write_u32_le" | "write_u32_be" | "write_i32_le"
+            | "write_i32_be" | "write_u64_le" | "write_u64_be" | "write_i64_le"
+            | "write_i64_be" | "write_f32_le" | "write_f32_be" | "write_f64_le"
+            | "write_f64_be" | "write_bytes",
             1,
         ) if is_byte_buffer => TBuiltinOp::ByteBufferWrite {
             method: method.to_string(),
@@ -956,6 +992,7 @@ pub(crate) fn resolve_closure_op(
     method: &str,
     args: &[crate::AST::CallArg],
     cx: &Cx,
+    fallible_callback: bool,
 ) -> TClosureOp {
     // The lambda arg's FnMut fact (the AST checks `args[0]` for map/each).
     let lambda_index = usize::from(method == "edit_disjoint");
@@ -969,6 +1006,8 @@ pub(crate) fn resolve_closure_op(
                 TClosureOp::OptionMap
             } else if matches!(recv_ty, Type::Map { .. }) {
                 TClosureOp::MapMap
+            } else if fallible_callback {
+                TClosureOp::TryMap
             } else if matches!(recv_ty, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut"))
             {
                 // D-DYNARRAY1: map-to-owned — never the `.clone()`-into-Vec form
@@ -981,6 +1020,7 @@ pub(crate) fn resolve_closure_op(
             }
         }
         "filter" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapFilter,
+        "filter" if fallible_callback => TClosureOp::TryFilter,
         "filter" => TClosureOp::Filter,
         "each" => {
             // The AST: `match rty { Map => jet_map_each, _ => list_each }`, where

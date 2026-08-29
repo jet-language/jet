@@ -482,7 +482,7 @@ impl JetWasmInt {
         jet_wasm_int_pow(
             self,
             Self::from_decimal(&exponent.to_string())
-                .unwrap_or_else(|_| jet_arithmetic_stop(file, line, "invalid exponent")),
+                .unwrap_or_else(|_| jet_arithmetic_stop(file, line, "Invalid exponent")),
             file,
             line,
         )
@@ -670,20 +670,54 @@ fn jet_wasm_int_rem(left: JetWasmInt, right: JetWasmInt, file: &str, line: u32) 
     })
 }
 
+fn jet_wasm_int_div_euclid(
+    left: JetWasmInt,
+    right: JetWasmInt,
+    file: &str,
+    line: u32,
+) -> JetWasmInt {
+    let (mut quotient, remainder) = left
+        .div_rem_ref(&right)
+        .unwrap_or_else(|| jet_arithmetic_stop(file, line, JET_ARITHMETIC_DIVIDE_ZERO));
+    if remainder.negative {
+        quotient = if right.negative {
+            quotient.add_ref(&JetWasmInt::from_u64(1))
+        } else {
+            quotient.sub_ref(&JetWasmInt::from_u64(1))
+        };
+    }
+    quotient
+}
+
+fn jet_wasm_int_rem_euclid(
+    left: JetWasmInt,
+    right: JetWasmInt,
+    file: &str,
+    line: u32,
+) -> JetWasmInt {
+    let (_, mut remainder) = left
+        .div_rem_ref(&right)
+        .unwrap_or_else(|| jet_arithmetic_stop(file, line, JET_ARITHMETIC_DIVIDE_ZERO));
+    if remainder.negative {
+        remainder = remainder.add_ref(&right.abs_ref());
+    }
+    remainder
+}
+
 fn jet_wasm_int_pow(left: JetWasmInt, right: JetWasmInt, file: &str, line: u32) -> JetWasmInt {
     left.pow_ref(&right).unwrap_or_else(|| {
-        jet_arithmetic_stop(file, line, "a negative exponent has no whole-number result")
+        jet_arithmetic_stop(file, line, "A negative exponent has no whole-number result")
     })
 }
 
 fn jet_wasm_int_shl(left: JetWasmInt, right: JetWasmInt, file: &str, line: u32) -> JetWasmInt {
     left.shl_ref(&right).unwrap_or_else(|| {
-        jet_arithmetic_stop(file, line, "invalid shift count")
+        jet_arithmetic_stop(file, line, "Invalid shift count")
     })
 }
 
 fn jet_wasm_int_shr(left: JetWasmInt, right: JetWasmInt, file: &str, line: u32) -> JetWasmInt {
     left.shr_ref(&right).unwrap_or_else(|| {
-        jet_arithmetic_stop(file, line, "invalid shift count")
+        jet_arithmetic_stop(file, line, "Invalid shift count")
     })
 }

@@ -1,5 +1,15 @@
 /// Shared zip-family policy. Engines only marshal values into this policy;
 /// length selection, strict mismatch, and padding indexes stay identical.
+fn jet_sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
+    match method {
+        "take" | "skip" if value < 0 => Some("sequence count must be nonnegative"),
+        "step_by" if value <= 0 => Some("step_by requires a positive step"),
+        "chunks" if value <= 0 => Some("chunks requires a positive size"),
+        "windows" if value <= 0 => Some("windows requires a positive size"),
+        _ => None,
+    }
+}
+
 fn jet_zip_row_count(lengths: &[usize], mode: u8) -> Option<usize> {
     if lengths.is_empty() {
         return Some(0);

@@ -257,10 +257,10 @@ pub fn e1292() -> Diagnostic {
 /// line, so it is rendered here instead of through the source-span renderer.
 pub fn render_e1292() -> &'static str {
     concat!(
-        "Error [E1292]: signing key generation needs cryptographic randomness\n",
+        "Error [E1292]: Signing key generation needs cryptographic randomness\n",
         " What: Jet could not create the package-signing key\n",
-        " Why: the operating system could not provide cryptographic randomness\n",
-        " Fix: retry as a new operation on a supported host; no key files were created\n",
+        " Why: The operating system could not provide cryptographic randomness\n",
+        " Fix: Retry as a new operation on a supported host; no key files were created\n",
         " More: jet-lang.dev/e/E1292\n",
     )
 }

@@ -2494,6 +2494,14 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                 .unwrap_or_else(|| init.ty.clone())
                         };
                         init = preserve_typed_list_shape(init, &want, cx);
+                        // D-MAPTYPE1: sema elaborates an empty typed map head to `MapLit([])`;
+                        // retain declared key/value types so emit does not default the map key to
+                        // `String` before task-group codegen consumes the value.
+                        if matches!(&want, Type::Map { .. })
+                            && matches!(&init.kind, TExprKind::MapLit(_))
+                        {
+                            init.ty = want.clone();
+                        }
                         // D-FIXARR1: if the binding type is `[T#N]` and the init lowered as a
                         // growable list (e.g. a typed-head literal elaborated to ListLit), re-tag
                         // so emit produces a Rust array `[e1, …]` instead of `vec![…]`.

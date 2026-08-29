@@ -30,6 +30,12 @@ fn run_interpret_forces_tier_zero_without_watch() {
         "{}",
         String::from_utf8_lossy(&default.stderr)
     );
+    assert!(
+        !default.stdout.is_empty(),
+        "default tier returned success with empty stdout: {}",
+        String::from_utf8_lossy(&default.stderr)
+    );
+    assert_eq!(default.stdout, format!("{marker}\n").into_bytes());
     assert!(String::from_utf8_lossy(&default.stderr).contains("tier1 native"));
 
     let forced = Command::new(jet())
@@ -45,6 +51,7 @@ fn run_interpret_forces_tier_zero_without_watch() {
         "{}",
         String::from_utf8_lossy(&forced.stderr)
     );
+    assert!(!forced.stdout.is_empty());
     assert!(!String::from_utf8_lossy(&forced.stderr).contains("tier1 native"));
     assert_eq!(forced.stdout, default.stdout);
 

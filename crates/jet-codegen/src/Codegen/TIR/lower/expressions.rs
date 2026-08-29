@@ -172,13 +172,9 @@ pub(crate) fn lower_fn_value_call(
 }
 
 /// D-MEM1 S6: lower `e` for use as a MUTATING method's receiver (`.push()`,
-/// `.insert()`, …). Ordinarily identical to `lower_expr`; the one exception is
-/// a place rooted in a `Pool` index (`pool[id]`, or `pool[id].field`) — the
-/// plain read there is a generation-checked VALUE CLONE (`jet_pool_get`,
-/// matching `world[id].attack`'s read semantics), so mutating it in place
-/// would silently edit a throwaway copy. Reroute through `jet_pool_get_mut`
-/// instead, mirroring the `LValue::Field`/`LValue::Index` place-building this
-/// same stage added for `tree[root].children.push(child)` on writes.
+/// `.insert()`, …). Ordinarily identical to `lower_expr`; indexed collections
+/// and their fields must retain a recursive place shape, while a Pool index
+/// uses its generation-checked mutable accessor instead of the read clone.
 pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     fn pool_mut_place(
         pool_expr: &Expr,
@@ -236,6 +232,41 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
             span,
             kind: IndexKind::Pool,
         } => pool_mut_place(base, index, *span, None, cx, env),
+        Expr::Index {
+            base,
+            index,
+            span,
+            kind,
+        } => {
+            let base_t = lower_expr_as_mut_place(base, cx, env);
+            let index_t = lower_expr(index, cx, env);
+            let base_ty = base_t.ty.without_user_tags();
+            let is_map = match kind {
+                IndexKind::Map => true,
+                IndexKind::List | IndexKind::FixedListProof => false,
+                IndexKind::Unknown => matches!(&base_ty, Type::Map { .. }),
+                _ => return lower_expr(e, cx, env),
+            };
+            let ty = match base_ty {
+                Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
+                Type::Map { value, .. } => (**value).clone(),
+                _ => return lower_expr(e, cx, env),
+            };
+            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+            TExpr {
+                ty,
+                kind: TExprKind::Index {
+                    base: Box::new(base_t),
+                    index: Box::new(index_t),
+                    is_map,
+                    uninit_fixed: matches!(
+                        base.as_ref(),
+                        Expr::Ident(name, _) if env.is_uninit_fixed(name)
+                    ),
+                    line,
+                },
+            }
+        }
         Expr::Field(base, field, _) => {
             if let Expr::Index {
                 base: pool_expr,
@@ -246,9 +277,23 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
             {
                 pool_mut_place(pool_expr, id_expr, *idx_span, Some(field), cx, env)
             } else {
-                lower_expr(e, cx, env)
+                let recv = lower_expr_as_mut_place(base, cx, env);
+                let field_ty = struct_field_type(cx, &recv.ty, field).unwrap_or(Type::Int);
+                let boxed = match &recv.ty {
+                    Type::Named(n) => cx.boxed_edges.contains(&(n.clone(), field.to_string())),
+                    _ => false,
+                };
+                TExpr {
+                    ty: field_ty,
+                    kind: TExprKind::Field {
+                        recv: Box::new(recv),
+                        field: field.to_string(),
+                        boxed,
+                    },
+                }
             }
         }
+        Expr::Paren(inner, _) => lower_expr_as_mut_place(inner, cx, env),
         _ => lower_expr(e, cx, env),
     }
 }
@@ -3258,6 +3303,43 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         lhs = fraction_from_int(lhs);
                     }
                 }
+                // D-TIMERES1=A: sema has already fixed these three forms to
+                // Duration. Keep the nanosecond carrier intact and dispatch
+                // through the handle seam so every engine calls one kernel.
+                let left_duration = matches!(
+                    &lhs.ty,
+                    Type::Named(name) if name == crate::Syntax::DURATION_TYPE
+                );
+                let right_duration = matches!(
+                    &rhs.ty,
+                    Type::Named(name) if name == crate::Syntax::DURATION_TYPE
+                );
+                if matches!(*op, BinOp::Mul | BinOp::Div)
+                    && ((left_duration && rhs.ty == Type::Int)
+                        || (*op == BinOp::Mul && lhs.ty == Type::Int && right_duration))
+                {
+                    let (duration, factor, duration_op) = if left_duration {
+                        (
+                            lhs,
+                            rhs,
+                            if *op == BinOp::Mul {
+                                THandleOp::DurationScale
+                            } else {
+                                THandleOp::DurationDivide
+                            },
+                        )
+                    } else {
+                        (rhs, lhs, THandleOp::DurationScale)
+                    };
+                    return TExpr {
+                        ty: Type::Named(crate::Syntax::DURATION_TYPE.to_string()),
+                        kind: TExprKind::HandleMethod {
+                            recv: Box::new(duration),
+                            op: duration_op,
+                            args: vec![factor],
+                        },
+                    };
+                }
                 // D-TYPE2-DEFAULT1 amends D-INTDIV1: exact whole-number
                 // division constructs a rational before any machine arithmetic
                 // path can see the operands.
@@ -4345,7 +4427,24 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // decided here, totally — via the shared `lower_one_call_arg` (the single
                 // `emit_call_args` reproduction). c109 Phase 13: a callee with a Fn-typed
                 // param (now in subset) routes its arg through the Box-coercion form.
-                let sig = cx.sigs.get(&call.name).cloned();
+                let sig = cx.sigs.get(&call.name).map(|sig| {
+                    let Some(order) = cx.fn_type_param_order.get(&call.name) else {
+                        return sig.clone();
+                    };
+                    if order.len() != call.type_args.len() {
+                        return sig.clone();
+                    }
+                    let subst = order
+                        .iter()
+                        .zip(&call.type_args)
+                        .map(|(param, actual)| (param.clone(), actual.clone()))
+                        .collect();
+                    sig.iter()
+                        .map(|(convention, ty)| {
+                            (*convention, crate::Generics::substitute_type(ty, &subst))
+                        })
+                        .collect()
+                });
                 let args: Vec<TCallArg> = call
                     .args
                     .iter()
@@ -5544,8 +5643,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
             })
         }
-        // #779: map literals desugar to empty `MapLit` + `IndexAssign` inserts inside
-        // an `IfExpr(true)` block. Engines keep only the empty-map constructor arm.
+        // A map literal is one typed value. Keep every lowered pair on the node so
+        // nested maps stay values of the outer map instead of sharing a synthetic
+        // mutable-map local with it.
         Expr::MapLit(entries, _) => in_own_frame(|| {
             let tentries: Vec<(TExpr, TExpr)> = entries
                 .iter()
@@ -5560,59 +5660,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 key_span: None,
                 value: Box::new(vt),
             };
-            if tentries.is_empty() {
-                return TExpr {
-                    ty: map_ty,
-                    kind: TExprKind::MapLit(Vec::new()),
-                };
+            TExpr {
+                ty: map_ty,
+                kind: TExprKind::MapLit(tentries),
             }
-            in_own_frame(|| {
-                let map_name = mangle_generated("m");
-                let empty = TExpr {
-                    ty: map_ty.clone(),
-                    kind: TExprKind::MapLit(Vec::new()),
-                };
-                let mut then_body = vec![crate::Codegen::TIR::TStmt::Let {
-                    name: map_name.clone(),
-                    kw: "let mut",
-                    let_ty: crate::Codegen::TIR::TLetTy::Inferred,
-                    init: empty,
-                    gc_promotion: None,
-                    gc_transferred: false,
-                }];
-                for (k, v) in tentries {
-                    then_body.push(crate::Codegen::TIR::TStmt::IndexAssign {
-                        uninit: false,
-                        base: TExpr {
-                            ty: map_ty.clone(),
-                            kind: TExprKind::Local(TLocal::user(map_name.clone())),
-                        },
-                        index: k,
-                        is_map: true,
-                        value: v,
-                    });
-                }
-                let result = TExpr {
-                    ty: map_ty.clone(),
-                    kind: TExprKind::Local(TLocal::user(map_name)),
-                };
-                TExpr {
-                    ty: map_ty.clone(),
-                    kind: TExprKind::IfExpr {
-                        cond: Box::new(crate::Codegen::TIR::TIfCond::Plain(TExpr {
-                            ty: Type::Bool,
-                            kind: TExprKind::BoolLit(true),
-                        })),
-                        then_body,
-                        then_value: Box::new(result),
-                        else_body: Vec::new(),
-                        else_value: Box::new(TExpr {
-                            ty: map_ty,
-                            kind: TExprKind::MapLit(Vec::new()),
-                        }),
-                    },
-                }
-            })
         }),
         // c109 Phase 5: indexing `coll[i]`. The `IndexKind` (List/Map) is the total
         // sema fact (`is_map`); the helper line is resolved at lowering. The result

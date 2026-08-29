@@ -1011,7 +1011,7 @@
     // no such method and rustc rejected the generated program (I2).
     impl super::JetDisplay for Duration {
         fn jet_display(&self) -> String {
-            format!("{}ns", self.ns)
+            super::jet_duration_kernel_show(self.ns)
         }
     }
 
@@ -1689,6 +1689,23 @@
             Some((quotient, remainder.normalize()))
         }
 
+        /// Euclidean quotient and remainder. The remainder is always
+        /// non-negative and smaller than the divisor magnitude; the quotient
+        /// is adjusted from the truncating pair when the dividend is negative.
+        pub fn div_rem_euclid(&self, other: &JetBigInt) -> Option<(JetBigInt, JetBigInt)> {
+            let (mut quotient, mut remainder) = self.div_rem(other)?;
+            if remainder.negative {
+                remainder = remainder.add(&other.abs());
+                let one = JetBigInt::from_int(1);
+                quotient = if other.negative {
+                    quotient.add(&one)
+                } else {
+                    quotient.sub(&one)
+                };
+            }
+            Some((quotient, remainder))
+        }
+
         pub fn abs(&self) -> JetBigInt {
             JetBigInt {
                 negative: false,
@@ -1727,7 +1744,7 @@
     // user code and every execution tier still see only `Int`.
     const JET_INT_SMALL_MIN: i64 = -(1i64 << 62);
     const JET_INT_SMALL_MAX: i64 = (1i64 << 62) - 1;
-    const JET_INT_BIG_TAG: i64 = i64::MIN;
+    const JET_INT_BIG_TAG: i64 = i64::MIN + 1;
     static JET_INT_BIG_VALUES: std::sync::OnceLock<std::sync::Mutex<Vec<JetBigInt>>> =
         std::sync::OnceLock::new();
 
@@ -1737,7 +1754,7 @@
 
     #[inline(always)]
     fn jet_int_is_tagged(value: i64) -> bool {
-        value < JET_INT_SMALL_MIN
+        (JET_INT_BIG_TAG..JET_INT_SMALL_MIN).contains(&value)
     }
 
     fn jet_int_big_value(value: i64) -> Option<JetBigInt> {
@@ -1764,6 +1781,9 @@
         let mut values = jet_int_big_values()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(id) = values.iter().position(|existing| existing == &value) {
+            return JET_INT_BIG_TAG.wrapping_add(id as i64);
+        }
         let id = values.len();
         values.push(value);
         JET_INT_BIG_TAG.wrapping_add(id as i64)
@@ -1858,7 +1878,10 @@
 
     #[inline(always)]
     pub fn jet_int_compare(left: i64, right: i64) -> i64 {
-        if !jet_int_is_tagged(left) && !jet_int_is_tagged(right) {
+        // Every valid immediate carrier is in the signed payload half-word;
+        // the lower-bound test is the hot tag check. Values below it remain
+        // on the bigint rail, including the reserved sentinel.
+        if left >= JET_INT_SMALL_MIN && right >= JET_INT_SMALL_MIN {
             return match left.cmp(&right) {
                 std::cmp::Ordering::Less => -1,
                 std::cmp::Ordering::Equal => 0,
@@ -1882,11 +1905,10 @@
     /// helper so tight loops see two tag tests and one checked machine op.
     #[inline(always)]
     pub fn jet_int_add(left: i64, right: i64) -> i64 {
-        if !jet_int_is_tagged(left) && !jet_int_is_tagged(right) {
-            if let Some(value) = left.checked_add(right) {
-                if (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
-                    return value;
-                }
+        if left >= JET_INT_SMALL_MIN && right >= JET_INT_SMALL_MIN {
+            let (value, overflowed) = left.overflowing_add(right);
+            if !overflowed && (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
+                return value;
             }
         }
         jet_int_add_slow(left, right)
@@ -1900,11 +1922,10 @@
 
     #[inline(always)]
     pub fn jet_int_sub(left: i64, right: i64) -> i64 {
-        if !jet_int_is_tagged(left) && !jet_int_is_tagged(right) {
-            if let Some(value) = left.checked_sub(right) {
-                if (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
-                    return value;
-                }
+        if left >= JET_INT_SMALL_MIN && right >= JET_INT_SMALL_MIN {
+            let (value, overflowed) = left.overflowing_sub(right);
+            if !overflowed && (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
+                return value;
             }
         }
         jet_int_sub_slow(left, right)
@@ -1918,11 +1939,10 @@
 
     #[inline(always)]
     pub fn jet_int_mul(left: i64, right: i64) -> i64 {
-        if !jet_int_is_tagged(left) && !jet_int_is_tagged(right) {
-            if let Some(value) = left.checked_mul(right) {
-                if (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
-                    return value;
-                }
+        if left >= JET_INT_SMALL_MIN && right >= JET_INT_SMALL_MIN {
+            let (value, overflowed) = left.overflowing_mul(right);
+            if !overflowed && (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
+                return value;
             }
         }
         jet_int_mul_slow(left, right)
@@ -1948,11 +1968,10 @@
 
     #[inline(always)]
     pub fn jet_int_neg(value: i64) -> i64 {
-        if !jet_int_is_tagged(value) {
-            if let Some(value) = value.checked_neg() {
-                if (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
-                    return value;
-                }
+        if value >= JET_INT_SMALL_MIN {
+            let (value, overflowed) = value.overflowing_neg();
+            if !overflowed && (JET_INT_SMALL_MIN..=JET_INT_SMALL_MAX).contains(&value) {
+                return value;
             }
         }
         jet_int_neg_slow(value)
@@ -1999,14 +2018,14 @@
         jet_int_value(value)
             .shl(&jet_int_value(count))
             .map(jet_int_pack)
-            .unwrap_or_else(|| crate::jet_arithmetic_stop(file, line, "invalid shift count"))
+            .unwrap_or_else(|| crate::jet_arithmetic_stop(file, line, "Invalid shift count"))
     }
 
     pub fn jet_int_shr(value: i64, count: i64, file: &str, line: u32) -> i64 {
         jet_int_value(value)
             .shr(&jet_int_value(count))
             .map(jet_int_pack)
-            .unwrap_or_else(|| crate::jet_arithmetic_stop(file, line, "invalid shift count"))
+            .unwrap_or_else(|| crate::jet_arithmetic_stop(file, line, "Invalid shift count"))
     }
 
     fn jet_int_div_rem(value: i64, divisor: i64, file: &str, line: u32) -> (i64, i64) {
@@ -2041,6 +2060,26 @@
         jet_int_div_rem(value, divisor, file, line).0
     }
 
+    pub fn jet_int_div_euclid(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+        if jet_int_is_zero(divisor) {
+            crate::jet_arithmetic_stop(file, line, crate::JET_ARITHMETIC_DIVIDE_ZERO);
+        }
+        let (quotient, _) = jet_int_value(value)
+            .div_rem_euclid(&jet_int_value(divisor))
+            .expect("checked Euclidean division by zero");
+        jet_int_pack(quotient)
+    }
+
+    pub fn jet_int_rem_euclid(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
+        if jet_int_is_zero(divisor) {
+            crate::jet_arithmetic_stop(file, line, crate::JET_ARITHMETIC_DIVIDE_ZERO);
+        }
+        let (_, remainder) = jet_int_value(value)
+            .div_rem_euclid(&jet_int_value(divisor))
+            .expect("checked Euclidean remainder by zero");
+        jet_int_pack(remainder)
+    }
+
     pub fn jet_int_floor_div(value: i64, divisor: i64, file: &str, line: u32) -> i64 {
         let (quotient, remainder) = jet_int_div_rem(value, divisor, file, line);
         if !jet_int_is_zero(remainder) && jet_int_is_negative(value) != jet_int_is_negative(divisor) {
@@ -2064,7 +2103,7 @@
         let base = jet_int_value(value);
         let exponent_value = jet_int_value(exponent);
         if exponent_value.negative {
-            crate::jet_arithmetic_stop(file, line, "negative default Int exponent");
+            crate::jet_arithmetic_stop(file, line, "Negative default Int exponent");
         }
         jet_int_pack(
             base.pow(&exponent_value)
@@ -2210,6 +2249,20 @@
         pub denominator: i64,
     }
 
+    impl PartialOrd for JetFraction {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
+    impl Ord for JetFraction {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            ((self.numerator as i128) * (other.denominator as i128)).cmp(
+                &((other.numerator as i128) * (self.denominator as i128)),
+            )
+        }
+    }
+
     impl JetFraction {
         pub fn new(numerator: i64, denominator: i64) -> Option<Self> {
             if denominator == 0 {
@@ -2264,6 +2317,55 @@
                 self.numerator.checked_mul(other.denominator)?,
                 self.denominator.checked_mul(other.numerator)?,
             )
+        }
+
+        pub fn from_int(value: i64) -> Option<Self> {
+            Self::new(jet_int_to_i64(value)?, 1)
+        }
+
+        pub fn from_float(value: f64) -> Option<Self> {
+            if !value.is_finite() {
+                return None;
+            }
+            if value == 0.0 {
+                return Some(Self {
+                    numerator: 0,
+                    denominator: 1,
+                });
+            }
+            let bits = value.to_bits();
+            let negative = (bits >> 63) != 0;
+            let exponent = ((bits >> 52) & 0x7ff) as i32;
+            let fraction = bits & ((1u64 << 52) - 1);
+            let (significand, power) = if exponent == 0 {
+                (fraction, -1074)
+            } else {
+                (fraction | (1u64 << 52), exponent - 1023 - 52)
+            };
+            let magnitude = i128::from(significand);
+            let (numerator, denominator) = if power >= 0 {
+                (magnitude.checked_shl(power as u32)?, 1i128)
+            } else {
+                (magnitude, 1i128.checked_shl((-power) as u32)?)
+            };
+            let numerator = if negative {
+                numerator.checked_neg()?
+            } else {
+                numerator
+            };
+            Self::new(i64::try_from(numerator).ok()?, i64::try_from(denominator).ok()?)
+        }
+
+        pub fn from_decimal(value: &JetDecimal) -> Option<Self> {
+            value.to_fraction()
+        }
+
+        pub fn to_int_exact(&self) -> Option<i64> {
+            (self.denominator == 1).then(|| jet_int_from_i64(self.numerator))
+        }
+
+        pub fn to_decimal(&self) -> Option<JetDecimal> {
+            JetDecimal::from_fraction(self)
         }
 
         pub fn to_float(&self) -> f64 {
@@ -2411,6 +2513,44 @@
             })
         }
 
+        pub fn from_int(value: i64) -> Result<Self, String> {
+            Self::from_str(&jet_int_to_string(value))
+        }
+
+        /// Preserve the exact binary64 value as a finite base-10 decimal.
+        /// Every binary denominator is a power of two, so a matching power
+        /// of five produces an exact decimal expansion.
+        pub fn from_float(value: f64) -> Option<Self> {
+            if !value.is_finite() {
+                return None;
+            }
+            if value == 0.0 {
+                return Some(Self::from_int(0).expect("zero is a valid Decimal"));
+            }
+            let bits = value.to_bits();
+            let negative = (bits >> 63) != 0;
+            let exponent = ((bits >> 52) & 0x7ff) as i32;
+            let fraction = bits & ((1u64 << 52) - 1);
+            let (significand, power) = if exponent == 0 {
+                (fraction, -1074)
+            } else {
+                (fraction | (1u64 << 52), exponent - 1023 - 52)
+            };
+            let mut numerator = JetBigInt::from_u64(significand);
+            if power >= 0 {
+                for _ in 0..power {
+                    numerator = numerator.mul(&JetBigInt::from_int(2));
+                }
+                Some(Self::from_bigint(numerator, 0, negative))
+            } else {
+                let scale = u32::try_from(-power).ok()?;
+                for _ in 0..scale {
+                    numerator = numerator.mul(&JetBigInt::from_int(5));
+                }
+                Some(Self::from_bigint(numerator, scale, negative))
+            }
+        }
+
         fn normalize(mut self) -> Self {
             // Trailing fractional zeros are insignificant; drop them with scale.
             // Popping digits without `scale -= 1` silently shifts the radix point
@@ -2498,6 +2638,127 @@
             )
         }
 
+        fn signed_bigint(&self) -> JetBigInt {
+            let value = self.to_bigint();
+            if self.negative {
+                value.neg()
+            } else {
+                value
+            }
+        }
+
+        fn scale_factor(scale: u32) -> JetBigInt {
+            let ten = JetBigInt::from_int(10);
+            let mut factor = JetBigInt::from_int(1);
+            for _ in 0..scale {
+                factor = factor.mul(&ten);
+            }
+            factor
+        }
+
+        fn from_signed_bigint(value: JetBigInt, scale: u32) -> JetDecimal {
+            let negative = value.negative;
+            JetDecimal::from_bigint(value.abs(), scale, negative)
+        }
+
+        pub fn to_fraction(&self) -> Option<JetFraction> {
+            let numerator = self.signed_bigint().try_i64()?;
+            let denominator = Self::scale_factor(self.scale).try_i64()?;
+            JetFraction::new(numerator, denominator)
+        }
+
+        pub fn div(&self, other: &JetDecimal) -> Option<JetFraction> {
+            self.to_fraction()?.div(&other.to_fraction()?)
+        }
+
+        fn quotient_remainder(&self) -> (JetBigInt, JetBigInt, JetBigInt) {
+            let denominator = Self::scale_factor(self.scale);
+            let (quotient, remainder) = self
+                .signed_bigint()
+                .div_rem(&denominator)
+                .expect("Decimal scale denominator is nonzero");
+            (quotient, remainder, denominator)
+        }
+
+        pub fn to_int_exact(&self) -> Option<i64> {
+            let (quotient, remainder, _) = self.quotient_remainder();
+            remainder
+                .is_zero()
+                .then(|| jet_int_from_str(&quotient.to_string_rep()).ok())
+                .flatten()
+        }
+
+        fn floor_int(&self) -> JetBigInt {
+            let (quotient, remainder, _) = self.quotient_remainder();
+            if self.negative && !remainder.is_zero() {
+                quotient.sub(&JetBigInt::from_int(1))
+            } else {
+                quotient
+            }
+        }
+
+        fn ceil_int(&self) -> JetBigInt {
+            let (quotient, remainder, _) = self.quotient_remainder();
+            if !self.negative && !remainder.is_zero() {
+                quotient.add(&JetBigInt::from_int(1))
+            } else {
+                quotient
+            }
+        }
+
+        fn round_int(&self) -> JetBigInt {
+            let (quotient, remainder, denominator) = self.quotient_remainder();
+            let doubled = remainder.abs().mul(&JetBigInt::from_int(2));
+            let mut magnitude = quotient.abs();
+            if doubled.compare(&denominator) != std::cmp::Ordering::Less {
+                magnitude = magnitude.add(&JetBigInt::from_int(1));
+            }
+            if self.negative {
+                magnitude.neg()
+            } else {
+                magnitude
+            }
+        }
+
+        pub fn floor(&self) -> JetDecimal {
+            Self::from_signed_bigint(self.floor_int(), 0)
+        }
+
+        pub fn ceil(&self) -> JetDecimal {
+            Self::from_signed_bigint(self.ceil_int(), 0)
+        }
+
+        pub fn round(&self) -> JetDecimal {
+            Self::from_signed_bigint(self.round_int(), 0)
+        }
+
+        /// Build a Decimal only when the reduced ratio has a finite base-10
+        /// expansion. Repeating ratios remain Fractions by design.
+        pub fn from_fraction(fraction: &JetFraction) -> Option<Self> {
+            let mut factors = fraction.denominator as u64;
+            let mut twos = 0u32;
+            while factors % 2 == 0 {
+                factors /= 2;
+                twos += 1;
+            }
+            let mut fives = 0u32;
+            while factors % 5 == 0 {
+                factors /= 5;
+                fives += 1;
+            }
+            if factors != 1 {
+                return None;
+            }
+            let scale = twos.max(fives);
+            let numerator = JetBigInt::from_int(fraction.numerator);
+            let scaled = numerator.mul(&Self::scale_factor(scale));
+            let (digits, remainder) = scaled.div_rem(&JetBigInt::from_int(fraction.denominator))?;
+            if !remainder.is_zero() {
+                return None;
+            }
+            Some(Self::from_signed_bigint(digits, scale))
+        }
+
         pub fn to_string_rep(&self) -> String {
             if self.digits == [0] {
                 return if self.scale == 0 {
@@ -2555,6 +2816,7 @@
         Boolean(bool),
         Number(f64),
         Integer(i64),
+        ExactInteger(String),
         Text(String),
         Array(Vec<JSON>),
         Object(std::collections::BTreeMap<String, JSON>),
@@ -2925,12 +3187,16 @@
         pub fn int(&self) -> Result<i64, String> {
             match self {
                 JSON::Integer(n) => Ok(*n),
+                JSON::ExactInteger(text) => jet_int_from_str(text),
                 JSON::Number(f) => {
-                    let n = *f as i64;
-                    if (n as f64 - f).abs() < 0.5 {
-                        Ok(n)
+                    if f.is_finite()
+                        && f.fract() == 0.0
+                        && *f >= i64::MIN as f64
+                        && *f < i64::MAX as f64
+                    {
+                        Ok(*f as i64)
                     } else {
-                        Err(format!("{} is not an integer", f))
+                        Err(format!("{} is not an exact integer", f))
                     }
                 }
                 _ => Err(format!(
@@ -2960,6 +3226,14 @@
         pub fn float(&self) -> Result<f64, String> {
             match self {
                 JSON::Integer(n) => Ok(*n as f64),
+                JSON::ExactInteger(text) => jet_int_from_str(text)
+                    .map(jet_int_to_f64)
+                    .and_then(|value| {
+                        value
+                            .is_finite()
+                            .then_some(value)
+                            .ok_or_else(|| format!("{text} is out of range for Float"))
+                    }),
                 JSON::Number(f) => Ok(*f),
                 _ => Err(format!(
                     "expected number, got {}",

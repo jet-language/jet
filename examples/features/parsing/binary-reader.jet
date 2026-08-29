@@ -4,12 +4,12 @@
 // position and returns a prefix-contract result such as `U32 !String` — a bounds miss is an ordinary error
 // value, never a panic or silent truncation (I1).
 fn run() {
-    // header/count/payload wire shape: a little-endian u32 magic, a
-    // little-endian u16 item count, then that many raw bytes.
+// header/count/payload wire shape: a little-endian u32 magic, a
+// little-endian u16 item count, then that many raw bytes.
     packet :: [U8]{0x2a, 0x00, 0x00, 0x00, 0x03, 0x00, 0x10, 0x20, 0x30}
     // magic = 42
     // count = 3
-    // payload
+// payload
     r :: Reader.over(packet)
     magic :: r.read_u32_le() ?? return Err("bad packet: no magic")
     count :: r.read_u16_le() ?? return Err("bad packet: no count")
@@ -48,9 +48,10 @@ fn run() {
     bytes_match :: magic_bytes == b"JGB1"
     print("bytes_match={bytes_match}")
 
-    wrapped_u64 :: U64{18446744073709551615}.wrapping_add(U64{1})
-    fnv_step :: (U64{14695981039346656037} ~| U64{74}).wrapping_mul(U64{1099511628211})
-    print("u64_wrap={wrapped_u64} fnv_step={fnv_step}")
+    max_u64 :: u64_from_bytes(b"\xff\xff\xff\xff\xff\xff\xff\xff")
+    wrapped_u64 :: max_u64.wrapping_add(U64{1})
+    fnv :: fnv1a(b"hello")
+    print("u64_wrap={wrapped_u64} fnv1a={fnv}")
 
     // A bounds miss is an ordinary error value — `?`-composable, never a panic.
     short :: [U8]{0x01}
@@ -70,4 +71,22 @@ fn run() {
     left :: r3.remaining()
     payload2 :: r3.take(left) ?? return Err("short read")
     print("remaining after take_pattern={payload2.len()}")
+}
+
+fn u64_from_bytes(bytes: [U8]) U64 -> {
+    value := U64{0}
+    loop byte in bytes {
+        value = value.wrapping_mul(U64{256}).wrapping_add(U64.from_u8(byte))
+    }
+    value
+}
+
+fn fnv1a(bytes: [U8]) U64 -> {
+    offset :: u64_from_bytes(b"\xcb\xf2\x9c\xe4\x84\x22\x23\x25")
+    prime :: u64_from_bytes(b"\x00\x00\x01\x00\x00\x00\x01\xb3")
+    hash := offset
+    loop byte in bytes {
+        hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    }
+    hash
 }

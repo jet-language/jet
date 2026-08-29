@@ -165,11 +165,9 @@ impl JetDebug for JetZonedDateTime {
         self.to_string_fmt()
     }
 }
-// D-PARCAPTURE1=D: one bounded indexed engine for every explicit parallel
-// collection adapter. Chunk boundaries are fixed so scheduling cannot affect
-// result order or `para_fold`'s merge tree; the number of worker threads is
-// bounded by the host's available parallelism.
-const JET_PARA_CHUNK_ITEMS: usize = 64;
+// D-PARCAPTURE1=D: one failure-aware wrapper around the shared indexed
+// collection scheduler. Chunk boundaries and result order live in the shared
+// Prelude collection seam; this wrapper only carries the AOT failure rail.
 
 struct JetParaFailure {
     index: usize,
@@ -268,56 +266,19 @@ fn jet_para_raise_failure(failure: JetParaFailure) -> ! {
     }
 }
 
-fn jet_list_para_chunks<R, F>(len: usize, f: F) -> Vec<R>
+fn jet_list_para_chunks<R, F>(len: usize, worker_limit: usize, f: F) -> Vec<R>
 where
     R: Send,
     F: Fn(std::ops::Range<usize>) -> Result<R, JetParaFailure> + Sync,
 {
-    let chunk_count = len.div_ceil(JET_PARA_CHUNK_ITEMS);
-    if chunk_count == 0 {
-        return Vec::new();
-    }
     #[cfg(jet_para_test_workers)]
-    let worker_count = 3.min(chunk_count);
+    let worker_cap = 3;
     #[cfg(not(jet_para_test_workers))]
-    let worker_count = std::thread::available_parallelism()
+    let worker_cap = std::thread::available_parallelism()
         .map(|n| n.get())
-        .unwrap_or(1)
-        .min(chunk_count);
-    // A single chunk is the safe serial fast path. Keep the indexed chunk
-    // boundaries when a host exposes only one CPU; para_fold's seed/merge
-    // semantics depend on those boundaries even without parallel workers.
-    if chunk_count == 1 {
-        return match f(0..len) {
-            Ok(result) => vec![result],
-            Err(failure) => jet_para_raise_failure(failure),
-        };
-    }
-    let mut indexed = std::thread::scope(|scope| {
-        let mut handles = Vec::with_capacity(worker_count);
-        let f = &f;
-        for worker in 0..worker_count {
-            handles.push(scope.spawn(move || {
-                let mut out = Vec::new();
-                for chunk in (worker..chunk_count).step_by(worker_count) {
-                    let start = chunk * JET_PARA_CHUNK_ITEMS;
-                    let end = (start + JET_PARA_CHUNK_ITEMS).min(len);
-                    out.push((chunk, f(start..end)));
-                }
-                out
-            }));
-        }
-        let mut indexed = Vec::with_capacity(chunk_count);
-        for handle in handles.into_iter().rev() {
-            match handle.join() {
-                Ok(results) => indexed.extend(results),
-                Err(payload) => std::panic::resume_unwind(payload),
-            }
-        }
-        indexed
-    });
-    indexed.sort_unstable_by_key(|(chunk, _)| *chunk);
-    let mut results = Vec::with_capacity(chunk_count);
+        .unwrap_or(1);
+    let indexed = jet_list_para_chunks_kernel(len, worker_limit, worker_cap, f);
+    let mut results = Vec::with_capacity(indexed.len());
     let mut first_failure: Option<JetParaFailure> = None;
     for (_, outcome) in indexed {
         match outcome {
@@ -338,13 +299,14 @@ where
     results
 }
 
-fn jet_list_para_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
+fn jet_list_para_map<T, U, F>(xs: Vec<T>, f: F, limit: i64) -> Vec<U>
 where
     T: Sync,
     U: Send,
     F: Fn(&T) -> U + Sync,
 {
-    jet_list_para_chunks(xs.len(), |range| {
+    let worker_limit = usize::try_from(limit).unwrap_or(usize::MAX).max(1);
+    jet_list_para_chunks(xs.len(), worker_limit, |range| {
         let mut out = Vec::with_capacity(range.len());
         for index in range {
             out.push(jet_para_call(index, || f(&xs[index]))?);
@@ -361,7 +323,7 @@ where
     T: Sync,
     F: Fn(&T) -> bool + Sync,
 {
-    jet_list_para_chunks(xs.len(), |range| {
+    jet_list_para_chunks(xs.len(), usize::MAX, |range| {
         let mut out = Vec::with_capacity(range.len());
         for index in range {
             out.push(jet_para_call(index, || f(&xs[index]))?);
@@ -412,7 +374,7 @@ where
     F: Fn(&U, &T) -> U + Sync,
     M: Fn(&U, &U) -> U + Sync,
 {
-    let mut partials = jet_list_para_chunks(xs.len(), |range| {
+    let mut partials = jet_list_para_chunks(xs.len(), usize::MAX, |range| {
         let start = range.start;
         let mut acc = jet_para_call(start, &seed)?;
         for index in range {
@@ -676,11 +638,18 @@ fn jet_std_os_run_atexit() {
     jet_runtime_atexit::run();
 }
 
+fn jet_runtime_report_parked_tasks() {
+    if let Some(report) = jet_observe_parked_tasks_report() {
+        eprint!("{}", report.rendered);
+    }
+}
+
 /// The only native process-exit boundary for generated programs. Lexical
 /// cleanup has already happened while the stop unwound to this point; process
 /// callbacks run here before the final native exit.
 fn jet_runtime_process_exit(code: i32, report: Option<&str>) -> ! {
     jet_std_os_run_atexit();
+    jet_runtime_report_parked_tasks();
     if let Some(report) = report {
         eprint!("{report}");
     }
@@ -694,6 +663,7 @@ where
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
         Ok(value) => {
             jet_std_os_run_atexit();
+            jet_runtime_report_parked_tasks();
             value
         }
         Err(payload) => {
@@ -1097,7 +1067,7 @@ fn jet_fixed_value(result: JetFixedArithmeticResult, file: &str, line: u32) -> i
         JetFixedArithmeticResult::Absent => jet_arithmetic_stop(
             file,
             line,
-            "this checked fixed-width operation has no result",
+            "This checked fixed-width operation has no result",
         ),
         JetFixedArithmeticResult::Trap(error) => {
             let message = error.message();
@@ -1109,59 +1079,62 @@ fn jet_fixed_value(result: JetFixedArithmeticResult, file: &str, line: u32) -> i
 macro_rules! jet_arith_impl {
     ($(($t:ty, $signed:expr)),*) => { $(
         impl JetArith for $t {
+            #[inline(always)]
             fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self {
-                jet_fixed_value(jet_fixed_arithmetic(
-                    self as i64, rhs as i128, JET_FIXED_OP_ADD, JET_FIXED_MODE_TRAP,
-                    $signed, <$t>::BITS as u8, $signed,
-                ), file, line) as $t
+                match self.checked_add(rhs) {
+                    Some(value) => value,
+                    None => jet_arithmetic_stop(
+                        file,
+                        line,
+                        "This addition overflows the value's type (the result is outside its range)",
+                    ),
+                }
             }
+            #[inline(always)]
             fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self {
-                jet_fixed_value(jet_fixed_arithmetic(
-                    self as i64, rhs as i128, JET_FIXED_OP_SUB, JET_FIXED_MODE_TRAP,
-                    $signed, <$t>::BITS as u8, $signed,
-                ), file, line) as $t
+                match self.checked_sub(rhs) {
+                    Some(value) => value,
+                    None => jet_arithmetic_stop(
+                        file,
+                        line,
+                        "This subtraction overflows the value's type (the result is outside its range)",
+                    ),
+                }
             }
+            #[inline(always)]
             fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self {
-                jet_fixed_value(jet_fixed_arithmetic(
-                    self as i64, rhs as i128, JET_FIXED_OP_MUL, JET_FIXED_MODE_TRAP,
-                    $signed, <$t>::BITS as u8, $signed,
-                ), file, line) as $t
+                match self.checked_mul(rhs) {
+                    Some(value) => value,
+                    None => jet_arithmetic_stop(
+                        file,
+                        line,
+                        "This multiplication overflows the value's type (the result is outside its range)",
+                    ),
+                }
             }
+            #[inline(always)]
             fn jet_wrapping_add(self, rhs: Self) -> Self {
-                jet_fixed_value(jet_fixed_arithmetic(
-                    self as i64, rhs as i128, JET_FIXED_OP_ADD, JET_FIXED_MODE_WRAPPING,
-                    $signed, <$t>::BITS as u8, $signed,
-                ), "<fixed-width>", 0) as $t
+                self.wrapping_add(rhs)
             }
+            #[inline(always)]
             fn jet_wrapping_sub(self, rhs: Self) -> Self {
-                jet_fixed_value(jet_fixed_arithmetic(
-                    self as i64, rhs as i128, JET_FIXED_OP_SUB, JET_FIXED_MODE_WRAPPING,
-                    $signed, <$t>::BITS as u8, $signed,
-                ), "<fixed-width>", 0) as $t
+                self.wrapping_sub(rhs)
             }
+            #[inline(always)]
             fn jet_wrapping_mul(self, rhs: Self) -> Self {
-                jet_fixed_value(jet_fixed_arithmetic(
-                    self as i64, rhs as i128, JET_FIXED_OP_MUL, JET_FIXED_MODE_WRAPPING,
-                    $signed, <$t>::BITS as u8, $signed,
-                ), "<fixed-width>", 0) as $t
+                self.wrapping_mul(rhs)
             }
+            #[inline(always)]
             fn jet_saturating_add(self, rhs: Self) -> Self {
-                jet_fixed_value(jet_fixed_arithmetic(
-                    self as i64, rhs as i128, JET_FIXED_OP_ADD, JET_FIXED_MODE_SATURATING,
-                    $signed, <$t>::BITS as u8, $signed,
-                ), "<fixed-width>", 0) as $t
+                self.saturating_add(rhs)
             }
+            #[inline(always)]
             fn jet_saturating_sub(self, rhs: Self) -> Self {
-                jet_fixed_value(jet_fixed_arithmetic(
-                    self as i64, rhs as i128, JET_FIXED_OP_SUB, JET_FIXED_MODE_SATURATING,
-                    $signed, <$t>::BITS as u8, $signed,
-                ), "<fixed-width>", 0) as $t
+                self.saturating_sub(rhs)
             }
+            #[inline(always)]
             fn jet_saturating_mul(self, rhs: Self) -> Self {
-                jet_fixed_value(jet_fixed_arithmetic(
-                    self as i64, rhs as i128, JET_FIXED_OP_MUL, JET_FIXED_MODE_SATURATING,
-                    $signed, <$t>::BITS as u8, $signed,
-                ), "<fixed-width>", 0) as $t
+                self.saturating_mul(rhs)
             }
             fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self {
                 jet_fixed_value(jet_fixed_arithmetic(
@@ -1340,13 +1313,53 @@ fn jet_checked_range_bounds(
     start as usize..end as usize
 }
 
-fn jet_slice_range<T: Clone>(
+trait JetSliceRange {
+    type Output;
+
+    fn slice_range(&self, range: &JetRange, file: &str, line: u32) -> Self::Output;
+}
+
+fn jet_slice_vec_range<T: Clone>(
     xs: &[T],
     range: &JetRange,
     file: &str,
     line: u32,
 ) -> Vec<T> {
     xs[jet_checked_range_bounds(xs.len() as i64, range, "slice", file, line)].to_vec()
+}
+
+impl<T: Clone> JetSliceRange for [T] {
+    type Output = Vec<T>;
+
+    fn slice_range(&self, range: &JetRange, file: &str, line: u32) -> Self::Output {
+        jet_slice_vec_range(self, range, file, line)
+    }
+}
+
+impl<T: Clone> JetSliceRange for Vec<T> {
+    type Output = Vec<T>;
+
+    fn slice_range(&self, range: &JetRange, file: &str, line: u32) -> Self::Output {
+        jet_slice_vec_range(self, range, file, line)
+    }
+}
+
+impl JetSliceRange for String {
+    type Output = String;
+
+    fn slice_range(&self, range: &JetRange, file: &str, line: u32) -> Self::Output {
+        jet_string_slice_value(self, range.start, range.end, range.exclusive)
+            .unwrap_or_else(|message| jet_panic(file, line, &message))
+    }
+}
+
+fn jet_slice_range<T: JetSliceRange + ?Sized>(
+    xs: &T,
+    range: &JetRange,
+    file: &str,
+    line: u32,
+) -> T::Output {
+    xs.slice_range(range, file, line)
 }
 // D-DYNARRAY1 / D-SHAPE-PLACE1: range places produce zero-copy windows.
 // Their bounds share `jet_range_bounds` with owned slicing and every engine.
@@ -1719,8 +1732,9 @@ fn jet_map_merge<K: Ord + Clone, V: Clone>(
     other: &JetMap<K, V>,
 ) -> JetMap<K, V> {
     let mut out = left.clone();
+    let storage = jet_map_make_mut(&mut out);
     for (k, v) in other {
-        out.insert(k.clone(), v.clone());
+        storage.insert(k.clone(), v.clone());
     }
     out
 }
@@ -1735,14 +1749,15 @@ where
     F: Fn(&K, V, V) -> V,
 {
     let mut out = left.clone();
+    let storage = jet_map_make_mut(&mut out);
     for (k, right) in other {
-        match out.remove(k) {
+        match storage.remove(k) {
             Some(left_v) => {
                 let resolved = conflict(k, left_v, right.clone());
-                out.insert(k.clone(), resolved);
+                storage.insert(k.clone(), resolved);
             }
             None => {
-                out.insert(k.clone(), right.clone());
+                storage.insert(k.clone(), right.clone());
             }
         }
     }
@@ -1929,19 +1944,8 @@ fn jet_string_lines(s: &String) -> Vec<String> {
     s.lines().map(|x| x.to_string()).collect()
 }
 fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let len = chars.len() as i64;
-    if a < 0 || b < 0 || a > b || b >= len {
-        jet_panic(
-            file,
-            line,
-            &format!(
-                "can't slice {} characters from {} to {} (inclusive)",
-                len, a, b
-            ),
-        );
-    }
-    chars[a as usize..=b as usize].iter().collect()
+    jet_string_slice_value(s, a, b, false)
+        .unwrap_or_else(|message| jet_panic(file, line, &message))
 }
 fn jet_list_each<T, F, I>(xs: I, f: F)
 where
@@ -1997,6 +2001,21 @@ where
 {
     xs.into_iter().fold(init, |acc, x| f(&acc, &x))
 }
+// Float has no Rust `Ord` implementation because NaN makes `partial_cmp`
+// return `None`. Jet's sort surface is total: NaN follows every non-NaN
+// value, and NaN compares equal to NaN. Keep that policy in the shared
+// Prelude so AOT, JIT and interpreter adapters use one ordering.
+fn jet_float_ordering(left: f64, right: f64) -> __jet_Ordering {
+    match left.partial_cmp(&right) {
+        Some(std::cmp::Ordering::Less) => __jet_Ordering::__jet_Less,
+        Some(std::cmp::Ordering::Equal) => __jet_Ordering::__jet_Equal,
+        Some(std::cmp::Ordering::Greater) => __jet_Ordering::__jet_Greater,
+        None if left.is_nan() && right.is_nan() => __jet_Ordering::__jet_Equal,
+        None if left.is_nan() => __jet_Ordering::__jet_Greater,
+        None => __jet_Ordering::__jet_Less,
+    }
+}
+
 fn jet_list_sort_by_compare<T, F>(xs: &mut Vec<T>, mut f: F)
 where
     F: FnMut(&T, &T) -> __jet_Ordering,
@@ -2048,9 +2067,10 @@ where F: FnMut(&U, &K, &V) -> U {
 fn jet_map_flat_map<K: Ord + Clone, V: Clone, F>(m: JetMap<K, V>, mut f: F) -> JetMap<K, V>
 where F: FnMut(&K, &V) -> JetMap<K, V> {
     let mut out = JetMap::new();
+    let storage = jet_map_make_mut(&mut out);
     for (k, v) in &m {
         for (ik, iv) in f(k, v).iter() {
-            out.insert(ik.clone(), iv.clone());
+            storage.insert(ik.clone(), iv.clone());
         }
     }
     out

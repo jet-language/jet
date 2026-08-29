@@ -1072,6 +1072,20 @@ fn ambient_unsupported(what: &str, span: Span) -> Diagnostic {
     jet_foundation::Prelude::jet_e0956_unsupported(what, span)
 }
 
+/// Registry-facing file routes owned by this stream dispatcher. The three
+/// entries must stay in lockstep with `Syntax::CORE_CALL_AMBIENT_ROUTES`;
+/// encoding reader/writer carriers below are internal stream operations and
+/// have no `CoreCallRecord` row to reconcile.
+pub(crate) const AMBIENT_CORE_CALLS: &[(&str, &str)] = &[
+    ("core.files", "create"),
+    ("core.files", "append"),
+    ("core.files", "open"),
+];
+
+pub(crate) fn ambient_core_call_keys() -> &'static [(&'static str, &'static str)] {
+    AMBIENT_CORE_CALLS
+}
+
 pub(crate) fn ambient_core_call(
     module: &str,
     method: &str,

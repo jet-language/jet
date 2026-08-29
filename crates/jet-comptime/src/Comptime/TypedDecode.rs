@@ -342,7 +342,12 @@ fn decode_int(tree: &CtValue) -> Result<CtValue, CtValue> {
     match variant_of(tree) {
         Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Int(*n)),
         Some(("Int", Some(CtValue::BigInt(n)))) => Ok(CtValue::BigInt(n.clone())),
-        Some(("Float", Some(CtValue::Float(value)))) if value.as_f64().fract() == 0.0 => {
+        Some(("Float", Some(CtValue::Float(value))))
+            if value.as_f64().is_finite()
+                && value.as_f64() >= i64::MIN as f64
+                && value.as_f64() < i64::MAX as f64
+                && value.as_f64().fract() == 0.0 =>
+        {
             Ok(CtValue::Int(value.as_f64() as i64))
         }
         Some(("Number", Some(CtValue::Str(text)))) => {
@@ -368,6 +373,13 @@ fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
             Ok(CtValue::Float(CtFloat::f64(value.as_f64())))
         }
         Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Float(CtFloat::f64(*n as f64))),
+        Some(("Int", Some(CtValue::BigInt(value)))) => value
+            .to_string_rep()
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())
+            .map(|value| CtValue::Float(CtFloat::f64(value)))
+            .ok_or_else(|| decode_error("expected Float, found out-of-range Int")),
         Some(("Number", Some(CtValue::Str(text)))) | Some(("Text", Some(CtValue::Str(text)))) => {
             let value = text
                 .trim()

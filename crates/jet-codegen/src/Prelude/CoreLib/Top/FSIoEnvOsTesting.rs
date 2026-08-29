@@ -432,22 +432,6 @@ fn jet_std_io_input_secret(prompt: &String) -> Result<String, jet_std::IOError> 
     .map_err(jet_std_io_secret_error)
 }
 
-fn jet_std_io_read_all_input() -> Result<String, jet_std::IOError> {
-    use std::io::Read;
-    if jet_fault_should_fail("IO.Read") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some("stdin".to_string()),
-            "fault injected: IO.Read",
-        ));
-    }
-    let mut s = String::new();
-    std::io::stdin()
-        .read_to_string(&mut s)
-        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e))?;
-    Ok(s)
-}
-
 // D-STDIN1=A: streaming line-by-line stdin.
 struct JetStdinReader {
     inner: std::io::BufReader<std::io::Stdin>,

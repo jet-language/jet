@@ -140,7 +140,7 @@ fn lower_lambda_expecting_with_host_borrow(
                 .unwrap_or(Type::Int)
         })
         .collect();
-    let body_ty = shared_body
+    let mut body_ty = shared_body
         .as_ref()
         .map(|body| lowered_block_return_ty(body))
         .unwrap_or_else(|| lambda_body_ty_expecting(lam, cx, env, expected_params));
@@ -347,6 +347,11 @@ fn lower_lambda_expecting_with_host_borrow(
             // An expression-bodied lambda returns an owned value, just like an
             // explicit `return`; clone a borrowed non-scalar parameter here.
             let lowered = lower_owned_expr(e, cx, &mut lam_env);
+            // D-CONC-SPAWN1 also applies to an ordinary stored callback: sema
+            // checked `?` against the enclosing failure carrier, so the
+            // closure's successful expression must construct that carrier
+            // before rustc sees the closure return type.
+            let lowered = fallible_lambda_value(lowered, lam, env);
             (
                 emit_tir_expr(&lowered, cx),
                 TLambdaBody::Expr(Box::new(lowered)),
@@ -362,11 +367,16 @@ fn lower_lambda_expecting_with_host_borrow(
                 )
             } else {
                 prepare_interrupt_callback_locals(stmts, cx, &mut lam_env);
-                let lowered = if return_type_has_value(&body_ty) {
+                // The source tail is value position even when the probe could
+                // not resolve a name declared by an earlier statement.
+                let lowered = if matches!(stmts.last(), Some(Stmt::Expr(_))) {
+                    lower_value_block(stmts, cx, &mut lam_env)
+                } else if return_type_has_value(&body_ty) {
                     lower_value_block(stmts, cx, &mut lam_env)
                 } else {
                     lower_stmts(stmts, cx, &mut lam_env)
                 };
+                body_ty = lowered_block_return_ty(&lowered);
                 let mut inner = String::new();
                 emit_tir_lambda_block(&lowered, cx, &mut inner, 1);
                 (format!("{{ {} }}", inner), TLambdaBody::Block(lowered))
@@ -398,6 +408,28 @@ fn lower_lambda_expecting_with_host_borrow(
         captures,
         materialized_captures: lam.meta.materialized_captures.clone(),
         frozen_captures: lam.meta.frozen_captures.clone(),
+    }
+}
+
+/// Lift the successful result of a callback that propagates into its enclosing
+/// failure carrier. The `?` nodes already carry failures out of the callback;
+/// this supplies the matching `Ok`/`Some` on the success path.
+fn fallible_lambda_value(value: TExpr, lam: &Lambda, env: &LowerEnv) -> TExpr {
+    if !lam.meta.fallible_propagation {
+        return value;
+    }
+    match env.ret_ty.as_ref() {
+        Some(return_ty @ Type::Result { .. }) if !matches!(value.ty, Type::Result { .. }) => {
+            TExpr {
+                ty: return_ty.clone(),
+                kind: TExprKind::Ok(Box::new(value)),
+            }
+        }
+        Some(return_ty @ Type::Option(_)) if !matches!(value.ty, Type::Option(_)) => TExpr {
+            ty: return_ty.clone(),
+            kind: TExprKind::Present(Box::new(value)),
+        },
+        _ => value,
     }
 }
 

@@ -138,11 +138,16 @@ pub(super) fn lower_reader_take_pattern(
 /// D-PARSESTR1: the bool test for a str-match arm head — whether the scan
 /// closure succeeds. Always refutable (E0148 requires an `else` whenever this
 /// pattern appears in an if-table with no fallback).
-pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, _cx: &Cx) -> TExpr {
+pub(super) fn str_match_pattern_cond_expr(
+    pattern: &Pattern,
+    subject: TExpr,
+    _cx: &Cx,
+) -> TExpr {
     let Pattern::StrMatch { parts, .. } = pattern else {
         return TExpr {
             ty: Type::Bool,
             kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::StrMatchScan {
+                subject: Box::new(subject),
                 parts: Vec::new(),
                 probe: crate::Codegen::TIR::TMatchProbe::IsSome,
             })),
@@ -151,6 +156,7 @@ pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, _cx: &Cx) -> TExpr 
     TExpr {
         ty: Type::Bool,
         kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::StrMatchScan {
+            subject: Box::new(subject),
             parts: parts.clone(),
             probe: crate::Codegen::TIR::TMatchProbe::IsSome,
         })),
@@ -164,6 +170,7 @@ pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, _cx: &Cx) -> TExpr 
 /// to one temp, then projects each hole out of it by field index.
 pub(super) fn lower_str_match_pattern_bindings(
     pattern: &Pattern,
+    subject: TExpr,
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> Vec<TStmt> {
@@ -189,6 +196,7 @@ pub(super) fn lower_str_match_pattern_bindings(
         init: TExpr {
             ty: tuple_ty.clone(),
             kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::StrMatchScan {
+                subject: Box::new(subject),
                 parts,
                 probe: crate::Codegen::TIR::TMatchProbe::Unwrap,
             })),

@@ -223,6 +223,10 @@
 // D-LOOP-GUARD1=A (ratified 2026-08-20, card #1416) keeps yielding-loop
 // guards comma-less: `loop name in source if condition -> value`; `, if` is
 // E0379, never a stride.
+// D-TIME-IN1=C (ratified 2026-08-28, card #2283) keeps bare `in` reserved for
+// source-loop parsing while the postfix lexer/parser carve-out admits it after
+// `.`. Thus `duration.in(.Seconds)` is a normal method call without making
+// `in` a general identifier.
 // D-LOOPSTATE1 owns break/next target arguments, and
 // D-COMPREHENSION1 fixes yielding-loop results to eager List.
 // D-IFGUARD1=A adds no spelling: subjectless statement/value guard tables
@@ -276,6 +280,9 @@
 // `x == Val(v)` instead. Facts reach the right side of `&&` only, not `||`.
 // D-UNIONTYPE1=A reuses the existing `|` token (TokKind::Pipe / BitOr) in type
 // position as TYPE_UNION_SEP. `T !(E1 | E2)` parses as `T !(E1 | E2)`.
+// D-BITOREXPR1=A (ratified 2026-08-28, card #2299) admits the same token in
+// value position as bitwise OR. It binds tighter than comparisons; type
+// position remains the union grammar above.
 // D-REGEX-LIT1=D adds no punctuation. Regex patterns use the universal
 // `Type{ body }` / inferred `{ body }` form from D-LIT-DOT1.
 // D-RANGE-VALUE1=A makes `a..b` and `a..<b` construct one nominal Range
@@ -291,6 +298,13 @@
 // family `Hex(n)`, `Pad(n[, "fill"])`, `PadLeft(n[, "fill"])`, `Sci(n)`,
 // `Percent(n)`, `Bin`, and `Oct`. Each selector lowers to one shared
 // `core.text.fmt` function; all execution tiers must preserve the exact output.
+// D-FMT-INTERP3=B: `Hex(n)` is the lowercase hexadecimal integer selector.
+// D-FMT-INTERP3=B: `Pad(n[, "fill"])` is the right-padding text selector.
+// D-FMT-INTERP3=B: `PadLeft(n[, "fill"])` is the left-padding text selector.
+// D-FMT-INTERP3=B: `Sci(n)` is the scientific-notation number selector.
+// D-FMT-INTERP3=B: `Percent(n)` is the percentage number selector.
+// D-FMT-INTERP3=B: `Bin` is the binary integer selector.
+// D-FMT-INTERP3=B: `Oct` is the octal integer selector.
 // D-FMT-INTERP2=A: trailing `=` in a hole reprints the expression source,
 // then " = ", then the value — `{count=}` → `count = 3`. Composes with
 // selectors: `{count=:Debug}`.
@@ -399,6 +413,14 @@ pub const PARA_METHODS: &[&str] = &[
     METHOD_PARA_FOLD,
 ];
 
+// D-GO127-STDLIB1=A (card #2278, 2026-08-28): Go 1.27 parity names are
+// registered at the syntax authority before sema or an engine accepts them.
+// `cut_last` is the terminal-boundary root; the Euclidean quotient and
+// remainder are separate operations, so neither grows a variant sibling.
+pub const METHOD_CUT_LAST: &str = "cut_last";
+pub const METHOD_DIV_EUCLID: &str = "div_euclid";
+pub const METHOD_REM_EUCLID: &str = "rem_euclid";
+
 /// Validate a source-literal HTTP route before code generation. Runtime route
 /// parsing repeats this check for computed Strings.
 pub fn validate_http_route_pattern(pattern: &str) -> Result<(), String> {
@@ -502,6 +524,47 @@ pub const NUMERIC_CONVERSION_SOURCES: &[(&str, &str)] = &[
     ("from_u64", "U64"),
     ("from_f32", "F32"),
     ("from_float", "Float"),
+    // D-TYPE2-EXACT-CONVERT1: the exact-number family uses the same
+    // destination-owned source suffix convention as fixed numerics.
+    ("from_decimal", "Decimal"),
+    ("from_fraction", "Fraction"),
+];
+
+/// D-W4310-BYTES1 / D-W4310-EXACT1 (card #2310/#2312, 2026-08-28): the
+/// completeness-pack names are registered here before they enter sema or an
+/// engine. Their implementations remain in the shared Prelude seams.
+pub const W4310_SURFACE_NAMES: &[&str] = &[
+    "read_i8",
+    "read_i16_le",
+    "read_i16_be",
+    "read_i32_le",
+    "read_i32_be",
+    "read_i64_le",
+    "read_i64_be",
+    "read_f32_be",
+    "read_f64_be",
+    "peek",
+    "seek",
+    "skip",
+    "write_i8",
+    "write_i16_le",
+    "write_i16_be",
+    "write_i32_le",
+    "write_i32_be",
+    "write_i64_le",
+    "write_i64_be",
+    "write_f32_le",
+    "write_f32_be",
+    "write_f64_le",
+    "write_f64_be",
+    "hmac_sha256",
+    "to_radix",
+    "from_radix",
+    "round",
+    "floor",
+    "ceil",
+    "from_decimal",
+    "from_fraction",
 ];
 
 pub fn numeric_conversion_source(method: &str) -> Option<&'static str> {

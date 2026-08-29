@@ -192,12 +192,12 @@ function jet_fixed_policy_step(raw, bits, signed, mode, file, line) {
   const max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;
   if (mode === "wrapping") return signed ? BigInt.asIntN(bits, raw) : BigInt.asUintN(bits, raw);
   if (mode === "saturating") return raw < min ? min : raw > max ? max : raw;
-  if (raw < min || raw > max) jet_runtime_stop("E3010", file, line, "fixed-width arithmetic overflow");
+  if (raw < min || raw > max) jet_runtime_stop("E3010", file, line, "Fixed-width arithmetic overflow");
   return raw;
 }
 
 function jet_fixed_policy_pow(base, exponent, bits, signed, mode, file, line) {
-  if (exponent < 0n) jet_runtime_stop("E3010", file, line, "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)");
+  if (exponent < 0n) jet_runtime_stop("E3010", file, line, "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)");
   let result = 1n;
   let factor = base;
   let remaining = exponent;

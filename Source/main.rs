@@ -1649,6 +1649,10 @@ fn main() {
             // directory is never the positional file/program arg.
             if a == "-p"
                 || a == "--output"
+                || a == "--endpoint"
+                || a == "--channel"
+                || a == "--platform"
+                || a == "--trust-key"
                 || a == "--gate"
                 || a == "--scope"
                 || a == "--kind"
@@ -1668,6 +1672,13 @@ fn main() {
                 continue;
             }
             if a.starts_with("--output=") {
+                continue;
+            }
+            if a.starts_with("--endpoint=")
+                || a.starts_with("--channel=")
+                || a.starts_with("--platform=")
+                || a.starts_with("--trust-key=")
+            {
                 continue;
             }
             if a.starts_with("--set=") {
@@ -2073,10 +2084,7 @@ fn main() {
             run_version();
             return;
         }
-        "upgrade" => {
-            run_upgrade();
-            return;
-        }
+        "self-update" => run_self_update(&raw, mode),
         "explain" => {
             if jet_argv.iter().any(|a| a == "--web-graph") {
                 run_explain_web_graph(&jet_argv[1..], mode);
@@ -3988,12 +3996,113 @@ fn run_version() {
     print!("{}", jet::Manifest::version_banner());
 }
 
-fn run_upgrade() {
-    println!(
-        "To upgrade {}, download the latest release from:",
-        jet::Syntax::BINARY_NAME
-    );
-    println!("  https://github.com/jet-lang/jet/releases");
+/// Self update verifies the signed channel manifest and selected platform
+/// artifact. The endpoint is host-owned so local staging and HTTPS use one
+/// verifier.
+fn run_self_update(raw: &[String], mode: OutputMode) -> ! {
+    let roots = jetpack::Store::resolve();
+    let endpoint = self_update_option(raw, "--endpoint")
+        .or_else(|| {
+            match jetpack::ToolchainUpdate::configured_endpoint(&roots.root) {
+                Ok(endpoint) => endpoint,
+                Err(error) => {
+                    emit_cli_report(
+                        "E2105",
+                        format!("could not read the Jet toolchain endpoint: {error}"),
+                        "self-update needs a readable host-owned endpoint configuration"
+                            .to_string(),
+                        "fix or remove JETPACK_ROOT/config/toolchain-v1.endpoint, or pass --endpoint <url>"
+                            .to_string(),
+                        mode.json,
+                    );
+                    exit(ExitCodes::USER_ERROR);
+                }
+            }
+        })
+        .unwrap_or_else(|| jetpack::ToolchainUpdate::DEFAULT_ENDPOINT.to_string());
+    let channel = self_update_option(raw, "--channel")
+        .unwrap_or_else(|| jetpack::ToolchainUpdate::DEFAULT_CHANNEL.to_string());
+    let platform = self_update_option(raw, "--platform")
+        .unwrap_or_else(jetpack::ToolchainUpdate::default_target);
+    let trust_key = self_update_option(raw, "--trust-key")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| roots.root.join("trust/toolchain-v1.ed25519.pub"));
+    let dry_run = raw.iter().any(|arg| arg == "--dry-run");
+    let apply = raw.iter().any(|arg| arg == "--apply");
+    let options = jetpack::ToolchainUpdate::UpdateOptions {
+        endpoint,
+        channel,
+        platform,
+        trust_key,
+        dry_run,
+        apply,
+    };
+    let current_exe = apply.then(|| std::env::current_exe().ok()).flatten();
+    match jetpack::ToolchainUpdate::run(&options, current_exe.as_deref()) {
+        Ok(result) => {
+            if mode.json {
+                println!(
+                    "{}",
+                    render_status_json(
+                        "ok",
+                        true,
+                        "self-update",
+                        &format!(
+                            ",\"channel\":{},\"version\":{},\"platform\":{},\"artifact\":{},\"sha256\":{},\"size\":{},\"key_id\":{},\"applied\":{}",
+                            jet_foundation::JSON::quote(&result.plan.channel),
+                            jet_foundation::JSON::quote(&result.plan.version),
+                            jet_foundation::JSON::quote(&result.plan.platform),
+                            jet_foundation::JSON::quote(&result.plan.artifact_url),
+                            jet_foundation::JSON::quote(&result.plan.sha256),
+                            result.plan.size,
+                            jet_foundation::JSON::quote(&result.plan.key_id),
+                            result.applied
+                        ),
+                    )
+                );
+            } else if result.applied {
+                println!(
+                    "updated {} to {} ({})",
+                    jet::Syntax::BINARY_NAME,
+                    result.plan.version,
+                    result.plan.platform
+                );
+            } else {
+                println!(
+                    "verified {} {} for {} from {}",
+                    jet::Syntax::BINARY_NAME,
+                    result.plan.version,
+                    result.plan.platform,
+                    result.plan.artifact_url
+                );
+            }
+            exit(ExitCodes::OK);
+        }
+        Err(error) => {
+            emit_cli_report(
+                "E2105",
+                format!("could not update {}: {error}", jet::Syntax::BINARY_NAME),
+                "self-update accepts only a signed channel manifest and a matching signed artifact"
+                    .to_string(),
+                "check the endpoint, public trust key, channel, and platform; use --dry-run to verify without installing"
+                    .to_string(),
+                mode.json,
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+}
+
+fn self_update_option(raw: &[String], name: &str) -> Option<String> {
+    raw.iter()
+        .find_map(|arg| arg.strip_prefix(&format!("{name}=")).map(str::to_string))
+        .or_else(|| {
+            raw.iter()
+                .position(|arg| arg == name)
+                .and_then(|index| raw.get(index + 1))
+                .filter(|value| !value.starts_with('-'))
+                .cloned()
+        })
 }
 
 fn is_diagnostic_code(s: &str) -> bool {

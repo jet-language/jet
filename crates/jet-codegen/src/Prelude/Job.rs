@@ -202,14 +202,14 @@ pub fn jet_job_help(argv: &[String], jobs: &[(&str, JetJobScope)]) {
 /// one registered fact, two renderings, never two wordings.
 #[allow(dead_code)]
 pub const JET_JOB_UNKNOWN_WHY: &str =
-    "the first program subcommand must name a function marked `#Job`.";
+    "The first program subcommand must name a function marked `#Job`.";
 #[allow(dead_code)]
 pub const JET_JOB_UNKNOWN_FIX: &str =
-    "mark a function `#Job`, or check the subcommand spelling.";
+    "Mark a function `#Job`, or check the subcommand spelling.";
 
 #[allow(dead_code)]
 pub fn jet_job_unknown_what(name: &str) -> String {
-    format!("no job named `{name}`")
+    format!("No job named `{name}`")
 }
 
 /// The one label and separator a job refusal uses to advertise names. The

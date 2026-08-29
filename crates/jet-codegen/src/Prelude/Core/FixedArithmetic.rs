@@ -27,40 +27,40 @@ impl JetFixedArithmeticError {
     pub(crate) fn message(self) -> String {
         match self {
             Self::AddOverflow => {
-                "this addition overflows the value's type (the result is outside its range)"
+                "This addition overflows the value's type (the result is outside its range)"
                     .to_string()
             }
             Self::SubOverflow => {
-                "this subtraction overflows the value's type (the result is outside its range)"
+                "This subtraction overflows the value's type (the result is outside its range)"
                     .to_string()
             }
             Self::MulOverflow => {
-                "this multiplication overflows the value's type (the result is outside its range)"
+                "This multiplication overflows the value's type (the result is outside its range)"
                     .to_string()
             }
-            Self::DivideZero => "divided by zero".to_string(),
+            Self::DivideZero => "Divided by zero".to_string(),
             Self::DivisionOverflow => {
-                "this division overflows the value's type (the result is outside its range)"
+                "This division overflows the value's type (the result is outside its range)"
                     .to_string()
             }
-            Self::RemainderOverflow => "attempt to calculate the remainder with overflow".to_string(),
+            Self::RemainderOverflow => "Attempt to calculate the remainder with overflow".to_string(),
             Self::PowerNegative => {
-                "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)"
+                "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)"
                     .to_string()
             }
             Self::PowerOverflow => {
-                "this power overflows the value's type (the result is outside its range)"
+                "This power overflows the value's type (the result is outside its range)"
                     .to_string()
             }
-            Self::RotateNegative => "a rotation count cannot be negative".to_string(),
+            Self::RotateNegative => "A rotation count cannot be negative".to_string(),
             Self::ShiftOutOfRange {
                 direction,
                 count,
                 bits,
             } => format!(
-                "shifting {direction} by {count} bits is out of range (this type is {bits} bits wide)"
+                "Shifting {direction} by {count} bits is out of range (this type is {bits} bits wide)"
             ),
-            Self::UnknownOperation => "this fixed-width arithmetic operation is unsupported".to_string(),
+            Self::UnknownOperation => "This fixed-width arithmetic operation is unsupported".to_string(),
         }
     }
 }

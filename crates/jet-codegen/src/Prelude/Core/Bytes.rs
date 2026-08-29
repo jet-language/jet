@@ -28,6 +28,9 @@ impl JetByteBuffer {
     pub(crate) fn write_u8(&mut self, v: u8) {
         self.bytes.push(v);
     }
+    pub(crate) fn write_i8(&mut self, v: i8) {
+        self.bytes.push(v as u8);
+    }
     pub(crate) fn write_byte(&mut self, v: u8) {
         self.write_u8(v);
     }
@@ -37,16 +40,46 @@ impl JetByteBuffer {
     pub(crate) fn write_u16_be(&mut self, v: u16) {
         self.bytes.extend_from_slice(&v.to_be_bytes());
     }
+    pub(crate) fn write_i16_le(&mut self, v: i16) {
+        self.bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    pub(crate) fn write_i16_be(&mut self, v: i16) {
+        self.bytes.extend_from_slice(&v.to_be_bytes());
+    }
     pub(crate) fn write_u32_le(&mut self, v: u32) {
         self.bytes.extend_from_slice(&v.to_le_bytes());
     }
     pub(crate) fn write_u32_be(&mut self, v: u32) {
         self.bytes.extend_from_slice(&v.to_be_bytes());
     }
+    pub(crate) fn write_i32_le(&mut self, v: i32) {
+        self.bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    pub(crate) fn write_i32_be(&mut self, v: i32) {
+        self.bytes.extend_from_slice(&v.to_be_bytes());
+    }
     pub(crate) fn write_u64_le(&mut self, v: u64) {
         self.bytes.extend_from_slice(&v.to_le_bytes());
     }
     pub(crate) fn write_u64_be(&mut self, v: u64) {
+        self.bytes.extend_from_slice(&v.to_be_bytes());
+    }
+    pub(crate) fn write_i64_le(&mut self, v: i64) {
+        self.bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    pub(crate) fn write_i64_be(&mut self, v: i64) {
+        self.bytes.extend_from_slice(&v.to_be_bytes());
+    }
+    pub(crate) fn write_f32_le(&mut self, v: f32) {
+        self.bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    pub(crate) fn write_f32_be(&mut self, v: f32) {
+        self.bytes.extend_from_slice(&v.to_be_bytes());
+    }
+    pub(crate) fn write_f64_le(&mut self, v: f64) {
+        self.bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    pub(crate) fn write_f64_be(&mut self, v: f64) {
         self.bytes.extend_from_slice(&v.to_be_bytes());
     }
     pub(crate) fn write_bytes(&mut self, bytes: &Vec<u8>) {
@@ -110,13 +143,18 @@ impl JetByteBuffer {
     pub(crate) fn next(&mut self) -> JetOutcome<u8, JetAbsent> {
         self.read_byte()
     }
-    pub(crate) fn read_byte(&mut self) -> JetOutcome<u8, JetAbsent> {
+    #[inline(always)]
+    pub(crate) fn read_byte_fast(&mut self) -> Option<u8> {
         if self.pos >= self.bytes.len() {
-            return Err(JetAbsent);
+            return None;
         }
-        let b = self.bytes[self.pos];
-        self.pos += 1;
-        Ok(b)
+        let pos = self.pos;
+        let byte = self.bytes[pos];
+        self.pos = pos + 1;
+        Some(byte)
+    }
+    pub(crate) fn read_byte(&mut self) -> JetOutcome<u8, JetAbsent> {
+        self.read_byte_fast().ok_or(JetAbsent)
     }
     pub(crate) fn read_bytes(&mut self, n: i64) -> JetOutcome<Vec<u8>, JetAbsent> {
         if n < 0 {

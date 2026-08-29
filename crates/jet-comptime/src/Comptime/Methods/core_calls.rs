@@ -23,6 +23,7 @@ fn core_call_allows_pure_parity(row: &jet_foundation::Syntax::CoreCallRecord) ->
         && matches!(
             row.interpreter_route,
             jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(_)
+                | jet_foundation::Syntax::CoreCallInterpreterRoute::Ambient
         )
         && row.pure_route != jet_foundation::Syntax::CoreCallPureRoute::None
         && !row.is_receiver()
@@ -1138,16 +1139,15 @@ pub fn apply_core_call_with_type(
                 None => CtValue::absent(Type::Int),
             })
         }
-        ("core.math", method @ ("saturating_add" | "saturating_sub" | "saturating_mul"))
-        | ("core.math", method @ ("wrapping_add" | "wrapping_sub" | "wrapping_mul")) => {
+        ("core.math", method @ ("saturating_add" | "saturating_sub" | "saturating_mul")) => {
             let left = exact_big(one(0)?)
                 .ok_or_else(|| unsupported("arithmetic needs whole numbers", span))?;
             let right = exact_big(one(1)?)
                 .ok_or_else(|| unsupported("arithmetic needs whole numbers", span))?;
             let value = match method {
-                "saturating_add" | "wrapping_add" => left.add(&right),
-                "saturating_sub" | "wrapping_sub" => left.sub(&right),
-                "saturating_mul" | "wrapping_mul" => left.mul(&right),
+                "saturating_add" => left.add(&right),
+                "saturating_sub" => left.sub(&right),
+                "saturating_mul" => left.mul(&right),
                 _ => unreachable!("whole-number arithmetic guard"),
             };
             Ok(exact_int_value(value))
@@ -1837,6 +1837,8 @@ pub fn apply_core_call_with_type(
             })
         }
         // --- core.regex / core.regex (D-REGEXENGINE1) ---
+        ("core.regex", "flags") => regex_flags(args, span),
+        ("core.regex", "compile" | "compile_with") => regex_compile(args, span),
         ("core.regex", "literal") => {
             let pattern = as_string(one(0)?, span)?;
             jet_foundation::RegexSyntax::validate(pattern).map_err(|error| {
@@ -1862,7 +1864,8 @@ pub fn apply_core_call_with_type(
         ("core.regex", "split") => regex_split(args, span),
         ("core.regex", "split_limit") => regex_split_limit(args, span),
         ("core.regex", "replace") => regex_replace(args, span, false),
-        ("core.regex", "replace_all") => regex_replace(args, span, true),
+        ("core.regex", "replace_first") => regex_replace(args, span, true),
+        ("core.regex", "replace_all") => regex_replace(args, span, false),
         ("core.regex", "match") => regex_match(args, span),
         // --- core.math.random (ambient; seed for deterministic REPL transcripts) ---
         ("core.math.random", "seed") => {

@@ -363,6 +363,19 @@ legacy_id := base32.decode(text, allow_lowercase: true, allow_missing_padding: t
 bytes := base32.decode(text, allow_whitespace: true, allow_missing_padding: true, allow_lowercase: true)
 ```
 
+## D-BYTESDECODE1=A — Byte-to-text and hex decoder policy
+
+`String.from_bytes` is strict: it returns its typed decode failure at the first
+invalid UTF-8 sequence and never substitutes text. `String.from_bytes_lossy`
+is the explicit lossy spelling; it replaces each invalid sequence with U+FFFD.
+The pair uses one Prelude implementation across every execution tier.
+
+`core.encoding.hex.decode` is strict and consumes exact input. It rejects
+surrounding or internal whitespace, odd-length text, and non-hex characters;
+it does not trim or silently repair input. These runtime parse/decode failures
+remain typed Core values, not compiler diagnostics. Executable examples and
+their goldens snapshot the observable rejection text.
+
 ## Shipped status (edition 2026 vs 2027)
 
 Ratified law above is the target contract. Shipped behavior in this repository is pinned by examples, corpora, and tests as follows.

@@ -47,12 +47,12 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("pad_start", 2) | ("pad_end", 2)
         | ("is_alphabetic", 0) | ("is_numeric", 0)
         | ("is_whitespace", 0) | ("is_ascii", 0)
-        | ("to_title", 0) | ("split_once", 1)
+        | ("to_title", 0) | ("split_once", 1) | ("cut_last", 1)
         | ("is_lower", 0) | ("is_upper", 0)
         | ("capitalize", 0) | ("swapcase", 0) | ("normalize", 0)
         | ("remove_prefix", 1) | ("remove_suffix", 1)
         | ("rsplit", 1)
-        | ("count", 1) | ("extend", 1) | ("concat", 1)
+        | ("count", 1) | ("counts", 0) | ("extend", 1) | ("concat", 1)
         // D-STR-AFTER1: first-occurrence substring split.
         | ("after", 1) | ("before", 1)
         // c97/D-STRPARSE1: parsing stays `Type.parse`.
@@ -94,7 +94,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("seek", 1) | ("read_bytes", 1) | ("read_string", 1)
         | ("last_index_of", 1) | ("equal", 1) | ("compare", 1) | ("copy_to", 1)
         | ("binary_search", 1) | ("random", 0) | ("min_max", 0) | ("slice", 1)
-        | ("contains_value", 1) | ("pop_first", 0)
+        | ("contains_value", 1) | ("pop_first", 0) | ("top_n", 1)
         | ("write_to", 1)
         // D-TAG1: Tally<T> instance methods (add/remove share list/set arms above).
         | ("has", 1)
@@ -553,8 +553,13 @@ pub fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool 
                 | "replace"
                 | "format"
                 | "to_string"
+                | "equal"
+                | "compare"
         ),
-        Some("LocalTime") => matches!(method, "hour" | "minute" | "second" | "to_string"),
+        Some("LocalTime") => matches!(
+            method,
+            "hour" | "minute" | "second" | "to_string" | "equal" | "compare"
+        ),
         Some("DateTime") => matches!(
             method,
             "hour"
@@ -578,8 +583,10 @@ pub fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool 
                 | "format_rfc3339"
                 | "format"
                 | "to_string"
+                | "equal"
+                | "compare"
         ),
-        Some("Instant") => matches!(method, "elapsed_millis" | "elapsed"),
+        Some("Instant") => matches!(method, "elapsed_millis" | "elapsed" | "equal" | "compare"),
         Some("Period") => matches!(method, "to_string"),
         Some("Zone") => matches!(method, "name"),
         Some("ZonedDateTime") => matches!(
@@ -594,6 +601,8 @@ pub fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool 
                 | "add_period"
                 | "format"
                 | "to_string"
+                | "equal"
+                | "compare"
         ),
         _ => false,
     }
@@ -619,7 +628,17 @@ pub(crate) fn is_sketch_method_name(recv_type: Option<&str>, method: &str) -> bo
 }
 
 /// Resolve a numeric receiver query into a total TIR operation.
-pub(crate) fn resolve_numeric_op(method: &str, src_name: &str) -> Option<TNumericOp> {
+pub(crate) fn resolve_numeric_op(method: &str, src_name: &str, line: u32) -> Option<TNumericOp> {
+    // D-GO127-STDLIB1=A: exact Int's Euclidean pair is binary, so its
+    // source line travels with the resolved operation for the zero-divisor
+    // boundary. The right-hand expression is carried by NumericBinaryMethod.
+    if src_name == "Int" {
+        match method {
+            crate::Syntax::METHOD_DIV_EUCLID => return Some(TNumericOp::EuclideanDiv { line }),
+            crate::Syntax::METHOD_REM_EUCLID => return Some(TNumericOp::EuclideanRem { line }),
+            _ => {}
+        }
+    }
     // Float predicates → `(recv).{method}()`.
     if let "is_nan" | "is_infinite" | "is_finite" = method {
         return Some(TNumericOp::Predicate(method.to_string()));
@@ -662,6 +681,17 @@ pub(crate) fn resolve_numeric_conversion_op(
             dst_rust: dst_rust.to_string(),
         });
     };
+    // `U64` is carried as an i64 word at the TIR/evaluator boundary. A
+    // direct `TryFrom<i64>` would inspect the carrier's signed spelling and
+    // reject or sign-wrap values whose high bit is set. The existing CastAs
+    // adapters instead select the exact `Int.from_u64` Prelude path.
+    if target_name == "Int"
+        && matches!(parse_int_name_tir(source_name), Some((false, _)))
+    {
+        return Some(TNumericOp::CastAs {
+            dst_rust: dst_rust.to_string(),
+        });
+    }
     if source_name == "Int" && target_name != "Int" {
         return Some(TNumericOp::TryFrom {
             host_kind: numeric_host_kind(dsigned, dbits)?,
@@ -757,6 +787,11 @@ pub(crate) fn parse_int_name_tir(name: &str) -> Option<(bool, u8)> {
 /// `recv_type.is_none()` gate — it must be covered here as a distinct op.
 pub(crate) fn is_covered_numeric_method(method: &str, nargs: usize) -> bool {
     crate::Collections::numeric_overflow_method(method, nargs).is_some()
+        || (nargs == 1
+            && matches!(
+                method,
+                crate::Syntax::METHOD_DIV_EUCLID | crate::Syntax::METHOD_REM_EUCLID
+            ))
         || (nargs == 0
             && matches!(
                 method,

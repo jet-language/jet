@@ -44,7 +44,13 @@ pub mod MathLayout;
 mod Methods;
 mod Purity;
 mod Reflect;
-mod RegexLite;
+mod jet_regex_syntax {
+    pub use jet_foundation::RegexSyntax::validate;
+}
+mod regex_kernel {
+    pub use jet_foundation::Outcome::*;
+    include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs");
+}
 pub mod ServicesLite;
 pub mod SyncLite;
 mod TextLite;

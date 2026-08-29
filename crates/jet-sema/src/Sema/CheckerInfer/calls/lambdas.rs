@@ -141,6 +141,14 @@ impl<'a> Checker<'a> {
         } else {
             exp_ret.map(|ret| (**ret).clone())
         };
+        // Collection callbacks advertise an open return row (`Fn(...)->None`)
+        // so sema can infer the mapped value. Keep that row local while the
+        // body is checked: a fallible callee makes the callback return its own
+        // Result carrier, rather than propagating into the enclosing function.
+        let infer_failure_carrier = expected_callable
+            && exp_ret.is_none()
+            && lam.result_type.is_none()
+            && lam.error_type.is_none();
 
         if let Some(ep) = exp_params {
             if lam.params.len() != ep.len() {
@@ -652,20 +660,26 @@ impl<'a> Checker<'a> {
             self.txn_depth = 0;
             self.txn_wall_depth = 0;
         }
-        let lambda_effect_snapshot = lam.effects.as_ref().map(|_| {
-            (
-                self.fx_direct.clone(),
-                self.fx_edges.clone(),
-                self.fx_maximal,
-            )
-        });
+        let lambda_effect_snapshot = (
+            self.fx_direct.clone(),
+            self.fx_edges.clone(),
+            self.fx_maximal,
+        );
         let saved_expected = self.expected_type.clone();
         self.expected_type = effective_ret.clone();
         // A block-bodied lambda's `return` belongs to the lambda, not to the
         // enclosing named function. Give statement checking the expected
         // callback result while the lambda body is active.
         let saved_ret = self.ret.clone();
-        if let Some(ret) = &effective_ret {
+        let saved_failure_carrier_inference = self.failure_carrier_inference;
+        let saved_failure_carrier = self.failure_carrier.clone();
+        let saved_statement_expr_inference = self.statement_expr_inference;
+        self.failure_carrier_inference = infer_failure_carrier;
+        self.failure_carrier = None;
+        self.statement_expr_inference = false;
+        if infer_failure_carrier {
+            self.ret = None;
+        } else if let Some(ret) = &effective_ret {
             self.ret = Some(ret.clone());
         }
         let saved_in_lambda_body = self.in_lambda_body;
@@ -726,6 +740,10 @@ impl<'a> Checker<'a> {
                 if needs_value {
                     self.infer(e)
                 } else {
+                    // The open return row still accepts value-producing calls,
+                    // but a valueless call is a statement in this callback.
+                    // Keep both cases on the shared statement call checker so
+                    // `() -> print(...)` does not enter value-only E0116.
                     self.infer_fallible_stmt(e)
                 }
             }
@@ -816,6 +834,18 @@ impl<'a> Checker<'a> {
             body_ret = Some(result_ty);
         }
 
+        // An open callback row uses `None` for a valueless function. The
+        // statement checker reports the real `Unit` call result while walking
+        // the body, but that implementation detail must not turn
+        // `Fn() -> None` into the incompatible `Fn() -> Unit` signature.
+        if infer_failure_carrier
+            && body_ret
+                .as_ref()
+                .is_some_and(|ty| is_unit_type(ty))
+        {
+            body_ret = None;
+        }
+
         let inferred_mut_caps = std::mem::replace(
             &mut self.inferred_lambda_mut_captures,
             saved_inferred_mut_captures,
@@ -835,11 +865,14 @@ impl<'a> Checker<'a> {
             .collect();
         // D-CONC-SPAWN1: record this body's own propagation fact, then
         // restore the enclosing body's.
-        lam.meta.fallible_propagation = self.task_body_propagates;
+        lam.meta.fallible_propagation = self.task_body_propagates || self.failure_carrier.is_some();
         self.task_body_propagates = saved_task_body_propagates;
         self.in_lambda_body = saved_in_lambda_body;
         self.ret = saved_ret;
         self.expected_type = saved_expected;
+        self.failure_carrier = saved_failure_carrier;
+        self.failure_carrier_inference = saved_failure_carrier_inference;
+        self.statement_expr_inference = saved_statement_expr_inference;
         self.txn_depth = saved_txn_depth;
         self.txn_wall_depth = saved_txn_wall_depth;
         for name in lending_params {
@@ -880,17 +913,25 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if let (Some((before_direct, before_edges, before_maximal)), Some(bound)) =
-            (lambda_effect_snapshot, lam.effects.as_ref())
-        {
+        if let Some(bound) = lam.effects.as_ref() {
+            let (before_direct, before_edges, before_maximal) = &lambda_effect_snapshot;
             self.record_callback_obligation(
                 bound,
-                &before_direct,
-                &before_edges,
-                before_maximal,
+                before_direct,
+                before_edges,
+                *before_maximal,
                 lam.span,
             );
         }
+
+        // An effect-free lambda remains effect-free when it closes over a
+        // value. Do not use the foreign-thread-safety predicate for this: its
+        // stricter capture rules are about crossing a C callback boundary,
+        // while ordinary function values only need their own effect delta.
+        let (before_direct, before_edges, before_maximal) = &lambda_effect_snapshot;
+        let inferred_effect_free = self.fx_direct == *before_direct
+            && self.fx_edges == *before_edges
+            && self.fx_maximal == *before_maximal;
 
         let ret_ty = if let Some(er) = &effective_ret {
             if let Some(br) = &body_ret {
@@ -931,6 +972,7 @@ impl<'a> Checker<'a> {
             effect_bound: lam
                 .effects
                 .clone()
+                .or_else(|| inferred_effect_free.then(Vec::new))
                 .or_else(|| crate::Sema::foreign_thread_safe_lambda(lam).then(Vec::new)),
             param_contract: exp_contract.cloned(),
             call_metadata: exp_metadata.cloned(),

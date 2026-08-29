@@ -40,6 +40,7 @@ mod jet_std {
         Boolean(bool),
         Number(f64),
         Integer(i64),
+        ExactInteger(String),
         Text(String),
         Array(Vec<JSON>),
         Object(std::collections::BTreeMap<String, JSON>),

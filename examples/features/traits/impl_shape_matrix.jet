@@ -1,0 +1,180 @@
+// Card #2287: every sema-admitted Display/Debug owner shape exercises the
+// same interpolation contexts on the default, release, and interpreter tiers.
+
+#[Printable, Debug]
+struct AutoOwner {
+    value: Int
+}
+
+#[Printable, Debug]
+struct DisplayOnlyOwner {
+    value: Int
+}
+
+impl DisplayOnlyOwner.Display {
+    fn display(self) String -> "display-only"
+}
+
+#[Printable, Debug]
+struct DebugOnlyOwner {
+    value: Int
+}
+
+impl DebugOnlyOwner.Debug {
+    fn debug(self) String -> "debug-only"
+}
+
+#[Printable, Debug]
+struct DisplayDebugOwner {
+    value: Int
+}
+
+impl DisplayDebugOwner.Display {
+    fn display(self) String -> "display-debug-display"
+}
+
+impl DisplayDebugOwner.Debug {
+    fn debug(self) String -> "display-debug-debug"
+}
+
+#[Printable, Debug, Equatable]
+struct EquatableOwner {
+    value: Int
+}
+
+impl EquatableOwner.Display {
+    fn display(self) String -> "equatable-display"
+}
+
+#[Printable, Debug]
+struct GenericOwner<T: Printable> {
+    value: T
+}
+
+impl GenericOwner.Display {
+    fn display(self) String -> "generic-display"
+}
+
+impl GenericOwner.Debug {
+    fn debug(self) String -> "generic-debug"
+}
+
+#[Printable, Debug]
+enum EnumOwner {
+    Ready
+}
+
+impl EnumOwner.Display {
+    fn display(self) String -> "enum-display"
+}
+
+impl EnumOwner.Debug {
+    fn debug(self) String -> "enum-debug"
+}
+
+#[Printable, Debug]
+struct UnitOwner {}
+
+impl UnitOwner.Display {
+    fn display(self) String -> "unit-display"
+}
+
+impl UnitOwner.Debug {
+    fn debug(self) String -> "unit-debug"
+}
+
+#Printable
+DistinctOwner :: distinct Int
+
+fn run() {
+    auto :: AutoOwner{value: 1}
+    display_only :: DisplayOnlyOwner{value: 2}
+    debug_only :: DebugOnlyOwner{value: 3}
+    display_debug :: DisplayDebugOwner{value: 4}
+    equatable :: EquatableOwner{value: 5}
+    generic :: GenericOwner<DisplayDebugOwner>{value: ~display_debug}
+    enum_value :: EnumOwner.Ready
+    unit :: UnitOwner{}
+    distinct :: DistinctOwner.from_int(9)
+
+    print("auto/bare={auto}")
+    print("auto/debug={auto:Debug}")
+    print("auto/pretty={auto:Pretty}")
+    print(~auto)
+    auto_list :: [AutoOwner]{~auto}
+    auto_map :: [String:AutoOwner]{"k": ~auto}
+    auto_tuple :: (value: ~auto, tag: "tuple")
+    print("auto/nested={auto_list:Debug}|{auto_map:Debug}|{auto_tuple:Debug}")
+
+    print("display-only/bare={display_only}")
+    print("display-only/debug={display_only:Debug}")
+    print("display-only/pretty={display_only:Pretty}")
+    print(~display_only)
+    display_only_list :: [DisplayOnlyOwner]{~display_only}
+    display_only_map :: [String:DisplayOnlyOwner]{"k": ~display_only}
+    display_only_tuple :: (value: ~display_only, tag: "tuple")
+    print("display-only/nested={display_only_list}|{display_only_map}|{display_only_tuple}")
+
+    print("debug-only/bare={debug_only}")
+    print("debug-only/debug={debug_only:Debug}")
+    print("debug-only/pretty={debug_only:Pretty}")
+    print(~debug_only)
+    debug_only_list :: [DebugOnlyOwner]{~debug_only}
+    debug_only_map :: [String:DebugOnlyOwner]{"k": ~debug_only}
+    debug_only_tuple :: (value: ~debug_only, tag: "tuple")
+    print("debug-only/nested={debug_only_list:Debug}|{debug_only_map:Debug}|{debug_only_tuple:Debug}")
+
+    print("display-debug/bare={display_debug}")
+    print("display-debug/debug={display_debug:Debug}")
+    print("display-debug/pretty={display_debug:Pretty}")
+    print(~display_debug)
+    display_debug_list :: [DisplayDebugOwner]{~display_debug}
+    display_debug_map :: [String:DisplayDebugOwner]{"k": ~display_debug}
+    display_debug_tuple :: (value: ~display_debug, tag: "tuple")
+    print("display-debug/nested={display_debug_list}|{display_debug_map}|{display_debug_tuple}")
+
+    print("equatable/bare={equatable}")
+    print("equatable/debug={equatable:Debug}")
+    print("equatable/pretty={equatable:Pretty}")
+    print(~equatable)
+    equatable_list :: [EquatableOwner]{~equatable}
+    equatable_map :: [String:EquatableOwner]{"k": ~equatable}
+    equatable_tuple :: (value: ~equatable, tag: "tuple")
+    print("equatable/nested={equatable_list}|{equatable_map}|{equatable_tuple}")
+
+    print("generic/bare={generic}")
+    print("generic/debug={generic:Debug}")
+    print("generic/pretty={generic:Pretty}")
+    print(~generic)
+    generic_list :: [GenericOwner<DisplayDebugOwner>]{~generic}
+    generic_map :: [String:GenericOwner<DisplayDebugOwner>]{"k": ~generic}
+    generic_tuple :: (value: ~generic, tag: "tuple")
+    print("generic/nested={generic_list}|{generic_map}|{generic_tuple}")
+
+    print("enum/bare={enum_value}")
+    print("enum/debug={enum_value:Debug}")
+    print("enum/pretty={enum_value:Pretty}")
+    print(~enum_value)
+    enum_list :: [EnumOwner]{~enum_value}
+    enum_map :: [String:EnumOwner]{"k": ~enum_value}
+    enum_tuple :: (value: ~enum_value, tag: "tuple")
+    print("enum/nested={enum_list}|{enum_map}|{enum_tuple}")
+
+    print("unit/bare={unit}")
+    print("unit/debug={unit:Debug}")
+    print("unit/pretty={unit:Pretty}")
+    print(~unit)
+    unit_list :: [UnitOwner]{~unit}
+    unit_map :: [String:UnitOwner]{"k": ~unit}
+    unit_tuple :: (value: ~unit, tag: "tuple")
+    print("unit/nested={unit_list}|{unit_map}|{unit_tuple}")
+
+    print("distinct/bare={distinct}")
+    print("distinct/debug={distinct.raw():Debug}")
+    print("distinct/pretty={distinct.raw():Pretty}")
+    print(distinct.raw())
+    distinct_list :: [DistinctOwner]{~distinct}
+    distinct_map :: [String:Int]{"k": distinct.raw()}
+    distinct_tuple :: (value: distinct.raw(), tag: "tuple")
+    print("distinct/nested={distinct_list}|{distinct_map}|{distinct_tuple}")
+}

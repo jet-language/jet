@@ -409,6 +409,21 @@ const TERMINAL_STDIN: ExampleStdin = ExampleStdin {
     tty_only: "",
 };
 
+const STDIN_INPUT_STDIN: ExampleStdin = ExampleStdin {
+    piped: "alpha\nbeta\n",
+    tty_only: "",
+};
+
+const STDIN_READ_ALL_STDIN: ExampleStdin = ExampleStdin {
+    piped: "alpha\nbeta\n",
+    tty_only: "",
+};
+
+const STDIN_READLINE_STDIN: ExampleStdin = ExampleStdin {
+    piped: "alpha\nbeta\n",
+    tty_only: "",
+};
+
 /// The stdin an example needs, or `None` for the examples that read nothing.
 ///
 /// Keyed by example stem (`<topic>/<name>`) so a harness that already walks
@@ -421,6 +436,9 @@ pub fn example_stdin(stem: &str) -> Option<&'static ExampleStdin> {
     match stem {
         "io/terminal_parity" => Some(&TERMINAL_PARITY_STDIN),
         "io/terminal" => Some(&TERMINAL_STDIN),
+        "io/stdin_input" => Some(&STDIN_INPUT_STDIN),
+        "io/stdin_read_all" => Some(&STDIN_READ_ALL_STDIN),
+        "io/stdin_readline" => Some(&STDIN_READLINE_STDIN),
         _ => None,
     }
 }

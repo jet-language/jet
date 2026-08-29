@@ -48,6 +48,15 @@ mod inline_range_kernel {
     include!("../../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }
 
+mod string_slice_kernel {
+    use jet_foundation::StructuralDebug::jet_debug_range;
+    include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
+}
+
+mod string_bytes_semantics {
+    include!("../../../jet-codegen/src/Prelude/Core/StringBytes.rs");
+}
+
 thread_local! {
     static STRUCT_NEW_COUNT: Cell<usize> = const { Cell::new(0) };
 }
@@ -512,6 +521,16 @@ pub(crate) fn runtime_stop_unwind(code: &'static str, line: u32, message: &str) 
     std::panic::resume_unwind(Box::new(JitRuntimeStop));
 }
 
+pub(crate) fn runtime_stop_unwind_at(
+    code: &'static str,
+    file: &str,
+    line: u32,
+    message: &str,
+) -> ! {
+    with_runtime_mut(|rt| rt.set_runtime_stop_at(code, file, line, message));
+    std::panic::resume_unwind(Box::new(JitRuntimeStop));
+}
+
 impl JitRuntime {
     /// Snapshot string handles allocated during lowering (baked into code).
     pub(crate) fn snapshot_compile_strings(&mut self) {
@@ -560,6 +579,27 @@ impl JitRuntime {
     /// hosts provide only source facts and keep no user-facing wording.
     pub(crate) fn set_runtime_stop(&mut self, code: &'static str, line: u32, message: &str) {
         self.set_runtime_stop_with_source_line(code, line, None, message);
+    }
+
+    pub(crate) fn set_runtime_stop_at(
+        &mut self,
+        code: &'static str,
+        file: &str,
+        line: u32,
+        message: &str,
+    ) {
+        if self.trapped.is_some() || self.exit_code.is_some() {
+            return;
+        }
+        let report = contract_kernel::jet_runtime_stop_report(
+            code, file, line, "", "", 1, 1, message, "",
+        );
+        let _ = jet_codegen::development_receipt::jet_production_failure_receipt_write(
+            code, file, line, "",
+        );
+        self.stderr.push_str(&report.rendered);
+        self.exit_code = Some(report.exit_code);
+        self.store_trap(message);
     }
 
     /// Same renderer, with a source line captured at the TIR stop site. A host
@@ -1431,6 +1471,38 @@ fn jet_jit_str_bytes(id: i64) -> i64 {
     })
 }
 
+fn jet_jit_str_from_bytes(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(id).unwrap_or(0);
+        let bytes = (0..len)
+            .map(|index| rt.heap.list_get_int(id, index).unwrap_or_default() as u8)
+            .collect::<Vec<_>>();
+        match string_bytes_semantics::jet_string_decode_utf8(&bytes) {
+            Ok(text) => {
+                let value = rt.heap.alloc_string(text);
+                alloc_jit_result(rt, true, value as u64)
+            }
+            Err(message) => {
+                let error = rt.heap.alloc_record(1);
+                let message = rt.heap.alloc_string(message);
+                let _ = rt.heap.record_set_string(error, 0, message);
+                alloc_jit_result(rt, false, error as u64)
+            }
+        }
+    })
+}
+
+fn jet_jit_str_from_bytes_lossy(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(id).unwrap_or(0);
+        let bytes = (0..len)
+            .map(|index| rt.heap.list_get_int(id, index).unwrap_or_default() as u8)
+            .collect::<Vec<_>>();
+        let text = string_bytes_semantics::jet_string_decode_utf8_lossy(&bytes);
+        rt.heap.alloc_string(text)
+    })
+}
+
 fn jet_jit_str_after(id: i64, sep_id: i64) -> i64 {
     with_runtime_result(0, |rt| {
         let text = rt.heap.clone_string(id).unwrap_or_default();
@@ -1482,21 +1554,38 @@ fn jet_jit_str_before_view(id: i64, sep_id: i64) -> i64 {
     })
 }
 
-/// Inclusive string slice (`s.slice(lo, hi)`). Same start/end = one char.
-fn jet_jit_str_slice(id: i64, start: i64, end: i64) -> i64 {
+fn jet_jit_str_slice_value(
+    id: i64,
+    start: i64,
+    end: i64,
+    exclusive: bool,
+    line: u32,
+) -> i64 {
     with_runtime_result(0, |rt| {
         let text = rt.heap.clone_string(id).unwrap_or_default();
-        let chars: Vec<char> = text.chars().collect();
-        let len = chars.len() as i64;
-        let lo = start.clamp(0, len) as usize;
-        let hi = end.clamp(0, len.saturating_sub(1).max(0)) as usize;
-        let sliced: String = if chars.is_empty() || start > end || lo >= chars.len() {
-            String::new()
-        } else {
-            chars[lo..=hi.min(chars.len() - 1)].iter().collect()
-        };
-        rt.heap.alloc_string(sliced)
+        match string_slice_kernel::jet_string_slice_value(&text, start, end, exclusive) {
+            Ok(sliced) => rt.heap.alloc_string(sliced),
+            Err(message) => {
+                rt.set_runtime_stop("E3001", line, &message);
+                0
+            }
+        }
     })
+}
+
+/// Inclusive string slice (`s.slice(lo, hi)`). Same start/end = one char.
+fn jet_jit_str_slice(id: i64, start: i64, end: i64) -> i64 {
+    jet_jit_str_slice_value(id, start, end, false, 0)
+}
+
+fn jet_jit_str_slice_range(
+    id: i64,
+    start: i64,
+    end: i64,
+    exclusive: i8,
+    line: i32,
+) -> i64 {
+    jet_jit_str_slice_value(id, start, end, exclusive != 0, line.max(0) as u32)
 }
 
 /// `Clock.new(ms)` — manual clock handle (1-based index into `rt.clocks`).
@@ -1757,7 +1846,7 @@ fn jet_jit_numeric_checked_int(value: i64, kind: i64, line: i64) -> i64 {
         None => {
             rt.set_arithmetic_stop(
                 line.max(0) as u32,
-                "value doesn't fit in destination type",
+                "Value doesn't fit in destination type",
             );
             0
         }
@@ -3013,6 +3102,32 @@ fn jet_jit_duration_difference(a: i64, b: i64) -> i64 {
     duration_kernel::jet_duration_kernel_difference(a, b)
 }
 
+fn jet_jit_duration_scale(value: i64, factor: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match duration_kernel::jet_duration_kernel_scale(value, factor) {
+        Some(value) => value,
+        None => {
+            rt.set_arithmetic_stop(
+                0,
+                duration_kernel::jet_duration_kernel_scale_error_reason(),
+            );
+            0
+        }
+    })
+}
+
+fn jet_jit_duration_divide(value: i64, factor: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match duration_kernel::jet_duration_kernel_divide(value, factor) {
+        Some(value) => value,
+        None => {
+            rt.set_arithmetic_stop(
+                0,
+                duration_kernel::jet_duration_kernel_scale_error_reason(),
+            );
+            0
+        }
+    })
+}
+
 /// Marshalling only: the nanosecond carrier in, a resident string handle out.
 /// The rendering itself stays in the shared Prelude kernel AOT's
 /// `impl JetShow for Duration` calls.
@@ -3861,6 +3976,13 @@ host_fns! {
         sig_str_binary_i64.params.push(AbiParam::new(types::I64));
         sig_str_binary_i64.params.push(AbiParam::new(types::I64));
         sig_str_binary_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_str_slice_range = Signature::new(cc);
+        sig_str_slice_range.params.push(AbiParam::new(types::I64));
+        sig_str_slice_range.params.push(AbiParam::new(types::I64));
+        sig_str_slice_range.params.push(AbiParam::new(types::I64));
+        sig_str_slice_range.params.push(AbiParam::new(types::I8));
+        sig_str_slice_range.params.push(AbiParam::new(types::I32));
+        sig_str_slice_range.returns.push(AbiParam::new(types::I64));
         let mut sig_f64_i64 = Signature::new(cc);
         sig_f64_i64.params.push(AbiParam::new(types::F64));
         sig_f64_i64.returns.push(AbiParam::new(types::I64));
@@ -4175,6 +4297,8 @@ host_fns! {
     str_rsplit: "jet_jit_str_rsplit" => jet_jit_str_rsplit: sig_str_binary_i64;
     str_chars: "jet_jit_str_chars" => jet_jit_str_chars: sig_str_unary_i64;
     str_bytes: "jet_jit_str_bytes" => jet_jit_str_bytes: sig_str_unary_i64;
+    str_from_bytes: "jet_jit_str_from_bytes" => jet_jit_str_from_bytes: sig_str_unary_i64;
+    str_from_bytes_lossy: "jet_jit_str_from_bytes_lossy" => jet_jit_str_from_bytes_lossy: sig_str_unary_i64;
     str_scalar_strings: "jet_jit_str_scalar_strings" => jet_jit_str_scalar_strings: sig_str_unary_i64;
     str_after: "jet_jit_str_after" => jet_jit_str_after: sig_str_binary_i64;
     str_before: "jet_jit_str_before" => jet_jit_str_before: sig_str_binary_i64;
@@ -4182,6 +4306,7 @@ host_fns! {
     str_after_view: "jet_jit_str_after_view" => jet_jit_str_after_view: sig_str_binary_i64;
     str_before_view: "jet_jit_str_before_view" => jet_jit_str_before_view: sig_str_binary_i64;
     str_slice: "jet_jit_str_slice" => jet_jit_str_slice: sig_str_replace;
+    str_slice_range: "jet_jit_str_slice_range" => jet_jit_str_slice_range: sig_str_slice_range;
     clock_new: "jet_jit_clock_new" => jet_jit_clock_new: sig_str_unary_i64;
     clock_now: "jet_jit_clock_now" => jet_jit_clock_now: sig_str_unary_i64;
     clock_tick: "jet_jit_clock_tick" => jet_jit_clock_tick: sig_struct_assign;
@@ -4269,6 +4394,8 @@ host_fns! {
     duration_add: "jet_jit_duration_add" => jet_jit_duration_add: sig_duration_int;
     duration_sub: "jet_jit_duration_sub" => jet_jit_duration_sub: sig_duration_int;
     duration_difference: "jet_jit_duration_difference" => jet_jit_duration_difference: sig_duration_int;
+    duration_scale: "jet_jit_duration_scale" => jet_jit_duration_scale: sig_duration_int;
+    duration_divide: "jet_jit_duration_divide" => jet_jit_duration_divide: sig_duration_int;
     duration_show: "jet_jit_duration_show" => jet_jit_duration_show: sig_str_unary_i64;
     perf_fidelity: "jet_jit_perf_fidelity" => jet_jit_perf_fidelity: sig_noarg_f64;
     perf_default_fidelity: "jet_jit_perf_default_fidelity" => jet_jit_perf_default_fidelity: sig_noarg_f64;

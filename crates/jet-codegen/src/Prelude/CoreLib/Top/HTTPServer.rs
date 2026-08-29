@@ -1109,7 +1109,7 @@ fn jet_http_server_run_listener_wasip2(
                         dynamic_grace_ms.clone(),
                         drain_deadline_ms.clone(),
                     ) {
-                        eprintln!("E2801: connection failed: {error}");
+                        eprintln!("E2801: Connection failed: {error}");
                     }
                 } else {
                     jet_http_server_handle_stream_wasip2(&mut stream, &mux, &options);
@@ -5092,7 +5092,7 @@ where
 {
     use std::io::Write;
     let listener = std::net::TcpListener::bind(addr.as_str()).unwrap_or_else(|e| {
-        eprintln!("E2801: bind on `{}` failed: {}", addr, e);
+        eprintln!("E2801: Bind on `{}` failed: {}", addr, e);
         std::process::exit(1);
     });
     let handler = std::sync::Arc::new(handler);
@@ -5100,7 +5100,7 @@ where
         let (mut stream, _peer) = match listener.accept() {
             Ok(x) => x,
             Err(e) => {
-                eprintln!("E2801: accept failed: {}", e);
+                eprintln!("E2801: Accept failed: {}", e);
                 continue;
             }
         };

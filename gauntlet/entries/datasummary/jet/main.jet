@@ -1,6 +1,5 @@
 use core.files as files
 use core.process as process
-use core.sys as sys
 use core.math as math
 
 fn mean(values: [Float]) Float -> {
@@ -27,8 +26,7 @@ fn summary(values: [Float]) String -> {
 
 fn run() {
     args :: process.argv()
-    cwd :: sys.current_dir() ?? "."
-    path :: Path.from(cwd).join(args.get(1) ?? "measurements.csv").to_string()
+    path :: args.get(1) ?? "measurements.csv"
     text :: files.read(path) ?? panic("read failed")
     groups := [String:[Float]]{}
     loop line in text.lines() {

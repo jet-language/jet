@@ -57,9 +57,6 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "saturating_add")
             | ("core.math", "saturating_sub")
             | ("core.math", "saturating_mul")
-            | ("core.math", "wrapping_add")
-            | ("core.math", "wrapping_sub")
-            | ("core.math", "wrapping_mul")
             | ("core.math", "int_pow")
             | ("core.math", "gcd")
             | ("core.math", "lcm")
@@ -3433,7 +3430,7 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::List(Box::new(Type::String))),
         )),
-        ("core.regex", "replace" | "replace_all") => Some((
+        ("core.regex", "replace" | "replace_first" | "replace_all") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),

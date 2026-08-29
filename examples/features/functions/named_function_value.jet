@@ -1,0 +1,12 @@
+// #2321: declaration-local parameter names do not change a function value's
+// structural fn type.
+fn add_one(n: Int) Int -> {
+    return n + 1
+}
+
+fn apply(f: fn(Int) Int, n: Int) Int -> f(n)
+
+fn run() {
+    print(apply(add_one, 9))
+    print(apply((n: Int) -> n * 2, 9))
+}

@@ -527,6 +527,22 @@ pub(crate) fn if_cond_in_subset(
         add_struct_pattern_binding_names(pattern, &mut names);
         return Some(names.into_iter().collect());
     }
+    // D-PARSESTR1: a string interpolation pattern is a structured condition
+    // in value-form dispatch. Its holes become locals in the then-branch, and
+    // lowering supplies the same scan tuple before the branch body runs.
+    if let Expr::PatternTest {
+        subject,
+        pattern: pattern @ Pattern::StrMatch { .. },
+        ..
+    } = cond
+    {
+        if !expr_in_subset(subject, cx, locals) {
+            return None;
+        }
+        let mut names = HashSet::new();
+        add_str_match_pattern_binding_names(pattern, &mut names);
+        return Some(names.into_iter().collect());
+    }
     // The atomic optional-binding (if-let) form. Conjunctions recurse above so each
     // later atom is checked with every earlier binding in scope.
     if let Expr::PatternTest {

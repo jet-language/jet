@@ -1,0 +1,26 @@
+// Cards #2290 and #2315: nested equality and Boolean arm selection.
+fn absent_int() ?Int -> None
+
+fn bool_label(value: Bool) Int -> {
+    if value == {
+        true -> { return 1 }
+        false -> { return 0 }
+        else -> { return -1 }
+    }
+}
+
+fn run() {
+    left :: [[1, 2], [3]]
+    right :: [[1, 2], [3]]
+    print("nested equal {left == right}")
+    print("nested method equal {left.equal(right)}")
+    deep_left :: [[[1, 2], [3]], [[4]]]
+    deep_right :: [[[1, 2], [3]], [[4]]]
+    print("deep equal {deep_left == deep_right}")
+    maps_left :: [[String:Int]{"a": 1}, [String:Int]{"b": 2}]
+    maps_right :: [[String:Int]{"a": 1}, [String:Int]{"b": 2}]
+    print("maps in list equal {maps_left == maps_right}")
+    print("none equal {absent_int() == None}")
+    print("false arm {bool_label(false)}")
+    print("true arm {bool_label(true)}")
+}

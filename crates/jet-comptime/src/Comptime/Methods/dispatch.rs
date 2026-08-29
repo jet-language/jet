@@ -34,8 +34,12 @@ mod seeded_random_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
 }
 
-fn seeded_rng_int(state: &mut u64, low: i64, high: i64) -> i64 {
-    seeded_random_kernel::jet_seeded_rng_int(state, low, high)
+fn seeded_rng_int(
+    state: &mut u64,
+    low: i64,
+    high: i64,
+) -> Result<i64, &'static str> {
+    seeded_random_kernel::jet_seeded_rng_int_checked(state, low, high)
 }
 
 fn seeded_rng_float(state: &mut u64) -> f64 {
@@ -165,11 +169,14 @@ pub fn apply_seeded_rng_method_with_type(
         _ => Err(unsupported("this Rng method list argument", span)),
     };
     match method {
-        "int" => Ok(CtValue::Int(seeded_rng_int(
-            state,
-            as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?,
-            as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?,
-        ))),
+        "int" => {
+            let low = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            let high = as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?;
+            let value = seeded_rng_int(state, low, high).map_err(|message| {
+                Diagnostic::from_row("E3010", &[("msg", message)], Some(span))
+            })?;
+            Ok(CtValue::Int(value))
+        }
         "float" => Ok(CtValue::Float(CtFloat::f64(seeded_rng_float(state)))),
         "float_range" => {
             let low = float(0)?;

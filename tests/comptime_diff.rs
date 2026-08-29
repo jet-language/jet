@@ -28,8 +28,9 @@ const CASES: &[&str] = &[
     "(0 - 17) / 5",
     "1 << 10",
     "255 & 15",
-    // D-SHAPE-PIPE1=C reserves single `|` for pattern alternatives; Jet has
-    // no bitwise-or expression. `|=` remains covered by tests/numops.rs.
+    // D-BITOREXPR1=A: value-position `|` is bitwise OR; `|=` remains covered
+    // by tests/numops.rs.
+    "12 | 10",
     "6 ^ 3",
     "1000000 * 1000000",
     // Float rounding + S21 "always a decimal" display

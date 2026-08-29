@@ -1436,6 +1436,138 @@ impl RootBootstrap {
     }
 }
 
+/// A public endpoint key in the exact `NixIndex` trust-file format.  This is
+/// deliberately a different type from [`TrustKey`]: the latter contains an
+/// HMAC secret and must never be serialized into a publication tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicTrustKey {
+    pub role: String,
+    pub key_id: String,
+    pub algorithm: String,
+    pub public_key: String,
+}
+
+impl PublicTrustKey {
+    /// Parse one `key-id:base64-public-key` line consumed by the signed index
+    /// and toolchain verifiers.  The decoded key is always exactly 32 bytes.
+    pub fn from_nix_line(role: impl Into<String>, value: &str) -> Result<Self, TrustError> {
+        let role = role.into();
+        if !matches!(role.as_str(), "index" | "cache" | "toolchain") {
+            return Err(TrustError::InvalidKey {
+                detail: format!("unknown public trust role `{role}`"),
+            });
+        }
+        let (key_id, encoded) = value.trim().split_once(':').ok_or_else(|| {
+            TrustError::InvalidKey {
+                detail: "public trust key must be key-id:base64-public-key".into(),
+            }
+        })?;
+        if key_id.is_empty()
+            || encoded.is_empty()
+            || key_id.chars().any(|c| c.is_control() || c == ':')
+            || encoded.chars().any(|c| c.is_control() || c.is_whitespace())
+        {
+            return Err(TrustError::InvalidKey {
+                detail: "public trust key has invalid key id or encoding".into(),
+            });
+        }
+        if is_test_public_key_id(key_id) {
+            return Err(TrustError::InvalidKey {
+                detail: format!("test public trust key `{key_id}` cannot be published"),
+            });
+        }
+        let decoded = jet_foundation::base_encoding_strict::decode_base64(encoded, false, false)
+            .map_err(|_| TrustError::InvalidKey {
+                detail: "public trust key is not padded base64".into(),
+            })?;
+        if decoded.len() != 32 {
+            return Err(TrustError::InvalidKey {
+                detail: "public trust key must decode to 32 bytes".into(),
+            });
+        }
+        Ok(Self {
+            role,
+            key_id: key_id.to_string(),
+            algorithm: "ed25519".to_string(),
+            public_key: encoded.to_string(),
+        })
+    }
+
+    pub fn path_for_publication(&self) -> &'static str {
+        match self.role.as_str() {
+            "index" => "nix-index-v1.ed25519.pub",
+            "cache" => "nix-cache-v1.ed25519.pub",
+            "toolchain" => "toolchain-v1.ed25519.pub",
+            _ => unreachable!("PublicTrustKey validates its role on construction"),
+        }
+    }
+}
+
+/// Render the public trust-root manifest consumed by the site publication.
+/// The manifest records the local bootstrap pin when one is available, but it
+/// never contains a `TrustKey` secret.  An empty key list is intentional while
+/// the owner-controlled production key ceremony is pending.
+pub fn public_trust_manifest(
+    domain: &str,
+    bootstrap: Option<&RootBootstrap>,
+    keys: &[PublicTrustKey],
+) -> Result<String, TrustError> {
+    if domain.is_empty() || domain.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err(TrustError::InvalidKey {
+            detail: "public trust manifest domain is empty or contains whitespace".into(),
+        });
+    }
+    let mut keys = keys.to_vec();
+    keys.sort_by(|left, right| left.role.cmp(&right.role));
+    for pair in keys.windows(2) {
+        if pair[0].role == pair[1].role {
+            return Err(TrustError::InvalidKey {
+                detail: format!("public trust role `{}` is duplicated", pair[0].role),
+            });
+        }
+    }
+    let status = if keys.is_empty() { "awaiting-key-ceremony" } else { "prepared" };
+    let root = bootstrap.map_or_else(
+        || "null".to_string(),
+        |pin| {
+            format!(
+                "{{\"protocol\":\"jet-tuf-root-v1\",\"digest\":\"{}\",\"version\":{},\"consistent_snapshot\":{}}}",
+                crate::JSON::json_escape(&pin.pin_digest),
+                pin.root_version,
+                pin.consistent_snapshot
+            )
+        },
+    );
+    let rendered_keys = keys
+        .iter()
+        .map(|key| {
+            format!(
+                "{{\"role\":\"{}\",\"path\":\"{}\",\"key_id\":\"{}\",\"algorithm\":\"{}\",\"public_key\":\"{}\"}}",
+                crate::JSON::json_escape(&key.role),
+                key.path_for_publication(),
+                crate::JSON::json_escape(&key.key_id),
+                crate::JSON::json_escape(&key.algorithm),
+                crate::JSON::json_escape(&key.public_key),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    Ok(format!(
+        "{{\"schema\":1,\"domain\":\"{}\",\"status\":\"{}\",\"root\":{},\"keys\":[{}],\"rotation\":\"offline threshold root rotation; publish a new manifest only after the old root verifies the new root\"}}\n",
+        crate::JSON::json_escape(domain),
+        status,
+        root,
+        rendered_keys,
+    ))
+}
+
+fn is_test_public_key_id(key_id: &str) -> bool {
+    key_id == "jet-test-index-v1"
+        || key_id == "repo-dogfood-index-v1"
+        || key_id.starts_with("test-")
+        || key_id.ends_with("-test")
+}
+
 /// Live trust engine state after bootstrap.
 #[derive(Debug, Clone)]
 pub struct TrustEngine {

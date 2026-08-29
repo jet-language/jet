@@ -1,21 +1,44 @@
-// D-UUIDENC1=A: pure base encoding value kernels.
+// D-UUIDENC1=A / D-BYTESDECODE1=A: exact encoding and byte-decoding kernels.
 
 const JET_B64_CHARS: &[u8; 64] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 pub(crate) fn jet_std_hex_decode(text: &String) -> Result<Vec<u8>, String> {
-    let s = text.trim();
-    if s.len() % 2 != 0 {
-        return Err(format!("hex string has odd length ({})", s.len()));
+    if let Some((offset, _)) = text.char_indices().find(|(_, ch)| ch.is_whitespace()) {
+        return Err(format!(
+            "hex string contains whitespace at byte offset {offset}"
+        ));
     }
-    let mut out = Vec::with_capacity(s.len() / 2);
-    for i in (0..s.len()).step_by(2) {
-        match u8::from_str_radix(&s[i..i + 2], 16) {
-            Ok(byte) => out.push(byte),
-            Err(_) => return Err(format!("invalid hex at offset {}: {:?}", i, &s[i..i + 2])),
-        }
+    if text.len() % 2 != 0 {
+        return Err(format!("hex string has odd length ({})", text.len()));
+    }
+    let mut out = Vec::with_capacity(text.len() / 2);
+    for (pair_index, pair) in text.as_bytes().chunks_exact(2).enumerate() {
+        let offset = pair_index * 2;
+        let Some(high) = hex_nibble(pair[0]) else {
+            return Err(format!(
+                "invalid hex at offset {offset}: {:?}",
+                String::from_utf8_lossy(pair)
+            ));
+        };
+        let Some(low) = hex_nibble(pair[1]) else {
+            return Err(format!(
+                "invalid hex at offset {offset}: {:?}",
+                String::from_utf8_lossy(pair)
+            ));
+        };
+        out.push((high << 4) | low);
     }
     Ok(out)
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 pub(crate) fn jet_std_hex_encode(bytes: &Vec<u8>) -> String {

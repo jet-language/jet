@@ -35,6 +35,29 @@ pub(crate) fn jet_checked_view_bounds(
         .ok_or_else(|| jet_view_bounds_error(start, end, exclusive, len))
 }
 
+#[allow(dead_code)]
+pub(crate) fn jet_string_slice_value(
+    text: &str,
+    start: i64,
+    end: i64,
+    exclusive: bool,
+) -> Result<String, String> {
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len() as i64;
+    let (start, end_exclusive) = jet_range_bounds(start, end, exclusive, len).ok_or_else(|| {
+        format!(
+            "can't slice {} characters from {} to {} ({})",
+            len,
+            start,
+            end,
+            if exclusive { "exclusive" } else { "inclusive" }
+        )
+    })?;
+    Ok(chars[start as usize..end_exclusive as usize]
+        .iter()
+        .collect())
+}
+
 pub(crate) fn jet_range_contains(
     start: i64,
     end: i64,

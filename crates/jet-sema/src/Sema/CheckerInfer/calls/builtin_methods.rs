@@ -16,6 +16,64 @@ fn cell_inner(ty: &Type) -> Type {
     }
 }
 
+/// Project an open collection callback's carrier through the adapter. The
+/// callback owns the failure row; `map`/`filter` lift the collection result
+/// around that row instead of leaving `Result` as an element type or asking
+/// the enclosing function to consume it.
+fn fallible_collection_return(
+    recv_ty: &Type,
+    method: &str,
+    callback_ret: &Type,
+) -> Option<Type> {
+    let Type::Result { ok, err } = callback_ret else {
+        return None;
+    };
+    let collection = match method {
+        "map" => match recv_ty {
+            Type::List(_) | Type::FixedList { .. } => Type::List(ok.clone()),
+            Type::Apply { name, args }
+                if name == Syntax::TYPE_ITER && args.len() == 1 => {
+                Collections::iter_ty((**ok).clone())
+            }
+            Type::Apply { name, .. }
+                if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") => {
+                Type::List(ok.clone())
+            }
+            Type::Apply { name, .. }
+                if name == Syntax::TYPE_SET || name == Syntax::TYPE_RANK => {
+                Type::List(ok.clone())
+            }
+            _ => return None,
+        },
+        "filter" => {
+            if !matches!(ok.as_ref(), Type::Bool) {
+                return None;
+            }
+            match recv_ty {
+                Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                    Type::List(inner.clone())
+                }
+                Type::Apply { name, args }
+                    if name == Syntax::TYPE_ITER && args.len() == 1 => {
+                    Collections::iter_ty(args[0].clone())
+                }
+                Type::Apply { name, args }
+                    if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+                        && !args.is_empty() => Type::List(Box::new(args[0].clone())),
+                Type::Apply { name, args }
+                    if (name == Syntax::TYPE_SET || name == Syntax::TYPE_RANK)
+                        && !args.is_empty() => Type::List(Box::new(args[0].clone())),
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    Some(Type::Result {
+        ok: Box::new(collection),
+        err: err.clone(),
+    })
+}
+
 impl<'a> Checker<'a> {
     fn check_builtin_method_labels(&mut self, method: &str, args: &[CallArg]) {
         // Zip labels name output fields rather than parameters. Map.merge's
@@ -29,6 +87,9 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if method == "merge" && index == 1 && label == "conflict" {
+                continue;
+            }
+            if method == "para_map" && index == 1 && label == "limit" {
                 continue;
             }
             self.diags.push(Diagnostic::error(
@@ -712,6 +773,15 @@ impl<'a> Checker<'a> {
         if let Some(mut expected) =
             build_expected.or_else(|| Collections::builtin_method_arg_types(recv_ty, method))
         {
+            // S40: String.slice keeps its original two-Int form and adds a
+            // one-Range form; the shared table has no arity parameter, so
+            // select the one-argument contract at this checking seam.
+            if matches!(recv_ty, Type::String) && method == "slice" && args.len() == 1 {
+                expected = vec![Type::Named(Syntax::TYPE_RANGE.to_string())];
+            }
+            if method == "para_map" && args.len() == 2 {
+                expected.push(Type::Int);
+            }
             // D-CMP3WAY1=B / #1435: `sort_by` also accepts one binary
             // comparator whose result is the core `Ordering` type.
             if method == "sort_by"
@@ -801,7 +871,9 @@ impl<'a> Checker<'a> {
                 self.expected_type = saved_exp;
                 self.lambda_escapes = saved_esc;
                 self.lambda_params_are_lending_views = saved_lending_params;
-                if Syntax::PARA_METHODS.contains(&method) {
+                if Syntax::PARA_METHODS.contains(&method)
+                    && !(method == "para_map" && i == 1)
+                {
                     self.check_para_lambda(&arg.expr);
                 }
                 if method == "para_fold" && i == 0 {
@@ -858,35 +930,62 @@ impl<'a> Checker<'a> {
                             ret: Some(ref r), ..
                         } = gt
                         {
-                            match recv_ty {
-                                Type::List(inner) => {
-                                    // D-LOOPMAP1=B: List.map returns [R]; Iter.map stays lazy.
-                                    refined_ret = Some(Type::List(Box::new((**r).clone())));
-                                    let _ = inner;
+                            if let Some(result) = fallible_collection_return(recv_ty, method, r) {
+                                refined_ret = Some(result);
+                            } else {
+                                match recv_ty {
+                                    Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                                        // D-LOOPMAP1=B: List.map returns [R]; Iter.map stays lazy.
+                                        refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                        let _ = inner;
+                                    }
+                                    Type::Apply { name, .. } if name == Syntax::TYPE_ITER => {
+                                        refined_ret = Some(Collections::iter_ty((**r).clone()));
+                                    }
+                                    // D-HOLE1: `opt.map(f: T -> R) -> R?`.
+                                    Type::Option(_) => {
+                                        refined_ret = Some(Type::Option(Box::new((**r).clone())));
+                                    }
+                                    // D-DYNARRAY1: `view.map(f: T -> R) -> [R]` — map-to-owned;
+                                    // the result is a fresh owned list, never another View.
+                                    Type::Apply { name, .. }
+                                        if matches!(name.as_str(), "View" | "ViewMut") =>
+                                    {
+                                        refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                    }
+                                    // #1478: `Set.map(f: T -> R) -> [R]` — same shape as
+                                    // `List.map`; a Set's uniqueness doesn't carry through
+                                    // an arbitrary mapping, so the result is a plain list.
+                                    Type::Apply { name, .. }
+                                        if name == "Set" || name == Syntax::TYPE_RANK =>
+                                    {
+                                        refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                    }
+                                    _ => {}
                                 }
-                                Type::Apply { name, .. } if name == Syntax::TYPE_ITER => {
-                                    refined_ret = Some(Collections::iter_ty((**r).clone()));
-                                }
-                                // D-HOLE1: `opt.map(f: T -> R) -> R?`.
-                                Type::Option(_) => {
-                                    refined_ret = Some(Type::Option(Box::new((**r).clone())));
-                                }
-                                // D-DYNARRAY1: `view.map(f: T -> R) -> [R]` — map-to-owned;
-                                // the result is a fresh owned list, never another View.
-                                Type::Apply { name, .. }
-                                    if matches!(name.as_str(), "View" | "ViewMut") =>
-                                {
-                                    refined_ret = Some(Type::List(Box::new((**r).clone())));
-                                }
-                                // #1478: `Set.map(f: T -> R) -> [R]` — same shape as
-                                // `List.map`; a Set's uniqueness doesn't carry through
-                                // an arbitrary mapping, so the result is a plain list.
-                                Type::Apply { name, .. }
-                                    if name == "Set" || name == Syntax::TYPE_RANK =>
-                                {
-                                    refined_ret = Some(Type::List(Box::new((**r).clone())));
-                                }
-                                _ => {}
+                            }
+                        }
+                    }
+                    if Collections::is_closure_method(method) && i == 0 && method == "filter" {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
+                        {
+                            if let Some(result) = fallible_collection_return(recv_ty, method, r) {
+                                refined_ret = Some(result);
+                            } else if matches!(r.as_ref(), Type::Result { .. }) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0108",
+                                    format!(
+                                        "argument 1 to `.filter()` should return Bool or Result<Bool, E>, not {}",
+                                        r.show()
+                                    ),
+                                    "a filter callback decides whether each item stays in the collection"
+                                        .to_string(),
+                                    "return a Bool, or a fallible Bool such as `check(item)`"
+                                        .to_string(),
+                                    Some(arg.expr.span()),
+                                ));
                             }
                         }
                     }

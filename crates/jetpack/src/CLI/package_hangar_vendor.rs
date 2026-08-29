@@ -288,11 +288,30 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                 _ => unreachable!(),
             }
         }
+        "stage" => {
+            let Some(destination) = parsed.flags.archive_to.as_deref() else {
+                return cache_usage(
+                    theme,
+                    parsed,
+                    "`cache stage` needs `--to <directory>`",
+                    "jetpack hangar cache stage --role public --to <staging-dir> --yes",
+                );
+            };
+            let role = parsed.flags.cache_role.as_deref().unwrap_or("public");
+            if !cache_confirm_apply(theme, parsed, "stage") {
+                return 0;
+            }
+            report_cache_stage(
+                theme,
+                parsed,
+                Store::stage_cache_from_hangar(&roots, destination, role),
+            )
+        }
         _ => cache_usage(
             theme,
             parsed,
             &format!("`cache {action}` is not a cache command"),
-            "jetpack hangar cache bind|list|remove|publish|verify|substitute",
+            "jetpack hangar cache bind|list|remove|publish|verify|substitute|stage",
         ),
     }
 }
@@ -318,6 +337,30 @@ fn report_cache(
             0
         }
         Err(error) => cache_error(theme, parsed, action, error),
+    }
+}
+
+fn report_cache_stage(
+    theme: &Theme,
+    parsed: &Parsed,
+    result: std::io::Result<Store::CacheStageReport>,
+) -> i32 {
+    match result {
+        Ok(report) => {
+            if parsed.flags.json {
+                println!("{}", Store::cache_stage_report_json("cache-stage", &report));
+            } else {
+                theme.status(&format!(
+                    "staged {} cache entr{} at {} ({})",
+                    report.entries,
+                    if report.entries == 1 { "y" } else { "ies" },
+                    report.destination.display(),
+                    human_bytes(report.bytes)
+                ));
+            }
+            0
+        }
+        Err(error) => cache_error(theme, parsed, "stage", error),
     }
 }
 

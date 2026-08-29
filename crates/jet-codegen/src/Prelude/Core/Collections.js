@@ -11,6 +11,44 @@ function jet_list_filter(xs, f) {
   return xs.filter((value) => f(value));
 }
 
+// Fallible collection callbacks keep the callback's Result carrier at the
+// adapter boundary. A successful callback contributes its payload; the first
+// Err is returned unchanged.
+function jet_list_try_map(xs, f) {
+  const values = xs && xs.__jet_iter ? xs.to_list() : xs;
+  const out = [];
+  for (const value of values) {
+    const result = f(value);
+    if (result && result.tag === "Err") return result;
+    out.push(result && result.tag === "Ok" ? result.values[0] : result);
+  }
+  return { tag: "Ok", values: [out] };
+}
+
+function jet_list_try_filter(xs, f) {
+  const values = xs && xs.__jet_iter ? xs.to_list() : xs;
+  const out = [];
+  for (const value of values) {
+    const result = f(value);
+    if (result && result.tag === "Err") return result;
+    const keep = result && result.tag === "Ok" ? result.values[0] : result;
+    if (keep) out.push(value);
+  }
+  return { tag: "Ok", values: [out] };
+}
+
+function jet_sequence_argument_message(method, value) {
+  if ((method === "take" || method === "skip") && value < 0)
+    return "sequence count must be nonnegative";
+  if (method === "step_by" && value <= 0)
+    return "step_by requires a positive step";
+  if (method === "chunks" && value <= 0)
+    return "chunks requires a positive size";
+  if (method === "windows" && value <= 0)
+    return "windows requires a positive size";
+  return null;
+}
+
 // The JS tier keeps the same explicit deferred boundary as native tiers.
 // Each view is one-shot: a second materialization is a use-after-drive.
 function jet_iter_lazy(pull) {
@@ -36,7 +74,11 @@ function jet_iter_lazy(pull) {
       return jet_iter_lazy(() => this._pull().filter((value) => f(value)));
     },
     skip(n) {
-      return jet_iter_lazy(() => this._pull().slice(Math.max(0, Number(n))));
+      const value = Number(n);
+      const message = jet_sequence_argument_message("skip", value);
+      if (message)
+        jet_runtime_stop("E3001", "<core.collections>", 0, message);
+      return jet_iter_lazy(() => this._pull().slice(value));
     },
     to_list() {
       return this._pull();
@@ -54,8 +96,12 @@ function jet_iter_to_list(view) {
 }
 
 function jet_iter_skip(view, n) {
+  const value = Number(n);
+  const message = jet_sequence_argument_message("skip", value);
+  if (message)
+    jet_runtime_stop("E3001", "<core.collections>", 0, message);
   if (view && view.__jet_iter) return view.skip(n);
-  return jet_iter_from_vec(view).skip(n);
+  return jet_iter_from_vec(view).skip(value);
 }
 
 function jet_iter_first(view) {

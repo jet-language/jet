@@ -502,26 +502,25 @@ fn write_yaml_std(manifest: &PathBuf) {
 }
 
 fn write_regex_rt(manifest: &PathBuf) {
-    let src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs");
+    let src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/Regex.rs");
     println!("cargo:rerun-if-changed={}", src.display());
-    let raw = std::fs::read_to_string(&src).expect("read Open.rs");
-    let start = raw
-        .find("    #[derive(Clone, Debug)]\n    pub struct RegexFlags {")
-        .expect("RegexFlags derive in Open.rs");
-    let mut body = raw[start..].to_string();
+    let raw = std::fs::read_to_string(&src).expect("read Regex.rs");
+    let mut body = raw;
     while let Some(impl_at) = body.find("impl crate::JetShow for ") {
         let rest = &body[impl_at..];
         let close = rest
-            .find("\n    }\n")
-            .map(|i| i + 6)
+            .find("\n}\n")
+            .map(|i| i + 3)
+            .or_else(|| rest.find("\n    }\n").map(|i| i + 6))
             .expect("JetShow impl close");
         body.replace_range(impl_at..impl_at + close, "");
     }
     while let Some(impl_at) = body.find("impl crate::JetDebug for ") {
         let rest = &body[impl_at..];
         let close = rest
-            .find("\n    }\n")
-            .map(|i| i + 6)
+            .find("\n}\n")
+            .map(|i| i + 3)
+            .or_else(|| rest.find("\n    }\n").map(|i| i + 6))
             .expect("JetDebug impl close");
         body.replace_range(impl_at..impl_at + close, "");
     }

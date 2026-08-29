@@ -114,16 +114,29 @@ pub fn jet_std_math_max_i64(left: i64, right: i64) -> i64 {
     left.max(right)
 }
 
+/// `round` uses nearest-integer ties away from zero, for both signs.
+pub fn jet_std_math_round(value: f64) -> i64 {
+    value.round() as i64
+}
+
 pub fn jet_std_math_clamp_i64(value: i64, low: i64, high: i64) -> i64 {
     value.clamp(low, high)
 }
 
 pub fn jet_std_math_min_f64(left: f64, right: f64) -> f64 {
-    left.min(right)
+    match (left.is_nan(), right.is_nan()) {
+        (true, false) => right,
+        (false, true) => left,
+        _ => left.min(right),
+    }
 }
 
 pub fn jet_std_math_max_f64(left: f64, right: f64) -> f64 {
-    left.max(right)
+    match (left.is_nan(), right.is_nan()) {
+        (true, false) => right,
+        (false, true) => left,
+        _ => left.max(right),
+    }
 }
 
 pub fn jet_std_math_clamp_f64(value: f64, low: f64, high: f64) -> f64 {
@@ -131,11 +144,19 @@ pub fn jet_std_math_clamp_f64(value: f64, low: f64, high: f64) -> f64 {
 }
 
 pub fn jet_std_math_min_f32(left: f32, right: f32) -> f32 {
-    left.min(right)
+    match (left.is_nan(), right.is_nan()) {
+        (true, false) => right,
+        (false, true) => left,
+        _ => left.min(right),
+    }
 }
 
 pub fn jet_std_math_max_f32(left: f32, right: f32) -> f32 {
-    left.max(right)
+    match (left.is_nan(), right.is_nan()) {
+        (true, false) => right,
+        (false, true) => left,
+        _ => left.max(right),
+    }
 }
 
 pub fn jet_std_math_clamp_f32(value: f32, low: f32, high: f32) -> f32 {

@@ -24,6 +24,21 @@ fn quoted(text: &str) -> Vec<&str> {
     values
 }
 
+fn listed_pairs(source: &str, marker: &str) -> Vec<(String, String)> {
+    let body = source
+        .split_once(marker)
+        .map(|(_, body)| body)
+        .and_then(|body| body.split_once("];"))
+        .map(|(body, _)| body)
+        .unwrap_or_else(|| panic!("missing pair list {marker}"));
+    body.lines()
+        .filter_map(|line| {
+            let values = quoted(line);
+            (values.len() == 2).then(|| (values[0].to_string(), values[1].to_string()))
+        })
+        .collect()
+}
+
 fn arm_pairs(source: &str) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     let mut pattern = String::new();
@@ -108,22 +123,13 @@ fn core_projection_is_complete_both_directions() {
             row.member
         );
         assert_eq!(row.fallibility, jet::Syntax::CoreCallFallibility::Sema);
-        for projection in [
-            jet::Syntax::CoreCallCoverage::SEMA,
-            jet::Syntax::CoreCallCoverage::TIR_SUBSET,
-            jet::Syntax::CoreCallCoverage::TIR_EVAL,
-            jet::Syntax::CoreCallCoverage::AOT,
-            jet::Syntax::CoreCallCoverage::INTERPRETER,
-            jet::Syntax::CoreCallCoverage::COMPTIME,
-            jet::Syntax::CoreCallCoverage::JIT,
-        ] {
-            assert!(
-                row.coverage.contains(projection),
-                "{}.{}, missing projection 0x{projection:02x}",
-                row.module,
-                row.member
-            );
-        }
+        assert_eq!(
+            row.coverage.bits() & !jet::Syntax::CoreCallCoverage::KNOWN,
+            0,
+            "{}.{}, unknown coverage bits",
+            row.module,
+            row.member
+        );
         if row.is_receiver() {
             assert!(row.module.is_empty());
             assert!(!row.has_direct_symbol());
@@ -159,6 +165,90 @@ fn core_projection_is_complete_both_directions() {
         );
         assert_eq!(jet::Syntax::core_call(row.module, row.member), Some(row));
     }
+    let ambient_rows: Vec<_> = jet::Syntax::CORE_CALLS
+        .iter()
+        .copied()
+        .filter(|row| {
+            row.interpreter_route == jet::Syntax::CoreCallInterpreterRoute::Ambient
+        })
+        .collect();
+    let ambient_mismatch = jet::Syntax::core_call_mismatch(
+        &ambient_rows,
+        "interpreter ambient",
+        jet::Syntax::core_call_ambient_routes(),
+    );
+    assert!(
+        ambient_mismatch.is_empty(),
+        "ambient route/table mismatch:\n{}",
+        ambient_mismatch.join("\n")
+    );
+    let ambient_keys: HashSet<_> = jet::Syntax::core_call_ambient_routes()
+        .iter()
+        .copied()
+        .collect();
+    assert_eq!(
+        ambient_keys.len(),
+        jet::Syntax::core_call_ambient_routes().len(),
+        "ambient route manifest contains duplicate keys"
+    );
+    for (module, member) in [
+        ("core.files", "rename"),
+        ("core.files", "glob"),
+        ("core.time", "parse_rfc3339"),
+        ("core.math", "from_bits"),
+        ("core.crypto.uuid", "v4"),
+        ("core.time", "new"),
+    ] {
+        let row = jet::Syntax::core_call(module, member)
+            .unwrap_or_else(|| panic!("missing named route row {module}.{member}"));
+        assert_eq!(
+            row.interpreter_route,
+            jet::Syntax::CoreCallInterpreterRoute::Ambient,
+            "named route {module}.{member} is not ambient"
+        );
+    }
+    let ambient = read("crates/jet-jit/src/ambient_interp.rs");
+    assert!(
+        ambient.contains("fn ambient_core_call_keys")
+            && ambient.contains("core_call_ambient_routes()"),
+        "ambient dispatcher does not export the canonical route set"
+    );
+    let enc_stream = read("crates/jet-jit/src/enc_stream/mod.rs");
+    assert!(
+        enc_stream.contains("const AMBIENT_CORE_CALLS")
+            && enc_stream.contains("fn ambient_core_call_keys"),
+        "stream dispatcher does not export its registry-facing route set"
+    );
+    let stream_keys = listed_pairs(&enc_stream, "AMBIENT_CORE_CALLS");
+    let stream_key_refs: Vec<_> = stream_keys
+        .iter()
+        .map(|(module, member)| (module.as_str(), member.as_str()))
+        .collect();
+    let stream_rows: Vec<_> = jet::Syntax::CORE_CALLS
+        .iter()
+        .copied()
+        .filter(|row| {
+            stream_keys
+                .iter()
+                .any(|(module, member)| *module == row.module && *member == row.member)
+        })
+        .collect();
+    let stream_mismatch = jet::Syntax::core_call_mismatch(
+        &stream_rows,
+        "encoding stream",
+        &stream_key_refs,
+    );
+    assert!(
+        stream_mismatch.is_empty(),
+        "encoding stream/table mismatch:\n{}",
+        stream_mismatch.join("\n")
+    );
+    let stream_unique: HashSet<_> = stream_keys.iter().collect();
+    assert_eq!(
+        stream_unique.len(),
+        stream_keys.len(),
+        "encoding stream route manifest contains duplicate keys"
+    );
     assert!(
         keys.len() > 500,
         "Core call table lost rows: {}",
@@ -278,7 +368,9 @@ fn one_fake_record_projects_without_a_consumer_arm() {
             "jet_fake_only",
             true,
             &[],
-            jet_foundation::Syntax::CoreCallCoverage::ALL,
+            jet_foundation::Syntax::CoreCallCoverage::from_bits(
+                jet_foundation::Syntax::CoreCallCoverage::KNOWN,
+            ),
         )];
 
     let row = jet_foundation::Syntax::core_call_in(FAKE, "core.fake", "only")
@@ -324,7 +416,10 @@ fn coverage_guard_rejects_a_missing_tier_projection() {
         ),
         vec!["core.fake.sema_only missing projection 0x40".to_string()]
     );
-    assert!(jet_foundation::Syntax::CoreCallCoverage::ALL.is_complete());
+    assert!(jet_foundation::Syntax::CoreCallCoverage::from_bits(
+        jet_foundation::Syntax::CoreCallCoverage::KNOWN
+    )
+    .is_complete());
     assert!(!jet_foundation::Syntax::CoreCallCoverage::from_bits(
         jet_foundation::Syntax::CoreCallCoverage::SEMA
     )
@@ -352,7 +447,9 @@ fn coverage_guard_rejects_interpreter_without_executable_route() {
             "jet_fake_no_interpreter_route",
             true,
             &[],
-            jet_foundation::Syntax::CoreCallCoverage::ALL,
+            jet_foundation::Syntax::CoreCallCoverage::from_bits(
+                jet_foundation::Syntax::CoreCallCoverage::KNOWN,
+            ),
         )
         .with_interpreter_route(jet_foundation::Syntax::CoreCallInterpreterRoute::None),
         jet_foundation::Syntax::CoreCallRecord::new_with_coverage(
@@ -361,7 +458,9 @@ fn coverage_guard_rejects_interpreter_without_executable_route() {
             "jet_fake_empty_pure_route",
             true,
             &[],
-            jet_foundation::Syntax::CoreCallCoverage::ALL,
+            jet_foundation::Syntax::CoreCallCoverage::from_bits(
+                jet_foundation::Syntax::CoreCallCoverage::KNOWN,
+            ),
         )
         .with_interpreter_route(
             jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(

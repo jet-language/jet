@@ -352,6 +352,22 @@ fn civil_method_defect(recv: &TimeValue, method: &str, detail: &str) -> i64 {
     })
 }
 
+fn time_bool_tag(value: bool) -> i64 {
+    if value {
+        1
+    } else {
+        0
+    }
+}
+
+fn time_ordering_tag(value: std::cmp::Ordering) -> i64 {
+    match value {
+        std::cmp::Ordering::Less => 0,
+        std::cmp::Ordering::Equal => 1,
+        std::cmp::Ordering::Greater => 2,
+    }
+}
+
 /// Civil-time method dispatch. `recv` is a `TimeValue` handle whose variant IS
 /// the receiver kind; `method` is a string handle; `arg0..arg5` are the args
 /// (unused slots are 0). Every `(receiver, method)` pair the residency gate
@@ -373,6 +389,26 @@ fn jet_jit_civil_time_method(
         (TimeValue::Date(d), "month") => d.month(),
         (TimeValue::Date(d), "day") => d.day(),
         (TimeValue::Date(d), "to_string") => alloc_string(d.to_string_fmt()),
+        (TimeValue::Date(d), "equal") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::Date(other) => Some(other.clone()),
+                _ => None,
+            });
+            match other {
+                Some(other) => time_bool_tag(*d == other),
+                None => civil_method_defect(v, &method, "argument is not a Date"),
+            }
+        }
+        (TimeValue::Date(d), "compare") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::Date(other) => Some(other.clone()),
+                _ => None,
+            });
+            match other {
+                Some(other) => time_ordering_tag(d.cmp(&other)),
+                None => civil_method_defect(v, &method, "argument is not a Date"),
+            }
+        }
         (TimeValue::Date(d), "add_days") => push(TimeValue::Date(d.add_days(arg0))),
         (TimeValue::Date(d), "add_months") => push(TimeValue::Date(d.add_months(arg0))),
         (TimeValue::Date(d), "diff_days") => {
@@ -414,6 +450,26 @@ fn jet_jit_civil_time_method(
         (TimeValue::DateTime(dt), "to_timestamp") => dt.to_timestamp(),
         (TimeValue::DateTime(dt), "date") => push(TimeValue::Date(dt.date())),
         (TimeValue::DateTime(dt), "time") => push(TimeValue::LocalTime(dt.time())),
+        (TimeValue::DateTime(dt), "equal") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::DateTime(other) => Some(other.clone()),
+                _ => None,
+            });
+            match other {
+                Some(other) => time_bool_tag(*dt == other),
+                None => civil_method_defect(v, &method, "argument is not a DateTime"),
+            }
+        }
+        (TimeValue::DateTime(dt), "compare") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::DateTime(other) => Some(other.clone()),
+                _ => None,
+            });
+            match other {
+                Some(other) => time_ordering_tag(dt.cmp(&other)),
+                None => civil_method_defect(v, &method, "argument is not a DateTime"),
+            }
+        }
         (TimeValue::DateTime(dt), "hour") => dt.hour(),
         (TimeValue::DateTime(dt), "minute") => dt.minute(),
         (TimeValue::DateTime(dt), "second") => dt.second(),
@@ -462,6 +518,26 @@ fn jet_jit_civil_time_method(
         }
         (TimeValue::Instant(i), "elapsed_millis") => i.elapsed_millis(),
         (TimeValue::Instant(i), "elapsed") => i.elapsed_nanos(),
+        (TimeValue::Instant(i), "equal") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::Instant(other) => Some(other.clone()),
+                _ => None,
+            });
+            match other {
+                Some(other) => time_bool_tag(*i == other),
+                None => civil_method_defect(v, &method, "argument is not an Instant"),
+            }
+        }
+        (TimeValue::Instant(i), "compare") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::Instant(other) => Some(other.clone()),
+                _ => None,
+            });
+            match other {
+                Some(other) => time_ordering_tag(i.cmp(&other)),
+                None => civil_method_defect(v, &method, "argument is not an Instant"),
+            }
+        }
         (TimeValue::Period(period), "to_string") => alloc_string(period.to_string_fmt()),
         (TimeValue::Instant(instant), "to_string") => alloc_string(instant.to_string_fmt()),
         (TimeValue::LocalTime(t), "hour") => t.hour(),
@@ -470,6 +546,46 @@ fn jet_jit_civil_time_method(
         (TimeValue::Zone(zone), "to_string") => alloc_string(zone.to_string_fmt()),
         (TimeValue::Zoned(zoned), "to_string") => alloc_string(zoned.to_string_fmt()),
         (TimeValue::LocalTime(t), "to_string") => alloc_string(t.to_string_fmt()),
+        (TimeValue::LocalTime(t), "equal") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::LocalTime(other) => Some(other.clone()),
+                _ => None,
+            });
+            match other {
+                Some(other) => time_bool_tag(*t == other),
+                None => civil_method_defect(v, &method, "argument is not a LocalTime"),
+            }
+        }
+        (TimeValue::LocalTime(t), "compare") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::LocalTime(other) => Some(other.clone()),
+                _ => None,
+            });
+            match other {
+                Some(other) => time_ordering_tag(t.cmp(&other)),
+                None => civil_method_defect(v, &method, "argument is not a LocalTime"),
+            }
+        }
+        (TimeValue::Zoned(z), "equal") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::Zoned(other) => Some(other.clone()),
+                _ => None,
+            });
+            match other {
+                Some(other) => time_bool_tag(*z == other),
+                None => civil_method_defect(v, &method, "argument is not a ZonedDateTime"),
+            }
+        }
+        (TimeValue::Zoned(z), "compare") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::Zoned(other) => Some(other.clone()),
+                _ => None,
+            });
+            match other {
+                Some(other) => time_ordering_tag(z.cmp(&other)),
+                None => civil_method_defect(v, &method, "argument is not a ZonedDateTime"),
+            }
+        }
         (TimeValue::Zoned(z), "format") => alloc_string(z.format_pattern(&clone_string(arg0))),
         (TimeValue::Zoned(z), "offset_seconds") => z.offset_seconds(),
         (TimeValue::Zoned(z), "is_dst") => {

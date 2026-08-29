@@ -116,8 +116,8 @@ mod collection_semantics {
         Ok(map.insert(key, value))
     }
 
-    fn jet_panic(_file: &str, line: u32, msg: &str) -> ! {
-        crate::runtime_host::runtime_stop_unwind("E3001", line, msg)
+    fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
+        crate::runtime_host::runtime_stop_unwind_at("E3001", file, line, msg)
     }
 
     include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");
@@ -125,6 +125,7 @@ mod collection_semantics {
     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
     include!("../../jet-codegen/src/Prelude/Memo.rs");
+    include!("../../jet-codegen/src/Prelude/Core/CollectionFailure.rs");
     include!("../../jet-codegen/src/Prelude/Core/Collections.rs");
 
     pub(super) fn list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
@@ -167,6 +168,25 @@ mod collection_semantics {
         F: Fn(&i64) -> i64,
     {
         jet_list_map(xs, f)
+    }
+
+    /// The resident callback must stay on its active runtime thread, so this
+    /// adapter uses the shared indexed Prelude scheduler with a one-worker cap.
+    /// `limit` remains part of the canonical call contract and is still an
+    /// upper bound; Cranelift callback re-entry cannot safely cross threads.
+    pub(super) fn list_closure_para_map<T, F>(xs: Vec<i64>, f: F, limit: i64) -> Vec<T>
+    where
+        T: Send,
+        F: Fn(&i64) -> T + Sync,
+    {
+        let worker_limit = usize::try_from(limit).unwrap_or(usize::MAX).max(1);
+        jet_list_para_chunks_kernel(xs.len(), worker_limit, 1, |range| {
+            Ok::<Vec<T>, ()>(range.map(|index| f(&xs[index])).collect())
+        })
+        .into_iter()
+        .filter_map(|(_, result)| result.ok())
+        .flatten()
+        .collect()
     }
 
     pub(super) fn list_closure_map_mut<F>(xs: Vec<i64>, f: F) -> Vec<i64>
@@ -549,6 +569,15 @@ mod collection_semantics {
 
     pub(super) fn list_count<T: PartialEq>(values: &[T], value: &T) -> i64 {
         jet_list_count_kernel(values, value)
+    }
+
+    pub(super) fn list_counts_i64(values: Vec<String>) -> Vec<(String, i64)> {
+        let map = jet_list_counts(values);
+        jet_map_entries_kernel(&map)
+    }
+
+    pub(super) fn map_top_n_i64(entries: Vec<(String, i64)>, n: i64) -> Vec<(String, i64)> {
+        jet_map_top_n(&map_from_pairs(entries), n)
     }
 
     pub(super) fn set_pop_i64(
@@ -1013,6 +1042,79 @@ fn jet_jit_list_closure_map_mut(list: i64, callback: i64) -> i64 {
     list_closure_map_i64(list, callback, true)
 }
 
+fn run_closure_para_map<T, Invoke, Encode>(
+    list: i64,
+    callback: i64,
+    limit: i64,
+    invoke: Invoke,
+    encode: Encode,
+) -> i64
+where
+    T: Default + Send,
+    Invoke: Fn(JitCallableSlot, i64) -> T + Sync,
+    Encode: Fn(Vec<T>) -> i64,
+{
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    let mapped = collection_semantics::list_closure_para_map(
+        values,
+        |value| {
+            if closure_trapped() {
+                T::default()
+            } else {
+                invoke(slot, *value)
+            }
+        },
+        limit,
+    );
+    if closure_trapped() {
+        return 0;
+    }
+    encode(mapped)
+}
+
+fn jet_jit_list_closure_para_map(list: i64, callback: i64, limit: i64) -> i64 {
+    run_closure_para_map(
+        list,
+        callback,
+        limit,
+        |slot, value| unsafe { invoke_closure_i64(slot, value) },
+        alloc_closure_ints,
+    )
+}
+
+fn jet_jit_list_closure_para_map_i8(list: i64, callback: i64, limit: i64) -> i64 {
+    run_closure_para_map(
+        list,
+        callback,
+        limit,
+        |slot, value| i64::from(unsafe { invoke_closure_i8(slot, value) }),
+        alloc_closure_ints,
+    )
+}
+
+fn jet_jit_list_closure_para_map_i32(list: i64, callback: i64, limit: i64) -> i64 {
+    run_closure_para_map(
+        list,
+        callback,
+        limit,
+        |slot, value| i64::from(unsafe { invoke_closure_i32(slot, value) }),
+        alloc_closure_ints,
+    )
+}
+
+fn jet_jit_list_closure_para_map_f64(list: i64, callback: i64, limit: i64) -> i64 {
+    run_closure_para_map(
+        list,
+        callback,
+        limit,
+        |slot, value| unsafe { invoke_closure_f64(slot, value) },
+        alloc_closure_floats,
+    )
+}
+
 fn list_closure_map_i8(list: i64, callback: i64, mutable: bool) -> i64 {
     let Some(slot) = closure_callback_slot(callback) else {
         return 0;
@@ -1186,24 +1288,17 @@ fn jet_jit_list_contains_str(list: i64, needle: i64) -> i8 {
 
 /// Element-wise list equality for `[T]` / fixed lists (int/byte elements).
 fn jet_jit_list_eq(a: i64, b: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| {
-        if a == b {
-            return 1;
-        }
-        let (Some(la), Some(lb)) = (rt.heap.list_len(a), rt.heap.list_len(b)) else {
-            return 0;
-        };
-        if la != lb {
-            return 0;
-        }
-        for i in 0..la {
-            match (rt.heap.list_get_int(a, i), rt.heap.list_get_int(b, i)) {
-                (Some(x), Some(y)) if x == y => {}
-                _ => return 0,
-            }
-        }
-        1
-    })
+    collection_semantics::list_equal(&clone_list_ints(a), &clone_list_ints(b)) as i8
+}
+
+/// Nested integer lists store inner list handles in the outer integer column.
+/// Marshal those handles to the same Vec shape that AOT passes to the shared
+/// Prelude equality kernel.
+fn jet_jit_list_eq_nested(a: i64, b: i64) -> i8 {
+    collection_semantics::list_equal(
+        &clone_nested_int_lists(a),
+        &clone_nested_int_lists(b),
+    ) as i8
 }
 
 /// Typed list equality adapters preserve the element semantics of the shared
@@ -1566,6 +1661,10 @@ fn jet_jit_list_count(list: i64, value: i64) -> i64 {
     })
 }
 
+fn jet_jit_list_counts(list: i64) -> i64 {
+    alloc_map_pairs(&collection_semantics::list_counts_i64(clone_list_strings(list)))
+}
+
 fn jet_jit_list_remove_value(list: i64, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(xs) = rt.heap.list_values_mut(list) else {
@@ -1761,8 +1860,7 @@ fn jet_jit_map_first(map: i64) -> i64 {
     })
 }
 
-fn jet_jit_map_to_list(map: i64) -> i64 {
-    let entries = collection_semantics::map_entries_i64(clone_map_pairs(map));
+fn alloc_map_rows(entries: Vec<(String, i64)>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let out = rt.heap.alloc_empty_list();
         for (key, value) in entries {
@@ -1774,6 +1872,14 @@ fn jet_jit_map_to_list(map: i64) -> i64 {
         }
         out
     })
+}
+
+fn jet_jit_map_to_list(map: i64) -> i64 {
+    alloc_map_rows(collection_semantics::map_entries_i64(clone_map_pairs(map)))
+}
+
+fn jet_jit_map_top_n(map: i64, n: i64) -> i64 {
+    alloc_map_rows(collection_semantics::map_top_n_i64(clone_map_pairs(map), n))
 }
 
 fn jet_jit_map_min(map: i64) -> i64 {
@@ -1904,6 +2010,14 @@ fn jet_jit_map_insert_composite(map: i64, key: i64, value: i64) {
     });
 }
 
+fn jet_jit_map_insert_int(map: i64, key: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .map_insert_int(map, key, value)
+            .expect("jit Int map insert: bad handle");
+    });
+}
+
 fn jet_jit_map_try_insert(map: i64, key: i64, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let key_text = rt.heap.clone_string(key).unwrap_or_default();
@@ -1917,6 +2031,20 @@ fn jet_jit_map_try_insert(map: i64, key: i64, value: i64) -> i64 {
             }
             Err(error) => alloc_error_result(rt, error),
         }
+    })
+}
+
+fn jet_jit_map_try_insert_int(map: i64, key: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if rt.heap.map_len(map).is_none() {
+            jet_foundation::ice!(None, "jit Int map try_insert: bad handle");
+        }
+        let previous = rt.heap.map_get_int(map, key);
+        rt.heap
+            .map_insert_int(map, key, value)
+            .expect("jit Int map try_insert: bad handle");
+        let option = option_i64(rt, previous);
+        crate::runtime_host::alloc_jit_result(rt, true, option as u64)
     })
 }
 
@@ -1960,6 +2088,22 @@ fn jet_jit_map_get_composite(map: i64, key: i64, line: u32) -> i64 {
     })
 }
 
+fn jet_jit_map_get_int(map: i64, key: i64, line: u32) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.map_get_int(map, key) {
+        Some(value) => value,
+        None => {
+            if rt.heap.map_len(map).is_none() {
+                jet_foundation::ice!(None, "jit Int map get: bad handle");
+            }
+            let key_text = jet_foundation::Outcome::jet_missing_map_key_value(
+                rt.heap.int_to_string(key),
+            );
+            rt.set_runtime_stop("E3001", line, &key_text);
+            0
+        }
+    })
+}
+
 /// Result-arena Option handle (`result_is_ok` / `result_get_i64`), *not* the
 /// packed `0 / value + 1` carrier its sibling `jet_jit_list_get_opt` returns.
 ///
@@ -1989,6 +2133,16 @@ fn jet_jit_map_get_opt_composite(map: i64, key: i64) -> i64 {
     })
 }
 
+fn jet_jit_map_get_opt_int(map: i64, key: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if rt.heap.map_len(map).is_none() {
+            jet_foundation::ice!(None, "jit Int map get_opt: bad handle");
+        }
+        let value = rt.heap.map_get_int(map, key);
+        option_i64(rt, value)
+    })
+}
+
 fn jet_jit_map_remove(map: i64, key: i64) -> i64 {
     let key_text = Concurrency::with_runtime_mut(|rt| {
         rt.heap
@@ -2013,6 +2167,16 @@ fn jet_jit_map_remove_composite(map: i64, key: i64) -> i64 {
         // passing the removal inline borrows the runtime twice.
         let removed = rt.heap.map_remove_composite(map, key);
         option_i64(rt, removed)
+    })
+}
+
+fn jet_jit_map_remove_int(map: i64, key: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if rt.heap.map_len(map).is_none() {
+            jet_foundation::ice!(None, "jit Int map remove: bad handle");
+        }
+        let value = rt.heap.map_remove_int(map, key);
+        option_i64(rt, value)
     })
 }
 
@@ -2072,6 +2236,26 @@ fn clone_list_ints(list: i64) -> Vec<i64> {
         rt.heap
             .clone_int_list(list)
             .expect("jit iter adapter: bad list handle")
+    })
+}
+
+fn clone_nested_int_lists(list: i64) -> Vec<Vec<i64>> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt
+            .heap
+            .list_len(list)
+            .expect("jit nested-list equality: bad list handle");
+        (0..len)
+            .map(|index| {
+                let child = rt
+                    .heap
+                    .list_get_int(list, index)
+                    .expect("jit nested-list equality: bad child handle");
+                rt.heap
+                    .clone_int_list(child)
+                    .expect("jit nested-list equality: bad child list")
+            })
+            .collect()
     })
 }
 
@@ -2569,8 +2753,9 @@ fn zip_family_rows(plan_id: i64, column_handles: i64, common_fill: i64, column_f
                 )
             },
         ) else {
-            rt.set_runtime_stop(
+            rt.set_runtime_stop_at(
                 "E3001",
+                "<core.collections>",
                 0,
                 collection_semantics::zip_length_mismatch_message(),
             );
@@ -3392,6 +3577,32 @@ fn jet_jit_scalar_debug(value: i64, kind: i64) -> i64 {
         };
         rt.heap.alloc_string(text)
     })
+}
+
+/// Append a map after the JIT has marshalled rendered key/value handles.
+fn jet_jit_str_push_debug_map(buf_id: i64, entries_id: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(entries) = rt.heap.clone_int_list(entries_id) else {
+            return;
+        };
+        if entries.len() % 2 != 0 {
+            return;
+        }
+        let mut marshalled = Vec::with_capacity(entries.len() / 2);
+        for pair in entries.chunks_exact(2) {
+            let Some(key) = rt.heap.clone_string(pair[0]) else {
+                return;
+            };
+            let Some(value) = rt.heap.clone_string(pair[1]) else {
+                return;
+            };
+            marshalled.push((key, value));
+        }
+        let text = jet_foundation::StructuralDebug::jet_debug_map(marshalled);
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+            buf.push_str(&text);
+        }
+    });
 }
 
 /// Append `T?` Debug text through the shared StructuralDebug formatter.
@@ -4987,6 +5198,17 @@ fn jet_jit_byte_buffer_write(handle: i64, value: i64, method: i64) {
             4 => buffer.write_u32_be(value as u32),
             5 => buffer.write_u64_le(value as u64),
             6 => buffer.write_u64_be(value as u64),
+            10 => buffer.write_i8(value as i8),
+            11 => buffer.write_i16_le(value as i16),
+            12 => buffer.write_i16_be(value as i16),
+            13 => buffer.write_i32_le(value as i32),
+            14 => buffer.write_i32_be(value as i32),
+            15 => buffer.write_i64_le(value),
+            16 => buffer.write_i64_be(value),
+            17 => buffer.write_f32_le(f64::from_bits(value as u64) as f32),
+            18 => buffer.write_f32_be(f64::from_bits(value as u64) as f32),
+            19 => buffer.write_f64_le(f64::from_bits(value as u64)),
+            20 => buffer.write_f64_be(f64::from_bits(value as u64)),
             7 => {
                 if let Some(bytes) = list_bytes {
                     buffer.write_bytes(&bytes);
@@ -5593,6 +5815,8 @@ host_fns! {
         let mut sig_closure_value = sig_closure_predicate.clone();
         sig_closure_value.returns.clear();
         sig_closure_value.returns.push(AbiParam::new(types::I64));
+        let mut sig_closure_value_limit = sig_closure_value.clone();
+        sig_closure_value_limit.params.push(AbiParam::new(types::I64));
         let sig_closure_each = sig_closure_predicate.clone();
         let mut sig_priority_queue_slot = Signature::new(cc);
         sig_priority_queue_slot.params.push(AbiParam::new(types::I64));
@@ -5632,6 +5856,10 @@ host_fns! {
     list_closure_all: "jet_jit_list_closure_all" => jet_jit_list_closure_all: sig_closure_predicate;
     list_closure_map: "jet_jit_list_closure_map" => jet_jit_list_closure_map: sig_closure_value;
     list_closure_map_mut: "jet_jit_list_closure_map_mut" => jet_jit_list_closure_map_mut: sig_closure_value;
+    list_closure_para_map: "jet_jit_list_closure_para_map" => jet_jit_list_closure_para_map: sig_closure_value_limit;
+    list_closure_para_map_i8: "jet_jit_list_closure_para_map_i8" => jet_jit_list_closure_para_map_i8: sig_closure_value_limit;
+    list_closure_para_map_i32: "jet_jit_list_closure_para_map_i32" => jet_jit_list_closure_para_map_i32: sig_closure_value_limit;
+    list_closure_para_map_f64: "jet_jit_list_closure_para_map_f64" => jet_jit_list_closure_para_map_f64: sig_closure_value_limit;
     list_closure_map_i8: "jet_jit_list_closure_map_i8" => jet_jit_list_closure_map_i8: sig_closure_value;
     list_closure_map_i8_mut: "jet_jit_list_closure_map_i8_mut" => jet_jit_list_closure_map_i8_mut: sig_closure_value;
     list_closure_map_i32: "jet_jit_list_closure_map_i32" => jet_jit_list_closure_map_i32: sig_closure_value;
@@ -5643,6 +5871,7 @@ host_fns! {
     list_closure_each_mut: "jet_jit_list_closure_each_mut" => jet_jit_list_closure_each_mut: sig_closure_each;
     list_contains_str: "jet_jit_list_contains_str" => jet_jit_list_contains_str: sig_list_eq;
     list_eq: "jet_jit_list_eq" => jet_jit_list_eq: sig_list_eq;
+    list_eq_nested: "jet_jit_list_eq_nested" => jet_jit_list_eq_nested: sig_list_eq;
     list_eq_str: "jet_jit_list_eq_str" => jet_jit_list_eq_str: sig_list_eq;
     list_eq_f64: "jet_jit_list_eq_f64" => jet_jit_list_eq_f64: sig_list_eq;
     list_order: "jet_jit_list_order" => jet_jit_list_order: sig_list_eq;
@@ -5656,6 +5885,7 @@ host_fns! {
     list_clone: "jet_jit_list_clone" => jet_jit_list_clone: sig_len;
     list_copy: "jet_jit_list_copy" => jet_jit_list_copy: sig_len;
     list_count: "jet_jit_list_count" => jet_jit_list_count: sig_get_opt;
+    list_counts: "jet_jit_list_counts" => jet_jit_list_counts: sig_len;
     list_remove_value: "jet_jit_list_remove_value" => jet_jit_list_remove_value: sig_get_opt;
     list_remove_slot: "jet_jit_list_remove_slot" => jet_jit_list_remove_slot: sig_list_remove_slot;
     list_slice: "jet_jit_list_slice" => jet_jit_list_slice: sig_slice;
@@ -5681,14 +5911,19 @@ host_fns! {
     map_merge: "jet_jit_map_merge" => jet_jit_map_merge: sig_get_opt;
     map_insert: "jet_jit_map_insert" => jet_jit_map_insert: sig_map_insert;
     map_insert_composite: "jet_jit_map_insert_composite" => jet_jit_map_insert_composite: sig_map_insert_composite;
+    map_insert_int: "jet_jit_map_insert_int" => jet_jit_map_insert_int: sig_map_insert;
     map_try_insert: "jet_jit_map_try_insert" => jet_jit_map_try_insert: sig_try_map_insert;
+    map_try_insert_int: "jet_jit_map_try_insert_int" => jet_jit_map_try_insert_int: sig_try_map_insert;
     map_increment: "jet_jit_map_increment" => jet_jit_map_increment: sig_push;
     map_get: "jet_jit_map_get" => jet_jit_map_get: sig_map_get;
     map_get_composite: "jet_jit_map_get_composite" => jet_jit_map_get_composite: sig_map_get_composite;
+    map_get_int: "jet_jit_map_get_int" => jet_jit_map_get_int: sig_map_get;
     map_get_opt: "jet_jit_map_get_opt" => jet_jit_map_get_opt: sig_map_get_opt;
     map_get_opt_composite: "jet_jit_map_get_opt_composite" => jet_jit_map_get_opt_composite: sig_map_get_opt_composite;
+    map_get_opt_int: "jet_jit_map_get_opt_int" => jet_jit_map_get_opt_int: sig_map_get_opt;
     map_remove: "jet_jit_map_remove" => jet_jit_map_remove: sig_map_get_opt;
     map_remove_composite: "jet_jit_map_remove_composite" => jet_jit_map_remove_composite: sig_map_get_opt_composite;
+    map_remove_int: "jet_jit_map_remove_int" => jet_jit_map_remove_int: sig_map_get_opt;
     map_len: "jet_jit_map_len" => jet_jit_map_len: sig_len;
     map_key_at: "jet_jit_map_key_at" => jet_jit_map_key_at: sig_map_at;
     map_value_at: "jet_jit_map_value_at" => jet_jit_map_value_at: sig_map_at;
@@ -5697,6 +5932,7 @@ host_fns! {
     map_equal: "jet_jit_map_equal" => jet_jit_map_equal: sig_list_eq;
     map_first: "jet_jit_map_first" => jet_jit_map_first: sig_len;
     map_to_list: "jet_jit_map_to_list" => jet_jit_map_to_list: sig_len;
+    map_top_n: "jet_jit_map_top_n" => jet_jit_map_top_n: sig_get_opt;
     map_min: "jet_jit_map_min" => jet_jit_map_min: sig_len;
     map_max: "jet_jit_map_max" => jet_jit_map_max: sig_len;
     map_intersection: "jet_jit_map_intersection" => jet_jit_map_intersection: sig_get_opt;
@@ -5742,6 +5978,7 @@ host_fns! {
     string_debug: "jet_jit_string_debug" => jet_jit_string_debug: sig_len;
     scalar_debug: "jet_jit_scalar_debug" => jet_jit_scalar_debug: sig_scalar_debug;
     enum_show: "jet_jit_enum_show" => jet_jit_enum_show: sig_enum_show;
+    str_push_debug_map: "jet_jit_str_push_debug_map" => jet_jit_str_push_debug_map: sig_push;
     str_push_debug_optional: "jet_jit_str_push_debug_optional" => jet_jit_str_push_debug_optional: sig_debug_optional;
     str_push_debug_record: "jet_jit_str_push_debug_record" => jet_jit_str_push_debug_record: sig_debug_record;
     str_push_debug_variant: "jet_jit_str_push_debug_variant" => jet_jit_str_push_debug_variant: sig_debug_variant;

@@ -11,11 +11,44 @@ pub(crate) fn jet_seeded_rng_next(state: &mut u64) -> u64 {
     z ^ (z >> 31)
 }
 
-pub(crate) fn jet_seeded_rng_int(state: &mut u64, low: i64, high: i64) -> i64 {
-    if high <= low {
-        return low;
+const JET_SEEDED_RNG_INT_RANGE_ERROR: &str = "Rng.int requires low <= high";
+
+fn jet_seeded_rng_bounded(state: &mut u64, bound: u64) -> u64 {
+    if bound == 0 {
+        // A zero u64 bound represents the full 2^64-sized domain.
+        return jet_seeded_rng_next(state);
     }
-    low + (jet_seeded_rng_next(state) % (high - low + 1) as u64) as i64
+    let threshold = bound.wrapping_neg() % bound;
+    loop {
+        let product = (jet_seeded_rng_next(state) as u128) * (bound as u128);
+        if (product as u64) >= threshold {
+            return (product >> 64) as u64;
+        }
+    }
+}
+
+pub(crate) fn jet_seeded_rng_int_checked(
+    state: &mut u64,
+    low: i64,
+    high: i64,
+) -> Result<i64, &'static str> {
+    if high < low {
+        return Err(JET_SEEDED_RNG_INT_RANGE_ERROR);
+    }
+    if high == low {
+        return Ok(low);
+    }
+    // For low <= high, two's-complement subtraction gives the mathematical
+    // span modulo 2^64. A wrapped inclusive width (0) is the full i64 domain.
+    let width = (high as u64)
+        .wrapping_sub(low as u64)
+        .wrapping_add(1);
+    let offset = jet_seeded_rng_bounded(state, width);
+    Ok((low as u64).wrapping_add(offset) as i64)
+}
+
+pub(crate) fn jet_seeded_rng_int(state: &mut u64, low: i64, high: i64) -> i64 {
+    jet_seeded_rng_int_checked(state, low, high).unwrap_or_else(|message| panic!("{message}"))
 }
 
 pub(crate) fn jet_seeded_rng_float(state: &mut u64) -> f64 {

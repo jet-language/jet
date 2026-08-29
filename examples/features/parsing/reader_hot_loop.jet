@@ -1,0 +1,16 @@
+// Non-corpus witness for the bounded fixed-width Reader region path.
+// The range is deliberately small by default so both execution tiers are
+// practical; the same program accepts a larger count for timing.
+use core.process as process
+
+fn run() {
+    n :: Int.parse(process.argv().get(1) ?? "1000") ?? 1000
+    data :: "A".repeat(n).bytes()
+    reader :: Reader.over(data)
+    total := U64{0}
+    loop _ in 0..<n {
+        byte :: reader.read_u8() ?? return Err("short reader")
+        total = total.wrapping_add(U64.from_u8(byte))
+    }
+    print(total)
+}

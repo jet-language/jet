@@ -438,7 +438,11 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             kind: "Regex".to_string(),
             method: method.to_string(),
         },
-        ("Regex", "replace" | "replace_all" | "replace_all_with" | "split_limit", 2) => {
+        (
+            "Regex",
+            "replace" | "replace_first" | "replace_all" | "replace_all_with" | "split_limit",
+            2,
+        ) => {
             THandleOp::RegexMethod {
                 kind: "Regex".to_string(),
                 method: method.to_string(),
@@ -501,14 +505,26 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         // instance methods. `take_pattern` isn't here — an argument-dependent
         // method (like Cursor's), resolved at its call site.
         ("Reader", "read_u8", 0) => THandleOp::ReaderReadU8,
+        ("Reader", "read_i8", 0) => THandleOp::ReaderReadI8,
         ("Reader", "read_u16_le", 0) => THandleOp::ReaderReadU16Le,
         ("Reader", "read_u16_be", 0) => THandleOp::ReaderReadU16Be,
+        ("Reader", "read_i16_le", 0) => THandleOp::ReaderReadI16Le,
+        ("Reader", "read_i16_be", 0) => THandleOp::ReaderReadI16Be,
         ("Reader", "read_u32_le", 0) => THandleOp::ReaderReadU32Le,
         ("Reader", "read_u32_be", 0) => THandleOp::ReaderReadU32Be,
+        ("Reader", "read_i32_le", 0) => THandleOp::ReaderReadI32Le,
+        ("Reader", "read_i32_be", 0) => THandleOp::ReaderReadI32Be,
         ("Reader", "read_u64_le", 0) => THandleOp::ReaderReadU64Le,
         ("Reader", "read_u64_be", 0) => THandleOp::ReaderReadU64Be,
+        ("Reader", "read_i64_le", 0) => THandleOp::ReaderReadI64Le,
+        ("Reader", "read_i64_be", 0) => THandleOp::ReaderReadI64Be,
         ("Reader", "read_f32_le", 0) => THandleOp::ReaderReadF32Le,
+        ("Reader", "read_f32_be", 0) => THandleOp::ReaderReadF32Be,
         ("Reader", "read_f64_le", 0) => THandleOp::ReaderReadF64Le,
+        ("Reader", "read_f64_be", 0) => THandleOp::ReaderReadF64Be,
+        ("Reader", "peek", 0) => THandleOp::ReaderPeek,
+        ("Reader", "seek", 1) => THandleOp::ReaderSeek,
+        ("Reader", "skip", 1) => THandleOp::ReaderSkip,
         ("Reader", "take", 1) => THandleOp::ReaderTake,
         ("Reader", "remaining", 0) => THandleOp::ReaderRemaining,
         ("Reader", "is_at_end", 0) => THandleOp::ReaderAtEnd,
@@ -675,7 +691,7 @@ pub(crate) fn handle_method_return_ty(
             ("Regex", "matches", 1) => {
                 Some(Some(Type::List(Box::new(Type::Named("Match".to_string())))))
             }
-            ("Regex", "replace" | "replace_all" | "replace_all_with", 2) => {
+            ("Regex", "replace" | "replace_first" | "replace_all" | "replace_all_with", 2) => {
                 Some(Some(Type::String))
             }
             ("Regex", "split_limit", 2) => Some(Some(Type::List(Box::new(Type::String)))),

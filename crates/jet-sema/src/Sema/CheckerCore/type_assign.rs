@@ -882,40 +882,13 @@ impl<'a> Checker<'a> {
             );
             return true;
         }
-        if let (
-            Type::Fn {
-                params: want_params,
-                ret: want_ret,
-                ..
-            },
-            Type::Fn {
-                params: got_params,
-                ret: got_ret,
-                ..
-            },
-        ) = (want, got)
+        // Function values are structurally assignable. Keep call metadata for
+        // binding a value call, but it cannot make equal callable shapes into
+        // different value types.
+        if matches!((want, got), (Type::Fn { .. }, Type::Fn { .. }))
+            && fn_types_compatible(want, got)
         {
-            // Keep ordinary function-shape mismatches on their existing
-            // generic diagnostic path. E0771 is only for the callable
-            // contract after parameters and return type already match.
-            if want_params == got_params && want_ret == got_ret {
-                if fn_types_compatible(want, got) {
-                    return true;
-                }
-                self.diags.push(Diagnostic::error(
-                    "E0771",
-                    format!(
-                        "this needs {}, but the function value is {}",
-                        want.show(),
-                        got.show()
-                    ),
-                    "public labels and parameter zones are part of a function's callable type"
-                        .to_string(),
-                    format!("use `{}` here", want.name()),
-                    Some(span),
-                ));
-                return true;
-            }
+            return true;
         }
         // A qualified constructor carries the owning module in its nominal
         // spelling, while a value from an imported signature may still carry

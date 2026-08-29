@@ -8,9 +8,8 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Float(f64),
-    /// Original number token for typed projection. Dynamic parsing never
-    /// constructs this arm; `parse_json_exact_numbers` uses the same tokenizer
-    /// and preserves it until the requested destination type consumes it.
+    /// Original number token for an integer that does not fit `i64`, or for
+    /// typed projection. Keeping the token avoids a lossy binary-float step.
     Number(String),
     Text(String),
     Array(Vec<Value>),
@@ -27,6 +26,29 @@ mod tests {
         let input = format!("{}0{}", "[".repeat(depth), "]".repeat(depth));
         let error = parse_json(&input, false).expect_err("depth limit must reject input");
         assert!(error.message.contains("nested too deeply"));
+    }
+
+    #[test]
+    fn integer_tokens_never_round_through_float() {
+        assert_eq!(
+            parse_json("-9223372036854775808", false),
+            Ok(Value::Int(i64::MIN))
+        );
+        assert_eq!(
+            parse_json("9223372036854775808", false),
+            Ok(Value::Number("9223372036854775808".to_string()))
+        );
+        assert_eq!(
+            parse_json("123456789012345678901234567890", false),
+            Ok(Value::Number("123456789012345678901234567890".to_string()))
+        );
+    }
+
+    #[test]
+    fn rejects_trailing_commas_and_non_finite_numbers() {
+        for input in ["[1,]", "{\"a\":1,}", "1e400", "-1e400"] {
+            parse_json(input, false).expect_err("invalid JSON must be rejected");
+        }
     }
 }
 
@@ -245,19 +267,27 @@ impl Parser {
             }
         }
         let text: String = self.chars[start..self.pos].iter().collect();
+        let is_integer = !text.contains('.') && !text.contains('e') && !text.contains('E');
         if self.preserve_numbers {
             super::jet_json_number::validate_json_number(&text)
                 .map_err(|message| self.err(&message))?;
             return Ok(Value::Number(text));
         }
-        if !text.contains('.') && !text.contains('e') && !text.contains('E') {
+        if is_integer {
             if let Ok(value) = text.parse::<i64>() {
                 return Ok(Value::Int(value));
             }
+            super::jet_json_number::validate_json_number(&text)
+                .map_err(|message| self.err(&message))?;
+            return Ok(Value::Number(text));
         }
-        text.parse::<f64>()
-            .map(Value::Float)
-            .map_err(|_| self.err(super::jet_encoding_errors::JSON_BAD_NUMBER))
+        let value = text
+            .parse::<f64>()
+            .map_err(|_| self.err(super::jet_encoding_errors::JSON_BAD_NUMBER))?;
+        if !value.is_finite() {
+            return Err(self.err(super::jet_encoding_errors::JSON_BAD_NUMBER));
+        }
+        Ok(Value::Float(value))
     }
 
     fn array(&mut self, depth: usize) -> Result<Value, Error> {
@@ -275,7 +305,13 @@ impl Parser {
             values.push(self.value(depth + 1)?);
             self.ws();
             match self.peek() {
-                Some(',') => self.pos += 1,
+                Some(',') => {
+                    self.pos += 1;
+                    self.ws();
+                    if self.peek() == Some(']') {
+                        return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_ARRAY_SEPARATOR));
+                    }
+                }
                 Some(']') => {}
                 _ => {
                     return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_ARRAY_SEPARATOR));
@@ -313,7 +349,13 @@ impl Parser {
             }
             self.ws();
             match self.peek() {
-                Some(',') => self.pos += 1,
+                Some(',') => {
+                    self.pos += 1;
+                    self.ws();
+                    if self.peek() == Some('}') {
+                        return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_OBJECT_SEPARATOR));
+                    }
+                }
                 Some('}') => {}
                 _ => {
                     return Err(

@@ -74,6 +74,7 @@ const MEM_LEAVES: &[(&str, CoreLeafKind)] = &[("AllocError", CoreLeafKind::Plain
 /// in the same Core-name authority used by generated declarations.
 const CORE_ROOT_TYPES: &[&str] = &[
     crate::Syntax::TYPE_DECIMAL,
+    crate::Syntax::TYPE_FRACTION,
     crate::Syntax::DURATION_TYPE,
     crate::Syntax::TYPE_INSTANT,
     crate::Syntax::TYPE_AUTHORITY,

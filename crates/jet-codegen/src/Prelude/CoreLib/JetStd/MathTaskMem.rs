@@ -397,6 +397,14 @@ macro_rules! jet_lane_show {
             F: FnOnce() -> T + Send + 'env,
             T: Send + 'static,
         {
+            self.spawn_at(0, f)
+        }
+
+        pub fn spawn_at<'env, F, T>(&self, spawn_site: usize, f: F) -> JetTask<T>
+        where
+            F: FnOnce() -> T + Send + 'env,
+            T: Send + 'static,
+        {
             let boxed: Box<dyn FnOnce() -> T + Send + 'env> = Box::new(f);
             // JET_VETTED_UNSAFE_BEGIN: jet_taskgroup_borrowed_spawn
             let erased: Box<dyn FnOnce() -> T + Send + 'static> =
@@ -410,7 +418,7 @@ macro_rules! jet_lane_show {
                     Ok::<(), ()>(())
                 })
                 .expect("task-group admission wait cannot fail");
-            let task = JetTask::spawn(move || {
+            let task = JetTask::spawn_at(spawn_site, move || {
                 let _permit = permit;
                 erased()
             });
@@ -453,12 +461,20 @@ macro_rules! jet_lane_show {
     }
     impl<T: Send + 'static> JetTask<T> {
         pub fn spawn<F: FnOnce() -> T + Send + 'static>(f: F) -> JetTask<T> {
+            Self::spawn_at(0, f)
+        }
+
+        pub fn spawn_at<F: FnOnce() -> T + Send + 'static>(
+            spawn_site: usize,
+            f: F,
+        ) -> JetTask<T> {
             let inherited_deadline = super::jet_ctx_deadline_ms();
             let control = super::JetTaskControl::new();
             JetTask {
                 state: std::sync::Arc::new(JetTaskState {
                     handle: std::sync::Mutex::new(Some(
-                        super::jet_scheduler_spawn_blocking_with_control(
+                        super::jet_scheduler_spawn_blocking_with_control_at(
+                            spawn_site,
                             move || {
                                 let _deadline_guard =
                                     inherited_deadline.map(super::jet_ctx_push_deadline);
@@ -476,11 +492,20 @@ macro_rules! jet_lane_show {
             f: F,
             control: std::sync::Arc<super::JetTaskControl>,
         ) -> JetTask<T> {
+            Self::spawn_typed_deadline_at(0, f, control)
+        }
+
+        pub(crate) fn spawn_typed_deadline_at<F: FnOnce() -> T + Send + 'static>(
+            spawn_site: usize,
+            f: F,
+            control: std::sync::Arc<super::JetTaskControl>,
+        ) -> JetTask<T> {
             let inherited_deadline = super::jet_ctx_deadline_ms();
             JetTask {
                 state: std::sync::Arc::new(JetTaskState {
                     handle: std::sync::Mutex::new(Some(
-                        super::jet_scheduler_spawn_blocking_with_control(
+                        super::jet_scheduler_spawn_blocking_with_control_at(
+                            spawn_site,
                             move || {
                                 let _deadline_guard =
                                     inherited_deadline.map(super::jet_ctx_push_deadline);
@@ -578,6 +603,49 @@ macro_rules! jet_lane_show {
         tasks: Vec<JetTask<T>>,
     ) -> Result<T, JetTaskFailure> {
         super::jet_scheduler_any(jet_task_entries(tasks, "any"))
+    }
+
+    /// D-CONC-FAIL1=A: a propagating task body returns a private `Result`
+    /// carrier. Flatten it at the task boundary before `join()` exposes the
+    /// public `TaskFailure` rail.
+    pub fn jet_task_join_result<T, E>(
+        task: JetTask<Result<T, E>>,
+    ) -> Result<T, JetTaskFailure>
+    where
+        T: Send + 'static,
+        E: Send + 'static + std::fmt::Debug,
+    {
+        jet_task_flatten_result(task.join())
+    }
+
+    pub fn jet_task_all_result<T, E>(
+        tasks: Vec<JetTask<Result<T, E>>>,
+    ) -> Result<Vec<T>, JetTaskFailure>
+    where
+        T: Send + 'static,
+        E: Send + 'static + std::fmt::Debug,
+    {
+        jet_task_flatten_results(jet_task_all(tasks))
+    }
+
+    pub fn jet_task_race_result<T, E>(
+        tasks: Vec<JetTask<Result<T, E>>>,
+    ) -> Result<T, JetTaskFailure>
+    where
+        T: Send + 'static,
+        E: Send + 'static + std::fmt::Debug,
+    {
+        jet_task_flatten_result(jet_task_race(tasks))
+    }
+
+    pub fn jet_task_any_result<T, E>(
+        tasks: Vec<JetTask<Result<T, E>>>,
+    ) -> Result<T, JetTaskFailure>
+    where
+        T: Send + 'static,
+        E: Send + 'static + std::fmt::Debug,
+    {
+        jet_task_flatten_result(jet_task_any(tasks))
     }
 
     /// Cooperative yield — park at a wait point with a zero timeout.

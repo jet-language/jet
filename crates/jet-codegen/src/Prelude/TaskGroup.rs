@@ -36,8 +36,8 @@ pub fn jet_task_cancellation() -> JetTaskCancellation {
     JetTaskCancellation {
         code: "E3004",
         what: "task cancelled at a cooperative wait point",
-        why: "the task control plane requested cancellation before this wait completed",
-        fix: "handle `TaskFailure.Cancelled`, or use `#Shield` around a cancellation-sensitive wait",
+        why: "The task control plane requested cancellation before this wait completed",
+        fix: "Handle `TaskFailure.Cancelled`, or use `#Shield` around a cancellation-sensitive wait",
     }
 }
 
@@ -50,6 +50,33 @@ pub fn jet_task_failure_from_code(code: &str, reason: String) -> JetTaskFailure 
         "E3003" => JetTaskFailure::DeadlineBlown,
         _ => JetTaskFailure::Panicked(reason),
     }
+}
+
+/// Flatten the private failure carrier used while a task body propagates with
+/// `?` onto the public task-failure rail. The task engines own only the join
+/// representation; this conversion keeps the task surface identical across
+/// AOT, JIT, and the evaluator.
+pub fn jet_task_flatten_result<T, E: std::fmt::Debug>(
+    result: Result<Result<T, E>, JetTaskFailure>,
+) -> Result<T, JetTaskFailure> {
+    result.and_then(|value| {
+        value.map_err(|error| jet_task_failure_from_result_error(error))
+    })
+}
+
+pub fn jet_task_failure_from_result_error<E: std::fmt::Debug>(error: E) -> JetTaskFailure {
+    jet_task_failure_from_code("TASK_BODY_FAILED", format!("{error:?}"))
+}
+
+pub fn jet_task_flatten_results<T, E: std::fmt::Debug>(
+    result: Result<Vec<Result<T, E>>, JetTaskFailure>,
+) -> Result<Vec<T>, JetTaskFailure> {
+    result.and_then(|values| {
+        values
+            .into_iter()
+            .map(|value| value.map_err(|error| jet_task_failure_from_result_error(error)))
+            .collect()
+    })
 }
 
 /// One ABI spelling for the typed failure rail. Engines may pack the returned
@@ -319,10 +346,10 @@ impl JetTaskDeadline {
 
 pub fn jet_task_deadline(wait_kind: &str) -> JetTaskDeadline {
     JetTaskDeadline {
-        what: format!("deadline exceeded while waiting in {wait_kind}"),
-        why: "this wait point observed the task context deadline from `#Context(deadline: …)`"
+        what: format!("Deadline exceeded while waiting in {wait_kind}"),
+        why: "This wait point observed the task context deadline from `#Context(deadline: …)`"
             .to_string(),
-        fix: "raise the deadline budget or shorten the work before this wait point".to_string(),
+        fix: "Raise the deadline budget or shorten the work before this wait point".to_string(),
     }
 }
 

@@ -2512,7 +2512,8 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             range,
             ..
         } => {
-            (jit_list_native_type(&base.ty)
+            (matches!(&base.ty, Type::String)
+                || jit_list_native_type(&base.ty)
                 || jit_list_record_type(&base.ty)
                 || base.ty.is_compute_tensor_family())
                 && resident_safe_expr(base, callees)
@@ -2560,7 +2561,18 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
                     TNumericOp::FloatToInt { .. } | TNumericOp::FloatNarrow { .. } => recv.ty.is_float(),
                     TNumericOp::TryFrom { .. } => recv.ty.is_integer(),
                     TNumericOp::InlineRange { .. } => recv.ty.is_integer(),
+                    TNumericOp::EuclideanDiv { .. } | TNumericOp::EuclideanRem { .. } => false,
                 }
+        }
+        TExprKind::NumericBinaryMethod { recv, arg, op } => {
+            resident_safe_expr(recv, callees)
+                && resident_safe_expr(arg, callees)
+                && matches!(
+                    op,
+                    TNumericOp::EuclideanDiv { .. } | TNumericOp::EuclideanRem { .. }
+                )
+                && matches!(&recv.ty, Type::Int)
+                && matches!(&arg.ty, Type::Int)
         }
         TExprKind::DistinctConvert { arg, .. } | TExprKind::DistinctRaw(arg) => {
             resident_safe_expr(arg, callees)
@@ -3052,7 +3064,8 @@ fn resident_safe_expr_recursive(expr: &TExpr, callees: &HashSet<String>) -> bool
             }
             THostCall::TupleIndex { base, .. } => resident_safe_expr(base, callees),
             THostCall::SwitchSubjectField { .. } | THostCall::SwitchSubjectValue => true,
-            THostCall::StrMatchScan { .. } | THostCall::BinMatchScan { .. } => true,
+            THostCall::StrMatchScan { subject, .. } => resident_safe_expr(subject, callees),
+            THostCall::BinMatchScan { .. } => true,
             // Sema emits this node only after proving the receiver is a live
             // Cell guard and every projected path is valid and disjoint.
             THostCall::CellGuardProject { .. } => true,
@@ -3504,6 +3517,10 @@ fn resident_safe_closure_method(
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_unary_lambda(args, callees)
         }
+        // The shared Prelude evaluator owns Result traversal for fallible
+        // callbacks; resident JIT deopts until its callback ABI can carry the
+        // same row without a second implementation.
+        TIR::TClosureOp::TryMap | TIR::TClosureOp::TryFilter => false,
         TIR::TClosureOp::ParaMap => {
             jit_closure_elem_type_for(&recv.ty).is_some_and(|elem| {
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
@@ -3916,6 +3933,12 @@ fn resident_safe_builtin_op(
         TBuiltinOp::MapFirst | TBuiltinOp::MapToList { .. } => {
             jit_map_string_int_type(recv_ty) && args.is_empty()
         }
+        TBuiltinOp::MapTopN { .. } => {
+            jit_map_string_int_type(recv_ty)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
         TBuiltinOp::MapEqual | TBuiltinOp::MapIntersection => {
             jit_map_string_int_type(recv_ty)
                 && args.len() == 1
@@ -3970,6 +3993,10 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::ParseInt | TBuiltinOp::ParseFloat => {
             matches!(recv_ty, Type::String) && args.is_empty()
+        }
+        TBuiltinOp::StringFromBytes | TBuiltinOp::StringFromBytesLossy => {
+            matches!(recv_ty, Type::List(inner) if matches!(inner.as_ref(), Type::IntN { signed: false, bits: 8 }))
+                && args.is_empty()
         }
         TBuiltinOp::Slice { .. } => {
             (jit_list_int_type(recv_ty) || matches!(recv_ty, Type::String))
@@ -4187,6 +4214,11 @@ fn resident_safe_builtin_op(
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::Counts => {
+            (jit_list_string_type(recv_ty)
+                || matches!(jit_list_iter_elem_type(recv_ty), Some(Type::String)))
+                && args.is_empty()
         }
         TBuiltinOp::ExtendList | TBuiltinOp::ConcatList => false,
         TBuiltinOp::SetFrom => {
@@ -4446,9 +4478,17 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::ListCopy => jit_list_int_type(recv_ty) && args.is_empty(),
         TBuiltinOp::ListEqual => {
-            jit_list_int_type(recv_ty)
+            let list_eq_type = |ty: &Type| {
+                jit_list_int_type(ty)
+                    || matches!(
+                        ty,
+                        Type::List(inner) | Type::FixedList { elem: inner, .. }
+                            if jit_list_int_type(inner)
+                    )
+            };
+            list_eq_type(recv_ty)
                 && args.len() == 1
-                && jit_list_int_type(&args[0].ty)
+                && list_eq_type(&args[0].ty)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::ListBinarySearch => {
@@ -4577,6 +4617,12 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::StringIsWhitespace
         | TBuiltinOp::StringIsAscii => matches!(recv_ty, Type::String) && args.is_empty(),
         TBuiltinOp::StringSplitOnce { .. } => {
+            matches!(recv_ty, Type::String)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::String)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::StringCutLast { .. } => {
             matches!(recv_ty, Type::String)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
@@ -5371,6 +5417,7 @@ fn expr_kind_name(kind: &TExprKind) -> &'static str {
         TExprKind::ClosureMethod { .. } => "ClosureMethod",
         TExprKind::HostBorrowCallback { .. } => "HostBorrowCallback",
         TExprKind::NumericMethod { .. } => "NumericMethod",
+        TExprKind::NumericBinaryMethod { .. } => "NumericBinaryMethod",
         TExprKind::OverflowOpt { .. } => "OverflowOpt",
         TExprKind::HandleMethod { .. } => "HandleMethod",
         // The closure kinds are named for the same reason: the callback form is
@@ -6529,7 +6576,11 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                         | "count",
                     0..=1
                 ) | ("group" | "name", 1)
-                    | ("replace_all" | "split_limit" | "replace_all_with", 2)
+                    | (
+                        "replace" | "replace_first" | "replace_all" | "split_limit"
+                        | "replace_all_with",
+                        2,
+                    )
             )
         }
         THandleOp::FileReaderReadLine if args.is_empty() => true,
@@ -6583,6 +6634,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::DurationIsZero | THandleOp::DurationTotalSeconds => args.is_empty(),
         THandleOp::DurationDifference => args.len() == 1,
         THandleOp::DurationSecondsValue => args.is_empty(),
+        THandleOp::DurationScale | THandleOp::DurationDivide => args.len() == 1,
         THandleOp::AllocAlloc | THandleOp::AllocTryAlloc => args.len() == 1,
         THandleOp::AllocReset
         | THandleOp::ClockNow
@@ -6822,19 +6874,32 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::AppMethod { .. } => true,
         THandleOp::ReaderOver
         | THandleOp::ReaderReadU8
+        | THandleOp::ReaderReadI8
         | THandleOp::ReaderReadU16Le
         | THandleOp::ReaderReadU16Be
+        | THandleOp::ReaderReadI16Le
+        | THandleOp::ReaderReadI16Be
         | THandleOp::ReaderReadU32Le
         | THandleOp::ReaderReadU32Be
+        | THandleOp::ReaderReadI32Le
+        | THandleOp::ReaderReadI32Be
         | THandleOp::ReaderReadU64Le
         | THandleOp::ReaderReadU64Be
+        | THandleOp::ReaderReadI64Le
+        | THandleOp::ReaderReadI64Be
         | THandleOp::ReaderReadF32Le
+        | THandleOp::ReaderReadF32Be
         | THandleOp::ReaderReadF64Le
+        | THandleOp::ReaderReadF64Be
+        | THandleOp::ReaderPeek
         | THandleOp::ReaderRemaining
         | THandleOp::ReaderAtEnd
         | THandleOp::CursorOver
         | THandleOp::CursorSkipWs => args.is_empty(),
-        THandleOp::ReaderTake | THandleOp::CursorTakeUntil => args.len() == 1,
+        THandleOp::ReaderTake
+        | THandleOp::ReaderSeek
+        | THandleOp::ReaderSkip
+        | THandleOp::CursorTakeUntil => args.len() == 1,
         THandleOp::CursorTakePattern { .. } | THandleOp::ReaderTakePattern { .. } => {
             args.is_empty()
         }

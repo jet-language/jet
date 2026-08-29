@@ -1373,6 +1373,10 @@ impl CtKey {
     pub fn from_value(v: CtValue) -> Option<CtKey> {
         match v {
             CtValue::Int(n) => Some(CtKey::Int(n)),
+            // Exact Int arithmetic spills values outside the evaluator's
+            // fast i64 carrier into BigInt. If the spill still fits i64,
+            // canonicalize it to the same key used by direct Int values.
+            CtValue::BigInt(value) => value.try_i64().map(CtKey::Int),
             CtValue::Str(s) => Some(CtKey::Str(s)),
             CtValue::Bool(b) => Some(CtKey::Bool(b)),
             CtValue::Char(c) => Some(CtKey::Char(c)),
@@ -1904,6 +1908,13 @@ impl CtValue {
 
     pub fn serialize(&self) -> String {
         match self {
+            CtValue::Int(n) if *n < -(1i64 << 62) || *n > (1i64 << 62) - 1 => {
+                // An oversized exact `Int` is a packed Prelude value. Use the
+                // string constructor so i64::MIN never becomes an invalid
+                // unary-negative Rust literal and every spill gets one key
+                // representation at the generated boundary.
+                format!("jet_std::jet_int_from_str({:?}).unwrap()", n.to_string())
+            }
             CtValue::Int(n) => format!("{}i64", n),
             CtValue::Float(value) => value.serialize(),
             CtValue::Bool(b) => b.to_string(),
@@ -1931,7 +1942,7 @@ impl CtValue {
                     let mut s = String::from("{ let mut _m = JetMap::new(); ");
                     for (k, v) in m {
                         s.push_str(&format!(
-                            "_m.insert(({}), {}); ",
+                            "jet_map_insert(&mut _m, ({}), {}); ",
                             k.to_value().serialize(),
                             v.serialize()
                         ));

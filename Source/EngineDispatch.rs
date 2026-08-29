@@ -96,7 +96,7 @@ fn version_skew_message(engine: &str, jet_version: &str, engine_version: Option<
             "Error [E1227]: `{bin}` {jet_version} and `{engine}` {ev} disagree\n \
              Why: `{bin}` and `{engine}` ship as one toolchain and must match exactly, or the \
              engine may not understand what `{bin}` sends it\n \
-             Fix: use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both \
+             Fix: Use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both \
              binaries come from the same release\n \
              More: jet-lang.dev/e/E1227\n"
         ),
@@ -104,7 +104,7 @@ fn version_skew_message(engine: &str, jet_version: &str, engine_version: Option<
             "Error [E1227]: `{bin}` {jet_version} and `{engine}` disagree (no protocol reply)\n \
              Why: `{bin}` and `{engine}` ship as one toolchain and must match exactly; this \
              `{engine}` didn't answer the version handshake, so it predates this protocol\n \
-             Fix: use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both \
+             Fix: Use matching `{bin}`/`{engine}` versions — reinstall the toolchain so both \
              binaries come from the same release\n \
              More: jet-lang.dev/e/E1227\n"
         ),

@@ -7,6 +7,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
+// Tier-parity scratch programs exercise the language and Core surface, not an
+// application manifest. Give every scratch project one explicit test
+// authority decision so an authority-floor change cannot turn unrelated
+// tests into per-test allowlists.
+const TIR_TEST_PACKAGE: &str = "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: .{ holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n";
+
 fn unique_tmp(prefix: &str) -> PathBuf {
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), n))
@@ -45,6 +51,27 @@ pub fn compile(name: &str, src: &str) -> String {
         .rust
 }
 
+/// Compile source that has no repository path. The compiler still needs a
+/// real bundle path to resolve its package and module context.
+pub fn compile_source(
+    name: &str,
+    src: &str,
+) -> Result<jet::CompileOutput, Vec<jet::Diagnostics::Diagnostic>> {
+    let dir = unique_tmp("jet_tir_compile_source");
+    fs::create_dir_all(&dir).unwrap();
+    let filename = if name.ends_with(".jet") {
+        name.to_string()
+    } else {
+        format!("{name}.jet")
+    };
+    let path = dir.join(filename);
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy().into_owned();
+    let result = jet::compile_with_path(src, &shown);
+    let _ = fs::remove_dir_all(&dir);
+    result
+}
+
 pub fn build_and_run_full(prefix: &str, name: &str, src: &str) -> (i32, String, String) {
     build_and_run_full_inner(prefix, name, src, None)
 }
@@ -70,9 +97,11 @@ fn jit_run_with_package(
     let jet_name = format!("{name}.jet");
     let jet_path = dir.join(&jet_name);
     fs::write(&jet_path, src).unwrap();
-    if let Some(package_source) = package_source {
-        fs::write(dir.join("package.jet"), package_source).unwrap();
-    }
+    fs::write(
+        dir.join("package.jet"),
+        package_source.unwrap_or(TIR_TEST_PACKAGE),
+    )
+    .unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
     command
         .arg("run")
@@ -96,6 +125,7 @@ pub fn jit_run_traced(name: &str, src: &str) -> (i32, String, String) {
     fs::create_dir_all(&dir).unwrap();
     let jet_path = dir.join(format!("{name}.jet"));
     fs::write(&jet_path, src).unwrap();
+    fs::write(dir.join("package.jet"), TIR_TEST_PACKAGE).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", jet_path.to_str().unwrap(), "--trace-tiers"])
         .current_dir(&dir)
@@ -132,6 +162,7 @@ pub fn jit_run_with_env_args(
     let jet_name = format!("{name}.jet");
     let jet_path = dir.join(&jet_name);
     fs::write(&jet_path, src).unwrap();
+    fs::write(dir.join("package.jet"), TIR_TEST_PACKAGE).unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
     command
         .arg("run")
@@ -171,9 +202,11 @@ fn interpreter_run_with_package(
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join(format!("{name}.jet"));
     fs::write(&path, src).unwrap();
-    if let Some(package_source) = package_source {
-        fs::write(dir.join("package.jet"), package_source).unwrap();
-    }
+    fs::write(
+        dir.join("package.jet"),
+        package_source.unwrap_or(TIR_TEST_PACKAGE),
+    )
+    .unwrap();
     let shown = path.to_string_lossy().into_owned();
     let outcome = jet::Interpreter::dev_iteration(&shown, false, true);
     let _ = fs::remove_dir_all(&dir);

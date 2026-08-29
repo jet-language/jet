@@ -1,0 +1,25 @@
+// D-BYTESDECODE1=A: hex decoding is strict and does not trim or repair input.
+use core.encoding.hex as hex
+
+fn run() {
+    valid :: hex.decode("4869") ?? return Err("valid hex failed")
+    print("valid-len={valid.len()}")
+
+    whitespace :: hex.decode(" 4869 ")
+    if whitespace == {
+        .Ok(_) -> { print("whitespace=accepted") }
+        .Err(error) -> { print("whitespace={error}") }
+    }
+
+    odd :: hex.decode("abc")
+    if odd == {
+        .Ok(_) -> { print("odd=accepted") }
+        .Err(error) -> { print("odd={error}") }
+    }
+
+    non_hex :: hex.decode("zz")
+    if non_hex == {
+        .Ok(_) -> { print("non-hex=accepted") }
+        .Err(error) -> { print("non-hex={error}") }
+    }
+}

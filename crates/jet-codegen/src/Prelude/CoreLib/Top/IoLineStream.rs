@@ -43,6 +43,28 @@ fn jet_std_io_readline() -> Result<String, jet_std::IOError> {
     jet_std_io_input(None)
 }
 
+fn jet_std_io_read_all_input() -> Result<String, jet_std::IOError> {
+    use std::io::Read;
+    if jet_fault_should_fail("IO.Read") {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            "fault injected: IO.Read",
+        ));
+    }
+    let mut input = String::new();
+    std::io::stdin()
+        .read_to_string(&mut input)
+        .map_err(|error| {
+            jet_std::IOError::other(
+                jet_std::IOOperation::Read,
+                Some("stdin".to_string()),
+                error,
+            )
+        })?;
+    Ok(input)
+}
+
 fn jet_std_io_read_until(delim: &String) -> Result<String, jet_std::IOError> {
     use std::io::Read;
     if delim.is_empty() {

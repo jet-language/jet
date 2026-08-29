@@ -230,10 +230,10 @@ impl ProviderFailure {
     }
     pub fn diagnostic(&self, budget: &str) -> ProviderDiagnostic {
         match self.class {
-            FailureClass::Unavailable | FailureClass::Incompatible => ProviderDiagnostic { code: "E2906", what: format!("performance budget {budget} has no usable evidence"), why: self.reason.clone(), fix: "correct the provider evidence or bootstrap only when absent or stale evidence is eligible".into() },
-            FailureClass::Unsupported => ProviderDiagnostic { code: "E2903", what: format!("performance budget {budget} is not valid"), why: self.reason.clone(), fix: "use one supported metric and provider pair".into() },
-            FailureClass::Unresolved => ProviderDiagnostic { code: "E2905", what: format!("performance budget {budget} cannot resolve provider"), why: self.reason.clone(), fix: "name one registered provider identity".into() },
-            _ => ProviderDiagnostic { code: "E2908", what: "performance budget operation failed".into(), why: format!("measurement provider refused the operation: {}", self.reason), fix: "correct the named provider failure and retry the operation".into() },
+            FailureClass::Unavailable | FailureClass::Incompatible => ProviderDiagnostic { code: "E2906", what: format!("Performance budget {budget} has no usable evidence"), why: self.reason.clone(), fix: "Correct the provider evidence or bootstrap only when absent or stale evidence is eligible".into() },
+            FailureClass::Unsupported => ProviderDiagnostic { code: "E2903", what: format!("Performance budget {budget} is not valid"), why: self.reason.clone(), fix: "Use one supported metric and provider pair".into() },
+            FailureClass::Unresolved => ProviderDiagnostic { code: "E2905", what: format!("Performance budget {budget} cannot resolve provider"), why: self.reason.clone(), fix: "Name one registered provider identity".into() },
+            _ => ProviderDiagnostic { code: "E2908", what: "Performance budget operation failed".into(), why: format!("Measurement provider refused the operation: {}", self.reason), fix: "Correct the named provider failure and retry the operation".into() },
         }
     }
 }
@@ -248,8 +248,8 @@ pub struct ProviderDiagnostic {
 impl ProviderDiagnostic {
     pub fn render(&self) -> String {
         format!(
-            "# Error [{}]: {}\n\nWhat: {}\nWhy: {}\nFix: {}\nMore: jet-lang.dev/e/{}\n",
-            self.code, self.what, self.what, self.why, self.fix, self.code
+            "Error [{}]: {}\n Why: {}\n Fix: {}\nMore: jet-lang.dev/e/{}\n",
+            self.code, self.what, self.why, self.fix, self.code
         )
     }
 }
@@ -3086,7 +3086,7 @@ pub fn evaluation_diagnostic(
                 .as_ref()
                 .map(&rational)
                 .unwrap_or_else(|| "none".into());
-            Some(ProviderDiagnostic{code:"E2907",what:format!("performance budget {budget} {state}"),why:format!("estimator {} with confidence [{lower}, {upper}] in {} direction did not prove the limit; baseline reports [{}]",rational(&evaluation.point),match direction{Direction::LowerIsBetter=>"lower-is-better",Direction::HigherIsBetter=>"higher-is-better"},baseline_report_ids.join(",")),fix:"improve the measured behavior, inspect the named evidence, or record an explicit exception".into()})
+            Some(ProviderDiagnostic{code:"E2907",what:format!("Performance budget {budget} {state}"),why:format!("Estimator {} with confidence [{lower}, {upper}] in {} direction did not prove the limit; baseline reports [{}]",rational(&evaluation.point),match direction{Direction::LowerIsBetter=>"lower-is-better",Direction::HigherIsBetter=>"higher-is-better"},baseline_report_ids.join(",")),fix:"Improve the measured behavior, inspect the named evidence, or record an explicit exception".into()})
         }
     }
 }

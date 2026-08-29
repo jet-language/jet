@@ -523,12 +523,12 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
                         .collect::<Vec<_>>()
                         .join(" and ");
                     eprintln!(
-                        "Error [E2950]: solver found a counterexample to {}",
+                        "Error [E2950]: Solver found a counterexample to {}",
                         item.obligation.kind
                     );
-                    eprintln!(" Why: {values} satisfy the assumptions but make the claim false");
+                    eprintln!(" Why: The assignment {values} satisfies the assumptions but makes the claim false");
                     eprintln!(
-                        " Fix: change {} so every return satisfies the claim, or correct the contract",
+                        " Fix: Change {} so every return satisfies the claim, or correct the contract",
                         item.obligation.origin
                     );
                     eprintln!("More: jet-lang.dev/e/E2950");

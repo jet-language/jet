@@ -71,6 +71,8 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} hangar cache list              list host-owned cache roles
   {bin} hangar cache publish <entry> --role <role> --yes
                                       publish a signed NAR to a write-granted mirror
+  {bin} hangar cache stage --role <role> --to <dir> --yes
+                                      lay out a signed local cache publication tree
   {bin} hangar cache verify <entry> --role <role>
                                       verify the first trusted cache hit
   {bin} hangar cache substitute <entry> --role <role> --to <dir> --yes

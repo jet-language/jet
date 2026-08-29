@@ -336,7 +336,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         }
     }
 
-    fn replace_indexed_value(
+    pub(super) fn replace_indexed_value(
         &mut self,
         base: CtValue,
         index: CtValue,

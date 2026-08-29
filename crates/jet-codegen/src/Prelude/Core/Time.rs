@@ -1,7 +1,7 @@
 // D-TIMEDEPTH1/D-TIME-CALENDAR1: civil-time types and calendar math.
 // Pure Rust, no external crates (I6). Proleptic Gregorian calendar, Unix time
 // as UTC seconds, and a small TZif reader for IANA zoneinfo files.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct JetDate {
     year: i64,
     month: i64,
@@ -103,8 +103,8 @@ impl JetDate {
     }
     pub(crate) fn add_months(&self, n: i64) -> JetDate {
         let total = self.month - 1 + n;
-        let y = self.year + total / 12;
-        let m = total % 12 + 1;
+        let y = self.year + total.div_euclid(12);
+        let m = total.rem_euclid(12) + 1;
         let d = self.day.min(Self::days_in_month_of(y, m));
         JetDate::new(y, m, d)
     }
@@ -113,7 +113,7 @@ impl JetDate {
     }
     pub(crate) fn weekday(&self) -> i64 {
         // Legacy D-TIMEDEPTH1 shape: 0=Sunday, 6=Saturday.
-        (self.to_day_number() + 6) % 7
+        (self.to_day_number() + 1).rem_euclid(7)
     }
     pub(crate) fn iso_weekday(&self) -> i64 {
         (self.to_day_number() % 7) + 1
@@ -166,7 +166,7 @@ impl JetDate {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct JetLocalTime {
     hour: i64,
     minute: i64,
@@ -310,7 +310,7 @@ impl JetInstant {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct JetDateTime {
     secs: i64,
     nanos: u32,
@@ -431,6 +431,9 @@ impl JetDateTime {
             let m = mm
                 .parse::<i64>()
                 .map_err(|_| format!("bad RFC3339 offset minute: {}", mm))?;
+            if h < 0 || h > 23 || m < 0 || m > 59 {
+                return Err(format!("RFC3339 offset out of range: {}", zone_part));
+            }
             sign * (h * 3600 + m * 60)
         };
         Ok(JetDateTime {
@@ -761,11 +764,32 @@ impl JetZone {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) struct JetZonedDateTime {
     instant: JetDateTime,
     zone: JetZone,
 }
+
+impl PartialEq for JetZonedDateTime {
+    fn eq(&self, other: &Self) -> bool {
+        self.instant == other.instant && self.zone.name == other.zone.name
+    }
+}
+
+impl Eq for JetZonedDateTime {}
+
+impl PartialOrd for JetZonedDateTime {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for JetZonedDateTime {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.instant.cmp(&other.instant)
+    }
+}
+
 impl JetZonedDateTime {
     pub(crate) fn now(zone: &JetZone) -> Self {
         JetDateTime::now().in_zone(zone)
@@ -847,8 +871,79 @@ pub(crate) fn jet_time_format_pattern(
     zone: Option<(&JetZone, i64)>,
 ) -> String {
     let mut out = pattern.clone();
-    let weekday =
-        ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][(date.iso_weekday() - 1) as usize];
+    let weekday_index = (date.iso_weekday() - 1) as usize;
+    let weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][weekday_index];
+    let weekday_full = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ][weekday_index];
+    let month_short =
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+            [(date.month - 1) as usize];
+    let month_full = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ][(date.month - 1) as usize];
+    let year = format!("{:04}", date.year);
+    let year_short = format!("{:02}", date.year.rem_euclid(100));
+    let month = format!("{:02}", date.month);
+    let day = format!("{:02}", date.day);
+    let day_of_year = format!("{:03}", date.day_of_year());
+    let hour = format!("{:02}", time.hour);
+    let hour_12 = format!("{:02}", ((time.hour + 11) % 12) + 1);
+    let minute = format!("{:02}", time.minute);
+    let second = format!("{:02}", time.second);
+    let meridiem = if time.hour < 12 { "AM" } else { "PM" };
+    let offset = zone
+        .map(|(_, seconds)| jet_time_offset_string(seconds))
+        .unwrap_or_default();
+    let zone_name = zone.map(|(z, _)| z.name.as_str()).unwrap_or_default();
+
+    // Strftime-style codes. Replace %% first so a formatted value can never
+    // be interpreted as another code.
+    out = out.replace("%%", "%");
+    out = out.replace("%A", weekday_full);
+    out = out.replace("%a", weekday);
+    out = out.replace("%B", month_full);
+    out = out.replace("%b", month_short);
+    out = out.replace("%Y", &year);
+    out = out.replace("%y", &year_short);
+    out = out.replace("%m", &month);
+    out = out.replace("%d", &day);
+    out = out.replace("%e", &format!("{:2}", date.day));
+    out = out.replace("%j", &day_of_year);
+    out = out.replace("%H", &hour);
+    out = out.replace("%I", &hour_12);
+    out = out.replace("%M", &minute);
+    out = out.replace("%S", &second);
+    out = out.replace("%p", meridiem);
+    out = out.replace("%z", &offset);
+    out = out.replace("%Z", zone_name);
+    out = out.replace("%F", &format!("{}-{}-{}", year, month, day));
+    out = out.replace("%T", &format!("{}:{}:{}", hour, minute, second));
+    out = out.replace("%R", &format!("{}:{}", hour, minute));
+    out = out.replace("%D", &format!("{}/{}/{}", month, day, year_short));
+
+    // The original Jet tokens remain supported. Longer tokens must be
+    // replaced first so `MMMM` is not read as four `MM` tokens.
+    out = out.replace("EEEE", weekday_full);
+    out = out.replace("MMMM", month_full);
+    out = out.replace("MMM", month_short);
     out = out.replace("yyyy", &format!("{:04}", date.year));
     out = out.replace("DDD", &format!("{:03}", date.day_of_year()));
     out = out.replace("EEE", weekday);

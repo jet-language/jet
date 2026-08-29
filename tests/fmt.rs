@@ -261,7 +261,7 @@ fn multi_head_function_surface_round_trips() {
 }
 
 #[test]
-fn alternatives_only_bar_formatting_is_stable() {
+fn bar_formatting_is_stable() {
     let src = "enum State { Ready Waiting }\n\nfn run() {\n    state :: State.Ready\n    if state == {\n        .Ready | .Waiting -> print(\"known\")\n    }\n}\n";
     let once = jet::format_source(src).expect("choice alternatives should format");
     assert!(
@@ -271,9 +271,13 @@ fn alternatives_only_bar_formatting_is_stable() {
     let twice = jet::format_source(&once).expect("formatted alternatives should parse");
     assert_eq!(once, twice, "alternative formatting must be stable");
 
-    assert!(
-        jet::format_source("fn run() { value :: 1 | 2 }").is_err(),
-        "formatter must not preserve a general single-bar expression"
+    let bit_or = jet::format_source("fn run() { value :: 1 | 2 }")
+        .expect("formatter should preserve value-position bitwise OR");
+    assert!(bit_or.contains("value :: 1 | 2"), "formatter lost bitwise OR:\n{bit_or}");
+    assert_eq!(
+        bit_or,
+        jet::format_source(&bit_or).unwrap(),
+        "bitwise-OR formatting must be stable"
     );
     assert!(
         jet::format_source("fn run() { value :: 1 |> print }").is_err(),

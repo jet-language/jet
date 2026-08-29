@@ -115,6 +115,16 @@ mod io_line_stream {
             Err(e) => super::result_err(&format!("{e:?}")),
         }
     }
+
+    pub(super) fn jet_jit_io_read_all_input() -> i64 {
+        match jet_std_io_read_all_input() {
+            Ok(s) => {
+                let id = super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+                super::result_ok(id as u64)
+            }
+            Err(e) => super::result_err(&format!("{e:?}")),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1334,6 +1344,7 @@ host_fns! {
     take: "jet_jit_io_take" => io_line_stream::jet_jit_io_take: unary;
     read_until: "jet_jit_io_read_until" => io_line_stream::jet_jit_io_read_until: unary;
     readline: "jet_jit_io_readline" => io_line_stream::jet_jit_io_readline: nullary;
+    read_all_input: "jet_jit_io_read_all_input" => io_line_stream::jet_jit_io_read_all_input: nullary;
     stdin_lines: "jet_jit_stdin_lines" => jet_jit_stdin_lines: unary;
     file_lines: "jet_jit_file_lines" => jet_jit_file_lines: unary;
     file_writer_write_line: "jet_jit_file_writer_write_line" => jet_jit_file_writer_write_line: binary;

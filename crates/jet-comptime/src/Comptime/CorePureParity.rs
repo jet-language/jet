@@ -16,6 +16,7 @@ use crate::Comptime::EmailAdapter;
 use crate::Comptime::Methods::as_float;
 use crate::Comptime::ServicesLite;
 use jet_foundation::Prelude::jet_as_bytes as as_bytes;
+use jet_foundation::StructuralDebug::jet_debug_map;
 use jet_foundation::Syntax::CoreCallPureRoute;
 
 type EvalResult = Result<CtValue, Diagnostic>;
@@ -529,6 +530,23 @@ pub(super) fn evaluate_method(
             };
             Ok(out.to_value())
         }),
+        ("Decimal", "div", 1) => decimal_from_value(recv, span).and_then(|left| {
+            let right = decimal_from_value(&args[0], span)?;
+            left.div(&right)
+                .map(|value| value.to_value())
+                .ok_or_else(|| unsupported("a Decimal quotient that leaves the exact Fraction range, or divided by zero", span))
+        }),
+        ("Decimal", "round" | "floor" | "ceil", 0) => {
+            decimal_from_value(recv, span).map(|decimal| {
+                let value = match method {
+                    "round" => decimal.round(),
+                    "floor" => decimal.floor(),
+                    "ceil" => decimal.ceil(),
+                    _ => unreachable!("decimal rounding method guard"),
+                };
+                value.to_value()
+            })
+        }
         ("ZonedDateTime", "date", 0) => {
             zoned_from_value(recv, span).map(|zoned| zoned.date().value())
         }
@@ -653,14 +671,10 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                 .iter()
                 .map(|(key, value)| {
                     let key = key.to_value();
-                    Some(format!(
-                        "{}: {}",
-                        nested_display(&key)?,
-                        nested_display(value)?
-                    ))
+                    Some((nested_display(&key)?, nested_display(value)?))
                 })
                 .collect::<Option<Vec<_>>>()?;
-            return Some(format!("[:{}]", values.join(", ")));
+            return Some(jet_debug_map(values));
         }
         _ => {}
     }
@@ -1097,21 +1111,16 @@ fn canonical_structural_display(value: &CtValue) -> Option<String> {
                 .collect::<Option<Vec<_>>>()?
                 .join(", ")
         )),
-        CtValue::Map(entries) => Some(format!(
-            "[:{}]",
-            entries
+        CtValue::Map(entries) => {
+            let values = entries
                 .iter()
                 .map(|(key, value)| {
                     let key = key.to_value();
-                    Some(format!(
-                        "{}: {}",
-                        nested_display(&key)?,
-                        nested_display(value)?
-                    ))
+                    Some((nested_display(&key)?, nested_display(value)?))
                 })
-                .collect::<Option<Vec<_>>>()?
-                .join(", ")
-        )),
+                .collect::<Option<Vec<_>>>()?;
+            Some(jet_debug_map(values))
+        }
         CtValue::Unit => Some(String::new()),
         CtValue::Closure(_) => None,
     }
@@ -2489,10 +2498,28 @@ fn format_zoned_pattern(pattern: &str, zoned: ZonedDateTime) -> String {
 }
 
 fn date_from_value(value: &CtValue, type_name: &str, span: Span) -> Result<Date, Diagnostic> {
+    let field_type_name = match value {
+        CtValue::Struct {
+            type_name: actual,
+            ..
+        } => {
+            let actual = actual
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(actual.as_str());
+            if matches!(type_name, "Date" | "LocalDate")
+                && matches!(actual, "Date" | "LocalDate")
+            {
+                actual
+            } else {
+                type_name
+            }
+        }
+        _ => type_name,
+    };
     Ok(Date::new(
-        int_field(value, type_name, "year", span)?,
-        int_field(value, type_name, "month", span)?,
-        int_field(value, type_name, "day", span)?,
+        int_field(value, field_type_name, "year", span)?,
+        int_field(value, field_type_name, "month", span)?,
+        int_field(value, field_type_name, "day", span)?,
     ))
 }
 

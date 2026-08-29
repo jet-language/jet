@@ -1622,7 +1622,7 @@ enum EntryError {
 /// Check the existing codegen capabilities for the Rust shape that entry
 /// reporting will receive. Native composites use their Prelude JetShow
 /// blanket implementations; nominal leaves use the existing printable set.
-fn jet_showable_type(cx: &Cx, ty: &Type) -> bool {
+pub(crate) fn jet_showable_type(cx: &Cx, ty: &Type) -> bool {
     match ty {
         Type::Int
         | Type::Float
@@ -1658,11 +1658,83 @@ fn jet_showable_type(cx: &Cx, ty: &Type) -> bool {
             (native_composite || cx.has_auto_printable_type(name))
                 && args.iter().all(|arg| jet_showable_type(cx, arg))
         }
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, field)| jet_showable_type(cx, field)),
         Type::TraitObject(_)
-        | Type::Tuple(_)
         | Type::Shared(_)
         | Type::Fn { .. }
         | Type::Measure(_) => false,
+    }
+}
+
+/// Check the Rust capability needed by a generated `JetDisplay` impl. This is
+/// separate from `JetShow`: an explicit source `Display` impl may provide
+/// display without providing printable/debug output.
+pub(crate) fn jet_displayable_type(cx: &Cx, ty: &Type) -> bool {
+    match ty {
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::Float32
+        | Type::Quantity { .. } => true,
+        Type::List(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::Tagged { inner, .. }
+        | Type::InlineRange { base: inner, .. } => jet_displayable_type(cx, inner),
+        Type::Result { ok, err } => {
+            jet_displayable_type(cx, ok) && jet_displayable_type(cx, err)
+        }
+        // JetMap's Prelude display impl requires both sides: BTreeMap must
+        // order keys and its renderer displays each key/value pair.
+        Type::Map { key, value, .. } => {
+            jet_displayable_type(cx, key) && jet_displayable_type(cx, value)
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, field)| jet_displayable_type(cx, field)),
+        Type::Union(members) => members
+            .iter()
+            .all(|member| jet_displayable_type(cx, member)),
+        Type::Named(name) => {
+            name == "str"
+                || cx.has_display_type(name)
+                || cx.has_auto_printable_type(name)
+                || cx
+                    .unit_label(&Type::Named(name.clone()))
+                    .is_some()
+        }
+        Type::Apply { name, args } => {
+            if name == "KeyRef" {
+                return true;
+            }
+            let native_composite = matches!(
+                name.as_str(),
+                crate::Syntax::TYPE_SET
+                    | crate::Syntax::TYPE_RANK
+                    | crate::Syntax::TYPE_PRIORITY_QUEUE
+                    | crate::Syntax::TYPE_QUEUE
+                    | crate::Syntax::TYPE_LRU
+                    | crate::Syntax::EXPIRING_VALUE_TYPE
+                    | "Loadable"
+                    | "View"
+            );
+            (native_composite
+                || cx.has_display_type(name)
+                || cx.has_auto_printable_type(name))
+                && args.iter().all(|arg| jet_displayable_type(cx, arg))
+        }
+        Type::TraitObject(bounds) => bounds.iter().any(|bound| {
+            matches!(
+                bound.as_str(),
+                crate::Generics::DISPLAY | crate::Generics::RENDERABLE
+            )
+        }),
+        Type::Shared(_) | Type::Fn { .. } | Type::Measure(_) => false,
     }
 }
 
@@ -1671,7 +1743,7 @@ fn jet_showable_type(cx: &Cx, ty: &Type) -> bool {
 /// to choose `.jet_debug()` vs the always-required `.jet_show()` fallback, so
 /// the generated crate never calls a `jet_debug` nobody emitted (I2) — e.g.
 /// `[FieldError]` or `NetError` payloads whose Prelude types are show-only.
-fn jet_debuggable_type(cx: &Cx, ty: &Type) -> bool {
+pub(crate) fn jet_debuggable_type(cx: &Cx, ty: &Type) -> bool {
     match ty {
         Type::Int
         | Type::Float
@@ -1699,8 +1771,10 @@ fn jet_debuggable_type(cx: &Cx, ty: &Type) -> bool {
         Type::Apply { name, args } => {
             cx.has_auto_debug_type(name) && args.iter().all(|arg| jet_debuggable_type(cx, arg))
         }
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, field)| jet_debuggable_type(cx, field)),
         Type::TraitObject(_)
-        | Type::Tuple(_)
         | Type::Shared(_)
         | Type::Fn { .. }
         | Type::Measure(_) => false,
@@ -1860,6 +1934,8 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
             rust_derives.extend(["Debug", "Clone", "PartialEq"]);
         }
         if !has_shared_guard && hashable {
+            rust_derives.push("PartialOrd");
+            rust_derives.push("Ord");
             rust_derives.push("Eq");
             rust_derives.push("Hash");
         }
@@ -2612,10 +2688,15 @@ pub(crate) fn emit_trait_impl(
         }
         out.push_str("}\n\n");
     }
+    let rust_trait_name = if block.trait_name == crate::Generics::DEBUG {
+        "__jet_Debug".to_string()
+    } else {
+        crate::Codegen::rust_trait_name(&block.trait_name)
+    };
     out.push_str(&format!(
         "impl{} {} for {}{} {{\n",
         tp_impl,
-        crate::Codegen::rust_trait_name(&block.trait_name),
+        rust_trait_name,
         mangle_path(type_name),
         tp_use
     ));
@@ -2801,10 +2882,15 @@ pub(crate) fn emit_external_trait_impl(
         }
         out.push_str("}\n\n");
     }
+    let rust_trait_name = if trait_name == crate::Generics::DEBUG {
+        "__jet_Debug".to_string()
+    } else {
+        crate::Codegen::rust_trait_name(trait_name)
+    };
     out.push_str(&format!(
         "impl{} {} for {}{} {{\n",
         tp_impl,
-        crate::Codegen::rust_trait_name(trait_name),
+        rust_trait_name,
         mangle_path(&i.type_name),
         tp_use,
     ));
@@ -2976,12 +3062,16 @@ fn emit_trait_method(
     // derived `encode`/`decode` — an authority difference, never a capability
     // one. A hand-written `impl T.Encode` keeps the unconditional ICE.
     if compiler_written || TIR::tir_covers_trait_method(f, type_name, cx, trait_name) {
+        let raw_protocol_return = matches!(
+            trait_name,
+            crate::Generics::ENCODE | crate::Generics::DECODE
+        ) || compiler_written && f.compiler_generated;
         let tir = TIR::lower_trait_method(
             f,
             type_name,
             cx,
             trait_name,
-            compiler_written && f.compiler_generated,
+            raw_protocol_return,
         );
         if let Some(name) = helper_name {
             if let TFuncKind::TraitMethod {

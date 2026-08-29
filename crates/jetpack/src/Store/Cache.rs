@@ -212,6 +212,15 @@ pub struct CacheTransferReport {
     pub bytes: u64,
 }
 
+/// Summary of a local cache publication tree prepared from Hangar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CacheStageReport {
+    pub role: String,
+    pub destination: PathBuf,
+    pub entries: usize,
+    pub bytes: u64,
+}
+
 /// Read-only trust state exposed by package explanation. This is the host's
 /// accepted admission pin, not a new cache decision path; transfer still
 /// performs the full signature, provenance, freshness, and output checks.
@@ -542,6 +551,73 @@ pub fn publish_cache_entry(
     )))
 }
 
+/// Lay out a complete local, signed cache tree from the current Hangar.
+///
+/// This is the staging half of cache publication. It deliberately uses the
+/// same provenance, NAR, receipt, and HMAC signing helpers as a normal cache
+/// publish, but its endpoint is always a local directory. No network mirror
+/// is contacted and the host role secret stays under the Jetpack root.
+pub fn stage_cache_from_hangar(
+    roots: &Roots,
+    destination: &Path,
+    role: &str,
+) -> io::Result<CacheStageReport> {
+    let binding = read_cache_binding(roots, role)?;
+    if !binding.allow_write {
+        return Err(invalid(
+            "cache binding is read-only; staging needs a write grant",
+        ));
+    }
+    let destination = absolutize_host_path(destination.to_path_buf())?;
+    ensure_directory(&destination)?;
+    let key = read_trust_key(&binding.trust_key)?;
+    let entries = super::list_checked(roots)?;
+    let mut bytes = 0u64;
+    for entry in &entries {
+        ensure_reproducible_for_shared_cache(roots, entry)?;
+        let output = Path::new(&entry.out);
+        let metadata = fs::symlink_metadata(output)?;
+        if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
+            return Err(invalid(
+                "only a local Hangar file or directory can be staged as a NAR",
+            ));
+        }
+        if entry.envelope.output_hash.is_empty() {
+            return Err(invalid(
+                "Hangar entry has no output identity for cache staging",
+            ));
+        }
+        let actual_output_hash =
+            super::try_entry_output_hash(roots, entry).map_err(io::Error::other)?;
+        if actual_output_hash != entry.envelope.output_hash {
+            return Err(invalid(
+                "local output does not match the Hangar entry output identity",
+            ));
+        }
+        let (nar, stats) = super::write_nar(output)?;
+        verify_cache_writer_authority(roots, entry, role, &key)?;
+        let info = nar_info_for(entry, &stats)?;
+        verify_decoded_output_hash(roots, entry, &nar)?;
+        let receipt = cache_receipt_for_publication(
+            &CacheEndpoint::Local(destination.clone()),
+            role,
+            entry,
+            &key,
+        )?;
+        publish_local_resumable(&destination, &info, &nar, &key, &receipt)?;
+        let builder = cache_builder_for_entry(entry)?;
+        allow_cache_builder(&roots.root, role, &builder).map_err(io::Error::other)?;
+        allow_cache_witness(&roots.root, role, &receipt.witness).map_err(io::Error::other)?;
+        bytes = bytes.saturating_add(stats.bytes);
+    }
+    Ok(CacheStageReport {
+        role: binding.role,
+        destination,
+        entries: entries.len(),
+        bytes,
+    })
+}
+
 pub fn verify_cache_transfer(
     roots: &Roots,
     target: &str,
@@ -822,6 +898,22 @@ pub fn cache_report_json(operation: &str, report: &CacheTransferReport) -> Strin
                 .map(crate::JSON::quote)
                 .unwrap_or_else(|| "null".to_string()),
             report.bytes
+        ),
+    )
+}
+
+pub fn cache_stage_report_json(operation: &str, report: &CacheStageReport) -> String {
+    jet_foundation::Report::render_status_json(
+        "ok",
+        true,
+        operation,
+        &format!(
+            ",\"operation\":{},\"role\":{},\"destination\":{},\"entries\":{},\"bytes\":{}",
+            crate::JSON::quote(operation),
+            crate::JSON::quote(&report.role),
+            crate::JSON::quote(&report.destination.to_string_lossy()),
+            report.entries,
+            report.bytes,
         ),
     )
 }

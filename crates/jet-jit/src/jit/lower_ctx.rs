@@ -430,6 +430,25 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    fn list_eq_host(&self, list_ty: &Type) -> FuncId {
+        let nested = matches!(
+            list_ty,
+            Type::List(inner) | Type::FixedList { elem: inner, .. }
+                if jit_list_int_type(inner)
+        );
+        if nested {
+            return self.host.coll.list_eq_nested;
+        }
+        match list_ty {
+            Type::List(elem) | Type::FixedList { elem, .. } => match self.erase_distinct_ty(elem) {
+                Type::String => self.host.coll.list_eq_str,
+                Type::Float | Type::Float32 => self.host.coll.list_eq_f64,
+                _ => self.host.coll.list_eq,
+            },
+            _ => self.host.coll.list_eq,
+        }
+    }
+
     /// Declared positional-parameter count of a resident host symbol, read from
     /// the host table without materializing the parameter list.
     fn host_param_count(&self, id: FuncId) -> usize {
@@ -1593,6 +1612,9 @@ impl LowerCtx<'_, '_> {
                 | THandleOp::ClockWait => Some(Type::Int),
                 THandleOp::DurationIn { .. } => Some(Type::Option(Box::new(Type::Int))),
                 THandleOp::DurationSecondsValue => Some(Type::Float),
+                THandleOp::DurationScale | THandleOp::DurationDivide => {
+                    Some(Type::Named(jet_foundation::Syntax::DURATION_TYPE.to_string()))
+                }
                 _ => {
                     let _ = args;
                     None
@@ -9080,14 +9102,19 @@ impl LowerCtx<'_, '_> {
                 in_own_frame(|| -> Result<Value, String> {
                     let (signed, bits) = jet_codegen::Comptime::MathLayout::integer_type_layout(ty)
                         .ok_or_else(|| "jit numeric bound unsupported".to_string())?;
-                    Ok(self.b.ins().iconst(
+                    let bound = self.b.ins().iconst(
                         types::I64,
                         jet_codegen::Comptime::MathLayout::integer_bound(
                             signed,
                             bits,
                             member == "MAX",
                         ),
-                    ))
+                    );
+                    if matches!(ty, Type::Int) {
+                        Ok(self.call_host(self.host.num.int_from_int, &[bound]))
+                    } else {
+                        Ok(bound)
+                    }
                 })
             }
             THostCall::ExpiringValueNew {
@@ -9376,12 +9403,13 @@ impl LowerCtx<'_, '_> {
             THostCall::Helper { helper, .. } => in_own_frame(|| -> Result<Value, String> {
                 Err(format!("jit helper unsupported: {helper}"))
             }),
-            THostCall::StrMatchScan { parts, probe } => {
+            THostCall::StrMatchScan {
+                subject,
+                parts,
+                probe,
+            } => {
                 in_own_frame(|| -> Result<Value, String> {
-                    let (subject, _) = self
-                        .switch_subject
-                        .clone()
-                        .ok_or("jit StrMatchScan outside switch")?;
+                    let subject = self.lower_expr(subject)?;
                     let pid = crate::Parse::install_str_pattern(parts.clone());
                     let pid_v = self.b.ins().iconst(types::I64, pid);
                     match probe {
@@ -9532,6 +9560,7 @@ impl LowerCtx<'_, '_> {
                     "Date"
                         | "DateTime"
                         | "Instant"
+                        | "LocalDate"
                         | "LocalTime"
                         | "Period"
                         | "Zone"
@@ -9809,7 +9838,10 @@ impl LowerCtx<'_, '_> {
         let buf_var = self.fresh_var(types::I64);
         let buf = self.call_host(self.host.str_begin, &[]);
         self.b.def_var(buf_var, buf);
-        self.push_str_lit(buf, "[:")?;
+        let entries = self.call_host(self.host.coll.list_new, &[]);
+        let push_entry = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
 
         let header = self.b.create_block();
         let body = self.b.create_block();
@@ -9829,18 +9861,6 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(body);
         self.b.seal_block(body);
-        let buf = self.b.use_var(buf_var);
-        let zero = self.b.ins().iconst(types::I64, 0);
-        let first = self.b.ins().icmp(IntCC::Equal, index, zero);
-        let comma = self.b.create_block();
-        let entry = self.b.create_block();
-        self.b.ins().brif(first, entry, &[], comma, &[]);
-        self.b.switch_to_block(comma);
-        self.b.seal_block(comma);
-        self.push_str_lit(buf, ", ")?;
-        self.b.ins().jump(entry, &[]);
-        self.b.switch_to_block(entry);
-        self.b.seal_block(entry);
 
         let key_raw = self.call_host(self.host.coll.map_key_at, &[map, index]);
         let value_raw = self.call_host(self.host.coll.map_value_at, &[map, index]);
@@ -9848,11 +9868,8 @@ impl LowerCtx<'_, '_> {
         let item = self.coerce_jet_show_value(value_raw, value_ty)?;
         let key_text = self.lower_jet_show_value(key, key_ty, false)?;
         let item_text = self.lower_jet_show_value(item, value_ty, false)?;
-        let buf = self.b.use_var(buf_var);
-        self.push_str_value(buf, key_text);
-        self.push_str_lit(buf, ": ")?;
-        self.push_str_value(buf, item_text);
-        self.b.def_var(buf_var, buf);
+        self.b.ins().call(push_entry, &[entries, key_text]);
+        self.b.ins().call(push_entry, &[entries, item_text]);
         self.b.ins().jump(step, &[]);
 
         self.b.switch_to_block(step);
@@ -9867,7 +9884,10 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(header);
         self.b.seal_block(exit);
         let buf = self.b.use_var(buf_var);
-        self.push_str_lit(buf, "]")?;
+        let push_map = self
+            .module
+            .declare_func_in_func(self.host.coll.str_push_debug_map, self.b.func);
+        self.b.ins().call(push_map, &[buf, entries]);
         Ok(buf)
     }
 
@@ -10641,12 +10661,18 @@ impl LowerCtx<'_, '_> {
                                 | "Date"
                                 | "DateTime"
                                 | "Instant"
+                                | "LocalDate"
                                 | "LocalTime"
                                 | "Period"
                                 | "Zone"
                                 | "ZonedDateTime"
                         ) {
-                            let text = self.lower_jet_show(e)?;
+                            let text = if matches!(fmt, StrFormat::Debug | StrFormat::Pretty) {
+                                let value = self.lower_expr(e)?;
+                                self.lower_debug_value_text(value, &push_ty)?
+                            } else {
+                                self.lower_jet_show(e)?
+                            };
                             let push_ref = self
                                 .module
                                 .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -11090,6 +11116,30 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.str_push_str, self.b.func);
                 self.b.ins().call(push, &[buf_id, text]);
+                Ok(())
+            }
+            // Core time values use the same Prelude renderer for every
+            // selector. The host only marshals the resident handle.
+            Type::Named(name) if name == jet_foundation::Syntax::DURATION_TYPE => {
+                let text = self.call_host(self.host.duration_show, &[value]);
+                self.push_str_value(buf_id, text);
+                Ok(())
+            }
+            Type::Named(name)
+                if matches!(
+                    name.as_str(),
+                    "Date"
+                        | "DateTime"
+                        | "Instant"
+                        | "LocalDate"
+                        | "LocalTime"
+                        | "Period"
+                        | "Zone"
+                        | "ZonedDateTime"
+                ) =>
+            {
+                let text = self.lower_civil_show_value(value);
+                self.push_str_value(buf_id, text);
                 Ok(())
             }
             Type::Named(name) if self.meta.enum_packed_showable(name) => {
@@ -12503,7 +12553,14 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         use jet_foundation::AST::{CtKey, CtReport, CtValue};
         match value {
-            CtValue::Int(value) => Ok(self.b.ins().iconst(types::I64, *value)),
+            CtValue::Int(value) => {
+                let value = if matches!(slot, Some(Type::Int)) || slot.is_none() {
+                    self.runtime.heap.int_from_i64(*value)
+                } else {
+                    *value
+                };
+                Ok(self.b.ins().iconst(types::I64, value))
+            }
             CtValue::Float(value) => Ok(self.b.ins().f64const(value.as_f64())),
             CtValue::Bool(value) => Ok(self.b.ins().iconst(types::I8, i64::from(*value))),
             CtValue::Char(value) => Ok(self.b.ins().iconst(types::I32, u32::from(*value) as i64)),
@@ -12571,15 +12628,13 @@ impl LowerCtx<'_, '_> {
                                 self.host.coll.map_insert,
                             )
                         }
-                        CtKey::Int(n) => {
-                            // Keep the established string-keyed JIT path for
-                            // scalar maps until a scalar map has a typed ABI.
-                            let sid = self.runtime.heap.alloc_string(n.to_string());
-                            (
-                                self.b.ins().iconst(types::I64, sid),
-                                self.host.coll.map_insert,
-                            )
-                        }
+                        CtKey::Int(n) => (
+                            self.b.ins().iconst(
+                                types::I64,
+                                self.runtime.heap.int_from_i64(*n),
+                            ),
+                            self.host.coll.map_insert_int,
+                        ),
                         CtKey::Bool(b) => {
                             let sid = self
                                 .runtime
@@ -12938,14 +12993,26 @@ impl LowerCtx<'_, '_> {
     fn map_insert_host_for_key(&self, key_ty: &Type) -> FuncId {
         if self.is_composite_map_key_type(key_ty) {
             self.host.coll.map_insert_composite
+        } else if matches!(key_ty, Type::Int) {
+            self.host.coll.map_insert_int
         } else {
             self.host.coll.map_insert
+        }
+    }
+
+    fn map_try_insert_host_for_key(&self, key_ty: &Type) -> FuncId {
+        if matches!(key_ty, Type::Int) {
+            self.host.coll.map_try_insert_int
+        } else {
+            self.host.coll.map_try_insert
         }
     }
 
     fn map_get_host_for_key(&self, key_ty: &Type) -> FuncId {
         if self.is_composite_map_key_type(key_ty) {
             self.host.coll.map_get_composite
+        } else if matches!(key_ty, Type::Int) {
+            self.host.coll.map_get_int
         } else {
             self.host.coll.map_get
         }
@@ -12954,6 +13021,8 @@ impl LowerCtx<'_, '_> {
     fn map_get_opt_host_for_key(&self, key_ty: &Type) -> FuncId {
         if self.is_composite_map_key_type(key_ty) {
             self.host.coll.map_get_opt_composite
+        } else if matches!(key_ty, Type::Int) {
+            self.host.coll.map_get_opt_int
         } else {
             self.host.coll.map_get_opt
         }
@@ -12962,6 +13031,8 @@ impl LowerCtx<'_, '_> {
     fn map_remove_host_for_key(&self, key_ty: &Type) -> FuncId {
         if self.is_composite_map_key_type(key_ty) {
             self.host.coll.map_remove_composite
+        } else if matches!(key_ty, Type::Int) {
+            self.host.coll.map_remove_int
         } else {
             self.host.coll.map_remove
         }
@@ -12978,7 +13049,9 @@ impl LowerCtx<'_, '_> {
     {
         let handle = self.call_host(self.host.coll.map_new, &[]);
         for (k, v) in entries {
-            if !matches!(&k.ty, Type::String) && !self.is_composite_map_key_type(&k.ty) {
+            if !matches!(&k.ty, Type::String | Type::Int)
+                && !self.is_composite_map_key_type(&k.ty)
+            {
                 return Err(format!("jit map key type unsupported: {:?}", k.ty));
             }
             let key = self.lower_expr(k)?;
@@ -14293,6 +14366,12 @@ impl LowerCtx<'_, '_> {
                             // Do not route through `io_input`: that host backs the
                             // separate `core.term.input` surface.
                             return Ok(self.call_host(self.host.io.readline, &[]));
+                        });
+                    }
+                    if module == "core.term" && method == "read_all_input" && args.is_empty() {
+                        return in_own_frame(|| -> Result<Value, String> {
+                            // Marshal the shared `jet_std_io_read_all_input` Prelude result.
+                            return Ok(self.call_host(self.host.io.read_all_input, &[]));
                         });
                     }
                     if module == "core.units" && method == "from" && args.len() == 2 {
@@ -16695,27 +16774,6 @@ impl LowerCtx<'_, '_> {
                                             self.lower_expr(&args[1])?,
                                         ],
                                     )),
-                                    "wrapping_add" => Some((
-                                        self.host.num.int_add,
-                                        vec![
-                                            self.lower_expr(&args[0])?,
-                                            self.lower_expr(&args[1])?,
-                                        ],
-                                    )),
-                                    "wrapping_sub" => Some((
-                                        self.host.num.int_sub,
-                                        vec![
-                                            self.lower_expr(&args[0])?,
-                                            self.lower_expr(&args[1])?,
-                                        ],
-                                    )),
-                                    "wrapping_mul" => Some((
-                                        self.host.num.int_mul,
-                                        vec![
-                                            self.lower_expr(&args[0])?,
-                                            self.lower_expr(&args[1])?,
-                                        ],
-                                    )),
                                     "int_pow" => Some((
                                         self.host.num.int_int_pow,
                                         vec![
@@ -17686,6 +17744,14 @@ impl LowerCtx<'_, '_> {
                                 ),
                                 "replace" if args.len() == 3 => (
                                     self.host.text.regex_replace,
+                                    vec![
+                                        self.lower_expr(&args[0])?,
+                                        self.lower_expr(&args[1])?,
+                                        self.lower_expr(&args[2])?,
+                                    ],
+                                ),
+                                "replace_first" if args.len() == 3 => (
+                                    self.host.text.regex_replace_first,
                                     vec![
                                         self.lower_expr(&args[0])?,
                                         self.lower_expr(&args[1])?,
@@ -18806,6 +18872,25 @@ impl LowerCtx<'_, '_> {
                 range,
                 line,
             } => in_own_frame(|| -> Result<Value, String> {
+                if matches!(&base.ty, Type::String) {
+                    let text = self.lower_expr(base)?;
+                    let (start, end, exclusive) = if let Some(range) = range {
+                        let [start, end, exclusive] = self.lower_range_expr(range)?;
+                        (start, end, exclusive)
+                    } else {
+                        let start = self.lower_expr(start)?;
+                        let end = self.lower_expr(end)?;
+                        let exclusive = self.b.ins().iconst(types::I8, 0);
+                        (start, end, exclusive)
+                    };
+                    let line = self.b.ins().iconst(types::I32, *line as i64);
+                    let result = self.call_host(
+                        self.host.str_slice_range,
+                        &[text, start, end, exclusive, line],
+                    );
+                    self.emit_trap_check()?;
+                    return Ok(result);
+                }
                 if base.ty.is_compute_tensor_family() {
                     let tensor = self.lower_expr(base)?;
                     let (start, end, exclusive) = if let Some(range) = range {
@@ -20637,6 +20722,11 @@ impl LowerCtx<'_, '_> {
             TExprKind::NumericMethod { recv, op } => in_own_frame(|| -> Result<Value, String> {
                 self.lower_numeric_method(recv, op, Some(&expr.ty))
             }),
+            TExprKind::NumericBinaryMethod { recv, op, arg } => {
+                in_own_frame(|| -> Result<Value, String> {
+                    self.lower_numeric_binary_method(recv, op, arg)
+                })
+            }
             TExprKind::DistinctConvert {
                 arg,
                 op,
@@ -21235,7 +21325,8 @@ impl LowerCtx<'_, '_> {
             }
             let map = self.lower_expr(recv)?;
             let key = self.lower_expr(&args[0])?;
-            return Ok(self.call_host(self.host.coll.map_get_opt, &[map, key]));
+            let host = self.map_get_opt_host_for_key(&args[0].ty);
+            return Ok(self.call_host(host, &[map, key]));
         }
         // Already-carried Option ABI; IntN uses the result arena. A carrier
         // `partial()` answers the same packed carrier from its host, so the
@@ -21574,7 +21665,8 @@ impl LowerCtx<'_, '_> {
                     }
                     _ => val,
                 };
-                Ok(self.call_host(self.host.coll.map_try_insert, &[recv_val, key, val]))
+                let host = self.map_try_insert_host_for_key(&args[0].ty);
+                Ok(self.call_host(host, &[recv_val, key, val]))
             }),
             TBuiltinOp::AddNewMap => {
                 in_own_frame(|| -> Result<Value, String> {
@@ -21799,6 +21891,9 @@ impl LowerCtx<'_, '_> {
                 let value = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.coll.list_count, &[recv_val, value]))
             }),
+            TBuiltinOp::Counts => {
+                Ok(self.call_host(self.host.coll.list_counts, &[recv_val]))
+            }
             TBuiltinOp::ExtendList | TBuiltinOp::ConcatList => {
                 Err(Self::BUILTIN_UNSUPPORTED.to_string())
             }
@@ -21972,6 +22067,10 @@ impl LowerCtx<'_, '_> {
                 let separator = self.lower_expr(&args[0])?;
                 Ok(self.call_host(self.host.text.split_once, &[recv_val, separator]))
             }),
+            TBuiltinOp::StringCutLast { .. } => in_own_frame(|| -> Result<Value, String> {
+                let separator = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.text.cut_last, &[recv_val, separator]))
+            }),
             TBuiltinOp::Reverse => Err(Self::BUILTIN_UNSUPPORTED.to_string()),
             TBuiltinOp::Sum { float: false } => in_own_frame(|| -> Result<Value, String> {
                 if !matches!(jit_list_iter_elem_type(&recv_ty), Some(Type::Int)) {
@@ -22025,6 +22124,26 @@ impl LowerCtx<'_, '_> {
                     return Err(Self::BUILTIN_UNSUPPORTED.to_string());
                 }
                 Ok(self.call_host(self.host.str_bytes, &[recv_val]))
+            }),
+            TBuiltinOp::StringFromBytes => in_own_frame(|| -> Result<Value, String> {
+                if !matches!(
+                    &recv_ty,
+                    Type::List(inner)
+                        if matches!(inner.as_ref(), Type::IntN { signed: false, bits: 8 })
+                ) {
+                    return Err(Self::BUILTIN_UNSUPPORTED.to_string());
+                }
+                Ok(self.call_host(self.host.str_from_bytes, &[recv_val]))
+            }),
+            TBuiltinOp::StringFromBytesLossy => in_own_frame(|| -> Result<Value, String> {
+                if !matches!(
+                    &recv_ty,
+                    Type::List(inner)
+                        if matches!(inner.as_ref(), Type::IntN { signed: false, bits: 8 })
+                ) {
+                    return Err(Self::BUILTIN_UNSUPPORTED.to_string());
+                }
+                Ok(self.call_host(self.host.str_from_bytes_lossy, &[recv_val]))
             }),
             TBuiltinOp::Split => in_own_frame(|| -> Result<Value, String> {
                 let sep = self.lower_expr(&args[0])?;
@@ -22081,7 +22200,9 @@ impl LowerCtx<'_, '_> {
                 }
                 let start = self.lower_expr(&args[0])?;
                 let end = self.lower_expr(&args[1])?;
-                Ok(self.call_host(self.host.str_slice, &[recv_val, start, end]))
+                let result = self.call_host(self.host.str_slice, &[recv_val, start, end]);
+                self.emit_trap_check()?;
+                Ok(result)
             }),
             TBuiltinOp::After => in_own_frame(|| -> Result<Value, String> {
                 let sep = self.lower_expr(&args[0])?;
@@ -22210,7 +22331,8 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::ListCopy => Ok(self.call_host(self.host.coll.list_copy, &[recv_val])),
             TBuiltinOp::ListEqual => in_own_frame(|| -> Result<Value, String> {
                 let other = self.lower_expr(&args[0])?;
-                Ok(self.call_host(self.host.coll.list_equal, &[recv_val, other]))
+                let host = self.list_eq_host(&recv_ty);
+                Ok(self.call_host(host, &[recv_val, other]))
             }),
             TBuiltinOp::ListBinarySearch => in_own_frame(|| -> Result<Value, String> {
                 let needle = self.lower_expr(&args[0])?;
@@ -22247,6 +22369,10 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::MapFirst => Ok(self.call_host(self.host.coll.map_first, &[recv_val])),
             TBuiltinOp::MapToList { .. } => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.coll.map_to_list, &[recv_val]))
+            }),
+            TBuiltinOp::MapTopN { .. } => in_own_frame(|| -> Result<Value, String> {
+                let n = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.coll.map_top_n, &[recv_val, n]))
             }),
             TBuiltinOp::MapMin => Ok(self.call_host(self.host.coll.map_min, &[recv_val])),
             TBuiltinOp::MapMax => Ok(self.call_host(self.host.coll.map_max, &[recv_val])),
@@ -22514,6 +22640,26 @@ impl LowerCtx<'_, '_> {
             }),
             TBuiltinOp::ByteBufferWrite { method } => in_own_frame(|| -> Result<Value, String> {
                 let value = self.lower_expr(&args[0])?;
+                let value = match &args[0].ty {
+                    Type::Float => self
+                        .b
+                        .ins()
+                        .bitcast(types::I64, Self::scalar_bitcast_memflags(), value),
+                    Type::Float32 => {
+                        let value = self.b.ins().fpromote(types::F64, value);
+                        self.b
+                            .ins()
+                            .bitcast(types::I64, Self::scalar_bitcast_memflags(), value)
+                    }
+                    Type::Bool | Type::Char => self.b.ins().uextend(types::I64, value),
+                    Type::Int | Type::IntN { .. } => value,
+                    other => {
+                        return Err(format!(
+                            "jit byte-buffer write value unsupported: {:?} ({other:?})",
+                            args[0].ty
+                        ))
+                    }
+                };
                 let method = match method.as_str() {
                     "write_u8" => 0,
                     "write_u16_le" => 1,
@@ -22525,6 +22671,17 @@ impl LowerCtx<'_, '_> {
                     "write_bytes" => 7,
                     "write_byte" => 8,
                     "write" => 9,
+                    "write_i8" => 10,
+                    "write_i16_le" => 11,
+                    "write_i16_be" => 12,
+                    "write_i32_le" => 13,
+                    "write_i32_be" => 14,
+                    "write_i64_le" => 15,
+                    "write_i64_be" => 16,
+                    "write_f32_le" => 17,
+                    "write_f32_be" => 18,
+                    "write_f64_le" => 19,
+                    "write_f64_be" => 20,
                     _ => return Err("jit byte-buffer write method unsupported".to_string()),
                 };
                 let method = self.b.ins().iconst(types::I64, method);
@@ -23001,7 +23158,31 @@ impl LowerCtx<'_, '_> {
                 };
                 Ok(self.call_host(host, &[value, lo, hi]))
             }
+            TNumericOp::EuclideanDiv { .. } | TNumericOp::EuclideanRem { .. } => {
+                Err("binary Euclidean numeric method used as unary operation".to_string())
+            }
         }
+    }
+
+    fn lower_numeric_binary_method(
+        &mut self,
+        recv: &TExpr,
+        op: &TNumericOp,
+        arg: &TExpr,
+    ) -> Result<Value, String> {
+        let left = self.lower_expr(recv)?;
+        let right = self.lower_expr(arg)?;
+        let value = match op {
+            TNumericOp::EuclideanDiv { .. } => {
+                self.call_host(self.host.num.int_div_euclid, &[left, right])
+            }
+            TNumericOp::EuclideanRem { .. } => {
+                self.call_host(self.host.num.int_rem_euclid, &[left, right])
+            }
+            _ => return Err("non-Euclidean operation in numeric binary method".to_string()),
+        };
+        self.emit_trap_check()?;
+        Ok(value)
     }
 
     fn lower_explicit_copy(&mut self, inner: &TExpr) -> Result<Value, String> {
@@ -24204,20 +24385,22 @@ impl LowerCtx<'_, '_> {
         }
         let spawn_ref = self.module.declare_func_in_func(spawn_fn, self.b.func);
         let spawn_ptr = self.b.ins().func_addr(types::I64, spawn_ref);
+        let spawn_site = self.b.ins().iconst(types::I64, site as i64);
         let (host_id, call_args) = match cap_vals.len() {
-            0 => (self.host.conc.spawn0, vec![spawn_ptr]),
-            1 => (self.host.conc.spawn1, vec![spawn_ptr, cap_vals[0]]),
+            0 => (self.host.conc.spawn0, vec![spawn_site, spawn_ptr]),
+            1 => (self.host.conc.spawn1, vec![spawn_site, spawn_ptr, cap_vals[0]]),
             2 => (
                 self.host.conc.spawn2,
-                vec![spawn_ptr, cap_vals[0], cap_vals[1]],
+                vec![spawn_site, spawn_ptr, cap_vals[0], cap_vals[1]],
             ),
             3 => (
                 self.host.conc.spawn3,
-                vec![spawn_ptr, cap_vals[0], cap_vals[1], cap_vals[2]],
+                vec![spawn_site, spawn_ptr, cap_vals[0], cap_vals[1], cap_vals[2]],
             ),
             4 => (
                 self.host.conc.spawn4,
                 vec![
+                    spawn_site,
                     spawn_ptr,
                     cap_vals[0],
                     cap_vals[1],
@@ -24900,6 +25083,14 @@ impl LowerCtx<'_, '_> {
             }),
             THandleOp::DurationSecondsValue => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.duration_seconds_value, &[recv_val]))
+            }),
+            THandleOp::DurationScale => in_own_frame(|| -> Result<Value, String> {
+                let factor = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.duration_scale, &[recv_val, factor]))
+            }),
+            THandleOp::DurationDivide => in_own_frame(|| -> Result<Value, String> {
+                let factor = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.duration_divide, &[recv_val, factor]))
             }),
             // D-INTBIG1 / D-DECIMAL1: instance methods on precise numerics.
             THandleOp::PreciseMethod { type_name, method }
@@ -26461,11 +26652,20 @@ impl LowerCtx<'_, '_> {
             THandleOp::ReaderReadU8 => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.parse.reader_read_u8, &[recv_val]))
             }),
+            THandleOp::ReaderReadI8 => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.parse.reader_read_i8, &[recv_val]))
+            }),
             THandleOp::ReaderReadU16Le => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.parse.reader_read_u16_le, &[recv_val]))
             }),
             THandleOp::ReaderReadU16Be => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.parse.reader_read_u16_be, &[recv_val]))
+            }),
+            THandleOp::ReaderReadI16Le => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.parse.reader_read_i16_le, &[recv_val]))
+            }),
+            THandleOp::ReaderReadI16Be => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.parse.reader_read_i16_be, &[recv_val]))
             }),
             THandleOp::ReaderReadU32Le => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.parse.reader_read_u32_le, &[recv_val]))
@@ -26473,17 +26673,46 @@ impl LowerCtx<'_, '_> {
             THandleOp::ReaderReadU32Be => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.parse.reader_read_u32_be, &[recv_val]))
             }),
+            THandleOp::ReaderReadI32Le => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.parse.reader_read_i32_le, &[recv_val]))
+            }),
+            THandleOp::ReaderReadI32Be => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.parse.reader_read_i32_be, &[recv_val]))
+            }),
             THandleOp::ReaderReadU64Le => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.parse.reader_read_u64_le, &[recv_val]))
             }),
             THandleOp::ReaderReadU64Be => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.parse.reader_read_u64_be, &[recv_val]))
             }),
+            THandleOp::ReaderReadI64Le => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.parse.reader_read_i64_le, &[recv_val]))
+            }),
+            THandleOp::ReaderReadI64Be => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.parse.reader_read_i64_be, &[recv_val]))
+            }),
             THandleOp::ReaderReadF32Le => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.parse.reader_read_f32_le, &[recv_val]))
             }),
+            THandleOp::ReaderReadF32Be => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.parse.reader_read_f32_be, &[recv_val]))
+            }),
             THandleOp::ReaderReadF64Le => in_own_frame(|| -> Result<Value, String> {
                 Ok(self.call_host(self.host.parse.reader_read_f64_le, &[recv_val]))
+            }),
+            THandleOp::ReaderReadF64Be => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.parse.reader_read_f64_be, &[recv_val]))
+            }),
+            THandleOp::ReaderPeek => in_own_frame(|| -> Result<Value, String> {
+                Ok(self.call_host(self.host.parse.reader_peek, &[recv_val]))
+            }),
+            THandleOp::ReaderSeek => in_own_frame(|| -> Result<Value, String> {
+                let n = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.parse.reader_seek, &[recv_val, n]))
+            }),
+            THandleOp::ReaderSkip => in_own_frame(|| -> Result<Value, String> {
+                let n = self.lower_expr(&args[0])?;
+                Ok(self.call_host(self.host.parse.reader_skip, &[recv_val, n]))
             }),
             THandleOp::ReaderTake => in_own_frame(|| -> Result<Value, String> {
                 let n = self.lower_expr(&args[0])?;
@@ -27546,29 +27775,11 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().isub(one, eq)
             }
             (Type::List(_) | Type::FixedList { .. }, BinOp::Eq) => {
-                let elem = match &lhs_ty {
-                    Type::List(elem) => Some(elem.as_ref()),
-                    Type::FixedList { elem, .. } => Some(elem.as_ref()),
-                    _ => None,
-                };
-                let host = match elem {
-                    Some(Type::String) => self.host.coll.list_eq_str,
-                    Some(Type::Float | Type::Float32) => self.host.coll.list_eq_f64,
-                    _ => self.host.coll.list_eq,
-                };
+                let host = self.list_eq_host(&lhs_ty);
                 self.call_host(host, &[l, r])
             }
             (Type::List(_) | Type::FixedList { .. }, BinOp::Ne) => {
-                let elem = match &lhs_ty {
-                    Type::List(elem) => Some(elem.as_ref()),
-                    Type::FixedList { elem, .. } => Some(elem.as_ref()),
-                    _ => None,
-                };
-                let host = match elem {
-                    Some(Type::String) => self.host.coll.list_eq_str,
-                    Some(Type::Float | Type::Float32) => self.host.coll.list_eq_f64,
-                    _ => self.host.coll.list_eq,
-                };
+                let host = self.list_eq_host(&lhs_ty);
                 let eq = self.call_host(host, &[l, r]);
                 let one = self.b.ins().iconst(types::I8, 1);
                 self.b.ins().isub(one, eq)
@@ -27710,12 +27921,8 @@ impl LowerCtx<'_, '_> {
             Type::Float | Type::Float32 => self.bool_from_fcmp(FloatCC::Equal, l, r),
             Type::String => self.call_host(self.host.str_eq, &[l, r]),
             Type::Named(_) | Type::Apply { .. } => self.bool_from_icmp(IntCC::Equal, l, r),
-            Type::List(elem) | Type::FixedList { elem, .. } => {
-                let host = match self.erase_distinct_ty(elem) {
-                    Type::String => self.host.coll.list_eq_str,
-                    Type::Float | Type::Float32 => self.host.coll.list_eq_f64,
-                    _ => self.host.coll.list_eq,
-                };
+            Type::List(_) | Type::FixedList { .. } => {
+                let host = self.list_eq_host(&ty);
                 self.call_host(host, &[l, r])
             }
             Type::Union(members) => self.lower_union_eq(members, l, r)?,
@@ -28232,7 +28439,7 @@ impl LowerCtx<'_, '_> {
                 if matches!(
                     name.as_str(),
                     "Url" | "Mime" | "Path" | "Date" | "DateTime" | "Instant"
-                        | "LocalTime" | "Period" | "Zone" | "ZonedDateTime"
+                        | "LocalDate" | "LocalTime" | "Period" | "Zone" | "ZonedDateTime"
                 )
         ) {
             let text = self.lower_jet_show(inner)?;
@@ -28460,7 +28667,9 @@ impl LowerCtx<'_, '_> {
         } else {
             self.b.ins().iconst(types::I64, const_flag.unwrap_or(0))
         };
-        Ok(self.call_host(host, &[recv_val, second]))
+        let result = self.call_host(host, &[recv_val, second]);
+        self.emit_trap_check()?;
+        Ok(result)
     }
 
     fn transfer_progress(&mut self, source: Value, target: Value) {
@@ -28660,7 +28869,15 @@ impl LowerCtx<'_, '_> {
                     args,
                     false,
                     matches!(op, TClosureOp::MapMut),
+                    None,
                 )
+            }
+            // Fallible callbacks carry a Result through the collection
+            // boundary. Keep this path on the shared Prelude evaluator until
+            // the resident ABI can marshal that carrier without reimplementing
+            // its failure semantics.
+            TClosureOp::TryMap | TClosureOp::TryFilter => {
+                Err(Self::CLOSURE_UNSUPPORTED.to_string())
             }
             TClosureOp::Any => self.lower_iter_any_all(recv, args, false),
             TClosureOp::All => self.lower_iter_any_all(recv, args, true),
@@ -28671,12 +28888,19 @@ impl LowerCtx<'_, '_> {
             | TClosureOp::MapMap
             | TClosureOp::MapFold
             | TClosureOp::MapFlatMap => self.lower_map_closure(recv, op, args),
-            // D-PARCAPTURE1: order-preserving parallel adapters — serial Cranelift
-            // inlining matches AOT results for the covered examples.
-            // parity: guard tests/dev.rs::unified_loop_jit_tiers_are_explicit_and_match_aot
-            TClosureOp::ParaMap => self.lower_native_iter_map_filter(recv, args, false, false),
-            TClosureOp::Filter => self.lower_native_iter_map_filter(recv, args, true, true),
-            TClosureOp::ParaFilter => self.lower_native_iter_map_filter(recv, args, true, true),
+            // D-PARCAPTURE1: the host calls the shared indexed Prelude kernel.
+            TClosureOp::ParaMap => {
+                let limit = if let Some(arg) = args.get(1) {
+                    self.lower_expr(arg)?
+                } else {
+                    self.b.ins().iconst(types::I64, i64::MAX)
+                };
+                self.lower_native_iter_map_filter(recv, args, false, false, Some(limit))
+            }
+            TClosureOp::Filter => self.lower_native_iter_map_filter(recv, args, true, true, None),
+            TClosureOp::ParaFilter => {
+                self.lower_native_iter_map_filter(recv, args, true, true, None)
+            }
             TClosureOp::Partition { .. } | TClosureOp::ParaPartition { .. } => {
                 self.lower_partition(recv, args)
             }
@@ -29669,6 +29893,7 @@ impl LowerCtx<'_, '_> {
         args: &[TExpr],
         is_filter: bool,
         map_mut: bool,
+        para_limit: Option<Value>,
     ) -> Result<Value, String> {
         let elem_ty = Self::closure_elem_type_for(recv)
             .ok_or_else(|| Self::CLOSURE_UNSUPPORTED.to_string())?;
@@ -29693,34 +29918,43 @@ impl LowerCtx<'_, '_> {
             self.host.coll.list_closure_filter
         } else {
             let mapped_ty = self.erase_distinct_ty(&body_expr.ty);
+            let parallel = para_limit.is_some();
             match self
                 .meta
                 .clif_ty(&body_expr.ty)
                 .or_else(|| clif_ty(&mapped_ty))
             {
                 Some(clif) if clif == types::F64 => {
-                    if map_mut {
+                    if parallel {
+                        self.host.coll.list_closure_para_map_f64
+                    } else if map_mut {
                         self.host.coll.list_closure_map_f64_mut
                     } else {
                         self.host.coll.list_closure_map_f64
                     }
                 }
                 Some(clif) if clif == types::I8 => {
-                    if map_mut {
+                    if parallel {
+                        self.host.coll.list_closure_para_map_i8
+                    } else if map_mut {
                         self.host.coll.list_closure_map_i8_mut
                     } else {
                         self.host.coll.list_closure_map_i8
                     }
                 }
                 Some(clif) if clif == types::I32 => {
-                    if map_mut {
+                    if parallel {
+                        self.host.coll.list_closure_para_map_i32
+                    } else if map_mut {
                         self.host.coll.list_closure_map_i32_mut
                     } else {
                         self.host.coll.list_closure_map_i32
                     }
                 }
                 Some(clif) if clif == types::I64 => {
-                    if map_mut {
+                    if parallel {
+                        self.host.coll.list_closure_para_map
+                    } else if map_mut {
                         self.host.coll.list_closure_map_mut
                     } else {
                         self.host.coll.list_closure_map
@@ -29730,7 +29964,11 @@ impl LowerCtx<'_, '_> {
             }
         };
         let (callback, env) = self.lower_collection_callback(lambda_expr)?;
-        let output = self.call_host(host, &[recv_val, callback]);
+        let output = if let Some(limit) = para_limit {
+            self.call_host(host, &[recv_val, callback, limit])
+        } else {
+            self.call_host(host, &[recv_val, callback])
+        };
         self.emit_trap_check()?;
         self.sync_collection_captures(lambda, env)?;
         if is_filter {
@@ -31550,13 +31788,15 @@ impl LowerCtx<'_, '_> {
         let one_b = self.b.ins().iconst(types::I8, 1);
         let has = self.b.ins().icmp(IntCC::NotEqual, has_flag, zero_b);
         let best_key = self.b.use_var(best_key_var);
-        // Match Rust/AOT: min_by_key keeps first on ties; max_by_key keeps last.
+        // Card #2298: both extrema keep the last equal key.
         let ordered = if is_max {
             let gt = self.b.ins().icmp(IntCC::SignedGreaterThan, key, best_key);
             let eq = self.b.ins().icmp(IntCC::Equal, key, best_key);
             self.b.ins().bor(gt, eq)
         } else {
-            self.b.ins().icmp(IntCC::SignedLessThan, key, best_key)
+            let lt = self.b.ins().icmp(IntCC::SignedLessThan, key, best_key);
+            let eq = self.b.ins().icmp(IntCC::Equal, key, best_key);
+            self.b.ins().bor(lt, eq)
         };
         let first = self.b.ins().icmp(IntCC::Equal, has, zero_b);
         let take = self.b.ins().bor(first, ordered);

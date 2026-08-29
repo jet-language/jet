@@ -206,8 +206,8 @@ choices; this inventory records the resulting methods and does not add aliases.
 
 | Type | Constructors | Main methods |
 | --- | --- | --- |
-| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort`, `sort_by`, `sort_desc`, `sort_by_desc`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `dedup_by`, `chunks`, `windows`, `chunk_while`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `min_max`, `min_max_by`, `group_by`, `count_by`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse`, `repeat`, `cycle`, `drop_last`, `shuffle`, `is_sorted`, `is_sorted_by`, `last_index_of`, `average`, `compare`, `split`, `to_set`, `join`, `to_list`/`collect`, `lazy`, `starts_with`, `ends_with`, `slice`, `copy`, `equal`, `binary_search`, `binary_search_by`, `union`, `intersection`, `difference`, `random`, `replace(index, value)`, `pop` |
-| `[K:V]` | map literal `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | `keys`/`values` (lazy `Iter` views), `has_key`, `get`, `add`, `add_new`, `remove`/`pop`, `pop_first`, `contains_value`, `merge`, `copy`, `equal`, `first`, `to_list`, `any`, `all`, `map`, `filter`, `flat_map`, `fold`, `min`, `max`, `intersection`, `slice`, `len`, `is_empty`, `clear` |
+| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort`, `sort_by`, `sort_desc`, `sort_by_desc`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `dedup_by`, `chunks`, `windows`, `chunk_while`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `min_max`, `min_max_by`, `group_by`, `count_by`, `counts`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse`, `repeat`, `cycle`, `drop_last`, `shuffle`, `is_sorted`, `is_sorted_by`, `last_index_of`, `average`, `compare`, `split`, `to_set`, `join`, `to_list`/`collect`, `lazy`, `starts_with`, `ends_with`, `slice`, `copy`, `equal`, `binary_search`, `binary_search_by`, `union`, `intersection`, `difference`, `random`, `replace(index, value)`, `pop` |
+| `[K:V]` | map literal `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | `keys`/`values` (lazy `Iter` views), `has_key`, `get`, `add`, `add_new`, `remove`/`pop`, `pop_first`, `contains_value`, `merge`, `copy`, `equal`, `first`, `to_list`, `top_n`, `any`, `all`, `map`, `filter`, `flat_map`, `fold`, `min`, `max`, `intersection`, `slice`, `len`, `is_empty`, `clear` |
 | `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `pop`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `copy`, `to_set`, `equal`, `capacity`, `first`, `values`, `all`, `filter`, `each`, `max`, `min`, `fold`, `map`, `flat_map`, `to_list`, `len`, `is_empty`, `clear` |
 | `Rank<T>` | `Rank.new()`, `Rank.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
 | `Queue<T>` | `Queue.new()`, `Queue.init(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `capacity`, `contains`, `get`, `delete`, `to_list`, `join`, `reverse`, `split`, `len`, `is_empty`, `clear` |
@@ -219,6 +219,12 @@ choices; this inventory records the resulting methods and does not add aliases.
 
 For the `[T]` row, `flatten` and `flat_map` return a plain list immediately;
 `.lazy().flatten()` and `.lazy().flat_map(...)` return deferred `Iter` views.
+`min_by` and `max_by` keep the last source item when keys compare equal.
+
+`counts()` consumes a list or `Iter<T>` and returns `[T:Int]`. `top_n(n)` returns
+`(key, value)` rows in descending value order, with ascending keys as the tie
+break. `para_map` preserves source order; `para_map(f, limit: n)` caps its
+worker count for that call.
 
 #### Sequence algorithm audit (card #2139)
 
@@ -325,6 +331,12 @@ One module for both whole-file convenience helpers and streaming handles
 (D-FILES-WRITE1). Path-taking functions accept a plain `String` or a `Path`.
 Use `Path` methods when composing paths; the type keeps separators and parent
 rules correct on every supported system.
+
+A relative path is resolved from the process working directory. `jet run`,
+`jet dev`, and the gauntlet runner start a program with its entry directory as
+that directory, so `fs.read("input.txt")` is the direct form for an entry-local
+file. Do not read `current_dir()` and join it to an already-relative argument;
+use `Path` only when intentionally composing a different path.
 
 The `Path` methods are the expert Path-only APIs: their receiver is always a
 `Path`. Convert once at the boundary with `Path.from(value)`, then pass the
@@ -1695,9 +1707,9 @@ fn run() {
 | Item | Notes |
 |------|-------|
 | `sqrt`, `pow`, `floor`, `ceil` | `Float` in, `Float` out |
-| `round` | `Float` in, `Int` out |
+| `round` | `Float` in, `Int` out; nearest ties go away from zero |
 | `abs` | `Int` or `Float` |
-| `min[T]`, `max[T]` | Two values of the same comparable type |
+| `min[T]`, `max[T]` | Two values of the same comparable type; one NaN yields the non-NaN operand, two NaNs yield NaN |
 | `clamp(x, lo, hi)` | Keep `x` inside the range |
 | `pi`, `e` | Float constants |
 | `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2` | Trig family |
@@ -1709,7 +1721,6 @@ fn run() {
 | `degrees`, `radians`, `lerp` | Unit conversion and interpolation |
 | `checked_add/sub/mul/pow` | Integer operations returning `?Int` on overflow |
 | `saturating_add/sub/mul` | Integer operations clamping on overflow |
-| `wrapping_add/sub/mul` | Integer operations wrapping on overflow |
 | `int_pow`, `gcd`, `lcm` | Integer power and number theory helpers |
 | `acosh`, `asinh`, `atanh`, `cbrt`, `exp2`, `exp_m1`, `ln_1p`, `log`, `signum`, `fma` | Extended float family (D-CORESURFACE1) |
 | `is_even`, `is_odd`, `isqrt`, `factorial`, `binomial`, `digits`, `leading_ones`, `trailing_ones` | Whole-number helpers |
@@ -3036,9 +3047,16 @@ safety property would be lost), and that is deliberate.
 Pattern-string calls return a `Result`; the `Err` carries a one-line message
 when the pattern itself is malformed (the only failure at the boundary).
 `compile` returns a reusable `Regex`, so hot paths parse once. A `Match`
-records capture text plus byte spans: `group(0)` is the whole match,
+records capture text plus zero-based Unicode-character positions: `group(0)` is the whole match,
 `group(n)` is the n-th group as `?String`, and named groups are read with
 `name("group")`.
+
+The dialect pins `\d` and `\w` to ASCII. `$` means the absolute end of the
+text, including when multiline mode is enabled. Captures are omitted from
+`split`; an empty match advances by one Unicode character so splitting and
+replacement retain the text between matches. The Thompson/Pike VM bounds
+matching work by the pattern instruction count and input length, so nested
+quantifiers do not create recursive backtracking or a ReDoS path.
 
 ```jet
 use core.regex as re
@@ -3077,7 +3095,8 @@ fn run() {
 | `re.find(pat, text)` | `?String !String` | first matched substring, `None` if none |
 | `re.find_all(pat, text)` | `[String] !String` | every non-overlapping match, left to right |
 | `re.matches(pat, text)` | `[Match] !String` | every non-overlapping match with captures/spans |
-| `re.replace(pat, repl, text)` | `String !String` | replace the first match (`$1`, `${name}` allowed in `repl`) |
+| `re.replace(pat, repl, text)` | `String !String` | replace every match (`$1`, `${name}` allowed in `repl`) |
+| `re.replace_first(pat, repl, text)` | `String !String` | replace only the first match |
 | `re.replace_all(pat, repl, text)` | `String !String` | replace every match |
 | `re.split(pat, text)` | `[String] !String` | split `text` on every match |
 | `re.split_limit(pat, text, n)` | `[String] !String` | split at most `n - 1` times |
@@ -3093,8 +3112,8 @@ fn run() {
 | `mat.group(n)` | `?String` | capture group `n` of a `Match` |
 | `mat.name(name)` | `?String` | capture group by name |
 | `mat.named_captures()` | `[[String]]` | named groups as `[name, value]` pairs |
-| `mat.start()` / `mat.end()` | `Int` | byte span of the whole match |
-| `mat.group_start(n)` / `mat.group_end(n)` | `?Int` | byte span of a capture |
+| `mat.start()` / `mat.end()` | `Int` | Unicode-character positions of the whole match |
+| `mat.group_start(n)` / `mat.group_end(n)` | `?Int` | Unicode-character positions of a capture |
 
 Note: `{N}` quantifiers must be written `{{N}}` in Jet source — single braces
 are string interpolation (S8). Typed regex heads own backslashes, so write
@@ -3510,7 +3529,8 @@ fn run() {
 | API | Returns | What it does |
 |-----|---------|--------------|
 | `String.bytes()` | `[U8]` | UTF-8 bytes of a string |
-| `String.from_bytes(bs)` | `String !UTF8Error` | Decode UTF-8 bytes |
+| `String.from_bytes(bs)` | `String !UTF8Error` | Strictly decode UTF-8 bytes |
+| `String.from_bytes_lossy(bs)` | `String` | Decode UTF-8 bytes with replacement characters |
 | `U8.from_int(n)` | `U8 !String` | Checked Int → U8 |
 | `Int.from_u8(b)` | `Int` | U8 → Int |
 

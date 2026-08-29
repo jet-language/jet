@@ -189,6 +189,26 @@ fn jet_jit_int_div(a: i64, b: i64) -> i64 {
     })
 }
 
+fn jet_jit_int_div_euclid(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_div_euclid(a, b) {
+        Some(value) => value,
+        None => {
+            rt.set_arithmetic_stop(0, divide_by_zero_message());
+            0
+        }
+    })
+}
+
+fn jet_jit_int_rem_euclid(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_rem_euclid(a, b) {
+        Some(value) => value,
+        None => {
+            rt.set_arithmetic_stop(0, divide_by_zero_message());
+            0
+        }
+    })
+}
+
 fn jet_jit_int_floor_div(a: i64, b: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_floor_div(a, b) {
         Some(value) => value,
@@ -654,9 +674,11 @@ host_fns! {
     int_to_string: "jet_jit_int_to_string" => jet_jit_int_to_string: sig_unary;
     int_to_f64: "jet_jit_int_to_f64" => jet_jit_int_to_f64: sig_unary_f64;
     int_div: "jet_jit_int_div" => jet_jit_int_div: sig_binary;
+    int_div_euclid: "jet_jit_int_div_euclid" => jet_jit_int_div_euclid: sig_binary;
     int_floor_div: "jet_jit_int_floor_div" => jet_jit_int_floor_div: sig_binary;
     int_mod: "jet_jit_int_mod" => jet_jit_int_mod: sig_binary;
     int_rem: "jet_jit_int_rem" => jet_jit_int_rem: sig_binary;
+    int_rem_euclid: "jet_jit_int_rem_euclid" => jet_jit_int_rem_euclid: sig_binary;
     int_pow: "jet_jit_int_pow" => jet_jit_int_pow: sig_binary;
     int_factorial: "jet_jit_int_factorial" => jet_jit_int_factorial: sig_unary;
     int_is_even: "jet_jit_int_is_even" => jet_jit_int_is_even: sig_unary_bool;

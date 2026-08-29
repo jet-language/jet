@@ -20,7 +20,7 @@ const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self", "shared"];
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "DataTree", "Decimal", "Derived", "Duration", "Effect", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "JSONError", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
-const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Arithmetic", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "FX", "HTML", "Impure", "Inline", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
+const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Arithmetic", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Error", "Every", "Extern", "FFI", "FX", "Flag", "Flatten", "HTML", "Impure", "Inline", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scalar", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
 const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "@", "@[", "]@", "^", "~"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "{", "|", "|=", "||", "~|", "~|="];
 // END GENERATED JET SYNTAX HIGHLIGHTS
@@ -67,6 +67,7 @@ module.exports = grammar({
 
   inline: ($) => [
     $.module_alias_suffix,
+    $.postfix_member_name,
   ],
 
   rules: {
@@ -1309,6 +1310,11 @@ module.exports = grammar({
         seq("(", $._expr, ",", commaSep1($._expr), ")"),
       ),
 
+    // D-TIME-IN1=C: dot position admits the reserved `in` spelling as a
+    // member name. Keep this rule inline so the tree shape stays the same as
+    // ordinary identifiers for queries and editor clients.
+    postfix_member_name: ($) => choice($.identifier, $.type_identifier),
+
     // `recv.method(…)` (including the canonical function-value `.call(…)`)
     // and qualified constructor `Enum.Variant(…)` /
     // `mod.Type.new(…)` — the member may be lower (method) or Upper (variant).
@@ -1318,7 +1324,7 @@ module.exports = grammar({
         seq(
           field("receiver", $._expr),
           choice(".", "?."),
-          field("method", choice($.identifier, $.type_identifier)),
+          field("method", $.postfix_member_name),
           $.arg_list,
         ),
       ),
@@ -1331,7 +1337,7 @@ module.exports = grammar({
         seq(
           field("object", $._expr),
           choice(".", "?."),
-          field("field", choice($.identifier, $.type_identifier, $.compiler_fact)),
+          field("field", choice($.postfix_member_name, $.compiler_fact)),
         ),
       ),
 

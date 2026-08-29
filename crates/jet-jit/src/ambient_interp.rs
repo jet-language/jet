@@ -30,6 +30,31 @@ mod fs_ops_kernel {
     include!("../../jet-codegen/src/Prelude/Core/FSOps.rs");
 }
 
+// I9: runtime stdin reads use the same Prelude kernels as AOT and the
+// resident JIT. This module only supplies the interpreter's native term and
+// IOError carriers; the read policy stays in IoLineStream.rs.
+mod io_line_stream_prelude {
+    use super::process_prelude::jet_std;
+    use super::IO::term_prelude::{
+        jet_term_read_stdin_line, jet_term_read_text, jet_term_write_stdout,
+    };
+    use crate::fault_injection::jet_fault_should_fail;
+
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs");
+
+    pub(crate) fn input(prompt: Option<&String>) -> Result<String, jet_std::IOError> {
+        jet_std_io_input(prompt)
+    }
+
+    pub(crate) fn readline() -> Result<String, jet_std::IOError> {
+        jet_std_io_readline()
+    }
+
+    pub(crate) fn read_all_input() -> Result<String, jet_std::IOError> {
+        jet_std_io_read_all_input()
+    }
+}
+
 // The interpreter supplies only the handle carriers and raw filesystem
 // kernels. File-stream policy, fault injection, and OS-error classification
 // come from the same Prelude fragments emitted by AOT and included by the
@@ -1915,6 +1940,13 @@ fn process_io_error(error: process_prelude::IOError) -> CtValue {
     }
 }
 
+fn io_text_outcome(result: Result<String, process_prelude::IOError>) -> CtValue {
+    match result {
+        Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+        Err(error) => CtValue::failed(Box::new(process_io_error(error))),
+    }
+}
+
 fn process_result_outcome(
     result: Result<process_prelude::ProcessReceipt, process_prelude::IOError>,
 ) -> CtValue {
@@ -3235,7 +3267,14 @@ fn ambient_time_call(
         (module, method),
         (
             "core.time",
-            "now" | "now_utc" | "today" | "instant" | "sleep" | "start"
+            "now"
+                | "now_utc"
+                | "today"
+                | "instant"
+                | "sleep"
+                | "start"
+                | "parse_rfc3339"
+                | "new"
         )
     ) {
         return None;
@@ -3265,8 +3304,59 @@ fn ambient_time_call(
                 CtValue::Int(crate::Time::ambient_monotonic_now_ms()),
             )],
         }),
+        ("core.time", "parse_rfc3339") => {
+            let Some(CtValue::Str(text)) = args.first() else {
+                return Err(unsupported("time.parse_rfc3339 expects a String", span));
+            };
+            Ok(match crate::Time::time_rt::jet_time_parse_rfc3339(text) {
+                Ok(datetime) => CtValue::Present(Box::new(CtValue::Struct {
+                    type_name: "DateTime".to_string(),
+                    fields: vec![
+                        ("secs".to_string(), CtValue::Int(datetime.to_timestamp())),
+                        ("nanos".to_string(), CtValue::Int(datetime.nanosecond())),
+                    ],
+                })),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
+            })
+        }
+        ("core.time", "new") => {
+            let year = ambient_int_arg(args, 0, "time.new year", span)?;
+            let month = ambient_int_arg(args, 1, "time.new month", span)?;
+            let day = ambient_int_arg(args, 2, "time.new day", span)?;
+            let date = crate::Time::time_rt::JetDate::new(year, month, day);
+            let type_name = match resolved_ret {
+                Some(Type::Named(name)) if name == "LocalDate" => "LocalDate",
+                _ => "Date",
+            };
+            Ok(CtValue::Struct {
+                type_name: type_name.to_string(),
+                fields: vec![
+                    ("year".to_string(), CtValue::Int(date.year())),
+                    ("month".to_string(), CtValue::Int(date.month())),
+                    ("day".to_string(), CtValue::Int(date.day())),
+                ],
+            })
+        }
         _ => unreachable!("ambient time method was filtered above"),
     })();
+    Some(result)
+}
+
+fn ambient_math_call(
+    module: &str,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if (module, method) != ("core.math", "from_bits") {
+        return None;
+    }
+    let result = match args.first() {
+        Some(CtValue::Int(bits)) => Ok(CtValue::Float(CtFloat::f64(
+            crate::MathExtra::math_rt::jet_std_math_from_bits(*bits),
+        ))),
+        _ => Err(unsupported("math.from_bits expects an Int", span)),
+    };
     Some(result)
 }
 
@@ -3827,6 +3917,13 @@ pub(crate) fn ambient_extern_call(
 // `env.set("NO_COLOR", ..)` means one thing under AOT and resident JIT and
 // another under the interpreter.
 
+/// Registry-facing ambient routes. The foundation owns the data so the
+/// projection guard and the test reconciliation consume exactly one set;
+/// this function is the consumer export for the dispatcher module.
+pub(crate) fn ambient_core_call_keys() -> &'static [(&'static str, &'static str)] {
+    jet_foundation::Syntax::core_call_ambient_routes()
+}
+
 pub fn ambient_core_call(
     module: &str,
     method: &str,
@@ -3893,7 +3990,22 @@ pub fn ambient_core_call(
             // string arm from becoming a second semantic route.
             jet_foundation::Syntax::CoreCallInterpreterRoute::Pure(_)
             | jet_foundation::Syntax::CoreCallInterpreterRoute::TypedIntrinsic => return None,
-            jet_foundation::Syntax::CoreCallInterpreterRoute::Ambient => {}
+            jet_foundation::Syntax::CoreCallInterpreterRoute::Ambient => {
+                if !ambient_core_call_keys()
+                    .iter()
+                    .any(|(known_module, known_method)| {
+                        *known_module == module && *known_method == method
+                    })
+                {
+                    return Some(Err(unsupported(
+                        &format!(
+                            "{}.{}(): ambient route is missing from the dispatcher manifest",
+                            module, method
+                        ),
+                        span,
+                    )));
+                }
+            }
         }
     }
     if module == "core.log" {
@@ -3917,6 +4029,25 @@ pub fn ambient_core_call(
     }
     if module == "core.term" && method == "stdin" {
         return Some(Ok(ambient_stdin()));
+    }
+    if module == "core.term" {
+        match method {
+            "input" => {
+                let prompt = match args.as_slice() {
+                    [] => None,
+                    [CtValue::Str(prompt)] => Some(prompt),
+                    _ => return Some(Err(unsupported("core.term.input arguments", span))),
+                };
+                return Some(Ok(io_text_outcome(io_line_stream_prelude::input(prompt))));
+            }
+            "readline" if args.is_empty() => {
+                return Some(Ok(io_text_outcome(io_line_stream_prelude::readline())));
+            }
+            "read_all_input" if args.is_empty() => {
+                return Some(Ok(io_text_outcome(io_line_stream_prelude::read_all_input())));
+            }
+            _ => {}
+        }
     }
     if module == "core.mem" {
         if let Some(result) =
@@ -4103,6 +4234,9 @@ pub fn ambient_core_call(
             "core.net.ws requires a native WebSocket carrier marshaller",
             span,
         )));
+    }
+    if let Some(result) = ambient_math_call(module, method, &args, span) {
+        return Some(result);
     }
     if let Some(result) = ambient_time_call(module, method, &args, span, resolved_ret.as_ref()) {
         return Some(result);

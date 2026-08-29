@@ -5,6 +5,44 @@ use crate::Syntax;
 use crate::AST::{BinOp, Expr, Pattern, Stmt, Type};
 use std::collections::{HashMap, HashSet};
 
+fn note_pattern_ranges(pattern: &Pattern, ranges: &mut Vec<(i64, i64)>) {
+    match pattern {
+        Pattern::Range { lo, hi, .. } => ranges.push((*lo, *hi)),
+        Pattern::Or(alts, _) => {
+            for alt in alts {
+                note_pattern_ranges(alt, ranges);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn ranges_cover_interval(ranges: &[(i64, i64)], lo: i128, hi: i128) -> bool {
+    if lo > hi {
+        return false;
+    }
+    let mut sorted = ranges
+        .iter()
+        .map(|(range_lo, range_hi)| (i128::from(*range_lo), i128::from(*range_hi)))
+        .collect::<Vec<_>>();
+    sorted.sort_unstable_by_key(|(range_lo, _)| *range_lo);
+
+    let mut next = lo;
+    for (range_lo, range_hi) in sorted {
+        if range_hi < next {
+            continue;
+        }
+        if range_lo > next {
+            return false;
+        }
+        next = next.max(range_hi.saturating_add(1));
+        if next > hi {
+            return true;
+        }
+    }
+    false
+}
+
 fn leading_guard_pattern_subject(expr: &Expr) -> Option<&Expr> {
     match expr {
         Expr::PatternTest { subject, .. } => Some(subject),
@@ -404,8 +442,10 @@ impl<'a> Checker<'a> {
         pattern: &Pattern,
         st: &Type,
         covered: &mut HashSet<String>,
+        covered_ranges: &mut Vec<(i64, i64)>,
         multi_head: bool,
     ) {
+        note_pattern_ranges(pattern, covered_ranges);
         let pspan = pattern.span();
         // Or-patterns cover multiple variants; insert all of them.
         let covered_names: Vec<String> = if let Pattern::Or(alts, _) = pattern {
@@ -465,6 +505,7 @@ impl<'a> Checker<'a> {
         &mut self,
         st: &Type,
         covered: &HashSet<String>,
+        covered_ranges: &[(i64, i64)],
         has_else: bool,
         span: Span,
         insert_at: Option<Span>,
@@ -474,15 +515,32 @@ impl<'a> Checker<'a> {
             return;
         }
         let multi_head = subj_name == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT);
-        // Int/Char are open scalar types, and an inline range is
-        // finite but has no interval-aware coverage proof yet — range
-        // arms can never prove totality here, so an `else` (or wildcard)
-        // is always required. `missing_pattern_coverage` returns None for
-        // these scalar cases, so we detect them separately.
-        if matches!(st, Type::Int | Type::InlineRange { .. } | Type::Char) {
-            let domain_note = if matches!(st, Type::InlineRange { .. }) {
+        // Finite integer domains can prove an else-less range table when the
+        // union of its arms covers the complete interval. Plain `Int` and
+        // `Char` remain open to this checker and still require `else`.
+        let finite_integer_interval = st
+            .integer_range()
+            .or_else(|| self.registry.integer_interval(st));
+        if let Some((lo, hi)) = finite_integer_interval {
+            if ranges_cover_interval(covered_ranges, lo, hi) {
+                return;
+            }
+        }
+        let distinct_integer = match st {
+            Type::Named(name) => self
+                .registry
+                .distinct_base(name)
+                .is_some_and(Type::is_integer),
+            _ => false,
+        };
+        if matches!(st, Type::Char)
+            || st.is_integer()
+            || distinct_integer
+            || finite_integer_interval.is_some()
+        {
+            let domain_note = if finite_integer_interval.is_some() {
                 format!(
-                    "`{}` is an inline range; range arms are not proven to cover its full interval",
+                    "`{}` has a finite integer interval, but the range arms do not cover every value",
                     st.show()
                 )
             } else {
@@ -548,6 +606,55 @@ impl<'a> Checker<'a> {
             }
             self.diags.push(diag);
         }
+    }
+
+    /// D-PARSESTR1 / D-BINPAT1: text and byte patterns are refutable even
+    /// when they are written in a value-form dispatch chain. Keep this one
+    /// diagnostic path shared with statement switches so `NoElse` never
+    /// silently turns a refutable table into a total expression.
+    fn report_refutable_pattern_without_else(
+        &mut self,
+        has_str_match_arm: bool,
+        has_bin_match_arm: bool,
+        span: Span,
+    ) -> bool {
+        if has_bin_match_arm && !has_str_match_arm {
+            self.diags.push(Diagnostic::error(
+                "E0148",
+                format!(
+                    "this `{}` matches bytes but has no `{}` arm",
+                    Syntax::KW_IF,
+                    Syntax::KW_ELSE
+                ),
+                "a binary pattern can always fail to match — the fixed bytes might differ, or the subject might be too short".to_string(),
+                format!(
+                    "add `{} {} {{ ... }}` to handle bytes that don't match",
+                    Syntax::KW_ELSE,
+                    Syntax::OP_UNIFIED_ARROW
+                ),
+                Some(span),
+            ));
+            return true;
+        }
+        if has_str_match_arm {
+            self.diags.push(Diagnostic::error(
+                "E0148",
+                format!(
+                    "this `{}` matches text but has no `{}` arm",
+                    Syntax::KW_IF,
+                    Syntax::KW_ELSE
+                ),
+                "a text pattern can always fail to match — the fixed text might differ, or a typed hole might not read as that type".to_string(),
+                format!(
+                    "add `{} {} {{ ... }}` to handle text that doesn't match",
+                    Syntax::KW_ELSE,
+                    Syntax::OP_UNIFIED_ARROW
+                ),
+                Some(span),
+            ));
+            return true;
+        }
+        false
     }
 
     /// Card #1440: an else-less all-pattern value dispatch arrives from the
@@ -637,6 +744,12 @@ impl<'a> Checker<'a> {
         };
         // Probe without retaining recovery diagnostics — the ordinary
         // per-level inference reports each arm's own errors once.
+        let has_str_match_arm = raw
+            .iter()
+            .any(|pattern| matches!(pattern, Pattern::StrMatch { .. }));
+        let has_bin_match_arm = raw
+            .iter()
+            .any(|pattern| matches!(pattern, Pattern::BinMatch { .. }));
         let diag_len = self.diags.len();
         let mut resolved: Vec<Pattern> = Vec::new();
         let mut all_pattern = !raw.is_empty();
@@ -655,16 +768,23 @@ impl<'a> Checker<'a> {
         }
         self.diags.truncate(diag_len);
         if !all_pattern {
+            self.report_refutable_pattern_without_else(
+                has_str_match_arm,
+                has_bin_match_arm,
+                span,
+            );
             return;
         }
         let mut covered = HashSet::new();
+        let mut covered_ranges = Vec::new();
         for p in &resolved {
-            self.note_pattern_coverage(p, &st, &mut covered, false);
+            self.note_pattern_coverage(p, &st, &mut covered, &mut covered_ranges, false);
         }
         let insert_at = last_arm_end.map(|e| Span::new(e, e));
         self.check_pattern_coverage_complete(
             &st,
             &covered,
+            &covered_ranges,
             false,
             span,
             insert_at,
@@ -778,6 +898,7 @@ impl<'a> Checker<'a> {
             false
         };
         let mut covered = HashSet::new();
+        let mut covered_ranges = Vec::new();
         // D-FACT-FLOW1: one snapshot before the table, one store per arm,
         // and one shared join at the end. No plane keeps the last-walked arm.
         let before = self.flow.clone();
@@ -796,6 +917,7 @@ impl<'a> Checker<'a> {
                         &pattern,
                         st,
                         &mut covered,
+                        &mut covered_ranges,
                         subj_name.as_deref() == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT),
                     );
                     let bindings = self.validate_pattern(st, &pattern, pspan);
@@ -866,6 +988,7 @@ impl<'a> Checker<'a> {
                 self.check_pattern_coverage_complete(
                     &st,
                     &covered,
+                    &covered_ranges,
                     else_body.is_some(),
                     span,
                     insert_at,
@@ -896,55 +1019,27 @@ impl<'a> Checker<'a> {
                     }
                 )
             });
-            if has_bin_match_arm && !has_str_match_arm {
+            if !self.report_refutable_pattern_without_else(
+                has_str_match_arm,
+                has_bin_match_arm,
+                span,
+            ) {
                 self.diags.push(Diagnostic::error(
-                        "E0148",
-                        format!(
-                            "this `{}` matches bytes but has no `{}` arm",
-                            Syntax::KW_IF,
-                            Syntax::KW_ELSE
-                        ),
-                        "a binary pattern can always fail to match — the fixed bytes might differ, or the subject might be too short".to_string(),
-                        format!(
-                            "add `{} {} {{ ... }}` to handle bytes that don't match",
-                            Syntax::KW_ELSE,
-                            Syntax::OP_UNIFIED_ARROW
-                        ),
-                        Some(span),
-                    ));
-            } else if has_str_match_arm {
-                self.diags.push(Diagnostic::error(
-                        "E0148",
-                        format!(
-                            "this `{}` matches text but has no `{}` arm",
-                            Syntax::KW_IF,
-                            Syntax::KW_ELSE
-                        ),
-                        "a text pattern can always fail to match — the fixed text might differ, or a typed hole might not read as that type".to_string(),
-                        format!(
-                            "add `{} {} {{ ... }}` to handle text that doesn't match",
-                            Syntax::KW_ELSE,
-                            Syntax::OP_UNIFIED_ARROW
-                        ),
-                        Some(span),
-                    ));
-            } else {
-                self.diags.push(Diagnostic::error(
-                        "E0003",
-                        format!(
-                            "this `{}` needs an `{}` arm",
-                            Syntax::KW_IF,
-                            Syntax::KW_ELSE
-                        ),
-                        "mixed condition arms (or non-pattern arms) must always have a fallback (D-IF1)"
-                            .to_string(),
-                        format!(
-                            "add `{} {} {{ ... }}` after the last arm",
-                            Syntax::KW_ELSE,
-                            Syntax::OP_UNIFIED_ARROW
-                        ),
-                        Some(span),
-                    ));
+                    "E0003",
+                    format!(
+                        "this `{}` needs an `{}` arm",
+                        Syntax::KW_IF,
+                        Syntax::KW_ELSE
+                    ),
+                    "mixed condition arms (or non-pattern arms) must always have a fallback (D-IF1)"
+                        .to_string(),
+                    format!(
+                        "add `{} {} {{ ... }}` after the last arm",
+                        Syntax::KW_ELSE,
+                        Syntax::OP_UNIFIED_ARROW
+                    ),
+                    Some(span),
+                ));
             }
         }
         if subjectless_guard && arms.len() > 1 {

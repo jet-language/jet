@@ -183,6 +183,18 @@ fn jet_observe_task_update(_state: &'static str, _wait: &str, _deadline_ms: Opti
 fn jet_observe_task_register(_observe_id: &std::sync::atomic::AtomicUsize) -> usize {
     0
 }
+fn jet_observe_task_register_at(
+    _observe_id: &std::sync::atomic::AtomicUsize,
+    _spawn_site: usize,
+) -> usize {
+    0
+}
+fn jet_observe_task_failure_message(_id: usize, reason: String) -> String {
+    reason
+}
+fn jet_observe_has_parked_tasks() -> bool {
+    false
+}
 fn jet_observe_task_enter(_id: usize) {}
 fn jet_observe_task_finish(_id: usize) {}
 

@@ -21,6 +21,22 @@ fn lexer_api_returns_stable_value_tokens() {
 }
 
 #[test]
+fn postfix_in_lexes_as_a_member_identifier() {
+    let lexed = jet::Compiler::lex_source(
+        "fn run() {\n    value :: duration.in(.Seconds)\n    loop item in [1] -> print(item)\n}\n",
+    );
+    assert!(lexed.diagnostics.is_empty(), "unexpected lexer diagnostics: {:?}", lexed.diagnostics);
+    assert!(lexed
+        .tokens
+        .iter()
+        .any(|token| token.kind == "identifier" && token.text == "in"));
+    assert!(lexed
+        .tokens
+        .iter()
+        .any(|token| token.kind == "keyword.in" && token.text == "in"));
+}
+
+#[test]
 fn parser_api_returns_read_only_syntax_summary() {
     let src = "struct User {\n    name: String\n}\n\nfn run() {\n    print(\"ok\")\n}\n";
     let tree = jet::Compiler::parse_source(src);
@@ -41,13 +57,29 @@ fn parser_api_reports_diagnostics_as_values() {
 }
 
 #[test]
-fn single_bar_is_alternatives_only_and_flow_pipe_has_no_foreign_guess() {
+fn reserved_in_diagnostic_teaches_postfix_member_carve_out() {
+    let tree = jet::Compiler::parse_source("fn run() {\n    in :: 1\n}\n");
+    let diagnostic = tree
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0003")
+        .expect("bare `in` should remain reserved");
+    assert!(
+        diagnostic.fix.contains("after `.` it is allowed as a member name"),
+        "diagnostic must teach D-TIME-IN1=C: {}",
+        diagnostic.fix
+    );
+}
+
+#[test]
+fn single_bar_is_bitwise_or_and_flow_pipe_has_no_foreign_guess() {
     let bit_or = jet::Compiler::parse_source(
         "fn run() {\n    left :: 1\n    right :: 2\n    value :: left | right\n}\n",
     );
     assert!(
-        bit_or.diagnostics.iter().any(|diag| diag.code == "E0003"),
-        "D-SHAPE-PIPE1=C rejects a general single-bar expression with E0003"
+        bit_or.diagnostics.is_empty(),
+        "D-BITOREXPR1=A admits value `|` as bitwise OR: {:?}",
+        bit_or.diagnostics
     );
 
     let pipe_closure = jet::Compiler::parse_source("fn run() {\n    f :: |x| x + 1\n}\n");

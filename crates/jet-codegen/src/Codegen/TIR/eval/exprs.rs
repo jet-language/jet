@@ -31,6 +31,19 @@ mod math_lib_pure {
     include!("../../../Prelude/CoreLib/Top/MathLibPure.rs");
 }
 
+#[allow(dead_code)]
+mod render_time_rt {
+    #![allow(dead_code)]
+    pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
+    include!("../../../Prelude/Core/Time.rs");
+}
+
+#[allow(dead_code)]
+mod render_duration_rt {
+    #![allow(dead_code)]
+    include!("../../../Prelude/Core/Duration.rs");
+}
+
 /// D-TERM1: project the shared term kernel's `JetKey` into the evaluator's
 /// value carrier. The variant names are the ratified Jet `Key` variant names
 /// and the payloads are the same `Char`/`Int` the AOT and resident tiers carry,
@@ -306,6 +319,7 @@ fn progress_terminal_builtin(op: &crate::Codegen::TIR::TBuiltinOp) -> bool {
             | crate::Codegen::TIR::TBuiltinOp::Min { .. }
             | crate::Codegen::TIR::TBuiltinOp::Max { .. }
             | crate::Codegen::TIR::TBuiltinOp::First
+            | crate::Codegen::TIR::TBuiltinOp::Counts
     )
 }
 
@@ -1168,6 +1182,7 @@ fn eval_host_children(host: &THostCall) -> Vec<&TExpr> {
         | THostCall::TupleIndex { base: recv, .. }
         | THostCall::YieldSend { value: recv }
         | THostCall::ExpectSnapshot { value: recv, .. } => vec![recv.as_ref()],
+        THostCall::StrMatchScan { subject, .. } => vec![subject.as_ref()],
         THostCall::FixedListIndex { base, index, .. } => vec![base.as_ref(), index.as_ref()],
         // A GC edit seeds the generated `value` root before evaluating these
         // expressions. The host-call arm evaluates them after that seed.
@@ -1187,7 +1202,6 @@ fn eval_host_children(host: &THostCall) -> Vec<&TExpr> {
         } => vec![value.as_ref(), duration.as_ref(), clock.as_ref()],
         THostCall::GcRead { .. }
         | THostCall::FnName(_)
-        | THostCall::StrMatchScan { .. }
         | THostCall::BinMatchScan { .. }
         | THostCall::SwitchSubjectField { .. }
         | THostCall::SwitchSubjectValue
@@ -1239,6 +1253,17 @@ fn view_op_line(op: &crate::Codegen::TIR::TBuiltinOp) -> Option<u32> {
     }
 }
 
+fn sequence_argument_op(op: &crate::Codegen::TIR::TBuiltinOp) -> bool {
+    matches!(
+        op,
+        crate::Codegen::TIR::TBuiltinOp::Take
+            | crate::Codegen::TIR::TBuiltinOp::Skip
+            | crate::Codegen::TIR::TBuiltinOp::StepBy
+            | crate::Codegen::TIR::TBuiltinOp::Chunks
+            | crate::Codegen::TIR::TBuiltinOp::Windows
+    )
+}
+
 /// Every strict child is scheduled in source order. Lazy bodies and
 /// short-circuit/control-flow edges are resumed by explicit work items instead
 /// of being placed in this list.
@@ -1285,6 +1310,9 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
         | TExprKind::TaskGroupRace { tasks: arg }
         | TExprKind::TaskGroupAny { tasks: arg }
         | TExprKind::SelectWait { builder: arg, .. } => vec![arg.as_ref()],
+        TExprKind::NumericBinaryMethod { recv, arg, .. } => {
+            vec![recv.as_ref(), arg.as_ref()]
+        }
         TExprKind::AmbientInput { prompt } => prompt
             .as_ref()
             .map(|expr| vec![expr.as_ref()])
@@ -1865,7 +1893,92 @@ fn duration_ns(value: &CtValue) -> Option<i64> {
     (type_name == crate::Syntax::DURATION_TYPE).then(|| struct_int(value, "ns"))?
 }
 
+fn render_time_field<'a>(value: &'a CtValue, wanted: &str) -> Option<&'a CtValue> {
+    let CtValue::Struct { fields, .. } = value else {
+        return None;
+    };
+    fields.iter().find_map(|(name, value)| {
+        let name = name
+            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+            .unwrap_or(name);
+        (name == wanted).then_some(value)
+    })
+}
+
+fn render_time_int(value: &CtValue, field: &str) -> Option<i64> {
+    match render_time_field(value, field) {
+        Some(CtValue::Int(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+fn render_time_datetime_parts(value: &CtValue) -> Option<(i64, u32)> {
+    Some((
+        render_time_int(value, "secs")?,
+        u32::try_from(render_time_int(value, "nanos")?).ok()?,
+    ))
+}
+
+fn render_time_zone(value: &CtValue) -> Option<render_time_rt::JetZone> {
+    let CtValue::Str(name) = render_time_field(value, "name")? else {
+        return None;
+    };
+    render_time_rt::JetZone::named(name).ok()
+}
+
+/// All evaluator time text goes through the same Prelude constructors and
+/// formatters used by AOT and the resident JIT hosts.
+fn prelude_time_render(value: &CtValue) -> Option<String> {
+    let CtValue::Struct { type_name, .. } = value else {
+        return None;
+    };
+    let type_name = crate::Codegen::nominal_leaf(type_name);
+    let type_name = type_name
+        .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(type_name);
+    match type_name {
+        "Date" | "LocalDate" => Some(
+            render_time_rt::JetDate::new(
+                render_time_int(value, "year")?,
+                render_time_int(value, "month")?,
+                render_time_int(value, "day")?,
+            )
+            .to_string_fmt(),
+        ),
+        "LocalTime" => Some(
+            render_time_rt::JetLocalTime::new(
+                render_time_int(value, "hour")?,
+                render_time_int(value, "minute")?,
+                render_time_int(value, "second")?,
+            )
+            .to_string_fmt(),
+        ),
+        "DateTime" => {
+            let (secs, nanos) = render_time_datetime_parts(value)?;
+            Some(render_time_rt::JetDateTime::from_timestamp_ns(secs, nanos).to_string_fmt())
+        }
+        "Duration" => Some(render_duration_rt::jet_duration_kernel_show(
+            render_time_int(value, "ns")?,
+        )),
+        "Zone" => Some(render_time_zone(value)?.to_string_fmt()),
+        "ZonedDateTime" => {
+            let (secs, nanos) =
+                render_time_datetime_parts(render_time_field(value, "instant")?)?;
+            let zone = render_time_zone(render_time_field(value, "zone")?)?;
+            Some(
+                render_time_rt::JetDateTime::from_timestamp_ns(secs, nanos)
+                    .in_zone(&zone)
+                    .to_string_fmt(),
+            )
+        }
+        _ => None,
+    }
+}
+
 fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
+    if let Some(text) = prelude_time_render(value) {
+        return Some(text);
+    }
     match (value, ty) {
         (CtValue::Int(value), ty) => {
             let (signed, _) = crate::Comptime::MathLayout::integer_type_layout(ty)?;
@@ -3222,7 +3335,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         }
                     }
                     Some(("Float", Some(CtValue::Float(value))))
-                        if value.as_f64().fract() == 0.0 =>
+                        if value.as_f64().is_finite()
+                            && value.as_f64() >= i64::MIN as f64
+                            && value.as_f64() < i64::MAX as f64
+                            && value.as_f64().fract() == 0.0 =>
                     {
                         Ok(CtValue::Int(value.as_f64() as i64))
                     }
@@ -3280,6 +3396,20 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 Some(("Int", Some(CtValue::Int(value)))) => {
                     Ok(CtValue::Float(CtFloat::f64(*value as f64)))
                 }
+                Some(("Int", Some(CtValue::BigInt(value)))) => {
+                    let Some(value) = value
+                        .to_string_rep()
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|value| value.is_finite())
+                    else {
+                        return Ok(CtValue::failed(Box::new(decode_error(
+                            "",
+                            "expected Float, found out-of-range Int",
+                        ))));
+                    };
+                    Ok(CtValue::Float(CtFloat::f64(value)))
+                }
                 Some(("Number", Some(CtValue::Str(value))))
                 | Some(("Text", Some(CtValue::Str(value)))) => {
                     let value = match value.trim().parse::<f64>() {
@@ -3310,6 +3440,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 let value = match datatree_variant(&tree) {
                     Some(("Float", Some(CtValue::Float(value)))) => value.as_f64(),
                     Some(("Int", Some(CtValue::Int(value)))) => *value as f64,
+                    Some(("Int", Some(CtValue::BigInt(value)))) => value
+                        .to_string_rep()
+                        .parse::<f64>()
+                        .unwrap_or(f64::INFINITY),
                     Some(("Number", Some(CtValue::Str(value))))
                     | Some(("Text", Some(CtValue::Str(value)))) => {
                         match value.trim().parse::<f64>() {
@@ -5831,7 +5965,19 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                 crate::AST::StrFormat::Debug => {
                                     let manual = match &e.ty {
                                         Type::Named(type_name) => {
-                                            self.funcs.get(&format!("{type_name}::debug")).copied()
+                                            let canonical_type_name = crate::Codegen::nominal_leaf(
+                                                type_name,
+                                            )
+                                            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                            .unwrap_or_else(|| {
+                                                crate::Codegen::nominal_leaf(type_name)
+                                            });
+                                            [
+                                                format!("{type_name}::debug"),
+                                                format!("{canonical_type_name}::debug"),
+                                            ]
+                                            .into_iter()
+                                            .find_map(|key| self.funcs.get(&key).copied())
                                         }
                                         _ => None,
                                     };
@@ -6538,7 +6684,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 // read window that misses is a program-side stop, not a
                 // comptime build error, exactly as for the mutable form above.
                 let raw = eval_builtin(op, &mut r, argv, self.span());
-                let mut result = match view_op_line(op) {
+                let runtime_line = view_op_line(op).or_else(|| {
+                    sequence_argument_op(op).then(|| self.span_line(self.span()))
+                });
+                let mut result = match runtime_line {
                     Some(line) => self.route_runtime_panic(raw, "E3001", line)?,
                     None => raw?,
                 };
@@ -6855,14 +7004,28 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         _ => {}
                     }
                 }
-                let mut result = eval_handle_with_type_and_sink(
+                let mut result = match eval_handle_with_type_and_sink(
                     op,
                     &mut r,
                     &mut argv,
                     self.span(),
                     Some(&expr.ty),
                     self.sink.as_ref(),
-                )?;
+                ) {
+                    Err(diagnostic) if self.runtime_execution && diagnostic.code == "E3010" => {
+                        // E3010's registered What template quotes `{msg}`;
+                        // runtime_stop owns that quoting at the report edge.
+                        let message = diagnostic
+                            .what
+                            .strip_prefix('`')
+                            .and_then(|message| message.strip_suffix('`'))
+                            .unwrap_or(&diagnostic.what)
+                            .to_owned();
+                        let line = self.span_line(self.span());
+                        Err(self.runtime_stop("E3010", line, &message))
+                    }
+                    result => result,
+                }?;
                 let http_json = matches!(
                     op,
                     crate::Codegen::TIR::THandleOp::HTTPClientMethod { method, .. }
@@ -7300,7 +7463,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                                         "E3010",
                                         *line as u32,
                                         &format!(
-                                            "the string has {} characters, so position {} doesn't exist",
+                                            "The string has {} characters, so position {} doesn't exist",
                                             s.chars().count(), idx
                                         ),
                                     )
@@ -8227,6 +8390,46 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                             &values,
                             self.span(),
                         ),
+                    }
+                }
+                crate::Codegen::TIR::THostCall::StrMatchScan {
+                    subject,
+                    parts,
+                    probe,
+                } => {
+                    let subject = self.eval_expr_child(subject, scope)?;
+                    let hit = super::str_match_scan_value(&subject, parts);
+                    match probe {
+                        crate::Codegen::TIR::TMatchProbe::IsSome => {
+                            Ok(CtValue::Bool(hit.is_some()))
+                        }
+                        crate::Codegen::TIR::TMatchProbe::Unwrap => {
+                            let Some(binds) = hit else {
+                                return Err(unsupported("string pattern unwrap", self.span()));
+                            };
+                            let Type::Tuple(fields) = &expr.ty else {
+                                return Err(unsupported("string pattern tuple", self.span()));
+                            };
+                            if fields.len() != binds.len() {
+                                return Err(unsupported(
+                                    "string pattern binding count",
+                                    self.span(),
+                                ));
+                            }
+                            let plain_fields = fields
+                                .iter()
+                                .map(|(name, ty)| (name.clone(), (**ty).clone()))
+                                .collect::<Vec<_>>();
+                            let values = binds.into_iter().map(|(_, _, value)| value);
+                            Ok(CtValue::Struct {
+                                type_name: crate::Codegen::Tuples::tuple_struct_name(&plain_fields),
+                                fields: fields
+                                    .iter()
+                                    .map(|(name, _)| name.clone())
+                                    .zip(values)
+                                    .collect(),
+                            })
+                        }
                     }
                 }
                 crate::Codegen::TIR::THostCall::BinMatchScan { parts, probe } => {
@@ -9874,12 +10077,18 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
             TExprKind::ClosureMethod { recv, op, args } => {
                 self.eval_closure_method(recv, op, args, scope)
             }
-            TExprKind::HostBorrowCallback { .. } => {
-                Err(unsupported("expr `HostBorrowCallback`", self.span()))
-            }
+            // Host-borrow adapters only change the native callback ABI. The
+            // evaluator has no borrow representation, so the callable itself
+            // is the same value and can enter the shared closure operation.
+            TExprKind::HostBorrowCallback { callable, .. } => self.eval_expr_child(callable, scope),
             TExprKind::NumericMethod { recv, op } => {
                 let v = self.eval_expr_child(recv, scope)?;
                 self.eval_numeric_op(&v, op, &recv.ty, &expr.ty)
+            }
+            TExprKind::NumericBinaryMethod { recv, op, arg } => {
+                let left = self.eval_expr_child(recv, scope)?;
+                let right = self.eval_expr_child(arg, scope)?;
+                self.eval_numeric_binary_op(&left, &right, op, &recv.ty, &arg.ty)
             }
             TExprKind::OverflowOpt {
                 prefix,
@@ -10325,6 +10534,24 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 }
                 self.write_back_place(recv, base_val, scope)
             }
+            TExprKind::Index {
+                base,
+                index,
+                is_map,
+                uninit_fixed,
+                ..
+            } => {
+                let base_value = self.eval_expr_child(base, scope)?;
+                let index_value = self.eval_expr_child(index, scope)?;
+                let updated = self.replace_indexed_value(
+                    base_value,
+                    index_value,
+                    *is_map,
+                    value,
+                    *uninit_fixed,
+                )?;
+                self.write_back_place(base, updated, scope)
+            }
             TExprKind::PoolSlot {
                 pool,
                 id,
@@ -10451,6 +10678,20 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                         CtValue::Int(n) => Ok(CtValue::Float(CtFloat::f32(*n as f32))),
                         _ => Err(unsupported("CastAs to f32", self.span())),
                     },
+                    _ if matches!(result_ty, Type::Int)
+                        && matches!(recv_ty, Type::IntN { signed: false, .. }) =>
+                    {
+                        let CtValue::Int(value) = v else {
+                            return Err(unsupported("CastAs from unsigned integer", self.span()));
+                        };
+                        // Unsigned fixed-width values use their two's-complement
+                        // i64 carrier in the evaluator. Decode that carrier
+                        // before constructing exact default `Int`; this is the
+                        // same operation as AOT/JIT `int_from_u64`.
+                        Ok(exact_int_value(
+                            jet_foundation::Numeric::CtBigInt::from_u64(*value as u64),
+                        ))
+                    }
                     _ => Ok(v.clone()),
                 }
             }
@@ -10484,7 +10725,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     return Err(self.runtime_stop(
                         "E3010",
                         *line,
-                        &format!("value doesn't fit in {dst_spelling}"),
+                        &format!("Value doesn't fit in {dst_spelling}"),
                     ));
                 }
                 let _ = (recv_ty, result_ty);
@@ -10628,7 +10869,43 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     Err(error) => Ok(CtValue::failed(Box::new(CtValue::Str(error)))),
                 }
             }
+            TNumericOp::EuclideanDiv { .. } | TNumericOp::EuclideanRem { .. } => {
+                unreachable!("Euclidean numeric methods require their binary TIR node")
+            }
         }
+    }
+
+    fn eval_numeric_binary_op(
+        &mut self,
+        left: &CtValue,
+        right: &CtValue,
+        op: &crate::Codegen::TIR::TNumericOp,
+        left_ty: &crate::AST::Type,
+        right_ty: &crate::AST::Type,
+    ) -> Result<CtValue, Diagnostic> {
+        use crate::Codegen::TIR::TNumericOp;
+        let left = exact_big(left).ok_or_else(|| {
+            unsupported(
+                "Euclidean numeric method expects exact Int operands",
+                self.span(),
+            )
+        })?;
+        let right = exact_big(right).ok_or_else(|| {
+            unsupported(
+                "Euclidean numeric method expects exact Int operands",
+                self.span(),
+            )
+        })?;
+        let (quotient, remainder) = left.div_rem_euclid(&right).ok_or_else(|| {
+            unsupported("Euclidean numeric method has a zero divisor", self.span())
+        })?;
+        let value = match op {
+            TNumericOp::EuclideanDiv { .. } => quotient,
+            TNumericOp::EuclideanRem { .. } => remainder,
+            _ => unreachable!("non-Euclidean operation in numeric binary evaluator"),
+        };
+        let _ = (left_ty, right_ty);
+        Ok(exact_int_value(value))
     }
 
     fn write_print(&mut self, text: &str, to_stderr: bool) -> Result<(), Diagnostic> {
@@ -10839,7 +11116,15 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         v: &CtValue,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<String, Diagnostic> {
-        let _ = scope;
+        // D-MEM1: views are values at the language surface. The evaluator's
+        // mutable-view carrier is an engine detail; interpolation must render
+        // the current value window, not its bookkeeping record.
+        if let CtValue::Struct { type_name, fields } = v {
+            if type_name == "__JetViewMut" {
+                let value = self.materialize_view_mut_window(fields, scope, self.span())?;
+                return self.show_value(&value, scope);
+            }
+        }
         if let CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } = v {
             let canonical_type_name = crate::Codegen::nominal_leaf(type_name)
                 .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
@@ -10856,6 +11141,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     }
                 }
             }
+        }
+        if let Some(text) = prelude_time_render(v) {
+            return Ok(text);
         }
         if let Some(text) = crate::Comptime::display_core_pure_value(v) {
             return Ok(text);
@@ -11060,6 +11348,9 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
     }
 
     pub(super) fn debug_value(&self, v: &CtValue) -> String {
+        if let Some(text) = prelude_time_render(v) {
+            return text;
+        }
         match v {
             CtValue::Struct { type_name, fields } => {
                 let ty = crate::Codegen::nominal_leaf(type_name)
@@ -11252,6 +11543,39 @@ fn eval_precise_builtin(
                 .map_err(|_| unsupported(&format!("`Decimal(\"{s}\")`"), span)),
             _ => Err(unsupported("`Decimal.from_str`", span)),
         },
+        ("Decimal", "from_int") => match args.first() {
+            Some(value) => {
+                let text = crate::Comptime::Builtins::exact_big(value)
+                    .ok_or_else(|| unsupported("`Decimal.from_int`", span))?
+                    .to_string_rep();
+                CtDecimal::from_str(&text)
+                    .map(|decimal| decimal.to_value())
+                    .map_err(|_| unsupported("`Decimal.from_int`", span))
+            }
+            None => Err(unsupported("`Decimal.from_int`", span)),
+        },
+        ("Decimal", "from_float") => match args.first() {
+            Some(CtValue::Float(value)) => CtDecimal::from_float(value.as_f64())
+                .map(|decimal| decimal.to_value())
+                .ok_or_else(|| unsupported("`Decimal.from_float`", span)),
+            _ => Err(unsupported("`Decimal.from_float`", span)),
+        },
+        ("Decimal", "from_fraction") => match args.first() {
+            Some(value) => CtFraction::from_value(value)
+                .ok()
+                .and_then(|fraction| CtDecimal::from_fraction(&fraction))
+                .map(|decimal| decimal.to_value())
+                .ok_or_else(|| unsupported("`Decimal.from_fraction` needs a finite ratio", span)),
+            None => Err(unsupported("`Decimal.from_fraction`", span)),
+        },
+        ("Decimal", "to_int") => match args.first() {
+            Some(value) => CtDecimal::from_value(value)
+                .ok()
+                .and_then(|decimal| decimal.to_int_exact())
+                .map(crate::Comptime::Builtins::exact_int_value)
+                .ok_or_else(|| unsupported("`Decimal.to_int` needs an integer value", span)),
+            None => Err(unsupported("`Decimal.to_int`", span)),
+        },
         // D-TYPE2-DEFAULT1: an exact Decimal crosses into Float at the
         // irrational-result math functions, exactly as a Fraction does. The
         // checker and the AOT lowerer both admit it, so the evaluator behind
@@ -11270,7 +11594,7 @@ fn eval_precise_builtin(
                 .map(|fraction| fraction.to_value())
                 .ok_or_else(|| unsupported("invalid exact quotient", span))
         }
-        ("Decimal", "add" | "sub" | "mul" | "equal" | "to_string")
+        ("Decimal", "add" | "sub" | "mul" | "div" | "round" | "floor" | "ceil" | "equal" | "to_string")
         | (
             "Fraction",
             "add" | "sub" | "mul" | "neg" | "to_string" | "div" | "equal" | "numerator"
@@ -11283,6 +11607,36 @@ fn eval_precise_builtin(
             let rest: Vec<_> = it.collect();
             crate::Comptime::Builtins::apply_method(&recv, func, rest, span)
         }
+        ("Fraction", "from_int") => match args.first() {
+            Some(value) => crate::Comptime::Builtins::exact_big(value)
+                .and_then(|integer| integer.try_i64())
+                .and_then(|integer| CtFraction::from_int(integer))
+                .map(|fraction| fraction.to_value())
+                .ok_or_else(|| unsupported("`Fraction.from_int` needs a word-sized Int", span)),
+            None => Err(unsupported("`Fraction.from_int`", span)),
+        },
+        ("Fraction", "from_float") => match args.first() {
+            Some(CtValue::Float(value)) => CtFraction::from_float(value.as_f64())
+                .map(|fraction| fraction.to_value())
+                .ok_or_else(|| unsupported("`Fraction.from_float` needs an exactly representable Float", span)),
+            _ => Err(unsupported("`Fraction.from_float`", span)),
+        },
+        ("Fraction", "from_decimal") => match args.first() {
+            Some(value) => CtDecimal::from_value(value)
+                .ok()
+                .and_then(|decimal| CtFraction::from_decimal(&decimal))
+                .map(|fraction| fraction.to_value())
+                .ok_or_else(|| unsupported("`Fraction.from_decimal` needs a word-sized Decimal", span)),
+            None => Err(unsupported("`Fraction.from_decimal`", span)),
+        },
+        ("Fraction", "to_int") => match args.first() {
+            Some(value) => CtFraction::from_value(value)
+                .ok()
+                .and_then(|fraction| fraction.to_int_exact())
+                .map(CtValue::Int)
+                .ok_or_else(|| unsupported("`Fraction.to_int` needs an integer value", span)),
+            None => Err(unsupported("`Fraction.to_int`", span)),
+        },
         ("Complex", "from_parts") => {
             let [real, imaginary] = args.as_slice() else {
                 return Err(unsupported(

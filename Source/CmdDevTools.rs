@@ -1153,9 +1153,9 @@ pub(crate) fn run_completions(args: &[String]) {
         || !matches!(args.len(), 1 | 3)
         || (args.len() == 3 && args[1] != jet::Syntax::CLI_COMPLETIONS_FOR)
     {
-        eprintln!("Error [E2102]: completions arguments don't match `{USAGE}`.");
-        eprintln!(" Why: a completion script needs one supported shell and, optionally, one compiled Jet program.");
-        eprintln!(" Fix: run `{USAGE}`.");
+        eprintln!("Error [E2102]: Completions arguments don't match `{USAGE}`.");
+        eprintln!(" Why: A completion script needs one supported shell and, optionally, one compiled Jet program.");
+        eprintln!(" Fix: Run `{USAGE}`.");
         eprintln!("More: jet-lang.dev/e/E2102");
         exit(ExitCodes::USAGE);
     }
@@ -1240,9 +1240,9 @@ fn completion_metadata_error(program: &str, why: &str) -> ! {
         .chars()
         .flat_map(char::escape_default)
         .collect::<String>();
-    eprintln!("Error [E2103]: couldn't read command metadata from `{program}`.");
+    eprintln!("Error [E2103]: Couldn't read command metadata from `{program}`.");
     eprintln!(" Why: {why}.");
-    eprintln!(" Fix: rebuild the program with this Jet toolchain, then try again.");
+    eprintln!(" Fix: Rebuild the program with this Jet toolchain, then try again.");
     eprintln!("More: jet-lang.dev/e/E2103");
     exit(ExitCodes::USER_ERROR);
 }
@@ -2136,9 +2136,9 @@ pub(crate) fn run_doctor(online: bool, apply: bool, mode: OutputMode) {
     }
     println!();
     if jet::Doctor::has_problem(&checks) {
-        println!("Warning [L2101] (doctor_advisory): toolchain checks need attention");
-        println!(" Why: one or more required tools or paths are unavailable");
-        println!(" Fix: follow the fixes above, then run `jet self doctor` again");
+        println!("Warning [L2101] (doctor_advisory): Toolchain checks need attention");
+        println!(" Why: One or more required tools or paths are unavailable");
+        println!(" Fix: Follow the fixes above, then run `jet self doctor` again");
         println!(" {}", jet::Explain::pointer_line("L2101", color));
         exit(ExitCodes::USER_ERROR);
     } else {
@@ -4480,7 +4480,7 @@ fn run_com_bind(args: &[&String]) {
     if !cfg!(target_os = "windows") {
         eprintln!("Error [E3260]: `com.*` needs a Windows host.");
         eprintln!(" Why: COM type libraries, apartments, and IDispatch are Windows facilities.");
-        eprintln!(" Fix: run `jet inspect bind com` and build the COM module on a Windows host.");
+        eprintln!(" Fix: Run `jet inspect bind com` and build the COM module on a Windows host.");
         eprintln!("More: jet-lang.dev/e/E3260");
         exit(ExitCodes::USER_ERROR)
     }

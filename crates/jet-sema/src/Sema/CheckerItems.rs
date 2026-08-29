@@ -1509,6 +1509,9 @@ impl<'a> Checker<'a> {
     pub(crate) fn is_equatable_type(&self, ty: &Type) -> bool {
         match ty {
             Type::List(inner) | Type::Option(inner) => self.is_equatable_type(inner),
+            Type::Map { key, value, .. } => {
+                self.is_equatable_type(key) && self.is_equatable_type(value)
+            }
             Type::Result { ok, err } => self.is_equatable_type(ok) && self.is_equatable_type(err),
             Type::Tuple(fields) => fields
                 .iter()
@@ -1559,8 +1562,9 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn types_comparable_type(&self, ty: &Type) -> bool {
-        let (normalized, registry, _) = self.capability_type_context(ty);
-        crate::Sema::Diagnostics::types_comparable(&normalized, registry)
+        let (normalized, registry, trait_reg) = self.capability_type_context(ty);
+        trait_reg.type_implements_trait(&normalized, crate::Generics::COMPARABLE)
+            || crate::Sema::Diagnostics::types_comparable(&normalized, registry)
     }
 
     pub(crate) fn incomparable_field_type(&self, ty: &Type) -> Option<String> {
@@ -3867,11 +3871,7 @@ impl<'a> Checker<'a> {
                         "convert one side, or compare fields that have the same type".to_string(),
                         Some(call.name_span),
                     ));
-                } else if !crate::Sema::Diagnostics::is_equatable(
-                    &lt,
-                    self.registry,
-                    self.trait_reg,
-                ) {
+                } else if !self.is_equatable_type(&lt) {
                     if let Some(field) = incomparable_field(&lt, self.registry) {
                         self.diags.push(Diagnostic::error(
                             "E0312",

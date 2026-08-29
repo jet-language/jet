@@ -48,6 +48,8 @@
 (extern_fn name: (type_identifier) @function)
 (call_expr name: (identifier) @function.call)
 (turbofish_call name: (identifier) @function.call)
+; D-TIME-IN1=C: the dot-member carve-out keeps `.in(...)` in the identifier
+; capture, even though bare `in` remains a control keyword.
 (method_call_expr method: (identifier) @function.method)
 
 ; Parameters / fields
@@ -134,7 +136,7 @@
   "check"
 ] @function.builtin
 
-; marker.rule: ABI Arithmetic Bindgen CLI Close Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten FX HTML Impure Inline Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
+; marker.rule: ABI Arithmetic Bindgen CLI Close Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated Discriminant Doc Encode Env Equatable Error Every Extern FFI FX Flag Flatten HTML Impure Inline Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scalar Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # & ... :: := @ @[ ]@ ^ ~
 ; operator: ! != % %% %%= %= && &= * *= + ++ += - -- -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> == > >= >> >>= ? ?. ?? ^= { | |= || ~| ~|=
 ; END GENERATED JET SYNTAX HIGHLIGHTS

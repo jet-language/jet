@@ -30,6 +30,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
     if expr_in_subset_inner(e, cx, locals) {
         return true;
     }
+    eprintln!("[DEBUG-2290] expr outside subset: {e:?}");
     refusal::note(refusal::EXPR, e.without_parens().span());
     false
 }

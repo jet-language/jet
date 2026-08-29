@@ -1,61 +1,23 @@
 use core.files as fs
 use core.process as process
-use core.sys as sys
-
-fn scan_one(path: String, display: String, needle: String) String -> {
+struct Match { display: String, count: Int }
+fn scan(path: String, root: String, needle: String) Match -> {
     text :: fs.read(~path) ?? ""
-    count := 0
-    loop line in text.lines() -> count += line.count(needle)
-    return "{display}:{count}"
+    count :: text.lines().map((line: String) -> line.count(needle)).sum()
+    return Match{display: "{root}/{Path.from(path).stem()}.txt", count}
 }
-
 fn run() {
-    args :: process.argv()
-    cwd :: sys.current_dir() ?? "missing"
-    root_name :: args.get(1) ?? "files"
-    needle :: args.get(2) ?? "needle-7f"
-    root :: Path.from(cwd).join(root_name).to_string()
+    root :: process.argv().get(1) ?? "files"
+    needle :: process.argv().get(2) ?? "needle-7f"
     entries :: fs.list_dir(root) ?? panic("list failed")
     paths := [String]{}
     loop entry in entries {
         if !entry.is_dir && entry.name.ends_with(".txt") -> paths.push(entry.path)
     }
-    paths.sort()
-    (sender, receiver) :: channel<String>()
-    if paths.len() == 0 {
-        print("files 0/0 total 0")
-        return
-    }
-    all := [String]{}
-
-    task.group _group(limit: 32) {
-        loop i in 0..<paths.len() {
-            path :: paths[i]
-            tx :: ~sender
-            file :: ~path
-            term :: ~needle
-            display :: "{root_name}/{Path.from(file).stem()}.txt"
-            handle :: task { tx.send(scan_one(file, display, term)) }
-            handle.detach()
-        }
-        loop _ in 0..<paths.len() {
-            all.push(receiver.receive() ?? panic("channel closed"))
-        }
-    }
-
-    sender.close()
-    all.sort()
-    matches := [String]{}
-    total := 0
-    loop result in all {
-        count :: Int.parse(result.after(":")) ?? 0
-        if count > 0 {
-            matches.push(result)
-            total += count
-        }
-    }
-    loop result in matches {
-        print(result)
-    }
-    print("files {matches.len()}/{paths.len()} total {total}")
+    results := paths.para_map((path: String) -> scan(path, root, needle), limit: 32)
+    results.sort_by(result -> result.display)
+    positive :: results.filter((result: Match) -> result.count > 0)
+    total :: positive.map((result: Match) -> result.count).sum()
+    loop result in positive -> print("{result.display}:{result.count}")
+    print("files {positive.len()}/{paths.len()} total {total}")
 }

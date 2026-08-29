@@ -249,6 +249,7 @@ const PRELUDE_PARTS: &[&str] = &[
     // no Prelude tree to read from.
     include_str!("../Prelude/Core/FSWalk.rs"),
     include_str!("../Prelude/CoreLib/JetStd/Iter.rs"),
+    include_str!("../Prelude/Core/CollectionFailure.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
     include_str!("../Prelude/Memo.rs"),
     include_str!("../Prelude/SharedProtocol.rs"),
@@ -881,6 +882,7 @@ fn jet_cov_dump() {
 /// may use an explicit ABI bridge, but never falls back to this path.
 const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/Regex.rs"),
     include_str!("../Prelude/TaskGroup.rs"),
     include_str!("../Prelude/CoreLib/JetStd/Mime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
@@ -1549,6 +1551,7 @@ fn push_corelib_prelude_body(
     // always uses the seeded stream. They are kernel dependencies, not
     // conditional math surface.
     out.push_str(include_str!("../Prelude/Core/SeededRandom.rs"));
+    out.push_str(include_str!("../Prelude/Core/StringBytes.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/FakeData.rs"));
 
@@ -3409,6 +3412,8 @@ mod tests {
         let byte_buffer = std::fs::read_to_string(root.join("src/Prelude/Core/Bytes.rs")).unwrap();
         let iter =
             std::fs::read_to_string(root.join("src/Prelude/CoreLib/JetStd/Iter.rs")).unwrap();
+        let collection_failure =
+            std::fs::read_to_string(root.join("src/Prelude/Core/CollectionFailure.rs")).unwrap();
         let collections =
             std::fs::read_to_string(root.join("src/Prelude/Core/Collections.rs")).unwrap();
         let memo = std::fs::read_to_string(root.join("src/Prelude/Memo.rs")).unwrap();
@@ -3472,6 +3477,10 @@ mod tests {
             ("src/Prelude/Core/Progress.rs", progress.as_str()),
             ("src/Prelude/Core/Bytes.rs", byte_buffer.as_str()),
             ("src/Prelude/CoreLib/JetStd/Iter.rs", iter.as_str()),
+            (
+                "src/Prelude/Core/CollectionFailure.rs",
+                collection_failure.as_str(),
+            ),
             ("src/Prelude/Core/Collections.rs", collections.as_str()),
             ("src/Prelude/Memo.rs", memo.as_str()),
             ("src/Prelude/SharedProtocol.rs", shared_protocol.as_str()),
@@ -3599,6 +3608,9 @@ mod tests {
         let collections_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Collections.rs\")")
             .unwrap();
+        let collection_failure_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/CollectionFailure.rs\")")
+            .unwrap();
         let iter_pos = production_codegen
             .find("include_str!(\"../Prelude/CoreLib/JetStd/Iter.rs\")")
             .unwrap();
@@ -3666,6 +3678,8 @@ mod tests {
                 && view_access_pos < collections_pos
                 && byte_buffer_pos < iter_pos
                 && iter_pos < collections_pos
+                && iter_pos < collection_failure_pos
+                && collection_failure_pos < collections_pos
                 && collections_pos < memo_pos
                 && memo_pos < term_pos
                 && term_pos < term_key_pos
@@ -3736,6 +3750,7 @@ mod tests {
                 progress.as_str(),
                 byte_buffer.as_str(),
                 iter.as_str(),
+                collection_failure.as_str(),
                 collections.as_str(),
                 memo.as_str(),
                 shared_protocol.as_str(),
@@ -3792,6 +3807,7 @@ mod tests {
                     progress.as_str(),
                     byte_buffer.as_str(),
                     iter.as_str(),
+                    collection_failure.as_str(),
                     collections.as_str(),
                     memo.as_str(),
                     shared_protocol.as_str(),

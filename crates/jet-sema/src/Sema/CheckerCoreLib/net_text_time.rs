@@ -561,7 +561,9 @@ pub fn regex_method_return(
             "matches" if argc == 1 => {
                 Some(Some(Type::List(Box::new(Type::Named("Match".to_string())))))
             }
-            "replace" | "replace_all" if argc == 2 => Some(Some(Type::String)),
+            "replace" | "replace_first" | "replace_all" if argc == 2 => {
+                Some(Some(Type::String))
+            }
             "split_limit" if argc == 2 => Some(Some(Type::List(Box::new(Type::String)))),
             "replace_all_with" if argc == 2 => Some(Some(Type::String)),
             _ => None,
@@ -1123,6 +1125,10 @@ fn uintn_ty(bits: u8) -> Type {
     }
 }
 
+fn intn_ty(bits: u8) -> Type {
+    Type::IntN { signed: true, bits }
+}
+
 /// D-SHIFT1 (c7shift): method calls on `binary.Reader` (`Reader.over(bytes)`
 /// static constructor is handled in `CheckerInfer/calls.rs`, mirroring
 /// `Path.from`). Every read is fallible — a bounds miss is an ordinary `?`
@@ -1137,13 +1143,30 @@ pub fn binary_reader_method_return(
         return None;
     }
     let bytes = || Type::List(Box::new(u8_ty()));
+    let result_unit = || result_ty(unit_ty(), Type::String);
     match (method, n_args) {
         ("read_u8", 0) => Some(Some(result_ty(uintn_ty(8), Type::String))),
         ("read_u16_le" | "read_u16_be", 0) => Some(Some(result_ty(uintn_ty(16), Type::String))),
         ("read_u32_le" | "read_u32_be", 0) => Some(Some(result_ty(uintn_ty(32), Type::String))),
         ("read_u64_le" | "read_u64_be", 0) => Some(Some(result_ty(uintn_ty(64), Type::String))),
-        ("read_f32_le", 0) => Some(Some(result_ty(Type::Float32, Type::String))),
-        ("read_f64_le", 0) => Some(Some(result_ty(Type::Float, Type::String))),
+        ("read_i8", 0) => Some(Some(result_ty(intn_ty(8), Type::String))),
+        ("read_i16_le" | "read_i16_be", 0) => {
+            Some(Some(result_ty(intn_ty(16), Type::String)))
+        }
+        ("read_i32_le" | "read_i32_be", 0) => {
+            Some(Some(result_ty(intn_ty(32), Type::String)))
+        }
+        ("read_i64_le" | "read_i64_be", 0) => {
+            Some(Some(result_ty(intn_ty(64), Type::String)))
+        }
+        ("read_f32_le" | "read_f32_be", 0) => {
+            Some(Some(result_ty(Type::Float32, Type::String)))
+        }
+        ("read_f64_le" | "read_f64_be", 0) => {
+            Some(Some(result_ty(Type::Float, Type::String)))
+        }
+        ("peek", 0) => Some(Some(result_ty(uintn_ty(8), Type::String))),
+        ("seek" | "skip", 1) => Some(Some(result_unit())),
         ("take", 1) => Some(Some(result_ty(bytes(), Type::String))),
         ("remaining", 0) => Some(Some(Type::Int)),
         ("is_at_end", 0) => Some(Some(Type::Bool)),

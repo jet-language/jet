@@ -1,0 +1,24 @@
+// Time values use one equality and ordering contract in every execution tier.
+fn run() {
+    early :: DateTime{"2024-02-29T23:58:57Z"}
+    late :: DateTime{"2024-03-01T00:00:00Z"}
+    early_date :: early.date()
+    late_date :: late.date()
+
+    print(early == late)
+    print(early < late)
+    print(early_date == late_date)
+    print(early_date < late_date)
+
+    datetimes := [DateTime]{late, early}
+    datetimes.sort()
+    loop value in datetimes {
+        print(value.to_string())
+    }
+
+    dates := [LocalDate]{late_date, early_date}
+    dates.sort()
+    loop value in dates {
+        print(value.to_string())
+    }
+}

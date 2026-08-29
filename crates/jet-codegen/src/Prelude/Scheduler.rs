@@ -3021,13 +3021,28 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    jet_scheduler_spawn_with_control(f, JetTaskControl::new())
+    jet_scheduler_spawn_at(0, f)
+}
+
+/// Submit a task with its compiler-assigned spawn-site label.
+pub fn jet_scheduler_spawn_at<F, T>(spawn_site: usize, f: F) -> JetSchedulerJoin<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    jet_scheduler_spawn_with_control_at(spawn_site, f, JetTaskControl::new())
 }
 
 pub fn jet_scheduler_spawn_blocking<F,T>(f:F)->JetSchedulerJoin<T>
 where F:FnOnce()->T+Send+'static,T:Send+'static,
 {
-    jet_scheduler_spawn_blocking_with_control(f,JetTaskControl::new())
+    jet_scheduler_spawn_blocking_at(0, f)
+}
+
+pub fn jet_scheduler_spawn_blocking_at<F,T>(spawn_site: usize, f:F)->JetSchedulerJoin<T>
+where F:FnOnce()->T+Send+'static,T:Send+'static,
+{
+    jet_scheduler_spawn_blocking_with_control_at(spawn_site, f, JetTaskControl::new())
 }
 
 pub fn jet_scheduler_spawn_with_control<F, T>(
@@ -3038,19 +3053,46 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    jet_scheduler_spawn_with_control_kind(f,control,false)
+    jet_scheduler_spawn_with_control_at(0, f, control)
+}
+
+pub fn jet_scheduler_spawn_with_control_at<F, T>(
+    spawn_site: usize,
+    f: F,
+    control: Arc<JetTaskControl>,
+) -> JetSchedulerJoin<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    jet_scheduler_spawn_with_control_kind(spawn_site, f, control, false)
 }
 
 pub fn jet_scheduler_spawn_blocking_with_control<F,T>(f:F,control:Arc<JetTaskControl>)->JetSchedulerJoin<T>
 where F:FnOnce()->T+Send+'static,T:Send+'static,
 {
-    jet_scheduler_spawn_with_control_kind(f,control,true)
+    jet_scheduler_spawn_blocking_with_control_at(0, f, control)
 }
 
-fn jet_scheduler_spawn_with_control_kind<F,T>(f:F,control:Arc<JetTaskControl>,blocking:bool)->JetSchedulerJoin<T>
+pub fn jet_scheduler_spawn_blocking_with_control_at<F,T>(
+    spawn_site: usize,
+    f:F,
+    control:Arc<JetTaskControl>,
+)->JetSchedulerJoin<T>
 where F:FnOnce()->T+Send+'static,T:Send+'static,
 {
-    let observe_id = jet_observe_task_register(&control.observe_id);
+    jet_scheduler_spawn_with_control_kind(spawn_site, f, control, true)
+}
+
+fn jet_scheduler_spawn_with_control_kind<F,T>(
+    spawn_site: usize,
+    f:F,
+    control:Arc<JetTaskControl>,
+    blocking:bool,
+)->JetSchedulerJoin<T>
+where F:FnOnce()->T+Send+'static,T:Send+'static,
+{
+    let observe_id = jet_observe_task_register_at(&control.observe_id, spawn_site);
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     let completion_order = Arc::new(OnceLock::new());
     let task_completion_order = completion_order.clone();
@@ -3094,7 +3136,10 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
                     .expect("deadline payload type checked");
                 JetSchedulerResult::Deadline(deadline.rendered)
             }
-            Err(e) => JetSchedulerResult::Panicked(jet_scheduler_panic_message(&*e)),
+            Err(e) => JetSchedulerResult::Panicked(jet_observe_task_failure_message(
+                observe_id,
+                jet_scheduler_panic_message(&*e),
+            )),
         };
         jet_observe_task_finish(observe_id);
         task_completion_order
@@ -3114,6 +3159,12 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
 pub fn jet_scheduler_drain() {
     let sched = scheduler();
     for _ in 0..5000 {
+        // A parked task cannot make progress without an external event. Let
+        // the common exit edge report its bounded identity instead of waiting
+        // through the drain ceiling and hiding the cause.
+        if jet_observe_has_parked_tasks() {
+            return;
+        }
         if sched.live.load(Ordering::Relaxed) == 0 {
             let g = sched.global.lock().unwrap();
             let pending_local = sched
@@ -3297,7 +3348,7 @@ mod interrupt_boundary_tests {
             (
                 "deadline",
                 Box::new(JetDeadlineUnwind {
-                    rendered: "Error [E3003]: deadline exceeded while waiting in task join"
+                    rendered: "Error [E3003]: Deadline exceeded while waiting in task join"
                         .to_string(),
                 }),
             ),
@@ -3307,7 +3358,7 @@ mod interrupt_boundary_tests {
             ),
             (
                 "deadline report",
-                Box::new("Error [E3003]: deadline exceeded while waiting in task join".to_string()),
+                Box::new("Error [E3003]: Deadline exceeded while waiting in task join".to_string()),
             ),
             (
                 "foreign boundary",

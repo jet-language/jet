@@ -12,7 +12,9 @@ use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit::emit_math_swizzle_read;
 use crate::Codegen::TIR::emit::emit_require_stop;
 use crate::Codegen::TIR::emit::statements::{emit_mut_collection_place, PRELUDE_CARRIED};
-use crate::Codegen::TIR::emit::{collect_select_after_durations, collect_select_arms};
+use crate::Codegen::TIR::emit::{
+    collect_select_after_durations, collect_select_arms, emit_tir_stopping_receiver,
+};
 use crate::Codegen::TIR::emit_static_owner;
 use crate::Codegen::TIR::emit_tir_call_args;
 use crate::Codegen::TIR::emit_tir_core_call;
@@ -43,6 +45,8 @@ use crate::Codegen::TIR::TLambda;
 use crate::Codegen::TIR::TModuleCallForm;
 use crate::Codegen::TIR::TNumericOp;
 use crate::Codegen::TIR::TOptionProbe;
+use crate::Codegen::TIR::TOutcomeFastBuffer;
+use crate::Codegen::TIR::TOutcomeFastPath;
 use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TStructExtra;
@@ -192,6 +196,26 @@ pub(super) fn is_float_view(ty: &Type) -> bool {
 
 pub(super) fn is_compute_view_mut(ty: &Type) -> bool {
     ty.is_compute_view_mut()
+}
+
+fn float_sort_comparator(elem: &Type, cx: &Cx, reverse: bool) -> Option<String> {
+    let (left, right) = match elem {
+        Type::Float => ("*left", "*right"),
+        Type::Float32 => ("*left as f64", "*right as f64"),
+        _ => return None,
+    };
+    let ordering = format!(
+        "{}jet_float_ordering({left}, {right})",
+        cx.root_prefix
+    );
+    Some(if reverse {
+        format!(
+            "|left, right| {}jet_ordering_reverse(&({ordering}))",
+            cx.root_prefix
+        )
+    } else {
+        format!("|left, right| {ordering}")
+    })
 }
 
 fn emit_shared_guard_projection(cx: &Cx, guard_ty: &Type, path: &[String]) -> String {
@@ -501,11 +525,16 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 }
             }
         }
-        THostCall::StrMatchScan { parts, probe } => {
+        THostCall::StrMatchScan {
+            subject,
+            parts,
+            probe,
+        } => {
+            let subject = emit_tir_expr(subject, cx);
             let (closure, _) = str_match_scan_closure_ex(
                 parts,
                 cx,
-                &jet_format!("{jet_prefix}switch_subject.as_str()"),
+                &format!("({subject}).as_str()"),
                 true,
             );
             match probe {
@@ -672,7 +701,15 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
             )
         }
         THostCall::NumericBounds { ty, member } => {
-            format!("{}::{member}", cx.rust_type(ty))
+            if matches!(ty, Type::Int) {
+                format!(
+                    "{}jet_std::jet_int_from_i64({}::{member})",
+                    cx.root_prefix,
+                    cx.rust_type(ty)
+                )
+            } else {
+                format!("{}::{member}", cx.rust_type(ty))
+            }
         }
         THostCall::ExpiringSecretNew {
             value,
@@ -927,7 +964,7 @@ fn emit_numeric_op(
             dst_spelling,
             line,
         } => format!(
-            "match {}jet_std::jet_int_try_from({}, {host_kind}) {{ Some(value) => value as {dst_rust}, None => jet_arithmetic_stop({:?}, {line}, &format!(\"value doesn't fit in {dst_spelling}\")) }}",
+            "match {}jet_std::jet_int_try_from({}, {host_kind}) {{ Some(value) => value as {dst_rust}, None => jet_arithmetic_stop({:?}, {line}, &format!(\"Value doesn't fit in {dst_spelling}\")) }}",
             cx.root_prefix, recv, cx.file
         ),
         TNumericOp::TryFrom {
@@ -974,72 +1011,97 @@ fn emit_numeric_op(
                 format!("({recv})")
             }
         }
+        TNumericOp::EuclideanDiv { .. } | TNumericOp::EuclideanRem { .. } => {
+            unreachable!("Euclidean numeric methods require their binary TIR node")
+        }
+    }
+}
+
+fn emit_numeric_binary_op(lhs: &str, rhs: &str, op: &TNumericOp, cx: &Cx) -> String {
+    match op {
+        TNumericOp::EuclideanDiv { line } => format!(
+            "{}jet_std::jet_int_div_euclid(({lhs}), ({rhs}), {:?}, {line})",
+            cx.root_prefix, cx.file
+        ),
+        TNumericOp::EuclideanRem { line } => format!(
+            "{}jet_std::jet_int_rem_euclid(({lhs}), ({rhs}), {:?}, {line})",
+            cx.root_prefix, cx.file
+        ),
+        _ => unreachable!("non-Euclidean operation in numeric binary emitter"),
     }
 }
 
 /// A fallible expression used directly by `??` does not need to materialize
-/// its error carrier on the success path. Keep this classification structural:
-/// the use site must be an immediate `Result` fallback, and the operation must
-/// publish a Prelude fast reader. The operation table only selects the shared
-/// kernel; it does not make every Reader call fast or change its error contract.
-fn fixed_reader_fast_helper(
-    op: &THandleOp,
-) -> Option<(&'static str, &'static str, usize)> {
-    Some(match op {
-        THandleOp::ReaderReadU8 => ("jet_reader_read_u8_fast", "read_u8", 1),
-        THandleOp::ReaderReadU16Le => ("jet_reader_read_u16_le_fast", "read_u16_le", 2),
-        THandleOp::ReaderReadU16Be => ("jet_reader_read_u16_be_fast", "read_u16_be", 2),
-        THandleOp::ReaderReadU32Le => ("jet_reader_read_u32_le_fast", "read_u32_le", 4),
-        THandleOp::ReaderReadU32Be => ("jet_reader_read_u32_be_fast", "read_u32_be", 4),
-        THandleOp::ReaderReadU64Le => ("jet_reader_read_u64_le_fast", "read_u64_le", 8),
-        THandleOp::ReaderReadU64Be => ("jet_reader_read_u64_be_fast", "read_u64_be", 8),
-        THandleOp::ReaderReadF32Le => ("jet_reader_read_f32_le_fast", "read_f32_le", 4),
-        THandleOp::ReaderReadF64Le => ("jet_reader_read_f64_le_fast", "read_f64_le", 8),
-        _ => return None,
-    })
-}
-
-fn immediate_result_fast_path(
+/// its outcome carrier on the success path. The operation only publishes a
+/// payload-access capability; this use-site check is what makes the fast path
+/// generic across outcome-producing operations and keeps ordinary calls intact.
+fn immediate_outcome_fast_path(
     value: &TExpr,
-) -> Option<(&'static str, &'static str, usize, &TExpr)> {
-    if !matches!(&value.ty, Type::Result { .. }) {
+) -> Option<(TOutcomeFastPath, &TExpr)> {
+    if !matches!(&value.ty, Type::Result { .. } | Type::Option(_)) {
         return None;
     }
-    let TExprKind::HandleMethod { recv, op, args } = &value.kind else {
-        return None;
-    };
-    if !args.is_empty() {
-        return None;
+    match &value.kind {
+        TExprKind::HandleMethod { recv, op, args } if args.is_empty() => {
+            op.outcome_fast_path().map(|path| (path, recv.as_ref()))
+        }
+        TExprKind::BuiltinMethod { recv, op, args } if args.is_empty() => {
+            op.outcome_fast_path().map(|path| (path, recv.as_ref()))
+        }
+        _ => None,
     }
-    let (helper, method, width) = fixed_reader_fast_helper(op)?;
-    Some((helper, method, width, recv))
 }
 
 /// Emit the raw-value branch for an immediate `??` use. `None` means the
 /// ordinary carrier path remains authoritative. The fast Prelude kernel only
-/// reports absence; the cold miss edge reconstructs the shared bounds error
-/// before binding the ambient `err` slot, so fallbacks retain their exact
-/// failure semantics without constructing that String in the loop.
-fn emit_immediate_result_fast_fallback(
+/// reports absence; a Reader miss reconstructs the shared bounds error before
+/// binding the ambient `err` slot, while an Option miss has no error carrier.
+fn emit_immediate_outcome_fast_fallback(
     value: &TExpr,
     fallback: &crate::Codegen::TIR::TOrFallback,
     cx: &Cx,
 ) -> Option<String> {
-    let (helper, method, width, recv) = immediate_result_fast_path(value)?;
+    let (path, recv) = immediate_outcome_fast_path(value)?;
     let recv = emit_tir_expr(recv, cx);
     let fallback = emit_tir_orfallback_rhs(fallback, cx);
-    let recv_ref = mangle_generated("reader_fast_recv");
-    let ambient_err = ambient_err_local().rust_name();
-    Some(jet_format!(
-        "{{ let {recv_ref} = &mut ({recv}); match {root}{helper}({recv_ref}) {{ Some({jet_prefix}ok) => {jet_prefix}ok, None => {{ let {ambient_err} = {root}jet_reader_bounds_error({method}, {width}, &*{recv_ref}); jet_journey_reset(); {fallback} }} }} }}",
-        root = cx.root_prefix,
-        helper = helper,
-        method = escape_rust_str(method),
-        width = width,
+    let recv_ref = mangle_generated("outcome_fast_recv");
+    let ok = mangle_generated("outcome_fast_ok");
+    let (buffer, helper, error_method, width) = match path {
+        TOutcomeFastPath::FixedRead {
+            buffer,
+            helper,
+            error_method,
+            width,
+        } => (buffer, helper, error_method, width),
+    };
+    let fast_call = match buffer {
+        TOutcomeFastBuffer::Reader => {
+            format!("{}{helper}({recv_ref})", cx.root_prefix)
+        }
+        TOutcomeFastBuffer::Bytes => format!("{recv_ref}.{helper}()"),
+    };
+    let miss = match (buffer, error_method) {
+        (TOutcomeFastBuffer::Reader, Some(method)) => {
+            let ambient_err = ambient_err_local().rust_name();
+            format!(
+                "{{ let {ambient_err} = {root}jet_reader_bounds_error({method}, {width}, &*{recv_ref}); jet_journey_reset(); {fallback} }}",
+                root = cx.root_prefix,
+                method = escape_rust_str(method),
+                width = width,
+            )
+        }
+        (TOutcomeFastBuffer::Bytes, None) => {
+            format!("{{ jet_journey_reset(); {fallback} }}")
+        }
+        _ => return None,
+    };
+    Some(format!(
+        "{{ let {recv_ref} = &mut ({recv}); match {fast_call} {{ Some({ok}) => {ok}, None => {miss} }} }}",
         recv = recv,
         recv_ref = recv_ref,
-        ambient_err = ambient_err,
-        fallback = fallback,
+        fast_call = fast_call,
+        ok = ok,
+        miss = miss,
     ))
 }
 
@@ -1288,6 +1350,23 @@ pub(crate) fn emit_inline_range_decode(
     }
 }
 
+fn task_result_carrier(ty: &Type) -> bool {
+    let Type::Apply { name, args } = ty.without_user_tags() else {
+        return false;
+    };
+    name == "Task"
+        && args
+            .first()
+            .is_some_and(|arg| matches!(arg.without_user_tags(), Type::Result { .. }))
+}
+
+fn task_result_list_carrier(ty: &Type) -> bool {
+    match ty.without_user_tags() {
+        Type::List(inner) => task_result_carrier(inner),
+        _ => false,
+    }
+}
+
 pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
     match &e.kind {
         // D-SG9: width suffix is read straight off the literal — no re-inference.
@@ -1305,7 +1384,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 None if matches!(e.ty, Type::Int)
                     && (*n < -(1i64 << 62) || *n > (1i64 << 62) - 1) =>
                 {
-                    format!("{}jet_std::jet_int_from_i64({})", cx.root_prefix, n)
+                    let value = if *n == i64::MIN {
+                        "i64::MIN".to_string()
+                    } else if *n == i64::MAX {
+                        "i64::MAX".to_string()
+                    } else {
+                        n.to_string()
+                    };
+                    format!("{}jet_std::jet_int_from_i64({value})", cx.root_prefix)
                 }
                 None => format!("{}i64", n),
             }
@@ -1401,6 +1487,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             format!("{}.into_iter().collect()", entries.rust_place())
         }
         TExprKind::Print(arg) => {
+            if let Some(stop) = emit_tir_stopping_receiver(arg, cx) {
+                return stop;
+            }
             // Parallel `jet test` runs each test on its own thread (per-test
             // isolation, D-TESTKIT1 gap #3); a bare `println!` from inside a test
             // body would interleave with other threads' output and with the
@@ -1775,12 +1864,50 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // branch was resolved into `op` at lowering; emit only formats. Args are
         // emitted PLAINLY (no clone/borrow wrappers — `arg(i)` is a raw `emit_expr`).
         TExprKind::BuiltinMethod { recv, op, args } => {
+            if let Some(stop) = emit_tir_stopping_receiver(recv, cx) {
+                return stop;
+            }
             // Eager fuse: `list.map(f).to_list()` → `jet_list_map` so borrowed
             // Fn captures need not be `'static` (E0521 under `jet_iter_map`).
             // Only fuse a real List/FixedList receiver — `filter(…).map(…).to_list()`
             // (and any other Iter→map chain) must stay on `jet_iter_map` + `.to_list()`;
             // cloning a move-only `JetIter` is E0599.
             if matches!(op, TBuiltinOp::IterToList | TBuiltinOp::IterCollect) {
+                // A bounded cycle of a List is still a concrete list operation.
+                // Keep it out of the boxed `JetIter` path: the singleton case is
+                // the common repeated-seed shape and can materialize with one
+                // allocation, while larger list seeds use a concrete iterator.
+                if let TExprKind::BuiltinMethod {
+                    recv: cycle_source,
+                    op: TBuiltinOp::IterCycle,
+                    args: cycle_args,
+                } = &recv.kind
+                {
+                    if let [count] = cycle_args.as_slice() {
+                        if let TExprKind::BuiltinMethod {
+                            recv: list,
+                            op: TBuiltinOp::ListLazy,
+                            args: list_args,
+                        } = &cycle_source.kind
+                        {
+                            if list_args.is_empty() && matches!(list.ty, Type::List(_)) {
+                                let count = emit_tir_expr(count, cx);
+                                if let TExprKind::ListLit(items) = &list.kind {
+                                    if let [item] = items.as_slice() {
+                                        return format!(
+                                            "vec![{}; ({count}).max(0) as usize]",
+                                            emit_tir_expr(item, cx)
+                                        );
+                                    }
+                                }
+                                let list = emit_tir_expr(list, cx);
+                                return format!(
+                                    "({list}).clone().into_iter().cycle().take(({count}).max(0) as usize).collect::<Vec<_>>()"
+                                );
+                            }
+                        }
+                    }
+                }
                 if let TExprKind::ClosureMethod {
                     recv: map_recv,
                     op: map_op,
@@ -1809,6 +1936,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             let recv_is_iter = crate::Collections::is_iter_type(&recv.ty);
             let recv_is_list = matches!(&recv.ty, Type::List(_) | Type::FixedList { .. });
+            let float_sort = match &recv.ty {
+                Type::List(inner) => float_sort_comparator(inner, cx, false),
+                _ => None,
+            };
+            let float_sort_desc = match &recv.ty {
+                Type::List(inner) => float_sort_comparator(inner, cx, true),
+                _ => None,
+            };
             let recv_is_compute_view_mut = is_compute_view_mut(&recv.ty);
             let fixed_concat_shape = if matches!(op, TBuiltinOp::ConcatList) {
                 match (&recv.ty, args.first().map(|argument| &argument.ty), &e.ty) {
@@ -1827,7 +1962,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 None
             };
             let recv_expr = recv;
-            let recv = emit_tir_expr(recv_expr, cx);
+            let recv_is_string = matches!(&recv_expr.ty, Type::String);
+            let recv = if op.needs_mut_receiver_place() {
+                emit_mut_collection_place(recv_expr, cx, &[])
+            } else {
+                emit_tir_expr(recv_expr, cx)
+            };
             let a = |i: usize| {
                 args.get(i)
                     .map(|e| emit_tir_expr(e, cx))
@@ -1851,7 +1991,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             match op {
                 TBuiltinOp::LenString => format!("jet_char_len(&({}))", recv),
                 TBuiltinOp::LenList => {
-                    if recv_is_iter {
+                    // A CoreCall receiver can lose the String-specific TIR op
+                    // and arrive here as LenList. Preserve String.len's scalar
+                    // law through the shared Prelude helper; Rust String::len
+                    // is a byte count and is only valid for byte collections.
+                    if recv_is_string {
+                        format!("jet_char_len(&({}))", recv)
+                    } else if recv_is_iter {
                         format!("({recv}).len()")
                     } else {
                         format!("({recv}).len() as i64")
@@ -1983,6 +2129,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::CountList => {
                     format!("jet_list_count(&({}), &({}))", recv, a(0))
                 }
+                TBuiltinOp::Counts => format!("jet_list_counts({vec_src})"),
                 TBuiltinOp::ExtendList => {
                     format!("({}).extend(({}).clone())", recv, a(0))
                 }
@@ -2011,8 +2158,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     a(0)
                 ),
                 TBuiltinOp::Reverse => format!("({}).reverse()", recv),
-                TBuiltinOp::Sort => format!("({}).sort()", recv),
-                TBuiltinOp::SortDesc => format!("{{ jet_list_sort_desc(&mut {}); }}", recv),
+                TBuiltinOp::Sort => match float_sort {
+                    Some(comparator) => {
+                        format!("{{ jet_list_sort_by_compare(&mut ({}), {}); }}", recv, comparator)
+                    }
+                    None => format!("({}).sort()", recv),
+                },
+                TBuiltinOp::SortDesc => match float_sort_desc {
+                    Some(comparator) => {
+                        format!("{{ jet_list_sort_by_compare(&mut ({}), {}); }}", recv, comparator)
+                    }
+                    None => format!("{{ jet_list_sort_desc(&mut {}); }}", recv),
+                },
                 TBuiltinOp::OrderingThen => format!(
                     "{}jet_ordering_then(&({}), &({}))",
                     cx.root_prefix,
@@ -2077,6 +2234,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Chars => format!("({}).chars().collect::<Vec<char>>()", recv),
                 TBuiltinOp::Bytes => {
                     format!("{}jet_string_bytes(&({}))", cx.root_prefix, recv)
+                }
+                TBuiltinOp::StringFromBytes => {
+                    format!("{}jet_string_from_bytes(&({}))", cx.root_prefix, recv)
+                }
+                TBuiltinOp::StringFromBytesLossy => {
+                    format!("{}jet_string_from_bytes_lossy(&({}))", cx.root_prefix, recv)
                 }
                 TBuiltinOp::Trim => format!("jet_unicode_trim(&({}))", recv),
                 TBuiltinOp::TrimStart => format!("{}jet_text_trim_start(&({}))", cx.root_prefix, recv),
@@ -2179,6 +2342,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 },
                 TBuiltinOp::StringSplitOnce { tuple_struct } => jet_name_format!(
                     "{0}jet_outcome_of({0}jet_unicode_split_once(&({1}), &({2})).map(|(__before, __after)| {3} {{ {name_prefix}before: __before, {name_prefix}after: __after }}))",
+                    cx.root_prefix, recv, a(0), tuple_struct
+                ),
+                TBuiltinOp::StringCutLast { tuple_struct } => jet_name_format!(
+                    "{0}jet_outcome_of({0}jet_unicode_cut_last(&({1}), &({2})).map(|(__before, __after)| {3} {{ {name_prefix}before: __before, {name_prefix}after: __after }}))",
                     cx.root_prefix, recv, a(0), tuple_struct
                 ),
                 TBuiltinOp::ToUpper => format!("jet_unicode_upper(&({}))", recv),
@@ -2574,6 +2741,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "jet_map_to_list(&({recv}), |key, value| {} {{ {name_prefix}key: key, {name_prefix}value: value }})",
                     tuple_struct
                 ),
+                TBuiltinOp::MapTopN { tuple_struct } => jet_name_format!(
+                    "jet_map_top_n(&({recv}), {}).into_iter().map(|(key, value)| {} {{ {name_prefix}key: key, {name_prefix}value: value }}).collect::<Vec<_>>()",
+                    a(0),
+                    tuple_struct
+                ),
                 TBuiltinOp::MapMin => format!("jet_map_min_value(&({recv}))"),
                 TBuiltinOp::MapMax => format!("jet_map_max_value(&({recv}))"),
                 TBuiltinOp::MapIntersection => format!("jet_map_intersection(&({recv}), &({}))", a(0)),
@@ -2770,6 +2942,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 );
             }
             emit_numeric_op(&rendered_recv, op, Some(&recv.ty), Some(&e.ty), cx)
+        }
+        TExprKind::NumericBinaryMethod { recv, op, arg } => {
+            let rendered_recv = emit_tir_expr(recv, cx);
+            let rendered_arg = emit_tir_expr(arg, cx);
+            emit_numeric_binary_op(&rendered_recv, &rendered_arg, op, cx)
         }
         // c109 Phase 28: an overflow opt-out builtin. `prefix`/`op` were resolved at
         // lowering; reproduce `emit_call`'s `(ls).{name}_{suffix}(rs)` byte-for-byte.
@@ -3640,6 +3817,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 Type::List(inner) | Type::FixedList { elem: inner, .. } => Some(inner.as_ref()),
                 _ => None,
             };
+            if elems.is_empty() {
+                if matches!(&e.ty, Type::List(_)) {
+                    let rust_type = cx.rust_type(&e.ty);
+                    let constructor = match rust_type.split_once('<') {
+                        Some((head, args)) => format!("{head}::<{args}"),
+                        None => rust_type,
+                    };
+                    return format!("{constructor}::new()");
+                }
+            }
             let parts = elems
                 .iter()
                 .map(|elem| {
@@ -3750,17 +3937,24 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .join(", ");
             format!("{} {{ {} }}", struct_name, parts)
         }
-        // #779: only empty map literals remain after lowering (`[:]` / desugar seed).
-        // Non-empty `[k: v, …]` becomes IfExpr + IndexAssign inserts.
+        // Map literals stay as typed TIR values. The builder uses the shared
+        // Prelude insertion seam so a nested map's value type is fixed before
+        // any entry is inserted.
         TExprKind::MapLit(entries) => {
             if entries.is_empty() {
+                // Keep the empty constructor generic.  The surrounding TIR
+                // type supplies both parameters; spelling them here is
+                // unsafe because Rust's JetMap carrier order is inferred at
+                // this expression boundary.
                 "JetMap::new()".to_string()
             } else {
-                // Defensive: should not appear after #779 lowering.
-                let mut s = String::from("{ let mut _m = JetMap::new(); ");
+                let mut s = format!(
+                    "{{ let mut _m: {} = JetMap::new(); ",
+                    cx.rust_type(&e.ty)
+                );
                 for (k, v) in entries {
                     s.push_str(&format!(
-                        "_m.insert(({}).clone(), {}); ",
+                        "jet_map_insert(&mut _m, ({}).clone(), {}); ",
                         emit_tir_expr(k, cx),
                         emit_tir_expr(v, cx)
                     ));
@@ -4043,7 +4237,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // (Statement.rs). D-FAIL-CARRIER1=A: unwrap the optional-success role
         // inside an explicit Result before running the fallback.
         TExprKind::OrFallback { value, fallback } => {
-            if let Some(fast) = emit_immediate_result_fast_fallback(value, fallback, cx) {
+            if let Some(fast) = emit_immediate_outcome_fast_fallback(value, fallback, cx) {
                 return fast;
             }
             let v = emit_tir_expr(value, cx);
@@ -4128,6 +4322,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // reproducing `emit_builtin_method`'s closure arms byte-for-byte. Args (the
         // lambda + any seed) are emitted PLAINLY (raw `arg(i)`).
         TExprKind::ClosureMethod { recv, op, args } => {
+            if let Some(stop) = emit_tir_stopping_receiver(recv, cx) {
+                return stop;
+            }
             // D-CORE-EAGER1=A: adjacent eager List.map(...).filter(...) calls
             // may share one traversal while the intermediate stays unobservable.
             // `.lazy()` is typed as Iter and therefore never enters this branch.
@@ -4162,6 +4359,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             let recv_is_fixed = matches!(recv.ty, Type::FixedList { .. });
             let recv_is_iter = crate::Collections::is_iter_type(&recv.ty);
+            let recv_is_view = matches!(
+                &recv.ty,
+                Type::Apply { name, .. }
+                    if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+            );
             let recv_is_set_materialized = matches!(
                 &recv.kind,
                 TExprKind::BuiltinMethod {
@@ -4225,6 +4427,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("jet_list_map_mut({vec_src}, {f})")
                     }
                 }
+                TClosureOp::TryMap => {
+                    let mut f = a(0);
+                    if let Some(rest) = f.strip_prefix("move ") {
+                        f = rest.to_string();
+                    }
+                    if recv_is_iter {
+                        format!("jet_iter_try_map({as_iter}, {f})")
+                    } else if recv_is_view {
+                        format!("jet_view_try_map(({recv}), {f})")
+                    } else {
+                        format!("jet_list_try_map({vec_src}, {f})")
+                    }
+                }
                 // D-HOLE1/D-MEM-PARAM1: `.map` on `T?` lends the payload to
                 // its plain callback instead of cloning/moving it.
                 TClosureOp::OptionMap => format!("({}).map_ref({})", recv, a(0)),
@@ -4237,6 +4452,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             f = rest.to_string();
                         }
                         format!("jet_list_filter({vec_src}, {f})")
+                    }
+                }
+                TClosureOp::TryFilter => {
+                    let mut f = a(0);
+                    if let Some(rest) = f.strip_prefix("move ") {
+                        f = rest.to_string();
+                    }
+                    if recv_is_iter {
+                        format!("jet_iter_try_filter({as_iter}, {f})")
+                    } else if recv_is_view {
+                        format!("jet_view_try_filter(({recv}), {f})")
+                    } else {
+                        format!("jet_list_try_filter({vec_src}, {f})")
                     }
                 }
                 TClosureOp::Each => format!("jet_list_each({vec_src}, {})", a(0)),
@@ -4296,7 +4524,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("jet_iter_filter_map({as_iter}, {})", a(0))
                 }
                 // D-PARCAPTURE1=D: all adapters share the bounded `para_` engine.
-                TClosureOp::ParaMap => format!("jet_list_para_map({}, {})", para_recv, a(0)),
+                TClosureOp::ParaMap => format!(
+                    "jet_list_para_map({}, {}, {})",
+                    para_recv,
+                    a(0),
+                    args.get(1)
+                        .map(|_| a(1))
+                        .unwrap_or_else(|| "i64::MAX".to_string())
+                ),
                 TClosureOp::ParaFilter => {
                     format!("jet_list_para_filter({}, {})", para_recv, a(0))
                 }
@@ -4671,6 +4906,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 THandleOp::DurationSecondsValue => {
                     format!("{}jet_duration_seconds_value(&({}))", root, recv)
+                }
+                THandleOp::DurationScale => {
+                    format!("{}jet_duration_scale(&({}), &({}))", root, recv, a(0))
+                }
+                THandleOp::DurationDivide => {
+                    format!("{}jet_duration_divide(&({}), &({}))", root, recv, a(0))
                 }
                 THandleOp::PreciseMethod { type_name, method } => {
                     let prefix = if type_name == "Fraction" {
@@ -5073,6 +5314,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ReflectValueFields => format!("({}).fields()", recv),
                 THandleOp::ReflectFieldName => format!("({}).name()", recv),
                 THandleOp::ReflectFieldValue => format!("({}).value()", recv),
+                THandleOp::TaskJoin if task_result_carrier(&recv_ty_for_stream) => format!(
+                    "{}jet_std::jet_task_join_result({})",
+                    cx.root_prefix, recv
+                ),
                 THandleOp::TaskJoin => format!("({}).join()", recv),
                 THandleOp::TaskDetach => format!("({}).detach()", recv),
                 THandleOp::TaskPause => {
@@ -6026,6 +6271,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                     "format" => format!("({}).format_pattern(&({}))", recv, a(0)),
                     "to_string" => format!("({}).to_string_fmt()", recv),
+                    "equal" | "compare" => format!("({}).{}(&({}))", recv, method, a(0)),
                     _ => {
                         if args.is_empty() {
                             format!("({}).{}()", recv, method)
@@ -6060,7 +6306,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "is_match" | "full_match" | "find" | "find_all" | "matches" | "split" | "name" | "count" => {
                         format!("({}).{}(&({}))", recv, method, a(0))
                     }
-                    "replace" | "replace_all" => {
+                    "replace" | "replace_first" | "replace_all" => {
                         format!("({}).{}(&({}), &({}))", recv, method, a(0), a(1))
                     }
                     "split_limit" => {
@@ -6189,11 +6435,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // `Err`, never a panic (I1/L2).
                 THandleOp::ReaderOver => format!("{}jet_reader_over(&({}))", root, recv),
                 THandleOp::ReaderReadU8 => format!("{}jet_reader_read_u8(&mut ({}))", root, recv),
+                THandleOp::ReaderReadI8 => format!("{}jet_reader_read_i8(&mut ({}))", root, recv),
                 THandleOp::ReaderReadU16Le => {
                     format!("{}jet_reader_read_u16_le(&mut ({}))", root, recv)
                 }
                 THandleOp::ReaderReadU16Be => {
                     format!("{}jet_reader_read_u16_be(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderReadI16Le => {
+                    format!("{}jet_reader_read_i16_le(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderReadI16Be => {
+                    format!("{}jet_reader_read_i16_be(&mut ({}))", root, recv)
                 }
                 THandleOp::ReaderReadU32Le => {
                     format!("{}jet_reader_read_u32_le(&mut ({}))", root, recv)
@@ -6201,17 +6454,42 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ReaderReadU32Be => {
                     format!("{}jet_reader_read_u32_be(&mut ({}))", root, recv)
                 }
+                THandleOp::ReaderReadI32Le => {
+                    format!("{}jet_reader_read_i32_le(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderReadI32Be => {
+                    format!("{}jet_reader_read_i32_be(&mut ({}))", root, recv)
+                }
                 THandleOp::ReaderReadU64Le => {
                     format!("{}jet_reader_read_u64_le(&mut ({}))", root, recv)
                 }
                 THandleOp::ReaderReadU64Be => {
                     format!("{}jet_reader_read_u64_be(&mut ({}))", root, recv)
                 }
+                THandleOp::ReaderReadI64Le => {
+                    format!("{}jet_reader_read_i64_le(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderReadI64Be => {
+                    format!("{}jet_reader_read_i64_be(&mut ({}))", root, recv)
+                }
                 THandleOp::ReaderReadF32Le => {
                     format!("{}jet_reader_read_f32_le(&mut ({}))", root, recv)
                 }
+                THandleOp::ReaderReadF32Be => {
+                    format!("{}jet_reader_read_f32_be(&mut ({}))", root, recv)
+                }
                 THandleOp::ReaderReadF64Le => {
                     format!("{}jet_reader_read_f64_le(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderReadF64Be => {
+                    format!("{}jet_reader_read_f64_be(&mut ({}))", root, recv)
+                }
+                THandleOp::ReaderPeek => format!("{}jet_reader_peek(&({}))", root, recv),
+                THandleOp::ReaderSeek => {
+                    format!("{}jet_reader_seek(&mut ({}), ({}) as i64)", root, recv, a(0))
+                }
+                THandleOp::ReaderSkip => {
+                    format!("{}jet_reader_skip(&mut ({}), ({}) as i64)", root, recv, a(0))
                 }
                 THandleOp::ReaderTake => {
                     // D-BINREAD-LEN1=A: sema admits only Int/U8/U16/U32 here.
@@ -6434,18 +6712,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::CoreClosureCall { kind } => match kind {
             TCoreClosureKind::Spawn {
                 group,
+                site,
                 spawn_closure,
                 ..
             } => match group {
                 Some(group) => format!(
-                    "({}).{}({})",
+                    "({}).{}({}, {})",
                     emit_tir_expr(group, cx),
-                    "spawn",
+                    "spawn_at",
+                    site,
                     spawn_closure
                 ),
                 None => format!(
-                    "{}jet_std::JetTask::spawn({})",
-                    cx.root_prefix, spawn_closure
+                    "{}jet_std::JetTask::spawn_at({}, {})",
+                    cx.root_prefix, site, spawn_closure
                 ),
             },
             TCoreClosureKind::Serve { addr, closure } => format!(
@@ -6503,15 +6783,30 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // D-CONC-SPAWN1=D: `task.all { … }` — join each child in source order.
         TExprKind::TaskGroupAll { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!("{}jet_std::jet_task_all({list})", cx.root_prefix)
+            let helper = if task_result_list_carrier(&tasks.ty) {
+                "jet_task_all_result"
+            } else {
+                "jet_task_all"
+            };
+            format!("{}jet_std::{helper}({list})", cx.root_prefix)
         }
         TExprKind::TaskGroupRace { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!("{}jet_std::jet_task_race({list})", cx.root_prefix)
+            let helper = if task_result_list_carrier(&tasks.ty) {
+                "jet_task_race_result"
+            } else {
+                "jet_task_race"
+            };
+            format!("{}jet_std::{helper}({list})", cx.root_prefix)
         }
         TExprKind::TaskGroupAny { tasks } => {
             let list = emit_tir_expr(tasks, cx);
-            format!("{}jet_std::jet_task_any({list})", cx.root_prefix)
+            let helper = if task_result_list_carrier(&tasks.ty) {
+                "jet_task_any_result"
+            } else {
+                "jet_task_any"
+            };
+            format!("{}jet_std::{helper}({list})", cx.root_prefix)
         }
         TExprKind::SelectStart | TExprKind::SelectRecv { .. } | TExprKind::SelectAfter { .. } => {
             unreachable!("retired fluent select builder reached AOT emission")

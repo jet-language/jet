@@ -1258,7 +1258,11 @@ impl<'a> Checker<'a> {
     pub(crate) fn infer_statement_expr(&mut self, expr: &mut Expr) -> Option<Type> {
         self.normalize_imported_core_expr(expr);
         self.normalize_prelude_expr(expr);
-        self.infer_fallible_stmt(expr)
+        let saved_statement_expr_inference = self.statement_expr_inference;
+        self.statement_expr_inference = true;
+        let result = self.infer_fallible_stmt(expr);
+        self.statement_expr_inference = saved_statement_expr_inference;
+        result
     }
 
     /// Infer and check an expression. Returns None when a problem was
@@ -1277,6 +1281,22 @@ impl<'a> Checker<'a> {
         e: &mut Expr,
         result: Option<Type>,
     ) -> Option<Type> {
+        // An open callback has no return row yet. If its callee does, retain
+        // that row as the callback's carrier; applying the enclosing function's
+        // `?` here would put a raw Result-returning closure in the wrong row.
+        // The callee row is the gate: ordinary lambdas and non-fallible calls
+        // keep the normal automatic-propagation path.
+        if self.failure_carrier_inference
+            && self.expected_type.is_none()
+            && matches!(result, Some(Type::Result { .. }))
+        {
+            if self.failure_carrier.is_none() {
+                self.failure_carrier = result.clone();
+                self.ret = result.clone();
+            }
+            self.task_body_propagates = true;
+            return result;
+        }
         if self.compiler_generated
             || !matches!(
                 e.without_parens(),
@@ -1301,7 +1321,7 @@ impl<'a> Checker<'a> {
         let mut wrapped = Expr::Try(Box::new(inner), span, TryConvert::None, None);
         let result = match &mut wrapped {
             Expr::Try(inner, try_span, convert, note) => {
-                self.infer_try(inner, *try_span, convert, note)
+                self.infer_try_with_inner_type(inner, *try_span, convert, note, result)
             }
             _ => unreachable!("automatic failure propagation builds a Try node"),
         };
@@ -2030,7 +2050,15 @@ impl<'a> Checker<'a> {
             }
         );
         if !result_pattern {
-            let result = self.infer(value);
+            let result = if self.statement_expr_inference {
+                // A braced dispatch arm is a statement arm when the whole
+                // dispatch is used as a statement. Use the statement call
+                // checker for its tail so `print(...)` contributes Unit
+                // instead of entering value-only call inference (E0116).
+                self.infer_fallible_stmt(value)
+            } else {
+                self.infer(value)
+            };
             self.expected_type = saved_expected;
             return result;
         }
@@ -2400,6 +2428,11 @@ impl<'a> Checker<'a> {
                         self.diags.push(int_range_error(signed, bits, span));
                     }
                     *width = Some((signed, bits));
+                    Some(Type::IntN { signed, bits })
+                } else if let Some((signed, bits)) = *width {
+                    // A prior contextual check may have recorded the literal's
+                    // fixed-width carrier on the AST. Preserve that carrier
+                    // when a later pass re-infers the rewritten expression.
                     Some(Type::IntN { signed, bits })
                 } else {
                     *width = None;
@@ -3931,6 +3964,30 @@ impl<'a> Checker<'a> {
                 );
                 for (name, state) in fixed_uninit {
                     self.flow.uninit.set(&name, state);
+                }
+                // S40 / D-RANGE-VALUE1: the one-argument String method is the
+                // surface spelling of the existing Range-aware Slice node.
+                // The method table has already checked the argument and
+                // receiver, so all tiers share the same TIR shape.
+                let string_slice_range = method == "slice"
+                    && args.len() == 1
+                    && recv_type.as_deref() == Some(crate::Syntax::TYPE_STRING)
+                    && inferred
+                        .as_ref()
+                        .is_some_and(|ty| matches!(ty, Type::String));
+                if string_slice_range {
+                    let slice_span = *method_span;
+                    let base =
+                        std::mem::replace(receiver, Box::new(Expr::Absent(slice_span)));
+                    let range = std::mem::replace(&mut args[0].expr, Expr::Absent(slice_span));
+                    let zero = || Box::new(Expr::Int(0, slice_span, None, None));
+                    *e = Expr::Slice {
+                        base,
+                        start: zero(),
+                        end: zero(),
+                        range: Some(Box::new(range)),
+                        span: slice_span,
+                    };
                 }
                 inferred
             }

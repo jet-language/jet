@@ -12,6 +12,7 @@
 
 mod common;
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -36,21 +37,30 @@ fn unused_local_port() -> u16 {
         .port()
 }
 
-static CANVAS_SESSION: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+static CANVAS_SESSIONS: OnceLock<Mutex<HashMap<u16, String>>> = OnceLock::new();
 
-fn canvas_session() -> Option<String> {
-    CANVAS_SESSION
-        .get_or_init(|| Mutex::new(None))
+fn canvas_session(port: u16) -> Option<String> {
+    CANVAS_SESSIONS
+        .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap()
-        .clone()
+        .get(&port)
+        .cloned()
+}
+
+fn remember_canvas_session(port: u16, session: String) {
+    CANVAS_SESSIONS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap()
+        .insert(port, session);
 }
 
 /// Minimal blocking HTTP/1.1 GET over a raw `TcpStream` — the same shape of
 /// client `jet dev --target=web`'s own std-only server (Source/CmdDevWeb.rs)
 /// expects, so the test doesn't need `curl` or any HTTP crate.
 fn http_get(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
-    http_get_with_session(port, path, canvas_session().as_deref())
+    http_get_with_session(port, path, canvas_session(port).as_deref())
 }
 
 fn http_get_without_session(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
@@ -104,14 +114,14 @@ fn http_get_response_with_session(
         let (name, value) = line.split_once(':')?;
         name.eq_ignore_ascii_case("content-type")
             .then(|| value.trim().to_string())
-    })?;
+    }).unwrap_or_default();
     Some((status, content_type, raw[split..].to_vec()))
 }
 
 fn http_post(port: u16, path: &str, body: &str) -> Option<(u16, Vec<u8>)> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
-    let authorization = canvas_session()
+    let authorization = canvas_session(port)
         .map(|session| format!("Authorization: Bearer {session}\r\n"))
         .unwrap_or_default();
     let req = format!(
@@ -147,6 +157,14 @@ fn json_field(haystack: &str, field: &str) -> String {
     let start = haystack.find(&key).expect("json field") + key.len();
     let rest = &haystack[start..];
     rest[..rest.find('"').expect("json field terminator")].to_string()
+}
+
+fn debug_session_id(body: &str) -> String {
+    let payload = body
+        .split_once("\"protocol\":\"jet.canvas.debug\"")
+        .map(|(_, rest)| rest)
+        .expect("debug protocol payload");
+    json_field(payload, "id")
 }
 
 fn json_number_after(haystack: &str, marker: &str) -> u16 {
@@ -298,10 +316,7 @@ fn wait_for_ports(child_stdout: std::process::ChildStdout) -> DevPorts {
             if let (Some(canvas), Some(application), Some(session)) =
                 (canvas_port, application_port, session.as_ref())
             {
-                *CANVAS_SESSION
-                    .get_or_init(|| Mutex::new(None))
-                    .lock()
-                    .unwrap() = Some(session.clone());
+                remember_canvas_session(canvas, session.clone());
                 let _ = tx.send(DevPorts {
                     canvas,
                     application,
@@ -345,10 +360,7 @@ fn wait_for_canvas_port(path: &std::path::Path, timeout: Duration) -> u16 {
             ))
         })
         .expect("PTY startup did not include a Canvas URL");
-    *CANVAS_SESSION
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .unwrap() = Some(session);
+    remember_canvas_session(port, session);
     port
 }
 
@@ -364,12 +376,12 @@ fn ui_showcase_uses_builtin_host_and_keeps_companion_page_live() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        include_str!("../examples/features/web/ui_showcase.jet"),
+        include_str!("../examples/features/web/ui_web_click.jet"),
     )
     .unwrap();
     fs::write(
-        dir.join("ui_showcase.html"),
-        include_str!("../examples/features/web/ui_showcase.html"),
+        dir.join("ui_web_click.html"),
+        include_str!("../examples/features/web/ui_web_click.html"),
     )
     .unwrap();
 
@@ -397,17 +409,17 @@ fn ui_showcase_uses_builtin_host_and_keeps_companion_page_live() {
         assert_eq!(status, 200, "request {request}");
         let html = String::from_utf8_lossy(&body);
         assert!(
-            html.contains("<h1>Flight deck</h1>"),
+            html.contains("<h1>Reactive counter, rendered live</h1>"),
             "request {request}: {html}"
         );
         assert!(
-            html.contains("data-motion-state=\"idle\"") && html.contains("init_app"),
+            html.contains("id=\"jet-app\"") && html.contains("jet_main"),
             "request {request}: showcase host served a generic shell"
         );
     }
     let (status, js) = http_get(port, "/app.js").expect("GET showcase app.js");
     assert_eq!(status, 200);
-    assert!(String::from_utf8_lossy(&js).contains("export function init_app()"));
+    assert!(String::from_utf8_lossy(&js).contains("function jet_main()"));
 
     drop(guard);
     let _ = fs::remove_dir_all(&dir);
@@ -457,9 +469,9 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
         ports.app_before_canvas,
         "startup must print App preview before Canvas"
     );
-    assert_ne!(
+    assert_eq!(
         ports.application, ports.canvas,
-        "app preview and Canvas listeners must remain separate"
+        "the workbench serves app preview and Canvas on one listener (card #2170)"
     );
     let port = ports.application;
 
@@ -481,11 +493,19 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
         .js_app;
     let (status, body) = http_get(port, "/app.js").expect("GET /app.js failed");
     assert_eq!(status, 200);
+    let served = String::from_utf8_lossy(&body);
+    // The dev host appends a source-map reference for the workbench debugger;
+    // everything before that trailer must match a plain compile byte-for-byte.
+    let map_trailer = "//# sourceMappingURL=app.js.map\n";
+    let stripped = served
+        .strip_suffix(map_trailer)
+        .unwrap_or_else(|| panic!("served app.js must end with the dev source-map trailer"));
     assert_eq!(
-        String::from_utf8_lossy(&body),
-        expected_initial,
-        "served app.js should match a plain compile of the same source"
+        stripped, expected_initial,
+        "served app.js (minus the dev source-map trailer) should match a plain compile of the same source"
     );
+    let (status, _map) = http_get(port, "/app.js.map").expect("GET /app.js.map failed");
+    assert_eq!(status, 200, "the referenced source map must be served");
 
     let (status, version_body) =
         http_get(port, "/__jet_dev_version").expect("GET /__jet_dev_version failed");
@@ -506,8 +526,12 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
         html.contains("__jet_dev_status") && html.contains("Build failed"),
         "served index.html should have the live-reload script injected"
     );
-    let (status, _) = http_get_without_session(ports.canvas, "/").expect("GET Canvas root");
-    assert_eq!(status, 401, "Canvas control routes must keep their session gate");
+    let (status, _) =
+        http_get_without_session(port, "/canvas").expect("GET /canvas without session");
+    assert_eq!(
+        status, 401,
+        "the Canvas workbench route must keep its session gate on the shared listener"
+    );
 
     // Edit the SAME file the dev server is watching (never a real example
     // file — this is the throwaway temp copy) and wait for the rebuild.
@@ -522,9 +546,10 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
         .js_app;
     let (status, body) = http_get(port, "/app.js").expect("GET /app.js (after edit) failed");
     assert_eq!(status, 200);
+    let served_edited = String::from_utf8_lossy(&body);
+    let served_edited = served_edited.strip_suffix(map_trailer).unwrap_or(&served_edited);
     assert_eq!(
-        String::from_utf8_lossy(&body),
-        expected_edited,
+        served_edited, expected_edited,
         "served app.js should reflect the rebuilt (edited) source"
     );
     assert_ne!(
@@ -758,7 +783,11 @@ fn jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep() {
         .expect("web output after recovery")
         .js_app;
     let (_, recovered_js) = http_get(application_port, "/app.js").expect("recovered app.js");
-    assert_eq!(String::from_utf8_lossy(&recovered_js), expected_edited);
+    let recovered_js = String::from_utf8_lossy(&recovered_js);
+    let recovered_js = recovered_js
+        .strip_suffix("//# sourceMappingURL=app.js.map\n")
+        .unwrap_or(&recovered_js);
+    assert_eq!(recovered_js, expected_edited);
 
     drop(guard);
     let terminal = stderr_rx
@@ -1225,9 +1254,9 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
         &session,
         "\"application\":{\"host\":\"127.0.0.1\",\"port\":",
     );
-    assert_ne!(
+    assert_eq!(
         application_port, port,
-        "Canvas and app listeners must differ"
+        "the workbench serves Canvas and app preview on one listener (card #2170)"
     );
     let (app_status, _) = http_get(application_port, "/").expect("GET app preview listener");
     assert_eq!(app_status, 200);
@@ -1984,7 +2013,7 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
     assert!(body.contains("\"state\":\"running\""), "{body}");
     assert!(body.contains("\"tier\":\"jet-dev-interpreter\""), "{body}");
     assert!(!body.contains("\"active_line\":null"), "{body}");
-    let session = json_field(&body, "id");
+    let session = debug_session_id(&body);
 
     let next = format!(
         "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",

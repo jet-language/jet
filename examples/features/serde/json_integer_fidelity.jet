@@ -1,0 +1,57 @@
+// D-JSON-INT-FIDELITY1: JSON keeps full integer values through dynamic and
+// typed Codable paths, rejects trailing commas, and decodes unit enum wires.
+use core.encoding.json as json
+
+#Codable
+struct IntegerRecord {
+    min: Int
+    max: Int
+    first: ?Int
+    second: ?String
+}
+
+#Codable
+enum Switch {
+    On
+    Off
+}
+
+@raw :: "{{\"min\":-9223372036854775808,\"max\":9223372036854775807,\"first\":123456789012345678901234567890,\"second\":\"ready\"}}"
+
+fn direct_min_encode() String -[]> {
+    return json.to_string(DataTree.Int(-9223372036854775808))
+}
+
+fn dynamic_roundtrip() String -[]> {
+    value :: json.parse(@raw) ?? panic("dynamic parse")
+    return json.to_string(value)
+}
+
+fn typed_roundtrip() String -[]> {
+    value :: json.decode<IntegerRecord>(@raw) ?? return "typed-rejected"
+    return json.to_string(value)
+}
+
+fn unit_roundtrip() String -[]> {
+    value :: json.decode<Switch>("\"On\"") ?? return "unit-rejected"
+    return json.to_string(value)
+}
+
+fn trailing_comma() String -[]> {
+    json.parse("{{\"a\":1,}}") ?? return "trailing-rejected"
+    return "trailing-accepted"
+}
+
+fn nonfinite_number() String -[]> {
+    json.decode<Float>("1e400") ?? return "nonfinite-rejected"
+    return "nonfinite-accepted"
+}
+
+fn run() {
+    print(direct_min_encode())
+    print(dynamic_roundtrip())
+    print(typed_roundtrip())
+    print(unit_roundtrip())
+    print(trailing_comma())
+    print(nonfinite_number())
+}

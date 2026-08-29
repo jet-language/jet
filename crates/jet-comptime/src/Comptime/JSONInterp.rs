@@ -8,6 +8,12 @@ fn from_json_int(value: i64) -> CtValue {
     exact_int_value(crate::Numeric::CtBigInt::from_int(value))
 }
 
+fn from_json_number(value: String) -> CtValue {
+    let number = crate::Numeric::CtBigInt::from_str(&value)
+        .expect("dynamic JSON integer token must be valid exact integer text");
+    exact_int_value(number)
+}
+
 fn from_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
     match value {
         jet_foundation::EncodingJson::Value::Null => json_variant("Null", None),
@@ -20,8 +26,8 @@ fn from_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
         jet_foundation::EncodingJson::Value::Float(value) => {
             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
         }
-        jet_foundation::EncodingJson::Value::Number(_) => {
-            unreachable!("lossless JSON number leaked into dynamic projection")
+        jet_foundation::EncodingJson::Value::Number(value) => {
+            json_variant("Int", Some(from_json_number(value)))
         }
         jet_foundation::EncodingJson::Value::Text(value) => {
             json_variant("Text", Some(CtValue::Str(value)))
@@ -58,8 +64,8 @@ fn from_ordered_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
         jet_foundation::EncodingJson::Value::Float(value) => {
             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
         }
-        jet_foundation::EncodingJson::Value::Number(_) => {
-            unreachable!("lossless JSON number leaked into dynamic projection")
+        jet_foundation::EncodingJson::Value::Number(value) => {
+            json_variant("Int", Some(from_json_number(value)))
         }
         jet_foundation::EncodingJson::Value::Text(value) => {
             json_variant("Text", Some(CtValue::Str(value)))
@@ -297,7 +303,11 @@ pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Str
         CtValue::Unit => "null".to_string(),
         CtValue::Bool(b) => b.to_string(),
         CtValue::Int(n) => n.to_string(),
-        CtValue::Float(f) => format!("{:?}", f),
+        CtValue::Float(f) => {
+            assert!(f.as_f64().is_finite(), "JSON cannot encode a non-finite Float");
+            format!("{:?}", f)
+        }
+        CtValue::BigInt(value) => value.to_string_rep(),
         CtValue::Str(s) => quote_json(s),
         CtValue::List(xs) => {
             if xs.is_empty() {

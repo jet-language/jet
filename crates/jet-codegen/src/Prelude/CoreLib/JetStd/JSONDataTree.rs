@@ -21,14 +21,18 @@
         }
     }
 
-    // Render a DataTree as JSON, preserving Object field order. Int prints with no
-    // decimal (`5`), Float keeps its decimal (`5.0`); Bytes render as a number array.
+    // Render a DataTree as JSON, preserving Object field order. Int uses the
+    // exact carrier renderer; Float keeps its decimal (`5.0`); Bytes render as
+    // a number array.
     pub fn render_datatree_json(t: &DataTree, pretty: bool, depth: usize) -> String {
         match t {
             DataTree::Null => "null".to_string(),
             DataTree::Bool(b) => b.to_string(),
-            DataTree::Int(n) => format!("{}", n),
-            DataTree::Float(f) => format!("{:?}", f),
+            DataTree::Int(n) => jet_int_to_string(*n),
+            DataTree::Float(f) => {
+                assert!(f.is_finite(), "JSON cannot encode a non-finite Float");
+                format!("{:?}", f)
+            }
             DataTree::Number(text) => text.clone(),
             DataTree::TypedText(text) => quote_json(text),
             DataTree::Text(s) => quote_json(s),
@@ -97,11 +101,16 @@
             JSON::Null => DataTree::Null,
             JSON::Boolean(b) => DataTree::Bool(*b),
             JSON::Integer(n) => DataTree::Int(*n),
+            JSON::ExactInteger(text) => DataTree::Int(
+                jet_int_from_str(text).unwrap_or_else(|_| {
+                    unreachable!("JSON exact integer carrier must contain a valid integer")
+                }),
+            ),
             JSON::Number(n) => {
                 if n.fract() == 0.0
                     && n.is_finite()
                     && *n >= i64::MIN as f64
-                    && *n <= i64::MAX as f64
+                    && *n < i64::MAX as f64
                 {
                     DataTree::Int(*n as i64)
                 } else {
@@ -167,19 +176,27 @@
             crate::jet_encoding_json::Value::Bool(value) => DataTree::Bool(value),
             crate::jet_encoding_json::Value::Int(value) => DataTree::Int(value),
             crate::jet_encoding_json::Value::Float(value) => DataTree::Float(value),
-            crate::jet_encoding_json::Value::Number(_) => {
-                unreachable!("lossless JSON number leaked into dynamic DataTree projection")
-            }
+            crate::jet_encoding_json::Value::Number(text) => DataTree::Int(
+                jet_int_from_str(&text).unwrap_or_else(|_| {
+                    unreachable!("JSON integer token must fit the exact Int carrier")
+                }),
+            ),
             crate::jet_encoding_json::Value::Text(value) => DataTree::Text(value),
             crate::jet_encoding_json::Value::Array(values) => {
                 DataTree::Array(values.into_iter().map(datatree_from_shared).collect())
             }
-            crate::jet_encoding_json::Value::Object(entries) => DataTree::Object(
-                entries
-                    .into_iter()
-                    .map(|(key, value)| (key, datatree_from_shared(value)))
-                    .collect(),
-            ),
+            crate::jet_encoding_json::Value::Object(mut entries) => {
+                // Dynamic JSON has the same sorted-key projection as the
+                // comptime BTreeMap value. Typed JSON uses the separate
+                // `typed_datatree_from_shared` path above to retain wire order.
+                entries.sort_by(|left, right| left.0.cmp(&right.0));
+                DataTree::Object(
+                    entries
+                        .into_iter()
+                        .map(|(key, value)| (key, datatree_from_shared(value)))
+                        .collect(),
+                )
+            }
         }
     }
 

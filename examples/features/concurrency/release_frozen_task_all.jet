@@ -1,0 +1,12 @@
+struct Snapshot {
+    value: Int
+}
+
+fn get(s: Snapshot) Int -> s.value
+
+fn run() {
+    source := Snapshot{value: 41}
+    frozen :: freeze(source)
+    values :: task.all { get(frozen), get(frozen) } ?? panic("task.all failed")
+    print(values[0], values[1])
+}

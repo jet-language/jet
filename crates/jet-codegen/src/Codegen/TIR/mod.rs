@@ -1223,6 +1223,32 @@ pub(crate) fn bind_generic_type(
             if bind_generic_type(ok, actual_ok, params, subst)
                 && bind_generic_type(err, actual_err, params, subst))
         }
+        Type::Fn {
+            params: template_params,
+            ret: template_ret,
+            ..
+        } => {
+            let Type::Fn {
+                params: actual_params,
+                ret: actual_ret,
+                ..
+            } = actual
+            else {
+                return false;
+            };
+            template_params.len() == actual_params.len()
+                && template_params
+                    .iter()
+                    .zip(actual_params)
+                    .all(|(template, actual)| bind_generic_type(template, actual, params, subst))
+                && match (template_ret, actual_ret) {
+                    (Some(template), Some(actual)) => {
+                        bind_generic_type(template, actual, params, subst)
+                    }
+                    (None, None) => true,
+                    _ => false,
+                }
+        }
         Type::Tagged { inner, .. } => bind_generic_type(inner, actual, params, subst),
         _ => template == actual,
     }
@@ -2917,8 +2943,12 @@ pub enum THostCall {
         inner: Box<TExpr>,
         kind: TOptionProbe,
     },
-    /// D-PARSESTR1: str-match scan against `__jet_switch_subject`; emit builds the IIFE.
+    /// D-PARSESTR1: str-match scan against the lowered subject; emit builds the IIFE.
+    /// Statement switches pass `SwitchSubjectValue`, while value-form dispatch
+    /// passes its own subject local. Keeping the subject in TIR makes the scan
+    /// usable in every expression position without relying on switch ambient.
     StrMatchScan {
+        subject: Box<TExpr>,
         parts: Vec<crate::AST::StrMatchPart>,
         probe: TMatchProbe,
     },
@@ -4083,11 +4113,9 @@ pub enum TExprKind {
         struct_name: String,
         fields: Vec<(String, TExpr)>,
     },
-    /// c109 Phase 5: a map literal `[k: v, …]` or empty `[:]`. The empty form
-    /// lowers to `JetMap::new()` (Rust infers the element
-    /// types from the binding context); a non-empty form lowers to the
-    /// `{ let mut _m = …; _m.insert((k).clone(), v); … _m }` builder, byte-for-byte
-    /// the AST `Expr::MapLit` form.
+    /// c109 Phase 5: a map literal `[k: v, …]` or empty `[:]`. A map remains
+    /// one typed value through TIR; each engine constructs it from these
+    /// ordered pairs, so nested maps are ordinary value expressions.
     MapLit(Vec<(TExpr, TExpr)>),
     /// c109 Phase 5: indexing `coll[i]` (`Expr::Index`). `is_map` is the resolved
     /// `IndexKind` carried TOTALLY from sema (never re-inferred): `true` → the
@@ -4367,7 +4395,7 @@ pub enum TExprKind {
         op: TClosureOp,
         args: Vec<TExpr>,
     },
-    /// Adapt a named Jet callback to a parallel helper's borrowed host inputs.
+    /// Adapt a Jet callback to a collection helper's borrowed host inputs.
     /// Scalar reads dereference the host borrow; owned/non-scalar reads keep it.
     HostBorrowCallback {
         callable: Box<TExpr>,
@@ -4382,6 +4410,15 @@ pub enum TExprKind {
     NumericMethod {
         recv: Box<TExpr>,
         op: TNumericOp,
+    },
+    /// D-GO127-STDLIB1=A: a binary exact-Int method whose operation is
+    /// resolved at lowering and whose right-hand operand remains a TIR child.
+    /// Keeping the operand in its own node preserves the nullary NumericMethod
+    /// shape used by predicates and conversions.
+    NumericBinaryMethod {
+        recv: Box<TExpr>,
+        op: TNumericOp,
+        arg: Box<TExpr>,
     },
     /// c109 Phase 28: an overflow opt-out builtin `wrapping(e)`/`saturating(e)`/
     /// `checked(e)` (D-NUMOPS1). The single integer `Expr::Binary` argument lowers to
@@ -4689,6 +4726,10 @@ pub enum TNumericOp {
     /// `to_string` on a numeric receiver → `(recv).jet_show()` (the AST `to_string`
     /// arm of `emit_builtin_method`, which fires for any receiver type).
     ToShow,
+    /// D-GO127-STDLIB1=A: exact-Int Euclidean quotient/remainder. The source
+    /// line is carried so divide-by-zero uses the normal arithmetic boundary.
+    EuclideanDiv { line: u32 },
+    EuclideanRem { line: u32 },
 }
 
 /// c109 Phase 11: a resolved closure-taking collection-method op, one per
@@ -4706,8 +4747,14 @@ pub enum TClosureOp {
     Map,
     /// `map` on a list whose lambda is FnMut — `jet_list_map_mut((recv).clone(), f)`.
     MapMut,
+    /// Fallible `map` — the callback owns the failure row and the collection
+    /// helper returns `Result<Collection<U>, E>`.
+    TryMap,
     /// `filter` — `jet_list_filter((recv).clone(), f)`.
     Filter,
+    /// Fallible `filter` — the callback returns `Result<Bool, E>` and the
+    /// collection helper stops at the first failure.
+    TryFilter,
     /// `each` on a list — `jet_list_each((recv).clone(), f)`.
     Each,
     /// `each` on a list whose lambda is FnMut — `jet_list_each_mut((recv).clone(), f)`.
@@ -4958,6 +5005,27 @@ pub enum TZipFillMode {
     Columns,
 }
 
+/// A resolved fast payload access for an outcome consumed immediately by `??`.
+/// The carrier is still authoritative on the ordinary path; this descriptor only
+/// lets emit elide its construction on the success edge and reconstruct failure
+/// at the cold edge. Operation tables publish capabilities, while the use site
+/// decides whether the immediate-outcome shape permits the optimization.
+#[derive(Clone, Copy)]
+pub(crate) enum TOutcomeFastPath {
+    FixedRead {
+        buffer: TOutcomeFastBuffer,
+        helper: &'static str,
+        error_method: Option<&'static str>,
+        width: usize,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum TOutcomeFastBuffer {
+    Reader,
+    Bytes,
+}
+
 // Debug names the variant in engine rejection text: a JIT refusal is a silent
 // interpreter deopt, so the message must say WHICH builtin method was refused.
 #[derive(Debug)]
@@ -5000,6 +5068,8 @@ pub enum TBuiltinOp {
     },
     /// `count(value)` on a list.
     CountList,
+    /// `counts()` on a list or iterator → a frequency map.
+    Counts,
     /// `extend(other)` on a list.
     ExtendList,
     /// `concat(other)` on a list.
@@ -5051,6 +5121,10 @@ pub enum TBuiltinOp {
     Chars,
     /// `bytes()` → `{root}jet_string_bytes(&(recv))`.
     Bytes,
+    /// `String.from_bytes(bytes)` → `{root}jet_string_from_bytes(&(recv))`.
+    StringFromBytes,
+    /// `String.from_bytes_lossy(bytes)` → `{root}jet_string_from_bytes_lossy(&(recv))`.
+    StringFromBytesLossy,
     /// `trim()` → pinned `jet_unicode_trim(&(recv))`.
     Trim,
     TrimStart,
@@ -5069,6 +5143,10 @@ pub enum TBuiltinOp {
         method: String,
     },
     StringSplitOnce {
+        tuple_struct: String,
+    },
+    /// `cut_last(sep)` → the shared Unicode terminal-boundary helper.
+    StringCutLast {
         tuple_struct: String,
     },
     /// `split(sep)` → `jet_iter_string_split(&(recv), &a0)` (lazy `JetIter<String>`).
@@ -5180,6 +5258,10 @@ pub enum TBuiltinOp {
     MapEqual,
     MapFirst,
     MapToList {
+        tuple_struct: String,
+    },
+    /// `top_n(n)` on a map → key/value rows ordered by descending value.
+    MapTopN {
         tuple_struct: String,
     },
     MapMin,
@@ -5370,6 +5452,93 @@ pub enum TBuiltinOp {
     GetDisjointWrite,
 }
 
+impl TBuiltinOp {
+    /// A resolved builtin with a write receiver must receive a live place.
+    /// Keep this fact on the TIR op so lowering and every emitter agree; lazy
+    /// iterator adapters are value operations and are intentionally absent.
+    pub(crate) fn needs_mut_receiver_place(&self) -> bool {
+        match self {
+            Self::Push
+            | Self::TryPush
+            | Self::TryReserve
+            | Self::TryInsertMap
+            | Self::TryStringPush
+            | Self::Pop
+            | Self::PriorityQueuePop
+            | Self::InsertMap
+            | Self::AddNewMap
+            | Self::InsertList
+            | Self::RemoveMap
+            | Self::RemoveList { .. }
+            | Self::PriorityQueueRemove { .. }
+            | Self::MapPopFirst
+            | Self::ExtendList
+            | Self::Reverse
+            | Self::Sort
+            | Self::SortDesc
+            | Self::Clear
+            | Self::SetInsert
+            | Self::SetRemove
+            | Self::SetPop
+            | Self::SortedSetInsert
+            | Self::SortedSetRemove
+            | Self::BitSetAdd
+            | Self::BitSetRemove
+            | Self::BagAdd
+            | Self::BagRemove
+            | Self::LruPut
+            | Self::LruAddNew
+            | Self::LruGet
+            | Self::ByteBufferWrite { .. }
+            | Self::DequePushFront
+            | Self::DequePushBack
+            | Self::DequePopFront
+            | Self::DequePopBack
+            | Self::DequeDelete
+            | Self::DequeReverse
+            | Self::DequeSplit
+            | Self::SplitWrite { .. }
+            | Self::GetDisjointWrite => true,
+            Self::ByteBufferMethod { method } => matches!(
+                method.as_str(),
+                "clear"
+                    | "seek"
+                    | "rewind"
+                    | "next"
+                    | "read"
+                    | "read_byte"
+                    | "read_bytes"
+                    | "read_string"
+                    | "flush"
+                    | "close"
+                    | "shutdown"
+                    | "copy_to"
+                    | "write_to"
+            ),
+            _ => false,
+        }
+    }
+
+    /// Publish only byte-wise outcome operations whose success payload can be
+    /// read without building the `JetOutcome` carrier first. This is a
+    /// capability table, not the decision to optimize a particular expression.
+    pub(crate) fn outcome_fast_path(&self) -> Option<TOutcomeFastPath> {
+        match self {
+            Self::ByteBufferMethod { method }
+                if matches!(method.as_str(), "next" | "read_byte") =>
+            {
+                Some(TOutcomeFastPath::FixedRead {
+                    buffer: TOutcomeFastBuffer::Bytes,
+                    helper: "read_byte_fast",
+                    error_method: None,
+                    width: 1,
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
 /// c109 Phase 13: a resolved handle-method op, one per handle arm of
 /// built-in method lowering. The handle-receiver branch
 /// (keyed on `rty == Some(Named(<handle>))`) is decided ONCE at lowering from the
@@ -5500,6 +5669,10 @@ pub enum THandleOp {
     /// D-TYPE2-TIME1=A: dimensional algebra reads canonical Time in seconds;
     /// the stored carrier remains i64 nanoseconds.
     DurationSecondsValue,
+    /// D-TIMERES1=A: checked scalar arithmetic on the canonical nanosecond
+    /// carrier. The factor is the sole plain argument.
+    DurationScale,
+    DurationDivide,
     /// D-INTBIG1 / D-DECIMAL1: instance methods on precise numeric types.
     PreciseMethod {
         type_name: String,
@@ -5855,14 +6028,26 @@ pub enum THandleOp {
     /// D-SHIFT1: `reader.read_u8()` → `{root}jet_reader_read_u8(&mut (recv))`
     /// → `Result<U8, String>`. Bounds miss is an ordinary `Err`, never a panic.
     ReaderReadU8,
+    ReaderReadI8,
     ReaderReadU16Le,
     ReaderReadU16Be,
+    ReaderReadI16Le,
+    ReaderReadI16Be,
     ReaderReadU32Le,
     ReaderReadU32Be,
+    ReaderReadI32Le,
+    ReaderReadI32Be,
     ReaderReadU64Le,
     ReaderReadU64Be,
+    ReaderReadI64Le,
+    ReaderReadI64Be,
     ReaderReadF32Le,
+    ReaderReadF32Be,
     ReaderReadF64Le,
+    ReaderReadF64Be,
+    ReaderPeek,
+    ReaderSeek,
+    ReaderSkip,
     /// D-SHIFT1: `reader.take(n)` → `{root}jet_reader_take(&mut (recv), (a0))`
     /// → `Result<Vec<u8>, String>` (owned copy — see CoreLib.rs comment on
     /// why `take` copies rather than borrowing a `View<T>`).
@@ -5899,6 +6084,40 @@ pub enum THandleOp {
         parts: Vec<crate::AST::BinMatchPart>,
         canonical: Vec<(String, Type)>,
     },
+}
+
+impl THandleOp {
+    /// Publish fixed-width Reader payload access for the same generic
+    /// immediate-outcome optimization used by byte buffers.
+    pub(crate) fn outcome_fast_path(&self) -> Option<TOutcomeFastPath> {
+        let (helper, method, width) = match self {
+            Self::ReaderReadU8 => ("jet_reader_read_u8_fast", "read_u8", 1),
+            Self::ReaderReadI8 => ("jet_reader_read_i8_fast", "read_i8", 1),
+            Self::ReaderReadU16Le => ("jet_reader_read_u16_le_fast", "read_u16_le", 2),
+            Self::ReaderReadU16Be => ("jet_reader_read_u16_be_fast", "read_u16_be", 2),
+            Self::ReaderReadI16Le => ("jet_reader_read_i16_le_fast", "read_i16_le", 2),
+            Self::ReaderReadI16Be => ("jet_reader_read_i16_be_fast", "read_i16_be", 2),
+            Self::ReaderReadU32Le => ("jet_reader_read_u32_le_fast", "read_u32_le", 4),
+            Self::ReaderReadU32Be => ("jet_reader_read_u32_be_fast", "read_u32_be", 4),
+            Self::ReaderReadI32Le => ("jet_reader_read_i32_le_fast", "read_i32_le", 4),
+            Self::ReaderReadI32Be => ("jet_reader_read_i32_be_fast", "read_i32_be", 4),
+            Self::ReaderReadU64Le => ("jet_reader_read_u64_le_fast", "read_u64_le", 8),
+            Self::ReaderReadU64Be => ("jet_reader_read_u64_be_fast", "read_u64_be", 8),
+            Self::ReaderReadI64Le => ("jet_reader_read_i64_le_fast", "read_i64_le", 8),
+            Self::ReaderReadI64Be => ("jet_reader_read_i64_be_fast", "read_i64_be", 8),
+            Self::ReaderReadF32Le => ("jet_reader_read_f32_le_fast", "read_f32_le", 4),
+            Self::ReaderReadF32Be => ("jet_reader_read_f32_be_fast", "read_f32_be", 4),
+            Self::ReaderReadF64Le => ("jet_reader_read_f64_le_fast", "read_f64_le", 8),
+            Self::ReaderReadF64Be => ("jet_reader_read_f64_be_fast", "read_f64_be", 8),
+            _ => return None,
+        };
+        Some(TOutcomeFastPath::FixedRead {
+            buffer: TOutcomeFastBuffer::Reader,
+            helper,
+            error_method: Some(method),
+            width,
+        })
+    }
 }
 
 /// One lowered call argument, with the borrow/clone decisions already made (so

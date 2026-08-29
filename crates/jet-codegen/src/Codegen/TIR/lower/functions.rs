@@ -914,19 +914,29 @@ fn lower_trait_method_inner(
     trait_name: &str,
     raw_protocol_return: bool,
 ) -> TFunc {
-    // D-FAILURE-FOUNDATION1: the caller supplies parser-unforgeable generated-
-    // trait provenance for raw protocol bodies. Their `Func` nodes are
-    // Jet-internal producers, not user-callable declarations, so projecting an
-    // omitted contract onto them would emit `Result<raw, Err>` and violate the
-    // Rust trait ABI. Ordinary user trait methods still use the implicit Error
-    // carrier.
+    // D-FAILURE-FOUNDATION1: protocol bodies keep their declared ABI. Encode,
+    // Decode, Display, Debug, Equatable, Comparable, and Close are Rust trait
+    // methods (`String`, `bool`, `Ordering`, and unit — never `Result`), so
+    // projecting an omitted contract onto a hand-written body would emit
+    // `Result<raw, Err>` and violate the trait ABI just as it would for a
+    // compiler-generated body.
+    // Other user trait methods still use the implicit Error carrier.
+    let raw_protocol_return = raw_protocol_return
+        || matches!(
+            trait_name,
+            crate::Generics::DISPLAY
+                | crate::Generics::DEBUG
+                | crate::Generics::EQUATABLE
+                | crate::Generics::COMPARABLE
+                | crate::Generics::CLOSE
+        );
     let declared_return_type = f.return_type.clone().unwrap_or_else(|| {
         Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
     });
     let return_type = if raw_protocol_return {
         debug_assert!(
-            f.compiler_generated && f.return_type.is_some(),
-            "compiler-generated trait protocols must declare their raw return type"
+            f.return_type.is_some() || trait_name == crate::Generics::CLOSE,
+            "protocol methods must declare their raw return type"
         );
         resolve_self_ty(&declared_return_type, type_name)
     } else {

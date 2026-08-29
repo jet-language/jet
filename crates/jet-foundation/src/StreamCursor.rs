@@ -62,9 +62,32 @@ pub fn jet_reader_read_u8_fast(r: &mut JetReader) -> Option<u8> {
     Some(value)
 }
 
+/// Prove that a fixed-width read region is resident before entering its hot
+/// loop. The caller must consume exactly `count` bytes from the returned
+/// half-open interval without changing the reader through another operation;
+/// the region emitter enforces that condition from TIR. A miss deliberately
+/// returns `None` without changing the reader so the ordinary fallible loop
+/// can preserve its partial-progress and bounds-error behavior.
+#[inline(always)]
+pub fn jet_reader_region_bounds(r: &JetReader, count: i64) -> Option<(usize, usize)> {
+    let count = usize::try_from(count).ok()?;
+    let end = r.pos.checked_add(count)?;
+    (end <= r.buf.len()).then_some((r.pos, end))
+}
+
 #[inline(always)]
 pub fn jet_reader_read_u8(r: &mut JetReader) -> Result<u8, String> {
     jet_reader_read_u8_fast(r).ok_or_else(|| jet_reader_bounds_error("read_u8", 1, r))
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i8_fast(r: &mut JetReader) -> Option<i8> {
+    jet_reader_read_u8_fast(r).map(|value| value as i8)
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i8(r: &mut JetReader) -> Result<i8, String> {
+    jet_reader_read_i8_fast(r).ok_or_else(|| jet_reader_bounds_error("read_i8", 1, r))
 }
 
 #[inline(always)]
@@ -99,6 +122,28 @@ pub fn jet_reader_read_u16_be_fast(r: &mut JetReader) -> Option<u16> {
 pub fn jet_reader_read_u16_be(r: &mut JetReader) -> Result<u16, String> {
     jet_reader_read_u16_be_fast(r)
         .ok_or_else(|| jet_reader_bounds_error("read_u16_be", 2, r))
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i16_le_fast(r: &mut JetReader) -> Option<i16> {
+    jet_reader_read_u16_le_fast(r).map(|value| value as i16)
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i16_le(r: &mut JetReader) -> Result<i16, String> {
+    jet_reader_read_i16_le_fast(r)
+        .ok_or_else(|| jet_reader_bounds_error("read_i16_le", 2, r))
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i16_be_fast(r: &mut JetReader) -> Option<i16> {
+    jet_reader_read_u16_be_fast(r).map(|value| value as i16)
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i16_be(r: &mut JetReader) -> Result<i16, String> {
+    jet_reader_read_i16_be_fast(r)
+        .ok_or_else(|| jet_reader_bounds_error("read_i16_be", 2, r))
 }
 
 #[inline(always)]
@@ -143,6 +188,28 @@ pub fn jet_reader_read_u32_be_fast(r: &mut JetReader) -> Option<u32> {
 pub fn jet_reader_read_u32_be(r: &mut JetReader) -> Result<u32, String> {
     jet_reader_read_u32_be_fast(r)
         .ok_or_else(|| jet_reader_bounds_error("read_u32_be", 4, r))
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i32_le_fast(r: &mut JetReader) -> Option<i32> {
+    jet_reader_read_u32_le_fast(r).map(|value| value as i32)
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i32_le(r: &mut JetReader) -> Result<i32, String> {
+    jet_reader_read_i32_le_fast(r)
+        .ok_or_else(|| jet_reader_bounds_error("read_i32_le", 4, r))
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i32_be_fast(r: &mut JetReader) -> Option<i32> {
+    jet_reader_read_u32_be_fast(r).map(|value| value as i32)
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i32_be(r: &mut JetReader) -> Result<i32, String> {
+    jet_reader_read_i32_be_fast(r)
+        .ok_or_else(|| jet_reader_bounds_error("read_i32_be", 4, r))
 }
 
 #[inline(always)]
@@ -198,6 +265,28 @@ pub fn jet_reader_read_u64_be(r: &mut JetReader) -> Result<u64, String> {
 }
 
 #[inline(always)]
+pub fn jet_reader_read_i64_le_fast(r: &mut JetReader) -> Option<i64> {
+    jet_reader_read_u64_le_fast(r).map(|value| value as i64)
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i64_le(r: &mut JetReader) -> Result<i64, String> {
+    jet_reader_read_i64_le_fast(r)
+        .ok_or_else(|| jet_reader_bounds_error("read_i64_le", 8, r))
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i64_be_fast(r: &mut JetReader) -> Option<i64> {
+    jet_reader_read_u64_be_fast(r).map(|value| value as i64)
+}
+
+#[inline(always)]
+pub fn jet_reader_read_i64_be(r: &mut JetReader) -> Result<i64, String> {
+    jet_reader_read_i64_be_fast(r)
+        .ok_or_else(|| jet_reader_bounds_error("read_i64_be", 8, r))
+}
+
+#[inline(always)]
 pub fn jet_reader_read_f32_le_fast(r: &mut JetReader) -> Option<f32> {
     if r.buf.len().saturating_sub(r.pos) < 4 {
         return None;
@@ -217,6 +306,28 @@ pub fn jet_reader_read_f32_le_fast(r: &mut JetReader) -> Option<f32> {
 pub fn jet_reader_read_f32_le(r: &mut JetReader) -> Result<f32, String> {
     jet_reader_read_f32_le_fast(r)
         .ok_or_else(|| jet_reader_bounds_error("read_f32_le", 4, r))
+}
+
+#[inline(always)]
+pub fn jet_reader_read_f32_be_fast(r: &mut JetReader) -> Option<f32> {
+    if r.buf.len().saturating_sub(r.pos) < 4 {
+        return None;
+    }
+    let pos = r.pos;
+    let value = f32::from_be_bytes([
+        r.buf[pos],
+        r.buf[pos + 1],
+        r.buf[pos + 2],
+        r.buf[pos + 3],
+    ]);
+    r.pos = pos + 4;
+    Some(value)
+}
+
+#[inline(always)]
+pub fn jet_reader_read_f32_be(r: &mut JetReader) -> Result<f32, String> {
+    jet_reader_read_f32_be_fast(r)
+        .ok_or_else(|| jet_reader_bounds_error("read_f32_be", 4, r))
 }
 
 #[inline(always)]
@@ -243,6 +354,89 @@ pub fn jet_reader_read_f64_le_fast(r: &mut JetReader) -> Option<f64> {
 pub fn jet_reader_read_f64_le(r: &mut JetReader) -> Result<f64, String> {
     jet_reader_read_f64_le_fast(r)
         .ok_or_else(|| jet_reader_bounds_error("read_f64_le", 8, r))
+}
+
+#[inline(always)]
+pub fn jet_reader_read_f64_be_fast(r: &mut JetReader) -> Option<f64> {
+    if r.buf.len().saturating_sub(r.pos) < 8 {
+        return None;
+    }
+    let pos = r.pos;
+    let value = f64::from_be_bytes([
+        r.buf[pos],
+        r.buf[pos + 1],
+        r.buf[pos + 2],
+        r.buf[pos + 3],
+        r.buf[pos + 4],
+        r.buf[pos + 5],
+        r.buf[pos + 6],
+        r.buf[pos + 7],
+    ]);
+    r.pos = pos + 8;
+    Some(value)
+}
+
+#[inline(always)]
+pub fn jet_reader_read_f64_be(r: &mut JetReader) -> Result<f64, String> {
+    jet_reader_read_f64_be_fast(r)
+        .ok_or_else(|| jet_reader_bounds_error("read_f64_be", 8, r))
+}
+
+pub fn jet_reader_peek(r: &JetReader) -> Result<u8, String> {
+    r.buf
+        .get(r.pos)
+        .copied()
+        .ok_or_else(|| jet_reader_bounds_error("peek", 1, r))
+}
+
+pub fn jet_reader_seek(r: &mut JetReader, position: i64) -> Result<(), String> {
+    if position < 0 {
+        return Err(format!(
+            "Reader.seek: position must not be negative, got {}",
+            position
+        ));
+    }
+    let position = usize::try_from(position).map_err(|_| {
+        format!(
+            "Reader.seek: position {} is outside the addressable buffer",
+            position
+        )
+    })?;
+    if position > r.buf.len() {
+        return Err(format!(
+            "Reader.seek: position {} is beyond end {}",
+            position,
+            r.buf.len()
+        ));
+    }
+    r.pos = position;
+    Ok(())
+}
+
+pub fn jet_reader_skip(r: &mut JetReader, count: i64) -> Result<(), String> {
+    if count < 0 {
+        return Err(format!(
+            "Reader.skip: length must not be negative, got {}",
+            count
+        ));
+    }
+    let count = usize::try_from(count).map_err(|_| {
+        format!(
+            "Reader.skip: length {} is outside the addressable buffer",
+            count
+        )
+    })?;
+    let end = r.pos.checked_add(count).ok_or_else(|| {
+        format!(
+            "Reader.skip: position overflow at {} plus {}",
+            r.pos, count
+        )
+    })?;
+    if end > r.buf.len() {
+        return Err(jet_reader_bounds_error("skip", count, r));
+    }
+    r.pos = end;
+    Ok(())
 }
 
 pub fn jet_reader_take(r: &mut JetReader, n: i64) -> Result<Vec<u8>, String> {

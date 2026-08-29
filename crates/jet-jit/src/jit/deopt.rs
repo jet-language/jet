@@ -408,7 +408,7 @@ fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
     // Per-run buffer, cleared like the sink (see `resident_invoke`).
     jet_foundation::Outcome::jet_journey_reset();
     jet_codegen::scheduler::jet_observe_runtime_start();
-    let outcome = jet_codegen::Comptime::with_ambient(
+    let mut outcome = jet_codegen::Comptime::with_ambient(
         Some(crate::ambient_interp::ambient_core_call),
         Some(crate::ambient_interp::ambient_handle),
         Some(crate::ambient_interp::ambient_extern_call),
@@ -445,6 +445,11 @@ fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
             Err(d) => RunOutcome::Problems(vec![rewrite_runtime_tier_diag(d)]),
         },
     );
+    if let RunOutcome::Ran { stderr, .. } = &mut outcome {
+        if let Some(report) = jet_codegen::scheduler::jet_observe_parked_tasks_report() {
+            stderr.push_str(&report.rendered);
+        }
+    }
     let ms = started.elapsed().as_secs_f64() * 1000.0;
     // Preserve the first lowering gap that caused the tier transition. A
     // whole-program interpreter run is a consequence of that gap, not its

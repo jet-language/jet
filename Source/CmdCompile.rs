@@ -7071,7 +7071,7 @@ pub(crate) fn build(
                 " Why: Jet uses rustc as its backend, and rustc needs a C linker to produce a native binary."
             );
             eprintln!(
-                " Fix: run from `nix develop`, or install a C toolchain (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`)."
+                " Fix: Run from `nix develop`, or install a C toolchain (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`)."
             );
             eprintln!("More: jet-lang.dev/e/L2101");
             exit(ExitCodes::USER_ERROR);

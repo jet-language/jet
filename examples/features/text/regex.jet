@@ -16,6 +16,8 @@ fn run() {
         print(mat.group(1) ?? "none")
     }
     print(re.replace_all(Regex{"\d+"}, "#", text))
+    print(re.replace(Regex{"a"}, "x", "a-a-a"))
+    print(re.replace_first(Regex{"a"}, "x", "a-a-a"))
     print(re.split(Regex{"\s+"}, text).len())
     print(Regex{"\d+"}.is_match(text))
     print(Regex{"[a-z]+"}.is_match("hello123"))
@@ -41,4 +43,22 @@ fn run() {
     print(rx.names().len())
     print(rx.count("Ada lovelace"))
     print(re.escape("a+b?"))
+
+    zero_width :: re.split(Regex{""}, "abc")
+    print(zero_width.len())
+    print(zero_width[1])
+    print(zero_width[2])
+    print(zero_width[3])
+
+    unicode_match :: re.match(Regex{"(é)"}, "aé")
+    if unicode_match == .Val(mat) {
+        print(mat.start())
+        print(mat.end())
+        print(mat.group_start(1) ?? -1)
+        print(mat.group_end(1) ?? -1)
+    }
+
+    print(Regex{"(a+)+$"}.is_match("aaaaaaaaaaaaaaaaaaaaX"))
+    absolute_end :: re.compile_with("a$", re.flags(false, true, false)) ?? return Err("bad end")
+    print(absolute_end.is_match("a\nb"))
 }

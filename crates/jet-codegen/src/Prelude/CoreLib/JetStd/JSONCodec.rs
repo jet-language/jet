@@ -17,9 +17,7 @@
             crate::jet_encoding_json::Value::Bool(value) => JSON::Boolean(value),
             crate::jet_encoding_json::Value::Int(value) => JSON::Integer(value),
             crate::jet_encoding_json::Value::Float(value) => JSON::Number(value),
-            crate::jet_encoding_json::Value::Number(_) => {
-                unreachable!("lossless JSON number leaked into dynamic projection")
-            }
+            crate::jet_encoding_json::Value::Number(value) => JSON::ExactInteger(value),
             crate::jet_encoding_json::Value::Text(value) => JSON::Text(value),
             crate::jet_encoding_json::Value::Array(values) => {
                 JSON::Array(values.into_iter().map(json_from_shared).collect())
@@ -49,7 +47,11 @@
             JSON::Null => "null".to_string(),
             JSON::Boolean(b) => b.to_string(),
             JSON::Integer(n) => n.to_string(),
-            JSON::Number(n) => format!("{:?}", n),
+            JSON::Number(n) => {
+                assert!(n.is_finite(), "JSON cannot encode a non-finite Float");
+                format!("{:?}", n)
+            }
+            JSON::ExactInteger(text) => text.clone(),
             JSON::Text(s) => quote_json(s),
             JSON::Array(items) => {
                 if items.is_empty() {

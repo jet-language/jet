@@ -102,6 +102,47 @@ fn corpus_gate_ledger_audit_fires_on_a_missing_row() {
     assert_eq!(audit.excluded, 1);
 }
 
+/// #2286: generated Core witnesses use the same strict resident-JIT,
+/// interpreter, and AOT oracle as the feature corpus. Discovery is a sorted
+/// filesystem walk, so adding a witness cannot silently leave it outside the
+/// gate. The denominator check is a separate Node command because this wave
+/// intentionally lands with uncovered rows for later coverage waves.
+#[test]
+fn core_conformance_corpus_uses_strict_three_tier_gate() {
+    with_jit_test_scope(|| {
+        if skip_if_cranelift_host_unsupported() {
+            return;
+        }
+        let entries = core_conformance_corpus_entries();
+        assert!(!entries.is_empty(), "Core conformance corpus must have witnesses");
+        for (stem, file) in entries {
+            assert_cranelift_three_way(&file, &stem);
+        }
+    });
+}
+
+/// #2286 criterion 3: the generator's structural guard must reject the
+/// bind-and-discard shape that previously made `uuid.v4` look covered.
+#[test]
+fn core_conformance_checker_rejects_unconsumed_result() {
+    let output = std::process::Command::new("node")
+        .arg("scripts/agent/core-conformance.mjs")
+        .arg("--hostile-fixtures")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("node must run the Core conformance checker");
+    assert!(
+        output.status.success(),
+        "Core conformance hostile fixture was accepted:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("rejected bind-and-discard result"),
+        "hostile fixture output must state the result-consumption guard"
+    );
+}
+
 /// c727 C1–C4: discover every top-level example, classify it, and ratchet the
 /// manifest. AOT-oracle examples (exit 0) must resident-JIT or deopt-interp
 /// with backend attribution — never silent fallback. Each AOT-oracle case

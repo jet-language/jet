@@ -1476,6 +1476,8 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
             | "Url"
             | "Path"
             | "Date"
+            | "Duration"
+            | "LocalDate"
             | "LocalTime"
             | "DateTime"
             | "Instant"
@@ -1809,7 +1811,10 @@ pub(crate) fn is_equatable(
         Type::Tuple(fields) => fields
             .iter()
             .all(|(_, field)| is_equatable(field, registry, trait_reg)),
-        Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
+        Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
+        Type::Map { key, value, .. } => {
+            is_equatable(key, registry, trait_reg) && is_equatable(value, registry, trait_reg)
+        }
         Type::FixedList { elem, .. } => is_equatable(elem, registry, trait_reg),
         Type::Tagged { inner, .. } => is_equatable(inner, registry, trait_reg),
         Type::InlineRange { base, .. } => is_equatable(base, registry, trait_reg),
@@ -1948,13 +1953,13 @@ pub(crate) fn incomparable_field(ty: &Type, registry: &TypeRegistry) -> Option<S
             // D-DIST1: distinct types wrap a comparable base; they are always comparable.
             Some(TypeDef::Distinct { .. }) => None,
             Some(TypeDef::Alias { .. }) => None,
-            None => Some("?".to_string()),
+            None => None,
         },
         Type::Option(inner) => incomparable_field(inner, registry),
         Type::Result { ok, err } => {
             incomparable_field(ok, registry).or_else(|| incomparable_field(err, registry))
         }
-        _ => Some("?".to_string()),
+        _ => None,
     }
 }
 
@@ -2117,6 +2122,8 @@ pub(crate) fn builtin_type_from_ident(name: &str) -> Option<Type> {
         Syntax::DURATION_TYPE => Some(Type::Named(Syntax::DURATION_TYPE.to_string())),
         Syntax::CLOCK_TYPE => Some(Type::Named(Syntax::CLOCK_TYPE.to_string())),
         Syntax::TYPE_AUTHORITY => Some(Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
+        Syntax::TYPE_DECIMAL => Some(Type::Named(Syntax::TYPE_DECIMAL.to_string())),
+        Syntax::TYPE_FRACTION => Some(Type::Named(Syntax::TYPE_FRACTION.to_string())),
         "Date" => Some(Type::Named("Date".to_string())),
         "Instant" => Some(Type::Named("Instant".to_string())),
         "Path" => Some(Type::Named("Path".to_string())),

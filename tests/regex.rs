@@ -112,8 +112,9 @@ fn run() {
     nums :: re.find_all(.{"\d+"}, text)
     print(nums.len())
 
-    // replace / replace_all (with group reference)
+    // replace / replace_first / replace_all (with group reference)
     print(re.replace(.{"ok"}, "done", text))
+    print(re.replace_first(.{"\d"}, "#", "1-2"))
     print(re.replace_all(.{"\d"}, "#", text))
 
     // split
@@ -133,8 +134,9 @@ fn run() {
     assert_eq!(lines[7], "2024", "find first match");
     assert_eq!(lines[8], "3", "find_all count (2024, 06, 21)");
     assert_eq!(lines[9], "2024-06-21 build done", "replace first");
-    assert_eq!(lines[10], "####-##-## build ok", "replace_all digits");
-    assert_eq!(lines[11], "3", "split into 3 parts");
+    assert_eq!(lines[10], "#-2", "replace_first digit");
+    assert_eq!(lines[11], "####-##-## build ok", "replace_all digits");
+    assert_eq!(lines[12], "3", "split into 3 parts");
 }
 
 #[test]
@@ -229,6 +231,41 @@ fn run() {
     assert_eq!(lines[6], "2", "split limit len");
     assert_eq!(lines[7], "b, c", "split limit remainder");
     assert_eq!(lines[8], "hit hit", "callback replacement");
+}
+
+#[test]
+fn regex_value_fidelity_is_shared_by_jit_and_interpreter() {
+    let src = r#"fn run() {
+    rx :: Regex{"a"}
+    print(rx.replace("x", "a-a"))
+    print(rx.replace_first("x", "a-a"))
+
+    zero_width :: Regex{""}.split("abc")
+    print(zero_width.len())
+    print(zero_width[1])
+    print(zero_width[2])
+    print(zero_width[3])
+
+    m :: Regex{"(é)"}.match("aé")
+    if m == Val(mat) {
+        print(mat.start())
+        print(mat.end())
+        print(mat.group_start(1) ?? -1)
+        print(mat.group_end(1) ?? -1)
+    }
+
+    print(Regex{"(a+)+$"}.is_match("aaaaaaaaaaaaaaaaaaaaX"))
+}
+"#;
+    let expected = "x-x-x\nx-a-a\n5\na\nb\nc\n1\n2\n1\n2\nfalse\n";
+    let (jit_code, jit_out, jit_err) = tir_support::jit_run("regex_value_fidelity", src);
+    assert_eq!(jit_code, 0, "jet run failed:\n{jit_err}");
+    assert_eq!(jit_out, expected, "jet run disagreed:\n{jit_err}");
+    let (interpreter_code, interpreter_out, interpreter_err) =
+        tir_support::interpreter_run("regex_value_fidelity", src);
+    assert_eq!(interpreter_code, jit_code, "interpreter exit disagreed:\n{interpreter_err}");
+    assert_eq!(interpreter_out, jit_out, "interpreter stdout disagreed:\n{interpreter_err}");
+    assert_eq!(interpreter_err, jit_err, "interpreter stderr disagreed");
 }
 
 #[test]

@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use super::browser;
 use super::unsupported;
 use crate::Codegen::TIR::THandleOp;
-use crate::Comptime::Builtins::{apply_method, apply_mutating, apply_mutating_with_type};
+use crate::Comptime::Builtins::{
+    apply_method, apply_mutating, apply_mutating_with_type, exact_big, exact_int_value,
+};
 use crate::Comptime::{CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::Type;
@@ -18,12 +20,342 @@ mod duration_kernel {
     include!("../../../Prelude/Core/Duration.rs");
 }
 
+#[allow(dead_code)]
 mod time_kernel {
     pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
+    include!("../../../Prelude/Core/Time.rs");
 }
 
 mod path_kernel {
     include!("../../../Prelude/Core/Path.rs");
+}
+
+fn civil_time_field<'a>(value: &'a CtValue, wanted: &str) -> Option<&'a CtValue> {
+    let CtValue::Struct { fields, .. } = value else {
+        return None;
+    };
+    fields.iter().find_map(|(name, value)| {
+        let name = name
+            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+            .unwrap_or(name);
+        (name == wanted).then_some(value)
+    })
+}
+
+fn duration_ns_value(value: &CtValue) -> Option<i64> {
+    match value {
+        CtValue::Struct { fields, .. } => fields.iter().find_map(|(name, value)| {
+            (name == "ns").then(|| match value {
+                CtValue::Int(value) => Some(*value),
+                _ => None,
+            })?
+        }),
+        _ => None,
+    }
+}
+
+fn duration_scaled_value(
+    recv: &CtValue,
+    args: &[CtValue],
+    divide: bool,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let value = duration_ns_value(recv)
+        .ok_or_else(|| unsupported("Duration scaling needs a Duration receiver", span))?;
+    let factor = args
+        .first()
+        .and_then(exact_big)
+        .and_then(|value| value.try_i64())
+        .ok_or_else(|| unsupported("Duration scaling needs a word-sized Int factor", span))?;
+    let value = if divide {
+        duration_kernel::jet_duration_kernel_divide(value, factor)
+    } else {
+        duration_kernel::jet_duration_kernel_scale(value, factor)
+    }
+    .ok_or_else(|| unsupported(duration_kernel::jet_duration_kernel_scale_error_reason(), span))?;
+    Ok(CtValue::Struct {
+        type_name: crate::Syntax::DURATION_TYPE.to_string(),
+        fields: vec![("ns".to_string(), CtValue::Int(value))],
+    })
+}
+
+fn civil_time_int(value: &CtValue, field: &str) -> Option<i64> {
+    match civil_time_field(value, field) {
+        Some(CtValue::Int(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+fn civil_time_date(value: &CtValue) -> Option<time_kernel::JetDate> {
+    Some(time_kernel::JetDate::new(
+        civil_time_int(value, "year")?,
+        civil_time_int(value, "month")?,
+        civil_time_int(value, "day")?,
+    ))
+}
+
+fn civil_time_local_time(value: &CtValue) -> Option<time_kernel::JetLocalTime> {
+    Some(time_kernel::JetLocalTime::new(
+        civil_time_int(value, "hour")?,
+        civil_time_int(value, "minute")?,
+        civil_time_int(value, "second")?,
+    ))
+}
+
+fn civil_time_datetime(value: &CtValue) -> Option<time_kernel::JetDateTime> {
+    Some(time_kernel::JetDateTime::from_timestamp_ns(
+        civil_time_int(value, "secs")?,
+        u32::try_from(civil_time_int(value, "nanos")?).ok()?,
+    ))
+}
+
+fn civil_time_zone(value: &CtValue) -> Option<time_kernel::JetZone> {
+    let CtValue::Str(name) = civil_time_field(value, "name")? else {
+        return None;
+    };
+    time_kernel::JetZone::named(name).ok()
+}
+
+fn civil_time_zoned(value: &CtValue) -> Option<time_kernel::JetZonedDateTime> {
+    let datetime = civil_time_datetime(civil_time_field(value, "instant")?)?;
+    let zone = civil_time_zone(civil_time_field(value, "zone")?)?;
+    Some(datetime.in_zone(&zone))
+}
+
+enum CivilTimeKernelValue {
+    Date(time_kernel::JetDate),
+    LocalTime(time_kernel::JetLocalTime),
+    DateTime(time_kernel::JetDateTime),
+    Instant(i64),
+    Zoned(time_kernel::JetZonedDateTime),
+    Duration(i64),
+}
+
+fn civil_time_kind(value: &CtValue) -> Option<&str> {
+    let CtValue::Struct { type_name, .. } = value else {
+        return None;
+    };
+    let type_name = type_name
+        .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(type_name);
+    matches!(
+        type_name,
+        "Date"
+            | "LocalDate"
+            | "LocalTime"
+            | "DateTime"
+            | "Instant"
+            | "ZonedDateTime"
+            | "Duration"
+    )
+    .then_some(type_name)
+}
+
+fn canonical_civil_time_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "Date" | "LocalDate" => Some("Date"),
+        "LocalTime" => Some("LocalTime"),
+        "DateTime" => Some("DateTime"),
+        "Instant" => Some("Instant"),
+        "ZonedDateTime" => Some("ZonedDateTime"),
+        "Duration" => Some("Duration"),
+        _ => None,
+    }
+}
+
+fn civil_time_kernel_value(
+    kind: &str,
+    value: &CtValue,
+    side: &str,
+    span: Span,
+) -> Result<CivilTimeKernelValue, Diagnostic> {
+    let malformed = || unsupported(&format!("malformed {kind} {side}"), span);
+    match kind {
+        "Date" | "LocalDate" => civil_time_date(value)
+            .map(CivilTimeKernelValue::Date)
+            .ok_or_else(malformed),
+        "LocalTime" => civil_time_local_time(value)
+            .map(CivilTimeKernelValue::LocalTime)
+            .ok_or_else(malformed),
+        "DateTime" => civil_time_datetime(value)
+            .map(CivilTimeKernelValue::DateTime)
+            .ok_or_else(malformed),
+        "Instant" => civil_time_int(value, "start_ns")
+            .map(CivilTimeKernelValue::Instant)
+            .ok_or_else(malformed),
+        "ZonedDateTime" => civil_time_zoned(value)
+            .map(CivilTimeKernelValue::Zoned)
+            .ok_or_else(malformed),
+        "Duration" => civil_time_int(value, "ns")
+            .map(CivilTimeKernelValue::Duration)
+            .ok_or_else(malformed),
+        _ => Err(unsupported(
+            &format!("unsupported civil-time comparison `{kind}`"),
+            span,
+        )),
+    }
+}
+
+fn civil_time_kernel_pair(
+    kind: &str,
+    left: &CtValue,
+    right: &CtValue,
+    span: Span,
+) -> Result<(CivilTimeKernelValue, CivilTimeKernelValue), Diagnostic> {
+    Ok((
+        civil_time_kernel_value(kind, left, "value", span)?,
+        civil_time_kernel_value(kind, right, "argument", span)?,
+    ))
+}
+
+fn civil_time_kernel_order(
+    kind: &str,
+    left: &CtValue,
+    right: &CtValue,
+    span: Span,
+) -> Result<std::cmp::Ordering, Diagnostic> {
+    let (left, right) = civil_time_kernel_pair(kind, left, right, span)?;
+    match (left, right) {
+        (CivilTimeKernelValue::Date(left), CivilTimeKernelValue::Date(right)) => {
+            Ok(left.cmp(&right))
+        }
+        (
+            CivilTimeKernelValue::LocalTime(left),
+            CivilTimeKernelValue::LocalTime(right),
+        ) => Ok(left.cmp(&right)),
+        (
+            CivilTimeKernelValue::DateTime(left),
+            CivilTimeKernelValue::DateTime(right),
+        ) => Ok(left.cmp(&right)),
+        (
+            CivilTimeKernelValue::Instant(left),
+            CivilTimeKernelValue::Instant(right),
+        ) => Ok(jet_time_instant_ordering(
+            time_kernel::jet_time_instant_compare(left, right),
+        )),
+        (
+            CivilTimeKernelValue::Zoned(left),
+            CivilTimeKernelValue::Zoned(right),
+        ) => Ok(left.cmp(&right)),
+        (
+            CivilTimeKernelValue::Duration(left),
+            CivilTimeKernelValue::Duration(right),
+        ) => Ok(left.cmp(&right)),
+        _ => Err(unsupported(
+            &format!("cannot compare civil-time `{kind}` values"),
+            span,
+        )),
+    }
+}
+
+fn civil_time_kernel_equal(
+    kind: &str,
+    left: &CtValue,
+    right: &CtValue,
+    span: Span,
+) -> Result<bool, Diagnostic> {
+    let (left, right) = civil_time_kernel_pair(kind, left, right, span)?;
+    match (left, right) {
+        (CivilTimeKernelValue::Date(left), CivilTimeKernelValue::Date(right)) => Ok(left == right),
+        (
+            CivilTimeKernelValue::LocalTime(left),
+            CivilTimeKernelValue::LocalTime(right),
+        ) => Ok(left == right),
+        (
+            CivilTimeKernelValue::DateTime(left),
+            CivilTimeKernelValue::DateTime(right),
+        ) => Ok(left == right),
+        (
+            CivilTimeKernelValue::Instant(left),
+            CivilTimeKernelValue::Instant(right),
+        ) => Ok(left == right),
+        (
+            CivilTimeKernelValue::Zoned(left),
+            CivilTimeKernelValue::Zoned(right),
+        ) => Ok(left == right),
+        (
+            CivilTimeKernelValue::Duration(left),
+            CivilTimeKernelValue::Duration(right),
+        ) => Ok(left == right),
+        _ => Err(unsupported(
+            &format!("cannot compare civil-time `{kind}` values"),
+            span,
+        )),
+    }
+}
+
+/// Compare two runtime carriers through the shared Prelude time kernel. `None`
+/// leaves ordinary list comparison to its existing evaluator path.
+pub(super) fn civil_time_order_values(
+    left: &CtValue,
+    right: &CtValue,
+    span: Span,
+) -> Result<Option<std::cmp::Ordering>, Diagnostic> {
+    let (Some(left_kind), Some(right_kind)) = (civil_time_kind(left), civil_time_kind(right))
+    else {
+        return Ok(None);
+    };
+    let (Some(left_kind), Some(right_kind)) = (
+        canonical_civil_time_kind(left_kind),
+        canonical_civil_time_kind(right_kind),
+    ) else {
+        return Ok(None);
+    };
+    if left_kind != right_kind {
+        return Ok(None);
+    }
+    civil_time_kernel_order(left_kind, left, right, span).map(Some)
+}
+
+pub(super) fn civil_time_value_kind(value: &CtValue) -> Option<&'static str> {
+    civil_time_kind(value).and_then(canonical_civil_time_kind)
+}
+
+fn civil_time_ordering(value: std::cmp::Ordering) -> CtValue {
+    let variant = match value {
+        std::cmp::Ordering::Less => "Less",
+        std::cmp::Ordering::Equal => "Equal",
+        std::cmp::Ordering::Greater => "Greater",
+    };
+    CtValue::Enum {
+        type_name: crate::Syntax::TYPE_ORDERING.to_string(),
+        variant: variant.to_string(),
+        args: Vec::new(),
+    }
+}
+
+fn eval_civil_time_comparison(
+    kind: &str,
+    method: &str,
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let rhs = args
+        .first()
+        .ok_or_else(|| unsupported(&format!("{kind}.{method} argument"), span))?;
+    if args.len() != 1 {
+        return Err(unsupported(
+            &format!("{kind}.{method} expects one argument"),
+            span,
+        ));
+    }
+
+    let result = match method {
+        "equal" => CtValue::Bool(civil_time_kernel_equal(kind, recv, rhs, span)?),
+        "compare" => civil_time_ordering(civil_time_kernel_order(kind, recv, rhs, span)?),
+        _ => {
+            return Err(unsupported(
+                &format!("unsupported civil-time comparison `{kind}.{method}`"),
+                span,
+            ));
+        }
+    };
+    Ok(result)
+}
+
+fn jet_time_instant_ordering(value: i64) -> std::cmp::Ordering {
+    value.cmp(&0)
 }
 
 fn handle_op_name(op: &THandleOp) -> String {
@@ -166,6 +498,31 @@ fn handle_op_name(op: &THandleOp) -> String {
         THandleOp::PluginCallInt => "PluginCallInt",
         THandleOp::PluginCallBool => "PluginCallBool",
         THandleOp::PluginCallText => "PluginCallText",
+        THandleOp::ReaderOver => "ReaderOver",
+        THandleOp::ReaderReadU8 => "ReaderReadU8",
+        THandleOp::ReaderReadI8 => "ReaderReadI8",
+        THandleOp::ReaderReadU16Le => "ReaderReadU16Le",
+        THandleOp::ReaderReadU16Be => "ReaderReadU16Be",
+        THandleOp::ReaderReadI16Le => "ReaderReadI16Le",
+        THandleOp::ReaderReadI16Be => "ReaderReadI16Be",
+        THandleOp::ReaderReadU32Le => "ReaderReadU32Le",
+        THandleOp::ReaderReadU32Be => "ReaderReadU32Be",
+        THandleOp::ReaderReadI32Le => "ReaderReadI32Le",
+        THandleOp::ReaderReadI32Be => "ReaderReadI32Be",
+        THandleOp::ReaderReadU64Le => "ReaderReadU64Le",
+        THandleOp::ReaderReadU64Be => "ReaderReadU64Be",
+        THandleOp::ReaderReadI64Le => "ReaderReadI64Le",
+        THandleOp::ReaderReadI64Be => "ReaderReadI64Be",
+        THandleOp::ReaderReadF32Le => "ReaderReadF32Le",
+        THandleOp::ReaderReadF32Be => "ReaderReadF32Be",
+        THandleOp::ReaderReadF64Le => "ReaderReadF64Le",
+        THandleOp::ReaderReadF64Be => "ReaderReadF64Be",
+        THandleOp::ReaderPeek => "ReaderPeek",
+        THandleOp::ReaderSeek => "ReaderSeek",
+        THandleOp::ReaderSkip => "ReaderSkip",
+        THandleOp::ReaderTake => "ReaderTake",
+        THandleOp::ReaderRemaining => "ReaderRemaining",
+        THandleOp::ReaderAtEnd => "ReaderAtEnd",
         _ => "",
     };
     name.to_string()
@@ -423,16 +780,16 @@ fn db_value_result(recv: &CtValue, want: &str, span: Span) -> Result<CtValue, Di
 fn datatree_int_result(recv: &CtValue) -> CtValue {
     let result = match recv {
         CtValue::Enum { variant, args, .. } => match (variant.as_str(), args.as_slice()) {
-            ("Int", [(_, CtValue::Int(value))]) => Ok(CtValue::Int(*value)),
+            ("Int", [(_, value @ (CtValue::Int(_) | CtValue::BigInt(_)))]) => {
+                Ok(value.clone())
+            }
             // Typed-JSON lexical `Number` carrier: same projection as the
             // Prelude accessor (DataTree.rs `int()`), so a hand `decode`
             // reads one protocol on every tier.
             ("Number", [(_, CtValue::Str(text))]) => {
-                crate::jet_json_number::json_exact_integer_text(text)
-                    .ok()
-                    .and_then(|digits| digits.parse::<i64>().ok())
-                    .map(CtValue::Int)
-                    .ok_or_else(|| {
+                jet_foundation::Numeric::CtBigInt::from_json_number(text)
+                    .map(exact_int_value)
+                    .map_err(|_| {
                         format!(
                             "expected int, got {}",
                             crate::Comptime::render_datatree_for_tir(recv)
@@ -786,6 +1143,8 @@ pub(super) fn eval_handle_with_type_and_sink(
         THandleOp::DBRollback => Err(unsupported("handle `DBRollback`", span)),
         THandleOp::DBClose => Err(unsupported("handle `DBClose`", span)),
         THandleOp::DurationNew { unit, float } => duration_new(recv, unit, *float, span),
+        THandleOp::DurationScale => duration_scaled_value(recv, args, false, span),
+        THandleOp::DurationDivide => duration_scaled_value(recv, args, true, span),
         THandleOp::ClockNow => apply_method(recv, "now", args.to_vec(), span),
         THandleOp::ClockTick => {
             apply_mutating_with_type(recv, "tick", args.to_vec(), span, resolved_ret)
@@ -885,9 +1244,12 @@ pub(super) fn eval_handle_with_type_and_sink(
         THandleOp::SolverFailureCount => apply_method(recv, "failure_count", args.to_vec(), span),
         THandleOp::SolverStatus => apply_method(recv, "status", args.to_vec(), span),
         THandleOp::MeasurementMethod { method } => apply_method(recv, method, args.to_vec(), span),
-        THandleOp::CivilTimeMethod { method, .. } => {
-            apply_method(recv, method, args.to_vec(), span)
+        THandleOp::CivilTimeMethod { kind, method }
+            if matches!(method.as_str(), "equal" | "compare") =>
+        {
+            eval_civil_time_comparison(kind, method, recv, args, span)
         }
+        THandleOp::CivilTimeMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
         THandleOp::PreciseMethod { type_name, method } => {
             apply_method(recv, method, args.to_vec(), span).or_else(|_| {
                 Err(unsupported(
@@ -1373,14 +1735,26 @@ pub(super) fn eval_handle_with_type_and_sink(
         // `jet_foundation::StreamCursor` kernel AOT splices into its prelude.
         THandleOp::ReaderOver
         | THandleOp::ReaderReadU8
+        | THandleOp::ReaderReadI8
         | THandleOp::ReaderReadU16Le
         | THandleOp::ReaderReadU16Be
+        | THandleOp::ReaderReadI16Le
+        | THandleOp::ReaderReadI16Be
         | THandleOp::ReaderReadU32Le
         | THandleOp::ReaderReadU32Be
+        | THandleOp::ReaderReadI32Le
+        | THandleOp::ReaderReadI32Be
         | THandleOp::ReaderReadU64Le
         | THandleOp::ReaderReadU64Be
+        | THandleOp::ReaderReadI64Le
+        | THandleOp::ReaderReadI64Be
         | THandleOp::ReaderReadF32Le
+        | THandleOp::ReaderReadF32Be
         | THandleOp::ReaderReadF64Le
+        | THandleOp::ReaderReadF64Be
+        | THandleOp::ReaderPeek
+        | THandleOp::ReaderSeek
+        | THandleOp::ReaderSkip
         | THandleOp::ReaderTake
         | THandleOp::ReaderRemaining
         | THandleOp::ReaderAtEnd

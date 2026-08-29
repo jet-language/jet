@@ -1838,6 +1838,17 @@ pub(crate) struct Checker<'a> {
     /// is typed against the enclosing fallible return. `infer_lambda` scopes it
     /// per lambda and harvests it into `LambdaMeta::fallible_propagation`.
     task_body_propagates: bool,
+    /// True while an open callback return is being inferred. A fallible callee
+    /// in this position supplies the callback's own Result carrier; it must not
+    /// be auto-unwrapped against the enclosing function's return row.
+    failure_carrier_inference: bool,
+    /// The carrier discovered for the current open callback, if its body has
+    /// reached a fallible callee.
+    failure_carrier: Option<Type>,
+    /// True while the root expression is being checked as a statement. A
+    /// dispatch nested in a value expression must keep value-tail checking;
+    /// only the statement root may make a braced arm's tail Unit.
+    statement_expr_inference: bool,
     /// True while checking the callback stored by `core.sys.on_interrupt`.
     /// This boundary retains a callback for asynchronous signal delivery and
     /// therefore needs stricter capture facts than an ordinary higher-order call.

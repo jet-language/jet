@@ -53,7 +53,16 @@ fn jet_det_rng_next(r: &mut jet_std::Rng) -> u64 {
     jet_seeded_rng_next(&mut r.state)
 }
 fn jet_rng_int(r: &mut jet_std::Rng, lo: i64, hi: i64) -> i64 {
-    jet_seeded_rng_int(&mut r.state, lo, hi)
+    let lo = jet_std::jet_int_to_i64(lo).unwrap_or_else(|| {
+        jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message())
+    });
+    let hi = jet_std::jet_int_to_i64(hi).unwrap_or_else(|| {
+        jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message())
+    });
+    match jet_seeded_rng_int_checked(&mut r.state, lo, hi) {
+        Ok(value) => jet_std::jet_int_from_i64(value),
+        Err(message) => jet_runtime_stop("E3010", "", 0, message),
+    }
 }
 fn jet_rng_float(r: &mut jet_std::Rng) -> f64 {
     jet_seeded_rng_float(&mut r.state)
@@ -151,6 +160,18 @@ fn jet_duration_difference(a: &jet_std::Duration, b: &jet_std::Duration) -> jet_
         ns: jet_duration_kernel_difference(a.ns, b.ns),
     }
 }
+fn jet_duration_scale(d: &jet_std::Duration, factor: &i64) -> jet_std::Duration {
+    jet_std::Duration {
+        ns: jet_duration_kernel_scale(d.ns, *factor)
+            .unwrap_or_else(|| panic!("{}", jet_duration_kernel_scale_error_reason())),
+    }
+}
+fn jet_duration_divide(d: &jet_std::Duration, factor: &i64) -> jet_std::Duration {
+    jet_std::Duration {
+        ns: jet_duration_kernel_divide(d.ns, *factor)
+            .unwrap_or_else(|| panic!("{}", jet_duration_kernel_scale_error_reason())),
+    }
+}
 
 impl std::ops::Add for jet_std::Duration {
     type Output = jet_std::Duration;
@@ -206,25 +227,85 @@ impl std::ops::Add<JetInstant> for jet_std::Duration {
     }
 }
 
+fn jet_time_ordering(ordering: std::cmp::Ordering) -> __jet_Ordering {
+    match ordering {
+        std::cmp::Ordering::Less => __jet_Ordering::__jet_Less,
+        std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal,
+        std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater,
+    }
+}
+
+impl __jet_Equatable for JetDate {
+    fn equal(&self, rhs: &Self) -> bool {
+        self == rhs
+    }
+}
+
+impl __jet_Comparable for JetDate {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering(self.cmp(rhs))
+    }
+}
+
+impl __jet_Equatable for JetLocalTime {
+    fn equal(&self, rhs: &Self) -> bool {
+        self == rhs
+    }
+}
+
+impl __jet_Comparable for JetLocalTime {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering(self.cmp(rhs))
+    }
+}
+
+impl __jet_Equatable for JetDateTime {
+    fn equal(&self, rhs: &Self) -> bool {
+        self == rhs
+    }
+}
+
+impl __jet_Comparable for JetDateTime {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering(self.cmp(rhs))
+    }
+}
+
+impl __jet_Equatable for jet_std::Duration {
+    fn equal(&self, rhs: &Self) -> bool {
+        self.ns == rhs.ns
+    }
+}
+
 impl __jet_Comparable for jet_std::Duration {
     fn compare(&self, rhs: &Self) -> __jet_Ordering {
-        if self.ns < rhs.ns {
-            __jet_Ordering::__jet_Less
-        } else if self.ns > rhs.ns {
-            __jet_Ordering::__jet_Greater
-        } else {
-            __jet_Ordering::__jet_Equal
-        }
+        jet_time_ordering(self.ns.cmp(&rhs.ns))
+    }
+}
+
+impl __jet_Equatable for JetInstant {
+    fn equal(&self, rhs: &Self) -> bool {
+        self == rhs
     }
 }
 
 impl __jet_Comparable for JetInstant {
     fn compare(&self, rhs: &Self) -> __jet_Ordering {
-        match self.compare_to(rhs) {
-            value if value < 0 => __jet_Ordering::__jet_Less,
-            0 => __jet_Ordering::__jet_Equal,
-            _ => __jet_Ordering::__jet_Greater,
-        }
+        jet_time_ordering(self.cmp(rhs))
+    }
+}
+
+// ZonedDateTime `==` is instant plus zone identity. Temporal keeps that
+// value equality distinct from its separate `equals` distinction.
+impl __jet_Equatable for JetZonedDateTime {
+    fn equal(&self, rhs: &Self) -> bool {
+        self == rhs
+    }
+}
+
+impl __jet_Comparable for JetZonedDateTime {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering(self.instant.cmp(&rhs.instant))
     }
 }
 
@@ -391,6 +472,15 @@ fn jet_fraction_mul(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_s
 fn jet_fraction_div(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
     a.div(b).expect("divided by zero")
 }
+fn jet_fraction_from_int(value: i64) -> jet_std::JetFraction {
+    jet_std::JetFraction::from_int(value).expect("exact Int does not fit Fraction")
+}
+fn jet_fraction_from_float(value: f64) -> jet_std::JetFraction {
+    jet_std::JetFraction::from_float(value).expect("Float has no word-sized exact Fraction")
+}
+fn jet_fraction_from_decimal(value: jet_std::JetDecimal) -> jet_std::JetFraction {
+    jet_std::JetFraction::from_decimal(&value).expect("Decimal does not fit Fraction")
+}
 fn jet_fraction_equal(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> bool {
     a == b
 }
@@ -408,6 +498,39 @@ fn jet_fraction_to_float(a: &jet_std::JetFraction) -> f64 {
 }
 fn jet_fraction_is_zero(a: &jet_std::JetFraction) -> bool {
     a.is_zero()
+}
+fn jet_fraction_to_int(a: &jet_std::JetFraction) -> i64 {
+    a.to_int_exact().expect("Fraction is not an integer")
+}
+fn jet_fraction_to_decimal(a: &jet_std::JetFraction) -> jet_std::JetDecimal {
+    a.to_decimal().expect("Fraction has a repeating expansion")
+}
+fn jet_decimal_from_int(value: i64) -> jet_std::JetDecimal {
+    jet_std::JetDecimal::from_int(value).expect("invalid exact Int")
+}
+fn jet_decimal_from_float(value: f64) -> jet_std::JetDecimal {
+    jet_std::JetDecimal::from_float(value).expect("Float is not finite")
+}
+fn jet_decimal_from_fraction(value: jet_std::JetFraction) -> jet_std::JetDecimal {
+    jet_std::JetDecimal::from_fraction(&value).expect("Fraction has a repeating expansion")
+}
+fn jet_decimal_div(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetFraction {
+    a.div(b).expect("Decimal quotient does not fit Fraction, or divided by zero")
+}
+fn jet_decimal_round(a: &jet_std::JetDecimal) -> jet_std::JetDecimal {
+    a.round()
+}
+fn jet_decimal_floor(a: &jet_std::JetDecimal) -> jet_std::JetDecimal {
+    a.floor()
+}
+fn jet_decimal_ceil(a: &jet_std::JetDecimal) -> jet_std::JetDecimal {
+    a.ceil()
+}
+fn jet_decimal_to_int(a: &jet_std::JetDecimal) -> i64 {
+    a.to_int_exact().expect("Decimal is not an integer")
+}
+fn jet_decimal_to_fraction(a: &jet_std::JetDecimal) -> jet_std::JetFraction {
+    a.to_fraction().expect("Decimal does not fit Fraction")
 }
 fn jet_decimal_add(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
     a.add(b)
@@ -438,7 +561,7 @@ fn jet_decimal_to_float(a: &jet_std::JetDecimal) -> f64 {
 // `Float`). Object keys arrive in sorted order (the internal `JSON` enum is
 // `BTreeMap`-keyed), matching the pre-`Data` dynamic JSON behavior.
 fn jet_std_json_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JSONError> {
-    jet_std::parse_json(text).map(|j| jet_std::datatree_from_json(&j))
+    jet_std::parse_json_datatree(text)
 }
 fn jet_std_json_render(d: &jet_std::DataTree) -> String {
     jet_std::render_datatree_json(d, false, 0)
@@ -467,7 +590,7 @@ fn jet_std_json_render_canonical(d: &jet_std::DataTree) -> String {
         match t {
             jet_std::DataTree::Null => "null".to_string(),
             jet_std::DataTree::Bool(b) => b.to_string(),
-            jet_std::DataTree::Int(n) => n.to_string(),
+            jet_std::DataTree::Int(n) => jet_std::jet_int_to_string(*n),
             jet_std::DataTree::Float(f) => format!("{:?}", f),
             jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
                 unreachable!("internal JSON carrier escaped typed decode")
@@ -561,9 +684,12 @@ fn jet_string_bytes(s: &String) -> Vec<u8> {
     s.as_bytes().to_vec()
 }
 fn jet_string_from_bytes(bs: &Vec<u8>) -> Result<String, jet_std::UTF8Error> {
-    String::from_utf8(bs.clone()).map_err(|e| jet_std::UTF8Error {
-        message: e.to_string(),
+    jet_string_decode_utf8(bs).map_err(|message| jet_std::UTF8Error {
+        message,
     })
+}
+fn jet_string_from_bytes_lossy(bs: &Vec<u8>) -> String {
+    jet_string_decode_utf8_lossy(bs)
 }
 fn jet_int_to_u8(n: i64) -> Result<u8, String> {
     if (0..=255).contains(&n) {

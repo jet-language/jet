@@ -12,6 +12,20 @@ pub(crate) fn jet_duration_kernel_from_float(value: f64, scale: i64) -> Option<i
         .then_some(nanoseconds.trunc() as i64)
 }
 
+/// D-TIMERES1=A: scalar duration arithmetic is checked at the one nanosecond
+/// carrier boundary. A failed multiply or divide has no Duration value.
+pub(crate) fn jet_duration_kernel_scale(value: i64, factor: i64) -> Option<i64> {
+    value.checked_mul(factor)
+}
+
+pub(crate) fn jet_duration_kernel_divide(value: i64, factor: i64) -> Option<i64> {
+    value.checked_div(factor)
+}
+
+pub(crate) fn jet_duration_kernel_scale_error_reason() -> &'static str {
+    "duration scaling overflowed or divided by zero"
+}
+
 pub(crate) fn jet_duration_kernel_int_error_reason() -> &'static str {
     "duration is outside the supported range"
 }

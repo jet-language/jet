@@ -1,7 +1,7 @@
 //! Closure-method evaluation for the canonical TIR evaluator (#778 deopt).
 use std::collections::HashMap;
 
-use crate::Codegen::TIR::{TClosureOp, TExpr, TExprKind, TLambda, TLambdaBody};
+use crate::Codegen::TIR::{TClosureOp, TExpr, TExprKind, TLambda, TLambdaBody, TStmt};
 use crate::Comptime::Builtins::{as_bool, cmp};
 use crate::Comptime::{CtReport, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -10,6 +10,10 @@ use super::{
     progress_elapsed, progress_emit, progress_iter_parts, progress_iter_value, progress_no_color,
     progress_now, unsupported, EvalCtx, Flow,
 };
+
+mod collection_failure_semantics {
+    include!("../../../Prelude/Core/CollectionFailure.rs");
+}
 
 fn ordering_cmp(value: &CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
     let CtValue::Enum {
@@ -468,6 +472,34 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 let (pulls, tail) = progress_passthrough(&progress, out.len());
                 Ok(wrap_list(out, pulls, tail))
             }
+            TClosureOp::TryMap => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("fallible map receiver", self.span()));
+                };
+                let mut callback_error = None;
+                let mapped = collection_failure_semantics::jet_collection_try_map(
+                    items,
+                    |item| match calln(self, vec![item]) {
+                        Ok(CtValue::Present(value)) => Ok(*value),
+                        Ok(CtValue::Failed(report)) => Err(CtValue::Failed(report)),
+                        Ok(value) => Ok(value),
+                        Err(error) => {
+                            callback_error = Some(error);
+                            Err(CtValue::Unit)
+                        }
+                    },
+                );
+                if let Some(error) = callback_error {
+                    return Err(error);
+                }
+                match mapped {
+                    Ok(out) => {
+                        let (pulls, tail) = progress_passthrough(&progress, out.len());
+                        Ok(CtValue::Present(Box::new(wrap_list(out, pulls, tail))))
+                    }
+                    Err(failure) => Ok(failure),
+                }
+            }
             TClosureOp::Filter => {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("filter receiver", self.span()));
@@ -489,6 +521,70 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     }
                 }
                 Ok(wrap_list(out, out_pulls, pending + old_tail))
+            }
+            TClosureOp::TryFilter => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("fallible filter receiver", self.span()));
+                };
+                let (source_pulls, old_tail) = progress
+                    .as_ref()
+                    .map(|(_, _, _, _, pulls, tail, _, _)| (pulls.clone(), *tail))
+                    .unwrap_or_default();
+                let mut callback_error = None;
+                let mut out_pulls = Vec::new();
+                let mut pending = 0usize;
+                let filtered = collection_failure_semantics::jet_collection_try_filter(
+                    items.into_iter().enumerate(),
+                    |(index, item)| {
+                        pending += source_pulls.get(*index).copied().unwrap_or(1);
+                        let keep = match calln(self, vec![item.clone()]) {
+                            Ok(CtValue::Present(value)) => as_bool(&value, self.span()),
+                            Ok(CtValue::Failed(report)) => {
+                                return Err(CtValue::Failed(report));
+                            }
+                            Ok(value) => as_bool(&value, self.span()),
+                            Err(error) => {
+                                callback_error = Some(error);
+                                return Err(CtValue::Unit);
+                            }
+                        };
+                        match keep {
+                            Ok(keep) => {
+                                if keep {
+                                    out_pulls.push(pending);
+                                    pending = 0;
+                                }
+                                Ok(keep)
+                            }
+                            Err(error) => {
+                                callback_error = Some(error);
+                                Err(CtValue::Unit)
+                            }
+                        }
+                    },
+                );
+                if let Some(error) = callback_error {
+                    return Err(error);
+                }
+                match filtered {
+                    Ok(indexed) => {
+                        let out = indexed
+                            .into_iter()
+                            .filter_map(|(_, item)| {
+                                // The helper retains the items for which the
+                                // callback returned true; the pull accounting
+                                // above remains aligned with that output.
+                                Some(item)
+                            })
+                            .collect();
+                        Ok(CtValue::Present(Box::new(wrap_list(
+                            out,
+                            out_pulls,
+                            pending + old_tail,
+                        ))))
+                    }
+                    Err(failure) => Ok(failure),
+                }
             }
             TClosureOp::Each | TClosureOp::EachMut | TClosureOp::EachRef => {
                 let CtValue::List(items) = recv_v else {
@@ -852,7 +948,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     let candidate_key = calln(self, vec![candidate.clone()])?;
                     let order = cmp(best_key.clone(), candidate_key.clone(), self.span())?;
                     if (maximum && order != std::cmp::Ordering::Greater)
-                        || (!maximum && order == std::cmp::Ordering::Greater)
+                        || (!maximum && order != std::cmp::Ordering::Less)
                     {
                         best = candidate;
                         best_key = candidate_key;
@@ -987,11 +1083,11 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 let mut max_key = min_key.clone();
                 for item in items.into_iter().skip(1) {
                     let key = calln(self, vec![item.clone()])?.jet_show();
-                    if key < min_key {
+                    if key <= min_key {
                         min_key = key.clone();
                         min_item = item.clone();
                     }
-                    if key > max_key {
+                    if key >= max_key {
                         max_key = key;
                         max_item = item;
                     }
@@ -1186,7 +1282,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         }
         let result = match &lam.executable {
             TLambdaBody::Expr(e) => self.eval_expr(e, &mut child)?,
-            TLambdaBody::Block(stmts) => match self.exec_stmts(stmts, &mut child)? {
+            TLambdaBody::Block(stmts) => match self.exec_lambda_body(stmts, &mut child)? {
                 Flow::Return(v) => v,
                 Flow::Normal => CtValue::Unit,
                 other => {
@@ -1196,16 +1292,18 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     ));
                 }
             },
-            TLambdaBody::SharedBlock(stmts) => match self.exec_stmts(&stmts[..], &mut child)? {
-                Flow::Return(v) => v,
-                Flow::Normal => CtValue::Unit,
-                other => {
-                    return Err(unsupported(
-                        &format!("control flow {other:?} escaping lambda"),
-                        self.span(),
-                    ));
+            TLambdaBody::SharedBlock(stmts) => {
+                match self.exec_lambda_body(&stmts[..], &mut child)? {
+                    Flow::Return(v) => v,
+                    Flow::Normal => CtValue::Unit,
+                    other => {
+                        return Err(unsupported(
+                            &format!("control flow {other:?} escaping lambda"),
+                            self.span(),
+                        ));
+                    }
                 }
-            },
+            }
         };
         // A capture whose place is another spelling of the SAME slot must not be
         // aliased: the body writes the slot's own key, and copying the phantom
@@ -1230,6 +1328,19 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         Ok(result)
     }
 
+    fn exec_lambda_body(
+        &mut self,
+        stmts: &'a [TStmt],
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<Flow, Diagnostic> {
+        if let Some((TStmt::ExprStmt(value), prefix)) = stmts.split_last() {
+            let scope_names = scope.keys().cloned().collect();
+            self.exec_stmts_value_with_names(prefix, value, scope, &scope_names)
+        } else {
+            self.exec_stmts(stmts, scope)
+        }
+    }
+
     pub(super) fn eval_tlambda_mut_arg(
         &mut self,
         lam: &'a TLambda,
@@ -1250,7 +1361,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         }
         let result = match &lam.executable {
             TLambdaBody::Expr(expr) => self.eval_expr(expr, &mut child)?,
-            TLambdaBody::Block(stmts) => match self.exec_stmts(stmts, &mut child)? {
+            TLambdaBody::Block(stmts) => match self.exec_lambda_body(stmts, &mut child)? {
                 Flow::Return(value) => value,
                 Flow::Normal => CtValue::Unit,
                 other => {
@@ -1260,16 +1371,18 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     ));
                 }
             },
-            TLambdaBody::SharedBlock(stmts) => match self.exec_stmts(&stmts[..], &mut child)? {
-                Flow::Return(value) => value,
-                Flow::Normal => CtValue::Unit,
-                other => {
-                    return Err(unsupported(
-                        &format!("control flow {other:?} escaping shared lambda"),
-                        self.span(),
-                    ));
+            TLambdaBody::SharedBlock(stmts) => {
+                match self.exec_lambda_body(&stmts[..], &mut child)? {
+                    Flow::Return(value) => value,
+                    Flow::Normal => CtValue::Unit,
+                    other => {
+                        return Err(unsupported(
+                            &format!("control flow {other:?} escaping shared lambda"),
+                            self.span(),
+                        ));
+                    }
                 }
-            },
+            }
         };
         for (source, runtime, _) in &lam.captures {
             if runtime != source {

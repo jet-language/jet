@@ -1,3 +1,61 @@
+// D-PARCAPTURE1=D: the indexed chunk scheduler is shared by AOT and resident
+// adapters. The AOT wrapper adds its failure rail; adapters only marshal the
+// callback and values into this kernel.
+const JET_PARA_CHUNK_ITEMS: usize = 64;
+
+fn jet_list_para_chunks_kernel<R, E, F>(
+    len: usize,
+    worker_limit: usize,
+    worker_cap: usize,
+    f: F,
+) -> Vec<(usize, Result<R, E>)>
+where
+    R: Send,
+    E: Send,
+    F: Fn(std::ops::Range<usize>) -> Result<R, E> + Sync,
+{
+    let chunk_count = len.div_ceil(JET_PARA_CHUNK_ITEMS);
+    if chunk_count == 0 {
+        return Vec::new();
+    }
+    let worker_count = worker_cap
+        .min(worker_limit.max(1))
+        .min(chunk_count);
+    if worker_count == 1 {
+        return (0..chunk_count)
+            .map(|chunk| {
+                let start = chunk * JET_PARA_CHUNK_ITEMS;
+                let end = (start + JET_PARA_CHUNK_ITEMS).min(len);
+                (chunk, f(start..end))
+            })
+            .collect();
+    }
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(worker_count);
+        let f = &f;
+        for worker in 0..worker_count {
+            handles.push(scope.spawn(move || {
+                let mut out = Vec::new();
+                for chunk in (worker..chunk_count).step_by(worker_count) {
+                    let start = chunk * JET_PARA_CHUNK_ITEMS;
+                    let end = (start + JET_PARA_CHUNK_ITEMS).min(len);
+                    out.push((chunk, f(start..end)));
+                }
+                out
+            }));
+        }
+        let mut indexed = Vec::with_capacity(chunk_count);
+        for handle in handles.into_iter().rev() {
+            match handle.join() {
+                Ok(results) => indexed.extend(results),
+                Err(payload) => std::panic::resume_unwind(payload),
+            }
+        }
+        indexed.sort_unstable_by_key(|(chunk, _)| *chunk);
+        indexed
+    })
+}
+
 // ── D-ITERTOOLS1=A: expanded collection/runtime handles ─────────────────────
 impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
     fn add_new(&mut self, key: K, value: V) -> bool {
@@ -353,11 +411,18 @@ where
     F: FnMut(&T) -> K,
 {
     let mut m: JetMap<K, i64> = JetMap::new();
+    let storage = std::ops::DerefMut::deref_mut(&mut m);
     for x in xs {
         let k = f(&x);
-        *m.entry(k).or_insert(0) += 1;
+        *storage.entry(k).or_insert(0) += 1;
     }
     m
+}
+
+/// Count each item directly. `count_by(x -> x)` is the same operation with
+/// the identity projection, but this named kernel keeps the common path terse.
+fn jet_list_counts<T: Ord + Clone, I: IntoIterator<Item = T>>(xs: I) -> JetMap<T, i64> {
+    jet_list_count_by(xs, |item| item.clone())
 }
 
 fn jet_map_copy_kernel<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> JetMap<K, V> {
@@ -379,6 +444,20 @@ fn jet_map_first_key_kernel<K: Ord + Clone, V>(
 
 fn jet_map_entries_kernel<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> Vec<(K, V)> {
     m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+/// Return at most `n` map entries by descending value, with ascending keys as
+/// the deterministic tie break. Negative limits select no entries.
+fn jet_map_top_n<K: Ord + Clone, V: Ord + Clone>(m: &JetMap<K, V>, n: i64) -> Vec<(K, V)> {
+    let mut entries = jet_map_entries_kernel(m);
+    entries.sort_by(|(left_key, left_value), (right_key, right_value)| {
+        right_value
+            .cmp(left_value)
+            .then_with(|| left_key.cmp(right_key))
+    });
+    let limit = usize::try_from(n.max(0)).unwrap_or(usize::MAX);
+    entries.truncate(limit);
+    entries
 }
 
 fn jet_map_min_value_kernel<K: Ord, V: Ord + Clone>(
@@ -698,14 +777,20 @@ fn jet_iter_string_rsplit(s: &String, sep: &str) -> JetIter<String> {
 }
 
 fn jet_iter_take<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<T> {
-    JetIter(Box::new(it.0.take(n.max(0) as usize)))
+    if let Some(message) = jet_sequence_argument_message("take", n) {
+        jet_panic("<core.collections>", 0, message);
+    }
+    JetIter(Box::new(it.0.take(n as usize)))
 }
 fn jet_iter_skip<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<T> {
-    JetIter(Box::new(it.0.skip(n.max(0) as usize)))
+    if let Some(message) = jet_sequence_argument_message("skip", n) {
+        jet_panic("<core.collections>", 0, message);
+    }
+    JetIter(Box::new(it.0.skip(n as usize)))
 }
 fn jet_iter_step_by<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<T> {
-    if n <= 0 {
-        return JetIter(Box::new(std::iter::empty()));
+    if let Some(message) = jet_sequence_argument_message("step_by", n) {
+        jet_panic("<core.collections>", 0, message);
     }
     JetIter(Box::new(it.0.step_by(n as usize)))
 }
@@ -756,9 +841,12 @@ impl<T> Iterator for JetChunksIter<T> {
     }
 }
 fn jet_iter_chunks<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<Vec<T>> {
+    if let Some(message) = jet_sequence_argument_message("chunks", n) {
+        jet_panic("<core.collections>", 0, message);
+    }
     JetIter(Box::new(JetChunksIter {
         inner: it.0,
-        size: n.max(1) as usize,
+        size: n as usize,
     }))
 }
 
@@ -779,9 +867,12 @@ impl<T: Clone> Iterator for JetWindowsIter<T> {
     }
 }
 fn jet_iter_windows<T: 'static + Clone>(it: JetIter<T>, n: i64) -> JetIter<Vec<T>> {
+    if let Some(message) = jet_sequence_argument_message("windows", n) {
+        jet_panic("<core.collections>", 0, message);
+    }
     JetIter(Box::new(JetWindowsIter {
         inner: it.0,
-        size: n.max(1) as usize,
+        size: n as usize,
         buf: std::collections::VecDeque::new(),
     }))
 }
@@ -798,11 +889,28 @@ where
 {
     JetIter(Box::new(it.0.map(move |x| f(&x))))
 }
+fn jet_iter_try_map<T: 'static, U: 'static, E, F>(
+    it: JetIter<T>,
+    mut f: F,
+) -> Result<JetIter<U>, E>
+where
+    F: FnMut(&T) -> Result<U, E>,
+{
+    let values = jet_collection_try_map(it.0, |x| f(&x))?;
+    Ok(JetIter(Box::new(values.into_iter())))
+}
 fn jet_iter_filter<T: 'static, F: 'static>(it: JetIter<T>, mut f: F) -> JetIter<T>
 where
     F: FnMut(&T) -> bool,
 {
     JetIter(Box::new(it.0.filter(move |x| f(x))))
+}
+fn jet_iter_try_filter<T: 'static, E, F>(it: JetIter<T>, f: F) -> Result<JetIter<T>, E>
+where
+    F: FnMut(&T) -> Result<bool, E>,
+{
+    let values = jet_collection_try_filter(it.0, f)?;
+    Ok(JetIter(Box::new(values.into_iter())))
 }
 fn jet_iter_take_while<T: 'static, F: 'static>(it: JetIter<T>, mut f: F) -> JetIter<T>
 where
@@ -971,11 +1079,37 @@ where
 {
     xs.iter().map(|x| f(x)).collect()
 }
+fn jet_list_try_map<T, U, E, F>(xs: Vec<T>, mut f: F) -> Result<Vec<U>, E>
+where
+    F: FnMut(&T) -> Result<U, E>,
+{
+    jet_collection_try_map(xs.iter(), |x| f(x))
+}
 fn jet_list_filter<T, F>(xs: Vec<T>, mut f: F) -> Vec<T>
 where
     F: FnMut(&T) -> bool,
 {
     xs.into_iter().filter(|x| f(x)).collect()
+}
+fn jet_list_try_filter<T, E, F>(xs: Vec<T>, f: F) -> Result<Vec<T>, E>
+where
+    F: FnMut(&T) -> Result<bool, E>,
+{
+    jet_collection_try_filter(xs, f)
+}
+
+fn jet_view_try_map<T, U, E, F>(xs: &[T], f: F) -> Result<Vec<U>, E>
+where
+    F: FnMut(&T) -> Result<U, E>,
+{
+    jet_collection_try_map(xs.iter(), f)
+}
+
+fn jet_view_try_filter<T: Clone, E, F>(xs: &[T], f: F) -> Result<Vec<T>, E>
+where
+    F: FnMut(&T) -> Result<bool, E>,
+{
+    jet_collection_try_filter(xs.iter().cloned(), f)
 }
 /// Adjacent eager adapters may be fused when the intermediate list is not
 /// observable. The callbacks still run in source order, once per element.
@@ -990,14 +1124,20 @@ where
 // List-shaped helpers serve eager concrete-List adapters and materializing
 // terminals; `.lazy()` and Iter receivers stay on the JetIter helpers above.
 fn jet_list_take<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
-    xs.into_iter().take(n.max(0) as usize).collect()
+    if let Some(message) = jet_sequence_argument_message("take", n) {
+        jet_panic("<core.collections>", 0, message);
+    }
+    xs.into_iter().take(n as usize).collect()
 }
 fn jet_list_skip<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
-    xs.into_iter().skip(n.max(0) as usize).collect()
+    if let Some(message) = jet_sequence_argument_message("skip", n) {
+        jet_panic("<core.collections>", 0, message);
+    }
+    xs.into_iter().skip(n as usize).collect()
 }
 fn jet_list_step_by<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
-    if n <= 0 {
-        return Vec::new();
+    if let Some(message) = jet_sequence_argument_message("step_by", n) {
+        jet_panic("<core.collections>", 0, message);
     }
     xs.into_iter().step_by(n as usize).collect()
 }
@@ -1011,11 +1151,16 @@ fn jet_list_dedup<T: Clone + PartialEq>(xs: Vec<T>) -> Vec<T> {
     out
 }
 fn jet_list_chunks<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
-    let n = n.max(1) as usize;
-    xs.chunks(n).map(|c| c.to_vec()).collect()
+    if let Some(message) = jet_sequence_argument_message("chunks", n) {
+        jet_panic("<core.collections>", 0, message);
+    }
+    xs.chunks(n as usize).map(|c| c.to_vec()).collect()
 }
 fn jet_list_windows<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
-    let n = n.max(1) as usize;
+    if let Some(message) = jet_sequence_argument_message("windows", n) {
+        jet_panic("<core.collections>", 0, message);
+    }
+    let n = n as usize;
     if n > xs.len() {
         return Vec::new();
     }
@@ -1077,19 +1222,45 @@ where
 {
     jet_outcome_of(xs.into_iter().position(|x| f(&x)).map(|i| i as i64))
 }
+fn jet_list_extreme_by<T, K: Ord, F, I>(xs: I, mut f: F, maximum: bool) -> JetOutcome<T, JetAbsent>
+where
+    I: IntoIterator<Item = T>,
+    F: FnMut(&T) -> K,
+{
+    let mut best: Option<(K, T)> = None;
+    for item in xs {
+        let key = f(&item);
+        let replace = match best.as_ref() {
+            None => true,
+            Some((best_key, _)) => {
+                let order = key.cmp(best_key);
+                if maximum {
+                    order != std::cmp::Ordering::Less
+                } else {
+                    order != std::cmp::Ordering::Greater
+                }
+            }
+        };
+        if replace {
+            best = Some((key, item));
+        }
+    }
+    jet_outcome_of(best.map(|(_, item)| item))
+}
+
 fn jet_list_min_by<T, K: Ord, F, I>(xs: I, f: F) -> JetOutcome<T, JetAbsent>
 where
     I: IntoIterator<Item = T>,
     F: FnMut(&T) -> K,
 {
-    jet_outcome_of(xs.into_iter().min_by_key(f))
+    jet_list_extreme_by(xs, f, false)
 }
 fn jet_list_max_by<T, K: Ord, F, I>(xs: I, f: F) -> JetOutcome<T, JetAbsent>
 where
     I: IntoIterator<Item = T>,
     F: FnMut(&T) -> K,
 {
-    jet_outcome_of(xs.into_iter().max_by_key(f))
+    jet_list_extreme_by(xs, f, true)
 }
 fn jet_list_group_by<T: Clone, K: Ord + Clone, F, I>(xs: I, mut f: F) -> JetMap<K, Vec<T>>
 where
@@ -1097,9 +1268,10 @@ where
     F: FnMut(&T) -> K,
 {
     let mut m: JetMap<K, Vec<T>> = JetMap::new();
+    let storage = std::ops::DerefMut::deref_mut(&mut m);
     for x in xs {
         let k = f(&x);
-        m.entry(k).or_default().push(x);
+        storage.entry(k).or_default().push(x);
     }
     m
 }
@@ -1319,8 +1491,10 @@ fn jet_list_min_max<T: Ord + Clone, R>(xs: &[T], build: impl FnOnce(T, T) -> R) 
 }
 fn jet_list_min_max_by<T: Clone, K: Ord, F, R>(xs: &[T], mut f: F, build: impl FnOnce(T, T) -> R) -> JetOutcome<R, JetAbsent>
 where F: FnMut(&T) -> K {
-    match (xs.iter().min_by_key(|x| f(x)).cloned(), xs.iter().max_by_key(|x| f(x)).cloned()) {
-        (Some(lo), Some(hi)) => Ok(build(lo, hi)),
+    let min = jet_list_min_by(xs.iter().cloned(), |x| f(x));
+    let max = jet_list_max_by(xs.iter().cloned(), |x| f(x));
+    match (min, max) {
+        (Ok(lo), Ok(hi)) => Ok(build(lo, hi)),
         _ => Err(JetAbsent),
     }
 }

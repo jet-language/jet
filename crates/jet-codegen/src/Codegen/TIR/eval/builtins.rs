@@ -1,4 +1,5 @@
 //! Exhaustive TBuiltinOp dispatch (#777).
+use super::handles::{civil_time_order_values, civil_time_value_kind};
 use super::unsupported;
 use crate::Codegen::TIR::TBuiltinOp;
 use crate::Comptime::Builtins::{apply_method, apply_mutating, apply_static_type_method};
@@ -67,11 +68,13 @@ fn eval_zip_family(
         return Err(unsupported("zip input arity", span));
     }
     let fill_args = &args[input_count.saturating_sub(1)..];
-    if mode == crate::Codegen::TIR::TZipMode::Strict
-        && columns
-            .iter()
-            .any(|column| column.len() != columns[0].len())
-    {
+    let zip_mode = match mode {
+        crate::Codegen::TIR::TZipMode::Short => 0,
+        crate::Codegen::TIR::TZipMode::Strict => 1,
+        crate::Codegen::TIR::TZipMode::Pad => 2,
+    };
+    let lengths = columns.iter().map(Vec::len).collect::<Vec<_>>();
+    if super::collection_semantics::zip_row_count(&lengths, zip_mode).is_none() {
         return Err(crate::Sema::Diagnostics::render_registered(
             "E0128",
             "zip inputs have different lengths".to_string(),
@@ -80,12 +83,6 @@ fn eval_zip_family(
             Some(span),
         ));
     }
-    let row_count = match mode {
-        crate::Codegen::TIR::TZipMode::Strict | crate::Codegen::TIR::TZipMode::Short => {
-            columns.iter().map(Vec::len).min().unwrap_or(0)
-        }
-        crate::Codegen::TIR::TZipMode::Pad => columns.iter().map(Vec::len).max().unwrap_or(0),
-    };
     let fills_for = |index: usize| -> CtValue {
         match fill_mode {
             crate::Codegen::TIR::TZipFillMode::DefaultNone => CtValue::absent(
@@ -140,18 +137,19 @@ fn eval_zip_family(
             }
         }
     };
-    let mut rows = Vec::with_capacity(row_count);
-    for row in 0..row_count {
-        let values = columns
-            .iter()
-            .enumerate()
-            .map(|(index, column)| column.get(row).cloned().unwrap_or_else(|| fills_for(index)))
-            .collect::<Vec<_>>();
-        rows.push(CtValue::Struct {
-            type_name: tuple_struct.to_string(),
-            fields: fields.iter().cloned().zip(values).collect(),
-        });
-    }
+    let rows = super::collection_semantics::zip_rows(
+        &lengths,
+        zip_mode,
+        |column, index| columns[column].get(index).cloned(),
+        fills_for,
+    )
+    .expect("zip row count was checked above")
+    .into_iter()
+    .map(|values| CtValue::Struct {
+        type_name: tuple_struct.to_string(),
+        fields: fields.iter().cloned().zip(values).collect(),
+    })
+    .collect();
     Ok(super::progress_iter_value(rows, true))
 }
 
@@ -260,6 +258,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::RemoveMap => apply_mutating(recv, "remove", args, span),
         TBuiltinOp::RemoveList { .. } => apply_mutating(recv, "remove", args, span),
         TBuiltinOp::CountList => apply_method(recv, "count", args, span),
+        TBuiltinOp::Counts => apply_method(recv, "counts", args, span),
         TBuiltinOp::ExtendList => apply_mutating(recv, "extend", args, span),
         TBuiltinOp::ConcatList => apply_method(recv, "concat", args, span),
         TBuiltinOp::GetMap => apply_method(recv, "get", args, span),
@@ -274,7 +273,40 @@ pub(super) fn eval_builtin(
         TBuiltinOp::Contains => apply_method(recv, "contains", args, span),
         TBuiltinOp::IndexOf => apply_method(recv, "index_of", args, span),
         TBuiltinOp::Reverse => apply_mutating(recv, "reverse", args, span),
-        TBuiltinOp::Sort => apply_mutating(recv, "sort", args, span),
+        TBuiltinOp::Sort => {
+            // List.sort has no type parameter at this evaluator boundary. For
+            // the time carriers, keep its comparator on the same Prelude
+            // kernel as the operator hooks; scalar-only `Builtins::cmp` cannot
+            // see these structured values.
+            if let CtValue::List(items) = recv {
+                let time_kind = items
+                    .first()
+                    .and_then(civil_time_value_kind)
+                    .filter(|kind| {
+                        items
+                            .iter()
+                            .all(|item| civil_time_value_kind(item) == Some(*kind))
+                    });
+                if time_kind.is_some() {
+                    let mut sort_error = None;
+                    items.sort_by(|left, right| {
+                        match civil_time_order_values(left, right, span) {
+                            Ok(Some(order)) => order,
+                            Ok(None) => std::cmp::Ordering::Equal,
+                            Err(error) => {
+                                sort_error.get_or_insert(error);
+                                std::cmp::Ordering::Equal
+                            }
+                        }
+                    });
+                    if let Some(error) = sort_error {
+                        return Err(error);
+                    }
+                    return Ok(CtValue::Unit);
+                }
+            }
+            apply_mutating(recv, "sort", args, span)
+        }
         TBuiltinOp::SortDesc => apply_mutating(recv, "sort_desc", args, span),
         TBuiltinOp::OrderingThen => apply_method(recv, "then", args, span),
         TBuiltinOp::OrderingReverse => apply_method(recv, "reverse", args, span),
@@ -289,6 +321,17 @@ pub(super) fn eval_builtin(
         TBuiltinOp::Clear => apply_mutating(recv, "clear", args, span),
         TBuiltinOp::Chars => apply_method(recv, "chars", args, span),
         TBuiltinOp::Bytes => apply_method(recv, "bytes", args, span),
+        TBuiltinOp::StringFromBytes => {
+            apply_static_type_method("String", "from_bytes", vec![recv.clone()], span)
+                .unwrap_or_else(|| Err(unsupported("String.from_bytes", span)))
+        }
+        TBuiltinOp::StringFromBytesLossy => apply_static_type_method(
+            "String",
+            "from_bytes_lossy",
+            vec![recv.clone()],
+            span,
+        )
+        .unwrap_or_else(|| Err(unsupported("String.from_bytes_lossy", span))),
         TBuiltinOp::Trim => apply_method(recv, "trim", args, span),
         TBuiltinOp::TrimStart => apply_method(recv, "trim_start", args, span),
         TBuiltinOp::TrimEnd => apply_method(recv, "trim_end", args, span),
@@ -315,6 +358,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::StringToTitle => apply_method(recv, "to_title", args, span),
         TBuiltinOp::StringMethod { method } => apply_method(recv, method, args, span),
         TBuiltinOp::StringSplitOnce { .. } => apply_method(recv, "split_once", args, span),
+        TBuiltinOp::StringCutLast { .. } => apply_method(recv, "cut_last", args, span),
         TBuiltinOp::ToUpper => apply_method(recv, "to_upper", args, span),
         TBuiltinOp::ToLower => apply_method(recv, "to_lower", args, span),
         TBuiltinOp::Repeat => apply_method(recv, "repeat", args, span),
@@ -358,6 +402,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::MapEqual => apply_method(recv, "equal", args, span),
         TBuiltinOp::MapFirst => apply_method(recv, "first", args, span),
         TBuiltinOp::MapToList { .. } => apply_method(recv, "to_list", args, span),
+        TBuiltinOp::MapTopN { .. } => apply_method(recv, "top_n", args, span),
         TBuiltinOp::MapMin => apply_method(recv, "min", args, span),
         TBuiltinOp::MapMax => apply_method(recv, "max", args, span),
         TBuiltinOp::MapIntersection => apply_method(recv, "intersection", args, span),

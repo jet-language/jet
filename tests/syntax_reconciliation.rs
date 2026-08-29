@@ -216,10 +216,10 @@ fn live_surface_has_no_retired_spellings() {
 fn pipe_family_has_no_stale_flow_reservation() {
     let decision = fs::read_to_string("docs/spec/syntax-decisions.md").unwrap();
     assert!(decision.contains("D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow"));
-    assert!(decision.contains("single `|` is legal only in alternative-list grammar"));
+    assert!(decision.contains("value-position `|` is bitwise OR"));
 
     let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax/math_layout.rs").unwrap();
-    assert!(syntax.contains("D-PATO / D-SHAPE-PIPE1=C"));
+    assert!(syntax.contains("D-PATO / D-SHAPE-PIPE1=C / D-BITOREXPR1=A"));
     assert!(syntax.contains("`|=` remains bitwise-or-assign under S17"));
 }
 

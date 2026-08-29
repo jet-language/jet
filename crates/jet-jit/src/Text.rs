@@ -132,7 +132,7 @@ pub(crate) mod text_rt {
             pub is_dir: bool,
         }
 
-        // D-REGEXENGINE1: canonical regex engine from JetStd/Open.rs (build.rs extract).
+        // D-REGEXENGINE1: canonical regex engine from JetStd/Regex.rs (build.rs extract).
         #[allow(unused_imports)]
         pub use jet_foundation::Outcome::*;
         include!(concat!(env!("OUT_DIR"), "/regex_rt.rs"));
@@ -254,6 +254,9 @@ pub(crate) mod text_rt {
     }
     pub(crate) fn split_once(s: &str, separator: &str) -> Option<(String, String)> {
         jet_unicode_split_once(&s.to_string(), &separator.to_string())
+    }
+    pub(crate) fn cut_last(s: &str, separator: &str) -> Option<(String, String)> {
+        jet_unicode_cut_last(&s.to_string(), &separator.to_string())
     }
     pub(crate) fn center(s: &str, width: i64, fill: &str) -> String {
         jet_text_center(&s.to_string(), width, &fill.to_string())
@@ -454,6 +457,21 @@ fn jet_jit_text_split_once(s: i64, separator: i64) -> i64 {
     })
 }
 
+fn jet_jit_text_cut_last(s: i64, separator: i64) -> i64 {
+    let Some((before, after)) = text_rt::cut_last(&clone_string(s), &clone_string(separator))
+    else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(2);
+        let before_id = rt.heap.alloc_string(before);
+        let after_id = rt.heap.alloc_string(after);
+        let _ = rt.heap.record_set_string(record, 0, before_id);
+        let _ = rt.heap.record_set_string(record, 1, after_id);
+        record.wrapping_add(1)
+    })
+}
+
 fn jet_jit_text_center(s: i64, width: i64, fill: i64) -> i64 {
     alloc_string(text_rt::center(
         &clone_string(s),
@@ -534,6 +552,10 @@ fn option_string_bits(opt: Option<String>) -> i64 {
             sid.wrapping_add(1)
         }
     }
+}
+
+fn option_int_bits(opt: Option<i64>) -> i64 {
+    opt.map_or(0, |value| value.wrapping_add(1))
 }
 
 fn list_strings(items: Vec<String>) -> i64 {
@@ -634,6 +656,19 @@ fn jet_jit_regex_replace(pat: i64, repl: i64, text: i64) -> i64 {
         .unwrap_or_default()
 }
 
+fn jet_jit_regex_replace_first(pat: i64, repl: i64, text: i64) -> i64 {
+    let text = clone_string(text);
+    let replacement = clone_string(repl);
+    clone_compiled_regex(pat)
+        .map(|regex| {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.heap
+                    .alloc_string(regex.replace_first(&text, &replacement))
+            })
+        })
+        .unwrap_or_default()
+}
+
 fn jet_jit_regex_split(pat: i64, text: i64) -> i64 {
     let t = clone_string(text);
     clone_compiled_regex(pat)
@@ -695,11 +730,13 @@ fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64) -> i64 {
         (RegexValue::Regex(rx), "split_limit") => {
             list_strings(rx.split_limit(&clone_string(arg0), arg1))
         }
-        (RegexValue::Regex(rx), "replace" | "replace_all") => {
-            let s = if method == "replace" {
-                rx.replace(&clone_string(arg0), &clone_string(arg1))
-            } else {
-                rx.replace_all(&clone_string(arg0), &clone_string(arg1))
+        (RegexValue::Regex(rx), "replace" | "replace_first" | "replace_all") => {
+            let text = clone_string(arg0);
+            let replacement = clone_string(arg1);
+            let s = match method.as_str() {
+                "replace_first" => rx.replace_first(&text, &replacement),
+                "replace_all" => rx.replace_all(&text, &replacement),
+                _ => rx.replace(&text, &replacement),
             };
             Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
         }
@@ -721,6 +758,8 @@ fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64) -> i64 {
         (RegexValue::Match(m), "name") => option_string_bits(m.name(&clone_string(arg0)).ok()),
         (RegexValue::Match(m), "start") => m.start(),
         (RegexValue::Match(m), "end") => m.end(),
+        (RegexValue::Match(m), "group_start") => option_int_bits(m.group_start(arg0).ok()),
+        (RegexValue::Match(m), "group_end") => option_int_bits(m.group_end(arg0).ok()),
         (RegexValue::Match(m), "named_captures") => {
             let outer = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
             for pair in m.named_captures() {
@@ -791,6 +830,7 @@ host_fns! {
     count: "jet_jit_text_count" => jet_jit_text_count: binary;
     title: "jet_jit_text_title" => jet_jit_text_title: unary;
     split_once: "jet_jit_text_split_once" => jet_jit_text_split_once: binary;
+    cut_last: "jet_jit_text_cut_last" => jet_jit_text_cut_last: binary;
     string_method: "jet_jit_string_method" => jet_jit_string_method: ternary;
     center: "jet_jit_text_center" => jet_jit_text_center: ternary;
     starts_any: "jet_jit_text_starts_any" => jet_jit_text_starts_any: binary_i8;
@@ -806,6 +846,7 @@ host_fns! {
     regex_matches: "jet_jit_regex_matches" => jet_jit_regex_matches: binary;
     regex_match: "jet_jit_regex_match" => jet_jit_regex_match: binary;
     regex_replace: "jet_jit_regex_replace" => jet_jit_regex_replace: ternary;
+    regex_replace_first: "jet_jit_regex_replace_first" => jet_jit_regex_replace_first: ternary;
     regex_replace_all: "jet_jit_regex_replace_all" => jet_jit_regex_replace_all: ternary;
     regex_split: "jet_jit_regex_split" => jet_jit_regex_split: binary;
     regex_split_limit: "jet_jit_regex_split_limit" => jet_jit_regex_split_limit: ternary;

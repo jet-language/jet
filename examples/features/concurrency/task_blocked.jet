@@ -1,0 +1,15 @@
+// D-OBSERVE-TASK1=A / card #2277: a detached child parked on a full channel
+// is named at the shared process-exit boundary.
+use core.tasks as tasks
+
+fn run() {
+    (sender, receiver) :: channel<Int>(1)
+    sender.send(1)
+    blocked :: task ^sender {
+        sender.send(2)
+        receiver.close()
+    }
+    blocked.detach()
+    tasks.yield_now()
+    print("leaving")
+}

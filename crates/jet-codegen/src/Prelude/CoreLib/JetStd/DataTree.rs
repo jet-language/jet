@@ -207,7 +207,14 @@
         pub fn float(&self) -> Result<f64, Vec<FieldError>> {
             match self {
                 DataTree::Float(f) => Ok(*f),
-                DataTree::Int(n) => Ok(*n as f64),
+                DataTree::Int(n) => {
+                    let value = jet_int_to_f64(*n);
+                    if value.is_finite() {
+                        Ok(value)
+                    } else {
+                        Err(FieldError::one("expected float, got out-of-range Int"))
+                    }
+                }
                 DataTree::Number(text) => text
                     .trim()
                     .parse::<f64>()
@@ -234,7 +241,7 @@
     // convert their resident representation to this tree and back.
     pub fn decode_int(t: &DataTree) -> Result<i64, Vec<FieldError>> {
         match t {
-            DataTree::Int(n) => Ok(jet_int_from_i64(*n)),
+            DataTree::Int(n) => Ok(*n),
             DataTree::Float(f)
                 if f.is_finite()
                     && f.fract() == 0.0
@@ -265,7 +272,14 @@
     pub fn decode_float(t: &DataTree) -> Result<f64, Vec<FieldError>> {
         match t {
             DataTree::Float(f) => Ok(*f),
-            DataTree::Int(n) => Ok(*n as f64),
+            DataTree::Int(n) => {
+                let value = jet_int_to_f64(*n);
+                if value.is_finite() {
+                    Ok(value)
+                } else {
+                    Err(FieldError::one("expected float, got out-of-range Int"))
+                }
+            }
             DataTree::Number(text) | DataTree::Text(text) => {
                 let value = text.trim().parse::<f64>().map_err(|_| {
                     FieldError::one(format!("expected Float, found text {:?}", text))
@@ -315,7 +329,7 @@
             DataTree::Number(text) => {
                 Err(FieldError::one(format!("expected Text, found number {text}")))
             }
-            DataTree::Int(n) => Ok(n.to_string()),
+            DataTree::Int(n) => Ok(jet_int_to_string(*n)),
             DataTree::Float(f) => Ok(format!("{:?}", f)),
             DataTree::Bool(value) => Ok(value.to_string()),
             other => Err(FieldError::one(format!(
@@ -328,7 +342,7 @@
     pub fn decode_f32(t: &DataTree) -> Result<f32, Vec<FieldError>> {
         let value = match t {
             DataTree::Float(value) => *value,
-            DataTree::Int(value) => *value as f64,
+            DataTree::Int(value) => jet_int_to_f64(*value),
             DataTree::Number(text) | DataTree::Text(text) => {
                 text.trim().parse::<f64>().map_err(|_| {
                     FieldError::one(format!("expected F32, found text {:?}", text))

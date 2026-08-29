@@ -8,6 +8,26 @@ pub(crate) use CoreUsage::{
     collect_used_core, expand_core_reachable_closure,
 };
 
+fn uses_raw_protocol_return(
+    trait_name: Option<&str>,
+    implementation_generated: bool,
+    function_generated: bool,
+) -> bool {
+    // D-FAILURE-FOUNDATION1: these traits are raw Rust trait ABIs (String,
+    // bool, Ordering, DataTree) — never the implicit Outcome carrier. A
+    // wrapped body would violate the trait signature for user and derived
+    // impls alike (rustc E0053/E0308 behind I2).
+    trait_name.is_some_and(|name| matches!(
+        name,
+        crate::Generics::DISPLAY
+            | crate::Generics::DEBUG
+            | crate::Generics::ENCODE
+            | crate::Generics::DECODE
+            | crate::Generics::EQUATABLE
+            | crate::Generics::COMPARABLE
+    )) || implementation_generated && function_generated
+}
+
 pub(super) fn qualified_effect_facts(
     modules: &[(String, HashMap<String, EffectSummary>)],
     taint_seeds: &HashMap<String, BTreeSet<String>>,
@@ -902,8 +922,11 @@ pub(crate) fn check_module_bodies(
                             ),
                             owner: Some(definition.name.clone()),
                             trait_name: Some(implementation.trait_name.clone()),
-                            raw_protocol_return:
-                                implementation.compiler_generated && function.compiler_generated,
+                            raw_protocol_return: uses_raw_protocol_return(
+                                Some(implementation.trait_name.as_str()),
+                                implementation.compiler_generated,
+                                function.compiler_generated,
+                            ),
                             function: function.clone(),
                         });
                     }
@@ -928,8 +951,11 @@ pub(crate) fn check_module_bodies(
                             ),
                             owner: Some(definition.name.clone()),
                             trait_name: Some(implementation.trait_name.clone()),
-                            raw_protocol_return:
-                                implementation.compiler_generated && function.compiler_generated,
+                            raw_protocol_return: uses_raw_protocol_return(
+                                Some(implementation.trait_name.as_str()),
+                                implementation.compiler_generated,
+                                function.compiler_generated,
+                            ),
                             function: function.clone(),
                         });
                     }
@@ -946,8 +972,11 @@ pub(crate) fn check_module_bodies(
                         ),
                         owner: Some(implementation.type_name.clone()),
                         trait_name: implementation.trait_name.clone(),
-                        raw_protocol_return:
-                            implementation.trait_name.is_some() && function.compiler_generated,
+                        raw_protocol_return: uses_raw_protocol_return(
+                            implementation.trait_name.as_deref(),
+                            false,
+                            function.compiler_generated,
+                        ),
                         function: function.clone(),
                     });
                 }
@@ -1200,7 +1229,11 @@ pub(crate) fn check_module_bodies(
                                 states,
                                 effect_facts,
                                 Some(&s.name),
-                                block.compiler_generated && m.compiler_generated,
+                                uses_raw_protocol_return(
+                                    Some(block.trait_name.as_str()),
+                                    block.compiler_generated,
+                                    m.compiler_generated,
+                                ),
                                 &ct_funcs,
                                 &ct_externs,
                                 &ct_base_dir,
@@ -1282,7 +1315,11 @@ pub(crate) fn check_module_bodies(
                                 states,
                                 effect_facts,
                                 Some(&e.name),
-                                block.compiler_generated && m.compiler_generated,
+                                uses_raw_protocol_return(
+                                    Some(block.trait_name.as_str()),
+                                    block.compiler_generated,
+                                    m.compiler_generated,
+                                ),
                                 &ct_funcs,
                                 &ct_externs,
                                 &ct_base_dir,
@@ -1347,7 +1384,11 @@ pub(crate) fn check_module_bodies(
                         states,
                         effect_facts,
                         Some(&i.type_name),
-                        i.trait_name.is_some() && m.compiler_generated,
+                        uses_raw_protocol_return(
+                            i.trait_name.as_deref(),
+                            false,
+                            m.compiler_generated,
+                        ),
                         &ct_funcs,
                         &ct_externs,
                         &ct_base_dir,
@@ -2113,6 +2154,9 @@ fn check_func_body_bundle_scoped(
         lambda_params_are_lending_views: false,
         is_task_spawn: false,
         task_body_propagates: false,
+        failure_carrier_inference: false,
+        failure_carrier: None,
+        statement_expr_inference: false,
         interrupt_callback_depth: 0,
         lambda_param_mutable: false,
         lambda_param_is_secret_loan: false,
@@ -2455,6 +2499,32 @@ fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::Ha
     walk(stmts, names);
 }
 
+/// Project the callable contract into a function value's type without
+/// promoting declaration-local names to public labels. Keep an entry for
+/// every parameter so positional-only and label-only zones remain visible;
+/// `call_metadata` retains the local names for diagnostics and calls.
+fn function_value_param_contract(
+    sig: &FuncSig,
+) -> Option<Vec<(String, crate::AST::ParamZone)>> {
+    let mut contract = Vec::with_capacity(sig.param_call.len());
+    for (index, (label, zone)) in sig.param_call.iter().enumerate() {
+        let implicit_local_label = *zone == crate::AST::ParamZone::Either
+            && sig
+                .param_info
+                .get(index)
+                .is_some_and(|(name, _)| name == label);
+        contract.push((
+            if implicit_local_label {
+                String::new()
+            } else {
+                label.clone()
+            },
+            *zone,
+        ));
+    }
+    (!contract.is_empty()).then_some(contract)
+}
+
 pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
     Type::Fn {
         params: sig
@@ -2475,7 +2545,7 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
         // the empty effect bound, so its value satisfies `-[]>` callable
         // positions without a second policing mechanism.
         effect_bound: (sig.is_pure || sig.is_foreign_thread_safe).then(Vec::new),
-        param_contract: (!sig.param_call.is_empty()).then(|| sig.param_call.clone()),
+        param_contract: function_value_param_contract(sig),
         call_metadata: Some(crate::AST::FunctionCallMetadata {
             names: sig
                 .param_info
@@ -2517,17 +2587,29 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
         });
         shape.is_ok() && compatible
     }
+    fn effect_bound_compatible(
+        want: Option<&Vec<(String, Span)>>,
+        got: Option<&Vec<(String, Span)>>,
+    ) -> bool {
+        match want {
+            None => true,
+            Some(want) => got.is_some_and(|got| {
+                got.iter()
+                    .all(|(effect, _)| want.iter().any(|(required, _)| required == effect))
+            }),
+        }
+    }
     let (
         Type::Fn {
             params: wp,
             ret: wr,
-            param_contract: wc,
+            effect_bound: we,
             ..
         },
         Type::Fn {
             params: gp,
             ret: gr,
-            param_contract: gc,
+            effect_bound: ge,
             ..
         },
     ) = (want, got)
@@ -2547,32 +2629,7 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
         (Some(a), Some(b)) => carrier_compatible(a, b),
         _ => false,
     };
-    let contract_compatible = match (wc, gc) {
-        (None, _) => true,
-        (Some(_), None) => false,
-        (Some(want_contract), Some(got_contract)) => {
-            want_contract.len() == got_contract.len()
-                && want_contract.iter().zip(got_contract).all(
-                    |((want_label, want_zone), (got_label, got_zone))| {
-                        let zone_accepts = matches!(
-                            (want_zone, got_zone),
-                            (
-                                crate::AST::ParamZone::PositionalOnly,
-                                crate::AST::ParamZone::PositionalOnly
-                                    | crate::AST::ParamZone::Either
-                            ) | (
-                                crate::AST::ParamZone::LabelOnly,
-                                crate::AST::ParamZone::LabelOnly | crate::AST::ParamZone::Either
-                            ) | (crate::AST::ParamZone::Either, crate::AST::ParamZone::Either)
-                        );
-                        zone_accepts
-                            && (*want_zone == crate::AST::ParamZone::PositionalOnly
-                                || want_label == got_label)
-                    },
-                )
-        }
-    };
-    return_compatible && Type::obligations_satisfy(want, got) && contract_compatible
+    return_compatible && effect_bound_compatible(we.as_ref(), ge.as_ref())
 }
 
 #[cfg(test)]
@@ -2597,15 +2654,15 @@ mod callable_contract_tests {
     }
 
     #[test]
-    fn function_contract_assignability_is_directional() {
+    fn function_contract_metadata_does_not_affect_assignability() {
         let bare = callable(None);
         let labelled = callable(Some(vec![("force", ParamZone::LabelOnly)]));
         let either = callable(Some(vec![("force", ParamZone::Either)]));
 
         assert!(fn_types_compatible(&bare, &labelled));
-        assert!(!fn_types_compatible(&labelled, &bare));
+        assert!(fn_types_compatible(&labelled, &bare));
         assert!(fn_types_compatible(&labelled, &either));
-        assert!(!fn_types_compatible(&either, &labelled));
+        assert!(fn_types_compatible(&either, &labelled));
     }
 
     #[test]
@@ -2644,7 +2701,7 @@ mod callable_contract_tests {
             &outer("SyntheticCarrier", nested(ParamZone::PositionalOnly)),
             &outer("SyntheticCarrier", nested(ParamZone::Either)),
         ));
-        assert!(!fn_types_compatible(
+        assert!(fn_types_compatible(
             &outer("SyntheticCarrier", nested(ParamZone::LabelOnly)),
             &outer("SyntheticCarrier", nested(ParamZone::PositionalOnly)),
         ));

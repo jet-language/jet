@@ -212,12 +212,12 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                 name, version
             );
             eprintln!(
-                " Why: the registry records the exact source revision. \
+                " Why: The registry records the exact source revision. \
                  Uncommitted changes would be silently excluded, making \
                  the published package unreproducible."
             );
             eprintln!(
-                " Fix: commit or stash all uncommitted changes, then run `jet registry publish` again."
+                " Fix: Commit or stash all uncommitted changes, then run `jet registry publish` again."
             );
             eprintln!("More: jet-lang.dev/e/E2605");
             eprintln!("      use `jet registry publish --force` to bypass with an explicit warning banner.");
@@ -1222,9 +1222,9 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
         Some(v) if !v.is_empty() => v,
         _ => {
             eprintln!("Error [E2606]: `jet registry yank` requires a version argument.");
-            eprintln!(" Why: a yank marks one specific published version as deprecated;");
-            eprintln!("      without a version the command doesn't know which one to yank.");
-            eprintln!(" Fix: run `jet registry yank <version>`, e.g. `jet registry yank 1.2.3`.");
+            eprintln!(" Why: A yank marks one specific published version as deprecated;");
+            eprintln!("      Without a version the command doesn't know which one to yank.");
+            eprintln!(" Fix: Run `jet registry yank <version>`, e.g. `jet registry yank 1.2.3`.");
             eprintln!("More: jet-lang.dev/e/E2606");
             exit(ExitCodes::USER_ERROR);
         }

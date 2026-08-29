@@ -950,13 +950,23 @@ pub(crate) fn method_call_in_subset(
         return expr_in_subset(receiver, cx, locals)
             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
+    // D-TIMEDEPTH1=A: Duration's comparison hooks lower to the existing typed
+    // binary path because Duration is a raw-nanosecond carrier, not a time
+    // handle. The binary path emits the same Prelude Comparable/Equatable hook
+    // used by AOT and already has evaluator/JIT scalar support.
+    if recv_type.as_deref() == Some(Syntax::DURATION_TYPE)
+        && matches!(method, "equal" | "compare")
+        && args.len() == 1
+    {
+        return expr_in_subset(receiver, cx, locals) && expr_in_subset(&args[0].expr, cx, locals);
+    }
     // Shape (f) [c109 Phase 11]: a closure-taking collection method (`map`/`filter`/
     // `each`/`find`/`any`/`all`/`sort_by`/`reduce`). Like the Phase-9 builtin shape it
     // carries `recv_type == None` and an in-subset *value* receiver. The Fn-vs-FnMut
-    // emit branch reads the lambda arg's `needs_fn_mut` meta, so the closure-arg
-    // position MUST be a literal `Expr::Lambda` (a fn-value there defaults to the
-    // non-mut form on the AST side, but covering that needs the deferred fn-value
-    // emit — exclude). `reduce` takes (seed, lambda); the rest take (lambda).
+    // emit branch reads the lambda arg's `needs_fn_mut` meta. Ordinary `map` may
+    // also carry a sema-checked local callback; all other closure args remain
+    // literal lambdas here because their lowering needs the lambda metadata.
+    // `reduce` takes (seed, lambda); the rest take (lambda).
     if recv_type.is_none() && closure_method_in_subset(method, args, cx, locals) {
         return expr_in_subset(receiver, cx, locals);
     }
@@ -1453,6 +1463,12 @@ pub(crate) fn static_method_call_in_subset(
     ) {
         return expr_in_subset(&args[0].expr, cx, locals);
     }
+    if matches!(
+        (type_name, method, args.len()),
+        ("String", "from_bytes" | "from_bytes_lossy", 1)
+    ) {
+        return expr_in_subset(&args[0].expr, cx, locals);
+    }
     if crate::AST::numeric_type_from_name(type_name).is_some()
         && Syntax::numeric_conversion_source(method).is_some()
         && args.len() == 1
@@ -1586,7 +1602,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         // path, handled separately above; raw/snapshot/new have bespoke lowering).
         "clone" | "raw" | "snapshot" | "new"
         // String / list / map / collection builtins (`emit_builtin_method`).
-        | "parse" | "from_bytes" | "len" | "is_empty" | "push" | "pop" | "insert"
+        | "parse" | "from_bytes" | "from_bytes_lossy" | "len" | "is_empty" | "push" | "pop" | "insert"
         | "remove" | "get" | "post" | "put" | "delete" | "first" | "last"
         | "contains" | "has" | "index_of" | "reverse" | "sort" | "sort_desc" | "join" | "detach"
         | "receive" | "sender" | "send" | "clear" | "chars" | "bytes" | "trim"
@@ -1601,7 +1617,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "take" | "skip" | "step_by" | "dedup" | "chunks" | "windows"
         | "indexed" | "indexes" | "zip" | "zip_short" | "zip_pad"
         | "take_while" | "skip_while" | "flat_map" | "scan"
-        | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by" | "partition"
+        | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by" | "counts" | "partition"
         | "para_map" | "para_filter" | "para_partition" | "para_fold"
         // #1479
         | "cycle" | "drop_last" | "shuffle" | "is_sorted" | "is_sorted_by"
@@ -1616,7 +1632,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "peer_addr" | "close" | "method" | "path" | "body" | "header" | "param"
         | "status" | "group"
         // D-COLLBREADTH1=A: Set<T> and Queue<T> methods.
-        | "union" | "to_list" | "collect" | "count"
+        | "union" | "to_list" | "collect" | "count" | "top_n"
         | "push_front" | "push_back" | "pop_front" | "pop_back" | "peek_front" | "peek_back"
         | "capacity"
         // `from` is the static constructor for Set — admitted here so the static-call
@@ -1647,9 +1663,10 @@ pub(crate) fn arg_conv_in_subset(_a: &crate::AST::CallArg) -> bool {
 /// with in-subset args? Covers `map`/`filter`/`each`/`find`/`any`/`all`/`sort_by`
 /// (1 arg: a lambda) and `reduce` (2 args: a seed value + a lambda). The closure-arg
 /// position is normally a literal `Expr::Lambda` (the Fn-vs-FnMut emit branch reads
-/// its `needs_fn_mut` meta). D-PARCAPTURE1 also admits top-level function values;
-/// lowering wraps their inputs in the parallel helper's host-borrow convention.
-/// The seed (`reduce`) and every callback body must be in-subset. No labels.
+/// its `needs_fn_mut` meta). Ordinary `map` also admits a sema-checked local
+/// callback; lowering wraps its inputs in the collection helper's host-borrow
+/// convention. D-PARCAPTURE1 also admits top-level function values. The seed
+/// (`reduce`) and every callback body must be in-subset. No labels.
 pub(crate) fn closure_method_in_subset(
     method: &str,
     args: &[crate::AST::CallArg],
@@ -1661,10 +1678,23 @@ pub(crate) fn closure_method_in_subset(
         Expr::Ident(name, _) => cx.fn_types.contains_key(name),
         _ => false,
     };
+    let map_callback = |expr: &Expr| match expr {
+        Expr::Lambda(lam) => lambda_in_subset(lam, cx, locals),
+        // Sema has already proved a local callback has the map Fn shape. Keep
+        // it on the same TIR path as a literal lambda; the lowerer reads the
+        // callback's resolved local type and emits the shared helper.
+        Expr::Ident(name, _) => locals.contains(name),
+        _ => false,
+    };
     if !crate::Collections::is_closure_method(method) {
         return false;
     }
-    if args.iter().any(|a| a.label.is_some()) {
+    if args.iter().enumerate().any(|(index, arg)| {
+        arg.label.is_some()
+            && !(method == "para_map"
+                && index == 1
+                && arg.label.as_ref().map(|(label, _)| label.as_str()) == Some("limit"))
+    }) {
         return false;
     }
     match method {
@@ -1682,13 +1712,17 @@ pub(crate) fn closure_method_in_subset(
         }
         "para_fold" => args.len() == 3 && args.iter().all(|arg| para_callback(&arg.expr)),
         "para_map" | "para_filter" | "para_partition" => {
-            args.len() == 1 && para_callback(&args[0].expr)
+            args.first().is_some_and(|arg| para_callback(&arg.expr))
+                && match method {
+                    "para_map" if args.len() == 2 => expr_in_subset(&args[1].expr, cx, locals),
+                    "para_map" => args.len() == 1,
+                    _ => args.len() == 1,
+                }
         }
         // (lambda). map/filter/each/find/any/all/sort_by + D-ITER1 +
         // D-PARCAPTURE1 closure adapters.
-        _ => {
-            args.len() == 1
-                && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
-        }
+        "map" => args.len() == 1 && map_callback(&args[0].expr),
+        _ => args.len() == 1
+            && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals)),
     }
 }

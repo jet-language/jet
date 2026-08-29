@@ -16,6 +16,15 @@ use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt};
 // using `jet::Interpreter::RunOutcome` still work unchanged.
 pub use jet_foundation::JitBackend::RunOutcome;
 
+fn append_parked_task_report(mut outcome: RunOutcome) -> RunOutcome {
+    if let RunOutcome::Ran { stderr, .. } = &mut outcome {
+        if let Some(report) = crate::scheduler::jet_observe_parked_tasks_report() {
+            stderr.push_str(&report.rendered);
+        }
+    }
+    outcome
+}
+
 /// The run result plus the non-denied diagnostics produced by the same sema
 /// check. Runtime output stays in `RunOutcome`; command front ends render these
 /// diagnostics separately so warnings can never enter a program's streams.
@@ -138,6 +147,7 @@ fn function_at(items: &[Item], definition: crate::Diagnostics::Span) -> Option<&
 /// skips the E2201 boundary scan and attempts execution with no guarantees.
 pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
     crate::boot_tir_eval();
+    crate::scheduler::jet_observe_runtime_start();
     let started = Instant::now();
     if let Some(diagnostic) = bundle
         .package_guarantees
@@ -217,6 +227,7 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
             Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
         }
     });
+    let outcome = append_parked_task_report(outcome);
     if jet_jit::trace_tiers_enabled() && matches!(&outcome, RunOutcome::Ran { .. }) {
         jet_jit::record_trace(vec![jet_jit::TierRow {
             function: "run".to_string(),
@@ -257,6 +268,7 @@ fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) ->
 /// internal-tooling mismatch, not a source error.
 pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> RunOutcome {
     crate::boot_tir_eval();
+    crate::scheduler::jet_observe_runtime_start();
     if let Some(diagnostic) = bundle
         .package_guarantees
         .application_authority
@@ -388,7 +400,7 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
             Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
         }
     });
-    outcome
+    append_parked_task_report(outcome)
 }
 
 /// D-SCHEDULE1: the `#Job`/`#Every(…)` facts the dev loop's due-job tick

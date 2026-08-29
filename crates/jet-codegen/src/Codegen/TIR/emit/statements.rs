@@ -18,7 +18,9 @@ use crate::Codegen::TIR::TIfCond;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
-use crate::Codegen::TIR::{TExpr, TExprKind, TOrFallback, TBuiltinOp};
+use crate::Codegen::TIR::{
+    TExpr, TExprKind, TOrFallback, TOutcomeFastBuffer, TOutcomeFastPath, TBuiltinOp,
+};
 use crate::AST::BinOp;
 use crate::AST::Type;
 
@@ -327,6 +329,24 @@ fn same_pure_expr(left: &TExpr, right: &TExpr, root: &TLocal) -> bool {
     }
 }
 
+/// Ownership lowering may wrap one occurrence of a map key in a compiler
+/// clone while leaving the other occurrence plain. Compare the value
+/// expression beneath those wrappers; the update emitter still performs the
+/// one required owned-key clone at the map boundary.
+fn same_pure_key_expr(left: &TExpr, right: &TExpr, root: &TLocal) -> bool {
+    match &left.kind {
+        TExprKind::Clone(inner) | TExprKind::ExplicitCopy(inner) => {
+            same_pure_key_expr(inner, right, root)
+        }
+        _ => match &right.kind {
+            TExprKind::Clone(inner) | TExprKind::ExplicitCopy(inner) => {
+                same_pure_key_expr(left, inner, root)
+            }
+            _ => same_pure_expr(left, right, root),
+        },
+    }
+}
+
 /// Recognize the generic `m[k] = (m.get(k) ?? default) OP delta` update.
 /// The shape is deliberately independent of corpus names or benchmark sizes.
 fn map_update_shape<'a>(
@@ -370,7 +390,7 @@ fn map_update_shape<'a>(
     };
     if !same_local(&root, &get_root)
         || !map_update_expr_safe(index, &root)
-        || !same_pure_expr(index, key, &root)
+        || !same_pure_key_expr(index, key, &root)
         || !map_update_expr_safe(default, &root)
         || !map_update_expr_safe(rhs, &root)
     {
@@ -488,6 +508,307 @@ fn split_callback_parts<'a>(collection: &'a TExpr, body: &'a [TStmt]) -> Option<
         return None;
     }
     Some((recv, sep))
+}
+
+/// The AOT Reader-region fast path is a use-site optimization for the same
+/// sema-resolved fixed-width/immediate-outcome capability published by the
+/// operation table. It admits one direct byte read per range iteration and
+/// rejects every unknown body shape; omission costs speed, never safety.
+struct ReaderRegionPlan {
+    reader: TLocal,
+    read_name: String,
+}
+
+fn reader_region_read_root(expr: &TExpr) -> Option<TLocal> {
+    let TExprKind::OrFallback { value, .. } = &expr.kind else {
+        return None;
+    };
+    let TExprKind::HandleMethod { recv, op, args } = &value.kind else {
+        return None;
+    };
+    if !args.is_empty()
+        || !matches!(&value.ty, Type::Result { .. } | Type::Option(_))
+        || !matches!(&recv.ty, Type::Named(name) if name == "Reader")
+    {
+        return None;
+    }
+    let TOutcomeFastPath::FixedRead {
+        buffer: TOutcomeFastBuffer::Reader,
+        width: 1,
+        ..
+    } = op.outcome_fast_path()?
+    else {
+        return None;
+    };
+    let TExprKind::Local(reader) = &recv.kind else {
+        return None;
+    };
+    if reader.deref || !reader.mutable || reader.is_persistent() {
+        return None;
+    }
+    Some(reader.clone())
+}
+
+fn reader_region_read_stmt(stmt: &TStmt) -> Option<(&str, TLocal)> {
+    let TStmt::Let {
+        name,
+        init,
+        gc_promotion,
+        gc_transferred,
+        ..
+    } = stmt
+    else {
+        return None;
+    };
+    if gc_promotion.is_some() || *gc_transferred {
+        return None;
+    }
+    reader_region_read_root(init).map(|reader| (name.as_str(), reader))
+}
+
+fn reader_region_expr_safe(expr: &TExpr, reader: &TLocal) -> bool {
+    match &expr.kind {
+        TExprKind::IntLit(..)
+        | TExprKind::FloatLit(..)
+        | TExprKind::BoolLit(..)
+        | TExprKind::CharLit(..)
+        | TExprKind::Unit
+        | TExprKind::DefaultLit
+        | TExprKind::Uninit
+        | TExprKind::CtLit(..)
+        | TExprKind::ConstRef(..)
+        | TExprKind::Absent => true,
+        TExprKind::Local(local) => !local.deref && !same_local(local, reader),
+        TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
+            crate::Codegen::TIR::TStrPart::Lit(_) => true,
+            crate::Codegen::TIR::TStrPart::Interp(value, _) => {
+                reader_region_expr_safe(value, reader)
+            }
+        }),
+        TExprKind::Binary { lhs, rhs, .. } => {
+            reader_region_expr_safe(lhs, reader) && reader_region_expr_safe(rhs, reader)
+        }
+        TExprKind::Unary { operand, .. }
+        | TExprKind::Clone(operand)
+        | TExprKind::ExplicitCopy(operand)
+        | TExprKind::Present(operand)
+        | TExprKind::Ok(operand)
+        | TExprKind::Err(operand)
+        | TExprKind::DistinctRaw(operand)
+        | TExprKind::Print(operand)
+        | TExprKind::Drop(operand) => reader_region_expr_safe(operand, reader),
+        TExprKind::Call { args, .. } => args
+            .iter()
+            .all(|arg| reader_region_expr_safe(&arg.value, reader)),
+        TExprKind::CoreCall { args, .. } => args
+            .iter()
+            .all(|arg| reader_region_expr_safe(arg, reader)),
+        TExprKind::BuiltinMethod { recv, args, .. }
+        | TExprKind::HandleMethod { recv, args, .. } => {
+            reader_region_expr_safe(recv, reader)
+                && args.iter().all(|arg| reader_region_expr_safe(arg, reader))
+        }
+        TExprKind::NumericMethod { recv, .. } => reader_region_expr_safe(recv, reader),
+        TExprKind::NumericBinaryMethod { recv, arg, .. } => {
+            reader_region_expr_safe(recv, reader) && reader_region_expr_safe(arg, reader)
+        }
+        TExprKind::OverflowOpt { lhs, rhs, .. } => {
+            reader_region_expr_safe(lhs, reader) && reader_region_expr_safe(rhs, reader)
+        }
+        TExprKind::OrFallback { value, fallback } => {
+            reader_region_expr_safe(value, reader)
+                && matches!(fallback, TOrFallback::Value(value) if reader_region_expr_safe(value, reader))
+        }
+        TExprKind::Index { base, index, .. } => {
+            reader_region_expr_safe(base, reader) && reader_region_expr_safe(index, reader)
+        }
+        TExprKind::MapLit(entries) => entries.iter().all(|(key, value)| {
+            reader_region_expr_safe(key, reader) && reader_region_expr_safe(value, reader)
+        }),
+        TExprKind::ListLit(items) => items
+            .iter()
+            .all(|item| reader_region_expr_safe(item, reader)),
+        TExprKind::TupleLit { fields, .. } => fields
+            .iter()
+            .all(|(_, value)| reader_region_expr_safe(value, reader)),
+        _ => false,
+    }
+}
+
+fn reader_region_stmt_safe(stmt: &TStmt, reader: &TLocal, read_name: &str) -> bool {
+    match stmt {
+        TStmt::SourceSpan(_) | TStmt::LineMarker(_) => true,
+        TStmt::Let {
+            name,
+            init,
+            gc_promotion,
+            gc_transferred,
+            ..
+        } if name == read_name => reader_region_read_root(init)
+            .is_some_and(|candidate| same_local(&candidate, reader))
+            && gc_promotion.is_none()
+            && !*gc_transferred,
+        TStmt::Let {
+            name,
+            init,
+            gc_promotion,
+            gc_transferred,
+            ..
+        } => {
+            mangle(name) != reader.rust_name()
+                && gc_promotion.is_none()
+                && !*gc_transferred
+                && reader_region_expr_safe(init, reader)
+        }
+        TStmt::ExprStmt(expr) => reader_region_expr_safe(expr, reader),
+        TStmt::Assign { place, value, .. } => {
+            let place_safe = match place {
+                TPlace::Local(local) => !local.deref && !same_local(local, reader),
+                TPlace::Expr(expr) => reader_region_expr_safe(expr, reader),
+            };
+            place_safe && reader_region_expr_safe(value, reader)
+        }
+        _ => false,
+    }
+}
+
+fn reader_region_plan(body: &[TStmt]) -> Option<ReaderRegionPlan> {
+    let mut candidate = None;
+    for stmt in body {
+        if let Some((read_name, reader)) = reader_region_read_stmt(stmt) {
+            if candidate.is_some() {
+                return None;
+            }
+            candidate = Some((read_name.to_string(), reader));
+        }
+    }
+    let (read_name, reader) = candidate?;
+    if !body
+        .iter()
+        .all(|stmt| reader_region_stmt_safe(stmt, &reader, &read_name))
+    {
+        return None;
+    }
+    Some(ReaderRegionPlan { reader, read_name })
+}
+
+fn emit_reader_region_stmts(
+    body: &[TStmt],
+    plan: &ReaderRegionPlan,
+    byte: &str,
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    active_deferred_closes: &mut Vec<ActiveCleanup>,
+) {
+    for stmt in body {
+        if let TStmt::Let {
+            name,
+            kw,
+            let_ty,
+            init,
+            gc_promotion,
+            gc_transferred,
+        } = stmt
+        {
+            if name == &plan.read_name
+                && gc_promotion.is_none()
+                && !*gc_transferred
+                && reader_region_read_root(init)
+                    .is_some_and(|reader| same_local(&reader, &plan.reader))
+            {
+                let pad = "    ".repeat(indent);
+                let ty_clause = emit_let_ty_clause(let_ty, cx);
+                out.push_str(&format!(
+                    "{}{} {}{} = {};\n",
+                    pad,
+                    kw,
+                    mangle(name),
+                    ty_clause,
+                    byte
+                ));
+                continue;
+            }
+        }
+        emit_tir_stmt(stmt, cx, out, indent, active_deferred_closes);
+    }
+}
+
+fn emit_reader_region_range(
+    label: &Option<String>,
+    var: &str,
+    start: &TExpr,
+    end: &TExpr,
+    body: &[TStmt],
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    active_deferred_closes: &mut Vec<ActiveCleanup>,
+) -> bool {
+    if !matches!(&start.kind, TExprKind::IntLit(0, _)) {
+        return false;
+    }
+    // `jet_reader_region_bounds` accepts the language's default `Int` count.
+    // Fixed-width range counters keep the ordinary emitter until a matching
+    // checked region representation exists; this avoids an emitter-side cast
+    // changing the source range's overflow behavior.
+    if !matches!(&start.ty, Type::Int) || !matches!(&end.ty, Type::Int) {
+        return false;
+    }
+    let Some(plan) = reader_region_plan(body) else {
+        return false;
+    };
+    // The bound proof runs after the range length is evaluated. Keep that
+    // evaluation outside the fast form unless it is itself unable to observe
+    // or mutate the reader; otherwise the fallback's source-order semantics
+    // would be changed even though the loop body is safe.
+    if !reader_region_expr_safe(end, &plan.reader) {
+        return false;
+    }
+    let pad = "    ".repeat(indent);
+    let inner_pad = "    ".repeat(indent + 1);
+    let body_pad = "    ".repeat(indent + 2);
+    let start = emit_expr_with_cleanups(start, cx, active_deferred_closes);
+    let end = emit_expr_with_cleanups(end, cx, active_deferred_closes);
+    let reader = plan.reader.rust_place();
+    let region_count = mangle_generated("reader_region_count");
+    let region_start = mangle_generated("reader_region_start");
+    let region_end = mangle_generated("reader_region_end");
+    let region_byte = mangle_generated("reader_region_byte");
+    let lbl = tir_label_prefix(label);
+    let loop_var = mangle(var);
+
+    out.push_str(&format!("{}{{\n", pad));
+    out.push_str(&format!("{}let {} = {};\n", inner_pad, region_count, end));
+    out.push_str(&format!(
+        "{}if let Some(({}, {})) = {}jet_reader_region_bounds(&{}, {}) {{\n",
+        inner_pad, region_start, region_end, cx.root_prefix, reader, region_count
+    ));
+    out.push_str(&format!(
+        "{}{}for ({}, {}) in ({}..{}).zip(({}).buf[{}..{}].iter().copied()) {{\n",
+        body_pad, lbl, loop_var, region_byte, start, region_count, reader, region_start, region_end
+    ));
+    emit_reader_region_stmts(
+        body,
+        &plan,
+        &region_byte,
+        cx,
+        out,
+        indent + 3,
+        active_deferred_closes,
+    );
+    out.push_str(&format!("{}}}\n", body_pad));
+    out.push_str(&format!("{}{}.pos = {};\n", body_pad, reader, region_end));
+    out.push_str(&format!("{}}} else {{\n", inner_pad));
+    out.push_str(&format!(
+        "{}{}for {} in ({}..{}) {{\n",
+        body_pad, lbl, loop_var, start, region_count
+    ));
+    emit_tir_stmts_nested(body, cx, out, indent + 3, active_deferred_closes);
+    out.push_str(&format!("{}}}\n", body_pad));
+    out.push_str(&format!("{}}}\n", inner_pad));
+    out.push_str(&format!("{}}}\n", pad));
+    true
 }
 
 fn emit_split_separator(
@@ -1785,6 +2106,22 @@ fn emit_tir_stmt(
                 }
                 out.push_str(&format!("{}}}\n", range_pad));
                 out.push_str(&format!("{}}}\n", pad));
+                return;
+            }
+            if *exclusive
+                && step.is_none()
+                && emit_reader_region_range(
+                    label,
+                    var,
+                    start,
+                    end,
+                    body,
+                    cx,
+                    out,
+                    indent,
+                    active_deferred_closes,
+                )
+            {
                 return;
             }
             let s = emit_expr_with_cleanups(start, cx, active_deferred_closes);
