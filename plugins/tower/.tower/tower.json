@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2356,
-    "rev": 46737,
+    "nextNum": 2357,
+    "rev": 46742,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -160869,6 +160869,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "Integrated transcript harness correction d704e89b8. Semantic check of tests/transcript.jet reaches only four check-mode unused-private warnings; jet test then exits 101 at generated build/transcript.rs, confirming #2350 is the remaining harness execution blocker. Default jet run still exits E0956 field recv under #2252."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "Default criterion is now blocked by existing P0 #2252: trace-tiers ends in E0956 field recv from generated CLIError.decode after earlier files and Codable gaps were removed. Phase 2 remains unopened."
         },
         {
@@ -160881,11 +160886,11 @@
         {
           "n": 1,
           "text": "The Jet package parses phase fixtures and passes package-wide semantic checking.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-29T04:15:25.112Z"
+          "evidence": "scripts/agent/jet-env jet check dogfood/jetpack completed clean; package runner, CLI, model, manifest, lock, plan, read-only, and transcript modules passed semantic checking.",
+          "at": "2026-08-29T04:25:58.004Z"
         },
         {
           "n": 2,
@@ -160926,7 +160931,7 @@
       "parentId": "c0oakubh",
       "needsAcceptance": false,
       "created": "2026-08-29T04:15:04.003Z",
-      "updated": "2026-08-29T04:23:39.240Z",
+      "updated": "2026-08-29T04:28:59.991Z",
       "updatedBy": "fable"
     },
     {
@@ -161098,7 +161103,18 @@
       "checkSteps": "Run jet test on the minimized imported-module regression and dogfood/jetpack/tests/transcript.jet parity suite, then build and execute dogfood/jetpack AOT.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Package-mode AOT reproduces independently of the test harness: from dogfood/jetpack, bare jet build reads runner.jet, passes checking and authority, generates build/runner.rs, then exits 101 because generated Rust does not compile."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Current consolidated phase-1 harness reproduces the same AOT totality failure: jet test dogfood/jetpack/tests/transcript.jet passes semantic analysis, generates build/transcript.rs, then exits 101 because generated Rust does not compile."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -161142,7 +161158,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T04:16:42.113Z",
-      "updated": "2026-08-29T04:16:59.268Z",
+      "updated": "2026-08-29T04:30:23.625Z",
       "updatedBy": "fable"
     },
     {
@@ -161328,6 +161344,69 @@
       "needsAcceptance": false,
       "created": "2026-08-29T04:19:03.505Z",
       "updated": "2026-08-29T04:19:15.956Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0k0pur7",
+      "num": 2356,
+      "title": "Statement payload dispatch reaches AOT codegen ICE",
+      "body": "The Jet Tower dogfood port exposed an I2 violation: a statement-position DataTree payload dispatch passes parse and sema, then native codegen exits 101 because typed IR does not cover the statement if. Expression-position value dispatch is a working source-level escape, but equivalent accepted statement syntax must not reach an internal compiler error.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Add a minimal enum and DataTree statement-payload reproducer. Route the accepted statement form through supported TIR and native emit, or reject it in sema with a registered product diagnostic if the form is not legal. Prove native and default-tier parity without adding a jit_gaps entry.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A minimal accepted statement-position payload dispatch no longer exits 101 under native build or test.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:26:24.011Z"
+        },
+        {
+          "n": 2,
+          "text": "The same reproducer returns the same value under default jet run and native execution.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:26:24.011Z"
+        },
+        {
+          "n": 3,
+          "text": "A regression test covers payload binding and wildcard payload patterns without a jit_gaps exception.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T04:26:24.011Z"
+        }
+      ],
+      "refs": [
+        "2327",
+        "1444",
+        "2008"
+      ],
+      "tags": [
+        "dogfood",
+        "scale",
+        "tower-shadow",
+        "compiler",
+        "i2"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-29T04:26:24.011Z",
+      "updated": "2026-08-29T04:26:24.011Z",
       "updatedBy": "fable"
     }
   ],
@@ -222368,6 +222447,41 @@
   ],
   "events": [
     {
+      "at": "2026-08-29T04:30:23.625Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c08hj382",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T04:29:11.208Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c08hj382",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T04:28:59.991Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c05xe1a7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T04:26:24.011Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0k0pur7",
+      "note": "Statement payload dispatch reaches AOT codegen ICE"
+    },
+    {
+      "at": "2026-08-29T04:25:58.004Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c05xe1a7",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-29T04:23:39.240Z",
       "by": "fable",
       "action": "card.update",
@@ -225831,41 +225945,6 @@
       "action": "card.criteria-add",
       "ref": "c05la7ri",
       "note": "#4 Stale red wall repaired: tir_control_and_data, tir_patterns_"
-    },
-    {
-      "at": "2026-08-28T12:07:49.765Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c05la7ri",
-      "note": "#3 Exhaustive if-match value form needs no redundant else; tota"
-    },
-    {
-      "at": "2026-08-28T12:07:42.966Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c05la7ri",
-      "note": "#2 Generality review: propagation keyed on failure row of calle"
-    },
-    {
-      "at": "2026-08-28T12:07:42.562Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c05la7ri",
-      "note": "phase,plan"
-    },
-    {
-      "at": "2026-08-28T12:07:32.227Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c05la7ri",
-      "note": "#1 Generality review: propagation keyed on failure row of calle"
-    },
-    {
-      "at": "2026-08-28T11:55:24.030Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0gwdlde",
-      "note": "phase"
     }
   ],
   "nextNum": 368,
