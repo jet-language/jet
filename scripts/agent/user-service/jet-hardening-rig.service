@@ -1,0 +1,22 @@
+[Unit]
+Description=Jet hardening rig bounded cycle
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+ExecStart=/usr/bin/env node @REPO@/scripts/agent/hardening-rig.mjs cycle --json
+KillMode=control-group
+CPUQuota=200%
+MemoryHigh=6G
+MemoryMax=8G
+MemorySwapMax=2G
+TasksMax=64
+IOWeight=10
+Nice=10
+RuntimeMaxSec=95m
+Environment=TMPDIR=%h/.cache/jet-test-scratch
+Environment=TMP=%h/.cache/jet-test-scratch
+Environment=TEMP=%h/.cache/jet-test-scratch
+
+[Install]
+WantedBy=default.target

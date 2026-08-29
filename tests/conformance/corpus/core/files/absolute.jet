@@ -1,0 +1,11 @@
+// core-conformance: core.files.absolute
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("files-absolute")
+    path :: Path.from(root).join("fixture.txt")
+    result :: files.absolute(path) ?? panic("absolute")
+    print(result.len() > 0)
+    files.remove_all(root) ?? panic("cleanup")
+}

@@ -1,0 +1,11 @@
+// core-conformance: core.files.lock
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("files-lock")
+    path :: Path.from(root).join("fixture.lock")
+    result :: files.lock(path) ?? panic("lock")
+    print(result.path.len() > 0)
+    files.remove_all(root) ?? panic("cleanup")
+}

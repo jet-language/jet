@@ -1,0 +1,14 @@
+// core-conformance: core.files.read_link
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("files-read-link")
+    source :: Path.from(root).join("source.txt")
+    link :: Path.from(root).join("link.txt")
+    files.write(source, "fixture") ?? panic("seed")
+    files.symlink(source, link) ?? panic("symlink")
+    result :: files.read_link(link) ?? panic("read_link")
+    print(result.len() > 0)
+    files.remove_all(root) ?? panic("cleanup")
+}

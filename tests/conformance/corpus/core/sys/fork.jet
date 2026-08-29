@@ -1,0 +1,10 @@
+// core-conformance: core.sys.fork
+use core.sys as os
+
+fn run() {
+    #Unsafe("fork and let the child return immediately") {
+        child :: os.fork() ?? -1
+        if child == 0 -> { return }
+        print(child >= 0)
+    }
+}

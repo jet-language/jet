@@ -1902,7 +1902,14 @@ impl<'a> Checker<'a> {
                             must_use_call_target,
                         );
                     }
-                    if self.arrow_loop_body && !self.is_unit_type(&ty) {
+                    // An implicit fallible `Unit` call carries its success
+                    // value in `Result<Unit, E>`. L0508 is about dropping
+                    // that success value, not the internal failure carrier.
+                    let arrow_body_value_type = match &ty {
+                        Type::Result { ok, .. } => ok.as_ref(),
+                        _ => &ty,
+                    };
+                    if self.arrow_loop_body && !self.is_unit_type(arrow_body_value_type) {
                         self.diags.push(Diagnostic::lint(
                                 "L0508",
                                 "this arrow loop body computes a value and drops it".to_string(),

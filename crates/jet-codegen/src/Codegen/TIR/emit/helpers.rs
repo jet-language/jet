@@ -173,9 +173,8 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
                     } else {
                         "Box::new"
                     };
-                    s = format!("{wrap}({s})");
+                    s = format!("{wrap}({s}) as {rust_ty}");
                 }
-                s = format!("{} as {}", s, cx.rust_type(&fc.ty));
             }
             if a.borrow && uninit_borrow.is_none() {
                 s = format!("&({})", s);

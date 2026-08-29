@@ -2018,7 +2018,7 @@ impl<'a> Checker<'a> {
                     if !self.copies_explicit() {
                         if let Some(target) = self.implicit_copy_target(&arg.expr, source_ty) {
                             if target == param_ty && is_cloneable(&target, self.registry) {
-                                Some(self.insert_implicit_copy(&mut arg.expr, &target))
+                                Some(self.insert_implicit_copy(&mut arg.expr, source_ty, &target))
                             } else {
                                 inferred
                             }

@@ -1,0 +1,12 @@
+// core-conformance: core.log.otlp_file
+use core.files as files
+use core.log as log
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("log-otlp-file")
+    path :: Path.from(root).join("events.jsonl").to_string()
+    result :: log.otlp_file(path)
+    print(result)
+    files.remove_all(root) ?? panic("cleanup")
+}

@@ -1,0 +1,12 @@
+// core-conformance: core.log.set_sink
+use core.files as files
+use core.log as log
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("log-set-sink")
+    path :: Path.from(root).join("events.jsonl").to_string()
+    result :: log.set_sink("jsonl", path)
+    print(result)
+    files.remove_all(root) ?? panic("cleanup")
+}

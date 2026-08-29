@@ -1518,7 +1518,7 @@ impl<'a> Checker<'a> {
             return Some(ty);
         }
         if is_cloneable(&target, self.registry) {
-            Some(self.insert_implicit_copy(e, &target))
+            Some(self.insert_implicit_copy(e, &ty, &target))
         } else {
             Some(ty)
         }
@@ -1564,27 +1564,91 @@ impl<'a> Checker<'a> {
         })
     }
 
-    pub(crate) fn insert_implicit_copy(&mut self, e: &mut Expr, ty: &Type) -> Type {
+    fn push_hidden_cost_lint(&mut self, operation: &str, fix: &str, span: Span) {
+        let diagnostic = Diagnostic::from_row(
+            "L2510",
+            &[("operation", operation), ("fix", fix)],
+            Some(span),
+        );
+        if !self.diags.iter().any(|previous| {
+            previous.code == diagnostic.code
+                && previous.span == diagnostic.span
+                && previous.what == diagnostic.what
+        }) {
+            self.diags.push(diagnostic);
+        }
+    }
+
+    fn report_hidden_cost_in_loop(&mut self, e: &Expr, source: &Type, target: &Type) {
+        if self.loop_depth == 0 || !type_owns_heap(target, self.registry) {
+            return;
+        }
+        let view_source = owned_type_for_read_view(source).is_some()
+            || (matches!(source, Type::String)
+                && matches!(e, Expr::Ident(name, _) if self.is_string_view(name)))
+            || (matches!(source, Type::List(_)) && {
+                let sources = self.view_call_sources(e);
+                !sources.is_empty()
+                    && sources.into_iter().all(|(_, _, kind, access)| {
+                        access == crate::Sema::ViewAccess::Read
+                            && matches!(
+                                kind,
+                                crate::Sema::ViewKind::List
+                                    | crate::Sema::ViewKind::Buffer
+                                    | crate::Sema::ViewKind::Matrix
+                            )
+                    })
+            });
+        let operation = if view_source {
+            format!("this copy of `{}` view into an owned slot", target.show())
+        } else {
+            format!("this implicit clone of `{}`", target.show())
+        };
+        let fix = if view_source {
+            format!(
+                "bind the copy once outside the loop, or keep views with `[View<{}>]`",
+                match target {
+                    Type::List(element) => element.show(),
+                    Type::String => "str".to_string(),
+                    _ => target.show(),
+                }
+            )
+        } else {
+            "hoist the clone, or use `~` when the copy is intentional".to_string()
+        };
+        self.push_hidden_cost_lint(&operation, &fix, e.span());
+    }
+
+    pub(crate) fn insert_implicit_copy(
+        &mut self,
+        e: &mut Expr,
+        source: &Type,
+        target: &Type,
+    ) -> Type {
         let span = e.span();
+        self.report_hidden_cost_in_loop(e, source, target);
         let old = std::mem::replace(e, Expr::Absent(span));
         *e = Expr::Copy(Box::new(old), span);
-        if matches!(ty, Type::Shared(_)) {
+        if matches!(target, Type::Shared(_)) {
             self.record_memory_event(crate::Sema::MemoryEvent::new(
                 crate::Sema::MemoryEventKind::RetainRelease,
                 span,
                 format!(
                     "implicit copy of `{}` retains a shared reference",
-                    ty.show()
+                    target.show()
                 ),
             ));
-        } else if type_owns_heap(ty, self.registry) {
+        } else if type_owns_heap(target, self.registry) {
             self.record_memory_event(crate::Sema::MemoryEvent::new(
                 crate::Sema::MemoryEventKind::Allocation,
                 span,
-                format!("implicit copy of `{}` allocates owned heap data", ty.show()),
+                format!(
+                    "implicit copy of `{}` allocates owned heap data",
+                    target.show()
+                ),
             ));
         }
-        ty.clone()
+        target.clone()
     }
 
     fn infer_checked(&mut self, e: &mut Expr) -> Option<Type> {
@@ -1751,14 +1815,14 @@ impl<'a> Checker<'a> {
         }
         if !borrowed {
             if !self.copies_explicit() {
-                if let Some(target) = ty
-                    .as_ref()
-                    .and_then(|source| self.implicit_copy_target(e, source))
-                {
+                if let Some((source, target)) = ty.as_ref().and_then(|source| {
+                    self.implicit_copy_target(e, source)
+                        .map(|target| (source.clone(), target))
+                }) {
                     if self.expected_type.as_ref() == Some(&target)
                         && is_cloneable(&target, self.registry)
                     {
-                        return Some(self.insert_implicit_copy(e, &target));
+                        return Some(self.insert_implicit_copy(e, &source, &target));
                     }
                 }
             }
@@ -2435,6 +2499,14 @@ impl<'a> Checker<'a> {
                     // when a later pass re-infers the rewritten expression.
                     Some(Type::IntN { signed, bits })
                 } else {
+                    let value = super::exact_integer_literal(n, raw.as_deref());
+                    if self.loop_depth > 0 && value.try_i64().is_none() {
+                        self.push_hidden_cost_lint(
+                            "this packed `Int` literal falls back to bigint",
+                            "hoist the literal, or use a fixed-width integer that fits",
+                            span,
+                        );
+                    }
                     *width = None;
                     Some(Type::Int)
                 }

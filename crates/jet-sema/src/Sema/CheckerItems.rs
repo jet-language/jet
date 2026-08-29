@@ -315,7 +315,8 @@ impl<'a> Checker<'a> {
             && ty.is_some_and(|ty| owned_type_for_read_view(ty).is_none())
             && ty.is_some_and(|ty| is_cloneable(ty, self.registry))
         {
-            self.insert_implicit_copy(expr, ty.expect("cloneable borrowed subplace has a type"));
+            let ty = ty.expect("cloneable borrowed subplace has a type");
+            self.insert_implicit_copy(expr, ty, ty);
             return false;
         }
         self.diags.push(Diagnostic::error(
@@ -2383,10 +2384,8 @@ impl<'a> Checker<'a> {
                 && !self.copies_explicit()
                 && ty.is_some_and(|ty| is_cloneable(ty, self.registry))
             {
-                self.insert_implicit_copy(
-                    expr,
-                    ty.expect("cloneable borrowed same-name field has a type"),
-                );
+                let ty = ty.expect("cloneable borrowed same-name field has a type");
+                self.insert_implicit_copy(expr, ty, ty);
                 return;
             }
             if borrowed {

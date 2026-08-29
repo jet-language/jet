@@ -1,0 +1,11 @@
+// core-conformance: core.net.udp_receive
+use core.net as net
+
+fn run() {
+    server :: net.udp_bind("127.0.0.1:0") ?? panic("server bind")
+    address :: net.udp_local_addr(server) ?? panic("server address")
+    client :: net.udp_bind("127.0.0.1:0") ?? panic("client bind")
+    net.udp_send_to(client, "recv", address) ?? panic("send")
+    result :: net.udp_receive(server, 16) ?? panic("receive")
+    print(net.udp_packet_data(result))
+}

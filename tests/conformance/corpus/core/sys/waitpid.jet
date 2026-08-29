@@ -1,0 +1,9 @@
+// core-conformance: core.sys.waitpid
+use core.sys as os
+
+fn run() {
+    #Unsafe("poll for a child that this witness does not have") {
+        result :: os.waitpid(-1, 1) ?? -1
+        print(result >= 0)
+    }
+}

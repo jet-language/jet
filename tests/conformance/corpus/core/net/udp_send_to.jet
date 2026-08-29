@@ -1,0 +1,11 @@
+// core-conformance: core.net.udp_send_to
+use core.net as net
+
+fn run() {
+    server :: net.udp_bind("127.0.0.1:0") ?? panic("server bind")
+    address :: net.udp_local_addr(server) ?? panic("server address")
+    client :: net.udp_bind("127.0.0.1:0") ?? panic("client bind")
+    result :: net.udp_send_to(client, "ping", address) ?? panic("send")
+    packet :: net.udp_receive(server, 16) ?? panic("receive")
+    print(result > 0 && net.udp_packet_data(packet) == "ping")
+}

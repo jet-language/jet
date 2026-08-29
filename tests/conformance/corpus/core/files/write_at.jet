@@ -1,0 +1,12 @@
+// core-conformance: core.files.write_at
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("files-write-at")
+    path :: Path.from(root).join("fixture.bin")
+    files.write_bytes(path, [U8]{65, 66, 67, 68}) ?? panic("seed")
+    result :: files.write_at(path, 1, [U8]{88, 89})
+    print(result)
+    files.remove_all(root) ?? panic("cleanup")
+}

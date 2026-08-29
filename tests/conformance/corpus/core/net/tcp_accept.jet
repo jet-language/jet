@@ -1,0 +1,10 @@
+// core-conformance: core.net.tcp_accept
+use core.net as net
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    _client :: net.tcp_connect(address) ?? panic("connect")
+    result :: net.tcp_accept(listener) ?? panic("accept")
+    print(net.socket_host(net.tcp_peer_socket_addr(result) ?? panic("peer address")))
+}

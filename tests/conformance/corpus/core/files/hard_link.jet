@@ -1,0 +1,15 @@
+// core-conformance: core.files.hard_link
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("files-hard-link")
+    source :: Path.from(root).join("source.txt")
+    destination :: Path.from(root).join("destination.txt")
+    files.write(source, "fixture") ?? panic("seed")
+    result :: files.hard_link(source, destination)
+    print(result)
+    text :: files.read(destination) ?? panic("read")
+    assert((text == "fixture"))
+    files.remove_all(root) ?? panic("cleanup")
+}

@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2359,
-    "rev": 46793,
+    "rev": 46814,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -155327,6 +155327,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "Final `jet run dogfood/tower` exits 1 after 21.00 s with E0956 at `core.files.canonicalize`. The service never binds. Final `jet dev` waits 120 s; the exact banner and port 8090 never appear. The same E0956 appears, and the watcher stops. This blocks API, SSE, mutation, UI, RSS, and latency proof."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "2026-08-29, canonical run.jet passes jet check dogfood/tower with 12 warnings and jet fmt --check. jet run reaches E3011 PatternTest after 74,959 ms, exits 70, and records failed-startup peak RSS 4,684,036 KiB. No steady-state request/RSS measurement exists."
         },
         {
@@ -155433,7 +155438,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-27T21:47:19.215Z",
-      "updated": "2026-08-29T08:34:53.088Z",
+      "updated": "2026-08-29T10:57:11.019Z",
       "updatedBy": "fable"
     },
     {
@@ -158091,13 +158096,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "(a) Make exact-quotient/Fraction construction total over the full i64 domain in the shared Prelude (widen to bigint internally); release must produce the same exact value as default, never panic. (b) Exponent literals: either evaluate 1e10 to the exact Decimal at compile time or reject at parse/sema with a registered diagnostic — a literal must never compile and then die at runtime. (c) Add the extremes and literal-form fixtures on all tiers; any remaining Decimal-string constructor gets a checked entry point (no unchecked parse reachable from user values).",
       "checkSteps": "F1_max.jet identical exact output default and release;MIN/-1 exact both tiers or one registered diagnostic;1e10/1E10/1e-5 evaluate or reject at compile time on all tiers;fixtures landed",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "NOT FIXED — verified by me against the integrated tree, not by lane claim. 'jet run examples/features/math/exact_division_extremes.jet' exits 1 while 'jet run --release' exits 0, so the two tiers disagree (I9 violation) and there is no committed golden. The witness exists but was never made green. Whoever picks this up: the divergence itself is the lead — release accepts what default rejects, so the exact-division extreme path is checked in one tier's lowering rather than in sema (I3)."
+        },
         {
           "at": "2026-08-28",
           "by": "fable",
@@ -158109,7 +158119,17 @@
           "text": "Seams located: exact division — Codegen/TIR/lower/expressions.rs:3261-3271 lowers Int/Int to Fraction.from_parts; CommonTypes.rs:2213-2234 JetFraction::new returns None on i64 extremes (checked_neg/checked_abs); MathRandomTime.rs:439-440 unwraps that None as 'invalid exact quotient' panic. Same None->panic mirrored: default evaluator exprs.rs:11382-11388, foundation Numeric.rs:86-107, JIT Numeric.rs:447-453. Exponent literals — lexer Scan.rs:637-651,660-678 accepts e/E as Float token; sema CheckerInfer/expr.rs:2442-2455 rewrites untyped Float literal to Decimal(string); foundation Numeric.rs:977-984 REJECTS e/E; AOT CommonTypes.rs:2357-2380 dot/digits only; MathRandomTime.rs:431-432 expect() panic. Fix shape: widen JetFraction::new internally (bigint) and teach the Decimal string path exponent notation (or normalize at sema rewrite); owned paths above."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "examples/features/math/exact_division_extremes.jet exits 0 on default and release with byte-identical stdout matching a committed golden; exact-division extremes report a Jet diagnostic, never a raw Rust panic (I2)",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "Verified by me against the integrated tree: examples/features/math/exact_division_extremes.jet exits 0 on both 'jet run' and 'jet run --release', stdout byte-identical across tiers, and matches the committed golden. Exact-division extremes no longer raise a raw Rust panic (I2).",
+          "at": "2026-08-29T10:58:22.104Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "sweep",
@@ -158121,8 +158141,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T20:03:39.954Z",
-      "updated": "2026-08-28T21:05:36.773Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T10:58:25.602Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-29T10:58:25.602Z"
     },
     {
       "id": "c0lxkhav",
@@ -158133,14 +158154,30 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Fix each emission seam: Float sort via total-order comparator (matches default semantics), JetDisplay impls for tuple/list-of-tuple shapes, typed empty-collection equality (annotate element type from sema), Unit selector trait signature. Then extend the #2286 conformance corpus so every sema-accepted shape must compile on release — an emission that cannot compile is caught by corpus, not by users.",
       "checkSteps": "all four repros print default-identical output on release;conformance corpus includes the four shapes",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "NOT FIXED — verified against the integrated tree. 'jet run examples/features/text/decimal_exponents.jet' exits 70 and 'jet run --release' exits 101, an internal compiler error. Exit 101 means rustc rejected generated code, which is an I2 violation by definition. No golden is committed. The scientific-notation witness (1e10, 1E10, 1e-5, Decimal(\"1e-30\")) is the right shape; the trait-bound ICE cluster this card names is still live. Autopsy recipe: after the release ICE, run 'scripts/agent/jet-env rustc --edition 2021 --crate-type bin build/decimal_exponents.rs -o /tmp/x' to read the exact rejected generated code."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "examples/features/text/decimal_exponents.jet exits 0 on default and release with byte-identical stdout matching a committed golden; no release-tier ICE",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "Verified by me against the integrated tree: examples/features/text/decimal_exponents.jet exits 0 on 'jet run' and 'jet run --release' with byte-identical stdout (10000000000 / 10000000000 / 0.00001 / 0.000000000000000000000000000001); the release-tier exit-101 ICE is gone. Golden blessed from real binary output at examples/features/expected/text/decimal_exponents.out.",
+          "at": "2026-08-29T10:58:28.917Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "sweep",
@@ -158152,8 +158189,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T20:03:40.454Z",
-      "updated": "2026-08-28T20:03:40.454Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-29T10:58:39.585Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-29T10:58:39.585Z"
     },
     {
       "id": "c0oy6gtl",
@@ -159240,8 +159278,29 @@
       "checkSteps": "f6_named_value.jet prints 10 and 18 both tiers;fixture landed",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "STILL OPEN after the second lane pass, verified by me. Both tiers now exit 0 (the release exit-101 ICE is fixed), but 'jet run' and 'jet run --release' produce DIFFERENT stdout for examples/features/functions/named_function_value.jet, and the default output no longer matches the committed golden. So this traded an ICE for an I9 tier divergence. Next agent: diff the two tiers' stdout directly, decide which is correct against the card's intent, fix the wrong tier in the Prelude or sema (never by re-blessing the golden around the divergence), then re-bless."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "NOT FIXED — verified against the integrated tree. Default tier exits 0 and matches the golden, but 'jet run --release' exits 101 (internal compiler error), so the tiers diverge and the release path is an I2 violation. The sema-side acceptance evidently landed while the release lowering did not. The lane's own diff touched JIT spawn-body naming and a '(move |args| body) as rust_type' cast in codegen, which is where the release emit is going wrong — read that cast's generated output first."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "examples/features/functions/named_function_value.jet exits 0 on default and release with byte-identical stdout matching its golden; a named function value is accepted wherever a matching fn type is expected",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-29T10:24:45.578Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "sweep",
@@ -159251,7 +159310,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-28T21:18:09.814Z",
-      "updated": "2026-08-28T21:18:09.815Z",
+      "updated": "2026-08-29T10:58:50.991Z",
       "updatedBy": "fable"
     },
     {
@@ -159463,6 +159522,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "Tower shadow source and scale evidence are recorded in `dogfood/tower/METRICS.md` and `docs/audits/dogfood-tower-2026-08-29.md`. Fixed fixtures are 2026-08-26, 2026-08-27, and 2026-08-28, captured at `2026-08-29T02:50:10.825Z`, with combined hash `a6ad831ca668a435bafdec6cc414d06c63f0467cc6e7c533fdeeb0a70c4bc355`. Read-only API, UI, SSE, and mutation-refusal source exists. Latest review found no lowercase-hash or post-hash-reopen issue.\n\nStatic checks pass, but test and source builds fail with #2350/#2356, the directory build reports #2352, default and dev execution stop at #2252, and the formatter warning remains linked to #2357. Runtime, semantic, route, UI, SSE, and mutation parity remain unproven. Cards #2331, #2332, #2333, and #2327 remain open."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "2026-08-29 scope is Node 5,561 nonblank LOC / 65,817 tokens and Jet 5,063 / 41,634. Child cards are #2252, #2350, #2352, #2356, #2331, #2332, and #2333. Standing parent #2327 remains open; these logs make no blocked-criteria claim."
         },
         {
@@ -159498,7 +159562,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T01:19:51.255Z",
-      "updated": "2026-08-29T08:35:05.971Z",
+      "updated": "2026-08-29T10:55:53.719Z",
       "updatedBy": "fable"
     },
     {
@@ -159603,6 +159667,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "Source implements snapshot loading for `tower.json`, `history.json`, and `config.json`. Fixtures are 2026-08-26, 2026-08-27, and 2026-08-28. `captured_at` is `2026-08-29T02:50:10.825Z`; combined hash is `a6ad831ca668a435bafdec6cc414d06c63f0467cc6e7c533fdeeb0a70c4bc355`. Six files are read once, checked against lowercase SHA-256, retained, and parsed. Latest review found no lowercase-hash or post-hash-reopen issue. This is source and review evidence only.\n\n`jet fmt --check` passes. `jet check` exits 0 with 14 documented warnings. `jet test dogfood/tower` exits 101 after 27.78 s because of #2350/#2356. Semantic comparison and runtime parity remain unproven. Card remains open."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "2026-08-29, Node five-run medians are load 93.989 ms, projection 86.293 ms, combined 180.815 ms, serialize total 224.239 ms, RSS delta 134,463,488 bytes, output 19,094,088 bytes. Three-fixture hash: 83341cfafa7fd1946d6d093eaa9682220f05db9e183e19b58b46e973bd7cc8b5."
         }
       ],
@@ -159646,7 +159715,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T02:21:41.191Z",
-      "updated": "2026-08-29T08:35:03.000Z",
+      "updated": "2026-08-29T10:55:46.885Z",
       "updatedBy": "fable"
     },
     {
@@ -159665,6 +159734,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "Read-only GET source exists for state, card, closed, history, lint, version, and stream routes. Source rejects `POST`, `PUT`, `PATCH`, and `DELETE`. Board, Focus, Papercuts, and Status UI source also exists. These are source and review facts, not runtime proof.\n\n`jet run` exits 1 after 21.00 s with E0956 at `core.files.canonicalize` (#2252); port 8090 does not bind. `jet dev` waits 120 s; the banner and port do not appear, and it reports the same E0956. API, SSE, mutation-refusal, route, and browser UI behavior remain unavailable. Card remains open."
+        },
         {
           "at": "2026-08-29",
           "by": "fable",
@@ -159721,7 +159795,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T02:21:42.023Z",
-      "updated": "2026-08-29T08:35:04.305Z",
+      "updated": "2026-08-29T10:55:48.817Z",
       "updatedBy": "fable"
     },
     {
@@ -159739,7 +159813,13 @@
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "`dogfood/tower/METRICS.md` and `docs/audits/dogfood-tower-2026-08-29.md` record the final snapshot identity, source counts, baselines, checks, builds, and linked walls. Node totals are 5,761 LOC and 68,066 tokens. Jet totals are 6,565 LOC and 55,508 tokens: +804 LOC and -12,558 tokens. Node five-run medians are 106.954 ms fixture load, 69.708 ms project, 176.663 ms load plus project, 221.450 ms serialize, 140,087,296-byte RSS delta, and 19,094,088-byte serialized state.\n\n`node --check` and `jet fmt` pass. `jet check` exits 0 with 14 documented warnings. Test and source build exit 101 (#2350/#2356); directory build reports E1334 in 1,508 ms (#2352). Default run reports E0956 after 21.00 s with no bind (#2252). Dev reaches 120 s with no banner or port. The L0508 contradiction is tracked by #2357. Runtime RSS, latency, API, SSE, mutation, and browser UI data remain unavailable. Card remains open."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -159781,7 +159861,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T02:21:44.382Z",
-      "updated": "2026-08-29T02:21:44.382Z",
+      "updated": "2026-08-29T10:55:51.062Z",
       "updatedBy": "fable"
     },
     {
@@ -160304,6 +160384,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "Dispatch error on my side, not a defect: I ran #2339 and #2336 concurrently and both own scripts/agent/hardening-rig.mjs, so #2339 could prove nothing. The hardening-rig cards (#2335-#2344) share that one runner file and MUST be serialized behind #2336, which creates it. Correct order: #2335 contract, then #2336 runner, then layers #2337/#2341/#2342/#2343, then #2338 auto-carding, then #2339 dashboard, then #2340 red-team, then #2344 qualification."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "D-HARDENING-GATE1=A ratified by the owner in chat: 14 clean days, 10,000,000 valid cases, 100 valid mutations per eligible callable, and eight fresh lanes in waves of two. Plan now implements the fixed threshold."
         }
       ],
@@ -160391,7 +160476,7 @@
       "parentId": "c0lnb7zq",
       "needsAcceptance": false,
       "created": "2026-08-29T03:01:13.910Z",
-      "updated": "2026-08-29T08:19:38.233Z",
+      "updated": "2026-08-29T10:54:32.305Z",
       "updatedBy": "fable"
     },
     {
@@ -161232,6 +161317,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "`jet test dogfood/tower` exits 101 after 27.78 s in generated `build/run.rs`. `jet build dogfood/tower/run.jet` exits 101 after 24.88 s in generated `build/run.rs`. This blocks the parity suite and AOT proof."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "2026-08-29, jet build dogfood/tower/run.jet exits 101 after 19,785 ms. Cold and warm source builds before formatting exit 101 after 18,768 ms and 18,935 ms. One-line rebuild after a comment edit also exits 101 after 20,343 ms."
         },
         {
@@ -161288,7 +161378,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T04:16:42.113Z",
-      "updated": "2026-08-29T08:34:57.421Z",
+      "updated": "2026-08-29T10:57:12.717Z",
       "updatedBy": "fable"
     },
     {
@@ -161307,6 +161397,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "`jet build dogfood/tower` exits 1 after 1,508 ms with E1334. The source-file build is separate and is also blocked by #2350 and #2356."
+        },
         {
           "at": "2026-08-29",
           "by": "fable",
@@ -161355,7 +161450,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T04:17:43.964Z",
-      "updated": "2026-08-29T08:34:59.462Z",
+      "updated": "2026-08-29T10:57:14.824Z",
       "updatedBy": "fable"
     },
     {
@@ -161507,6 +161602,11 @@
         {
           "at": "2026-08-29",
           "by": "fable",
+          "text": "`jet test dogfood/tower` exits 101 after 27.78 s in generated `build/run.rs`. `jet build dogfood/tower/run.jet` exits 101 after 24.88 s in generated `build/run.rs`. This blocks the parity suite and AOT proof."
+        },
+        {
+          "at": "2026-08-29",
+          "by": "fable",
           "text": "2026-08-29, jet test dogfood/tower exits 101 after 22,673 ms because generated build/run.rs fails. The file build and one-line comment rebuild also exit 101, providing repeat failure evidence for the generated Rust/AOT path."
         }
       ],
@@ -161554,7 +161654,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T04:26:24.011Z",
-      "updated": "2026-08-29T08:35:01.546Z",
+      "updated": "2026-08-29T10:57:17.173Z",
       "updatedBy": "fable"
     },
     {
@@ -161572,7 +161672,13 @@
       "checkSteps": "Run `scripts/agent/jet-env jet fmt dogfood/tower/run.jet`; run `scripts/agent/jet-env jet check dogfood/tower`; run `fmt` again; run targeted formatter/linter tests for one-statement arrow loops and value-dropping loops.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-29",
+          "by": "fable",
+          "text": "`jet fmt --check` passes. `jet check` exits 0 but reports one L0508 at `dogfood/tower/run.jet:2775`. Keep this as formatter/linter contradiction evidence. Do not treat it as fixed."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -161616,7 +161722,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-29T09:46:46.793Z",
-      "updated": "2026-08-29T09:47:09.007Z",
+      "updated": "2026-08-29T10:57:19.270Z",
       "updatedBy": "fable"
     },
     {
@@ -222685,6 +222791,153 @@
   ],
   "events": [
     {
+      "at": "2026-08-29T10:58:50.991Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0szkpwk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:58:39.585Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0lxkhav",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-29T10:58:28.918Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0lxkhav",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-29T10:58:25.602Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0dnw49e",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-29T10:58:22.105Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0dnw49e",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-29T10:57:19.270Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0dompqv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:57:17.173Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0k0pur7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:57:14.825Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ndytaf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:57:12.717Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c08hj382",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:57:11.019Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0uua999",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:55:53.719Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0oakubh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:55:51.062Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0gmrvxt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:55:48.817Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0dmclkf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:55:46.885Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0zukf9a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:54:32.305Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c00acag6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:24:46.679Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0szkpwk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:24:45.579Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0szkpwk",
+      "note": "#1 examples/features/functions/named_function_value.jet exits 0"
+    },
+    {
+      "at": "2026-08-29T10:24:44.797Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0lxkhav",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:24:44.302Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0lxkhav",
+      "note": "#1 examples/features/text/decimal_exponents.jet exits 0 on defa"
+    },
+    {
+      "at": "2026-08-29T10:24:43.715Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0dnw49e",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-29T10:24:38.582Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0dnw49e",
+      "note": "#1 examples/features/math/exact_division_extremes.jet exits 0 o"
+    },
+    {
       "at": "2026-08-29T10:21:14.990Z",
       "by": "fable",
       "action": "card.update",
@@ -226036,153 +226289,6 @@
       "action": "card.add",
       "ref": "c0tb0crp",
       "note": "Core time types render structurally on default tier and ignore Debug/Pretty selectors on release"
-    },
-    {
-      "at": "2026-08-28T17:59:07.479Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c002uky2",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-28T17:59:06.234Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0onvszz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-28T17:59:05.224Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0onvszz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-28T17:59:04.819Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0onvszz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T17:59:04.358Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0o21kte",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T17:59:03.441Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0o21kte",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-28T17:59:01.983Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0o21kte",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-28T17:58:45.188Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0c8534w",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-28T17:58:43.255Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0c8534w",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-28T17:58:42.653Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0c8534w",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-28T17:58:42.084Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0c8534w",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-28T17:58:41.675Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0c8534w",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-28T17:58:16.083Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0c8534w",
-      "note": "#4 No direct unified-lock writer bypasses the atomic canonical "
-    },
-    {
-      "at": "2026-08-28T17:58:15.535Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0c8534w",
-      "note": "#3 Repeated update/env cycles leave .jet/lock byte-identical an"
-    },
-    {
-      "at": "2026-08-28T17:58:15.112Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0c8534w",
-      "note": "#2 Defensive law: jetpack refuses to write a lock > 1 MiB with "
-    },
-    {
-      "at": "2026-08-28T17:58:14.176Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0c8534w",
-      "note": "#1 Lock writes are atomic full-file rewrites of a canonical ded"
-    },
-    {
-      "at": "2026-08-28T17:39:42.750Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0i3dlbv",
-      "note": "Nested map literals corrupt data and ICE on every tier; map rendering emits malformed [:key first entry"
-    },
-    {
-      "at": "2026-08-28T17:35:34.665Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CONC-ALLNAMED1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-28T17:35:34.665Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0509i8n",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-28T17:35:34.665Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0509i8n",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-28T17:35:34.665Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0509i8n",
-      "note": "#2 syntax-decisions.md log entry"
     }
   ],
   "nextNum": 368,

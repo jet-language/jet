@@ -1,0 +1,10 @@
+// core-conformance: core.net.set_write_timeout
+use core.net as net
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    client :: net.tcp_connect(address) ?? panic("connect")
+    result :: net.set_write_timeout(&client, 1000) ?? panic("timeout")
+    print(result)
+}

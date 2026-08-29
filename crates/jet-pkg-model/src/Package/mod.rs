@@ -1116,15 +1116,7 @@ impl PackageFacts {
             let Some(sources) = parse_sources(&files) else {
                 return Ok(None);
             };
-            let mut targets = sources
-                .iter()
-                .filter(|source| source.path.parent() == Some(resolver.root()))
-                .flat_map(|source| {
-                    imported_module_targets(resolver.root(), source, parts[0], &sources)
-                })
-                .collect::<Vec<_>>();
-            targets.sort();
-            targets.dedup();
+            let targets = reachable_import_module_targets(resolver.root(), parts[0], &sources);
             let matches = if targets.len() == 1 {
                 sources
                     .iter()
@@ -3450,31 +3442,62 @@ fn unique_top_level_function<'a>(
     found
 }
 
-fn imported_module_targets(
+/// Follow the ordinary in-project import graph from root source files. Output
+/// references name the alias at any reachable import depth, while every edge
+/// still passes the same safe path and source-set checks as direct lookup.
+fn reachable_import_module_targets(
     root: &std::path::Path,
-    source: &ParsedSource,
     wanted: &str,
     sources: &[ParsedSource],
 ) -> Vec<std::path::PathBuf> {
+    let mut pending = sources
+        .iter()
+        .filter(|source| source.path.parent() == Some(root))
+        .map(|source| source.path.clone())
+        .collect::<Vec<_>>();
+    let mut visited = std::collections::BTreeSet::new();
     let mut targets = Vec::new();
-    for import in &source.program.imports {
-        if import.import_alias() != wanted
-            || matches!(&import.kind, crate::AST::ImportKind::Unqualified { .. })
-        {
+
+    while let Some(path) = pending.pop() {
+        if !visited.insert(normalize_discovery_path(&path)) {
             continue;
         }
-        for candidate in import_target_paths(root, &source.path, &import.kind) {
-            let Some(candidate) = normalize_safe_import_path(root, &candidate) else {
+        let Some(source) = sources.iter().find(|source| source.path == path) else {
+            continue;
+        };
+        for import in &source.program.imports {
+            if matches!(&import.kind, crate::AST::ImportKind::Unqualified { .. }) {
                 continue;
-            };
-            if let Some(target) = sources.iter().find(|other| {
-                normalize_discovery_path(&other.path) == candidate
-            }) {
-                targets.push(target.path.clone());
             }
+            let resolved = resolved_import_targets(root, source, &import.kind, sources);
+            if import.import_alias() == wanted {
+                targets.extend(resolved.iter().cloned());
+            }
+            pending.extend(resolved);
         }
     }
+
+    targets.sort();
+    targets.dedup();
     targets
+}
+
+fn resolved_import_targets(
+    root: &std::path::Path,
+    source: &ParsedSource,
+    kind: &crate::AST::ImportKind,
+    sources: &[ParsedSource],
+) -> Vec<std::path::PathBuf> {
+    import_target_paths(root, &source.path, kind)
+        .into_iter()
+        .filter_map(|candidate| normalize_safe_import_path(root, &candidate))
+        .filter_map(|candidate| {
+            sources
+                .iter()
+                .find(|other| normalize_discovery_path(&other.path) == candidate)
+                .map(|target| target.path.clone())
+        })
+        .collect()
 }
 
 fn imported_source_paths(
@@ -3486,13 +3509,8 @@ fn imported_source_paths(
         .program
         .imports
         .iter()
-        .flat_map(|import| import_target_paths(root, &source.path, &import.kind))
-        .filter_map(|path| normalize_safe_import_path(root, &path))
-        .filter(|path| {
-            sources
-                .iter()
-                .any(|source| normalize_discovery_path(&source.path) == *path)
-        })
+        .filter(|import| !matches!(&import.kind, crate::AST::ImportKind::Unqualified { .. }))
+        .flat_map(|import| resolved_import_targets(root, source, &import.kind, sources))
         .collect()
 }
 
@@ -4089,6 +4107,35 @@ outputs: .{ app: .Executable.{ entry: launch } }"#,
         std::fs::write(
             dir.join("src/cli/main.jet"),
             "pub fn cli_run() {}\nfn run() { cli_run() }\n",
+        )
+        .unwrap();
+        let facts = PackageFacts::parse(
+            r#"name: "demo"
+outputs: .{ app: .Executable.{ entry: app.cli_run } }"#,
+            "package.jet",
+        )
+        .unwrap();
+        let output = facts.outputs.get("app").unwrap();
+        assert_eq!(
+            facts.entry_path(&dir, output).unwrap(),
+            Some(dir.join("src/cli/main.jet"))
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn output_entry_follows_a_nested_import_graph() {
+        let dir = temp_dir("output-entry-import-graph");
+        std::fs::create_dir_all(dir.join("src/cli")).unwrap();
+        std::fs::write(dir.join("entry.jet"), "use \"runner\" as runner\n").unwrap();
+        std::fs::write(
+            dir.join("runner.jet"),
+            "use \"src/cli/main\" as app\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("src/cli/main.jet"),
+            "pub fn cli_run() {}\n",
         )
         .unwrap();
         let facts = PackageFacts::parse(

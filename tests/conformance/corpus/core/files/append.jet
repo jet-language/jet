@@ -1,0 +1,12 @@
+// core-conformance: core.files.append
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("files-append")
+    path :: Path.from(root).join("fixture.txt")
+    files.write(path, "fixture") ?? panic("seed")
+    result :: files.append(path) ?? panic("append")
+    print(result.read_line() ?? panic("read"))
+    files.remove_all(root) ?? panic("cleanup")
+}

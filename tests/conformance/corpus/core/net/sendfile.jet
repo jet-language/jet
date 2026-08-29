@@ -1,0 +1,15 @@
+// core-conformance: core.net.sendfile
+use core.files as files
+use core.net as net
+
+fn run() {
+    scratch :: files.temp_file("jet-net-sendfile") ?? panic("temp file")
+    files.write(scratch.path, "file") ?? panic("write file")
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    client :: net.tcp_connect(address) ?? panic("connect")
+    server :: net.tcp_accept(listener) ?? panic("accept")
+    result :: net.sendfile(&client, scratch.path) ?? panic("sendfile")
+    received :: server.read_text(4) ?? panic("read")
+    print(result > 0 && received == "file")
+}

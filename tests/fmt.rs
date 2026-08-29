@@ -2991,6 +2991,17 @@ fn effect_control_arrows_format_as_one_statement_bodies() {
 }
 
 #[test]
+fn fmt_value_dropping_loop_body_is_canonical_and_stable() {
+    let src = "fn run() {\n    values := [1, 2]\n    loop v in values { v * 2 }\n}\n";
+    let once = jet::format_source(src).expect("value-dropping loop should format");
+    assert!(once.contains("loop v in values -> v * 2"), "{once}");
+    assert_eq!(
+        once,
+        jet::format_source(&once).expect("canonical value-dropping loop should reformat")
+    );
+}
+
+#[test]
 fn loop_headers_use_in_binding_and_comma_clauses() {
     let src = "fn run() {\n    loop item in [1, 2, 3], 2 { print(item) }\n    loop (key, value) in counts { print(key) }\n    loop i in 0..<3 { print(i) }\n}\n";
     let once = jet::format_source(src).expect("fmt should accept canonical loop headers");

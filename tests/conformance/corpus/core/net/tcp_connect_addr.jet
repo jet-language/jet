@@ -1,0 +1,9 @@
+// core-conformance: core.net.tcp_connect_addr
+use core.net as net
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    result :: net.tcp_connect_addr(address) ?? panic("connect")
+    print(net.socket_host(net.tcp_local_socket_addr(result) ?? panic("local address")))
+}

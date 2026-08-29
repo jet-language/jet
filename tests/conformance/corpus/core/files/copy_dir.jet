@@ -1,0 +1,17 @@
+// core-conformance: core.files.copy_dir
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("files-copy-dir")
+    source :: Path.from(root).join("source")
+    source_file :: source.join("fixture.txt")
+    destination :: Path.from(root).join("destination")
+    destination_file :: destination.join("fixture.txt")
+    files.create_dir(source) ?? panic("source")
+    files.write(source_file, "fixture") ?? panic("seed")
+    result :: files.copy_dir(source, destination)
+    print(result)
+    assert((files.exists(destination_file) == true))
+    files.remove_all(root) ?? panic("cleanup")
+}

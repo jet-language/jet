@@ -3823,11 +3823,32 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         if func.name == "recurse" && self.call_depth < 3 {
+            let stmt_shapes: Vec<_> = func
+                .body
+                .iter()
+                .map(std::mem::discriminant)
+                .collect();
+            let return_shapes: Vec<_> = func
+                .body
+                .iter()
+                .filter_map(|stmt| match stmt {
+                    TStmt::Return(Some(expr)) => Some((
+                        expr.ty.clone(),
+                        std::mem::discriminant(&expr.kind),
+                    )),
+                    _ => None,
+                })
+                .collect();
             eprintln!(
-                "[DEBUG-card2358] run_func depth={} body={} chain={}",
+                "[DEBUG-card2358] run_func depth={} body={} chain={} ret={:?} params={} body_len={} stmts={:?} returns={:?}",
                 self.call_depth,
                 recursive_body(func).is_some(),
                 recursive_chain_supported(&self.funcs, func),
+                func.ret,
+                func.params.len(),
+                func.body.len(),
+                stmt_shapes,
+                return_shapes,
             );
         }
         // D-MEMO1=A: the interpreter adapter marshals the argument tuple to the

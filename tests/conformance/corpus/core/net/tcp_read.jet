@@ -1,0 +1,12 @@
+// core-conformance: core.net.tcp_read
+use core.net as net
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    client :: net.tcp_connect(address) ?? panic("connect")
+    server :: net.tcp_accept(listener) ?? panic("accept")
+    client.write_text("read") ?? panic("write")
+    result :: net.tcp_read(&server) ?? panic("read")
+    print(result)
+}
