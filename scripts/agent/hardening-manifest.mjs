@@ -481,6 +481,137 @@ function observerCalls(code) {
   return out;
 }
 
+function expressionCalls(code) {
+  const out = [];
+  const pattern = /(?<![A-Za-z0-9_.])(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)*[A-Za-z_][A-Za-z0-9_]*\s*(?:<[^{}]*>\s*)?\(/g;
+  for (const match of code.matchAll(pattern)) {
+    const open = match.index + match[0].lastIndexOf("(");
+    try {
+      out.push({
+        start: match.index,
+        open,
+        close: matching(code, open, "(", ")"),
+        callee: match[0].slice(0, match[0].lastIndexOf("(")).trim().replace(/\s+/g, ""),
+      });
+    } catch { /* invalid call */ }
+  }
+  return out;
+}
+
+function bindingExpressionContinues(code, newline) {
+  let next = newline + 1;
+  while (next < code.length && /[ \t\r]/.test(code[next])) next += 1;
+  if (/^(?:\?\?|\.|,|&&|\|\||[+\-*\/%<>=])/.test(code.slice(next))) return true;
+  let previous = newline - 1;
+  while (previous >= 0 && /[ \t\r]/.test(code[previous])) previous -= 1;
+  return /(?:\?\?|[,(+\-*\/%<>=])$/.test(code.slice(Math.max(0, previous - 2), previous + 1));
+}
+
+function bindingExpressionEnd(code, start) {
+  let round = 0;
+  let square = 0;
+  let curly = 0;
+  for (let index = start; index < code.length; index += 1) {
+    const char = code[index];
+    if (char === "(") round += 1;
+    else if (char === ")") round -= 1;
+    else if (char === "[") square += 1;
+    else if (char === "]") square -= 1;
+    else if (char === "{") curly += 1;
+    else if (char === "}") {
+      if (round === 0 && square === 0 && curly === 0) return index;
+      curly -= 1;
+    } else if (char === "\n" && round === 0 && square === 0 && curly === 0 && !bindingExpressionContinues(code, index)) return index;
+    else if (char === ";" && round === 0 && square === 0 && curly === 0) return index;
+  }
+  return code.length;
+}
+
+function bindingDeclarations(code, observers) {
+  const out = [];
+  const pattern = /(?:^|[{};])\s*(@?[A-Za-z_][A-Za-z0-9_]*)\s*(?:::|:=)\s*/gm;
+  for (const match of code.matchAll(pattern)) {
+    const start = match.index + match[0].indexOf(match[1]);
+    out.push({ name: match[1], start, rhsStart: match.index + match[0].length });
+  }
+  for (let index = 0; index < out.length; index += 1) {
+    const declaration = out[index];
+    const next = out[index + 1]?.start ?? code.length;
+    const observer = observers.find(({ open }) => open >= declaration.rhsStart)?.open ?? code.length;
+    declaration.end = Math.min(next, observer, bindingExpressionEnd(code, declaration.rhsStart));
+  }
+  return out;
+}
+
+function nearbyOperator(code, start, end, containerStart, containerEnd) {
+  const before = code.slice(containerStart, start).replace(/[\s()]+$/g, "");
+  const after = code.slice(end, containerEnd).replace(/^[\s()]+/g, "");
+  if (/^(?:\?\?|===|!==|==|!=)/.test(after) || /(?:\?\?|===|!==|==|!=)$/.test(before)) {
+    return after.startsWith("??") || before.endsWith("??") ? "error-propagation" : "equality";
+  }
+  return null;
+}
+
+function valueContext(code, start, end, containerStart, containerEnd, calls, observers, allowPropagation = true) {
+  const enclosing = calls
+    .filter(({ open, close }) => open < start && end <= close && !observers.some((observer) => observer.open === open))
+    .sort((left, right) => (left.close - left.open) - (right.close - right.open))[0] || null;
+  const member = code.slice(end, containerEnd).match(/^\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)/)?.[1] || null;
+  const operator = nearbyOperator(code, start, end, containerStart, containerEnd);
+  const usableOperator = operator === "error-propagation" && !allowPropagation ? null : operator;
+  return {
+    aware: Boolean(enclosing || member || usableOperator),
+    follow_up: member || enclosing?.callee || usableOperator || null,
+  };
+}
+
+function traceBinding(code, binding, after, opaque, declarations, observers, calls, rootBinding, inheritedAware = false, inheritedFollowUp = null, seen = new Set()) {
+  const traceKey = `${binding}:${after}`;
+  if (seen.has(traceKey)) return null;
+  seen.add(traceKey);
+  const escaped = binding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const use = new RegExp(`(?<![A-Za-z0-9_])${escaped}(?![A-Za-z0-9_])`, "g");
+  for (const match of code.matchAll(use)) {
+    const start = match.index;
+    if (start <= after) continue;
+    const observer = observers.find(({ open, close }) => open < start && start < close);
+    if (observer) {
+      const context = valueContext(code, start, start + binding.length, observer.open + 1, observer.close, calls, observers);
+      const aware = inheritedAware || context.aware;
+      if (!opaque || aware) {
+        const followUp = inheritedFollowUp || context.follow_up;
+        return {
+          kind: aware ? "follow-up" : "primitive",
+          operation: observer.operation,
+          binding: rootBinding,
+          follow_up: followUp,
+          type_aware: true,
+          observed_type: aware ? "derived-primitive" : "declared-return-value",
+        };
+      }
+      continue;
+    }
+    const next = declarations.find((declaration) => declaration.start >= after && declaration.rhsStart <= start && start < declaration.end);
+    if (!next) continue;
+    const context = valueContext(code, start, start + binding.length, next.rhsStart, next.end, calls, observers);
+    const traced = traceBinding(
+      code,
+      next.name,
+      next.end,
+      opaque,
+      declarations,
+      observers,
+      calls,
+      rootBinding,
+      inheritedAware || context.aware,
+      inheritedFollowUp || context.follow_up,
+      seen,
+    );
+    if (traced) return traced;
+  }
+  return null;
+}
+
 function likelyOpaque(module, member) {
   return /(?:^|\.)(open|connect|listen|accept|bind|stdin|stdout|stderr|reader|writer|session|socket|request|response|handle|lock|watch|spawn|transaction|cursor|stream|server|client)$/.test(`${module}.${member}`);
 }
@@ -502,39 +633,49 @@ function seedInspection(key, source) {
   const callOpen = callStart + callMatches[0][0].lastIndexOf("(");
   let callClose;
   try { callClose = matching(code, callOpen, "(", ")"); } catch { return { errors: [...errors, `unbalanced ${key} call`], sink: null }; }
-  const lineStart = code.lastIndexOf("\n", callStart) + 1;
-  const binding = code.slice(lineStart, callStart).match(/(?:^|[{};])\s*(@?[A-Za-z_][A-Za-z0-9_]*)\s*(?:::|:=)\s*$/)?.[1] || null;
   const observers = observerCalls(code);
-  if (!binding) {
-    const observer = observers.find(({ open, close }) => open < callStart && callStart < close);
-    if (!observer) errors.push("direct result has no observable sink");
-    if (likelyOpaque(module, member)) errors.push("opaque result needs a follow-up operation before observation");
+  const calls = expressionCalls(code);
+  const directObserver = observers.find(({ open, close }) => open < callStart && callStart < close);
+  if (directObserver) {
+    const context = valueContext(code, callStart, callClose + 1, directObserver.open + 1, directObserver.close, calls, observers);
+    if (likelyOpaque(module, member) && !context.aware) errors.push("opaque result needs a follow-up operation before observation");
     return {
       errors,
-      sink: observer ? { kind: "call-result", operation: observer.operation, type_aware: true, observed_type: "return-value" } : null,
+      sink: {
+        kind: "call-result",
+        operation: directObserver.operation,
+        follow_up: context.follow_up,
+        type_aware: true,
+        observed_type: context.aware ? "derived-primitive" : "return-value",
+      },
     };
   }
-  if (binding.startsWith("_")) errors.push(`result is bound to discard name ${binding}`);
-  const use = new RegExp(`(?<![A-Za-z0-9_])${binding}(?![A-Za-z0-9_])`);
-  const observer = observers.find(({ open, close }) => open > callClose && use.test(code.slice(open + 1, close)));
-  if (!observer) {
-    errors.push(`bound result ${binding} is never consumed by print/eprint/assert`);
+  const declarations = bindingDeclarations(code, observers);
+  const binding = declarations.find(({ rhsStart, end }) => rhsStart <= callStart && callStart < end) || null;
+  if (!binding) {
+    errors.push("direct result has no observable sink");
+    if (likelyOpaque(module, member)) errors.push("opaque result needs a follow-up operation before observation");
     return { errors, sink: null };
   }
-  const expression = code.slice(observer.open + 1, observer.close);
-  const followUp = expression.match(new RegExp(`${binding}\\s*\\.\\s*([A-Za-z_][A-Za-z0-9_]*)`))?.[1] || null;
-  if (likelyOpaque(module, member) && !followUp) errors.push("opaque result needs a follow-up operation before observation");
-  return {
-    errors,
-    sink: {
-      kind: followUp ? "follow-up" : "primitive",
-      operation: observer.operation,
-      binding,
-      follow_up: followUp,
-      type_aware: true,
-      observed_type: followUp ? "derived-primitive" : "declared-return-value",
-    },
-  };
+  if (binding.name.startsWith("_")) errors.push(`result is bound to discard name ${binding.name}`);
+  const sourceContext = valueContext(code, callStart, callClose + 1, binding.rhsStart, binding.end, calls, observers, false);
+  const sink = traceBinding(
+    code,
+    binding.name,
+    binding.end,
+    likelyOpaque(module, member),
+    declarations,
+    observers,
+    calls,
+    binding.name,
+    sourceContext.aware,
+    sourceContext.follow_up,
+  );
+  if (!sink) {
+    errors.push(`bound result ${binding.name} is never consumed by print/eprint/assert`);
+    return { errors, sink: null };
+  }
+  return { errors, sink };
 }
 
 function parseExclusions(root) {
@@ -1307,6 +1448,29 @@ function hostileFixtures() {
   stale.source_snapshot.hash = sha256("changed");
   rehash(stale);
   if (validateManifest(stale, { currentSnapshotHash: manifest.source_snapshot.hash }).ok) fail("stale snapshot accepted");
+  const inspectFixture = (body) => seedInspection(
+    "core.test.open",
+    ["// core-conformance: core.test.open", "use core.test as api", "", "fn run() {", ...body.split("\n").map((line) => `    ${line}`), "}"].join("\n"),
+  );
+  for (const [name, body] of [
+    ["nested", `print(api.inspect(api.open("value")))`],
+    ["propagation", `print(api.open("value") ?? panic("open"))`],
+    ["equality", `value :: api.open("value") ?? panic("open")\nprint(value == "value")`],
+    ["argument", `value :: api.open("value") ?? panic("open")\nprint(api.inspect(value))`],
+    ["method", `value :: api.open("value") ?? panic("open")\nprint(value.len())`],
+    ["transitive", `value :: api.open("value") ?? panic("open")\nalias :: value\nprint(alias.len())`],
+  ]) {
+    const result = inspectFixture(body);
+    if (result.errors.length) fail(`accepted observer fixture rejected: ${name}`);
+  }
+  for (const [name, body] of [
+    ["discard", `_ :: api.open("value") ?? panic("open")\nprint("done")`],
+    ["compile-only", `api.open("value")`],
+    ["unused", `value :: api.open("value") ?? panic("open")\nprint("done")`],
+    ["opaque-direct", `print(api.open("value"))`],
+  ]) {
+    if (inspectFixture(body).errors.length === 0) fail(`rejected observer fixture accepted: ${name}`);
+  }
   console.log("hardening manifest hostile fixtures: PASS");
   return 0;
 }
