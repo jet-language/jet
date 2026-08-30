@@ -10520,6 +10520,68 @@ impl LowerCtx<'_, '_> {
         Ok(val)
     }
 
+    fn lower_module_call(
+        &mut self,
+        target: &str,
+        args: &[TCallArg],
+        expr: &TExpr,
+        missing: String,
+    ) -> Result<Value, String> {
+        let func_id = self.func_ids.get(target).copied().ok_or(missing)?;
+        let arg_vals: Result<Vec<_>, _> = args.iter().map(|arg| self.lower_call_arg(arg)).collect();
+        let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+        let call = self.b.ins().call(func_ref, &arg_vals?);
+        let call_value = self.b.inst_results(call).first().copied();
+        self.emit_trap_check()?;
+
+        let adapted_ok = self.meta.target_return(target).and_then(|ret| match ret {
+            Type::Result { ok, .. }
+                if !matches!(&expr.ty, Type::Result { .. }) && &expr.ty == ok.as_ref() =>
+            {
+                Some(ok.as_ref().clone())
+            }
+            _ => None,
+        });
+        let Some(ok_ty) = adapted_ok else {
+            let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
+            return Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
+        };
+
+        let carrier = call_value.ok_or_else(|| {
+            format!("jit module call target `{target}` has no Result carrier")
+        })?;
+        let payload_clif = if matches!(&expr.ty, Type::Named(name) if name == "Unit")
+            || matches!(&expr.ty, Type::Tuple(fields) if fields.is_empty())
+        {
+            types::I8
+        } else {
+            self.meta
+                .clif_ty(&expr.ty)
+                .or_else(|| clif_ty(&expr.ty))
+                .ok_or_else(|| format!("jit module call Result payload unsupported: {:?}", expr.ty))?
+        };
+        let is_ok = self.call_host(self.host.result_is_ok, &[carrier]);
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, payload_clif);
+        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        self.emit_lexical_exit(Some(carrier), false, self.shield_depth)?;
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let payload = self.result_payload(carrier, &ok_ty)?;
+        self.track_compute_value(payload, &ok_ty)?;
+        self.b.ins().jump(merge, &[payload]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
     fn lower_fn_call(
         &mut self,
         callee: Value,
@@ -20948,36 +21010,21 @@ impl LowerCtx<'_, '_> {
                     }
                 }
             },
-            TExprKind::ModuleCall { form, args, .. } => match form {
-                TModuleCallForm::InlineMangled { mangled } => {
-                    let func_id = self
-                        .func_ids
-                        .get(mangled)
-                        .copied()
-                        .ok_or_else(|| "jit module call unsupported".to_string())?;
-                    let arg_vals: Result<Vec<_>, _> =
-                        args.iter().map(|arg| self.lower_call_arg(arg)).collect();
-                    let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                    let call = self.b.ins().call(func_ref, &arg_vals?);
-                    let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
-                    self.emit_trap_check()?;
-                    Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
-                }
-                TModuleCallForm::Qualified { rust_mod, rust_fn } => {
-                    let key = format!("{rust_mod}::{rust_fn}");
-                    let func_id =
-                        self.func_ids.get(&key).copied().ok_or_else(|| {
-                            format!("jit file-module call target missing `{key}`")
-                        })?;
-                    let arg_vals: Result<Vec<_>, _> =
-                        args.iter().map(|arg| self.lower_call_arg(arg)).collect();
-                    let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                    let call = self.b.ins().call(func_ref, &arg_vals?);
-                    let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
-                    self.emit_trap_check()?;
-                    Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
-                }
-            },
+            TExprKind::ModuleCall { form, args, .. } => {
+                let (target, missing) = match form {
+                    TModuleCallForm::InlineMangled { mangled } => {
+                        (mangled.clone(), "jit module call unsupported".to_string())
+                    }
+                    TModuleCallForm::Qualified { rust_mod, rust_fn } => {
+                        let key = format!("{rust_mod}::{rust_fn}");
+                        (
+                            key,
+                            format!("jit file-module call target missing `{rust_mod}::{rust_fn}`"),
+                        )
+                    }
+                };
+                self.lower_module_call(&target, args, expr, missing)
+            }
             TExprKind::ExternCall { wrapper, args, .. } => {
                 in_own_frame(|| -> Result<Value, String> {
                     let wid = self.runtime.heap.alloc_string(wrapper.clone());

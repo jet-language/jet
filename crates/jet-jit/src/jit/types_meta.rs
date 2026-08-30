@@ -741,6 +741,7 @@ pub(crate) struct JitMeta<'a> {
     distinct_ranges: &'a HashMap<String, (i64, i64)>,
     result_option_targets: HashSet<String>,
     result_option_params: HashSet<(String, usize)>,
+    target_returns: HashMap<String, Type>,
     reflect_paths: &'a HashMap<String, String>,
     /// D-MEMO1=A: the ratified cache bound of each `#Memo fn`, so `f.cache()`
     /// can hand the one Prelude memo store the same bound AOT's
@@ -770,6 +771,15 @@ impl<'a> JitMeta<'a> {
             distinct_ranges: &program.distinct_ranges,
             result_option_targets,
             result_option_params,
+            target_returns: program
+                .funcs
+                .iter()
+                .filter_map(|func| {
+                    func.ret
+                        .as_ref()
+                        .map(|ret| (func.name.clone(), ret.clone()))
+                })
+                .collect(),
             reflect_paths: &program.reflect_paths,
             memo_bounds: program
                 .funcs
@@ -786,6 +796,10 @@ impl<'a> JitMeta<'a> {
     pub(crate) fn result_option_param(&self, function: &str, index: usize) -> bool {
         self.result_option_params
             .contains(&(function.to_string(), index))
+    }
+
+    pub(crate) fn target_return(&self, name: &str) -> Option<&Type> {
+        self.target_returns.get(name)
     }
 
     pub(crate) fn memo_dependents(&self, owner: &str, source: &str) -> &[String] {
