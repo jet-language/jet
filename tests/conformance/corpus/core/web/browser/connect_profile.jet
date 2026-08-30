@@ -1,0 +1,9 @@
+// core-conformance: core.web.browser.connect_profile
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(1000) ?? panic("timeout")
+    result :: browser.connect_profile("ws://127.0.0.1:1/session", profile, timeout)
+    print(result == .Err(_))
+}

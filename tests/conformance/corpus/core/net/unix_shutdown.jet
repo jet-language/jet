@@ -1,0 +1,11 @@
+// core-conformance: core.net.unix_shutdown
+use core.net as net
+
+fn run() {
+    listener :: net.unix_listen("/tmp/jet-conformance-unix-shutdown.sock") ?? panic("listen")
+    client :: net.unix_connect("/tmp/jet-conformance-unix-shutdown.sock") ?? panic("connect")
+    server :: net.unix_accept(listener) ?? panic("accept")
+    result :: net.unix_shutdown(&client, .Write) ?? panic("shutdown")
+    print(result)
+    net.unix_close(&server) ?? panic("server close")
+}

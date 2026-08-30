@@ -1,0 +1,14 @@
+// core-conformance: core.game.run
+use core.game as game
+
+fn run() {
+    scene := game.Scene.new("conformance")
+    scene.input.bind("tick", "Space")
+    scene.on_frame((frame) -> {
+        if frame.input.pressed("tick") -> print(frame.index)
+    })
+    replay :: game.Replay.record("runs/conformance.jetreplay")
+    backend :: game.Backend.headless()
+    result :: game.run(scene, replay: replay, backend: backend)
+    print(result)
+}

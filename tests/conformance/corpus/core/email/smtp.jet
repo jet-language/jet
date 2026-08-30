@@ -1,0 +1,17 @@
+// core-conformance: core.email.smtp
+use core.email as email
+
+fn run() {
+    config :: email.SMTPConfig{
+        host: "localhost",
+        port: 2525,
+        security: .StartTls,
+        auth: .None,
+        recipient_policy: .RequireAll,
+        trust: .System,
+        limits: email.Limits.safe(),
+        dkim: None
+    }
+    result :: email.smtp(config)
+    print(result)
+}

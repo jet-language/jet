@@ -1,0 +1,17 @@
+// core-conformance: core.crypto.vault.prepare_import_wrapped
+use core.crypto as crypto
+use core.crypto.vault as vault
+
+fn run() -[Secret]> {
+    current :: vault.current<crypto.SigningKey>("__core_conformance_import_wrapped") ?? return
+    if current == .Val(reference) -> {
+        identity :: crypto.X25519SecretKey.new_random() ?? return
+        recipient :: identity.public_key()
+        wrapped :: vault.export_to_recipients<crypto.SigningKey>(&reference, [recipient]) ?? return
+        unlock :: vault.KeyUnlock.Recipient(&identity)
+        result :: vault.prepare_import_wrapped<crypto.SigningKey>("__core_conformance_restored", wrapped, unlock)
+        print(result == .Err(_))
+    } else -> {
+        print(true)
+    }
+}

@@ -1,0 +1,10 @@
+// core-conformance: core.crypto.vault.commit_generate
+use core.crypto as crypto
+use core.crypto.vault as vault
+
+fn run() -[Secret]> {
+    plan :: vault.prepare_generate<crypto.SigningKey>("__core_conformance_generate") ?? return
+    write :: vault.authorize_write(&plan, "fixed generate authorization") ?? return
+    result :: vault.commit_generate(^write, ^plan)
+    print(result == .Err(_))
+}

@@ -1,0 +1,13 @@
+// core-conformance: core.encoding.jsonl.reader
+use core.encoding.jsonl as jsonl
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("jsonl-reader")
+    path :: Path.from(root).join("values.jsonl")
+    files.write(path, "{{\"a\":1}}\n") ?? panic("fixture")
+    input :: files.open(path) ?? panic("open")
+    reader :: jsonl.reader(^input) ?? panic("reader")
+    print(reader.next() ?? panic("next"))
+}

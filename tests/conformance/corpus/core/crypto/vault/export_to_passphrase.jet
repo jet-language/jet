@@ -1,0 +1,14 @@
+// core-conformance: core.crypto.vault.export_to_passphrase
+use core.crypto as crypto
+use core.crypto.vault as vault
+
+fn run() -[Secret]> {
+    current :: vault.current<crypto.SigningKey>("__core_conformance_export_passphrase") ?? return
+    if current == .Val(reference) -> {
+        passphrase :: crypto.Secret.from_text("a sixteen byte recovery phrase")
+        result :: vault.export_to_passphrase<crypto.SigningKey>(&reference, &passphrase)
+        print(result == .Err(_))
+    } else -> {
+        print(true)
+    }
+}

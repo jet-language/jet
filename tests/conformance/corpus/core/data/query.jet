@@ -1,0 +1,17 @@
+// core-conformance: core.data.query
+use core.data as data
+
+#Codable
+struct Sale {
+    item: String
+    quantity: Int
+}
+
+fn run() {
+    rows :: [Sale]{
+        Sale{item: "small", quantity: 1},
+        Sale{item: "large", quantity: 3}
+    }
+    result :: data.query(rows, SQL{"SELECT * FROM sales WHERE quantity > 1 LIMIT 1"}) ?? panic("query")
+    print(result[0].item)
+}

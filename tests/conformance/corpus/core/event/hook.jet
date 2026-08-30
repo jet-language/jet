@@ -1,0 +1,11 @@
+// core-conformance: core.event.hook
+use core.event as event
+
+fn run() {
+    scope :: event.scope()
+    hook :: event.hook<Int, String>("fallback")
+    sub :: hook.on(scope, value -> "seen {value}")
+    print(hook.listener_count())
+    print(hook.run(3, "unused"))
+    print(sub.is_active())
+}

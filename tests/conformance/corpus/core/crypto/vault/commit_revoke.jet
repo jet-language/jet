@@ -1,0 +1,15 @@
+// core-conformance: core.crypto.vault.commit_revoke
+use core.crypto as crypto
+use core.crypto.vault as vault
+
+fn run() -[Secret]> {
+    current :: vault.current<crypto.SigningKey>("__core_conformance_commit_revoke") ?? return
+    if current == .Val(reference) -> {
+        plan :: vault.prepare_revoke<crypto.SigningKey>(&reference, "fixed commit revoke reason") ?? return
+        write :: vault.authorize_write(&plan, "fixed commit revoke authorization") ?? return
+        result :: vault.commit_revoke<crypto.SigningKey>(^write, ^plan)
+        print(result == .Err(_))
+    } else -> {
+        print(true)
+    }
+}

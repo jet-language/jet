@@ -1,0 +1,15 @@
+// core-conformance: core.data.csv_reader
+use core.data as data
+use core.files as files
+
+#Codable
+struct Record {
+    value: Int
+}
+
+fn run() {
+    input :: files.open("/dev/null") ?? panic("open")
+    limits := data.DataLimits.safe()
+    reader :: data.csv_reader<Record>(input, limits) ?? panic("reader")
+    print((reader.next() ?? panic("next")) == None)
+}

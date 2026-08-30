@@ -1,0 +1,13 @@
+// core-conformance: core.crypto.vault.prepare_retire
+use core.crypto as crypto
+use core.crypto.vault as vault
+
+fn run() -[Secret]> {
+    current :: vault.current<crypto.SigningKey>("__core_conformance_lifecycle") ?? return
+    if current == .Val(reference) -> {
+        result :: vault.prepare_retire<crypto.SigningKey>(&reference, "fixed retire reason")
+        print(result == .Err(_))
+    } else -> {
+        print(true)
+    }
+}

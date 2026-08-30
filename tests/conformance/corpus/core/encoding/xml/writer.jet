@@ -1,0 +1,43 @@
+// core-conformance: core.encoding.xml.writer
+use core.encoding.xml as xml
+use core.files as files
+use core.testing as testing
+
+fn xml_name(local: String) DataTree -> {
+    return DataTree.Object([
+        "raw": DataTree.Text(~local),
+        "prefix": DataTree.Null,
+        "local": DataTree.Text(~local),
+        "namespace_uri": DataTree.Null
+    ])
+}
+
+fn run() {
+    root :: testing.temp_dir("xml-writer")
+    path :: Path.from(root).join("value.xml")
+    output :: files.create(path) ?? panic("create")
+    writer :: xml.writer(^output) ?? panic("writer")
+    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_start"), "encoding": DataTree.Null, "bom": DataTree.Array([])])) ?? panic("document_start")
+    semantic :: DataTree.Object([
+        "name": xml_name("r"),
+        "namespaces": DataTree.Array([]),
+        "attributes": DataTree.Array([]),
+        "empty_style": DataTree.Text("empty")
+    ])
+    open_lexical :: DataTree.Object([
+        "raw_text": DataTree.Null,
+        "raw_bytes": DataTree.Null,
+        "semantic": semantic
+    ])
+    root_event :: DataTree.Object([
+        "$xml_event": DataTree.Text("element_start"),
+        "name": xml_name("r"),
+        "namespaces": DataTree.Array([]),
+        "attributes": DataTree.Array([]),
+        "empty_style": DataTree.Text("empty"),
+        "open_lexical": open_lexical
+    ])
+    writer.write(root_event) ?? panic("element_start")
+    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_end")])) ?? panic("document_end")
+    print(writer.finish())
+}

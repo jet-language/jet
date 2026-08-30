@@ -1,0 +1,19 @@
+// core-conformance: core.http.get
+use core.http as http
+use core.net as net
+use core.tasks as tasks
+
+fn run() {
+    (sender, ch) :: channel<String>()
+    t :: task {
+        listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+        sender.send(listener.local_addr() ?? panic("address"))
+        stream :: listener.accept() ?? panic("accept")
+        stream.read_text(8192) ?? panic("request")
+        net.tcp_reply(^stream, "200 OK", "witness") ?? panic("reply")
+    }
+    addr :: ch.receive() ?? panic("address")
+    response :: http.get("http://{addr}/") ?? panic("get")
+    print(response.body().text(1024) ?? panic("body"))
+    t.join() ?? panic("server")
+}

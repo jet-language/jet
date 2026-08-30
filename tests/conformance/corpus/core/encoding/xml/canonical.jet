@@ -1,0 +1,9 @@
+// core-conformance: core.encoding.xml.canonical
+use core.encoding.xml as xml
+
+fn run() {
+    document :: xml.parse("<r b=\"2\" a=\"1\"><x/></r>") ?? panic("parse")
+    options :: xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }
+    result :: xml.canonical(document, options) ?? panic("canonical")
+    print(result)
+}

@@ -1,0 +1,17 @@
+// core-conformance: core.crypto.vault.commit_import_x25519
+use core.crypto.vault as vault
+
+fn run() -[Secret]> {
+    #Unsafe("restore a fixed X25519 secret into the vault") {
+        bytes :: [U8]{
+            0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d,
+            0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2, 0x66, 0x45,
+            0xdf, 0x4c, 0x2f, 0x87, 0xeb, 0xc0, 0x99, 0x2a,
+            0xb1, 0x77, 0xfb, 0xa5, 0x1d, 0xb9, 0x2c, 0x2a,
+        }
+        plan :: vault.prepare_import_x25519("__core_conformance_import_x25519", ^bytes) ?? return
+        write :: vault.authorize_write(&plan, "fixed X25519-import authorization") ?? return
+        result :: vault.commit_import_x25519(^write, ^plan)
+        print(result == .Err(_))
+    }
+}

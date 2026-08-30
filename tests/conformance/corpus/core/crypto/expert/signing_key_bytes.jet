@@ -1,0 +1,11 @@
+// core-conformance: core.crypto.expert.signing_key_bytes
+use core.crypto as crypto
+use core.crypto.expert as expert
+
+fn run() {
+    key :: crypto.SigningKey.new_random() ?? return Err("signing key")
+    #Unsafe("inspect generated signing-key bytes") {
+        result :: expert.signing_key_bytes(key)
+        print(result.len() == 32)
+    }
+}

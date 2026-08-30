@@ -1,0 +1,13 @@
+// core-conformance: core.event.decision_hook
+use core.event as event
+
+fn run() {
+    hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    print(hook.listener_count())
+    outcome :: hook.run(4)
+    if outcome == {
+        .Continue(value) -> { print(value) }
+        .Cancel -> { print("cancel") }
+        .Fail(error) -> { print(error) }
+    }
+}

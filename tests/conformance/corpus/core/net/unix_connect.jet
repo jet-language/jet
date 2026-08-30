@@ -1,0 +1,10 @@
+// core-conformance: core.net.unix_connect
+use core.net as net
+
+fn run() {
+    listener :: net.unix_listen("/tmp/jet-conformance-unix-connect.sock") ?? panic("listen")
+    result :: net.unix_connect("/tmp/jet-conformance-unix-connect.sock") ?? panic("connect")
+    server :: net.unix_accept(listener) ?? panic("accept")
+    print(net.unix_write_all_bytes(&result, "connect".bytes()) ?? panic("write"))
+    print(net.unix_read(&server) ?? panic("read"))
+}

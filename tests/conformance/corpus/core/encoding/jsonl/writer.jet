@@ -1,0 +1,13 @@
+// core-conformance: core.encoding.jsonl.writer
+use core.encoding.jsonl as jsonl
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("jsonl-writer")
+    path :: Path.from(root).join("values.jsonl")
+    output :: files.create(path) ?? panic("create")
+    writer :: jsonl.writer(^output) ?? panic("writer")
+    writer.write(DataTree.Object(["a": DataTree.Int(1)])) ?? panic("write")
+    print(writer.finish())
+}

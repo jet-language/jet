@@ -1,0 +1,15 @@
+// core-conformance: core.ui.reactive_render
+use core.ui as ui
+use core.reactive as reactive
+
+fn run() {
+    backend :: ui.null_backend()
+    label :: reactive.signal("one")
+    print(ui.reactive_render(() -> {
+        node :: ui.text(label.get())
+        ui.mount(backend, node)
+    }))
+    print(backend.render_count())
+    label.set("two")
+    print(backend.render_count())
+}

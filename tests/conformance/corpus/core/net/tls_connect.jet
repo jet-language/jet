@@ -1,0 +1,15 @@
+// core-conformance: core.net.tls_connect
+use core.net as net
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    client :: net.tcp_connect(address) ?? panic("connect")
+    server :: net.tcp_accept(listener) ?? panic("accept")
+    net.tcp_close(&server) ?? panic("close")
+    result :: net.tls_connect(^client, "localhost")
+    print(result == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    })
+}

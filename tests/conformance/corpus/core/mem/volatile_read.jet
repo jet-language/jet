@@ -1,0 +1,12 @@
+// core-conformance: core.mem.volatile_read
+use core.mem as mem
+
+fn run() {
+    value :: 7
+    #Unsafe("value is live on this stack frame and the pointer never escapes") {
+        addr :: mem.address_of(value)
+        pointer :: mem.Ptr<Int>.from_addr(addr)
+        result :: mem.volatile_read(pointer)
+        print(result)
+    }
+}

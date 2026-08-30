@@ -1,0 +1,13 @@
+// core-conformance: core.encoding.csv.reader
+use core.encoding.csv as csv
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("csv-reader")
+    path :: Path.from(root).join("rows.csv")
+    files.write(path, "name,score\nada,9\n") ?? panic("fixture")
+    input :: files.open(path) ?? panic("open")
+    reader :: csv.reader(^input) ?? panic("reader")
+    print(reader.next() ?? panic("next"))
+}

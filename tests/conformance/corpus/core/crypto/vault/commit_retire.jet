@@ -1,0 +1,15 @@
+// core-conformance: core.crypto.vault.commit_retire
+use core.crypto as crypto
+use core.crypto.vault as vault
+
+fn run() -[Secret]> {
+    current :: vault.current<crypto.SigningKey>("__core_conformance_commit_retire") ?? return
+    if current == .Val(reference) -> {
+        plan :: vault.prepare_retire<crypto.SigningKey>(&reference, "fixed commit retire reason") ?? return
+        write :: vault.authorize_write(&plan, "fixed commit retire authorization") ?? return
+        result :: vault.commit_retire<crypto.SigningKey>(^write, ^plan)
+        print(result == .Err(_))
+    } else -> {
+        print(true)
+    }
+}

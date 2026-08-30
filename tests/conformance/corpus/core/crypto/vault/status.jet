@@ -1,0 +1,13 @@
+// core-conformance: core.crypto.vault.status
+use core.crypto as crypto
+use core.crypto.vault as vault
+
+fn run() -[Secret]> {
+    current :: vault.current<crypto.SigningKey>("__core_conformance_status") ?? return
+    if current == .Val(reference) -> {
+        result :: vault.status<crypto.SigningKey>(&reference)
+        print(result == .Err(_))
+    } else -> {
+        print(true)
+    }
+}

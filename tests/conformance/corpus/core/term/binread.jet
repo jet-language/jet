@@ -1,0 +1,13 @@
+// core-conformance: core.term.binread
+use core.term as term
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("term-binread")
+    path :: Path.from(root).join("fixture.bin")
+    files.write_bytes(path, [U8]{65, 66, 67}) ?? panic("seed")
+    result :: term.binread(path) ?? return
+    print(result.len())
+    files.remove_all(root) ?? panic("cleanup")
+}

@@ -1,0 +1,11 @@
+// core-conformance: core.crypto.vault.commit_store
+use core.crypto as crypto
+use core.crypto.vault as vault
+
+fn run() -[Secret]> {
+    key :: crypto.SigningKey.new_random() ?? return
+    plan :: vault.prepare_store<crypto.SigningKey>("__core_conformance_store", ^key) ?? return
+    write :: vault.authorize_write(&plan, "fixed store authorization") ?? return
+    result :: vault.commit_store(^write, ^plan)
+    print(result == .Err(_))
+}

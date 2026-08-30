@@ -1,0 +1,14 @@
+// core-conformance: core.encoding.cbor.writer
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("cbor-writer")
+    path :: Path.from(root).join("value.cbor")
+    output :: files.create(path) ?? panic("create")
+    writer :: cbor.writer(^output) ?? panic("writer")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("write")
+    print(writer.finish())
+}

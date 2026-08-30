@@ -1,0 +1,14 @@
+// core-conformance: core.encoding.json.writer
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("json-writer")
+    path :: Path.from(root).join("value.json")
+    output :: files.create(path) ?? panic("create")
+    writer :: json.writer(^output) ?? panic("writer")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("write")
+    print(writer.finish())
+}

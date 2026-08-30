@@ -1,0 +1,19 @@
+// core-conformance: core.net.tls.write_all
+use core.net as net
+use core.net.tls as tls
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    client :: net.tcp_connect(address) ?? panic("connect")
+    server :: net.tcp_accept(listener) ?? panic("accept")
+    net.tcp_close(&server) ?? panic("close")
+    result :: net.tls_connect(^client, "localhost")
+    print(result == {
+        .Ok(stream) -> tls.write_all(&stream, "x".bytes()) == {
+            .Ok(_) -> true
+            .Err(_) -> false
+        }
+        .Err(_) -> true
+    })
+}

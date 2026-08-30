@@ -1,0 +1,13 @@
+// core-conformance: core.encoding.xml.decode_bytes
+use core.encoding.xml as xml
+
+#Codable
+struct Item {
+    #Rename("$text") value: String
+}
+
+fn run() {
+    bytes :: [U8]{60, 105, 116, 101, 109, 62, 111, 107, 60, 47, 105, 116, 101, 109, 62}
+    result :: xml.decode_bytes<Item>(bytes) ?? panic("decode_bytes")
+    print(result.value)
+}

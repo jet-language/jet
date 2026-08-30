@@ -1,0 +1,24 @@
+// core-conformance: core.net.dns_srv_priority
+use core.net as net
+use core.tasks as tasks
+
+fn run() {
+    server :: net.udp_bind("127.0.0.1:0") ?? panic("DNS server")
+    address :: net.socket_to_string(net.udp_local_addr(server) ?? panic("server address"))
+    responder :: task {
+        request :: net.udp_receive(server, 512) ?? panic("DNS query")
+        query :: net.udp_packet_bytes(request)
+        response :: [U8]{
+            query[0], query[1], 0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0,
+            7, 101, 120, 97, 109, 112, 108, 101, 4, 116, 101, 115, 116, 0,
+            0, 33, 0, 1,
+            0xc0, 0x0c, 0, 33, 0, 1, 0, 0, 0, 60, 0, 20,
+            0, 10, 0, 20, 1, 187, 6, 116, 97, 114, 103, 101, 116, 4, 116, 101, 115, 116, 0
+        }
+        net.udp_send_bytes_to(server, response, net.udp_packet_addr(request)) ?? panic("DNS response")
+    }
+    records :: net.dns_srv_at(address, "example.test", 1000) ?? panic("DNS SRV")
+    result :: net.dns_srv_priority(records[0])
+    print(result == 10)
+    responder.join() ?? panic("DNS responder")
+}

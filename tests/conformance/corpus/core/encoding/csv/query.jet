@@ -1,0 +1,18 @@
+// core-conformance: core.encoding.csv.query
+use core.encoding.csv as csv
+use core.files as files
+use core.testing as testing
+
+#Codable
+struct Sale {
+    item: String
+    qty: Int
+}
+
+fn run() {
+    root :: testing.temp_dir("csv-query")
+    path :: Path.from(root).join("sales.csv")
+    files.write(path, "item,qty\npen,3\n") ?? panic("fixture")
+    result :: csv.query<Sale>(path.to_string(), SQL{"SELECT * FROM sales WHERE qty > 1"}) ?? panic("query")
+    print(result[0].qty)
+}

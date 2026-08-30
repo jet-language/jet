@@ -1,0 +1,14 @@
+// core-conformance: core.crypto.expert.migrate_v1
+use core.crypto as crypto
+use core.crypto.expert as expert
+
+fn run() {
+    key :: [U8]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}
+    recipient :: crypto.X25519PublicKey.from_bytes([U8]{0xde, 0x9e, 0xdb, 0x7d, 0x7b, 0x7d, 0xc1, 0xb4, 0xd3, 0x5b, 0x61, 0xc2, 0xec, 0xe4, 0x35, 0x37, 0x3f, 0x83, 0x43, 0xc8, 0x5b, 0x78, 0x67, 0x4d, 0xad, 0xfc, 0x7e, 0x14, 0x6f, 0x88, 0x2b, 0x4f}) ?? return Err("recipient")
+    source :: Path.from("/dev/null")
+    destination :: Path.from("/dev/null/jet-core-conformance-migrated.jetc")
+    #Unsafe("fixed JETC v1 source failure") {
+        result :: expert.migrate_v1(key, source, [recipient], destination)
+        print(result == .Err(.SourceIo))
+    }
+}

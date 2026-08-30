@@ -1,0 +1,13 @@
+// core-conformance: core.encoding.csv.writer
+use core.encoding.csv as csv
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("csv-writer")
+    path :: Path.from(root).join("rows.csv")
+    output :: files.create(path) ?? panic("create")
+    writer :: csv.writer(^output) ?? panic("writer")
+    writer.write(["name", "score"]) ?? panic("write")
+    print(writer.finish())
+}

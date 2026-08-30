@@ -1,0 +1,12 @@
+// core-conformance: core.net.unix_listen
+use core.net as net
+
+fn run() {
+    listener :: net.unix_listen("/tmp/jet-conformance-unix-listen.sock") ?? panic("listen")
+    client :: net.unix_connect("/tmp/jet-conformance-unix-listen.sock") ?? panic("connect")
+    print(net.unix_accept(listener) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    })
+    print(net.unix_close(&client) ?? panic("close"))
+}

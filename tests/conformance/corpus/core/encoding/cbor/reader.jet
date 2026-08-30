@@ -1,0 +1,13 @@
+// core-conformance: core.encoding.cbor.reader
+use core.encoding.cbor as cbor
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root :: testing.temp_dir("cbor-reader")
+    path :: Path.from(root).join("value.cbor")
+    files.write_bytes(path, [U8]{1}) ?? panic("fixture")
+    input :: files.open(path) ?? panic("open")
+    reader :: cbor.reader(^input) ?? panic("reader")
+    print(reader.next() ?? panic("next"))
+}
