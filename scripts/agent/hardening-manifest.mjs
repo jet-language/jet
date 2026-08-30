@@ -59,6 +59,15 @@ function validDigest(value) {
   return typeof value === "string" && SHA256_PATTERN.test(value);
 }
 
+export function manifestContentDigest(manifest) {
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    throw new Error("manifest is not an object");
+  }
+  const content = { ...manifest };
+  delete content.content_digest;
+  return sha256(canonicalJson(content));
+}
+
 function sourceBytes(value) {
   return Buffer.isBuffer(value) || value instanceof Uint8Array
     ? Buffer.from(value)
@@ -807,7 +816,7 @@ function normalizeRoutes(routes = {}) {
   for (const tier of TIERS) {
     for (const value of routes[tier] || []) {
       if (typeof value === "string") {
-        out[tier].push({ stable_id: value.includes(":") ? value : `module:${value}`, route: `${tier}:fixture`, evidence: [] });
+        out[tier].push({ stable_id: value.includes(":") ? value : `module:${value}`, route: `${tier}:fixture`, seam: null, evidence: [] });
       } else {
         out[tier].push({
           stable_id: value.stable_id,
@@ -912,6 +921,7 @@ export function buildManifest({ root = DEFAULT_ROOT, surface = null } = {}) {
     exclusions: [...exclusions.entries()].sort(([left], [right]) => compareStable(left, right)).map(([stable_id, value]) => ({ stable_id, ...value })),
     rows,
   };
+  manifest.content_digest = manifestContentDigest(manifest);
   const validation = validateManifest(manifest);
   if (!validation.ok) fail(validation.errors.join("\n"));
   return manifest;
@@ -919,7 +929,8 @@ export function buildManifest({ root = DEFAULT_ROOT, surface = null } = {}) {
 
 function expectedRouteMap(manifest) {
   const out = Object.fromEntries(TIERS.map((tier) => [tier, new Map()]));
-  for (const tier of TIERS) for (const route of manifest.actual_routes?.[tier] || []) {
+  for (const tier of TIERS) for (const route of Array.isArray(manifest.actual_routes?.[tier]) ? manifest.actual_routes[tier] : []) {
+    if (!isRecord(route) || typeof route.stable_id !== "string" || typeof route.route !== "string") continue;
     const key = `${route.stable_id}\u0000${route.route}`;
     if (out[tier].has(key)) return { error: `duplicate actual route fact: ${tier}:${route.stable_id}:${route.route}` };
     out[tier].set(key, route);
@@ -927,59 +938,260 @@ function expectedRouteMap(manifest) {
   return out;
 }
 
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validateSourceSnapshot(snapshot, errors) {
+  if (!isRecord(snapshot)) {
+    errors.push("manifest source snapshot is required");
+    return;
+  }
+  if (snapshot.algorithm !== "sha256") errors.push("manifest source snapshot algorithm must be sha256");
+  if (!Array.isArray(snapshot.files)) {
+    errors.push("manifest source snapshot files are required");
+    return;
+  }
+  let previousPath = null;
+  const paths = new Set();
+  for (const file of snapshot.files) {
+    if (!isRecord(file)) {
+      errors.push("manifest source snapshot has an invalid file");
+      continue;
+    }
+    if (typeof file.path !== "string" || file.path.length === 0) errors.push("manifest source snapshot file path is required");
+    else {
+      if (paths.has(file.path)) errors.push(`duplicate manifest source snapshot file: ${file.path}`);
+      paths.add(file.path);
+      if (previousPath !== null && compareStable(previousPath, file.path) > 0) errors.push("manifest source snapshot files are not sorted");
+      previousPath = file.path;
+    }
+    if (!Number.isInteger(file.bytes) || file.bytes < 0) errors.push(`invalid manifest source snapshot byte count: ${file.path || "?"}`);
+    if (!validDigest(file.sha256)) errors.push(`invalid manifest source snapshot digest: ${file.path || "?"}`);
+  }
+  if (!validDigest(snapshot.hash)) errors.push("manifest source snapshot hash is missing or invalid");
+  else if (snapshot.hash !== sha256(canonicalJson(snapshot.files))) errors.push("manifest source snapshot hash does not match files");
+}
+
 export function validateManifest(manifest, { expectedIds = null, currentSnapshotHash = null } = {}) {
   const errors = [];
-  if (!manifest || typeof manifest !== "object") return { ok: false, errors: ["manifest is not an object"] };
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) return { ok: false, errors: ["manifest is not an object"] };
+  const expectedContentDigest = manifestContentDigest(manifest);
   if (manifest.schema !== SURFACE_SCHEMA) errors.push(`manifest schema must be ${SURFACE_SCHEMA}`);
   if (manifest.schema_version !== SURFACE_SCHEMA_VERSION) errors.push(`manifest schema_version must be ${SURFACE_SCHEMA_VERSION}`);
+  if (!validDigest(manifest.content_digest)) errors.push("manifest content digest is missing or invalid");
+  else if (manifest.content_digest !== expectedContentDigest) errors.push("manifest content digest does not match manifest");
+  validateSourceSnapshot(manifest.source_snapshot, errors);
+
   const rows = Array.isArray(manifest.rows) ? manifest.rows : [];
+  if (!Array.isArray(manifest.rows)) errors.push("manifest rows are required");
   const seen = new Set();
+  const rowsById = new Map();
+  let previousRowId = null;
   for (const row of rows) {
-    if (!row || typeof row.stable_id !== "string") { errors.push("manifest row has no stable_id"); continue; }
-    if (seen.has(row.stable_id)) errors.push(`duplicate stable_id: ${row.stable_id}`);
-    seen.add(row.stable_id);
-    const prefix = KIND_PREFIX[row.kind];
-    if (!prefix || !row.stable_id.startsWith(prefix)) errors.push(`stable_id kind mismatch: ${row.stable_id}`);
-    const tiers = row.applicable_tiers || [];
-    if ([...new Set(tiers)].length !== tiers.length) errors.push(`duplicate tier projection: ${row.stable_id}`);
-    for (const tier of tiers) if (!TIERS.includes(tier)) errors.push(`unknown tier projection ${tier}: ${row.stable_id}`);
-    const projectionTiers = (row.projections || []).map((projection) => projection.tier);
-    if (canonicalJson([...tiers].sort()) !== canonicalJson([...new Set(projectionTiers)].sort())) errors.push(`applicable tier projection mismatch: ${row.stable_id}`);
-    if (row.status === "covered") {
-      if (row.value_consuming !== true || !row.sink || row.sink.type_aware !== true || typeof row.sink.operation !== "string") errors.push(`executable row has no type-aware observable sink: ${row.stable_id}`);
+    if (!isRecord(row) || typeof row.stable_id !== "string" || row.stable_id.length === 0) {
+      errors.push("manifest row has no stable_id");
+      continue;
     }
-    if (row.status === "excluded" && (!row.exclusion?.reason || !row.exclusion?.owner || !row.exclusion?.decision)) errors.push(`exclusion is not owner-ratified: ${row.stable_id}`);
-    if (row.status === "invalid" && (!Array.isArray(row.errors) || row.errors.length === 0)) errors.push(`invalid row has no failure: ${row.stable_id}`);
+    const stableId = row.stable_id;
+    if (seen.has(stableId)) errors.push(`duplicate stable_id: ${stableId}`);
+    seen.add(stableId);
+    rowsById.set(stableId, row);
+    if (previousRowId !== null && compareStable(previousRowId, stableId) > 0) errors.push("manifest rows are not sorted");
+    previousRowId = stableId;
+
+    const prefix = KIND_PREFIX[row.kind];
+    if (!prefix || !stableId.startsWith(prefix) || stableId.length === prefix.length) errors.push(`stable_id kind mismatch: ${stableId}`);
+    for (const field of ["kind", "owner", "member", "domain", "status"]) {
+      if (typeof row[field] !== "string" || row[field].length === 0) errors.push(`manifest row ${field} is required: ${stableId}`);
+    }
+    if (prefix) {
+      const untagged = stableId.slice(prefix.length);
+      const dot = untagged.lastIndexOf(".");
+      const owner = dot < 0 ? untagged : untagged.slice(0, dot);
+      const member = dot < 0 ? untagged : untagged.slice(dot + 1);
+      if (row.owner !== owner || row.member !== member) errors.push(`manifest row identity mismatch: ${stableId}`);
+      if (typeof row.owner === "string" && typeof row.member === "string" && row.domain !== rowDomain(row)) errors.push(`manifest row domain mismatch: ${stableId}`);
+    }
+
+    const tiers = row.applicable_tiers;
+    if (!Array.isArray(tiers)) errors.push(`manifest row applicable_tiers is required: ${stableId}`);
+    else {
+      if ([...new Set(tiers)].length !== tiers.length) errors.push(`duplicate tier projection: ${stableId}`);
+      for (const tier of tiers) if (!TIERS.includes(tier)) errors.push(`unknown tier projection ${tier}: ${stableId}`);
+      if (canonicalJson(tiers) !== canonicalJson([...tiers].sort((left, right) => TIERS.indexOf(left) - TIERS.indexOf(right)))) errors.push(`manifest tiers are not sorted: ${stableId}`);
+    }
+
+    const projections = row.projections;
+    const projectionKeys = new Set();
+    if (!Array.isArray(projections)) errors.push(`manifest row projections are required: ${stableId}`);
+    else {
+      for (const projection of projections) {
+        if (!isRecord(projection)) {
+          errors.push(`manifest row has an invalid projection: ${stableId}`);
+          continue;
+        }
+        if (!TIERS.includes(projection.tier)) errors.push(`unknown projection tier ${projection.tier}: ${stableId}`);
+        if (typeof projection.route !== "string" || projection.route.length === 0) errors.push(`projection route is required: ${stableId}`);
+        const key = `${projection.tier}\u0000${projection.route}`;
+        if (projectionKeys.has(key)) errors.push(`duplicate row projection: ${stableId}:${projection.tier}:${projection.route}`);
+        projectionKeys.add(key);
+        if (!Object.prototype.hasOwnProperty.call(projection, "seam") || (projection.seam !== null && (typeof projection.seam !== "string" || projection.seam.length === 0))) {
+          errors.push(`projection seam is invalid: ${stableId}`);
+        }
+        if (!Array.isArray(projection.evidence) || projection.evidence.some((item) => typeof item !== "string" || item.length === 0)) errors.push(`projection evidence is invalid: ${stableId}`);
+      }
+      const ordered = [...projections].sort((left, right) => TIERS.indexOf(left?.tier) - TIERS.indexOf(right?.tier) || compareStable(left?.route || "", right?.route || ""));
+      if (canonicalJson(projections) !== canonicalJson(ordered)) errors.push(`manifest row projections are not sorted: ${stableId}`);
+    }
+    const projectionTiers = Array.isArray(projections) ? projections.filter(isRecord).map((projection) => projection.tier) : [];
+    if (Array.isArray(tiers) && canonicalJson([...tiers].sort()) !== canonicalJson([...new Set(projectionTiers)].sort())) errors.push(`applicable tier projection mismatch: ${stableId}`);
+    if (!Array.isArray(row.dispatcher_arms)) errors.push(`manifest dispatcher arms are required: ${stableId}`);
+    else if (Array.isArray(projections) && canonicalJson(row.dispatcher_arms) !== canonicalJson(projections.filter(isRecord).map((projection) => projection.route))) errors.push(`dispatcher arms mismatch: ${stableId}`);
+
+    for (const field of ["membership_sources", "membership_evidence"]) {
+      if (!Array.isArray(row[field]) || row[field].some((item) => typeof item !== "string" || item.length === 0)) errors.push(`manifest row ${field} is invalid: ${stableId}`);
+      else if (canonicalJson(row[field]) !== canonicalJson(uniqueSorted(row[field]))) errors.push(`manifest row ${field} is not sorted: ${stableId}`);
+    }
+    if (row.seed !== null && (typeof row.seed !== "string" || row.seed.length === 0)) errors.push(`manifest row seed is invalid: ${stableId}`);
+    if (row.value_consuming !== null && typeof row.value_consuming !== "boolean") errors.push(`manifest row value_consuming is invalid: ${stableId}`);
+    if (row.sink !== null && !isRecord(row.sink)) errors.push(`manifest row sink is invalid: ${stableId}`);
+    if (row.exclusion !== null && !isRecord(row.exclusion)) errors.push(`manifest row exclusion is invalid: ${stableId}`);
+    if (!VALID_STATUSES.has(row.status)) errors.push(`unknown manifest row status ${row.status}: ${stableId}`);
+    if (row.status === "covered") {
+      if (row.value_consuming !== true || !row.seed || !row.sink || row.sink.type_aware !== true || typeof row.sink.operation !== "string" || row.sink.operation.length === 0) errors.push(`executable row has no type-aware observable sink: ${stableId}`);
+    }
+    if (row.status === "excluded" && (!row.exclusion?.reason || !row.exclusion?.owner || !row.exclusion?.decision)) errors.push(`exclusion is not owner-ratified: ${stableId}`);
+    if (row.status === "missing" && (row.value_consuming !== null || row.sink !== null)) errors.push(`missing row has executable proof: ${stableId}`);
+    if (row.status === "unrouted" && (tiers?.length !== 0 || row.value_consuming !== null || row.sink !== null)) errors.push(`unrouted row has coverage: ${stableId}`);
   }
-  const denominator = manifest.denominator?.source_ids || {};
+
+  const denominator = isRecord(manifest.denominator) ? manifest.denominator : null;
+  if (!denominator) errors.push("manifest denominator is required");
+  const sourceIds = denominator && isRecord(denominator.source_ids) ? denominator.source_ids : null;
+  const counts = denominator && isRecord(denominator.counts) ? denominator.counts : null;
+  if (!sourceIds) errors.push("manifest denominator source_ids are required");
+  if (!counts) errors.push("manifest denominator counts are required");
+  const memberIds = new Set();
+  const denominatorIds = new Set();
   for (const kind of KIND_ORDER) {
-    const source = Array.isArray(denominator[kind]) ? denominator[kind] : [];
+    const source = sourceIds && Array.isArray(sourceIds[kind]) ? sourceIds[kind] : null;
+    if (!source) {
+      errors.push(`manifest denominator is missing ${kind}`);
+      continue;
+    }
     const sourceSet = new Set(source);
     if (sourceSet.size !== source.length) errors.push(`denominator contains duplicate ${kind}`);
-    const rowSet = new Set(rows.filter((row) => row.kind === kind).map((row) => row.stable_id));
+    let previousId = null;
+    for (const id of source) {
+      if (typeof id !== "string" || id.length === 0 || !id.startsWith(KIND_PREFIX[kind])) errors.push(`denominator has invalid ${kind}: ${id}`);
+      else {
+        memberIds.add(id);
+        if (denominatorIds.has(id)) errors.push(`duplicate denominator identity: ${id}`);
+        denominatorIds.add(id);
+        if (previousId !== null && compareStable(previousId, id) > 0) errors.push(`denominator ${kind} is not sorted`);
+        previousId = id;
+      }
+    }
+    if (counts && counts[kind] !== source.length) errors.push(`denominator count mismatch: ${kind}`);
+    const rowSet = new Set(rows.filter((row) => row?.kind === kind).map((row) => row?.stable_id));
     for (const id of sourceSet) if (!rowSet.has(id)) errors.push(`source membership missing from manifest: ${id}`);
     for (const id of rowSet) if (!sourceSet.has(id)) errors.push(`manifest row is not source membership: ${id}`);
   }
-  const routeMap = expectedRouteMap(manifest);
-  if (routeMap.error) errors.push(routeMap.error);
-  for (const tier of TIERS) for (const route of manifest.actual_routes?.[tier] || []) {
-    if (!seen.has(route.stable_id)) errors.push(`dispatcher arm has no public row: ${tier}:${route.stable_id}`);
-    else {
-      const row = rows.find((candidate) => candidate.stable_id === route.stable_id);
-      if (!row?.projections?.some((projection) => projection.tier === tier && projection.route === route.route)) errors.push(`dispatcher arm missing projection: ${tier}:${route.stable_id}:${route.route}`);
+  if (counts && counts.exclusions === undefined) errors.push("manifest exclusion count is required");
+
+  const exclusions = manifest.exclusions;
+  const exclusionsById = new Map();
+  if (!Array.isArray(exclusions)) errors.push("manifest exclusions are required");
+  else {
+    let previousExclusion = null;
+    for (const exclusion of exclusions) {
+      if (!isRecord(exclusion) || typeof exclusion.stable_id !== "string" || exclusion.stable_id.length === 0) {
+        errors.push("manifest exclusion has no stable_id");
+        continue;
+      }
+      const stableId = exclusion.stable_id;
+      if (exclusionsById.has(stableId)) errors.push(`duplicate exclusion identity: ${stableId}`);
+      exclusionsById.set(stableId, exclusion);
+      if (previousExclusion !== null && compareStable(previousExclusion, stableId) > 0) errors.push("manifest exclusions are not sorted");
+      previousExclusion = stableId;
+      const kind = KIND_ORDER.find((candidate) => stableId.startsWith(KIND_PREFIX[candidate]));
+      if (!kind) errors.push(`exclusion has invalid stable_id: ${stableId}`);
+      if (!memberIds.has(stableId)) errors.push(`exclusion is not source membership: ${stableId}`);
+      for (const field of ["reason", "owner", "decision"]) {
+        if (typeof exclusion[field] !== "string" || exclusion[field].length === 0) errors.push(`exclusion ${field} is required: ${stableId}`);
+      }
+    }
+    if (counts && counts.exclusions !== exclusions.length) errors.push("denominator exclusion count mismatch");
+  }
+  for (const row of rows.filter(isRecord)) {
+    const recorded = exclusionsById.get(row.stable_id);
+    if (row.exclusion === null) {
+      if (recorded) errors.push(`manifest exclusion is missing from row: ${row.stable_id}`);
+      if (row.status === "excluded") errors.push(`excluded row has no exclusion record: ${row.stable_id}`);
+    } else if (!recorded) {
+      errors.push(`row exclusion is not persisted: ${row.stable_id}`);
+    } else {
+      const recordedDetails = { ...recorded };
+      delete recordedDetails.stable_id;
+      if (canonicalJson(row.exclusion) !== canonicalJson(recordedDetails) || row.status !== "excluded") errors.push(`row exclusion mismatch: ${row.stable_id}`);
     }
   }
-  for (const row of rows) for (const projection of row.projections || []) {
-    const route = manifest.actual_routes?.[projection.tier]?.find((candidate) => candidate.stable_id === row.stable_id && candidate.route === projection.route);
+  for (const stableId of exclusionsById.keys()) if (!rowsById.has(stableId)) errors.push(`exclusion has no manifest row: ${stableId}`);
+
+  const actualRoutes = manifest.actual_routes;
+  if (!isRecord(actualRoutes)) errors.push("manifest actual_routes are required");
+  else {
+    for (const key of Object.keys(actualRoutes)) if (!TIERS.includes(key)) errors.push(`unknown route tier: ${key}`);
+    for (const tier of TIERS) {
+      const routes = actualRoutes[tier];
+      if (!Array.isArray(routes)) {
+        errors.push(`manifest routes are missing ${tier}`);
+        continue;
+      }
+      let previousRoute = null;
+      const routeKeys = new Set();
+      for (const route of routes) {
+        if (!isRecord(route) || typeof route.stable_id !== "string" || typeof route.route !== "string" || route.route.length === 0) {
+          errors.push(`manifest route is invalid: ${tier}`);
+          continue;
+        }
+        const key = `${route.stable_id}\u0000${route.route}`;
+        if (routeKeys.has(key)) errors.push(`duplicate actual route fact: ${tier}:${route.stable_id}:${route.route}`);
+        routeKeys.add(key);
+        if (!KIND_ORDER.some((kind) => route.stable_id.startsWith(KIND_PREFIX[kind]))) errors.push(`route has invalid stable_id: ${tier}:${route.stable_id}`);
+        if (!Object.prototype.hasOwnProperty.call(route, "seam") || (route.seam !== null && (typeof route.seam !== "string" || route.seam.length === 0))) errors.push(`route seam is invalid: ${tier}:${route.stable_id}`);
+        if (!Array.isArray(route.evidence) || route.evidence.some((item) => typeof item !== "string" || item.length === 0)) errors.push(`route evidence is invalid: ${tier}:${route.stable_id}`);
+        const identity = `${route.stable_id}\u0000${route.route}`;
+        if (previousRoute !== null && compareStable(previousRoute, identity) > 0) errors.push(`manifest routes are not sorted: ${tier}`);
+        previousRoute = identity;
+      }
+    }
+  }
+  const routeMap = expectedRouteMap(manifest);
+  if (routeMap.error) errors.push(routeMap.error);
+  for (const tier of TIERS) for (const route of (Array.isArray(manifest.actual_routes?.[tier]) ? manifest.actual_routes[tier] : []).filter(isRecord)) {
+    if (!seen.has(route.stable_id)) errors.push(`dispatcher arm has no public row: ${tier}:${route.stable_id}`);
+    else {
+      const row = rowsById.get(route.stable_id);
+      const projection = Array.isArray(row?.projections)
+        ? row.projections.find((candidate) => isRecord(candidate) && candidate.tier === tier && candidate.route === route.route)
+        : null;
+      if (!projection) errors.push(`dispatcher arm missing projection: ${tier}:${route.stable_id}:${route.route}`);
+      else if (canonicalJson({ seam: projection.seam, evidence: projection.evidence }) !== canonicalJson({ seam: route.seam, evidence: route.evidence })) errors.push(`dispatcher arm proof mismatch: ${tier}:${route.stable_id}:${route.route}`);
+    }
+  }
+  for (const row of rows.filter(isRecord)) for (const projection of (Array.isArray(row.projections) ? row.projections : []).filter(isRecord)) {
+    const route = routeMap[projection.tier]?.get(`${row.stable_id}\u0000${projection.route}`) || null;
     if (!route) errors.push(`fake coverage or missing dispatcher arm: ${projection.tier}:${row.stable_id}:${projection.route}`);
   }
-  const constructorRows = rows.filter((row) => row.member === "new");
+  const constructorRows = rows.filter((row) => row?.member === "new");
   const constructorIds = new Set();
   for (const row of constructorRows) {
     const key = `${row.kind}:${row.owner}`;
     if (constructorIds.has(key)) errors.push(`duplicate constructor: ${key}`);
     constructorIds.add(key);
-    if (row.kind === "receiver_method" && !rows.some((candidate) => candidate.kind === "nominal_type" && candidate.member === row.owner)) {
+    if (row.kind === "receiver_method" && !rows.some((candidate) => candidate?.kind === "nominal_type" && candidate.member === row.owner)) {
       // Receiver type names are often unqualified in the registry; this check
       // only rejects an actually unowned constructor, not a missing module path.
       if (!row.owner) errors.push(`constructor has no owner: ${row.stable_id}`);
@@ -990,12 +1202,26 @@ export function validateManifest(manifest, { expectedIds = null, currentSnapshot
     for (const id of expected) if (!seen.has(id)) errors.push(`expected membership missing: ${id}`);
     for (const id of seen) if (!expected.has(id)) errors.push(`unexpected membership: ${id}`);
   }
-  if (currentSnapshotHash && manifest.source_snapshot?.hash !== currentSnapshotHash) errors.push("manifest source snapshot is stale");
+  if (currentSnapshotHash !== null && currentSnapshotHash !== undefined && manifest.source_snapshot?.hash !== currentSnapshotHash) errors.push("manifest source snapshot is stale");
   return { ok: errors.length === 0, errors: [...new Set(errors)].sort() };
 }
 
 export function manifestIsStale(manifest, root = DEFAULT_ROOT) {
   return manifest?.source_snapshot?.hash !== sourceSnapshot(root).hash;
+}
+
+export function readManifest(path, { root = DEFAULT_ROOT } = {}) {
+  if (typeof path !== "string" || path.length === 0) fail("manifest path is required");
+  if (!existsSync(path)) fail(`unreadable manifest: ${path}`);
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    fail(`unreadable manifest ${path}: ${error.message}`);
+  }
+  const validation = validateManifest(manifest, { currentSnapshotHash: sourceSnapshot(root).hash });
+  if (!validation.ok) fail(validation.errors.join("\n"));
+  return manifest;
 }
 
 function hostileFixtures() {
@@ -1019,28 +1245,67 @@ function hostileFixtures() {
   };
   const manifest = buildManifest({ surface });
   if (!validateManifest(manifest).ok) fail("valid manifest fixture rejected");
+  const rehash = (value) => { value.content_digest = manifestContentDigest(value); return value; };
+  const tamperedContent = JSON.parse(JSON.stringify(manifest));
+  tamperedContent.rows[0].domain = "tampered";
+  const tamperedValidation = validateManifest(tamperedContent);
+  if (tamperedValidation.ok || !tamperedValidation.errors.includes("manifest content digest does not match manifest")) fail("manifest content tampering accepted");
   const missingReceiver = JSON.parse(JSON.stringify(manifest));
   missingReceiver.rows = missingReceiver.rows.filter((row) => row.stable_id !== "receiver:Widget.read");
   missingReceiver.denominator.source_ids.receiver_method = ["receiver:Widget.read"];
+  rehash(missingReceiver);
   if (validateManifest(missingReceiver).ok) fail("missing receiver accepted");
   const missingField = JSON.parse(JSON.stringify(manifest));
   missingField.rows = missingField.rows.filter((row) => row.stable_id !== "field:Widget.value");
+  rehash(missingField);
   if (validateManifest(missingField).ok) fail("missing field accepted");
   const fakeCoverage = JSON.parse(JSON.stringify(manifest));
   fakeCoverage.rows.find((row) => row.stable_id === "module:core.test.call").projections.push({ tier: "interpreter", route: "fake:coverage", evidence: [] });
   fakeCoverage.rows.find((row) => row.stable_id === "module:core.test.call").applicable_tiers.push("interpreter");
+  rehash(fakeCoverage);
   if (validateManifest(fakeCoverage).ok) fail("fake coverage accepted");
+  const fakeRow = JSON.parse(JSON.stringify(manifest));
+  const fake = JSON.parse(JSON.stringify(fakeRow.rows[0]));
+  fake.stable_id = "field:Widget.fake";
+  fake.member = "fake";
+  fakeRow.rows.push(fake);
+  rehash(fakeRow);
+  if (validateManifest(fakeRow).ok) fail("fake row accepted");
+  const fakeRoute = JSON.parse(JSON.stringify(manifest));
+  fakeRoute.actual_routes.aot.push({ stable_id: "module:core.test.call", route: "aot:fake", seam: null, evidence: [] });
+  rehash(fakeRoute);
+  if (validateManifest(fakeRoute).ok) fail("fake route accepted");
   const duplicate = JSON.parse(JSON.stringify(manifest));
   duplicate.rows.push(duplicate.rows[0]);
+  rehash(duplicate);
   if (validateManifest(duplicate).ok) fail("duplicate constructor/row accepted");
+  const duplicateIdentity = JSON.parse(JSON.stringify(manifest));
+  duplicateIdentity.denominator.source_ids.module_call.push("module:core.test.call");
+  rehash(duplicateIdentity);
+  if (validateManifest(duplicateIdentity).ok) fail("duplicate denominator identity accepted");
   const observerless = JSON.parse(JSON.stringify(manifest));
   const observed = observerless.rows.find((row) => row.stable_id === "module:core.test.call");
   observed.status = "covered";
   observed.value_consuming = false;
   observed.sink = null;
+  rehash(observerless);
   if (validateManifest(observerless).ok) fail("observerless value accepted");
+  const malformedExclusion = JSON.parse(JSON.stringify(manifest));
+  malformedExclusion.exclusions.push({ stable_id: "module:core.test.call", reason: "", owner: "owner", decision: "D-2335" });
+  malformedExclusion.denominator.counts.exclusions = 1;
+  rehash(malformedExclusion);
+  if (validateManifest(malformedExclusion).ok) fail("malformed exclusion accepted");
+  const invalidExclusion = JSON.parse(JSON.stringify(manifest));
+  const excluded = invalidExclusion.rows.find((row) => row.stable_id === "module:core.test.call");
+  excluded.status = "excluded";
+  excluded.exclusion = { reason: "reason", owner: null, decision: "D-2335" };
+  excluded.value_consuming = null;
+  excluded.sink = null;
+  rehash(invalidExclusion);
+  if (validateManifest(invalidExclusion).ok) fail("invalid exclusion accepted");
   const stale = JSON.parse(JSON.stringify(manifest));
   stale.source_snapshot.hash = sha256("changed");
+  rehash(stale);
   if (validateManifest(stale, { currentSnapshotHash: manifest.source_snapshot.hash }).ok) fail("stale snapshot accepted");
   console.log("hardening manifest hostile fixtures: PASS");
   return 0;
@@ -1048,6 +1313,16 @@ function hostileFixtures() {
 
 function main(args) {
   if (args.includes("--hostile-fixtures")) return hostileFixtures();
+  const checkAt = args.indexOf("--check");
+  if (checkAt >= 0) {
+    const path = args[checkAt + 1];
+    if (!path || path.startsWith("--")) fail("--check requires a path");
+    const manifest = readManifest(path);
+    const counts = Object.fromEntries(["covered", "missing", "unrouted", "excluded", "invalid", "invalid-exclusion"].map((status) => [status, manifest.rows.filter((row) => row.status === status).length]));
+    console.log(`hardening manifest: ${manifest.rows.length} tagged rows; ${counts.covered} covered; ${counts.missing} missing; ${counts.unrouted} unrouted; ${counts.excluded} excluded; ${counts.invalid + counts["invalid-exclusion"]} invalid`);
+    console.log(`hardening manifest: source ${manifest.source_snapshot.hash}; VALID`);
+    return 0;
+  }
   const manifest = buildManifest();
   const validation = validateManifest(manifest);
   if (!validation.ok) { for (const error of validation.errors) console.error(`error: ${error}`); return 1; }
@@ -1056,6 +1331,7 @@ function main(args) {
   if (writeAt >= 0) {
     const path = args[writeAt + 1];
     if (!path) fail("--write requires a path");
+    mkdirSync(dirname(resolve(path)), { recursive: true });
     writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`);
     console.log(`hardening manifest: wrote ${path}`);
   }

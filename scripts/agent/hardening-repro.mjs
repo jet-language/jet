@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 
 export const REPRO_SCHEMA = "jet.hardening.repro.v1";
 export const REPRO_SCHEMA_VERSION = 1;
+const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 function canonical(value) {
   if (value === null || typeof value !== "object") return value;
@@ -21,6 +22,15 @@ export function sha256(value) {
     ? value
     : Buffer.from(String(value), "utf8");
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
+export function reproContentDigest(bundle) {
+  if (!bundle || typeof bundle !== "object" || Array.isArray(bundle)) {
+    throw new Error("repro bundle is not an object");
+  }
+  const content = { ...bundle };
+  delete content.content_digest;
+  return sha256(canonicalJson(content));
 }
 
 function requiredString(value, name) {
@@ -125,6 +135,7 @@ export function makeReproBundle(input = {}) {
       ? JSON.parse(JSON.stringify(input.tower_action))
       : (() => { throw new Error("repro Tower action is required"); })(),
   };
+  bundle.content_digest = reproContentDigest(bundle);
   const result = validateReproBundle(bundle);
   if (!result.ok) throw new Error(result.errors.join("\n"));
   return bundle;
@@ -132,9 +143,12 @@ export function makeReproBundle(input = {}) {
 
 export function validateReproBundle(bundle, { currentRegistrySnapshotHash } = {}) {
   const errors = [];
-  if (!bundle || typeof bundle !== "object") return { ok: false, stale: false, errors: ["repro bundle is not an object"] };
+  if (!bundle || typeof bundle !== "object" || Array.isArray(bundle)) return { ok: false, stale: false, errors: ["repro bundle is not an object"] };
+  const expectedContentDigest = reproContentDigest(bundle);
   if (bundle.schema !== REPRO_SCHEMA) errors.push(`repro schema must be ${REPRO_SCHEMA}`);
   if (bundle.schema_version !== REPRO_SCHEMA_VERSION) errors.push(`repro schema_version must be ${REPRO_SCHEMA_VERSION}`);
+  if (!SHA256_PATTERN.test(bundle.content_digest || "")) errors.push("repro content digest is missing or invalid");
+  else if (bundle.content_digest !== expectedContentDigest) errors.push("repro content digest does not match bundle");
   for (const field of [
     "run_id", "started", "finished", "commit", "binary_sha256", "host", "target",
     "registry_snapshot_hash", "config_hash", "stable_surface_id", "seed", "mutation_arm",
@@ -238,6 +252,22 @@ function hostileFixtures() {
   if (stale.ok || !stale.stale) throw new Error("stale repro snapshot was accepted");
   const missing = validateReproBundle({ ...valid, binary_sha256: "" });
   if (missing.ok) throw new Error("invalid repro bundle was accepted");
+  const tamperCases = {
+    source: (bundle) => { bundle.source = `${bundle.source}print(2)\n`; },
+    tier: (bundle) => { bundle.tier_commands[0].tier = "aot"; },
+    outcome: (bundle) => { bundle.actual_relation = "wrong"; },
+    id: (bundle) => { bundle.stable_surface_id = "module:core.math.cos"; },
+    manifest: (bundle) => { bundle.registry_snapshot_hash = sha256("tampered-registry"); },
+    proof: (bundle) => { bundle.oracle.input_digest = sha256("tampered-input"); },
+  };
+  for (const [name, mutate] of Object.entries(tamperCases)) {
+    const tampered = JSON.parse(JSON.stringify(valid));
+    mutate(tampered);
+    const result = validateReproBundle(tampered);
+    if (result.ok || !result.errors.includes("repro content digest does not match bundle")) {
+      throw new Error(`repro content tampering accepted: ${name}`);
+    }
+  }
   console.log("hardening repro hostile fixtures: PASS");
   return 0;
 }
