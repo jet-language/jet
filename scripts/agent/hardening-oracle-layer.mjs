@@ -813,7 +813,7 @@ function inspectSource(source) {
     errors.push("observable sink is missing");
   }
   const bindings = [];
-  const bindingPattern = /\b([A-Za-z_]\w*)\s*(?:::|:=)\s*/g;
+  const bindingPattern = /\b([A-Za-z_]\w*)\s*(?:::|:=)/g;
   let match;
   while ((match = bindingPattern.exec(scanned.masked)) !== null) {
     const name = match[1];
