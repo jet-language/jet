@@ -4516,6 +4516,10 @@ pub enum TExprKind {
     /// where the AST path prepends it.
     ModuleCall {
         form: TModuleCallForm,
+        /// Effective return type of the lowered target function. `ty` remains the
+        /// source-visible call type; the AOT emitter uses this separate fact only
+        /// to adapt a hidden `Result` carrier to its raw success payload.
+        target_return: Option<Type>,
         /// D-GENERIC-CALL1=A: explicit generic arguments for the target.
         type_args: Vec<Type>,
         args: Vec<TCallArg>,

@@ -874,6 +874,39 @@ pub(crate) fn call_return_type(cx: &Cx, name: &str) -> Type {
     }
 }
 
+/// The return carrier of a cross-module target, matching the `TFunc::ret` that
+/// lowering gives the emitted function. The source-visible module-call type is
+/// kept separately on `TExpr`; this fact is only for the hidden-result ABI seam.
+pub(crate) fn module_call_target_return(cx: &Cx, declared: Option<&Type>) -> Type {
+    // `lower_func_with_web_boundary` keeps a source-declared Stream raw rather
+    // than lifting it into the ordinary failure carrier. Mirror that existing
+    // TFunc rule before expanding aliases.
+    if matches!(
+        declared,
+        Some(Type::Apply { name, args })
+            if name == crate::Syntax::TYPE_STREAM && args.len() == 1
+    ) {
+        return declared
+            .map(|ty| cx.expand_type_aliases(ty))
+            .unwrap_or_else(unit_type);
+    }
+    let declared = declared.map(|ty| cx.expand_type_aliases(ty));
+    jet_foundation::AST::FailureContract::from_return_type(declared.as_ref()).effective_type()
+}
+
+/// Resolve the effective return contract recorded for a source-module import.
+/// The outer `Option` distinguishes missing metadata from a target whose source
+/// declaration has no explicit return type.
+pub(crate) fn imported_module_call_target_return(
+    cx: &Cx,
+    alias: &str,
+    method: &str,
+) -> Option<Type> {
+    cx.import_rets
+        .get(&(alias.to_string(), method.to_string()))
+        .map(|declared| module_call_target_return(cx, declared.as_ref()))
+}
+
 /// Resolve a generic call's result using the explicit arguments first, then
 /// the concrete lowered argument types. This is the codegen-side mirror of
 /// sema's substitution; engines receive a concrete TIR type, never a binder.

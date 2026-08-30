@@ -12,6 +12,7 @@ use crate::Codegen::Cx;
 use crate::Codegen::TIR::ambient_err_local;
 use crate::Codegen::TIR::ast_operand_is_integer;
 use crate::Codegen::TIR::clone_env;
+use crate::Codegen::TIR::imported_module_call_target_return;
 use crate::Codegen::TIR::int_lit_type;
 use crate::Codegen::TIR::is_numeric_bounds_const;
 use crate::Codegen::TIR::lower::contract_expr_proven;
@@ -4152,17 +4153,19 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     lower_one_call_arg(a, conv, env, cx)
                                 })
                                 .collect();
+                            let ret = call_return_type_with_args(
+                                cx,
+                                &mangled_key,
+                                &call.type_args,
+                                &args,
+                            );
                             let lowered = TExpr {
-                                ty: call_return_type_with_args(
-                                    cx,
-                                    &mangled_key,
-                                    &call.type_args,
-                                    &args,
-                                ),
+                                ty: ret.clone(),
                                 kind: TExprKind::ModuleCall {
                                     form: TModuleCallForm::InlineMangled {
                                         mangled: mangled_key,
                                     },
+                                    target_return: Some(ret),
                                     type_args: call.type_args.clone(),
                                     args,
                                 },
@@ -4229,6 +4232,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                         rust_mod,
                                         rust_fn: mangle(&fn_name).to_string(),
                                     },
+                                    target_return: imported_module_call_target_return(
+                                        cx,
+                                        &call.name,
+                                        &fn_name,
+                                    ),
                                     type_args: call.type_args.clone(),
                                     args,
                                 },
@@ -6623,6 +6631,7 @@ pub(crate) fn wrap_foreign_undo(
         },
         Module {
             form: TModuleCallForm,
+            target_return: Option<Type>,
             type_args: Vec<Type>,
         },
     }
@@ -6641,10 +6650,15 @@ pub(crate) fn wrap_foreign_undo(
         ),
         TExprKind::ModuleCall {
             form,
+            target_return,
             type_args,
             args,
         } => (
-            Forward::Module { form, type_args },
+            Forward::Module {
+                form,
+                target_return,
+                type_args,
+            },
             args.into_iter().map(Arg::Module).collect::<Vec<_>>(),
         ),
         kind => {
@@ -6814,8 +6828,13 @@ pub(crate) fn wrap_foreign_undo(
             c_abi,
             args: forward_extern_args,
         },
-        Forward::Module { form, type_args } => TExprKind::ModuleCall {
+        Forward::Module {
             form,
+            target_return,
+            type_args,
+        } => TExprKind::ModuleCall {
+            form,
+            target_return,
             type_args,
             args: forward_module_args,
         },

@@ -1367,6 +1367,53 @@ fn task_result_list_carrier(ty: &Type) -> bool {
     }
 }
 
+/// Emit one resolved module call and adapt only the hidden Result ABI. A source
+/// `Result` expression remains the carrier; a raw success expression unwraps the
+/// target's effective Result with ordinary Rust propagation.
+fn emit_tir_module_call(
+    expr: &TExpr,
+    form: &TModuleCallForm,
+    target_return: Option<&Type>,
+    type_args: &[Type],
+    args: &[crate::Codegen::TIR::TCallArg],
+    cx: &Cx,
+) -> String {
+    let arg_str = emit_tir_call_args(args, cx);
+    let type_args = if type_args.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "::<{}>",
+            type_args
+                .iter()
+                .map(|ty| cx.rust_type(ty))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let call = match form {
+        TModuleCallForm::Qualified { rust_mod, rust_fn } => format!(
+            "{}{}::{}{}({})",
+            cx.root_prefix, rust_mod, rust_fn, type_args, arg_str
+        ),
+        TModuleCallForm::InlineMangled { mangled } => format!(
+            "{}{}{}({})",
+            cx.root_prefix,
+            mangle(mangled),
+            type_args,
+            arg_str
+        ),
+    };
+    match target_return {
+        Some(Type::Result { ok, .. })
+            if !matches!(&expr.ty, Type::Result { .. }) && &expr.ty == ok.as_ref() =>
+        {
+            format!("({call})?")
+        }
+        _ => call,
+    }
+}
+
 pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
     match &e.kind {
         // D-SG9: width suffix is read straight off the literal — no re-inference.
@@ -6888,40 +6935,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // prefix with root). Args were resolved into `TCallArg`s (`emit_tir_call_args`).
         TExprKind::ModuleCall {
             form,
+            target_return,
             type_args,
             args,
-        } => {
-            let arg_str = emit_tir_call_args(args, cx);
-            let type_args = if type_args.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "::<{}>",
-                    type_args
-                        .iter()
-                        .map(|ty| cx.rust_type(ty))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            };
-            match form {
-                TModuleCallForm::Qualified { rust_mod, rust_fn } => {
-                    format!(
-                        "{}{}::{}{}({})",
-                        cx.root_prefix, rust_mod, rust_fn, type_args, arg_str
-                    )
-                }
-                TModuleCallForm::InlineMangled { mangled } => {
-                    format!(
-                        "{}{}{}({})",
-                        cx.root_prefix,
-                        mangle(mangled),
-                        type_args,
-                        arg_str
-                    )
-                }
-            }
-        }
+        } => emit_tir_module_call(e, form, target_return.as_ref(), type_args, args, cx),
         // c109 Phase 14: an FFI extern call. Reproduces `emit_call`'s `extern_funcs`
         // arm: `{ffi_crate}::{wrapper}(args)`. `cx.ffi_crate` is program-level (read
         // here, like Phase 10's regex form); the AST falls back to "jet_ffi" when it is

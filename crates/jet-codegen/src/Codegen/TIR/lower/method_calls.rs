@@ -18,6 +18,7 @@ use crate::Codegen::TIR::fn_field_call_ty;
 use crate::Codegen::TIR::game_static_type;
 use crate::Codegen::TIR::handle_method_op;
 use crate::Codegen::TIR::handle_method_return_ty;
+use crate::Codegen::TIR::imported_module_call_target_return;
 use crate::Codegen::TIR::is_app_method_name;
 use crate::Codegen::TIR::is_civil_time_method_name;
 use crate::Codegen::TIR::is_concurrency_method_name;
@@ -35,6 +36,7 @@ use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
 use crate::Codegen::TIR::lower_debug_text;
 use crate::Codegen::TIR::lower_extern_call_arg;
+use crate::Codegen::TIR::module_call_target_return;
 use crate::AST::{AccessConvention, Expr, StrPart, Type};
 
 fn unit_ratio_as_f64(value: &crate::AST::UnitRatio) -> f64 {
@@ -391,11 +393,13 @@ fn lower_archive_source_call(
     }
     let (sig, fixed_ret) = crate::Sema::core_fixed_sig("core.archive", method)?;
     let targs = lower_module_args(args, Some(sig.as_slice()), env, cx);
+    let ty = resolved_ret
+        .cloned()
+        .or(fixed_ret)
+        .unwrap_or_else(unit_type);
+    let target_return = Some(module_call_target_return(cx, Some(&ty)));
     Some(TExpr {
-        ty: resolved_ret
-            .cloned()
-            .or(fixed_ret)
-            .unwrap_or_else(unit_type),
+        ty,
         kind: TExprKind::ModuleCall {
             form: TModuleCallForm::Qualified {
                 // The source package is emitted as `mod __jet_core_archive`.
@@ -404,6 +408,7 @@ fn lower_archive_source_call(
                 rust_mod: crate::Codegen::mangle("core_archive"),
                 rust_fn: mangle(method).to_string(),
             },
+            target_return,
             type_args: type_args.to_vec(),
             args: targs,
         },
@@ -1228,6 +1233,11 @@ fn lower_method_call_impl(
                                 rust_mod,
                                 rust_fn: mangle(&rust_fn).to_string(),
                             },
+                            target_return: imported_module_call_target_return(
+                                cx,
+                                &alias,
+                                &root_name,
+                            ),
                             type_args: type_args.to_vec(),
                             args: lowered_args,
                         },
@@ -3001,6 +3011,7 @@ fn lower_method_call_impl(
                                         rust_mod,
                                         rust_fn: mangle(method).to_string(),
                                     },
+                                    target_return: None,
                                     type_args: type_args.to_vec(),
                                     args: targs,
                                 },
@@ -3031,12 +3042,14 @@ fn lower_method_call_impl(
                     return in_own_frame(|| {
                         let sig = cx.sigs.get(&mangled_key).cloned();
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
+                        let ret = call_return_type_with_args(cx, &mangled_key, type_args, &targs);
                         return TExpr {
-                            ty: call_return_type_with_args(cx, &mangled_key, type_args, &targs),
+                            ty: ret.clone(),
                             kind: TExprKind::ModuleCall {
                                 form: TModuleCallForm::InlineMangled {
                                     mangled: mangled_key,
                                 },
+                                target_return: Some(ret),
                                 type_args: type_args.to_vec(),
                                 args: targs,
                             },
@@ -3071,6 +3084,11 @@ fn lower_method_call_impl(
                                     rust_mod: real_mod,
                                     rust_fn: mangle(&real_fn).to_string(),
                                 },
+                                target_return: imported_module_call_target_return(
+                                    cx,
+                                    alias,
+                                    method,
+                                ),
                                 type_args: type_args.to_vec(),
                                 args: targs,
                             },
@@ -3148,6 +3166,7 @@ fn lower_method_call_impl(
                                     rust_mod: mod_name,
                                     rust_fn: mangle(method).to_string(),
                                 },
+                                target_return: imported_module_call_target_return(cx, alias, method),
                                 type_args: type_args.to_vec(),
                                 args: targs,
                             },
@@ -3221,6 +3240,7 @@ fn lower_method_call_impl(
                                     rust_mod: mod_name,
                                     rust_fn: mangle(method).to_string(),
                                 },
+                                target_return: None,
                                 type_args: type_args.to_vec(),
                                 args: targs,
                             },
@@ -3237,12 +3257,14 @@ fn lower_method_call_impl(
                             .map(String::as_str);
                         let sig = cx.sigs.get(&mangled_key).cloned();
                         let targs = lower_module_args(args, sig.as_deref(), env, cx);
+                        let ret = call_return_type_with_args(cx, &mangled_key, type_args, &targs);
                         let lowered = TExpr {
-                            ty: call_return_type_with_args(cx, &mangled_key, type_args, &targs),
+                            ty: ret.clone(),
                             kind: TExprKind::ModuleCall {
                                 form: TModuleCallForm::InlineMangled {
                                     mangled: mangled_key,
                                 },
+                                target_return: Some(ret),
                                 type_args: type_args.to_vec(),
                                 args: targs,
                             },
