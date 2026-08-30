@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalJson, sha256 } from "./hardening-repro.mjs";
@@ -10,6 +9,7 @@ import { canonicalJson, sha256 } from "./hardening-repro.mjs";
 export const SURFACE_SCHEMA = "jet.hardening.surface.v1";
 export const SURFACE_SCHEMA_VERSION = 1;
 export const TIERS = Object.freeze(["aot", "jet_run", "interpreter"]);
+export const DEFAULT_MANIFEST_PATH = ".jet/hardening-manifest.json";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = resolve(SCRIPT_DIR, "../..");
@@ -36,6 +36,34 @@ const ROUTE_FILES = Object.freeze({
   jet_run: ["crates/jet-jit/src/jit/lower_ctx.rs", "crates/jet-jit/src/jit/runtime_host.rs", "crates/jet-jit/src/jit/types_meta.rs"],
   interpreter: ["crates/jet-jit/src/ambient_interp.rs", "crates/jet-jit/src/enc_stream/mod.rs", "crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs", "crates/jet-comptime/src/Comptime/CorePureParity.rs"],
 });
+const VALID_STATUSES = new Set(["covered", "missing", "unrouted", "excluded"]);
+const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
+function compareStable(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function uniqueSorted(values) {
+  return [...new Set(values)].sort(compareStable);
+}
+
+function lineNumber(source, offset) {
+  return source.slice(0, offset).split("\n").length;
+}
+
+function rowEvidence(path, source, offset, seam, stableId) {
+  return `${path}:${lineNumber(source, offset)}:${seam}:${stableId}`;
+}
+
+function validDigest(value) {
+  return typeof value === "string" && SHA256_PATTERN.test(value);
+}
+
+function sourceBytes(value) {
+  return Buffer.isBuffer(value) || value instanceof Uint8Array
+    ? Buffer.from(value)
+    : Buffer.from(String(value), "utf8");
+}
 
 function fail(message) {
   throw new Error(message);
@@ -247,44 +275,106 @@ function explicitTypes(moduleItemsSource) {
   return out;
 }
 
-function parseReceiverRows(callsSource) {
-  const out = [];
-  for (const call of calls(callsSource, "CoreCallRecord::receiver(")) {
-    const types = quoted(call.args[0] || "");
-    const member = quoted(call.args[1] || "")[0];
+function moduleItemEvidence(source, module, member, stableId) {
+  const clean = withoutComments(source);
+  const moduleIndex = clean.indexOf(`"${module}"`);
+  const memberIndex = clean.indexOf(`"${member}"`, Math.max(0, moduleIndex));
+  const offset = memberIndex >= 0 ? memberIndex : moduleIndex >= 0 ? moduleIndex : 0;
+  return [rowEvidence(PATHS.moduleItems, source, offset, "core-module-registry", stableId)];
+}
+
+function typeMembershipEvidence(source, stableId) {
+  const untagged = untaggedId(stableId);
+  const dot = untagged.lastIndexOf(".");
+  const module = dot < 0 ? "" : untagged.slice(0, dot);
+  const type = dot < 0 ? untagged : untagged.slice(dot + 1);
+  return moduleItemEvidence(source, module, type, stableId);
+}
+
+function parseCoreCallRegistry(callsSource, path = PATHS.calls) {
+  const events = [
+    ...calls(callsSource, "CoreCallRecord::new(").map((call) => ({ ...call, kind: "module_call" })),
+    ...calls(callsSource, "CoreCallRecord::receiver(").map((call) => ({ ...call, kind: "receiver_method" })),
+  ].sort((left, right) => left.start - right.start);
+  const modules = new Map();
+  const receivers = new Map();
+  for (const [index, event] of events.entries()) {
+    const block = codeOnly(callsSource.slice(event.start, events[index + 1]?.start ?? callsSource.length));
+    if (event.kind === "module_call") {
+      const module = quoted(event.args[0] || "")[0];
+      const member = quoted(event.args[1] || "")[0];
+      if (!module || !member || !module.startsWith("core.")) continue;
+      const stable_id = `module:${module}.${member}`;
+      modules.set(stable_id, {
+        stable_id,
+        module,
+        member,
+        aot_direct: !/\.without_direct_aot\s*\(\s*\)/.test(block),
+        jit_direct: !/\.without_direct_jit\s*\(\s*\)/.test(block),
+        interpreter_explicit: /\.with_(?:pure_route|interpreter_route)\s*\(/.test(block),
+        evidence: [rowEvidence(path, callsSource, event.start, "CoreCallRecord::new", stable_id)],
+      });
+      continue;
+    }
+    const types = quoted(event.args[0] || "");
+    const member = quoted(event.args[1] || "")[0];
     if (!member || types.length === 0) continue;
-    for (const type of types) out.push({ stable_id: `receiver:${type}.${member}`, type, member });
+    for (const type of types) {
+      const stable_id = `receiver:${type}.${member}`;
+      receivers.set(stable_id, {
+        stable_id,
+        type,
+        member,
+        evidence: [rowEvidence(path, callsSource, event.start, "CoreCallRecord::receiver", stable_id)],
+      });
+    }
   }
-  return out;
+  return { modules, receivers };
+}
+
+function parseReceiverRows(callsSource) {
+  return [...parseCoreCallRegistry(callsSource).receivers.values()]
+    .sort((left, right) => compareStable(left.stable_id, right.stable_id));
 }
 
 function parsePlainCallRows(callsSource) {
-  const out = [];
-  for (const call of calls(callsSource, "CoreCallRecord::new(")) {
-    const module = quoted(call.args[0] || "")[0];
-    const member = quoted(call.args[1] || "")[0];
-    if (module?.startsWith("core.") && member) out.push(`${module}.${member}`);
-  }
-  return [...new Set(out)].sort();
+  return [...parseCoreCallRegistry(callsSource).modules.values()]
+    .map((row) => row.stable_id)
+    .sort(compareStable);
 }
 
 function parsePairLiterals(source) {
   const clean = withoutComments(source);
   const out = [];
   const pattern = /\(\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*\)/g;
-  for (const match of clean.matchAll(pattern)) out.push([decodeRustString(match[1]), decodeRustString(match[2])]);
+  for (const match of clean.matchAll(pattern)) {
+    out.push({
+      first: decodeRustString(match[1]),
+      second: decodeRustString(match[2]),
+      start: match.index,
+    });
+  }
   return out;
 }
 
 function parseFieldRows(typesSource, surfaceSource) {
   const clean = withoutComments(typesSource);
-  const out = new Set();
-  const add = (type, field) => {
-    if (/^[A-Z][A-Za-z0-9_]*$/.test(type) && /^[a-z_][A-Za-z0-9_]*$/.test(field)) out.add(`${type}.${field}`);
+  const evidence = new Map();
+  const add = (type, field, offset = 0, path = PATHS.fields, seam = "core-field-registry") => {
+    if (!/^[A-Z][A-Za-z0-9_]*$/.test(type) || !/^[a-z_][A-Za-z0-9_]*$/.test(field)) return;
+    const stable = `${type}.${field}`;
+    if (!evidence.has(stable)) evidence.set(stable, []);
+    evidence.get(stable).push(rowEvidence(
+      path,
+      path === PATHS.fields ? typesSource : surfaceSource,
+      offset,
+      seam,
+      `field:${stable}`,
+    ));
   };
   const pair = /\(\s*((?:"[^"]+"\s*(?:\|\s*)?)+)\s*,\s*((?:"[^"]+"\s*(?:\|\s*)?)+)\s*\)\s*=>/g;
   for (const match of clean.matchAll(pair)) {
-    for (const type of quoted(match[1])) for (const field of quoted(match[2])) add(type, field);
+    for (const type of quoted(match[1])) for (const field of quoted(match[2])) add(type, field, match.index);
   }
   for (const fieldMatch of clean.matchAll(/match\s+field\s*\{/g)) {
     const opening = clean.indexOf("{", fieldMatch.index + fieldMatch[0].length - 1);
@@ -298,8 +388,10 @@ function parseFieldRows(typesSource, surfaceSource) {
     }
     const body = clean.slice(opening + 1, close);
     const fields = [];
-    for (const match of body.matchAll(/"([a-z_][A-Za-z0-9_]*)"\s*(?:\|\s*)*(?==>)/g)) fields.push(match[1]);
-    for (const type of types) for (const field of fields) add(type, field);
+    for (const match of body.matchAll(/"([a-z_][A-Za-z0-9_]*)"\s*(?:\|\s*)*(?==>)/g)) {
+      fields.push({ name: match[1], offset: opening + 1 + match.index });
+    }
+    for (const type of types) for (const field of fields) add(type, field.name, field.offset);
   }
   const constructable = clean.indexOf("pub(crate) fn core_constructable_fields");
   if (constructable >= 0) {
@@ -308,7 +400,9 @@ function parseFieldRows(typesSource, surfaceSource) {
       const opening = body.indexOf("[", match.index + match[0].length - 1);
       let close;
       try { close = matching(body, opening, "[", "]"); } catch { continue; }
-      for (const field of body.slice(opening + 1, close).matchAll(/\(\s*"([a-z_][A-Za-z0-9_]*)"/g)) add(match[1], field[1]);
+      for (const field of body.slice(opening + 1, close).matchAll(/\(\s*"([a-z_][A-Za-z0-9_]*)"/g)) {
+        add(match[1], field[1], constructable + opening + 1 + field.index, PATHS.fields, "core-constructable-field");
+      }
     }
   }
   // A field table can use Syntax string constants for a reserved type name.
@@ -322,9 +416,14 @@ function parseFieldRows(typesSource, surfaceSource) {
       for (const field of fields) add(value, field);
     }
   }
-  return [...out].sort().map((stable) => {
+  return [...evidence.keys()].sort(compareStable).map((stable) => {
     const dot = stable.lastIndexOf(".");
-    return { stable_id: `field:${stable}`, type: stable.slice(0, dot), field: stable.slice(dot + 1) };
+    return {
+      stable_id: `field:${stable}`,
+      type: stable.slice(0, dot),
+      field: stable.slice(dot + 1),
+      evidence: uniqueSorted(evidence.get(stable)),
+    };
   });
 }
 
@@ -468,57 +567,149 @@ function routeIdentity(id) {
   return id.startsWith("module:") ? id.slice("module:".length) : id;
 }
 
-function routeFactsFromSources(root, moduleIds, receiverRows, fieldRows, typeRows, plainRows) {
+function routeSourceEvidence(root, paths, pattern, seam, stableId) {
+  for (const path of paths) {
+    const absolute = join(root, path);
+    if (!existsSync(absolute)) continue;
+    const source = readFileSync(absolute, "utf8");
+    const match = codeOnly(source).match(pattern);
+    if (match) return [rowEvidence(path, source, match.index, seam, stableId)];
+  }
+  return [];
+}
+
+function routeFactsFromSources(
+  root,
+  moduleIds,
+  receiverRows,
+  fieldRows,
+  typeRows,
+  plainRows,
+  registry = null,
+) {
   const expectedModules = new Set(moduleIds.map(routeIdentity));
   const actual = Object.fromEntries(TIERS.map((tier) => [tier, []]));
-  const add = (tier, stableId, route, evidence) => {
+  const add = (tier, stableId, route, evidence, seam) => {
+    const proof = uniqueSorted(evidence.filter(Boolean));
+    if (proof.length === 0) return;
     const rows = actual[tier];
-    if (!rows.some((row) => row.stable_id === stableId && row.route === route)) rows.push({ stable_id: stableId, route, evidence: [...evidence].sort() });
+    const existing = rows.find((row) => row.stable_id === stableId && row.route === route);
+    if (existing) {
+      existing.evidence = uniqueSorted([...existing.evidence, ...proof]);
+      return;
+    }
+    rows.push({ stable_id: stableId, route, seam, evidence: proof });
   };
+
+  const callsSource = registry?.source || (existsSync(join(root, PATHS.calls)) ? readFileSync(join(root, PATHS.calls), "utf8") : "");
+  const callRegistry = registry?.rows || parseCoreCallRegistry(callsSource);
+  const moduleRegistry = callRegistry.modules || new Map();
+  const receiverRegistry = callRegistry.receivers || new Map();
+
+  const genericLookups = {
+    aot: routeSourceEvidence(root, ROUTE_FILES.aot, /(?:crate::)?Syntax::core_call\s*\(\s*module\s*,\s*method\s*\)/, "aot-core-call-dispatch", "__route__"),
+    jet_run: routeSourceEvidence(root, ROUTE_FILES.jet_run, /jet_foundation::Syntax::core_call\s*\(\s*module\s*,\s*method\s*\)/, "jet-run-core-call-dispatch", "__route__"),
+    interpreter: routeSourceEvidence(root, ROUTE_FILES.interpreter, /jet_foundation::Syntax::core_call\s*\(\s*module\s*,\s*method\s*\)/, "interpreter-core-call-dispatch", "__route__"),
+  };
+  const routeSupports = {
+    aot: (entry) => entry?.aot_direct !== false,
+    jet_run: (entry) => entry?.jit_direct !== false,
+    interpreter: (entry) => entry?.interpreter_explicit === true,
+  };
+
+  for (const row of moduleRegistry.values()) {
+    if (!expectedModules.has(row.stable_id.slice("module:".length))) continue;
+    for (const tier of TIERS) {
+      if (!routeSupports[tier](row)) continue;
+      const lookup = genericLookups[tier];
+      if (lookup.length === 0) continue;
+      add(
+        tier,
+        row.stable_id,
+        `${tier}:canonical-core-call-lookup`,
+        [...row.evidence, ...lookup.map((item) => item.replace("__route__", row.stable_id))],
+        "core-call-registry",
+      );
+    }
+  }
+
+  // Hand-written literal arms remain valid, but only when the exact pair is
+  // present in the registry. The row-specific registry proof prevents an
+  // unrelated pair in a route file from becoming blanket coverage.
   for (const tier of TIERS) {
     for (const path of ROUTE_FILES[tier]) {
       const absolute = join(root, path);
       if (!existsSync(absolute)) continue;
       const source = readFileSync(absolute, "utf8");
-      for (const [module, member] of parsePairLiterals(source)) {
-        const untagged = `${module}.${member}`;
-        if (expectedModules.has(untagged)) add(tier, `module:${untagged}`, `${tier}:literal-dispatch`, [path]);
-        for (const receiver of receiverRows) {
-          if (receiver.member === member && receiver.type === module) add(tier, receiver.stable_id, `${tier}:receiver-dispatch`, [path]);
-        }
+      for (const pair of parsePairLiterals(source)) {
+        const stableId = `module:${pair.first}.${pair.second}`;
+        const entry = moduleRegistry.get(stableId);
+        if (!expectedModules.has(`${pair.first}.${pair.second}`) || !entry) continue;
+        add(
+          tier,
+          stableId,
+          `${tier}:literal-dispatch`,
+          [
+            ...entry.evidence,
+            rowEvidence(path, source, pair.start, "literal-dispatch", stableId),
+          ],
+          "core-call-registry",
+        );
       }
     }
   }
-  const aotSources = ROUTE_FILES.aot.map((path) => existsSync(join(root, path)) ? readFileSync(join(root, path), "utf8") : "").join("\n");
-  const jitSources = ROUTE_FILES.jet_run.map((path) => existsSync(join(root, path)) ? readFileSync(join(root, path), "utf8") : "").join("\n");
-  if (/Syntax::core_call\(module\s*,\s*method\)/.test(aotSources)) {
-    for (const row of plainRows) if (expectedModules.has(row)) add("aot", `module:${row}`, "aot:canonical-core-call-lookup", ROUTE_FILES.aot);
-  }
-  if (/Syntax::core_call\(module\s*,\s*method\)/.test(jitSources)) {
-    for (const row of plainRows) if (expectedModules.has(row)) add("jet_run", `module:${row}`, "jet_run:canonical-core-call-lookup", ROUTE_FILES.jet_run);
-  }
-  const interpreter = actual.interpreter;
-  if (ROUTE_FILES.interpreter.some((path) => existsSync(join(root, path)))) {
-    const source = ROUTE_FILES.interpreter.map((path) => existsSync(join(root, path)) ? readFileSync(join(root, path), "utf8") : "").join("\n");
-    if (/core_receiver_method|evaluate_method/.test(source)) {
-      for (const receiver of receiverRows) {
-        if (!interpreter.some((row) => row.stable_id === receiver.stable_id)) add("interpreter", receiver.stable_id, "interpreter:receiver-dispatch", ROUTE_FILES.interpreter);
-      }
+
+  const receiverLookup = routeSourceEvidence(
+    root,
+    ROUTE_FILES.interpreter,
+    /core_receiver_method\s*\(/,
+    "interpreter-receiver-dispatch",
+    "__route__",
+  );
+  if (receiverLookup.length > 0) {
+    for (const receiver of receiverRows) {
+      const entry = receiverRegistry.get(receiver.stable_id);
+      if (!entry) continue;
+      add(
+        "interpreter",
+        receiver.stable_id,
+        "interpreter:canonical-receiver-lookup",
+        [...(receiver.evidence || entry.evidence || []), ...receiverLookup.map((item) => item.replace("__route__", receiver.stable_id))],
+        "core-receiver-registry",
+      );
     }
   }
-  const shapePaths = {
-    aot: ROUTE_FILES.aot,
-    jet_run: ROUTE_FILES.jet_run,
-    interpreter: ROUTE_FILES.interpreter,
+
+  const shapePatterns = {
+    aot: /core_struct_field_rust_name\s*\(/,
+    jet_run: /core_struct_field_(?:type|names|index|layout)\s*\(/,
+    interpreter: /TExprKind::Field|struct_field_types/,
   };
   for (const tier of TIERS) {
-    const evidence = shapePaths[tier].filter((path) => existsSync(join(root, path)) && /core_struct_field(?:_type|_rust_name)/.test(readFileSync(join(root, path), "utf8")));
-    if (evidence.length) {
-      for (const row of fieldRows) add(tier, row.stable_id, `${tier}:canonical-field-shape`, evidence);
-      for (const row of typeRows) add(tier, row.stable_id, `${tier}:canonical-type-shape`, evidence);
+    const shapeEvidence = routeSourceEvidence(root, ROUTE_FILES[tier], shapePatterns[tier], `${tier}-core-shape-dispatch`, "__route__");
+    if (shapeEvidence.length === 0) continue;
+    for (const row of fieldRows) {
+      add(
+        tier,
+        row.stable_id,
+        `${tier}:canonical-field-shape`,
+        [...(row.evidence || []), ...shapeEvidence.map((item) => item.replace("__route__", row.stable_id))],
+        "core-field-registry",
+      );
+    }
+    for (const row of typeRows) {
+      add(
+        tier,
+        row.stable_id,
+        `${tier}:canonical-type-shape`,
+        [...(row.evidence || []), ...shapeEvidence.map((item) => item.replace("__route__", row.stable_id))],
+        "core-type-registry",
+      );
     }
   }
-  for (const rows of Object.values(actual)) rows.sort((left, right) => left.stable_id.localeCompare(right.stable_id) || left.route.localeCompare(right.route));
+  for (const rows of Object.values(actual)) {
+    rows.sort((left, right) => compareStable(left.stable_id, right.stable_id) || compareStable(left.route, right.route));
+  }
   return actual;
 }
 
@@ -527,12 +718,15 @@ function sourceFiles(root) {
   for (const paths of Object.values(ROUTE_FILES)) for (const path of paths) files.add(path);
   const corpus = join(root, "tests/conformance/corpus");
   for (const path of walk(corpus)) files.add(relative(root, path).replaceAll("\\", "/"));
-  return [...files].sort();
+  return [...files].sort(compareStable);
 }
 
 export function sourceSnapshotFromContents(entries) {
-  const files = Object.entries(entries).map(([path, contents]) => ({ path, bytes: Buffer.byteLength(String(contents)), sha256: sha256(contents) }))
-    .sort((left, right) => left.path.localeCompare(right.path));
+  const files = Object.entries(entries).map(([path, contents]) => ({
+    path,
+    bytes: sourceBytes(contents).length,
+    sha256: sha256(contents),
+  })).sort((left, right) => compareStable(left.path, right.path));
   return { algorithm: "sha256", files, hash: sha256(canonicalJson(files)) };
 }
 
@@ -560,10 +754,16 @@ function defaultSurface(root) {
   const typeSet = new Set();
   for (const [module, names] of modules) for (const name of names) if (/^[A-Z]/.test(name)) typeSet.add(`type:${module}.${name}`);
   for (const [module, names] of explicit) for (const name of names) typeSet.add(`type:${module}.${name}`);
-  const receiverRows = parseReceiverRows(readFileSync(join(root, PATHS.calls), "utf8"));
+  const callsSource = readFileSync(join(root, PATHS.calls), "utf8");
+  const registry = { source: callsSource, rows: parseCoreCallRegistry(callsSource) };
+  const receiverRows = parseReceiverRows(callsSource);
   const fieldRows = parseFieldRows(readFileSync(join(root, PATHS.fields), "utf8"), surfaceSource);
-  const plainRows = parsePlainCallRows(readFileSync(join(root, PATHS.calls), "utf8"));
-  const routes = routeFactsFromSources(root, moduleCalls, receiverRows, fieldRows, [...typeSet].map((stable_id) => ({ stable_id })), plainRows);
+  const plainRows = parsePlainCallRows(callsSource);
+  const typeRows = [...typeSet].sort(compareStable).map((stable_id) => ({
+    stable_id,
+    evidence: typeMembershipEvidence(moduleItemsSource, stable_id),
+  }));
+  const routes = routeFactsFromSources(root, moduleCalls, receiverRows, fieldRows, typeRows, plainRows, registry);
   const seeds = new Map();
   const corpusRoot = join(root, "tests/conformance/corpus");
   for (const path of walk(corpusRoot)) {
@@ -590,6 +790,15 @@ function defaultSurface(root) {
       field: [PATHS.fields],
       nominal_type: [PATHS.moduleTypes],
     },
+    membershipEvidence: {
+      module_call: Object.fromEntries(moduleCalls.map((stable_id) => [
+        stable_id,
+        moduleItemEvidence(moduleItemsSource, untaggedId(stable_id).slice(0, untaggedId(stable_id).lastIndexOf(".")), untaggedId(stable_id).slice(untaggedId(stable_id).lastIndexOf(".") + 1), stable_id),
+      ])),
+      receiver_method: Object.fromEntries(receiverRows.map((row) => [row.stable_id, row.evidence || []])),
+      field: Object.fromEntries(fieldRows.map((row) => [row.stable_id, row.evidence || []])),
+      nominal_type: Object.fromEntries(typeRows.map((row) => [row.stable_id, row.evidence || []])),
+    },
   };
 }
 
@@ -597,10 +806,18 @@ function normalizeRoutes(routes = {}) {
   const out = Object.fromEntries(TIERS.map((tier) => [tier, []]));
   for (const tier of TIERS) {
     for (const value of routes[tier] || []) {
-      if (typeof value === "string") out[tier].push({ stable_id: value.includes(":") ? value : `module:${value}`, route: `${tier}:fixture`, evidence: [] });
-      else out[tier].push({ stable_id: value.stable_id, route: value.route || `${tier}:fixture`, evidence: [...(value.evidence || [])].sort() });
+      if (typeof value === "string") {
+        out[tier].push({ stable_id: value.includes(":") ? value : `module:${value}`, route: `${tier}:fixture`, evidence: [] });
+      } else {
+        out[tier].push({
+          stable_id: value.stable_id,
+          route: value.route || `${tier}:fixture`,
+          seam: value.seam || null,
+          evidence: uniqueSorted([...(value.evidence || [])]),
+        });
+      }
     }
-    out[tier].sort((left, right) => left.stable_id.localeCompare(right.stable_id) || left.route.localeCompare(right.route));
+    out[tier].sort((left, right) => compareStable(left.stable_id, right.stable_id) || compareStable(left.route, right.route));
   }
   return out;
 }
@@ -610,7 +827,7 @@ function normalizedExclusions(exclusions = new Map()) {
   const entries = exclusions instanceof Map ? exclusions.entries() : Object.entries(exclusions);
   for (const [key, value] of entries) {
     const stable = key.includes(":") ? key : `module:${key}`;
-    out.set(stable, typeof value === "string" ? { reason: value, owner: null, decision: null } : value);
+    out.set(stable, typeof value === "string" ? { reason: value, owner: null, decision: null } : { ...value });
   }
   return out;
 }
@@ -633,7 +850,12 @@ function rowDomain(row) {
 function buildRow(kind, value, surface, routes, exclusions) {
   const identity = rowIdentity(kind, value);
   const routeRows = [];
-  for (const tier of TIERS) for (const route of routes[tier]) if (route.stable_id === identity.stable_id) routeRows.push({ tier, route: route.route, evidence: route.evidence });
+  for (const tier of TIERS) {
+    for (const route of routes[tier]) {
+      if (route.stable_id !== identity.stable_id) continue;
+      routeRows.push({ tier, route: route.route, seam: route.seam, evidence: route.evidence });
+    }
+  }
   const applicable = [...new Set(routeRows.map((route) => route.tier))].sort((left, right) => TIERS.indexOf(left) - TIERS.indexOf(right));
   const exclusion = exclusions.get(identity.stable_id) || exclusions.get(untaggedId(identity.stable_id)) || null;
   const seed = surface.seeds?.get(identity.stable_id) || surface.seeds?.[identity.stable_id] || null;
@@ -648,9 +870,10 @@ function buildRow(kind, value, surface, routes, exclusions) {
     member: identity.member,
     domain: rowDomain(identity),
     applicable_tiers: applicable,
-    projections: routeRows.sort((left, right) => TIERS.indexOf(left.tier) - TIERS.indexOf(right.tier) || left.route.localeCompare(right.route)),
+    projections: routeRows.sort((left, right) => TIERS.indexOf(left.tier) - TIERS.indexOf(right.tier) || compareStable(left.route, right.route)),
     dispatcher_arms: routeRows.map((route) => route.route),
-    membership_sources: [...(surface.membershipSources?.[kind] || [])].sort(),
+    membership_sources: [...(surface.membershipSources?.[kind] || [])].sort(compareStable),
+    membership_evidence: uniqueSorted(surface.membershipEvidence?.[kind]?.[identity.stable_id] || value.evidence || []),
     seed: seed?.path || null,
     value_consuming: exclusion || !executable ? null : !invalid,
     sink: exclusion || !executable ? null : seed.sink,
@@ -673,17 +896,20 @@ export function buildManifest({ root = DEFAULT_ROOT, surface = null } = {}) {
   };
   for (const kind of KIND_ORDER) members[kind] = [...new Set(members[kind])].sort();
   const rows = KIND_ORDER.flatMap((kind) => members[kind].map((value) => buildRow(kind, value, actual, routes, exclusions)))
-    .sort((left, right) => left.stable_id.localeCompare(right.stable_id));
+    .sort((left, right) => compareStable(left.stable_id, right.stable_id));
   const manifest = {
     schema: SURFACE_SCHEMA,
     schema_version: SURFACE_SCHEMA_VERSION,
     source_snapshot: actual.snapshot || sourceSnapshot(root),
     denominator: {
       source_ids: members,
-      counts: Object.fromEntries(KIND_ORDER.map((kind) => [kind, members[kind].length])),
+      counts: {
+        ...Object.fromEntries(KIND_ORDER.map((kind) => [kind, members[kind].length])),
+        exclusions: exclusions.size,
+      },
     },
     actual_routes: routes,
-    exclusions: [...exclusions.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([stable_id, value]) => ({ stable_id, ...value })),
+    exclusions: [...exclusions.entries()].sort(([left], [right]) => compareStable(left, right)).map(([stable_id, value]) => ({ stable_id, ...value })),
     rows,
   };
   const validation = validateManifest(manifest);
