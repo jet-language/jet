@@ -5,8 +5,8 @@ use core.testing as testing
 fn run() {
     root :: testing.temp_dir("files-write")
     path :: Path.from(root).join("fixture.txt")
-    files.write(path, "fixture").drop("the witness only needs call completion")
-    print(true)
+    result :: files.write(path, "fixture")
+    print(result)
     text :: files.read(path) ?? panic("read")
     assert((text == "fixture"))
     files.remove_all(root) ?? panic("cleanup")
