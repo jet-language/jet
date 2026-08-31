@@ -113,6 +113,24 @@ fn scalar_shape(params: &[(AccessConvention, Type)], return_type: Option<&Type>)
     }
     Some(next)
 }
+fn export_signature(function: &Func) -> GuestFunction {
+    let params = function
+        .params
+        .iter()
+        .map(|param| (param.convention, param.ty.clone()))
+        .collect::<Vec<_>>();
+    let return_type = function.return_type.clone();
+    GuestFunction {
+        direction: GuestDirection::Export,
+        library: None,
+        name: function.name.clone(),
+        symbol: function.name.clone(),
+        scalar: scalar_shape(&params, return_type.as_ref()),
+        params,
+        return_type,
+    }
+}
+
 
 /// Whether a marker is a valid guest-boundary spelling at a callable/module
 /// site. The marker vocabulary uses this only to recognize the ratified
@@ -179,27 +197,16 @@ pub fn guest_import_function_signature(function: &Func) -> Option<GuestFunction>
 
 /// Build the sema row for one `#Export(c)` function.
 pub fn guest_export_signature(function: &Func) -> Option<GuestFunction> {
-    is_guest_export(function).then(|| GuestFunction {
-        direction: GuestDirection::Export,
-        library: None,
-        name: function.name.clone(),
-        symbol: function.name.clone(),
-        params: function
-            .params
-            .iter()
-            .map(|param| (param.convention, param.ty.clone()))
-            .collect(),
-        scalar: scalar_shape(
-            &function
-                .params
-                .iter()
-                .map(|param| (param.convention, param.ty.clone()))
-                .collect::<Vec<_>>(),
-            function.return_type.as_ref(),
-        ),
-        return_type: function.return_type.clone(),
-    })
+    is_guest_export(function).then(|| export_signature(function))
 }
+
+/// Build the sema row for one sandbox export. Unlike the native C guest
+/// surface, a sandbox exports every top-level `pub fn` in its entry module;
+/// there is no separate export marker (D-PLUGIN-EXPORT1=A).
+pub fn sandbox_export_signature(function: &Func) -> Option<GuestFunction> {
+    (function.is_pub && !function.is_package_pub).then(|| export_signature(function))
+}
+
 
 /// Collect every guest callable from the post-sema bundle.
 ///
@@ -242,6 +249,20 @@ pub fn guest_export_surface(bundle: &ProgramBundle) -> Vec<GuestFunction> {
     guest_surface(bundle)
         .into_iter()
         .filter(|function| function.direction == GuestDirection::Export)
+        .collect()
+}
+/// Collect the exact top-level public entry-module functions exported by a
+/// `target: sandbox` build, in source order. This intentionally stays separate
+/// from `guest_export_surface`, whose explicit `#Export(c)` marker is the
+/// native C/Library boundary.
+pub fn sandbox_export_surface(bundle: &ProgramBundle) -> Vec<GuestFunction> {
+    bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Func(function) => sandbox_export_signature(function),
+            _ => None,
+        })
         .collect()
 }
 

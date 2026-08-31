@@ -1,8 +1,9 @@
-//! D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A / D-PLUGIN-VERSION1=A
+//! D-PLUGIN1=B / D-PLUGIN-EXPORT1=A / D-PLUGIN-VERSION1=A
 //! (c81): the driver-layer half of `target: sandbox` — resolving the manifest
-//! `export:` name, validating the marked `#Export(c)` surface (v1: homogeneous
-//! `Int`/`Float`/`Bool`/`Text`
-//! scalars only), and the ApiFreeze-based version handshake.
+//! `export:` name, validating the entry module's top-level `pub fn` surface
+//! (v1: homogeneous `Int`/`Float`/`Bool`/`Text` scalars only), and the
+//! ApiFreeze-based version handshake.
+
 //!
 //! Re-grounding note (this card): D-PLUGIN-EXPORT1/D-PLUGIN-VERSION1's ratified
 //! text names the retired D-CAP4 `api: stable` freeze machinery as the version
@@ -66,16 +67,17 @@ fn e1260(detail: &str) -> Diagnostic {
     )
 }
 
-/// Validate the entry module's `#Export(c)` surface for a `target: sandbox`
-/// build. Every marked function must be exportable
+/// Validate the entry module's top-level `pub fn` surface for a
+/// `target: sandbox` build. Every public function must be exportable
 /// (`Codegen::plugin_export_shape`); a non-conforming one is E1260, not a
 /// silent skip (I3/I4 — codegen's own skip is a defensive fallback, this is
 /// the real enforcement point).
+
 pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     for item in &bundle.modules[bundle.entry].items {
         let Item::Func(f) = item else { continue };
-        if !crate::Sema::is_guest_export(f) {
+        if crate::Sema::sandbox_export_signature(f).is_none() {
             continue;
         }
         if crate::Codegen::plugin_export_shape(f).is_none() {
@@ -85,6 +87,7 @@ pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
             )));
         }
     }
+
     diags
 }
 
@@ -127,7 +130,7 @@ pub fn check_and_freeze_version(
     let mut funcs = Vec::new();
     for item in &bundle.modules[bundle.entry].items {
         let Item::Func(f) = item else { continue };
-        if !crate::Sema::is_guest_export(f)
+        if crate::Sema::sandbox_export_signature(f).is_none()
             || crate::Codegen::plugin_export_shape(f).is_none()
         {
             continue;

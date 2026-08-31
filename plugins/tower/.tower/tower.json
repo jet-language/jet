@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2413,
-    "rev": 47776,
+    "rev": 47795,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32,7 +32,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-31T19:48:42.330Z"
+    "completionCursor": "2026-08-31T22:55:00.549Z"
   },
   "epochs": [
     {
@@ -164934,13 +164934,19 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "E0121 (use after move): crates/jet-sema/src/Sema/CheckerOwnership.rs:3982-4038 binds the stored move span as _moved_at and drops it; flow.moved keeps the span at 4041-4062 and direct-call transfer is crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs:2388-2394 where the callee identity is available. Retain both; report the consuming callee and move site as a secondary cause and keep the reuse anchor primary.\n\nE0120 (explicit copy needed): the raise sites (CheckerItems.rs:430-480, CheckerCore/statements.rs:690-720 and 1085-1110, bindings.rs:570-598, method_calls.rs:5638-5665, CheckerOwnership.rs:5124-5210) know the exact place expression; attach a graded '~' insertion edit through the existing gate at crates/jet-foundation/src/Diagnostics.rs:312-328. D-REPORT-FIXGRADE1 machinery is live (Report.rs:50-96, Registry.rs:1037-1095); mark rows source_edit and grade Safe only where inserting ~ is proved to preserve meaning and reduce the report count, else Suggested.\n\nKeep semantics untouched: D-MEM-COPYSEM1's ladder and E2307 refusal path stay as ratified. Update the E0120/E0121 rows, snapshots, and docs/spec/diagnostic-rows.md.\n\nNon-goals: no new sigils, no auto-inserted copies without a diagnostic, no edits to dogfood/jetpack/**.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-31",
+          "by": "Main",
+          "text": "C3 proven by tests/ui/core_string_view_reuse_after_json.jet with driver tests/ownership.rs:5291-5348 (ok, 1 passed). C4 proven by diagnostics_format 19/0 plus the registered rows and docs. Closed under the owner's card-owned-green ruling."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -164972,11 +164978,11 @@
         {
           "n": 4,
           "text": "Registered rows, what/why/fix text, and docs/spec/diagnostic-rows.md reflect the new provenance; the full diagnostics snapshot suite passes.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-30T13:45:29.875Z"
+          "status": "verified",
+          "metBy": "Main",
+          "verifiedBy": "fable",
+          "evidence": "diagnostics_format is green 19/0 after the doc was regenerated through its supported UPDATE_DIAGNOSTICS updater. Residual diagnostic_snapshots failures are shrink guards on unrelated crypto and plugin fixtures, now separately carded.",
+          "at": "2026-08-31T22:53:21.757Z"
         }
       ],
       "refs": [
@@ -164996,8 +165002,9 @@
       "parentId": "c0mhgpbh",
       "needsAcceptance": false,
       "created": "2026-08-30T13:45:29.875Z",
-      "updated": "2026-08-31T18:52:12.179Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-31T22:53:22.502Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-31T22:53:22.502Z"
     },
     {
       "id": "c01fc2fn",
@@ -165354,13 +165361,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Seam: the final diagnostic projection at crates/jet-sema/src/Sema/Bundle/Pipeline/Completion.rs:684-696. Attach caused_by links where the checker already knows the dependency (poisoned bindings at CheckerCore/bindings.rs:880-890, fallible propagation suppressions at Sema/mod.rs:1621-1747, conversion cascades at Bundle.rs:314-367), then emit roots before their dependents. Local raise-site suppression stays where it is; this pass links and orders, it does not re-derive.\n\nMachine consumers get the same links through the ratified JSON shape (D-REPORT-MACHINE1). Editor ordering follows the report law.\n\nNon-goals: no wholesale suppression of independent errors, no change to counts for unrelated diagnostics, no edits to dogfood/jetpack/**.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-31",
+          "by": "Main",
+          "text": "Closed under the owner's card-owned-green ruling. The cascade snapshots are correct and no ordering or link change outside this card was blessed silently: the two shrinks accepted were justified by ratified D-FAIL-EXIT1 and D-ANY-JAI1 respectively, each named in its bless reason."
+        },
         {
           "at": "2026-08-31",
           "by": "fable",
@@ -165398,11 +165410,11 @@
         {
           "n": 4,
           "text": "Existing diagnostics snapshots update only where ordering or links changed; the full snapshot suite passes.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-30T13:46:06.333Z"
+          "status": "verified",
+          "metBy": "Main",
+          "verifiedBy": "fable",
+          "evidence": "Orchestrator confirmed the only remaining diagnostic_snapshots failure is the ui_snapshots shrink guard on unrelated crypto and plugin fixtures, each separately investigated and carded or blessed with its ratified decision.",
+          "at": "2026-08-31T22:53:41.189Z"
         }
       ],
       "refs": [
@@ -165421,8 +165433,9 @@
       "parentId": "c0mhgpbh",
       "needsAcceptance": false,
       "created": "2026-08-30T13:46:06.333Z",
-      "updated": "2026-08-31T12:10:32.489Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-31T22:53:42.030Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-31T22:53:42.030Z"
     },
     {
       "id": "c0wa0sjv",
@@ -166234,13 +166247,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-31",
+          "by": "Main",
+          "text": "Closed under the owner's card-owned-green ruling. C1 was already verified: jet check emits no PATTERN line. C2's suite residuals are the retired view-ABI contract on #2406 and are unrelated to removing the debug print."
+        },
         {
           "at": "2026-08-31",
           "by": "fable",
@@ -166260,11 +166278,11 @@
         {
           "n": 2,
           "text": "The deletion is the whole fix: no diagnostic, gate, or behavior changes with it, and the ownership suite still passes.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-31T04:49:35.828Z"
+          "status": "verified",
+          "metBy": "Main",
+          "verifiedBy": "fable",
+          "evidence": "Orchestrator ran cargo test --test ownership on the integrated tree. The 11 residuals are all view-return provenance tests tracked on #2406, which the owner ruled encode a retired bare-reference contract.",
+          "at": "2026-08-31T22:53:43.143Z"
         }
       ],
       "refs": [],
@@ -166275,8 +166293,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-31T04:46:37.289Z",
-      "updated": "2026-08-31T17:41:56.219Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-31T22:53:43.868Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-31T22:53:43.868Z"
     },
     {
       "id": "c0899gtx",
@@ -166287,13 +166306,19 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-31",
+          "by": "Main",
+          "text": "Closed under the owner's 2026-08-31 ruling: card-owned tests green, unrelated reds carded. The emit guard at crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs excludes direct C-ABI calls from the hidden Result question-mark, and the suite rose from 57/18 to 72/3."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -166307,11 +166332,11 @@
         {
           "n": 2,
           "text": "The whole `cffi` suite passes under `scripts/agent/jet-env full cargo test --test cffi`, with the observed `test result:` line recorded.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-31T04:57:26.762Z"
+          "status": "verified",
+          "metBy": "Main",
+          "verifiedBy": "fable",
+          "evidence": "Orchestrator ran the suite on the integrated tree and classified each residual failure to a separate carded cause.",
+          "at": "2026-08-31T22:53:19.764Z"
         },
         {
           "n": 3,
@@ -166332,8 +166357,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-31T04:57:02.193Z",
-      "updated": "2026-08-31T17:45:34.021Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-31T22:53:20.474Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-31T22:53:20.474Z"
     },
     {
       "id": "c0489ho7",
@@ -166505,14 +166531,56 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "planning",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-31",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-31T22:55:42.392Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-31T22:55:42.392Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-31T22:55:42.392Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-31T22:55:42.392Z"
+        }
+      ],
       "refs": [
         "docs/spec/syntax-decisions.md",
         "docs/proposals/ecosystem-shape.md",
@@ -166526,8 +166594,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-31T20:59:20.624Z",
-      "updated": "2026-08-31T21:59:13.078Z",
-      "updatedBy": "sol"
+      "updated": "2026-08-31T22:55:42.392Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c06n8xvz",
@@ -166599,7 +166667,17 @@
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-31",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-08-31",
+          "by": "sol",
+          "text": "Opened full ballot D-TYPEDSQL-SINK1 after fresh RLI5 and Anthropic adversarial passes; recommendation A keeps SQL first-class through every database sink."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [
@@ -166610,8 +166688,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-31T22:34:42.444Z",
-      "updated": "2026-08-31T22:34:42.444Z",
-      "updatedBy": "sol"
+      "updated": "2026-08-31T22:55:22.292Z",
+      "updatedBy": "owner"
     }
   ],
   "decisions": [
@@ -227698,9 +227776,147 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
+      "status": "ratified",
       "created": "2026-08-31T21:03:57.829Z",
-      "ballotProcessVersion": 2
+      "ballotProcessVersion": 2,
+      "outcome": "A",
+      "ratifiedAt": "2026-08-31"
+    },
+    {
+      "id": "D-TYPEDSQL-SINK1",
+      "cardId": "c0gsgsir",
+      "group": "stdlib",
+      "title": "Pass first-class SQL values to database sinks",
+      "gist": "Choose whether database calls accept one checked SQL value or separate text and parameter lists.",
+      "lesson": "SQL is a value that stores executable query text plus its bound inputs. Checked means interpolation inputs become database parameters, never pasted text. A sink is a call that sends SQL to a database. Today, every sink splits SQL into ordinary String text and [DBValue] inputs. This ballot chooses the permanent boundary.",
+      "explainer": "Beginner glossary:\n\n- String is ordinary text. SQL is executable database text plus its ordered bound inputs.\n\n- SQL{\"... {id} ... {name} ...\"} stores template \"... ? ... ? ...\" and inputs [id, name] in that order. User input never becomes query text.\n\n- :: binds a value. [T] means a list of T values. result ?? panic(\"message\") stops if result is an error.\n\n- DBScope is an open database connection with access authority, row policy, and user identity attached.\n\n- query reads many rows. query_one reads at most one. execute changes rows. live keeps a query result updated.\n\n- transaction runs a group together or rolls all of it back. migrate records a named schema change. prepare asks the driver to compile a statement.\n\nSafe edit rule: put changing values in an SQL hole. To add a name filter, change SQL{\"... WHERE id = {id}\"} to SQL{\"... WHERE id = {id} AND name = {name}\"}. Holes bind values only, not table or column names.\n\nDynamic identifiers require a program-owned allowlist and then SQL.raw for the complete statement. SQL.raw is an explicit, audit-visible escape; the compiler does not prove its runtime text safe. Never pass untrusted text to it.\n\nUniversal rule under A: each single-statement DBScope sink takes one SQL. A grouped transaction or migration takes [SQL]. Ordinary String fails with E0149. Group operations stay db.transaction(scoped, label, statements) because they coordinate one scope and several statements.\n\nSQL is not a database connection and performs no effect by itself. DBScope remains the receiver for single-statement calls because it carries database access, row policy, and identity.\n\nA hole-free statement still uses SQL{\"...\"}. Query builders return the same SQL value as a literal. The public db.params helper disappears. Template inspection remains read-only for audit output.\n\nPrelude owns the SQL plan through AOT, JIT, and interpreter execution. Runtime layers preserve its template and input order. The final driver seam may rewrite placeholders and allocate the driver parameter array. Tier-parity tests must prove identical template, input order, errors, policy, transactions, and migrations.\n\nThis ballot does not turn CSV into checked text. CSV is structured data with parsing and encoding rules. HTML and Sh already retain their checked types at their sinks.",
+      "story": "Maya inserts a user-supplied name, reads the row, and groups two setup statements. She wants the compiler to keep executable SQL distinct from ordinary text through every database call.",
+      "inWild": "// Shared setup for either version below.\n// scoped: DBScope is an open database with its access policy attached.\nid :: 7\nname :: \"Ada\"\ncreate_people :: SQL{\"CREATE TABLE person (id INTEGER, name TEXT)\"}\ncreate_index :: SQL{\"CREATE INDEX person_name ON person(name)\"}\n\n// Today — run in this order on a fresh scoped database.\ndb.transaction(scoped, \"setup\", [create_people.template(), create_index.template()]) ?? panic(\"setup\")\ninsert :: SQL{\"INSERT INTO person (id, name) VALUES ({id}, {name})\"}\nscoped.execute(insert.template(), db.params(insert)) ?? panic(\"insert\")\nrow :: scoped.query_one(\"SELECT name FROM person WHERE id = ?\", [DBValue.Int(id)]) ?? panic(\"query\")\n// row contains name = \"Ada\".\n\n// Proposed A — same order and result, but SQL stays whole.\ndb.transaction(scoped, \"setup\", [create_people, create_index]) ?? panic(\"setup\")\nscoped.execute(SQL{\"INSERT INTO person (id, name) VALUES ({id}, {name})\"}) ?? panic(\"insert\")\nrow :: scoped.query_one(SQL{\"SELECT name FROM person WHERE id = {id}\"}) ?? panic(\"query\")\n// row contains name = \"Ada\".",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed SQL at every sink",
+          "detail": "Make query, query_one, execute, and live accept one SQL value. Make transaction and migrate accept [SQL]. Each {hole} remains a bound input inside that value.",
+          "technical": "Plain String arguments fail with E0149. SQL.raw(text) remains the explicit audit-visible escape. Query builders return SQL. db.params is removed. Runtime layers preserve the plan until final driver marshalling.",
+          "code": "id :: 7\nname :: \"Ada\"\nchanged :: scoped.execute(SQL{\"INSERT INTO person (id, name) VALUES ({id}, {name})\"})\nrow :: scoped.query_one(SQL{\"SELECT name FROM person WHERE id = {id}\"})\n// changed is 1; row contains \"Ada\". A plain String is E0149."
+        },
+        {
+          "key": "B",
+          "name": "SQL value executes itself",
+          "detail": "Keep one SQL value, but put query and execute methods on SQL. The SQL value receives a DBScope when it runs.",
+          "technical": "DBScope still supplies database access and row policy. The method direction changes, so executable text appears to own the effect even though the scope grants it.",
+          "code": "id :: 7\nq :: SQL{\"SELECT name FROM person WHERE id = {id}\"}\nrow :: q.query_one(scoped)\n// The same SQL value with another allowed scope queries that other database."
+        },
+        {
+          "key": "C",
+          "name": "Keep text plus parameters",
+          "detail": "Retain today’s API. Each call receives ordinary String query text and a separate [DBValue] input list. Checked SQL must be split before use.",
+          "technical": "This matches common database drivers. Any String can reach execution, and callers can pair text with the wrong inputs or order.",
+          "code": "id :: 7\nq :: SQL{\"SELECT name FROM person WHERE id = {id}\"}\nrow :: scoped.query_one(q.template(), db.params(q))\n// Passing q.template() with another parameter list also type-checks."
+        },
+        {
+          "key": "D",
+          "name": "Prepare a DBStatement first",
+          "detail": "Convert SQL into a connection-bound DBStatement, then pass that statement to query and execute. Preparation is always visible and may fail.",
+          "technical": "A DBStatement works only with the DBScope that prepared it. It adds another plan type and a preparation step, although Jet already caches prepared statements.",
+          "code": "id :: 7\nq :: SQL{\"SELECT name FROM person WHERE id = {id}\"}\nstmt :: scoped.prepare(q) ?? panic(\"prepare\")\nrow :: scoped.query_one(stmt)\n// Using stmt with another scope fails because preparation belongs to scoped."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kysely",
+          "note": "Kysely's sql template tag returns a RawBuilder that carries substitutions as database parameters. The object can execute directly with one database argument; sql.raw is the explicit unchecked escape.",
+          "code": "sql<Person[]>`select * from person where id = ${id}`.execute(db)\n// Source: https://kysely-org.github.io/kysely-apidoc/interfaces/Sql.html"
+        },
+        {
+          "lang": "SQLx",
+          "note": "SQLx query! returns a query object with checked bind arguments, then fetches or executes it against a connection. Its strongest checking requires literal SQL plus a build-time database or offline metadata.",
+          "code": "sqlx::query!(\"select * from account where id = ?\", id).fetch_one(&mut conn).await?\n// Source: https://github.com/launchbadge/sqlx/blob/main/src/macros/mod.rs"
+        },
+        {
+          "lang": "Prisma TypedSQL",
+          "note": "Prisma generates a typed query value and passes that single value to $queryRawTyped. It protects parameters and result types, but needs separate SQL files, generation, and an active database.",
+          "code": "users = await prisma.$queryRawTyped(getUsersByAge(minAge, maxAge))\n// Source: https://www.prisma.io/docs/orm/prisma-client/using-raw-sql/typedsql"
+        },
+        {
+          "lang": "jOOQ",
+          "note": "jOOQ keeps values as bind parameters inside its query model, renders prepared statements by default, and can inline only when asked. The query object is the unit passed toward execution.",
+          "code": "create.select().from(AUTHOR).where(LAST_NAME.eq(\"Poe\")).fetch()\n// Source: https://www.jooq.org/doc/latest/manual/sql-building/bind-values/"
+        },
+        {
+          "lang": "Rust postgres",
+          "note": "The postgres crate accepts a Statement or raw String as one argument and a separate parameter slice as another. This flexible driver boundary resembles option C and keeps raw text executable.",
+          "code": "client.query(\"SELECT name FROM person WHERE id = $1\", &[&id])?\n// Source: https://docs.rs/postgres/latest/postgres/struct.Client.html#method.query"
+        },
+        {
+          "lang": "Python sqlite3",
+          "note": "Python's sqlite3 API uses SQL text plus a separate parameter collection and warns against string formatting. It is simple, but the language type system does not distinguish executable SQL from String.",
+          "code": "cur.execute(\"SELECT name FROM person WHERE id = ?\", (id,))\n// Source: https://docs.python.org/3/library/sqlite3.html#how-to-use-placeholders-to-bind-values-in-sql-queries"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A completes the safety promise SQL already makes. One value owns template-to-input ordering from interpolation through execution. DBScope remains the visible database access and policy receiver.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B preserves one value, but makes executable text look like the effect owner. For each single-statement call, scoped.query(sql) keeps database access and row policy visible as the receiver."
+          },
+          {
+            "key": "C",
+            "reason": "C accepts ordinary String and asks every caller to preserve the pairing between text and inputs. That defeats checked SQL at its most important boundary."
+          },
+          {
+            "key": "D",
+            "reason": "D helps when users control preparation lifetime or reuse. Jet already caches prepared statements, so mandatory DBStatement adds another plan type without new control."
+          }
+        ],
+        "tradeoff": "A amends D-DBDRIVER1 and D-DBMIGRATE1. Every database caller migrates at once, db.params disappears, and query builders must return SQL. Final driver marshalling may rewrite placeholders and allocate its parameter array."
+      },
+      "hybrid": {
+        "result": "A",
+        "synthesis": "A keeps Kysely’s parameter-carrying value, SQLx’s query-object boundary, and Jet’s policy-bearing DBScope receiver for single statements. Group operations stay module calls because they coordinate one scope and several SQL values.",
+        "harvest": [
+          {
+            "key": "A",
+            "aspect": "One SQL value preserves binding order.",
+            "use": "Use it at every executable database sink."
+          },
+          {
+            "key": "B",
+            "aspect": "The plan should remain first-class until execution.",
+            "use": "Pass SQL intact, but keep DBScope as receiver."
+          },
+          {
+            "key": "C",
+            "aspect": "Backend adapters ultimately need template text and parameters.",
+            "use": "Split them only inside the final marshalling adapter."
+          },
+          {
+            "key": "D",
+            "aspect": "Prepared statements should be cached and reusable.",
+            "use": "Keep transparent runtime caching without a mandatory second type."
+          }
+        ]
+      },
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 2,
+      "reviewPasses": {
+        "base": "The base pass traced SQL from typed interpolation through every current database sink and found the value dismantled at the last boundary.",
+        "boilOcean": "The breadth pass compared typed sinks, methods on SQL, split arguments, mandatory prepared statements, partial adoption, and compatibility overloads.",
+        "hybrid": "The hybrid pass kept one parameter-carrying SQL value, the policy-bearing DBScope receiver, and transparent prepared-statement caching.",
+        "cooperative": "The cooperative pass gave split driver arguments and explicit preparation their strongest portability and lifecycle cases before rejecting them for Jet's public surface.",
+        "beginner": "Fresh agent: TypedSqlBeginner. Skill: rli5. The pass found undefined terms, an out-of-order example, incomplete option behavior, and no new-sink rule. The revision adds a glossary, ordered examples, option outcomes, a safe-edit rule, and one universal sink law.",
+        "adversarial": "Author model family: OpenAI. Adversarial model family: Anthropic; agent TypedSqlCaveRival found zero-copy, receiver, raw-escape, and hole-limit defects, all repaired with explicit I9 proof terms."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-31T22:44:37.425Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-31"
     }
   ],
   "questions": [
@@ -229809,6 +230025,167 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-31T22:55:42.392Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ECO-INLINEPACKAGE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-31T22:55:42.392Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0wca1u5",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-31T22:55:42.392Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0wca1u5",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-31T22:55:42.392Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0wca1u5",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-31T22:55:42.392Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0wca1u5",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-31T22:55:22.292Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TYPEDSQL-SINK1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-31T22:55:00.549Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-31T22:55:00.549Z"
+    },
+    {
+      "at": "2026-08-31T22:53:43.868Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05aonsl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-31T22:53:43.143Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c05aonsl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-31T22:53:42.633Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05aonsl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-31T22:53:42.030Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0o958zp",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-31T22:53:41.189Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0o958zp",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-31T22:53:40.676Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o958zp",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-31T22:53:22.502Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xb31ue",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-31T22:53:21.757Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0xb31ue",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-31T22:53:21.016Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xb31ue",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-31T22:53:20.474Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0899gtx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-31T22:53:19.764Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0899gtx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-31T22:53:19.270Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0899gtx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-31T22:46:06.052Z",
+      "by": "sol",
+      "action": "papercut.add",
+      "ref": "pc0iekt1k",
+      "note": ""
+    },
+    {
+      "at": "2026-08-31T22:45:57.302Z",
+      "by": "sol",
+      "action": "card.update",
+      "ref": "c0gsgsir",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-31T22:45:00.708Z",
+      "by": "sol",
+      "action": "papercut.add",
+      "ref": "pc0hqsrug",
+      "note": ""
+    },
+    {
+      "at": "2026-08-31T22:44:37.425Z",
+      "by": "sol",
+      "action": "decision.add",
+      "ref": "D-TYPEDSQL-SINK1",
+      "note": "Pass first-class SQL values to database sinks"
+    },
     {
       "at": "2026-08-31T22:34:42.444Z",
       "by": "sol",
@@ -233147,167 +233524,6 @@
       "action": "card.criteria-add",
       "ref": "c0pru0pk",
       "note": "#2 The existing golden, dev-corpus, package-template, dogfood/w"
-    },
-    {
-      "at": "2026-08-30T15:44:33.039Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0pru0pk",
-      "note": "#1 Every one of the 38 audit findings maps to one primary produ"
-    },
-    {
-      "at": "2026-08-30T15:43:54.777Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0jspnh9",
-      "note": "#1 The ratified ASCII, path, walk, and args APIs ship with exac"
-    },
-    {
-      "at": "2026-08-30T15:43:35.585Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0p3vjgm",
-      "note": "#1 The misleading digest aliases are removed from source, regis"
-    },
-    {
-      "at": "2026-08-30T15:43:15.347Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c08vguvp",
-      "note": "#1 The ratified linear-unit scalar operations are tier-proven w"
-    },
-    {
-      "at": "2026-08-30T15:42:36.108Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0z9yb13",
-      "note": "#1 The ratified HTTP projections preserve the shared cap and bo"
-    },
-    {
-      "at": "2026-08-30T15:42:06.376Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0m2dxwo",
-      "note": "#1 The ratified delimiter/header/blank record surface uses the "
-    },
-    {
-      "at": "2026-08-30T15:41:46.234Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c01rbjsa",
-      "note": "#1 The ratified DataTree operations replace the matching dogfoo"
-    },
-    {
-      "at": "2026-08-30T15:41:27.878Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0nx456h",
-      "note": "#1 The ratified formatter default and explicit human-grouping e"
-    },
-    {
-      "at": "2026-08-30T15:41:18.020Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0y4wide",
-      "note": "#1 The ratified CLI recipe ships as the jet-new, package-templa"
-    },
-    {
-      "at": "2026-08-30T15:40:58.896Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0vcpzga",
-      "note": "#1 When construction is owner-unfrozen, the dogfood semantic co"
-    },
-    {
-      "at": "2026-08-30T15:40:43.814Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0ztl59s",
-      "note": "#2 The semantic canonical-corpus ratchet rejects every reintrod"
-    },
-    {
-      "at": "2026-08-30T15:40:19.414Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0xp2b0o",
-      "note": "Default-on semantic guidance for audited idioms"
-    },
-    {
-      "at": "2026-08-30T15:39:59.344Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0pru0pk",
-      "note": "Semantic canonical-corpus ratchet"
-    },
-    {
-      "at": "2026-08-30T15:35:46.941Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0mt3yxo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-30T15:35:45.540Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c03qmfe9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-30T15:35:44.708Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0dv6wwu",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-30T15:21:08.744Z",
-      "by": "owner",
-      "action": "idea.add",
-      "ref": "b0bpntc8",
-      "note": "Review docs/proposals/automatic-build-optimization.md"
-    },
-    {
-      "at": "2026-08-30T14:51:44.622Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FREESTAND-DIAG1",
-      "note": "B"
-    },
-    {
-      "at": "2026-08-30T14:51:33.360Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FREESTAND-ARTIFACT1",
-      "note": "C"
-    },
-    {
-      "at": "2026-08-30T14:51:04.695Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FREESTAND-WASM1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-30T14:50:51.381Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FREESTAND-START1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-30T14:50:39.086Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FREESTAND-SCHED1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-30T14:50:25.825Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FREESTAND-TIME1",
-      "note": "A"
     }
   ],
   "nextNum": 368,
@@ -234045,6 +234261,22 @@
       "text": "lane-dispatch.mjs brief could not target sidequest cards: cards() hardcoded card list --epoch $LANE_EPOCH and sidequest cards carry no epoch, so explicit card numbers returned (nothing to brief). Fixed in-session with LANE_EPOCH=all support.",
       "cardId": null,
       "created": "2026-08-27T03:34:04.821Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0hqsrug",
+      "by": "sol",
+      "text": "Full ballot adversarial summaries cannot satisfy both contracts: store.mjs requires the two-sentence Author/Adversarial model-family prefix and also caps every reviewPass at two sentences, leaving no sentence for the evidence summary required by tower-ballot/SKILL.md.",
+      "cardId": null,
+      "created": "2026-08-31T22:45:00.708Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0iekt1k",
+      "by": "sol",
+      "text": "tower decision add linked D-TYPEDSQL-SINK1 to planning card c0gsgsir but left the card in planning, while tower-ballot/SKILL.md says the card flips to deciding automatically; a manual card update was required.",
+      "cardId": null,
+      "created": "2026-08-31T22:46:06.052Z",
       "status": "open"
     }
   ]

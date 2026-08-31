@@ -1,7 +1,9 @@
-//! The one typed export surface shared by native Library and sandbox outputs.
+//! The typed export shapes shared by native Library and sandbox outputs.
 //!
-//! Driver validation and both lowerers read this table. It is deliberately
-//! small: marked top-level functions with one homogeneous scalar shape.
+//! Native Library exports come from the explicit `#Export(c)` surface; sandbox
+//! exports come from top-level public functions. Both use the same scalar ABI
+//! table while keeping their selection rules separate.
+
 
 use crate::AST::{AccessConvention, Func, ProgramBundle};
 
@@ -69,38 +71,54 @@ pub struct ExportFunction {
     pub params: Vec<AccessConvention>,
 }
 
-/// Classify one function's homogeneous foreign-boundary shape.
+fn export_scalar(scalar: crate::Sema::GuestScalar) -> ExportScalar {
+    match scalar {
+        crate::Sema::GuestScalar::Int => ExportScalar::Int,
+        crate::Sema::GuestScalar::Float => ExportScalar::Float,
+        crate::Sema::GuestScalar::Bool => ExportScalar::Bool,
+        crate::Sema::GuestScalar::Text => ExportScalar::Text,
+    }
+}
+
+fn export_function(guest: crate::Sema::GuestFunction) -> Option<ExportFunction> {
+    Some(ExportFunction {
+        name: guest.name,
+        scalar: export_scalar(guest.scalar?),
+        params: guest
+            .params
+            .into_iter()
+            .map(|(convention, _)| convention)
+            .collect(),
+    })
+}
+
+/// Classify one explicitly marked native Library export's homogeneous shape.
 pub fn export_shape(function: &Func) -> Option<ExportScalar> {
     crate::Sema::guest_export_signature(function)
         .and_then(|guest| guest.scalar)
-        .map(|scalar| match scalar {
-            crate::Sema::GuestScalar::Int => ExportScalar::Int,
-            crate::Sema::GuestScalar::Float => ExportScalar::Float,
-            crate::Sema::GuestScalar::Bool => ExportScalar::Bool,
-            crate::Sema::GuestScalar::Text => ExportScalar::Text,
-        })
+        .map(export_scalar)
 }
 
-/// Collect the exact top-level export list consumed by both artifact paths.
+/// Classify one sandbox's top-level public export shape.
+pub fn sandbox_export_shape(function: &Func) -> Option<ExportScalar> {
+    crate::Sema::sandbox_export_signature(function)
+        .and_then(|guest| guest.scalar)
+        .map(export_scalar)
+}
+
+/// Collect the exact top-level `#Export(c)` list for native Library artifacts.
 pub fn export_surface(bundle: &ProgramBundle) -> Vec<ExportFunction> {
     crate::Sema::guest_export_surface(bundle)
         .into_iter()
-        .filter_map(|guest| {
-            Some(ExportFunction {
-                name: guest.name,
-                scalar: match guest.scalar? {
-                    crate::Sema::GuestScalar::Int => ExportScalar::Int,
-                    crate::Sema::GuestScalar::Float => ExportScalar::Float,
-                    crate::Sema::GuestScalar::Bool => ExportScalar::Bool,
-                    crate::Sema::GuestScalar::Text => ExportScalar::Text,
-                },
-                params: guest
-                    .params
-                    .into_iter()
-                    .map(|(convention, _)| convention)
-                    .collect(),
-            })
-        })
+        .filter_map(export_function)
+        .collect()
+}
+
+/// Collect the exact top-level public list for sandbox artifacts.
+pub fn sandbox_export_surface(bundle: &ProgramBundle) -> Vec<ExportFunction> {
+    crate::Sema::sandbox_export_surface(bundle)
+        .into_iter()
+        .filter_map(export_function)
         .collect()
 }
 

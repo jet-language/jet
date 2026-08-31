@@ -1,7 +1,7 @@
 // D-SYNC1=A / D-DBPOLICY1=A (#1159/#1160): CRDT values + typed row policies.
 
 use super::jet_std;
-use super::{__jet_Decode, __jet_Encode, jet_live_publish_transport, JetShow};
+use super::{__jet_Decode, __jet_Encode, jet_live_publish_transport, JetShow, JetDisplay};
 
 pub(crate) const MAX_SYNC_TEXT: usize = 1024 * 1024;
 /// Tombstones outlive the characters they replace, so a document holds more

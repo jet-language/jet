@@ -2680,7 +2680,7 @@ pub use Guest::{
     guest_export_signature, guest_export_surface, guest_import_function_signature,
     guest_import_signature, guest_import_surface, guest_import_symbol, guest_surface,
     is_guest_export, is_guest_export_marker, is_guest_import, is_guest_import_marker,
-    GuestDirection, GuestFunction, GuestScalar,
+    sandbox_export_signature, sandbox_export_surface, GuestDirection, GuestFunction, GuestScalar,
 };
 // D-MIGRATE2C: `jet inspect schema status` reuses the schema-migration diff.
 pub use SchemaMigration::{check_schema_migrations, desugar_migrations};

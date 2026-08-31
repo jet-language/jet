@@ -3,31 +3,31 @@
 //! loader (the host side lives in `crates/jet-driver/src/Prelude/Plugin.rs`,
 //! embedded via the FFI bridge). Reuses the ordinary whole-program `emit_bundle`
 //! output verbatim (I3: codegen stays dumb, no second lowering path) and
-//! appends one `#[export_name = "…"] pub extern "C" fn` wrapper per marked
-//! `#Export(c)` function, calling straight into the already-emitted `__jet_<name>` — the
-//! same naming convention every other Jet top-level function gets.
+//! appends one `#[export_name = "…"] pub extern "C" fn` wrapper per top-level
+//! `pub fn`, calling straight into the already-emitted `__jet_<name>` — the same
+//! naming convention every other Jet top-level function gets.
 //!
 //! v1 scope, both real (working end-to-end) and deliberately narrow — a
 //! documented boundary, not a stub:
-//!   - a marked `#Export(c)` function must have every parameter and its return type be
+//!   - every top-level `pub fn` must have every parameter and its return type be
 //!     one homogeneous Component Model scalar: `Int`, `Float`, `Bool`, or
 //!     `Text` (checked before this runs — see
 //!     `Jetpack::PluginExport::validate_export_surface` in the driver, I3: the
-//!     check lives outside codegen). Non-conforming `pub fn`s are silently
+//!     check lives outside codegen). Non-conforming functions are silently
 //!     excluded from the export set here — driver-side validation already
 //!     turned a non-conforming plugin build into a hard error, so this can
 //!     never observe one in practice; this is a defensive skip, not the
 //!     enforcement point.
-//!   - only the entry file's TOP-LEVEL `#Export(c)` items are walked — a marked
-//!     function
-//!     nested inside a `module <name> { … }` body isn't (yet) collected. A
-//!     top-level function is always emitted as `__jet_<name>` in the whole-
+//!   - only the entry file's TOP-LEVEL `pub fn` items are walked — a public
+//!     function nested inside a `module <name> { … }` body isn't (yet) collected.
+//!     A top-level function is always emitted as `__jet_<name>` in the whole-
 //!     program Rust this module calls straight into; a module-scoped one may
 //!     get a different mangled name, which needs verifying (not guessing)
 //!     before this recurses into `Item::CodeModule` bodies the way
 //!     `ApiFreeze::collect_pub_fns` already does for the analogous library-API
 //!     freeze. A real follow-on, not a stub — v1 plugins are single flat
 //!     files, which is already a complete, useful shape.
+
 
 use crate::AST::ProgramBundle;
 use jet_foundation::Names::{mangle, mangle_generated};
@@ -62,12 +62,13 @@ pub struct PluginArtifacts {
 /// keyword, so there is nothing else to name per-plugin).
 const WORLD_NAME: &str = "jetplugin";
 
-/// Classify a `#Export(c)` signature for export: `Some(scalar)` when every
-/// parameter and the return type are the same Component Model scalar, else
-/// `None` (not exportable in v1 — see module doc).
+/// Classify a top-level public sandbox signature for export: `Some(scalar)`
+/// when every parameter and the return type are the same Component Model
+/// scalar, else `None` (not exportable in v1 — see module doc).
 pub fn plugin_export_shape(f: &crate::AST::Func) -> Option<PluginScalar> {
-    super::Embedding::export_shape(f)
+    super::Embedding::sandbox_export_shape(f)
 }
+
 
 /// `snake_case` (or anything) -> `kebab-case`, the Component Model's required
 /// identifier shape. Jet function names are ASCII identifiers, so a plain
@@ -112,7 +113,7 @@ pub fn emit_plugin(
     export_name: &str,
 ) -> PluginArtifacts {
     let sanitized = sanitize_package_name(export_name);
-    let exports = super::Embedding::export_surface(bundle);
+    let exports = super::Embedding::sandbox_export_surface(bundle);
 
     let mut wit_lines = Vec::new();
     let mut wrapper_fns = String::new();

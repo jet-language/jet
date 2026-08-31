@@ -16,7 +16,7 @@ use crate::runtime_host::{JitCallableSlot, bind_jit_callable_handle, jit_callabl
 
 #[allow(dead_code, unused_imports)]
 mod semantics {
-    use crate::JetShow;
+    use crate::{JetDisplay, JetShow};
     use jet_foundation::Outcome::jet_list_bounds_message;
     use jet_foundation::StructuralDebug::jet_debug_range;
 
