@@ -136,7 +136,11 @@ mod native {
     }
 
     pub fn core_args_spec() -> CtValue {
-        spec_value(push_spec(jet_args_spec()))
+        let spec = match crate::Comptime::runtime_argv0() {
+            Some(prog) => jet_args_spec_with_program(prog),
+            None => jet_args_spec(),
+        };
+        spec_value(push_spec(spec))
     }
 
     pub fn eval_handle(

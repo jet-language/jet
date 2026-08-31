@@ -5,7 +5,7 @@ use core.testing as testing
 fn run() {
     root :: testing.temp_dir("files-write-atomic")
     path :: Path.from(root).join("fixture.bin")
-    result :: files.write_atomic(path, [U8]{65, 66, 67, 68})
-    print(result)
+    files.write_atomic(path, [U8]{65, 66, 67, 68}).drop("the witness only needs call completion")
+    print(true)
     files.remove_all(root) ?? panic("cleanup")
 }

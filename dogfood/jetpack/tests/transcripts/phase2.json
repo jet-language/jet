@@ -1,0 +1,73 @@
+{
+  "schema": "jetpack-dogfood-phase2/v1",
+  "platform": "x86_64-linux",
+  "comparison": "Exact argv, exit code, path-law verdict, output hash, deduplication state, and normalized payload tree. Generated entry ids are compared semantically because they include the caller-supplied absolute store root.",
+  "cases": [
+    {
+      "name": "portable-ingest",
+      "argv": ["hangar", "ingest", "tests/fixtures/phase2/portable", "--name", "portable", "--ref", "portable@fixture", "--json", "--no-color", "--offline"],
+      "stdout": "{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true,\"action\":\"ingest\",\"id\":\"portable-94835e297a6d\",\"output_hash\":\"sha256-a30069bb3a497c58ef27cf60edb359eb5e6ad8b5933e885d559c0bf16f08546b\",\"deduplicated\":false}\n",
+      "exit_code": 0,
+      "verdict": "accepted",
+      "output_hash": "sha256-a30069bb3a497c58ef27cf60edb359eb5e6ad8b5933e885d559c0bf16f08546b",
+      "store_tree": [
+        "dir:bin:0555",
+        "file:bin/tool:0444:da773d229ceb4768e042459b633fb46f0f305edfc7e4c72bd29c570f8b6e3850",
+        "dir:share:0555",
+        "file:share/message.txt:0444:5085debb5f138c445724ec0b5765094895c83dc39db81860dcbde8bb15419878"
+      ]
+    },
+    {
+      "name": "portable-content-deduplication",
+      "argv": ["hangar", "ingest", "tests/fixtures/phase2/portable", "--name", "portable-copy", "--ref", "portable-copy@fixture", "--json", "--no-color", "--offline"],
+      "stdout": "{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true,\"action\":\"ingest\",\"id\":\"portable-copy-cda2a974fa13\",\"output_hash\":\"sha256-a30069bb3a497c58ef27cf60edb359eb5e6ad8b5933e885d559c0bf16f08546b\",\"deduplicated\":true}\n",
+      "exit_code": 0,
+      "verdict": "deduplicated",
+      "output_hash": "sha256-a30069bb3a497c58ef27cf60edb359eb5e6ad8b5933e885d559c0bf16f08546b",
+      "store_tree": [
+        "dir:bin:0555",
+        "file:bin/tool:0444:da773d229ceb4768e042459b633fb46f0f305edfc7e4c72bd29c570f8b6e3850",
+        "dir:share:0555",
+        "file:share/message.txt:0444:5085debb5f138c445724ec0b5765094895c83dc39db81860dcbde8bb15419878"
+      ]
+    },
+    {
+      "name": "reserved-device-rejected",
+      "argv": ["hangar", "ingest", "tests/fixtures/phase2/reserved", "--name", "invalid", "--json", "--no-color", "--offline"],
+      "stdout": "{\"schema\":\"jet.report/v1\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E1299\",\"what\":\"Store path rejected: `CON`\",\"why\":\"Hangar Store v2 path law (reserved) forbids this name: Windows reserved device name.\",\"fix\":\"Rename the entry to a portable store path: no reserved Windows names, no trailing `.`/` `, no case-fold collisions with a sibling, and no `.`/`..` components.\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"fix_edits\":[],\"cause\":[],\"clears\":0}\n",
+      "exit_code": 2,
+      "verdict": "reserved",
+      "output_hash": "",
+      "store_tree": []
+    },
+    {
+      "name": "ascii-casefold-rejected",
+      "argv": ["hangar", "ingest", "tests/fixtures/phase2/casefold", "--name", "invalid", "--json", "--no-color", "--offline"],
+      "stdout": "{\"schema\":\"jet.report/v1\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E1299\",\"what\":\"Store path rejected: `README`\",\"why\":\"Hangar Store v2 path law (case-fold) forbids this name: collides with `Readme` under ASCII case-folding.\",\"fix\":\"Rename the entry to a portable store path: no reserved Windows names, no trailing `.`/` `, no case-fold collisions with a sibling, and no `.`/`..` components.\",\"detail\":null,\"file\":null,\"line\":null,\"col\":null,\"span\":null,\"fix_edits\":[],\"cause\":[],\"clears\":0}\n",
+      "exit_code": 2,
+      "verdict": "case-fold",
+      "output_hash": "",
+      "store_tree": []
+    },
+    {
+      "name": "unicode-normalization-preserved",
+      "argv": ["hangar", "ingest", "tests/fixtures/phase2/unicode", "--name", "unicode", "--ref", "unicode@fixture", "--json", "--no-color", "--offline"],
+      "stdout": "{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true,\"action\":\"ingest\",\"id\":\"unicode-e683e2409c07\",\"output_hash\":\"sha256-e2304d34d552b56e3776c34b23fcfb2fbacb9eb7aa60012dc3c75060eb8fcda3\",\"deduplicated\":false}\n",
+      "exit_code": 0,
+      "verdict": "accepted-distinct-raw-bytes",
+      "output_hash": "sha256-e2304d34d552b56e3776c34b23fcfb2fbacb9eb7aa60012dc3c75060eb8fcda3",
+      "store_tree": [
+        "file:café:0444:f1d626e7a70538f6a9eb0b65d8b71a12083a06da446dcb0a7943d9479183e4cf",
+        "file:café:0444:dcde261ae09ae7d38054ee36faa1e49d3d845651f7e3a26b8f26919476345df0"
+      ]
+    }
+  ],
+  "journal": {
+    "root": "hangar/closure-db/journal",
+    "version": "jet-closure-journal-v1",
+    "filename": "<20-digit-sequence>-<16-hex-content-id>.txn",
+    "count_compacts_after": 64,
+    "byte_compacts_above": 4194304,
+    "byte_compaction_minimum_transactions": 2
+  }
+}

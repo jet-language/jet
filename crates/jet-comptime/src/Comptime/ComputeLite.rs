@@ -48,14 +48,7 @@ include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
 fn device_to_ct(device: JetComputeDevice) -> CtValue {
     CtValue::Enum {
         type_name: "ComputeDevice".to_string(),
-        variant: match device {
-            JetComputeDevice::Auto => "Auto".to_string(),
-            JetComputeDevice::Cpu => "CPU".to_string(),
-            JetComputeDevice::Metal => "Metal".to_string(),
-            JetComputeDevice::Cuda => "CUDA".to_string(),
-            JetComputeDevice::Vulkan => "Vulkan".to_string(),
-            JetComputeDevice::WebGpu => "WebGPU".to_string(),
-        },
+        variant: device.jet_show(),
         args: Vec::new(),
     }
 }

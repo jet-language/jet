@@ -211,6 +211,21 @@ pub(crate) fn jet_testing_fixture(path: &String) -> String {
     }
 }
 
+pub(crate) fn jet_testing_corpus_entries(path: &str) -> Vec<String> {
+    let Ok(read) = std::fs::read_dir(path) else {
+        return Vec::new();
+    };
+    let mut paths = read
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+        .into_iter()
+        .filter(|path| path.is_file())
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .collect()
+}
+
 pub(crate) fn jet_testing_temp_dir_path(prefix: &str) -> String {
     let safe: String = prefix
         .chars()

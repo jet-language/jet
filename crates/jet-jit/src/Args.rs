@@ -124,7 +124,11 @@ mod runtime {
     }
 
     pub(super) fn jet_jit_args_spec() -> i64 {
-        push_spec(jet_args_spec())
+        let spec = match jet_codegen::Comptime::runtime_argv0() {
+            Some(prog) => jet_args_spec_with_program(prog),
+            None => jet_args_spec(),
+        };
+        push_spec(spec)
     }
 
     pub(super) fn jet_jit_args_description(h: i64, description: i64) -> i64 {

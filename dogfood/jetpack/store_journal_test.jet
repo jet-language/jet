@@ -1,0 +1,138 @@
+use core.crypto as crypto
+use core.files as fs
+use "src/store/journal"
+
+fn test_root(name: String) String -> {
+    return Path.home().join(".cache").join("jet-dogfood").join("journal-tests").join(name).to_string()
+}
+
+fn cleanup(path: String) {
+    if fs.exists(~path) -> fs.remove_all(path) ?? panic("journal fixture cleanup failed")
+}
+
+fn journal_path(root: String) String -> {
+    return Path.from(root).join("hangar").join("closure-db").join("journal").to_string()
+}
+
+fn append_record(root: String, key: String, value: String) {
+    journal.append(~root, journal.JournalRecord{key: key, value: value, deleted: false}) ?? panic("journal append failed")
+}
+
+fn transaction_count(root: String) Int -> {
+    path :: journal_path(root)
+    entries :: fs.list_dir(~path) ?? panic("journal transaction listing failed")
+    count := 0
+    loop entry in entries {
+        if !entry.is_dir && entry.name.ends_with(".txn") -> count += 1
+    }
+    return count
+}
+
+fn write_synthetic(root: String, transaction: journal.JournalTransaction) {
+    path :: journal_path(root)
+    sequence :: transaction.sequence
+    body :: journal.render_transaction(transaction)
+    checksum :: crypto.sha256(body.bytes()).hex()
+    name := "{sequence.to_string()}"
+    loop name.len() < 20 -> name = "0{name}"
+    final :: Path.from(path).join("{name}-{checksum.slice(0, 15)}.txn")
+    fs.create_dir_all(~path) ?? panic("synthetic journal directory failed")
+    fs.write(~final, "{body}checksum\t{checksum}\n") ?? panic("synthetic journal write failed")
+}
+
+#Test("journal uses canonical root names and checksum framing") {
+    root :: test_root("canonical")
+    cleanup(~root)
+    append_record(~root, "alpha", "one")
+    expected_dir :: journal_path(~root)
+    entries :: fs.list_dir(~expected_dir) ?? panic("canonical journal listing failed")
+    txn_name := ""
+    loop entry in entries {
+        if entry.name.ends_with(".txn") -> txn_name = entry.name
+    }
+    assert(txn_name.len() == 41, "journal filename must contain 20-digit sequence and 16-digit content id")
+    assert(txn_name.slice(20, 20) == "-", "journal filename separator is missing")
+    raw :: fs.read(Path.from(expected_dir).join(~txn_name)) ?? panic("canonical journal read failed")
+    frame :: raw.cut_last("checksum\t") ?? panic("journal checksum frame is missing")
+    expected_checksum :: crypto.sha256(frame.before.bytes()).hex()
+    assert(raw.ends_with("checksum\t{expected_checksum}\n"), "journal checksum does not cover the body")
+    assert(raw.starts_with("jet-closure-journal-v1\nkind\tdelta\n"), "journal body is not canonical")
+    assert(!fs.exists(Path.from(expected_dir).join("00000000000000000001.partial")), "committed append left a partial")
+    cleanup(~root)
+}
+
+#Test("journal replays sorted synthetic transactions and recovers partials") {
+    root :: test_root("recovery")
+    cleanup(~root)
+    write_synthetic(~root, journal.JournalTransaction{
+        sequence: 10,
+        kind: "delta",
+        records: [journal.JournalRecord]{journal.JournalRecord{key: "late", value: "ten", deleted: false}}
+    })
+    write_synthetic(~root, journal.JournalTransaction{
+        sequence: 2,
+        kind: "delta",
+        records: [journal.JournalRecord]{journal.JournalRecord{key: "early", value: "two", deleted: false}}
+    })
+    partial :: Path.from(journal_path(~root)).join("00000000000000000011-interrupted.partial")
+    fs.write(~partial, "incomplete") ?? panic("partial journal fixture write failed")
+    recovered :: journal.recover(~root) ?? panic("journal recovery failed")
+    assert_eq(recovered.transaction_count, 2)
+    assert_eq(recovered.recovered_partials, 1)
+    assert_eq(recovered.replay_order[0].key, "early")
+    assert_eq(recovered.replay_order[1].key, "late")
+    assert(!fs.exists(~partial), "recovery did not remove interrupted partial")
+    cleanup(~root)
+}
+
+#Test("journal compacts strictly after the 64 transaction threshold") {
+    root :: test_root("count-threshold")
+    cleanup(~root)
+    loop index in 0..<64 -> append_record(~root, "key-{index}", "value-{index}")
+    before :: journal.compact_if_needed(~root) ?? panic("count threshold precheck failed")
+    assert(!before.compacted, "journal compacted at exactly 64 transactions")
+    assert_eq(transaction_count(~root), 64)
+    append_record(~root, "key-64", "value-64")
+    after :: journal.compact_if_needed(~root) ?? panic("count threshold compaction failed")
+    assert(after.compacted, "journal did not compact at 65 transactions")
+    assert_eq(transaction_count(~root), 1)
+    assert_eq(after.transaction_count, 1)
+    assert_eq(after.records.len(), 65)
+    cleanup(~root)
+}
+
+#Test("journal requires more than one transaction and more than 4 MiB") {
+    root :: test_root("byte-threshold")
+    cleanup(~root)
+    payload :: "x".repeat(2 * 1024 * 1024 + 1)
+    append_record(~root, "large-one", ~payload)
+    single :: journal.recover(~root) ?? panic("single large journal recovery failed")
+    assert_eq(single.transaction_count, 1)
+    assert(single.transaction_bytes > 4 * 1024 * 1024, "one large transaction must exceed 4 MiB")
+    before :: journal.compact_if_needed(~root) ?? panic("byte threshold precheck failed")
+    assert(!before.compacted, "journal compacted with only one transaction")
+
+    append_record(~root, "large-two", ~payload)
+    two :: journal.recover(~root) ?? panic("two large journal recovery failed")
+    assert_eq(two.transaction_count, 2)
+    assert(two.transaction_bytes > 4 * 1024 * 1024, "two large transactions must exceed 4 MiB")
+    after :: journal.compact_if_needed(~root) ?? panic("byte threshold compaction failed")
+    assert(after.compacted, "journal did not compact above the byte threshold")
+    assert_eq(transaction_count(~root), 1)
+    assert_eq(after.transaction_count, 1)
+    assert_eq(after.records.len(), 2)
+    cleanup(~root)
+}
+
+#Test("journal writes only below the caller supplied root") {
+    base :: test_root("root-boundary")
+    cleanup(~base)
+    root :: Path.from(~base).join("inside").to_string()
+    outside :: Path.from(~base).join("outside-sentinel").to_string()
+    fs.create_dir_all(~base) ?? panic("root boundary fixture directory failed")
+    fs.write(~outside, "sentinel") ?? panic("root boundary sentinel write failed")
+    append_record(~root, "inside", "only")
+    assert_eq(fs.read(~outside) ?? panic("root boundary sentinel read failed"), "sentinel")
+    assert(fs.exists(Path.from(root).join("hangar")), "journal did not use the supplied root")
+    cleanup(~base)
+}

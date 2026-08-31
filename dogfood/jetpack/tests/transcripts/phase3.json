@@ -1,0 +1,68 @@
+{
+  "schema": "jetpack-dogfood-phase3/v1",
+  "platform": "x86_64-linux",
+  "comparison": "Offline realization covers local and prefetched source paths, digest rejection before publication, and recorded-provider replay with repeat deduplication.",
+  "empty_store_tree": [
+    "dir:hangar/",
+    "dir:hangar/closure-db/",
+    "dir:hangar/closure-db/journal/",
+    "dir:hangar/objects/"
+  ],
+  "cases": [
+    {
+      "name": "local-success",
+      "provider": "local",
+      "reference": "portable@github",
+      "argv": ["realize", "tests/fixtures/phase3/provider-source", "--provider", "local", "--name", "portable", "--version", "1.0.0", "--ref", "portable@github", "--digest", "sha256-a30069bb3a497c58ef27cf60edb359eb5e6ad8b5933e885d559c0bf16f08546b", "--json", "--no-color", "--offline"],
+      "expected_hash": "sha256-a30069bb3a497c58ef27cf60edb359eb5e6ad8b5933e885d559c0bf16f08546b",
+      "payload_tree": ["dir:bin:0555", "file:bin/tool:0444:da773d229ceb4768e042459b633fb46f0f305edfc7e4c72bd29c570f8b6e3850", "dir:share:0555", "file:share/message.txt:0444:5085debb5f138c445724ec0b5765094895c83dc39db81860dcbde8bb15419878"],
+      "success": true,
+      "deduplicated": false,
+      "expected_error": ""
+    },
+    {
+      "name": "prefetched-success",
+      "provider": "prefetched",
+      "reference": "portable@github",
+      "argv": ["realize", "tests/fixtures/phase3/provider-source", "--provider", "prefetched", "--name", "portable", "--version", "1.0.0", "--ref", "portable@github", "--digest", "sha256-a30069bb3a497c58ef27cf60edb359eb5e6ad8b5933e885d559c0bf16f08546b", "--json", "--no-color", "--offline"],
+      "expected_hash": "sha256-a30069bb3a497c58ef27cf60edb359eb5e6ad8b5933e885d559c0bf16f08546b",
+      "payload_tree": ["dir:bin:0555", "file:bin/tool:0444:da773d229ceb4768e042459b633fb46f0f305edfc7e4c72bd29c570f8b6e3850", "dir:share:0555", "file:share/message.txt:0444:5085debb5f138c445724ec0b5765094895c83dc39db81860dcbde8bb15419878"],
+      "success": true,
+      "deduplicated": false,
+      "expected_error": ""
+    },
+    {
+      "name": "wrong-digest-no-publication",
+      "provider": "local",
+      "reference": "portable@github",
+      "argv": ["realize", "tests/fixtures/phase3/provider-source", "--provider", "local", "--name", "portable", "--version", "1.0.0", "--ref", "portable@github", "--digest", "sha256-0000000000000000000000000000000000000000000000000000000000000000", "--json", "--no-color", "--offline"],
+      "expected_hash": "sha256-0000000000000000000000000000000000000000000000000000000000000000",
+      "payload_tree": [],
+      "success": false,
+      "deduplicated": false,
+      "expected_error": "ingest failed: staged payload digest does not match expected hash"
+    },
+    {
+      "name": "recorded-replay",
+      "provider": "github",
+      "reference": "portable@github",
+      "argv": ["realize", "tests/fixtures/phase3/github-result.json", "--provider", "recorded", "--json", "--no-color", "--offline"],
+      "expected_hash": "sha256-a30069bb3a497c58ef27cf60edb359eb5e6ad8b5933e885d559c0bf16f08546b",
+      "payload_tree": ["dir:bin:0555", "file:bin/tool:0444:da773d229ceb4768e042459b633fb46f0f305edfc7e4c72bd29c570f8b6e3850", "dir:share:0555", "file:share/message.txt:0444:5085debb5f138c445724ec0b5765094895c83dc39db81860dcbde8bb15419878"],
+      "success": true,
+      "deduplicated": false,
+      "expected_error": ""
+    },
+    {
+      "name": "recorded-repeat-dedup",
+      "provider": "github",
+      "reference": "portable@github",
+      "argv": ["realize", "tests/fixtures/phase3/github-result.json", "--provider", "recorded", "--json", "--no-color", "--offline"],
+      "expected_hash": "sha256-a30069bb3a497c58ef27cf60edb359eb5e6ad8b5933e885d559c0bf16f08546b",
+      "payload_tree": ["dir:bin:0555", "file:bin/tool:0444:da773d229ceb4768e042459b633fb46f0f305edfc7e4c72bd29c570f8b6e3850", "dir:share:0555", "file:share/message.txt:0444:5085debb5f138c445724ec0b5765094895c83dc39db81860dcbde8bb15419878"],
+      "success": true,
+      "deduplicated": true,
+      "expected_error": ""
+    }
+  ]
+}

@@ -1,0 +1,492 @@
+use core.crypto as crypto
+use core.encoding.json as json
+use core.files as fs
+use core.sys as sys
+use path_laws as laws
+use journal as closure_journal
+
+#Error
+pub struct IngestError {
+    pub message: String
+}
+
+pub struct IngestRequest {
+    pub name: String
+    pub version: String
+    pub reference: String
+    pub source: String
+    pub expected_hash: String
+}
+
+pub struct IngestResult {
+    pub id: String
+    pub output_hash: String
+    pub deduplicated: Bool
+    pub package_root: String
+    pub payload_root: String
+    pub projection: [String]
+    pub payload_entries: [String]
+}
+
+fn absolute_path(raw: String, label: String) String !IngestError -> {
+    if raw.trim() == "" -> return Err(IngestError{message: "{label} is required"})
+    absolute :: fs.absolute(Path.from(raw).normalize()) ?? return Err(IngestError{message: "{label} cannot be resolved"})
+    return Ok(absolute)
+}
+
+fn ensure_directory(path: String, label: String) Bool !IngestError -> {
+    if fs.exists(~path) {
+        stat :: fs.stat(~path) ?? return Err(IngestError{message: "{label} cannot be inspected"})
+        if stat.is_symlink || !stat.is_dir {
+            return Err(IngestError{message: "{label} is not a real directory"})
+        }
+        return Ok(true)
+    }
+    fs.create_dir_all(~path) ?? return Err(IngestError{message: "{label} cannot be created"})
+    stat :: fs.stat(~path) ?? return Err(IngestError{message: "{label} cannot be inspected after creation"})
+    if stat.is_symlink || !stat.is_dir {
+        return Err(IngestError{message: "{label} is not a real directory after creation"})
+    }
+    return Ok(true)
+}
+
+fn remove_tree_if_present(path: String, label: String) Bool !IngestError -> {
+    if !fs.exists(~path) -> return Ok(true)
+    stat :: fs.stat(~path) ?? return Err(IngestError{message: "{label} cannot be inspected"})
+    if stat.is_symlink {
+        fs.remove(~path) ?? return Err(IngestError{message: "{label} symlink cannot be removed"})
+        return Ok(true)
+    }
+    if stat.is_dir {
+        writable_mode := 0
+        if sys.family() == "unix" -> writable_mode = 0o700
+        fs.set_mode(~path, writable_mode) ?? return Err(IngestError{message: "{label} cannot be made removable"})
+        entries :: fs.list_dir(~path) ?? return Err(IngestError{message: "{label} cannot be listed for removal"})
+        loop entry in entries {
+            remove_tree_if_present(entry.path, ~label) ?? return Err(IngestError{message: "{label} child cannot be removed"})
+        }
+    }
+    fs.remove_all(~path) ?? return Err(IngestError{message: "{label} cannot be removed"})
+    return Ok(true)
+}
+
+fn fail_after_stage(stage_output: String, error: IngestError) IngestResult !IngestError -> {
+    _ :: remove_tree_if_present(~stage_output, "staging path")
+    return Err(error)
+}
+
+fn same_strings(left: [String], right: [String]) Bool !IngestError -> {
+    if left.len() != right.len() -> return Ok(false)
+    loop (index, value) in left {
+        if value != right[index] -> return Ok(false)
+    }
+    return Ok(true)
+}
+
+fn same_stat(left: Stat, right: Stat) Bool !IngestError -> {
+    return Ok(left.is_file == right.is_file && left.is_dir == right.is_dir && left.is_symlink == right.is_symlink && left.size == right.size && left.mode == right.mode)
+}
+
+fn directory_names(path: String) [String] !IngestError -> {
+    entries :: fs.list_dir(~path) ?? return Err(IngestError{message: "directory {path} cannot be read"})
+    names := [String]{}
+    loop entry in entries -> names.push(entry.name)
+    laws.reject_casefold_collisions(~names) ?? return Err(IngestError{message: "directory {path} has unsafe or colliding names"})
+    names.sort()
+    return Ok(names)
+}
+
+fn relative_depth(path: String) Int !IngestError -> {
+    depth := 0
+    loop byte in path.bytes() {
+        if byte == 47 -> depth += 1
+    }
+    return Ok(depth)
+}
+
+// Native source links are retained as links, but every relative target must
+// remain below the source root. Links are never resolved during copy or hash.
+fn validate_relative_link(link_relative: String, target: String) Bool !IngestError -> {
+    if target.starts_with("/") || target.contains("\\") {
+        return Err(IngestError{message: "symlink {link_relative} is absolute or contains a backslash"})
+    }
+    depth := relative_depth(~link_relative)
+    loop component in target.split("/") {
+        if component == "" || component == "." -> next
+        if component == ".." {
+            if depth == 0 {
+                return Err(IngestError{message: "symlink {link_relative} escapes its source root"})
+            }
+            depth -= 1
+            next
+        }
+        laws.validate_component(~component) ?? return Err(IngestError{message: "symlink {link_relative} has an unsafe target"})
+        depth += 1
+    }
+    return Ok(true)
+}
+
+fn validate_destination(path: String, store_root: String, label: String) Bool !IngestError -> {
+    candidate :: Path.from(path).normalize().to_string()
+    base :: Path.from(store_root).normalize().to_string()
+    if candidate != base && !candidate.starts_with("{base}/") {
+        return Err(IngestError{message: "{label} leaves the store root"})
+    }
+    return Ok(true)
+}
+
+fn copy_node(source: String, destination: String, source_root: String, relative: String, store_root: String) Bool !IngestError -> {
+    validate_destination(~destination, ~store_root, "copy destination") ?? return Err(IngestError{message: "copy destination leaves the store root"})
+    stat_before :: fs.stat(~source) ?? return Err(IngestError{message: "source {relative} cannot be inspected"})
+    if stat_before.is_symlink {
+        target :: fs.read_link(~source) ?? return Err(IngestError{message: "source symlink {relative} cannot be read"})
+        validate_relative_link(~relative, ~target) ?? return Err(IngestError{message: "source symlink {relative} escapes its root"})
+        fs.symlink(~target, ~destination) ?? return Err(IngestError{message: "source symlink {relative} cannot be copied"})
+        after_target :: fs.read_link(~source) ?? return Err(IngestError{message: "source symlink {relative} cannot be re-read"})
+        if after_target != target {
+            return Err(IngestError{message: "source symlink {relative} changed while copying"})
+        }
+        stat_after :: fs.stat(~source) ?? return Err(IngestError{message: "source symlink {relative} cannot be re-inspected"})
+        same_stat(stat_before, stat_after) ?? return Err(IngestError{message: "source symlink {relative} changed while copying"})
+        return Ok(true)
+    }
+    if stat_before.is_dir {
+        if {
+            fs.exists(~destination) -> {
+                destination_stat :: fs.stat(~destination) ?? return Err(IngestError{message: "destination directory {relative} cannot be inspected"})
+                if destination_stat.is_symlink || !destination_stat.is_dir {
+                    return Err(IngestError{message: "destination directory {relative} is not real"})
+                }
+            }
+            else -> {
+                fs.create_dir_all(~destination) ?? return Err(IngestError{message: "destination directory {relative} cannot be created"})
+            }
+        }
+        names_before :: directory_names(~source)
+        loop name in names_before {
+            child_source :: Path.from(source).join(~name).to_string()
+            child_destination :: Path.from(destination).join(~name).to_string()
+            child_relative := ~name
+            if relative != "" -> child_relative = "{relative}/{name}"
+            laws.validate_relative_path(~child_relative) ?? return Err(IngestError{message: "source path {child_relative} is unsafe"})
+            copy_node(~child_source, ~child_destination, ~source_root, ~child_relative, ~store_root) ?? return Err(IngestError{message: "source path {child_relative} cannot be copied"})
+        }
+        names_after :: directory_names(~source)
+        if !same_strings(~names_before, ~names_after) {
+            return Err(IngestError{message: "source directory {relative} changed while copying"})
+        }
+        return Ok(true)
+    }
+    if stat_before.is_file {
+        if fs.exists(~destination) {
+            return Err(IngestError{message: "destination file {relative} already exists"})
+        }
+        // Core copy preserves the source permission bits; lstat above prevents
+        // ordinary inputs from intentionally being followed as links.
+        fs.copy(~source, ~destination) ?? return Err(IngestError{message: "source file {relative} cannot be copied"})
+        destination_stat :: fs.stat(~destination) ?? return Err(IngestError{message: "destination file {relative} cannot be inspected"})
+        if destination_stat.is_symlink || !destination_stat.is_file {
+            return Err(IngestError{message: "destination file {relative} is not a real file"})
+        }
+        stat_after :: fs.stat(~source) ?? return Err(IngestError{message: "source file {relative} cannot be re-inspected"})
+        if !same_stat(stat_before, stat_after) {
+            return Err(IngestError{message: "source file {relative} changed while copying"})
+        }
+        return Ok(true)
+    }
+    return Err(IngestError{message: "source path {relative} has an unsupported file kind"})
+}
+
+fn seal_node(path: String) Bool !IngestError -> {
+    stat :: fs.stat(~path) ?? return Err(IngestError{message: "staged path cannot be inspected while sealing"})
+    if stat.is_symlink -> return Ok(true)
+    if stat.is_dir {
+        names :: directory_names(~path)
+        loop name in names {
+            child :: Path.from(path).join(~name).to_string()
+            seal_node(~child) ?? return Err(IngestError{message: "staged child {name} cannot be sealed"})
+        }
+    }
+    // Unix canonical identity keeps native node/type bits while clearing all
+    // write bits. Other platforms use the same 0/1 readonly mode as Stat.
+    sealed_mode := 1
+    if sys.family() == "unix" -> sealed_mode = stat.mode & 0o777555
+    fs.set_mode(~path, sealed_mode) ?? return Err(IngestError{message: "staged path cannot be sealed"})
+    return Ok(true)
+}
+
+fn push_u64(hasher: &crypto.Hasher, value: Int) Bool !IngestError -> {
+    encoded :: U64.from_int(value) ?? return Err(IngestError{message: "archive length is outside U64"})
+    frame := Bytes.new()
+    frame.write_u64_be(encoded)
+    hasher.update(frame.to_bytes())
+    return Ok(true)
+}
+
+fn push_u32(hasher: &crypto.Hasher, value: Int) Bool !IngestError -> {
+    encoded :: U32.from_int(value) ?? return Err(IngestError{message: "archive mode is outside U32"})
+    frame := Bytes.new()
+    frame.write_u32_be(encoded)
+    hasher.update(frame.to_bytes())
+    return Ok(true)
+}
+
+fn push_bytes(hasher: &crypto.Hasher, bytes: [U8]) Bool !IngestError -> {
+    push_u64(&hasher, bytes.len()) ?? return Err(IngestError{message: "archive byte length cannot be encoded"})
+    hasher.update(bytes)
+    return Ok(true)
+}
+
+fn archive_header(hasher: &crypto.Hasher, kind: U8, relative: String, mode: Int) Bool !IngestError -> {
+    hasher.update([kind])
+    push_bytes(&hasher, relative.bytes()) ?? return Err(IngestError{message: "archive path cannot be encoded"})
+    push_u32(&hasher, mode) ?? return Err(IngestError{message: "archive mode cannot be encoded"})
+    return Ok(true)
+}
+
+fn archive_node(path: String, relative: String, hasher: &crypto.Hasher) Bool !IngestError -> {
+    stat :: fs.stat(~path) ?? return Err(IngestError{message: "archive path {relative} cannot be inspected"})
+    if stat.is_dir {
+        archive_header(&hasher, 68, ~relative, stat.mode) ?? return Err(IngestError{message: "archive directory {relative} cannot be framed"})
+        names :: directory_names(~path)
+        loop name in names {
+            child_path :: Path.from(path).join(~name).to_string()
+            child_relative := ~name
+            if relative != "" -> child_relative = "{relative}/{name}"
+            laws.validate_relative_path(~child_relative) ?? return Err(IngestError{message: "archive path {child_relative} is unsafe"})
+            archive_node(~child_path, ~child_relative, &hasher) ?? return Err(IngestError{message: "archive path {child_relative} cannot be framed"})
+        }
+        return Ok(true)
+    }
+    if stat.is_symlink {
+        target :: fs.read_link(~path) ?? return Err(IngestError{message: "archive symlink {relative} cannot be read"})
+        validate_relative_link(~relative, ~target) ?? return Err(IngestError{message: "archive symlink {relative} escapes its root"})
+        archive_header(&hasher, 76, ~relative, stat.mode) ?? return Err(IngestError{message: "archive symlink {relative} cannot be framed"})
+        push_bytes(&hasher, target.bytes()) ?? return Err(IngestError{message: "archive symlink {relative} target cannot be framed"})
+        return Ok(true)
+    }
+    if stat.is_file {
+        bytes :: fs.read_bytes(~path) ?? return Err(IngestError{message: "archive file {relative} cannot be read"})
+        if bytes.len() != stat.size {
+            return Err(IngestError{message: "archive file {relative} changed while reading"})
+        }
+        archive_header(&hasher, 70, ~relative, stat.mode) ?? return Err(IngestError{message: "archive file {relative} cannot be framed"})
+        push_u64(&hasher, bytes.len()) ?? return Err(IngestError{message: "archive file {relative} length cannot be framed"})
+        hasher.update(bytes)
+        after :: fs.stat(~path) ?? return Err(IngestError{message: "archive file {relative} cannot be re-inspected"})
+        if !same_stat(stat, after) {
+            return Err(IngestError{message: "archive file {relative} changed while hashing"})
+        }
+        return Ok(true)
+    }
+    return Err(IngestError{message: "archive path {relative} has an unsupported file kind"})
+}
+
+fn archive_hash(root: String) String !IngestError -> {
+    hasher := crypto.Hasher.new()
+    hasher.update("jet-hangar-archive-v1".bytes())
+    hasher.update([0])
+    archive_node(~root, "", &hasher) ?? return Err(IngestError{message: "archive root cannot be hashed"})
+    return Ok("sha256-{hasher.digest()}")
+}
+
+fn projection_entries(root: String, relative: String, out: &[String]) Bool !IngestError -> {
+    stat :: fs.stat(~root) ?? return Err(IngestError{message: "tree path {relative} cannot be inspected"})
+    if stat.is_symlink {
+        target :: fs.read_link(~root) ?? return Err(IngestError{message: "tree symlink {relative} cannot be read"})
+        out.push("symlink:{relative}:{target}")
+        return Ok(true)
+    }
+    if stat.is_dir {
+        if relative != "" -> out.push("dir:{relative}/")
+        names :: directory_names(~root)
+        loop name in names {
+            child_root :: Path.from(root).join(~name).to_string()
+            child_relative := ~name
+            if relative != "" -> child_relative = "{relative}/{name}"
+            projection_entries(~child_root, ~child_relative, &out) ?? return Err(IngestError{message: "tree path {child_relative} cannot be read"})
+        }
+        return Ok(true)
+    }
+    if stat.is_file {
+        bytes :: fs.read_bytes(~root) ?? return Err(IngestError{message: "tree file {relative} cannot be read"})
+        out.push("file:{relative}:{crypto.sha256(bytes).hex()}")
+        return Ok(true)
+    }
+    return Err(IngestError{message: "tree path {relative} has an unsupported file kind"})
+}
+
+fn json_string(value: String) String !IngestError -> {
+    return json.to_string(DataTree.Text(~value))
+}
+
+fn metadata_json(request: IngestRequest, output_hash: String, payload_root: String) String !IngestError -> {
+    name :: json_string(~request.name)
+    version :: json_string(~request.version)
+    reference :: json_string(~request.reference)
+    out :: json_string(~payload_root)
+    empty :: json_string("")
+    hash :: json_string(~output_hash)
+    platform :: json_string("native")
+    provenance :: json_string("jetpack-ingest")
+    named_outputs :: "{{\"out\":{hash}}}"
+    return Ok("{{\n  \"name\": {name},\n  \"version\": {version},\n  \"ref\": {reference},\n  \"out\": {out},\n  \"bin\": {empty},\n  \"rlib\": {empty},\n  \"output_hash\": {hash},\n  \"platform\": {platform},\n  \"signature\": {empty},\n  \"provenance\": {provenance},\n  \"source_fingerprint\": {empty},\n  \"recipe_fingerprint\": {empty},\n  \"policy_fingerprint\": {empty},\n  \"identity_platform\": {platform},\n  \"references\": [],\n  \"named_outputs\": {named_outputs},\n  \"platform_artifact_kind\": {empty},\n  \"producer_record\": {empty},\n  \"receipt\": {empty},\n  \"realized_at\": 0,\n  \"last_used_at\": \"0\"\n}}")
+}
+
+fn safe_entry_id(name: String, version: String, reference: String, payload_root: String) String !IngestError -> {
+    laws.validate_component(~name) ?? return Err(IngestError{message: "package name is unsafe"})
+    if version != "" {
+        laws.validate_component(~version) ?? return Err(IngestError{message: "package version is unsafe"})
+    }
+    fingerprint :: crypto.sha256("{reference}\n{payload_root}".bytes()).hex()
+    short :: fingerprint.slice(0, 11)
+    if version == "" -> return Ok("{name}-{short}")
+    return Ok("{name}-{version}-{short}")
+}
+
+pub fn ingest(store_root: String, request: IngestRequest) IngestResult !IngestError -> {
+    root :: absolute_path(~store_root, "store root")
+    ensure_directory(~root, "store root") ?? return Err(IngestError{message: "store root cannot be prepared"})
+    hangar :: Path.from(root).join("hangar").to_string()
+    objects :: Path.from(hangar).join("objects").to_string()
+    closure_db :: Path.from(hangar).join("closure-db").to_string()
+    journal_dir :: Path.from(closure_db).join("journal").to_string()
+    ensure_directory(~hangar, "hangar") ?? return Err(IngestError{message: "hangar cannot be prepared"})
+    ensure_directory(~objects, "hangar objects") ?? return Err(IngestError{message: "hangar objects cannot be prepared"})
+    ensure_directory(~closure_db, "closure database") ?? return Err(IngestError{message: "closure database cannot be prepared"})
+    ensure_directory(~journal_dir, "closure journal") ?? return Err(IngestError{message: "closure journal cannot be prepared"})
+
+    source_absolute :: absolute_path(~request.source, "source")
+    source_stat :: fs.stat(~source_absolute) ?? return Err(IngestError{message: "source cannot be inspected"})
+    if source_stat.is_symlink || !source_stat.is_dir {
+        return Err(IngestError{message: "source must be a real directory"})
+    }
+    source_root :: fs.canonicalize(~source_absolute) ?? return Err(IngestError{message: "source cannot be canonicalized"})
+
+    stage_fingerprint :: crypto.sha256("{request.name}\n{request.version}\n{request.reference}\n{source_root}".bytes()).hex()
+    stage_key :: stage_fingerprint.slice(0, 23)
+    // Stage beside immutable objects so publication is one same-directory
+    // atomic rename on every supported filesystem and sandbox.
+    stage_output :: Path.from(objects).join(".stage-{stage_key}").to_string()
+    remove_tree_if_present(~stage_output, "staging path") ?? return Err(IngestError{message: "staging path cannot be reset"})
+    copy_node(~source_root, ~stage_output, ~source_root, "", ~root) ?? {
+        return fail_after_stage(~stage_output, err)
+    }
+
+    seal_node(~stage_output) ?? {
+        return fail_after_stage(~stage_output, err)
+    }
+    output_hash :: archive_hash(~stage_output) ?? {
+        return fail_after_stage(~stage_output, err)
+    }
+    if request.expected_hash != "" && request.expected_hash != output_hash {
+        return fail_after_stage(~stage_output, IngestError{message: "staged payload digest does not match expected hash"})
+    }
+    payload_root :: Path.from(objects).join(~output_hash).to_string()
+    payload_root_absolute :: fs.absolute(Path.from(payload_root).normalize()) ?? {
+        return fail_after_stage(~stage_output, IngestError{message: "payload root cannot be resolved"})
+    }
+    validate_destination(~payload_root_absolute, ~root, "payload root") ?? {
+        return fail_after_stage(~stage_output, err)
+    }
+
+    deduplicated := false
+    if {
+        fs.exists(~payload_root_absolute) -> {
+            existing_stat :: fs.stat(~payload_root_absolute) ?? {
+                return fail_after_stage(~stage_output, IngestError{message: "existing payload cannot be inspected"})
+            }
+            if existing_stat.is_symlink || !existing_stat.is_dir {
+                return fail_after_stage(~stage_output, IngestError{message: "existing payload is not a real directory"})
+            }
+            existing_hash :: archive_hash(~payload_root_absolute) ?? {
+                return fail_after_stage(~stage_output, err)
+            }
+            if existing_hash != output_hash {
+                return fail_after_stage(~stage_output, IngestError{message: "existing payload digest does not match its object name"})
+            }
+            deduplicated = true
+        }
+        else -> {
+            if fs.rename(~stage_output, ~payload_root_absolute) == {
+                .Ok(_) -> {}
+                .Err(error) -> {
+                    return fail_after_stage(~stage_output, IngestError{message: "payload cannot be published: {error}"})
+                }
+                else -> {
+                    return fail_after_stage(~stage_output, IngestError{message: "payload publication returned an invalid result"})
+                }
+            }
+        }
+    }
+
+    id :: safe_entry_id(~request.name, ~request.version, ~request.reference, ~payload_root_absolute) ?? {
+        return fail_after_stage(~stage_output, err)
+    }
+    package_root :: Path.from(hangar).join(~id).to_string()
+    if {
+        fs.exists(~package_root) -> {
+            package_stat :: fs.stat(~package_root) ?? {
+                return fail_after_stage(~stage_output, IngestError{message: "package projection cannot be inspected"})
+            }
+            if package_stat.is_symlink || !package_stat.is_dir {
+                return fail_after_stage(~stage_output, IngestError{message: "package projection is not a real directory"})
+            }
+        }
+        else -> {
+            ensure_directory(~package_root, "package projection") ?? {
+                return fail_after_stage(~stage_output, err)
+            }
+        }
+    }
+    metadata :: metadata_json(request, ~output_hash, ~payload_root_absolute) ?? {
+        return fail_after_stage(~stage_output, err)
+    }
+    metadata_path :: Path.from(package_root).join("meta.json").to_string()
+    if {
+        fs.exists(~metadata_path) -> {
+            existing_metadata :: fs.read(~metadata_path) ?? {
+                return fail_after_stage(~stage_output, IngestError{message: "existing package metadata cannot be read"})
+            }
+            if existing_metadata != metadata {
+                return fail_after_stage(~stage_output, IngestError{message: "existing package metadata conflicts with the ingest"})
+            }
+        }
+        else -> {
+            fs.write(~metadata_path, ~metadata) ?? {
+                return fail_after_stage(~stage_output, IngestError{message: "package metadata cannot be written"})
+            }
+        }
+    }
+
+    _ :: closure_journal.append(~root, closure_journal.JournalRecord{
+        key: ~id,
+        value: ~output_hash,
+        deleted: false
+    }) ?? {
+        return fail_after_stage(~stage_output, IngestError{message: "closure journal cannot be committed"})
+    }
+
+    projection := [String]{}
+    projection_entries(~package_root, "", &projection) ?? {
+        return fail_after_stage(~stage_output, err)
+    }
+    projection.sort()
+    payload_entries := [String]{}
+    projection_entries(~payload_root_absolute, "", &payload_entries) ?? {
+        return fail_after_stage(~stage_output, err)
+    }
+    payload_entries.sort()
+    remove_tree_if_present(~stage_output, "staging path") ?? {
+        return fail_after_stage(~stage_output, err)
+    }
+    return Ok(IngestResult{
+        id: id,
+        output_hash: output_hash,
+        deduplicated: deduplicated,
+        package_root: package_root,
+        payload_root: payload_root_absolute,
+        projection: projection,
+        payload_entries: payload_entries
+    })
+}

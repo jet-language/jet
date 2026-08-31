@@ -30,50 +30,16 @@ mod progress_semantics {
 
 // #1480: literal Prelude source for line/byte stdin primitives. The extern "C"
 // wrappers below only marshal jit heap i64 handles to/from Rust values and
-// call these included functions — no logic is re-encoded here (I9). The
-// nested `jet_std` mirrors only the IOError shape these functions construct
-// via `.other(...)`; it carries no behavior of its own.
+// call these included functions — no logic is re-encoded here (I9). These
+// wrappers marshal JIT handles/results and call the shared Prelude functions;
+// they own no IO policy.
 mod io_line_stream {
     use crate::fault_injection::jet_fault_should_fail;
+    use crate::ambient_interp::process_prelude::jet_std;
 
     use super::term_prelude::{
         jet_term_read_stdin_line, jet_term_read_text, jet_term_write_stdout,
     };
-
-    #[allow(dead_code)]
-    mod jet_std {
-        #[derive(Debug)]
-        pub enum IOOperation {
-            Read,
-            Write,
-            Flush,
-        }
-        #[derive(Debug)]
-        pub struct IOContext {
-            pub operation: IOOperation,
-            pub resource: Option<String>,
-            pub os_code: Option<i64>,
-            pub cause: Option<String>,
-        }
-        #[derive(Debug)]
-        pub enum IOError {
-            Other(IOContext),
-        }
-        impl IOError {
-            pub fn other(
-                operation: IOOperation,
-                resource: Option<String>,
-                cause: impl ToString,
-            ) -> Self {
-                Self::Other(IOContext {
-                    operation,
-                    resource,
-                    os_code: None,
-                    cause: Some(cause.to_string()),
-                })
-            }
-        }
-    }
 
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -126,6 +92,8 @@ mod io_line_stream {
         }
     }
 }
+
+pub(crate) use io_line_stream::JetStdinReader;
 
 #[derive(Clone)]
 struct JitProgressState {
@@ -291,7 +259,31 @@ fn jet_jit_io_stderr() -> i64 {
 }
 
 fn jet_jit_io_stdin() -> i64 {
-    3
+    Concurrency::with_runtime_mut(|rt| {
+        rt.stdin_readers.push(io_line_stream::jet_std_io_stdin());
+        rt.stdin_readers.len() as i64
+    })
+}
+
+fn jet_jit_stdin_read_line(handle: i64) -> i64 {
+    let result = Concurrency::with_runtime_mut(|rt| {
+        let idx = handle
+            .checked_sub(1)
+            .and_then(|index| usize::try_from(index).ok());
+        let Some(reader) = idx.and_then(|index| rt.stdin_readers.get_mut(index)) else {
+            return None;
+        };
+        Some(io_line_stream::jet_std_io_stdin_read_line(reader))
+    });
+    match result {
+        Some(Ok(None)) => result_ok(0),
+        Some(Ok(Some(line))) => {
+            let string = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(line));
+            result_ok(string.wrapping_add(1) as u64)
+        }
+        Some(Err(error)) => crate::Process::process_io_error_result(error),
+        None => result_err_msg("bad StdinHandle"),
+    }
 }
 
 fn jet_jit_stdout_write(_h: i64, text: i64) -> i64 {
@@ -1263,6 +1255,49 @@ fn jet_jit_term_read_key() -> i64 {
     (payload << 8) | disc
 }
 
+/// `Key` Display — decode only the resident `pack_enum_scalar` carrier, then
+/// use the shared Prelude renderer.
+fn jet_jit_term_key_display(packed: i64) -> i64 {
+    use jet_codegen::terminal_runtime::JetKey;
+    let disc = packed & 0xff;
+    let payload = packed >> 8;
+    let variant = crate::types_meta::prelude_enum_variant_at(
+        jet_foundation::Syntax::TYPE_KEY,
+        disc,
+    )
+    .unwrap_or_else(|| jet_foundation::ice!(None, "jit key display: Key variant metadata"));
+    let key = match variant {
+        "Char" => {
+            let Some(value) = char::from_u32(payload as u32) else {
+                jet_foundation::ice!(None, "jit key display: invalid Char payload");
+            };
+            JetKey::Char(value)
+        }
+        "Enter" => JetKey::Enter,
+        "Escape" => JetKey::Escape,
+        "Backspace" => JetKey::Backspace,
+        "Tab" => JetKey::Tab,
+        "Delete" => JetKey::Delete,
+        "Up" => JetKey::Up,
+        "Down" => JetKey::Down,
+        "Left" => JetKey::Left,
+        "Right" => JetKey::Right,
+        "F" => JetKey::F(payload),
+        "Ctrl" => {
+            let Some(value) = char::from_u32(payload as u32) else {
+                jet_foundation::ice!(None, "jit key display: invalid Ctrl payload");
+            };
+            JetKey::Ctrl(value)
+        }
+        "Unknown" => JetKey::Unknown,
+        _ => jet_foundation::ice!(None, "jit key display: unknown Key variant"),
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .alloc_string(jet_codegen::terminal_runtime::jet_key_show(&key))
+    })
+}
+
 host_fns! {
     struct IOHostFns;
     register: register_io_symbols;
@@ -1306,6 +1341,7 @@ host_fns! {
     stdout: "jet_jit_io_stdout" => jet_jit_io_stdout: nullary;
     stderr: "jet_jit_io_stderr" => jet_jit_io_stderr: nullary;
     stdin: "jet_jit_io_stdin" => jet_jit_io_stdin: nullary;
+    stdin_read_line: "jet_jit_stdin_read_line" => jet_jit_stdin_read_line: unary;
     stdout_write: "jet_jit_stdout_write" => jet_jit_stdout_write: binary;
     stdout_write_line: "jet_jit_stdout_write_line" => jet_jit_stdout_write_line: binary;
     stdout_write_bytes: "jet_jit_stdout_write_bytes" => jet_jit_stdout_write_bytes: binary;
@@ -1347,6 +1383,7 @@ host_fns! {
     read_all_input: "jet_jit_io_read_all_input" => io_line_stream::jet_jit_io_read_all_input: nullary;
     stdin_lines: "jet_jit_stdin_lines" => jet_jit_stdin_lines: unary;
     file_lines: "jet_jit_file_lines" => jet_jit_file_lines: unary;
+    file_reader_read_line: "jet_jit_file_reader_read_line" => super::enc_stream::jet_jit_file_reader_read_line: unary;
     file_writer_write_line: "jet_jit_file_writer_write_line" => jet_jit_file_writer_write_line: binary;
     file_writer_flush: "jet_jit_file_writer_flush" => jet_jit_file_writer_flush: unary;
     file_writer_close: "jet_jit_file_writer_close" => super::enc_stream::jet_jit_file_writer_close: unary_void;
@@ -1354,4 +1391,5 @@ host_fns! {
     term_enter: "jet_jit_term_enter" => jet_jit_term_enter: nullary_void;
     term_leave: "jet_jit_term_leave" => jet_jit_term_leave: nullary_void;
     term_read_key: "jet_jit_term_read_key" => jet_jit_term_read_key: nullary;
+    term_key_display: "jet_jit_term_key_display" => jet_jit_term_key_display: unary;
 }

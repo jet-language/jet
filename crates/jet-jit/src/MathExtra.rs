@@ -34,6 +34,9 @@ fn jet_jit_math_from_bits(value: i64) -> f64 {
 fn jet_jit_math_round(value: f64) -> i64 {
     math_rt::jet_std_math_round(value)
 }
+fn jet_jit_math_trunc(value: f64) -> f64 {
+    math_rt::jet_std_math_trunc(value)
+}
 
 fn opt_i64(v: Option<i64>) -> i64 {
     match v {
@@ -198,6 +201,18 @@ fn jet_jit_math_exp_m1(x: f64) -> f64 {
 fn jet_jit_math_ln_1p(x: f64) -> f64 {
     x.ln_1p()
 }
+fn jet_jit_math_ln(x: f64) -> f64 {
+    x.ln()
+}
+fn jet_jit_math_log2(x: f64) -> f64 {
+    x.log2()
+}
+fn jet_jit_math_log10(x: f64) -> f64 {
+    x.log10()
+}
+fn jet_jit_math_fract(x: f64) -> f64 {
+    x.fract()
+}
 fn jet_jit_math_log(x: f64, base: f64) -> f64 {
     x.log(base)
 }
@@ -353,6 +368,7 @@ host_fns! {
     to_bits: "jet_jit_math_to_bits" => jet_jit_math_to_bits: f64_i64;
     from_bits: "jet_jit_math_from_bits" => jet_jit_math_from_bits: i64_f64;
     round: "jet_jit_math_round" => jet_jit_math_round: f64_i64;
+    trunc: "jet_jit_math_trunc" => jet_jit_math_trunc: f64_f64;
     erf: "jet_jit_math_erf" => jet_jit_math_erf: f64_f64;
     erfc: "jet_jit_math_erfc" => jet_jit_math_erfc: f64_f64;
     gamma: "jet_jit_math_gamma" => jet_jit_math_gamma: f64_f64;
@@ -393,6 +409,10 @@ host_fns! {
     exp2: "jet_jit_math_exp2" => jet_jit_math_exp2: f64_f64;
     exp_m1: "jet_jit_math_exp_m1" => jet_jit_math_exp_m1: f64_f64;
     ln_1p: "jet_jit_math_ln_1p" => jet_jit_math_ln_1p: f64_f64;
+    ln: "jet_jit_math_ln" => jet_jit_math_ln: f64_f64;
+    log2: "jet_jit_math_log2" => jet_jit_math_log2: f64_f64;
+    log10: "jet_jit_math_log10" => jet_jit_math_log10: f64_f64;
+    fract: "jet_jit_math_fract" => jet_jit_math_fract: f64_f64;
     log: "jet_jit_math_log" => jet_jit_math_log: f64_f64_f64;
     copysign: "jet_jit_math_copysign" => jet_jit_math_copysign: f64_f64_f64;
     signum: "jet_jit_math_signum" => jet_jit_math_signum: f64_f64;

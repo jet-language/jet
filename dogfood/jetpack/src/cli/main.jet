@@ -1,0 +1,173 @@
+use core.encoding.json as json
+use core.files as fs
+use core.process as process
+use core.sys as env
+use core.term as io
+use plan
+use read_only
+
+#Error
+pub struct CLIError {
+    pub message: String
+}
+
+pub struct CommandResult {
+    pub stdout: String
+    pub exit_code: Int
+}
+
+
+struct ParsedCommand {
+    verb: String
+    name: String
+}
+
+fn error_result(action: String, message: String) CommandResult !Never -> {
+    action_json :: json.to_string(DataTree.Text(~action))
+    error_json :: json.to_string(DataTree.Text(~message))
+    wire :: "{{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"error\",\"ok\":false,\"action\":{action_json},\"error\":{error_json}}}"
+    return CommandResult{stdout: "{wire}\n", exit_code: 2}
+}
+
+fn success_result(wire: String) CommandResult !Never -> {
+    return CommandResult{stdout: "{wire}\n", exit_code: 0}
+}
+
+fn command_action(argv: [String]) String !Never -> {
+    return argv.get(0) ?? "cli"
+}
+
+fn parse_command(argv: [String]) ParsedCommand !CLIError -> {
+    verb :: argv.get(0) ?? return Err(CLIError{message: "a command is required"})
+    if verb != "plan" && verb != "list" && verb != "inspect" {
+        return Err(CLIError{message: "unsupported command {verb}"})
+    }
+
+    name := ""
+    seen_name := false
+    loop arg in argv.skip(1).to_list() {
+        if arg.starts_with("-") {
+            if arg == "--json" || arg == "--offline" {
+                next
+            }
+            return Err(CLIError{message: "unsupported flag {arg}"})
+        }
+        if verb == "plan" && !seen_name {
+            name = arg
+            seen_name = true
+            next
+        }
+        return Err(CLIError{message: "unexpected argument {arg}"})
+    }
+    if verb == "plan" && !seen_name {
+        name = "dogfood"
+    }
+    return Ok(ParsedCommand{verb: verb, name: name})
+}
+
+fn slash(path: String) String !CLIError -> {
+    return Ok(path.replace("\\", "/"))
+}
+
+fn is_under(path: String, base: String) Bool !CLIError -> {
+    path_text :: slash(path)
+    base_text :: slash(base)
+    return Ok(path_text == base_text || path_text.starts_with("{base_text}/"))
+}
+
+fn reject_symlink_components(path: Path, label: String) Bool !CLIError -> {
+    current := path
+    loop {
+        if fs.stat(~current) == {
+            .Ok(metadata) -> {
+                if metadata.is_symlink {
+                    return Err(CLIError{message: "{label} contains symbolic link component {current.to_string()}; use a real path under the Jet dogfood cache"})
+                }
+            }
+            .Err(error) -> {
+                if error == .NotFound(_) {
+                } else {
+                    return Err(CLIError{message: "{label} component cannot be inspected at {current.to_string()}; use a readable path under the Jet dogfood cache"})
+                }
+            }
+        }
+        parent :: current.parent()
+        if parent == {
+            .Val(next) -> {
+                if next.to_string() == current.to_string() {
+                    break
+                }
+                current = next
+            }
+            .None -> break
+        }
+    }
+    return Ok(true)
+}
+
+fn normalized_absolute(raw: String, label: String) String !CLIError -> {
+    if raw.trim() == "" {
+        return Err(CLIError{message: "{label} is required"})
+    }
+    candidate :: Path.from(raw).normalize()
+    absolute :: fs.absolute(candidate) ?? return Err(CLIError{message: "{label} cannot be resolved: {raw}"})
+    normalized :: Path.from(absolute).normalize()
+    _symlink_check :: reject_symlink_components(~normalized, ~label)
+    if fs.exists(~normalized) {
+        canonical :: fs.canonicalize(normalized) ?? return Err(CLIError{message: "{label} cannot be canonicalized: {normalized.to_string()}"})
+        return Ok(canonical)
+    }
+    return Ok(normalized.to_string())
+}
+
+fn checked_store_root(raw: String) String !CLIError -> {
+    checked :: normalized_absolute(raw, "store root")
+    base_path :: Path.home().join(".cache").join("jet-dogfood")
+    base :: normalized_absolute(base_path.to_string(), "Jet dogfood cache")
+    if !is_under(~checked, ~base) {
+        return Err(CLIError{message: "store root must be under the Jet dogfood cache at {base}; choose a child path"})
+    }
+    return Ok(checked)
+}
+
+pub fn execute(argv: [String], project_root: String, store_root: String) CommandResult !Never -> {
+    action :: command_action(~argv)
+    if parse_command(argv) == {
+        .Err(error) -> return error_result(action, error.message)
+        .Ok(command) -> {
+            if checked_store_root(store_root) == {
+                .Err(error) -> return error_result(command.verb, error.message)
+                .Ok(root) -> {
+                    if command.verb == "plan" {
+                        if plan.render(~project_root, ~command.name) == {
+                            .Err(error) -> return error_result("plan", error.message)
+                            .Ok(wire) -> return success_result(wire)
+                        }
+                    }
+                    if command.verb == "list" {
+                        if read_only.list_json(~root) == {
+                            .Err(error) -> return error_result("list", error.message)
+                            .Ok(wire) -> return success_result(wire)
+                        }
+                    }
+                    if read_only.inspect_json(~root) == {
+                        .Err(error) -> return error_result("inspect", error.message)
+                        .Ok(wire) -> return success_result(wire)
+                    }
+                }
+            }
+        }
+    }
+    panic("unreachable command result")
+}
+
+pub fn cli_run() {
+    argv :: process.argv().skip(1).to_list()
+    configured :: env.get("JETPACK_DOGFOOD_ROOT") ?? Path.home().join(".cache").join("jet-dogfood").join("jetpack-store").to_string()
+    project :: env.get("JETPACK_PROJECT_ROOT") ?? "."
+    result :: execute(argv, project, configured)
+    out :: io.stdout()
+    out.write(result.stdout) ?? panic("stdout write failed")
+    out.flush() ?? panic("stdout flush failed")
+    process.exit(result.exit_code)
+}

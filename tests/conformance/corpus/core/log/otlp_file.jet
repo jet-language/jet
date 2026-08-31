@@ -6,7 +6,7 @@ use core.testing as testing
 fn run() {
     root :: testing.temp_dir("log-otlp-file")
     path :: Path.from(root).join("events.jsonl").to_string()
-    result :: log.otlp_file(path)
-    print(result)
+    log.otlp_file(path).drop("sink setup returns Unit")
+    print(true)
     files.remove_all(root) ?? panic("cleanup")
 }

@@ -1,0 +1,369 @@
+use core.crypto as crypto
+use core.encoding.hex as hex
+use core.files as fs
+
+// This is the dogfood port of the shipped closure journal. The wire format is
+// deliberately shared: a version line, tab-separated records, and a SHA-256
+// footer. A transaction is durable only after its partial file is synced and
+// renamed to the committed `.txn` name.
+#Codable
+pub struct JournalRecord {
+    pub key: String
+    pub value: String
+    pub deleted: Bool
+}
+
+#Codable
+pub struct JournalTransaction {
+    pub sequence: Int
+    pub kind: String
+    pub records: [JournalRecord]
+}
+
+#Codable
+pub struct JournalRecovery {
+    // One current value per key. A tombstone remains visible with deleted=true.
+    pub records: [JournalRecord]
+    // Current committed records in transaction/file replay order.
+    pub replay_order: [JournalRecord]
+    pub transaction_count: Int
+    pub transaction_bytes: Int
+    pub recovered_partials: Int
+    pub compacted: Bool
+}
+
+fn empty_recovery() JournalRecovery -> {
+    return JournalRecovery{
+        records: [JournalRecord]{},
+        replay_order: [JournalRecord]{},
+        transaction_count: 0,
+        transaction_bytes: 0,
+        recovered_partials: 0,
+        compacted: false
+    }
+}
+
+fn journal_dir(root: String) String !Err -> {
+    if root.trim() == "" -> return Err("journal root is required")
+    return Ok(Path.from(root).join("hangar").join("closure-db").join("journal").to_string())
+}
+
+fn ensure_journal_dir(root: String) String !Err -> {
+    journal :: journal_dir(root)
+    fs.create_dir_all(~journal) ?? return Err("journal directory cannot be created")
+    return Ok(journal)
+}
+
+fn transaction_base(sequence: Int) String !Err -> {
+    if sequence <= 0 -> return Err("journal sequence must be positive")
+    digits :: sequence.to_string()
+    if digits.len() > 20 -> return Err("journal sequence exceeds filename width")
+    padded := ~digits
+    loop _ in 0..<(20 - digits.len()) -> padded = "0{padded}"
+    return Ok(padded)
+}
+
+fn transaction_sequence(name: String) ?Int -> {
+    if !name.ends_with(".txn") || name.len() < 26 -> return None
+    if name.slice(20, 20) != "-" -> return None
+    prefix :: ~name.slice(0, 19)
+    sequence :: prefix.to_int() ?? return None
+    if sequence <= 0 -> return None
+    return Val(sequence)
+}
+
+fn transaction_path(journal: String, name: String) String -> {
+    return Path.from(journal).join(name).to_string()
+}
+
+fn transaction_names(journal: String) [String] !Err -> {
+    if !fs.exists(~journal) -> return Ok([String]{})
+    entries :: fs.list_dir(~journal) ?? return Err("journal directory cannot be read")
+    names := [String]{}
+    loop entry in entries {
+        if entry.is_dir || !entry.name.ends_with(".txn") -> next
+        if transaction_sequence(~entry.name) == .Val(_) -> names.push(~entry.name)
+    }
+    names.sort()
+    return Ok(names)
+}
+
+fn next_sequence(journal: String) Int !Err -> {
+    names :: transaction_names(~journal)
+    highest := 0
+    loop name in names {
+        sequence :: transaction_sequence(~name) ?? 0
+        if sequence > highest -> highest = sequence
+    }
+    return Ok(highest + 1)
+}
+
+fn decode_hex(encoded: String) [U8] !Err -> {
+    bytes :: hex.decode(encoded) ?? return Err("journal hex field is invalid")
+    return Ok(bytes)
+}
+
+fn decode_text(encoded: String) String !Err -> {
+    bytes :: decode_hex(encoded)
+    text :: String.from_bytes(~bytes) ?? return Err("journal text field is not UTF-8")
+    return Ok(text)
+}
+
+fn render_record(record: JournalRecord) String -> {
+    key :: hex.encode(record.key.bytes())
+    if record.deleted -> return "delete\t{key}\n"
+    value :: hex.encode(record.value.bytes())
+    action :: hex.encode("jet-dogfood".bytes())
+    return "record\t{key}\t{value}\t{action}\n"
+}
+
+// Public for synthetic fixtures: callers can create a canonical body, then
+// append checksum and write a filename when exercising crash recovery.
+pub fn render_transaction(transaction: JournalTransaction) String -> {
+    out := "jet-closure-journal-v1\nkind\t{transaction.kind}\n"
+    records :: transaction.records
+    loop record in records -> out += render_record(~record)
+    return out
+}
+
+fn write_transaction(journal: String, transaction: JournalTransaction) String !Err -> {
+    sequence :: transaction.sequence
+    body :: render_transaction(transaction)
+    checksum :: crypto.sha256(body.bytes()).hex()
+    content_id :: ~checksum.slice(0, 15)
+    base :: transaction_base(sequence)
+    final_path :: transaction_path(~journal, "{base}-{content_id}.txn")
+    partial_path :: transaction_path(~journal, "{base}-{content_id}.partial")
+    wire := "{body}checksum\t{checksum}\n"
+    fs.write(~partial_path, ~wire) ?? return Err("journal transaction cannot be written")
+    fs.fsync(~partial_path) ?? return Err("journal transaction cannot be synced")
+    fs.rename(~partial_path, ~final_path) ?? return Err("journal transaction cannot be committed")
+    return Ok(final_path)
+}
+
+// Append is the journal commit path. Every write stays under root/hangar and
+// publishes only after the partial frame has been synced and renamed.
+pub fn append(root: String, record: JournalRecord) String !Err -> {
+    journal :: ensure_journal_dir(root)
+    sequence :: next_sequence(~journal)
+    transaction := JournalTransaction{
+        sequence: sequence,
+        kind: "delta",
+        records: [JournalRecord]{record}
+    }
+    path :: write_transaction(journal, transaction)
+    return Ok(path)
+}
+
+fn body_checksum(raw: String) String !Err -> {
+    frame :: raw.cut_last("checksum\t") ?? return Err("journal checksum is missing")
+    if !frame.after.ends_with("\n") -> return Err("journal checksum frame is truncated")
+    checksum :: ~frame.after.remove_suffix("\n")
+    if checksum.len() != 64 -> return Err("journal checksum frame is invalid")
+    if checksum.to_lower() != checksum -> return Err("journal checksum must be lowercase")
+    _ :: decode_hex(~checksum)
+    body :: ~frame.before
+    expected :: crypto.sha256(body.bytes()).hex()
+    if expected != checksum -> return Err("journal checksum mismatch")
+    return Ok(body)
+}
+
+fn duplicate_record(records: [JournalRecord], key: String) Bool -> {
+    loop record in records {
+        if record.key == key -> return true
+    }
+    return false
+}
+
+fn parse_transaction(raw: String, sequence: Int) JournalTransaction !Err -> {
+    body :: body_checksum(raw)
+    lines :: body.lines()
+    if lines.len() < 2 || lines[0] != "jet-closure-journal-v1" {
+        return Err("unsupported journal version")
+    }
+    kind_line :: ~lines[1]
+    if kind_line != "kind\tdelta" && kind_line != "kind\tsnapshot" {
+        return Err("missing journal kind")
+    }
+    kind := "delta"
+    if kind_line == "kind\tsnapshot" -> kind = "snapshot"
+    records := [JournalRecord]{}
+    if lines.len() > 2 {
+        loop index in 2..<lines.len() {
+            line :: ~lines[index]
+            fields :: line.split("\t").to_list()
+            if fields.len() == 2 && fields[0] == "delete" {
+                key :: decode_text(~fields[1])
+                records.push(JournalRecord{key: key, value: "", deleted: true})
+                next
+            }
+            if fields[0] == "record" && (fields.len() == 4 || fields.len() == 6) {
+                key :: decode_text(~fields[1])
+                if duplicate_record(~records, ~key) -> return Err("duplicate journal record")
+                value :: decode_text(~fields[2])
+                _ :: decode_hex(~fields[3])
+                if fields.len() == 6 {
+                    _ :: decode_hex(~fields[4])
+                    _ :: decode_hex(~fields[5])
+                }
+                records.push(JournalRecord{key: key, value: value, deleted: false})
+                next
+            }
+            if fields[0] == "object" && fields.len() == 4 {
+                _ :: decode_hex(~fields[1])
+                _ :: decode_hex(~fields[2])
+                if fields[3] != "0" && fields[3] != "1" {
+                    return Err("journal object flag is invalid")
+                }
+                next
+            }
+            if fields[0] == "output" && fields.len() == 4 {
+                _ :: decode_hex(~fields[1])
+                _ :: decode_hex(~fields[2])
+                _ :: decode_hex(~fields[3])
+                next
+            }
+            if fields[0] == "reference" && fields.len() == 3 {
+                _ :: decode_hex(~fields[1])
+                _ :: decode_hex(~fields[2])
+                next
+            }
+            return Err("invalid journal line")
+        }
+    }
+    return Ok(JournalTransaction{sequence: sequence, kind: kind, records: records})
+}
+
+fn apply_current(recovery: JournalRecovery, record: JournalRecord) JournalRecovery !Err -> {
+    old_records :: recovery.records
+    old_order :: recovery.replay_order
+    transaction_count :: recovery.transaction_count
+    transaction_bytes :: recovery.transaction_bytes
+    recovered_partials :: recovery.recovered_partials
+    compacted :: recovery.compacted
+
+    records := [JournalRecord]{}
+    replaced := false
+    loop existing in old_records {
+        if {
+            !replaced && existing.key == record.key -> {
+                records.push(~record)
+                replaced = true
+            }
+            else -> records.push(~existing)
+        }
+    }
+    if !replaced -> records.push(~record)
+
+    replay_order := [JournalRecord]{}
+    loop existing in old_order -> replay_order.push(~existing)
+    replay_order.push(~record)
+
+    return JournalRecovery{
+        records: records,
+        replay_order: replay_order,
+        transaction_count: transaction_count,
+        transaction_bytes: transaction_bytes,
+        recovered_partials: recovered_partials,
+        compacted: compacted
+    }
+}
+
+fn mark_recovered_partial(recovery: JournalRecovery) JournalRecovery -> {
+    return JournalRecovery{
+        records: recovery.records,
+        replay_order: recovery.replay_order,
+        transaction_count: recovery.transaction_count,
+        transaction_bytes: recovery.transaction_bytes,
+        recovered_partials: recovery.recovered_partials + 1,
+        compacted: recovery.compacted
+    }
+}
+
+fn reset_snapshot_state(recovery: JournalRecovery) JournalRecovery -> {
+    return JournalRecovery{
+        records: [JournalRecord]{},
+        replay_order: [JournalRecord]{},
+        transaction_count: recovery.transaction_count,
+        transaction_bytes: recovery.transaction_bytes,
+        recovered_partials: recovery.recovered_partials,
+        compacted: recovery.compacted
+    }
+}
+
+fn count_transaction(recovery: JournalRecovery, bytes: Int) JournalRecovery -> {
+    return JournalRecovery{
+        records: recovery.records,
+        replay_order: recovery.replay_order,
+        transaction_count: recovery.transaction_count + 1,
+        transaction_bytes: recovery.transaction_bytes + bytes,
+        recovered_partials: recovery.recovered_partials,
+        compacted: recovery.compacted
+    }
+}
+
+fn mark_compacted(recovery: JournalRecovery) JournalRecovery -> {
+    return JournalRecovery{
+        records: recovery.records,
+        replay_order: recovery.replay_order,
+        transaction_count: recovery.transaction_count,
+        transaction_bytes: recovery.transaction_bytes,
+        recovered_partials: recovery.recovered_partials,
+        compacted: true
+    }
+}
+
+// Replay committed `.txn` files in lexical filename order. Partial files are
+// crash artifacts and are removed exactly as the shipped recovery does.
+pub fn recover(root: String) JournalRecovery !Err -> {
+    journal :: journal_dir(root)
+    recovery := empty_recovery()
+    if !fs.exists(~journal) -> return Ok(recovery)
+    entries :: fs.list_dir(~journal) ?? return Err("journal directory cannot be read")
+    transaction_names := [String]{}
+    loop entry in entries {
+        if entry.is_dir -> next
+        if entry.name.ends_with(".partial") {
+            fs.remove(entry.path) ?? return Err("interrupted journal transaction cannot be removed")
+            recovery = mark_recovered_partial(recovery)
+            next
+        }
+        if entry.name.ends_with(".txn") -> transaction_names.push(~entry.name)
+    }
+    transaction_names.sort()
+    loop name in transaction_names {
+        sequence :: transaction_sequence(~name) ?? return Err("journal transaction name is invalid")
+        path :: transaction_path(~journal, ~name)
+        raw :: fs.read(~path) ?? return Err("journal transaction cannot be read")
+        bytes :: raw.bytes().len()
+        transaction :: parse_transaction(raw, sequence)
+        if transaction.kind == "snapshot" -> recovery = reset_snapshot_state(recovery)
+        loop record in transaction.records -> recovery = apply_current(recovery, record)
+        recovery = count_transaction(recovery, bytes)
+    }
+    return Ok(recovery)
+}
+
+// Write and commit one canonical snapshot before deleting any older txn. The
+// count threshold is strict (>64); the byte threshold needs >1 txn and >4 MiB.
+pub fn compact_if_needed(root: String) JournalRecovery !Err -> {
+    journal :: journal_dir(root)
+    current :: recover(~root)
+    names :: transaction_names(~journal)
+    by_count := current.transaction_count > 64
+    by_bytes := current.transaction_count > 1 && current.transaction_bytes > 4 * 1024 * 1024
+    if !by_count && !by_bytes -> return Ok(current)
+    sequence :: next_sequence(~journal)
+    snapshot := JournalTransaction{
+        sequence: sequence,
+        kind: "snapshot",
+        records: current.records
+    }
+    _ :: write_transaction(~journal, ~snapshot)
+    loop name in names {
+        path :: transaction_path(~journal, ~name)
+        fs.remove(~path) ?? return Err("superseded journal transaction cannot be removed")
+    }
+    compacted := recover(~root)
+    return Ok(mark_compacted(compacted))
+}

@@ -1,0 +1,1006 @@
+use core.crypto as crypto
+use core.encoding.json as json
+use core.files as fs
+use lock as lock_model
+use manifest as manifest_model
+
+#Error
+pub struct PlanError {
+    pub message: String
+}
+
+struct Profile {
+    name: String
+    extends: [String]
+    packages: [String]
+    collisions: [String:String]
+    source: String
+}
+
+struct PackageSeed {
+    raw: String
+    declared_by: [String]
+}
+
+struct Resolved {
+    applied: [String]
+    sources: [String]
+    packages: [PackageSeed]
+    collisions: [String:String]
+}
+
+struct Selector {
+    raw: String
+    version: String
+    revision: String
+    baseline: String
+    features: [String]
+    digest: String
+    platform: String
+}
+
+struct RefParts {
+    target: String
+    source: String
+    channel: String
+    selector: Selector
+}
+
+struct PackageFact {
+    raw: String
+    target: String
+    source: String
+    upstream: String
+    provider: String
+    channel: String
+    declared_by: [String]
+    provider_facts: String
+}
+
+struct FactEntry {
+    key: String
+    value: String
+    provenance: String
+}
+
+fn json_string(value: String) String !PlanError -> {
+    return json.to_string(DataTree.Text(~value))
+}
+
+fn json_strings(values: [String]) String !PlanError -> {
+    rendered := [String]{}
+    loop value in values {
+        rendered.push(json_string(~value))
+    }
+    return rendered.join(",")
+}
+
+fn json_manifest(value: manifest_model.Manifest) String !PlanError -> {
+    deps := [String]{}
+    loop dep in value.deps {
+        deps.push("{{\"name\":{json_string(~dep.name)},\"reference\":{json_string(~dep.reference)}}}")
+    }
+    packages := [String]{}
+    loop package in value.packages {
+        packages.push("{{\"name\":{json_string(~package.name)},\"kind\":{json_string(~package.kind)},\"entry\":{json_string(~package.entry)}}}")
+    }
+    return "{{\"name\":{json_string(~value.name)},\"version\":{json_string(~value.version)},\"deps\":[{deps.join(",")}],\"packages\":[{packages.join(",")}]}}"
+}
+
+fn json_lock(value: lock_model.LockFile) String !PlanError -> {
+    packages := [String]{}
+    loop package in value.packages {
+        packages.push("{{\"name\":{json_string(~package.name)},\"version\":{json_string(~package.version)},\"reference\":{json_string(~package.reference)},\"output_hash\":{json_string(~package.output_hash)}}}")
+    }
+    return "{{\"version\":{value.version},\"packages\":[{packages.join(",")}]}}"
+}
+
+fn valid_name(name: String) Bool !PlanError -> {
+    if name == "" || !name.is_ascii() {
+        return false
+    }
+    if name.starts_with(".") || name.ends_with(".") {
+        return false
+    }
+    if name.contains("/") || name.contains("\\") || name.contains("..") {
+        return false
+    }
+    if name.contains(" ") || name.contains("\t") || name.contains("\n") {
+        return false
+    }
+    if name.contains("{{") || name.contains("}}") || name.contains("[") || name.contains("]") {
+        return false
+    }
+    if name.contains(":") || name.contains(",") || name.contains(";") || name.contains("\"") {
+        return false
+    }
+    return true
+}
+
+fn same_strings(left: [String], right: [String]) Bool !PlanError -> {
+    if left.len() != right.len() {
+        return false
+    }
+    loop (index, value) in left {
+        if value != right[index] {
+            return false
+        }
+    }
+    return true
+}
+
+fn same_map(left: [String:String], right: [String:String]) Bool !PlanError -> {
+    if left.len() != right.len() {
+        return false
+    }
+    loop (key, value) in left {
+        if !right.has_key(key) || right[key] != value {
+            return false
+        }
+    }
+    return true
+}
+
+fn same_profile(left: Profile, right: Profile) Bool !PlanError -> {
+    return same_strings(left.extends, right.extends)
+        && same_strings(left.packages, right.packages)
+        && same_map(left.collisions, right.collisions)
+}
+
+fn brace_delta(line: String) Int !PlanError -> {
+    depth := 0
+    quoted := false
+    escaped := false
+    loop ch in line.chars() {
+        if escaped {
+            escaped = false
+            next
+        }
+        if quoted && ch == '\\' {
+            escaped = true
+            next
+        }
+        if ch == '\"' {
+            quoted = !quoted
+            next
+        }
+        if quoted {
+            next
+        }
+        if ch == '{' {
+            depth += 1
+        }
+        if ch == '}' {
+            depth -= 1
+        }
+    }
+    return depth
+}
+
+fn split_top_level(text: String) [String] !PlanError -> {
+    values := [String]{}
+    current := ""
+    square_depth := 0
+    curly_depth := 0
+    quoted := false
+    escaped := false
+    loop ch in text.chars() {
+        if escaped {
+            current += "{ch}"
+            escaped = false
+            next
+        }
+        if quoted && ch == '\\' {
+            current += "{ch}"
+            escaped = true
+            next
+        }
+        if ch == '\"' {
+            quoted = !quoted
+            current += "{ch}"
+            next
+        }
+        if !quoted {
+            if ch == '[' {
+                square_depth += 1
+            }
+            if ch == ']' {
+                square_depth -= 1
+                if square_depth < 0 {
+                    return Err(PlanError{message: "profile value has an unmatched closing bracket"})
+                }
+            }
+            if ch == '{' {
+                curly_depth += 1
+            }
+            if ch == '}' {
+                curly_depth -= 1
+                if curly_depth < 0 {
+                    return Err(PlanError{message: "profile value has an unmatched closing brace"})
+                }
+            }
+            if (ch == ',' || ch == ';' || ch == '\n') && square_depth == 0 && curly_depth == 0 {
+                item :: ~current.trim()
+                if item != "" {
+                    values.push(item)
+                }
+                current = ""
+                next
+            }
+        }
+        current += "{ch}"
+    }
+    if quoted {
+        return Err(PlanError{message: "profile value has an unterminated string"})
+    }
+    if square_depth != 0 || curly_depth != 0 {
+        return Err(PlanError{message: "profile value has an unbalanced collection"})
+    }
+    item :: ~current.trim()
+    if item != "" {
+        values.push(item)
+    }
+    return Ok(values)
+}
+
+fn scalar(raw: String, context: String) String !PlanError -> {
+    value := ~raw.trim()
+    if value.ends_with(",") || value.ends_with(";") {
+        value = ~value.slice(0, value.len() - 2).trim()
+    }
+    if value == "" {
+        return Err(PlanError{message: "profile field {context}: missing value"})
+    }
+    if value.starts_with("\"") {
+        if value.len() < 2 || !value.ends_with("\"") {
+            return Err(PlanError{message: "profile field {context}: malformed quoted value"})
+        }
+        if value.len() == 2 {
+            return Ok("")
+        }
+        inner :: ~value.slice(1, value.len() - 2)
+        if inner.contains("\"") {
+            return Err(PlanError{message: "profile field {context}: malformed quoted value"})
+        }
+        return Ok(inner)
+    }
+    if value.contains("\"") {
+        return Err(PlanError{message: "profile field {context}: malformed quoted value"})
+    }
+    return Ok(value)
+}
+
+fn list_inner(raw: String, context: String) String !PlanError -> {
+    value := ~raw.trim()
+    if !value.starts_with("[") || !value.ends_with("]") {
+        return Err(PlanError{message: "profile field {context}: expected a list"})
+    }
+    if value.len() == 2 {
+        return Ok("")
+    }
+    return Ok(~value.slice(1, value.len() - 2).trim())
+}
+
+fn parse_string_list(raw: String, context: String) [String] !PlanError -> {
+    inner :: list_inner(~raw, ~context)
+    values := [String]{}
+    if inner == "" {
+        return Ok(values)
+    }
+    entries :: split_top_level(~inner)
+    loop entry in entries {
+        value :: scalar(~entry, ~context)
+        if value != "" {
+            values.push(value)
+        }
+    }
+    return Ok(values)
+}
+
+fn normalize_package_ref(raw: String) String !PlanError -> {
+    value :: scalar(~raw, "packages")
+    if value == "" {
+        return Err(PlanError{message: "profile packages: empty package reference"})
+    }
+    if value.starts_with("/") || value.starts_with("./") || value.starts_with("../") {
+        return Err(PlanError{message: "profile packages: path references are not supported"})
+    }
+    if value.contains("@") {
+        return Ok(value)
+    }
+    dot :: value.split_once(".")
+    if dot == {
+        .Val(pair) -> {
+            source :: ~pair.before.trim()
+            target :: ~pair.after.trim()
+            if source != "" && target != "" && !source.contains("#") && !target.starts_with("[") {
+                return Ok("{target}@{source}")
+            }
+        }
+        else -> {}
+    }
+    return Ok("{value}@default")
+}
+
+fn parse_package_list(raw: String) [String] !PlanError -> {
+    inner :: list_inner(~raw, "packages")
+    packages := [String]{}
+    if inner == "" {
+        return Ok(packages)
+    }
+    entries :: split_top_level(~inner)
+    loop entry in entries {
+        value :: scalar(~entry, "packages")
+        spread :: value.split_once(".[")
+        if spread == {
+            .Val(pair) -> {
+                if !value.ends_with("]") {
+                    return Err(PlanError{message: "profile packages: malformed member spread"})
+                }
+                source :: ~pair.before.trim()
+                body :: ~pair.after.remove_suffix("]").trim()
+                if source == "" || body == "" {
+                    return Err(PlanError{message: "profile packages: malformed member spread"})
+                }
+                members :: split_top_level(~body)
+                loop member in members {
+                    target :: scalar(~member, "packages")
+                    if target == "" {
+                        return Err(PlanError{message: "profile packages: empty member spread"})
+                    }
+                    normalized :: normalize_package_ref("{target}@{source}")
+                    if !packages.contains(normalized) {
+                        packages.push(normalized)
+                    }
+                }
+            }
+            else -> {
+                normalized :: normalize_package_ref(~value)
+                if !packages.contains(normalized) {
+                    packages.push(normalized)
+                }
+            }
+        }
+    }
+    return Ok(packages)
+}
+
+fn parse_collisions(raw: String, profile_name: String) [String:String] !PlanError -> {
+    value := ~raw.trim()
+    if !value.starts_with("{{") || !value.ends_with("}}") {
+        return Err(PlanError{message: "profile {profile_name} field collisions: expected a map"})
+    }
+    collisions := [String:String]{}
+    if value.len() == 2 {
+        return Ok(collisions)
+    }
+    inner :: ~value.slice(1, value.len() - 2).trim()
+    entries :: split_top_level(~inner)
+    loop entry in entries {
+        pair :: entry.split_once(":") ?? return Err(PlanError{message: "profile {profile_name} collisions: expected path and provider"})
+        path :: scalar(~pair.before, "{profile_name}.collisions.path")
+        provider_raw :: scalar(~pair.after, "{profile_name}.collisions.provider")
+        if path == "" || provider_raw == "" {
+            return Err(PlanError{message: "profile {profile_name} collisions: empty path or provider"})
+        }
+        provider :: normalize_package_ref(~provider_raw)
+        if collisions.has_key(path) {
+            return Err(PlanError{message: "profile {profile_name} collisions: duplicate path {path}"})
+        }
+        collisions[path] = ~provider
+    }
+    return Ok(collisions)
+}
+
+fn parse_profile_body(profile_name: String, body: String) Profile !PlanError -> {
+    extends := [String]{}
+    packages := [String]{}
+    collisions := [String:String]{}
+    seen_extends := false
+    seen_packages := false
+    seen_collisions := false
+    fields :: split_top_level(~body)
+    loop raw_field in fields {
+        field :: ~raw_field.trim()
+        if field == "" || field.starts_with("//") {
+            next
+        }
+        pair :: field.split_once(":") ?? return Err(PlanError{message: "profile {profile_name}: field expected ':'"})
+        key :: ~pair.before.trim()
+        value :: ~pair.after.trim()
+        if key == "extends" {
+            if seen_extends {
+                return Err(PlanError{message: "profile {profile_name}: repeated extends field"})
+            }
+            extends = parse_string_list(~value, "{profile_name}.extends")
+            seen_extends = true
+            next
+        }
+        if key == "packages" {
+            if seen_packages {
+                return Err(PlanError{message: "profile {profile_name}: repeated packages field"})
+            }
+            packages = parse_package_list(~value)
+            seen_packages = true
+            next
+        }
+        if key == "collisions" {
+            if seen_collisions {
+                return Err(PlanError{message: "profile {profile_name}: repeated collisions field"})
+            }
+            collisions = parse_collisions(~value, ~profile_name)
+            seen_collisions = true
+            next
+        }
+        return Err(PlanError{message: "profile {profile_name}: unknown field {key}"})
+    }
+    return Ok(Profile{
+        name: profile_name,
+        extends: extends,
+        packages: packages,
+        collisions: collisions,
+        source: "profile.{profile_name}",
+    })
+}
+
+fn finish_profile(name: String, body_lines: [String]) Profile !PlanError -> {
+    body := ~body_lines.join("\n").trim()
+    if body.ends_with(",") {
+        body = ~body.remove_suffix(",").trim()
+    }
+    if !body.ends_with("}}") {
+        return Err(PlanError{message: "profile {name}: missing closing brace"})
+    }
+    body = ~body.remove_suffix("}}").trim()
+    return parse_profile_body(~name, ~body)
+}
+
+fn parse_profiles(source: String) [Profile] !PlanError -> {
+    profiles := [Profile]{}
+    active := false
+    depth := 0
+    current_name := ""
+    body_lines := [String]{}
+    loop raw in source.lines() {
+        line :: ~raw.trim()
+        if !active {
+            if line == "" || line.starts_with("//") {
+                next
+            }
+            if !line.starts_with("module profile.") {
+                next
+            }
+            open :: line.split_once("{{") ?? return Err(PlanError{message: "profile module {line}: missing opening brace"})
+            header :: ~open.before.trim()
+            current_name = ~header.remove_prefix("module profile.").trim()
+            if !valid_name(~current_name) {
+                return Err(PlanError{message: "profile module: invalid name {current_name}"})
+            }
+            body_lines = [String]{}
+            body_lines.push(~open.after)
+            depth = brace_delta(~line)
+            active = true
+            if depth == 0 {
+                profile :: finish_profile(~current_name, body_lines)
+                existing := -1
+                loop (index, item) in profiles {
+                    if item.name == profile.name {
+                        existing = index
+                        break
+                    }
+                }
+                if {
+                    existing >= 0 -> {
+                        if !same_profile(profiles[existing], profile) {
+                            return Err(PlanError{message: "profile {profile.name}: conflicting duplicate declaration"})
+                        }
+                    }
+                    else -> {
+                        profiles.push(profile)
+                    }
+                }
+                active = false
+                current_name = ""
+                body_lines = [String]{}
+            }
+            next
+        }
+        body_lines.push(~line)
+        depth += brace_delta(~line)
+        if depth < 0 {
+            return Err(PlanError{message: "profile {current_name}: unbalanced braces"})
+        }
+        if depth == 0 {
+            profile :: finish_profile(~current_name, body_lines)
+            existing := -1
+            loop (index, item) in profiles {
+                if item.name == profile.name {
+                    existing = index
+                    break
+                }
+            }
+            if {
+                existing >= 0 -> {
+                    if !same_profile(profiles[existing], profile) {
+                        return Err(PlanError{message: "profile {profile.name}: conflicting duplicate declaration"})
+                    }
+                }
+                else -> {
+                    profiles.push(profile)
+                }
+            }
+            active = false
+            current_name = ""
+            body_lines = [String]{}
+        }
+    }
+    if active {
+        return Err(PlanError{message: "profile {current_name}: missing closing brace"})
+    }
+    return Ok(profiles)
+}
+
+fn profile_index(profiles: [Profile], name: String) Int !PlanError -> {
+    loop (index, profile) in profiles {
+        if profile.name == name {
+            return index
+        }
+    }
+    return -1
+}
+
+fn cycle_text(stack: [String], name: String) String !PlanError -> {
+    cycle := [String]{}
+    started := false
+    loop item in stack {
+        if item == name {
+            started = true
+        }
+        if started {
+            cycle.push(~item)
+        }
+    }
+    cycle.push(~name)
+    return cycle.join(" -> ")
+}
+
+fn merge_parent_packages(target: [PackageSeed], source: [PackageSeed]) [PackageSeed] !PlanError -> {
+    out := target
+    loop package in source {
+        found := -1
+        loop (index, existing) in out {
+            if existing.raw == package.raw {
+                found = index
+                break
+            }
+        }
+        if {
+            found < 0 -> {
+                owners := [String]{}
+                loop owner in package.declared_by {
+                    owners.push(~owner)
+                }
+                out.push(PackageSeed{raw: ~package.raw, declared_by: owners})
+            }
+            else -> {
+                merged := ~out[found]
+                loop owner in package.declared_by {
+                    if !merged.declared_by.contains(owner) {
+                        merged.declared_by.push(~owner)
+                    }
+                }
+                out[found] = merged
+            }
+        }
+    }
+    return out
+}
+
+fn resolve_profile(name: String, profiles: [Profile], stack: [String]) Resolved !PlanError -> {
+    if stack.contains(name) {
+        return Err(PlanError{message: "profile inheritance cycle: {cycle_text(~stack, ~name)}"})
+    }
+    index := profile_index(profiles, ~name)
+    if index < 0 {
+        return Err(PlanError{message: "profile {name} does not exist"})
+    }
+    profile :: ~profiles[index]
+    next_stack := stack.copy()
+    next_stack.push(~name)
+    resolved := Resolved{
+        applied: [String]{},
+        sources: [String]{},
+        packages: [PackageSeed]{},
+        collisions: [String:String]{},
+    }
+    loop parent in profile.extends {
+        parent_resolved :: resolve_profile(~parent, profiles, ~next_stack)
+        resolved.applied = merge_string_list(~resolved.applied, ~parent_resolved.applied)
+        resolved.sources = merge_string_list(~resolved.sources, ~parent_resolved.sources)
+        resolved.packages = merge_parent_packages(~resolved.packages, ~parent_resolved.packages)
+        loop (path, provider) in parent_resolved.collisions {
+            if {
+                resolved.collisions.has_key(path) -> {
+                    if resolved.collisions[path] != provider {
+                        return Err(PlanError{message: "profile {name}: conflicting collision for {path}"})
+                    }
+                }
+                else -> {
+                    resolved.collisions[path] = ~provider
+                }
+            }
+    }
+    }
+    if !resolved.applied.contains(name) {
+        resolved.applied.push(~name)
+    }
+    source_name := "profile.{name}"
+    if !resolved.sources.contains(source_name) {
+        resolved.sources.push(~source_name)
+    }
+    loop raw_package in profile.packages {
+        found := -1
+        loop (package_index, existing) in resolved.packages {
+            if existing.raw == raw_package {
+                found = package_index
+                break
+            }
+        }
+        if {
+            found < 0 -> {
+                resolved.packages.push(PackageSeed{
+                    raw: ~raw_package,
+                    declared_by: [String]{~name},
+                })
+            }
+            else -> {
+                package := ~resolved.packages[found]
+                if !package.declared_by.contains(name) {
+                    package.declared_by.push(~name)
+                }
+                resolved.packages[found] = package
+            }
+        }
+    }
+    loop (path, provider) in profile.collisions {
+        if {
+            resolved.collisions.has_key(path) -> {
+                if resolved.collisions[path] != provider {
+                    return Err(PlanError{message: "profile {name}: conflicting collision for {path}"})
+                }
+            }
+            else -> {
+                resolved.collisions[path] = ~provider
+            }
+        }
+    }
+    return Ok(resolved)
+}
+
+fn merge_string_list(left: [String], right: [String]) [String] !PlanError -> {
+    out := left
+    loop value in right {
+        if !out.contains(value) {
+            out.push(~value)
+        }
+    }
+    return out
+}
+
+fn parse_selector(raw: String) Selector !PlanError -> {
+    selector := Selector{
+        raw: "",
+        version: "",
+        revision: "",
+        baseline: "",
+        features: [String]{},
+        digest: "",
+        platform: "",
+    }
+    if raw == "" {
+        return Ok(selector)
+    }
+    selector.raw = "#{raw}"
+    groups := raw.split("&")
+    loop group in groups {
+        parts := group.split(",")
+        loop part_raw in parts {
+            part :: ~part_raw.trim()
+            if part == "" {
+                next
+            }
+            assignment := part.split_once("=")
+            key := "version"
+            value := part
+            if assignment == {
+                .Val(pair) -> {
+                    key = ~pair.before.trim()
+                    value = ~pair.after.trim()
+                }
+                else -> {}
+            }
+            if value == "" {
+                return Err(PlanError{message: "package selector: empty value"})
+            }
+            if key == "version" {
+                selector.version = ~value
+                next
+            }
+            if key == "revision" || key == "rev" {
+                selector.revision = ~value
+                next
+            }
+            if key == "baseline" {
+                selector.baseline = ~value
+                next
+            }
+            if key == "digest" || key == "hash" || key == "sha256" {
+                selector.digest = ~value
+                next
+            }
+            if key == "platform" || key == "target" {
+                selector.platform = ~value
+                next
+            }
+            if key == "feature" || key == "features" {
+                features := value.split("+")
+                loop feature_raw in features {
+                    feature :: ~feature_raw.trim()
+                    if feature != "" && !selector.features.contains(feature) {
+                        selector.features.push(feature)
+                    }
+                }
+                selector.features.sort()
+                next
+            }
+            return Err(PlanError{message: "package selector: unknown fact {key}"})
+        }
+    }
+    return Ok(selector)
+}
+
+fn parse_reference(raw: String) RefParts !PlanError -> {
+    normalized :: normalize_package_ref(~raw)
+    at :: normalized.last_index_of("@") ?? return Err(PlanError{message: "package reference {normalized}: missing source"})
+    if at <= 0 || at >= normalized.len() - 1 {
+        return Err(PlanError{message: "package reference {normalized}: missing source"})
+    }
+    left :: ~normalized.slice(0, at - 1)
+    source_part :: ~normalized.slice(at + 1, normalized.len() - 1)
+    target := ~left
+    selector_text := ""
+    target_selector :: ~left.split_once("#")
+    if target_selector == {
+        .Val(pair) -> {
+            target = ~pair.before.trim()
+            selector_text = ~pair.after.trim()
+        }
+        else -> {}
+    }
+    if target == "" || source_part == "" {
+        return Err(PlanError{message: "package reference {normalized}: malformed identity"})
+    }
+    source := ~source_part
+    channel := ""
+    source_channel :: ~source_part.split_once("#")
+    if source_channel == {
+        .Val(pair) -> {
+            source = ~pair.before.trim()
+            channel = ~pair.after.trim()
+        }
+        else -> {}
+    }
+    if source == "" {
+        return Err(PlanError{message: "package reference {normalized}: empty source"})
+    }
+    selector :: parse_selector(~selector_text)
+    return Ok(RefParts{
+        target: target,
+        source: source,
+        channel: channel,
+        selector: selector,
+    })
+}
+
+fn provider_for_source(source: String) String !PlanError -> {
+    if source == "default" || source == "nixpkgs" {
+        return "nix"
+    }
+    if source == "jet" || source == "jetpack" {
+        return "nix"
+    }
+    if source == "path" || source.starts_with("/") || source.starts_with(".") {
+        return "core"
+    }
+    return source
+}
+
+fn external_provider(provider: String) Bool !PlanError -> {
+    return ["jet-registry", "npm", "pypi", "cargo", "swiftpm", "maven", "nuget", "conan", "vcpkg", "github", "homebrew", "binary", "cran", "luarocks", "ruby", "perl", "php"].contains(provider)
+}
+
+fn selector_exact(selector: Selector) Bool !PlanError -> {
+    return selector.version != "" || selector.revision != "" || selector.digest != ""
+}
+
+fn fact_entry(key: String, value: String, provenance: String) FactEntry !PlanError -> {
+    return FactEntry{key: key, value: value, provenance: provenance}
+}
+
+fn facts_json(entries: [FactEntry]) String !PlanError -> {
+    sorted := entries.copy()
+    sorted.sort_by((entry: FactEntry) -> entry.key)
+    rendered := [String]{}
+    loop entry in sorted {
+        rendered.push("{json_string(~entry.key)}:{json_string(~entry.value)}")
+    }
+    return rendered.join(",")
+}
+
+fn selector_json(selector: Selector) String !PlanError -> {
+    return "{{\"raw\":{json_string(~selector.raw)},\"version\":{json_string(~selector.version)},\"revision\":{json_string(~selector.revision)},\"baseline\":{json_string(~selector.baseline)},\"features\":[{json_strings(~selector.features)}],\"digest\":{json_string(~selector.digest)},\"platform\":{json_string(~selector.platform)}}}"
+}
+
+fn provider_facts_json(raw: String, target: String, source: String, provider: String, profile: String, provenance: String, selector: Selector) String !PlanError -> {
+    facts := [FactEntry]{
+        fact_entry("provider.name", ~provider, "ref"),
+        fact_entry("provider.target", ~target, "ref"),
+        fact_entry("profile.name", ~profile, "profile.source"),
+        fact_entry("profile.provenance", ~provenance, "profile.source"),
+        fact_entry("package.target", ~target, "profile.declaration"),
+        fact_entry("package.source", ~source, "profile.declaration"),
+        fact_entry("provider.resolved_source", ~source, "resolver"),
+    }
+    if source != provider {
+        facts.push(fact_entry("provider.authority", ~source, "ref"))
+    }
+    if selector.raw != "" {
+        facts.push(fact_entry("provider.selector", ~selector.raw, "ref"))
+    }
+    fact_values := facts_json(~facts)
+    provenance_entries := facts.copy()
+    provenance_entries.sort_by((entry: FactEntry) -> entry.key)
+    provenance_values := [String]{}
+    loop entry in provenance_entries {
+        provenance_values.push("{json_string(~entry.key)}:{json_string(~entry.provenance)}")
+    }
+    return "{{\"schema\":\"jet-provider-facts-v1\",\"provider\":{json_string(~provider)},\"reference\":{json_string(~raw)},\"target\":{json_string(~target)},\"selector\":{selector_json(~selector)},\"resolved_source\":{json_string(~source)},\"profile\":{json_string(~profile)},\"profile_provenance\":{json_string(~provenance)},\"facts\":{{{fact_values}}},\"provenance\":{{{provenance_values.join(",")}}},\"native_format\":\"\",\"native_document\":\"\",\"losses\":[],\"conflicts\":[]}}"
+}
+
+fn make_package_fact(seed: PackageSeed, profile: String) PackageFact !PlanError -> {
+    parts :: parse_reference(~seed.raw)
+    provider :: provider_for_source(~parts.source)
+    if external_provider(~provider) && !selector_exact(~parts.selector) {
+        return Err(PlanError{message: "package {seed.raw}: external provider needs an exact selector"})
+    }
+    provenance := seed.declared_by.join(",")
+    provider_facts :: provider_facts_json(~seed.raw, ~parts.target, ~parts.source, ~provider, ~profile, ~provenance, ~parts.selector)
+    return Ok(PackageFact{
+        raw: seed.raw,
+        target: parts.target,
+        source: parts.source,
+        upstream: "",
+        provider: provider,
+        channel: parts.channel,
+        declared_by: seed.declared_by,
+        provider_facts: provider_facts,
+    })
+}
+
+fn json_collisions(collisions: [String:String]) String !PlanError -> {
+    keys := collisions.keys().to_list()
+    keys.sort()
+    rendered := [String]{}
+    loop key in keys {
+        value :: collisions[key]
+        rendered.push("{json_string(~key)}:{json_string(~value)}")
+    }
+    return rendered.join(",")
+}
+
+fn json_package(package: PackageFact) String !PlanError -> {
+    upstream := "null"
+    if package.upstream != "" {
+        upstream = json_string(~package.upstream)
+    }
+    channel := "null"
+    if package.channel != "" {
+        channel = json_string(~package.channel)
+    }
+    return "{{\"raw\":{json_string(~package.raw)},\"target\":{json_string(~package.target)},\"source\":{json_string(~package.source)},\"upstream\":{upstream},\"provider\":{json_string(~package.provider)},\"channel\":{channel},\"declared_by\":[{json_strings(~package.declared_by)}],\"provider_facts\":{package.provider_facts}}}"
+}
+
+fn framed(key: String, value: String) String !PlanError -> {
+    return "{key}\t{value.bytes().len()}\t{value}\n"
+}
+
+fn provider_fact_map(packages: [PackageFact]) String !PlanError -> {
+    sorted := packages.copy()
+    sorted.sort_by((package: PackageFact) -> package.raw)
+    rendered := [String]{}
+    loop package in sorted {
+        rendered.push("{json_string(~package.raw)}:{package.provider_facts}")
+    }
+    return rendered.join(",")
+}
+
+pub fn render(project_root: String, name: String) String !PlanError -> {
+    selected_name := ~name.trim()
+    if selected_name == "" {
+        selected_name = "dogfood"
+    }
+    env_path :: Path.from(project_root).join("env.jet")
+    source :: fs.read(env_path) ?? return Err(PlanError{message: "env.jet cannot be read"})
+    manifest_path :: Path.from(project_root).join("package.jet")
+    manifest_source :: fs.read(manifest_path) ?? return Err(PlanError{message: "package.jet cannot be read"})
+    manifest_data :: manifest_model.parse_manifest(manifest_source) ?? {
+        return Err(PlanError{message: "package.jet: {manifest_model.parse_error_message(err)}"})
+    }
+    lock_path :: Path.from(project_root).join(".jet").join("lock")
+    lock_source :: fs.read(lock_path) ?? return Err(PlanError{message: ".jet/lock cannot be read"})
+    lock_data :: lock_model.parse_lock(lock_source) ?? {
+        return Err(PlanError{message: ".jet/lock: {lock_model.parse_error_message(err)}"})
+    }
+    profiles :: parse_profiles(~source)
+    resolved :: resolve_profile(~selected_name, ~profiles, [String]{})
+    loop (path, provider) in resolved.collisions {
+        found := false
+        loop package in resolved.packages {
+            if package.raw == provider {
+                found = true
+                break
+            }
+        }
+        if !found {
+            return Err(PlanError{message: "profile {selected_name} collision {path} selects missing package {provider}"})
+        }
+    }
+    packages := [PackageFact]{}
+    loop seed in resolved.packages {
+        packages.push(make_package_fact(~seed, ~selected_name))
+    }
+    manifest_wire :: json_manifest(~manifest_data)
+    lock_wire :: json_lock(~lock_data)
+
+    canonical := "jet-package-profile-plan-v1\n"
+    canonical += framed("name", ~selected_name)
+    canonical += framed("selected", ~selected_name)
+    canonical += framed("manifest", ~manifest_wire)
+    canonical += framed("lock", ~lock_wire)
+    loop applied in resolved.applied {
+        canonical += framed("applied", ~applied)
+    }
+    loop source_name in resolved.sources {
+        canonical += framed("source", ~source_name)
+    }
+    loop package in packages {
+        canonical += framed("package.raw", ~package.raw)
+        canonical += framed("package.target", ~package.target)
+        canonical += framed("package.source", ~package.source)
+        upstream := package.upstream
+        if upstream == "" {
+            upstream = "<none>"
+        }
+        canonical += framed("package.upstream", ~upstream)
+        canonical += framed("package.provider", ~package.provider)
+        channel := package.channel
+        if channel == "" {
+            channel = "<none>"
+        }
+        canonical += framed("package.channel", ~channel)
+        loop owner in package.declared_by {
+            canonical += framed("package.declared_by", ~owner)
+        }
+        facts_digest := "sha256-{crypto.sha256(package.provider_facts.bytes()).hex()}"
+        canonical += framed("package.provider_facts", ~facts_digest)
+    }
+    collision_keys := resolved.collisions.keys().to_list()
+    collision_keys.sort()
+    loop path in collision_keys {
+        provider :: resolved.collisions[path]
+        canonical += framed("collision.path", ~path)
+        canonical += framed("collision.provider", ~provider)
+    }
+    fingerprint := "sha256-{crypto.sha256(canonical.bytes()).hex()}"
+    return "{{\"name\":{json_string(~selected_name)},\"fingerprint\":{json_string(~fingerprint)},\"selected_profiles\":[{json_string(~selected_name)}],\"applied\":[{json_strings(~resolved.applied)}],\"sources\":[{json_strings(~resolved.sources)}],\"packages\":[{packages.map((package: PackageFact) -> json_package(~package)).join(",")}],\"collisions\":{{{json_collisions(~resolved.collisions)}}},\"provider_facts\":{{{provider_fact_map(~packages)}}},\"manifest\":{manifest_wire},\"lock\":{lock_wire}}}"
+}

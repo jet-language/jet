@@ -1,0 +1,189 @@
+use core.encoding.json as json
+use core.files as fs
+use ingest as store
+use path_laws as laws
+
+#Error
+pub struct RealizeError {
+    pub message: String
+}
+
+pub struct RealizeRequest {
+    pub provider: String
+    pub name: String
+    pub version: String
+    pub reference: String
+    pub source: String
+    pub expected_hash: String
+}
+
+pub struct RealizeResult {
+    pub provider: String
+    pub reference: String
+    pub id: String
+    pub output_hash: String
+    pub deduplicated: Bool
+    pub package_root: String
+    pub payload_root: String
+    pub projection: [String]
+    pub payload_entries: [String]
+}
+
+fn record_text(tree: DataTree, field: String) String !RealizeError -> {
+    value :: tree.field(~field) ?? {
+        return Err(RealizeError{message: "provider result field {field} is missing"})
+    }
+    text :: value.text() ?? {
+        return Err(RealizeError{message: "provider result field {field} must be text"})
+    }
+    return Ok(text)
+}
+
+fn validate_record_shape(tree: DataTree) Bool !RealizeError -> {
+    if tree == .Object(entries) {
+        keys :: entries.keys().to_list()
+        if keys.len() != 7 {
+            return Err(RealizeError{message: "provider result must contain exactly seven fields"})
+        }
+        allowed := ["schema", "provider", "reference", "name", "version", "source", "expected_hash"]
+        loop key in keys {
+            if !allowed.contains(key) {
+                return Err(RealizeError{message: "provider result has unknown field {key}"})
+            }
+        }
+        return Ok(true)
+    }
+    return Err(RealizeError{message: "provider result must be a JSON object"})
+}
+
+fn ingest_realized(store_root: String, provider: String, request: store.IngestRequest) RealizeResult !RealizeError -> {
+    reference :: request.reference.copy()
+    ingested :: store.ingest(~store_root, request) ?? {
+        return Err(RealizeError{message: "ingest failed: {err.message}"})
+    }
+    return Ok(RealizeResult{
+        provider: provider,
+        reference: reference,
+        id: ingested.id,
+        output_hash: ingested.output_hash,
+        deduplicated: ingested.deduplicated,
+        package_root: ingested.package_root,
+        payload_root: ingested.payload_root,
+        projection: ingested.projection,
+        payload_entries: ingested.payload_entries
+    })
+}
+
+fn recorded_request(request: RealizeRequest) RealizeRequest !RealizeError -> {
+    if request.source.trim() == "" {
+        return Err(RealizeError{message: "recorded provider result path is required"})
+    }
+    record_absolute :: fs.absolute(Path.from(request.source).normalize()) ?? {
+        return Err(RealizeError{message: "provider result path cannot be resolved"})
+    }
+    record_stat :: fs.stat(~record_absolute) ?? {
+        return Err(RealizeError{message: "provider result cannot be inspected"})
+    }
+    if record_stat.is_symlink || !record_stat.is_file {
+        return Err(RealizeError{message: "provider result must be a real file"})
+    }
+    raw :: fs.read(~record_absolute) ?? {
+        return Err(RealizeError{message: "provider result cannot be read"})
+    }
+    tree :: json.parse(raw) ?? {
+        return Err(RealizeError{message: "provider result is malformed"})
+    }
+    _ :: validate_record_shape(~tree) ?? {
+        return Err(RealizeError{message: "provider result shape is invalid: {err.message}"})
+    }
+    schema :: record_text(~tree, "schema") ?? {
+        return Err(err)
+    }
+    provider :: record_text(~tree, "provider") ?? {
+        return Err(err)
+    }
+    reference :: record_text(~tree, "reference") ?? {
+        return Err(err)
+    }
+    name :: record_text(~tree, "name") ?? {
+        return Err(err)
+    }
+    version :: record_text(~tree, "version") ?? {
+        return Err(err)
+    }
+    source :: record_text(~tree, "source") ?? {
+        return Err(err)
+    }
+    expected_hash :: record_text(~tree, "expected_hash") ?? {
+        return Err(err)
+    }
+    if schema != "jetpack-provider-result/v1" {
+        return Err(RealizeError{message: "provider result schema is unsupported"})
+    }
+    if provider.trim() == "" || provider == "local" || provider == "prefetched" || provider == "recorded" {
+        return Err(RealizeError{message: "provider result provider is invalid"})
+    }
+    if name.trim() == "" -> return Err(RealizeError{message: "provider result name is required"})
+    if expected_hash.trim() == "" {
+        return Err(RealizeError{message: "provider result expected hash is required"})
+    }
+    if source.trim() == "" {
+        return Err(RealizeError{message: "provider result source is required"})
+    }
+    laws.validate_relative_path(~source) ?? {
+        return Err(RealizeError{message: "provider result source is unsafe: {err.message}"})
+    }
+    if source.contains(":") {
+        return Err(RealizeError{message: "provider result source must be relative"})
+    }
+    if request.name != "" && request.name != name {
+        return Err(RealizeError{message: "recorded provider result name does not match request"})
+    }
+    if request.version != "" && request.version != version {
+        return Err(RealizeError{message: "recorded provider result version does not match request"})
+    }
+    if request.reference != "" && request.reference != reference {
+        return Err(RealizeError{message: "recorded provider result reference does not match request"})
+    }
+    if request.expected_hash != "" && request.expected_hash != expected_hash {
+        return Err(RealizeError{message: "recorded provider result expected hash does not match request"})
+    }
+    record_parent :: Path.from(record_absolute).parent() ?? {
+        return Err(RealizeError{message: "provider result path has no parent"})
+    }
+    resolved_source :: record_parent.join(~source).normalize().to_string()
+    return Ok(RealizeRequest{
+        provider: provider,
+        name: name,
+        version: version,
+        reference: reference,
+        source: resolved_source,
+        expected_hash: expected_hash
+    })
+}
+
+pub fn realize(store_root: String, request: RealizeRequest) RealizeResult !RealizeError -> {
+    if request.provider == "local" || request.provider == "prefetched" {
+        if request.expected_hash.trim() == "" {
+            return Err(RealizeError{message: "{request.provider} realization requires an expected hash"})
+        }
+        return ingest_realized(~store_root, request.provider, store.IngestRequest{
+            name: request.name,
+            version: request.version,
+            reference: request.reference,
+            source: request.source,
+            expected_hash: request.expected_hash
+        })
+    }
+    if request.provider == "recorded" {
+        effective :: recorded_request(~request)
+        return ingest_realized(~store_root, effective.provider, store.IngestRequest{
+            name: effective.name,
+            version: effective.version,
+            reference: effective.reference,
+            source: effective.source,
+            expected_hash: effective.expected_hash
+        })
+    }
+    return Err(RealizeError{message: "unsupported realization provider {request.provider}"})
+}

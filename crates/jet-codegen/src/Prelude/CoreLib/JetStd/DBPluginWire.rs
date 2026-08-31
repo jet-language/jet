@@ -24,6 +24,12 @@
         }
     }
 
+    impl super::JetDisplay for DBValue {
+        fn jet_display(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
+
     fn render_db_value(v: &DBValue) -> String {
         match v {
             DBValue::Null => "null".to_string(),

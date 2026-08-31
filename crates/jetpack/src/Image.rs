@@ -15,14 +15,10 @@
 //!
 //! **Layer media type is uncompressed** (`application/vnd.oci.image.layer.v1.tar`,
 //! not the `+gzip` variant) — both are valid, spec-compliant OCI layer types.
-//! `core.archive.gzip`'s flate2 bridge (D-CORE-COMPRESS1) was evaluated for
-//! gzip compression here first, but that runtime is emitted only into generated
-//! user-program bridge crates, never linked into `jetpack` itself. Linking flate2 into
-//! `jet-driver` directly would violate I6 (zero external crates in the
-//! compiler proper, which `jetpack`/`jet-driver` are part of). Uncompressed
-//! tar sidesteps needing a native DEFLATE implementation to ship a real image
-//! today; gzip layers are a follow-up once/if a native (I6-safe) deflate
-//! exists.
+//! The image builder deliberately keeps layers uncompressed even though the
+//! shared `core.archive.gzip` kernel is available: this path has no need for
+//! another layer representation, and the uncompressed form is already
+//! spec-compliant.
 //!
 //! OCI Image Format Spec layout implemented (the minimal uncompressed local
 //! subset): `oci-layout`, `index.json`, and

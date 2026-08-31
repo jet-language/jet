@@ -1,0 +1,282 @@
+use core.crypto as crypto
+use core.encoding.json as json
+use core.files as fs
+use core.process as process
+use core.sys as sys
+
+#Codable
+struct Phase3Case {
+    pub name: String
+    pub provider: String
+    pub reference: String
+    pub argv: [String]
+    pub expected_hash: String
+    pub payload_tree: [String]
+    pub success: Bool
+    pub deduplicated: Bool
+    pub expected_error: String
+}
+
+#Codable
+struct Phase3Collection {
+    pub schema: String
+    pub platform: String
+    pub comparison: String
+    pub empty_store_tree: [String]
+    pub cases: [Phase3Case]
+}
+
+#Codable
+struct Phase3Success {
+    pub schema: String
+    pub moment: String
+    pub status: String
+    pub ok: Bool
+    pub action: String
+    pub provider: String
+    pub reference: String
+    pub id: String
+    pub output_hash: String
+    pub deduplicated: Bool
+}
+
+#Codable
+struct Phase3ErrorWire {
+    pub schema: String
+    pub moment: String
+    pub status: String
+    pub ok: Bool
+    pub action: String
+    pub error: String
+}
+
+struct Phase3Observed {
+    stdout: String
+    stderr: String
+    exit_code: Int
+    store_tree: [String]
+}
+
+fn package_root() String -> {
+    cwd :: sys.current_dir() ?? panic("phase3 cannot read current directory")
+    local :: Path.from(cwd)
+    if fs.exists(local.join("package.jet")) -> return local.to_string()
+    nested :: local.join("dogfood").join("jetpack")
+    if fs.exists(nested.join("package.jet")) -> return nested.to_string()
+    panic("phase3 cannot find dogfood/jetpack package")
+}
+
+fn transcript_path() String -> {
+    return Path.from(package_root()).join("tests").join("transcripts").join("phase3.json").to_string()
+}
+
+fn store_root(name: String) String -> {
+    return Path.home().join(".cache").join("jet-dogfood").join("jetpack-phase3").join(name).to_string()
+}
+
+fn cleanup_node(path: String) {
+    if !fs.exists(~path) {
+        return
+    }
+    stat :: fs.stat(~path) ?? panic("phase3 cleanup path cannot be inspected")
+    if stat.is_symlink {
+        fs.remove(path) ?? panic("phase3 cleanup symlink cannot be removed")
+        return
+    }
+    if stat.is_dir {
+        writable_mode := 0
+        if sys.family() == "unix" -> writable_mode = 0o700
+        fs.set_mode(~path, writable_mode) ?? panic("phase3 cleanup directory cannot be made writable")
+        entries :: fs.list_dir(~path) ?? panic("phase3 cleanup directory cannot be listed")
+        loop entry in entries -> cleanup_node(entry.path)
+    }
+    fs.remove_all(path) ?? panic("phase3 cleanup path cannot be removed")
+}
+
+fn cleanup(path: String) { cleanup_node(path) }
+
+fn slash(path: String) String -> { return path.replace("\\", "/") }
+
+fn mode_text(mode: Int) String -> {
+    bits :: mode % 0o1000
+    owner :: (bits /% 64) % 8
+    group :: (bits /% 8) % 8
+    other :: bits % 8
+    return "0{owner}{group}{other}"
+}
+
+fn store_tree(root: String) [String] -> {
+    entries :: fs.walk(root) ?? panic("phase3 store tree cannot be read")
+    tree := [String]{}
+    loop entry in entries {
+        relative :: slash(entry.relative)
+        stat :: fs.stat(~entry.path) ?? panic("phase3 store entry cannot be inspected")
+        if stat.is_symlink {
+            target :: fs.read_link(entry.path) ?? panic("phase3 store symlink cannot be read")
+            tree.push("symlink:{relative}:{slash(target)}")
+        } else if entry.is_dir -> tree.push("dir:{relative}/") else {
+            bytes :: fs.read_bytes(entry.path) ?? panic("phase3 store file cannot be read")
+            tree.push("file:{relative}:{crypto.sha256(bytes).hex()}")
+        }
+    }
+    tree.sort()
+    return tree
+}
+
+fn payload_tree_node(path: String, relative: String, tree: &[String]) {
+    stat :: fs.stat(~path) ?? panic("phase3 payload path cannot be inspected")
+    if stat.is_symlink -> panic("phase3 payload contains a symlink")
+    if stat.is_dir {
+        if relative != "" -> tree.push("dir:{relative}:{mode_text(stat.mode)}")
+        entries :: fs.list_dir(~path) ?? panic("phase3 payload directory cannot be read")
+        names := [String]{}
+        loop entry in entries -> names.push(~entry.name)
+        names.sort()
+        loop name in names {
+            child_path :: Path.from(path).join(~name).to_string()
+            child_relative := ~name
+            if relative != "" -> child_relative = "{relative}/{name}"
+            payload_tree_node(~child_path, ~child_relative, &tree)
+        }
+        return
+    }
+    if stat.is_file {
+        bytes :: fs.read_bytes(~path) ?? panic("phase3 payload file cannot be read")
+        tree.push("file:{relative}:{mode_text(stat.mode)}:{crypto.sha256(bytes).hex()}")
+        return
+    }
+    panic("phase3 payload has an unsupported file kind")
+}
+
+fn payload_tree(root: String, expected_hash: String) [String] -> {
+    payload :: Path.from(root).join("hangar").join("objects").join(expected_hash).to_string()
+    if !fs.exists(~payload) -> panic("phase3 payload object is missing")
+    tree := [String]{}
+    payload_tree_node(~payload, "", &tree)
+    return tree
+}
+
+fn invoke(case: Phase3Case, project: String, root: String) Phase3Observed -> {
+    jet_bin :: sys.get("JET_BIN") ?? panic("phase3 requires JET_BIN")
+    if !jet_bin.starts_with("/") -> panic("phase3 requires an absolute JET_BIN")
+    home :: Path.home().to_string()
+    command := [String]{~jet_bin, "run", "--"}
+    loop arg in case.argv -> command.push(~arg)
+    result :: process.cmd(command)
+        .cwd(~project)
+        .env("HOME", ~home)
+        .env("JETPACK_DOGFOOD_ROOT", ~root)
+        .env("JETPACK_PROJECT_ROOT", ~project)
+        .env("JETPACK_OFFLINE", "1")
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .run() ?? panic("phase3 CLI invocation failed")
+    observed_tree :: store_tree(~root)
+    return Phase3Observed{
+        stdout: result.output,
+        stderr: result.errors,
+        exit_code: result.code,
+        store_tree: observed_tree
+    }
+}
+
+fn checked_in() Phase3Collection -> {
+    raw :: fs.read(Path.from(transcript_path())) ?? panic("phase3 transcript is missing")
+    return json.decode<Phase3Collection>(raw) ?? panic("phase3 transcript is invalid")
+}
+
+fn case_for(cases: [Phase3Case], name: String) Phase3Case -> {
+    loop case in cases {
+        if case.name == name -> return case
+    }
+    panic("phase3 transcript case is missing")
+}
+
+fn assert_success(observed: Phase3Observed, expected: Phase3Case, root: String) {
+    actual :: json.decode<Phase3Success>(~observed.stdout) ?? panic("phase3 success output is not valid JSON")
+    assert(expected.success, "phase3 success fixture must be marked successful")
+    assert_eq(observed.exit_code, 0)
+    assert_eq(actual.schema, "jet.report/v1")
+    assert_eq(actual.moment, "tool")
+    assert_eq(actual.status, "ok")
+    assert(actual.ok, "phase3 realization success must set ok")
+    assert_eq(actual.action, "realize")
+    assert_eq(actual.provider, expected.provider)
+    assert_eq(actual.reference, expected.reference)
+    assert(actual.id != "", "phase3 realization success must include an id")
+    assert_eq(actual.output_hash, expected.expected_hash)
+    assert_eq(actual.deduplicated, expected.deduplicated)
+    assert_eq(payload_tree(~root, ~actual.output_hash), expected.payload_tree)
+}
+
+fn assert_rejection(observed: Phase3Observed, expected: Phase3Case, expected_tree: [String]) {
+    actual :: json.decode<Phase3ErrorWire>(~observed.stdout) ?? panic("phase3 error output is not valid JSON")
+    assert(!expected.success, "phase3 rejection fixture must be marked unsuccessful")
+    assert_eq(observed.exit_code, 2)
+    assert_eq(actual.schema, "jet.report/v1")
+    assert_eq(actual.moment, "tool")
+    assert_eq(actual.status, "error")
+    assert(!actual.ok, "phase3 realization rejection must clear ok")
+    assert_eq(actual.action, "realize")
+    assert_eq(actual.error, expected.expected_error)
+    assert_eq(observed.store_tree, expected_tree)
+}
+
+#Test("phase3 local and prefetched realization succeed offline") {
+    document :: checked_in()
+    assert_eq(document.schema, "jetpack-dogfood-phase3/v1")
+    assert_eq(document.platform, "x86_64-linux")
+    project :: package_root()
+
+    local_case :: case_for(~document.cases, "local-success")
+    local_root :: store_root("local")
+    cleanup(~local_root)
+    local_actual :: invoke(local_case, ~project, ~local_root)
+    assert_success(local_actual, local_case, local_root)
+    cleanup(local_root)
+
+    prefetched_case :: case_for(~document.cases, "prefetched-success")
+    prefetched_root :: store_root("prefetched")
+    cleanup(~prefetched_root)
+    prefetched_actual :: invoke(prefetched_case, ~project, ~prefetched_root)
+    assert_success(prefetched_actual, prefetched_case, prefetched_root)
+    cleanup(prefetched_root)
+}
+
+#Test("phase3 wrong digest does not publish") {
+    document :: checked_in()
+    project :: package_root()
+    wrong_case :: case_for(~document.cases, "wrong-digest-no-publication")
+    wrong_root :: store_root("wrong-digest")
+    cleanup(~wrong_root)
+    actual :: invoke(wrong_case, ~project, ~wrong_root)
+    assert_eq(actual.exit_code, 2)
+    assert_rejection(actual, wrong_case, document.empty_store_tree)
+    cleanup(wrong_root)
+}
+
+#Test("phase3 recorded provider replay and repeat deduplicate") {
+    document :: checked_in()
+    project :: package_root()
+    replay_case :: case_for(~document.cases, "recorded-replay")
+    repeat_case :: case_for(~document.cases, "recorded-repeat-dedup")
+    assert_eq(replay_case.argv, repeat_case.argv)
+    root :: store_root("recorded")
+    cleanup(~root)
+
+    first :: invoke(replay_case, ~project, ~root)
+    assert_success(first, replay_case, root)
+    first_stdout :: first.stdout
+    first_exit := first.exit_code
+    first_tree :: first.store_tree
+
+    cleanup(~root)
+    replay :: invoke(replay_case, ~project, ~root)
+    assert_eq(replay.stdout, first_stdout)
+    assert_eq(replay.exit_code, first_exit)
+    assert_eq(replay.store_tree, first_tree)
+
+    repeat :: invoke(repeat_case, ~project, ~root)
+    assert_success(repeat, repeat_case, root)
+    cleanup(root)
+}

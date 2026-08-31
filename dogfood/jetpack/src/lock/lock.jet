@@ -1,0 +1,271 @@
+pub struct LockedPackage {
+    pub name: String
+    pub version: String
+    pub reference: String
+    pub output_hash: String
+}
+
+pub struct LockFile {
+    pub version: Int
+    pub packages: [LockedPackage]
+}
+
+#Error
+pub struct ParseError {
+    pub message: String
+}
+
+pub fn parse_error_message(error: ParseError) String !Never -> error.message
+
+fn scalar(raw: String, field: String) String !ParseError -> {
+    value := ~raw.trim()
+    if value.ends_with(",") {
+        value = ~value.remove_suffix(",").trim()
+    }
+    if value == "" {
+        return Err(ParseError{message: "lock field {field}: missing value"})
+    }
+    if value.starts_with("\"") {
+        first :: value.split_once("\"") ?? return Err(ParseError{message: "lock field {field}: malformed quoted value"})
+        first_after :: ~first.after
+        second :: first_after.split_once("\"") ?? return Err(ParseError{message: "lock field {field}: malformed quoted value"})
+        tail :: ~second.after.trim()
+        if tail != "" {
+            return Err(ParseError{message: "lock field {field}: trailing text after quoted value"})
+        }
+        before :: ~second.before
+        return Ok(before)
+    }
+    if value.contains("\"") {
+        return Err(ParseError{message: "lock field {field}: malformed quoted value"})
+    }
+    return Ok(value)
+}
+
+fn assignment(line: String, key: String, record: String) String !ParseError -> {
+    pair :: line.split_once("=") ?? return Err(ParseError{message: "lock record {record}: field {key} expected '='"})
+    before :: ~pair.before.trim()
+    if before != key {
+        return Err(ParseError{message: "lock record {record}: invalid field {key}"})
+    }
+    return scalar(~pair.after, "lock record {record} field {key}")
+}
+
+fn source_quoted(line: String, key: String, record: String) String !ParseError -> {
+    marker :: "{key} ="
+    pair :: line.split_once(marker) ?? return Err(ParseError{message: "lock record {record} field source: missing {key}"})
+    rest :: ~pair.after.trim()
+    if !rest.starts_with("\"") {
+        return Err(ParseError{message: "lock record {record} field source: malformed {key} reference"})
+    }
+    first :: rest.split_once("\"") ?? return Err(ParseError{message: "lock record {record} field source: malformed {key} reference"})
+    first_after :: ~first.after
+    second :: first_after.split_once("\"") ?? return Err(ParseError{message: "lock record {record} field source: malformed {key} reference"})
+    before :: ~first.before
+    second_before :: ~second.before
+    if before != "" || second_before == "" {
+        return Err(ParseError{message: "lock record {record} field source: malformed {key} reference"})
+    }
+    return Ok(second_before)
+}
+
+fn source_value(line: String, record: String) String !ParseError -> {
+    if !line.starts_with("source = {{") || !line.ends_with("}}") {
+        return Err(ParseError{message: "lock record {record} field source: malformed block"})
+    }
+    if line.contains("nix =") {
+        return source_quoted(line, "nix", record)
+    }
+    if line.contains("path =") {
+        return source_quoted(line, "path", record)
+    }
+    if line.contains("git =") {
+        return source_quoted(line, "git", record)
+    }
+    return Err(ParseError{message: "lock record {record} field source: missing reference"})
+}
+
+fn safe_name(name: String) Bool !ParseError -> {
+    if name == "" || !name.is_ascii() {
+        return Ok(false)
+    }
+    if name.starts_with(".") || name.contains("/") || name.contains("\\") || name.contains("..") {
+        return Ok(false)
+    }
+    if name.contains(":") || name.contains("@") || name.contains(" ") || name.contains("\t") {
+        return Ok(false)
+    }
+    if name.contains("{{") || name.contains("}}") || name.contains("[") || name.contains("]") {
+        return Ok(false)
+    }
+    if name.contains(",") || name.contains(";") || name.contains("\"") {
+        return Ok(false)
+    }
+    return Ok(true)
+}
+
+fn finish_package(name: String, version: String, reference: String, output_hash: String, has_name: Bool, has_version: Bool, has_reference: Bool, has_hash: Bool) LockedPackage !ParseError -> {
+    if !has_name || name == "" {
+        return Err(ParseError{message: "lock record package: missing name"})
+    }
+    if !safe_name(name) {
+        return Err(ParseError{message: "lock record package {name}: unsafe name"})
+    }
+    if !has_version {
+        return Err(ParseError{message: "lock record package {name}: missing version"})
+    }
+    if !has_reference || reference == "" {
+        return Err(ParseError{message: "lock record package {name}: missing source reference"})
+    }
+    if !has_hash || output_hash == "" {
+        return Err(ParseError{message: "lock record package {name}: missing output-hash"})
+    }
+    return Ok(LockedPackage{
+        name: name,
+        version: version,
+        reference: reference,
+        output_hash: output_hash,
+    })
+}
+
+fn duplicate_package(packages: [LockedPackage], name: String) Bool !ParseError -> {
+    loop item in packages {
+        if item.name == name {
+            return Ok(true)
+        }
+    }
+    return Ok(false)
+}
+
+pub fn parse_lock(text: String) LockFile !ParseError -> {
+    version := 0
+    seen_version := false
+    packages := [LockedPackage]{}
+    in_package := false
+    in_root := false
+    name := ""
+    package_version := ""
+    reference := ""
+    output_hash := ""
+    has_name := false
+    has_package_version := false
+    has_reference := false
+    has_hash := false
+
+    loop raw in text.lines() {
+        line :: ~raw.trim()
+        if line == "" || line.starts_with("#") {
+            next
+        }
+
+        if line == "[[package]]" {
+            if in_package {
+                package :: finish_package(name, package_version, reference, output_hash, has_name, has_package_version, has_reference, has_hash)
+                if duplicate_package(packages, package.name) {
+                    return Err(ParseError{message: "lock record package {package.name}: duplicate name"})
+                }
+                packages.push(package)
+            }
+            in_package = true
+            in_root = false
+            name = ""
+            package_version = ""
+            reference = ""
+            output_hash = ""
+            has_name = false
+            has_package_version = false
+            has_reference = false
+            has_hash = false
+            next
+        }
+
+        if line == "[root]" {
+            if in_package {
+                package :: finish_package(name, package_version, reference, output_hash, has_name, has_package_version, has_reference, has_hash)
+                if duplicate_package(packages, package.name) {
+                    return Err(ParseError{message: "lock record package {package.name}: duplicate name"})
+                }
+                packages.push(package)
+                in_package = false
+            }
+            in_root = true
+            next
+        }
+
+        if line.starts_with("[") {
+            return Err(ParseError{message: "lock block {line}: unknown record"})
+        }
+        if in_root {
+            next
+        }
+
+        if !in_package {
+            pair :: line.split_once("=") ?? return Err(ParseError{message: "lock field: expected '='"})
+            key :: ~pair.before.trim()
+            if key != "version" {
+                return Err(ParseError{message: "lock field {key}: unexpected top-level field"})
+            }
+            if seen_version {
+                return Err(ParseError{message: "lock field version: duplicate"})
+            }
+            raw_version :: scalar(~pair.after, "lock field version")
+            version = raw_version.to_int() ?? return Err(ParseError{message: "lock field version: expected integer"})
+            seen_version = true
+            next
+        }
+
+        pair :: line.split_once("=") ?? return Err(ParseError{message: "lock record package: expected '='"})
+        key :: ~pair.before.trim()
+        if key == "name" {
+            if has_name {
+                return Err(ParseError{message: "lock record package field name: duplicate"})
+            }
+            name = assignment(line, "name", "package")
+            has_name = true
+            next
+        }
+        if key == "version" {
+            if has_package_version {
+                return Err(ParseError{message: "lock record package {name} field version: duplicate"})
+            }
+            package_version = assignment(line, "version", "package {name}")
+            has_package_version = true
+            next
+        }
+        if key == "source" {
+            if has_reference {
+                return Err(ParseError{message: "lock record package {name} field source: duplicate"})
+            }
+            reference = source_value(line, name)
+            has_reference = true
+            next
+        }
+        if key == "output-hash" {
+            if has_hash {
+                return Err(ParseError{message: "lock record package {name} field output-hash: duplicate"})
+            }
+            output_hash = assignment(line, "output-hash", "package {name}")
+            has_hash = true
+            next
+        }
+        if key == "fingerprint" || key == "dependencies" || key == "platform" || key == "provenance" {
+            next
+        }
+        return Err(ParseError{message: "lock record package {name} field {key}: unknown field"})
+    }
+
+    if in_package {
+        package :: finish_package(name, package_version, reference, output_hash, has_name, has_package_version, has_reference, has_hash)
+        if duplicate_package(packages, package.name) {
+            return Err(ParseError{message: "lock record package {package.name}: duplicate name"})
+        }
+        packages.push(package)
+    }
+    if !seen_version {
+        return Err(ParseError{message: "lock field version: missing value"})
+    }
+    if version != 1 {
+        return Err(ParseError{message: "lock field version: expected 1"})
+    }
+    return Ok(LockFile{version: version, packages: packages})
+}

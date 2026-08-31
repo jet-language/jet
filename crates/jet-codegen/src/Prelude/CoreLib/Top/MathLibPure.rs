@@ -119,6 +119,10 @@ pub fn jet_std_math_round(value: f64) -> i64 {
     value.round() as i64
 }
 
+pub fn jet_std_math_trunc(value: f64) -> f64 {
+    value.trunc()
+}
+
 pub fn jet_std_math_clamp_i64(value: i64, low: i64, high: i64) -> i64 {
     value.clamp(low, high)
 }

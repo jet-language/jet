@@ -1,0 +1,318 @@
+use "ref" as refs
+#Error
+pub struct ParseError {
+    pub message: String
+}
+
+pub fn parse_error_message(error: ParseError) String !Never -> error.message
+
+
+pub struct Dependency {
+    pub name: String
+    pub reference: String
+}
+
+pub struct PackageTarget {
+    pub name: String
+    pub kind: String
+    pub entry: String
+}
+
+pub struct Manifest {
+    pub name: String
+    pub version: String
+    pub deps: [Dependency]
+    pub packages: [PackageTarget]
+}
+
+fn safe_name(name: String) Bool !ParseError -> {
+    if name == "" || !name.is_ascii() {
+        return Ok(false)
+    }
+    if name.starts_with(".") || name.contains("/") || name.contains("\\") || name.contains("..") {
+        return Ok(false)
+    }
+    if name.contains(":") || name.contains("@") || name.contains(" ") || name.contains("\t") {
+        return Ok(false)
+    }
+    if name.contains("{{") || name.contains("}}") || name.contains("[") || name.contains("]") {
+        return Ok(false)
+    }
+    if name.contains(",") || name.contains(";") || name.contains("\"") {
+        return Ok(false)
+    }
+    return Ok(true)
+}
+
+fn scalar(raw: String, field: String) String !ParseError -> {
+    value := ~raw.trim()
+    if value.ends_with(",") {
+        value = ~value.remove_suffix(",").trim()
+    }
+    if value == "" {
+        return Err(ParseError{message: "manifest field {field}: missing value"})
+    }
+    if value.starts_with("\"") {
+        first :: value.split_once("\"") ?? return Err(ParseError{message: "manifest field {field}: malformed quoted value"})
+        first_after :: ~first.after
+        second :: first_after.split_once("\"") ?? return Err(ParseError{message: "manifest field {field}: malformed quoted value"})
+        tail :: ~second.after.trim()
+        if tail != "" {
+            return Err(ParseError{message: "manifest field {field}: trailing text after quoted value"})
+        }
+        before :: ~second.before
+        return Ok(before)
+    }
+    if value.contains("\"") {
+        return Err(ParseError{message: "manifest field {field}: malformed quoted value"})
+    }
+    return Ok(value)
+}
+
+fn field_value(line: String, field: String) String !ParseError -> {
+    pair :: line.split_once(":") ?? return Err(ParseError{message: "manifest field {field}: expected ':'"})
+    before :: ~pair.before.trim()
+    if before != field {
+        return Err(ParseError{message: "manifest field {field}: invalid field name"})
+    }
+    return scalar(~pair.after, field)
+}
+
+fn parse_dependency(line: String) Dependency !ParseError -> {
+    entry := ~line.trim()
+    if entry.ends_with(",") {
+        entry = ~entry.remove_suffix(",").trim()
+    }
+    pair :: entry.split_once(":") ?? return Err(ParseError{message: "dependency record: expected ':'"})
+    name :: ~pair.before.trim()
+    if !safe_name(name) {
+        return Err(ParseError{message: "dependency record {name}: unsafe name"})
+    }
+    raw :: scalar(~pair.after, "dependency {name}")
+    parsed :: refs.classify(raw) ?? return Err(ParseError{message: "dependency record {name}: invalid reference"})
+    return Ok(Dependency{name: name, reference: parsed.raw})
+}
+
+fn valid_kind(kind: String) Bool !ParseError -> {
+    return Ok(kind == "library" || kind == "executable" || kind == "test" || kind == "example" || kind == "benchmark")
+}
+
+fn kind_prefix(raw: String) String !ParseError -> {
+    value :: ~raw.trim()
+    if value == "executable{{" || value == "executable {{" || value == "Executable{{" || value == "Executable {{" {
+        return Ok("executable")
+    }
+    if value == "library{{" || value == "library {{" || value == "Library{{" || value == "Library {{" {
+        return Ok("library")
+    }
+    if value == "test{{" || value == "test {{" || value == "Test{{" || value == "Test {{" {
+        return Ok("test")
+    }
+    if value == "example{{" || value == "example {{" || value == "Example{{" || value == "Example {{" {
+        return Ok("example")
+    }
+    if value == "benchmark{{" || value == "benchmark {{" || value == "Benchmark{{" || value == "Benchmark {{" {
+        return Ok("benchmark")
+    }
+    return Ok("")
+}
+
+
+fn duplicate_dependency(deps: [Dependency], name: String) Bool !ParseError -> {
+    loop dep in deps {
+        if dep.name == name {
+            return Ok(true)
+        }
+    }
+    return Ok(false)
+}
+
+fn duplicate_package(packages: [PackageTarget], name: String) Bool !ParseError -> {
+    loop item in packages {
+        if item.name == name {
+            return Ok(true)
+        }
+    }
+    return Ok(false)
+}
+
+pub fn parse_manifest(text: String) Manifest !ParseError -> {
+    name := ""
+    version := ""
+    deps := [Dependency]{}
+    packages := [PackageTarget]{}
+    seen_name := false
+    seen_version := false
+    seen_deps := false
+    seen_packages := false
+    section := ""
+    target_record := false
+    target_name := ""
+    target_kind := ""
+    target_entry := ""
+    target_has_kind := false
+    target_has_entry := false
+
+    loop raw in text.lines() {
+        line :: ~raw.trim()
+        if line == "" || line.starts_with("//") {
+            next
+        }
+
+        if section == "deps" {
+            if line == "}}" || line == "}}," {
+                section = ""
+                next
+            }
+            dep :: parse_dependency(line)
+            if duplicate_dependency(deps, dep.name) {
+                return Err(ParseError{message: "dependency record {dep.name}: duplicate name"})
+            }
+            deps.push(dep)
+            next
+        }
+
+        if section == "packages" {
+            if target_record {
+                if line == "}}" || line == "}}," {
+                    if !target_has_kind {
+                        return Err(ParseError{message: "package record {target_name}: missing kind"})
+                    }
+                    if duplicate_package(packages, target_name) {
+                        return Err(ParseError{message: "package record {target_name}: duplicate name"})
+                    }
+                    packages.push(PackageTarget{
+                        name: target_name.copy(),
+                        kind: target_kind,
+                        entry: target_entry,
+                    })
+                    target_record = false
+                    target_name = ""
+                    target_kind = ""
+                    target_entry = ""
+                    target_has_kind = false
+                    target_has_entry = false
+                    next
+                }
+                pair :: line.split_once(":") ?? return Err(ParseError{message: "package record {target_name}: expected field ':'"})
+                key :: ~pair.before.trim()
+                if key == "kind" {
+                    if target_has_kind {
+                        return Err(ParseError{message: "package record {target_name} field kind: duplicate"})
+                    }
+                    target_kind = scalar(~pair.after, "package record {target_name} field kind")
+                    if !valid_kind(target_kind) {
+                        return Err(ParseError{message: "package record {target_name} field kind: invalid kind {target_kind}"})
+                    }
+                    target_has_kind = true
+                    next
+                }
+                if key == "entry" {
+                    if target_has_entry {
+                        return Err(ParseError{message: "package record {target_name} field entry: duplicate"})
+                    }
+                    target_entry = scalar(~pair.after, "package record {target_name} field entry")
+                    target_has_entry = true
+                    next
+                }
+                return Err(ParseError{message: "package record {target_name} field {key}: unknown field"})
+            }
+
+            if line == "}}" || line == "}}," {
+                section = ""
+                next
+            }
+            pair :: line.split_once(":") ?? return Err(ParseError{message: "package record: expected ':'"})
+            target_name = ~pair.before.trim()
+            if !safe_name(target_name) {
+                return Err(ParseError{message: "package record {target_name}: unsafe name"})
+            }
+            value := ~pair.after.trim()
+            if value.ends_with(",") {
+                value = ~value.remove_suffix(",").trim()
+            }
+            if value == "{{" {
+                target_kind = ""
+                target_entry = ""
+                target_has_kind = false
+                target_has_entry = false
+                target_record = true
+                next
+            }
+            prefix :: kind_prefix(value)
+            if prefix != "" {
+                target_kind = prefix
+                target_entry = ""
+                target_has_kind = true
+                target_has_entry = false
+                target_record = true
+                next
+            }
+            kind :: scalar(value, "package {target_name}")
+            if !valid_kind(kind) {
+                return Err(ParseError{message: "package record {target_name}: invalid kind {kind}"})
+            }
+            if duplicate_package(packages, target_name) {
+                return Err(ParseError{message: "package record {target_name}: duplicate name"})
+            }
+            packages.push(PackageTarget{name: target_name, kind: kind, entry: ""})
+            target_name = ""
+            next
+        }
+
+        if line == "}}" || line == "}}," {
+            return Err(ParseError{message: "manifest block: unexpected closing brace"})
+        }
+        if line == "deps: {{" || line == "deps: .{{" {
+            if seen_deps {
+                return Err(ParseError{message: "manifest field deps: duplicate block"})
+            }
+            seen_deps = true
+            section = "deps"
+            next
+        }
+        if line == "packages: {{" || line == "packages: .{{" {
+            if seen_packages {
+                return Err(ParseError{message: "manifest field packages: duplicate block"})
+            }
+            seen_packages = true
+            section = "packages"
+            next
+        }
+
+        pair :: line.split_once(":") ?? return Err(ParseError{message: "manifest field: expected ':'"})
+        key :: ~pair.before.trim()
+        if key == "name" {
+            if seen_name {
+                return Err(ParseError{message: "manifest field name: duplicate"})
+            }
+            name = field_value(line, "name")
+            seen_name = true
+            next
+        }
+        if key == "version" {
+            if seen_version {
+                return Err(ParseError{message: "manifest field version: duplicate"})
+            }
+            version = field_value(line, "version")
+            seen_version = true
+            next
+        }
+        if key == "edition" {
+            _edition :: scalar(~pair.after, "manifest field edition")
+            next
+        }
+        return Err(ParseError{message: "manifest field {key}: unknown field"})
+    }
+
+    if section != "" {
+        return Err(ParseError{message: "manifest block {section}: missing closing brace"})
+    }
+    if !seen_name || name == "" {
+        return Err(ParseError{message: "manifest field name: missing value"})
+    }
+    if !seen_version || version == "" {
+        return Err(ParseError{message: "manifest field version: missing value"})
+    }
+    return Ok(Manifest{name: name, version: version, deps: deps, packages: packages})
+}

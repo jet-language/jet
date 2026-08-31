@@ -163,7 +163,7 @@ fn process_io_operation_bits(operation: process_prelude::IOOperation) -> i64 {
     }
 }
 
-fn process_io_error_result(error: process_prelude::IOError) -> i64 {
+pub(crate) fn process_io_error_result(error: process_prelude::IOError) -> i64 {
     let (variant, context) = match error {
         process_prelude::IOError::InvalidInput(context) => (0, context),
         process_prelude::IOError::NotFound(context) => (1, context),

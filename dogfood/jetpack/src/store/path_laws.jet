@@ -1,0 +1,90 @@
+#Error
+pub struct PathLawError {
+    pub message: String
+}
+
+fn ascii_fold(name: String) String !PathLawError -> {
+    folded := name
+    folded = folded.replace("A", "a")
+    folded = folded.replace("B", "b")
+    folded = folded.replace("C", "c")
+    folded = folded.replace("D", "d")
+    folded = folded.replace("E", "e")
+    folded = folded.replace("F", "f")
+    folded = folded.replace("G", "g")
+    folded = folded.replace("H", "h")
+    folded = folded.replace("I", "i")
+    folded = folded.replace("J", "j")
+    folded = folded.replace("K", "k")
+    folded = folded.replace("L", "l")
+    folded = folded.replace("M", "m")
+    folded = folded.replace("N", "n")
+    folded = folded.replace("O", "o")
+    folded = folded.replace("P", "p")
+    folded = folded.replace("Q", "q")
+    folded = folded.replace("R", "r")
+    folded = folded.replace("S", "s")
+    folded = folded.replace("T", "t")
+    folded = folded.replace("U", "u")
+    folded = folded.replace("V", "v")
+    folded = folded.replace("W", "w")
+    folded = folded.replace("X", "x")
+    folded = folded.replace("Y", "y")
+    folded = folded.replace("Z", "z")
+    return Ok(folded)
+}
+
+fn reserved_stem(name: String) String !PathLawError -> {
+    pieces :: name.split(".").to_list()
+    return Ok(pieces.get(0) ?? name)
+}
+
+pub fn validate_component(name: String) Bool !PathLawError -> {
+    if name == "" -> return Err(PathLawError{message: "path component is empty"})
+    if name == "." || name == ".." {
+        return Err(PathLawError{message: "path component is traversal"})
+    }
+    if name.contains("\\") {
+        return Err(PathLawError{message: "path component contains a backslash"})
+    }
+    loop byte in name.bytes() {
+        if byte == 0 -> return Err(PathLawError{message: "path component contains a NUL byte"})
+    }
+    if name.ends_with(".") || name.ends_with(" ") {
+        return Err(PathLawError{message: "path component has a trailing dot or space"})
+    }
+    stem :: reserved_stem(~name)
+    upper :: stem.to_upper()
+    if upper == "CON" || upper == "PRN" || upper == "AUX" || upper == "NUL" || upper == "COM1" || upper == "COM2" || upper == "COM3" || upper == "COM4" || upper == "COM5" || upper == "COM6" || upper == "COM7" || upper == "COM8" || upper == "COM9" || upper == "LPT1" || upper == "LPT2" || upper == "LPT3" || upper == "LPT4" || upper == "LPT5" || upper == "LPT6" || upper == "LPT7" || upper == "LPT8" || upper == "LPT9" {
+        return Err(PathLawError{message: "path component uses a reserved Windows name"})
+    }
+    return Ok(true)
+}
+
+pub fn validate_relative_path(path: String) Bool !PathLawError -> {
+    if path == "" -> return Ok(true)
+    if path.starts_with("/") || path.ends_with("/") {
+        return Err(PathLawError{message: "relative path is absolute or has an empty edge"})
+    }
+    components :: path.split("/")
+    loop component in components {
+        if component == "" {
+            return Err(PathLawError{message: "relative path contains an empty component"})
+        }
+        validate_component(~component) ?? return Err(PathLawError{message: "relative path has an unsafe component"})
+    }
+    return Ok(true)
+}
+
+pub fn reject_casefold_collisions(names: [String]) Bool !PathLawError -> {
+    seen := [String:String]{}
+    loop name in names {
+        validate_component(~name) ?? return Err(PathLawError{message: "directory contains an unsafe name"})
+        key :: ascii_fold(~name)
+        if seen.has_key(key) && seen[key] != name {
+            return Err(PathLawError{message: "directory contains names that collide under ASCII case folding"})
+        }
+        seen[key] = name
+    }
+    return Ok(true)
+}

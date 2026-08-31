@@ -1566,6 +1566,9 @@ pub fn service_display_value(value: &CtValue) -> Option<String> {
         CtValue::Struct { type_name, .. } if type_name == "ServiceRuntime" => {
             Some(ct_to_runtime(value, span).ok()?.jet_show())
         }
+        CtValue::Struct { type_name, .. } if type_name == "ServiceStateStore" => {
+            Some(ct_to_state_store(value, span).ok()?.jet_show())
+        }
         _ => None,
     }
 }

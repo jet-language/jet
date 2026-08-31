@@ -1,0 +1,56 @@
+pub struct Reference {
+    pub raw: String
+    pub target: String
+    pub provider: String
+    pub kind: String
+}
+#Error
+pub struct ParseError {
+    pub message: String
+}
+
+
+fn has_space(value: String) Bool !ParseError -> {
+    return Ok(value.contains(" ") || value.contains("\t") || value.contains("\n"))
+}
+
+pub fn classify(raw: String) Reference !ParseError -> {
+    value :: ~raw
+    if value == "" {
+        return Err(ParseError{message: "reference: missing value"})
+    }
+    if has_space(value) {
+        return Err(ParseError{message: "reference {value}: whitespace is not allowed"})
+    }
+
+    if !value.contains("@") {
+        if value.starts_with("./") || value.starts_with("../") || value.starts_with("/") {
+            return Ok(Reference{
+                raw: ~value,
+                target: ~value,
+                provider: "",
+                kind: "path",
+            })
+        }
+        return Err(ParseError{message: "reference {value}: expected target@provider or bare path"})
+    }
+
+    pair :: value.split_once("@") ?? return Err(ParseError{message: "reference {value}: expected target@provider"})
+    target :: ~pair.before
+    provider :: ~pair.after
+    if target == "" {
+        return Err(ParseError{message: "reference {value}: missing target"})
+    }
+    if provider == "" {
+        return Err(ParseError{message: "reference {value}: missing provider"})
+    }
+    if provider.contains("@") {
+        return Err(ParseError{message: "reference {value}: provider contains '@'"})
+    }
+    return Ok(Reference{
+        raw: ~value,
+        target: target,
+        provider: provider,
+        kind: "direct",
+    })
+}

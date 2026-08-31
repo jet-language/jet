@@ -1,0 +1,221 @@
+use core.encoding.json as json
+use core.files as fs
+
+#Error
+pub struct ReadError {
+    pub message: String
+}
+
+#Codable
+struct PackageMetadata {
+    name: ?String
+    version: ?String
+    #Rename("ref") reference: ?String
+    out: ?String
+    bin: ?String
+    output_hash: ?String
+    provenance: ?String
+}
+
+struct ObjectRecord {
+    id: String
+    name: String
+    version: String
+    reference: String
+    output_hash: String
+    source_built: Bool
+}
+
+#Codable
+struct PackageRow {
+    id: String
+    name: String
+    version: String
+    reference: String
+    output_hash: String
+    source_built: Bool
+}
+
+#Codable
+struct ListReport {
+    schema: String
+    moment: String
+    status: String
+    ok: Bool
+    action: String
+    packages: [PackageRow]
+}
+
+#Codable
+struct InspectFinding {
+    kind: String
+    subject: String
+    detail: String
+    fixed: Bool
+}
+
+#Codable
+struct InspectReport {
+    schema: String
+    moment: String
+    status: String
+    ok: Bool
+    action: String
+    objects: Int
+    findings: [InspectFinding]
+    fixed: Int
+    remaining: Int
+    seal_reused: Int
+    seal_resealed: Int
+    seal_reseal_needed: Int
+}
+
+fn safe_entry_name(name: String) Bool !ReadError -> {
+    if name == "" || !name.is_ascii() {
+        return false
+    }
+    if name.starts_with(".") || name == ".." {
+        return false
+    }
+    if name.contains("/") || name.contains("\\") || name.contains("..") {
+        return false
+    }
+    if name.contains(":") || name.contains(" ") || name.contains("\t") {
+        return false
+    }
+    if name.contains("\n") {
+        return false
+    }
+    return true
+}
+
+fn internal_directory(name: String) Bool !ReadError -> {
+    return name == "build-scratch"
+        || name == "failed-scratch"
+        || name == "objects"
+        || name == ".stage"
+        || name == "cas"
+        || name == "referrers"
+        || name == "closure-db"
+        || name == "lifecycle-db"
+        || name == "quarantine"
+        || name == "receipts"
+        || name == "seals"
+        || name == "stage"
+        || name == ".archive-stage"
+        || name == "reproducibility-staging"
+        || name == "unreproducible"
+}
+
+fn object_ids(store_root: String) [String] !ReadError -> {
+    hangar :: Path.from(store_root).join("hangar")
+    if !fs.exists(~hangar) {
+        return Ok([String]{})
+    }
+    hangar_stat :: fs.stat(~hangar) ?? return Err(ReadError{message: "Hangar cannot be inspected"})
+    if hangar_stat.is_symlink || !hangar_stat.is_dir {
+        return Err(ReadError{message: "Hangar is not a directory"})
+    }
+    hangar_text :: hangar.to_string()
+    entries :: fs.list_dir(~hangar_text) ?? return Err(ReadError{message: "Hangar cannot be read"})
+    ids := [String]{}
+    loop entry in entries {
+        if !entry.is_dir {
+            next
+        }
+        entry_stat :: fs.stat(~entry.path) ?? return Err(ReadError{message: "Hangar entry cannot be inspected"})
+        if entry_stat.is_symlink || !entry_stat.is_dir {
+            next
+        }
+        name :: ~entry.name
+        if internal_directory(~name) {
+            next
+        }
+        if safe_entry_name(~name) {
+            ids.push(name)
+        }
+    }
+    ids.sort()
+    return Ok(ids)
+}
+
+fn read_record(hangar_root: String, id: String) ObjectRecord !ReadError -> {
+    object :: Path.from(hangar_root).join(~id)
+    metadata_path :: object.join("meta.json")
+    metadata_stat :: fs.stat(~metadata_path) ?? return Err(ReadError{message: "Hangar object {id} metadata cannot be inspected"})
+    if metadata_stat.is_symlink || !metadata_stat.is_file {
+        return Err(ReadError{message: "Hangar object {id} metadata is not a file"})
+    }
+    raw :: fs.read(metadata_path) ?? return Err(ReadError{message: "Hangar object {id} metadata cannot be read"})
+    metadata :: json.decode<PackageMetadata>(raw) ?? return Err(ReadError{message: "Hangar object {id} metadata is malformed"})
+    name :: metadata.name ?? return Err(ReadError{message: "Hangar object {id} metadata has no name"})
+    version :: metadata.version ?? return Err(ReadError{message: "Hangar object {id} metadata has no version"})
+    reference :: metadata.reference ?? return Err(ReadError{message: "Hangar object {id} metadata has no reference"})
+    output_hash :: metadata.output_hash ?? return Err(ReadError{message: "Hangar object {id} metadata has no output hash"})
+    provenance :: metadata.provenance ?? ""
+    return Ok(ObjectRecord{
+        id: id,
+        name: name,
+        version: version,
+        reference: reference,
+        output_hash: output_hash,
+        source_built: provenance.contains("core-"),
+    })
+}
+
+fn records(store_root: String) [ObjectRecord] !ReadError -> {
+    ids :: object_ids(~store_root)
+    hangar_root :: Path.from(store_root).join("hangar").to_string()
+    result := [ObjectRecord]{}
+    loop id in ids {
+        record :: read_record(~hangar_root, id)
+        result.push(record)
+    }
+    return Ok(result)
+}
+
+fn list_report(entries: [ObjectRecord]) String !ReadError -> {
+    packages := [PackageRow]{}
+    loop entry in entries {
+        packages.push(PackageRow{
+            id: entry.id,
+            name: entry.name,
+            version: entry.version,
+            reference: entry.reference,
+            output_hash: entry.output_hash,
+            source_built: entry.source_built,
+        })
+    }
+    return json.to_string(ListReport{
+        schema: "jet.report/v1",
+        moment: "tool",
+        status: "ok",
+        ok: true,
+        action: "list",
+        packages: packages,
+    })
+}
+
+pub fn list_json(store_root: String) String !ReadError -> {
+    entries :: records(store_root)
+    wire :: list_report(entries)
+    return Ok(wire)
+}
+
+pub fn inspect_json(store_root: String) String !ReadError -> {
+    entries :: records(store_root)
+    return Ok(json.to_string(InspectReport{
+        schema: "jet.report/v1",
+        moment: "tool",
+        status: "ok",
+        ok: true,
+        action: "hangar.doctor",
+        objects: entries.len(),
+        findings: [InspectFinding]{},
+        fixed: 0,
+        remaining: 0,
+        seal_reused: 0,
+        seal_resealed: 0,
+        seal_reseal_needed: 0,
+    }))
+}

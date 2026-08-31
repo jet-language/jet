@@ -660,3 +660,11 @@ pub fn with_runtime_argv<R>(args: &[String], run: impl FnOnce() -> R) -> R {
 pub fn runtime_argv() -> Option<Vec<String>> {
     RUNTIME_ARGV.with(|slot| slot.borrow().clone())
 }
+
+pub fn runtime_argv0() -> Option<String> {
+    RUNTIME_ARGV.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|args| args.first().cloned().unwrap_or_default())
+    })
+}

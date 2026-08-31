@@ -1,0 +1,582 @@
+use core.crypto as crypto
+use core.encoding.json as json
+use core.files as fs
+use core.process as process
+use core.sys as sys
+use main as cli
+use plan
+
+
+#Error
+pub struct TranscriptError {
+    pub message: String
+}
+
+#Codable
+pub struct Transcript {
+    pub argv: [String]
+    pub stdout: String
+    pub exit_code: Int
+    pub store_tree: [String]
+}
+
+fn reject_symlink_components(path: Path, label: String) Bool !TranscriptError -> {
+    current := path
+    loop {
+        if fs.stat(~current) == {
+            .Ok(metadata) -> {
+                if metadata.is_symlink {
+                    return Err(TranscriptError{message: "{label} contains symbolic link component {current.to_string()}; use a real path"})
+                }
+            }
+            .Err(error) -> {
+                if error == .NotFound(_) {
+                } else {
+                    return Err(TranscriptError{message: "{label} component cannot be inspected at {current.to_string()}; use a readable path"})
+                }
+            }
+        }
+        parent :: current.parent()
+        if parent == {
+            .Val(next) -> {
+                if next.to_string() == current.to_string() {
+                    break
+                }
+                current = next
+            }
+            .None -> break
+        }
+    }
+    return Ok(true)
+}
+
+fn normalized_path(raw: String) String !TranscriptError -> {
+    if raw.trim() == "" -> return Err(TranscriptError{message: "path is required"})
+    candidate :: Path.from(raw).normalize()
+    absolute :: fs.absolute(candidate) ?? return Err(TranscriptError{message: "path cannot be resolved"})
+    normalized :: Path.from(absolute).normalize()
+    _symlink_check :: reject_symlink_components(~normalized, "path")
+    if fs.exists(~normalized) {
+        canonical :: fs.canonicalize(normalized) ?? return Err(TranscriptError{message: "path cannot be canonicalized"})
+        return Ok(canonical)
+    }
+    return Ok(normalized.to_string())
+}
+
+fn slash(path: String) String !TranscriptError -> {
+    return Ok(path.replace("\\", "/"))
+}
+
+fn is_under(path: String, base: String) Bool !TranscriptError -> {
+    path_text :: slash(path)
+    base_text :: slash(base)
+    return Ok(path_text == base_text || path_text.starts_with("{base_text}/"))
+}
+
+// Read-only inspection may use the private dogfood cache or checked-in fixtures.
+fn fixture_base() String !TranscriptError -> {
+    local :: Path.from("tests").join("fixtures").join("phase1")
+    if fs.exists(~local) {
+        return normalized_path(Path.from("tests").join("fixtures").to_string())
+    }
+    return normalized_path(
+        Path.from("dogfood").join("jetpack").join("tests").join("fixtures").to_string()
+    )
+}
+
+pub fn validate_store_root(root: String) String !TranscriptError -> {
+    checked :: normalized_path(root)
+    home :: Path.home()
+    dogfood :: normalized_path(home.join(".cache").join("jet-dogfood").to_string())
+    fixtures :: fixture_base()
+    if is_under(~checked, ~dogfood) || is_under(~checked, ~fixtures) -> return Ok(checked)
+    return Err(TranscriptError{message: "store root must be under the Jet dogfood cache or the fixture tree"})
+}
+
+fn validate_private_store_root(root: String) String !TranscriptError -> {
+    checked :: normalized_path(root)
+    base :: normalized_path(
+        Path.home().join(".cache").join("jet-dogfood").join("jetpack-transcripts").to_string()
+    )
+    if checked == base || !is_under(~checked, ~base) {
+        return Err(TranscriptError{message: "writable store root must be a private child of the Jet dogfood transcript cache"})
+    }
+    return Ok(checked)
+}
+
+pub fn store_tree(root: String) [String] !TranscriptError -> {
+    checked :: validate_store_root(root)
+    entries :: fs.walk(checked) ?? return Err(TranscriptError{message: "store tree cannot be read"})
+    tree := [String]{}
+    loop entry in entries {
+        relative :: slash(entry.relative)
+        if {
+            entry.is_dir -> {
+                tree.push("dir:{relative}/")
+            }
+            else -> {
+                bytes :: fs.read_bytes(entry.path) ?? return Err(TranscriptError{message: "store file cannot be read"})
+                digest :: crypto.sha256(bytes).hex()
+                tree.push("file:{relative}:{digest}")
+            }
+        }
+    }
+    tree.sort()
+    return Ok(tree)
+}
+
+pub fn load_collection(path: String) [Transcript] !TranscriptError -> {
+    raw :: fs.read(Path.from(path)) ?? return Err(TranscriptError{message: "checked-in transcript collection is missing"})
+    return json.decode<[Transcript]>(raw) ?? return Err(TranscriptError{message: "checked-in transcript collection is invalid"})
+}
+
+// The shipped `hangar list` leaves one zero-byte lock inode behind. Normalize
+// that exact artifact only; drop its now-empty directory, and keep every other
+// path and digest observable.
+pub fn normalize_list_tree(root: String, tree: [String]) [String] !TranscriptError -> {
+    checked :: validate_store_root(root)
+    marker_path :: Path.from(checked).join(".locks").join("hangar.lock")
+    if !fs.exists(~marker_path) -> return Ok(tree)
+    marker_bytes :: fs.read_bytes(marker_path) ?? return Err(TranscriptError{message: "list lock marker cannot be read"})
+    if marker_bytes.len() != 0 -> return Ok(tree)
+    marker :: "file:.locks/hangar.lock:{crypto.sha256(marker_bytes).hex()}"
+    normalized := [String]{}
+    removed_marker := false
+    has_other_lock_entries := false
+    loop entry in tree {
+        if entry == marker {
+            removed_marker = true
+            next
+        }
+        if entry.starts_with("file:.locks/") || (entry.starts_with("dir:.locks/") && entry != "dir:.locks/") {
+            has_other_lock_entries = true
+        }
+        normalized.push(~entry)
+    }
+    if !removed_marker -> return Ok(tree)
+    if !has_other_lock_entries {
+        without_marker_dir := [String]{}
+        loop entry in normalized {
+            if entry == "dir:.locks/" -> next
+            without_marker_dir.push(~entry)
+        }
+        normalized = without_marker_dir
+    }
+    normalized.sort()
+    return Ok(normalized)
+}
+fn offline_argv(argv: [String]) [String] !TranscriptError -> {
+    effective := [String]{}
+    loop item in argv {
+        effective.push(~item)
+    }
+    if !effective.contains("--offline") -> effective.push("--offline")
+    return Ok(effective)
+}
+
+fn invoke_oracle(oracle: String, argv: [String], project_root: String, root: String) Transcript !TranscriptError -> {
+    if oracle.trim() == "" -> return Err(TranscriptError{message: "oracle executable is required"})
+    checked :: validate_private_store_root(root)
+    fs.create_dir_all(~checked) ?? return Err(TranscriptError{message: "store root cannot be created"})
+    effective :: offline_argv(argv)
+    command := [String]{~oracle}
+    loop item in effective {
+        command.push(~item)
+    }
+    result :: process.cmd(command)
+        .cwd(project_root)
+        .env_clear()
+        .env("HOME", ~checked)
+        .env("JETPACK_ROOT", ~checked)
+        .env("JETPACK_OFFLINE", "1")
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .run() ?? return Err(TranscriptError{message: "oracle executable could not be run"})
+    tree :: store_tree(checked)
+    return Ok(Transcript{
+        argv: effective,
+        stdout: result.output,
+        exit_code: result.code,
+        store_tree: tree,
+    })
+}
+
+pub fn record(oracle: String, argv: [String], project_root: String, store_root: String) Transcript !TranscriptError -> {
+    return invoke_oracle(oracle, argv, project_root, store_root)
+}
+
+pub fn replay(oracle: String, project_root: String, expected: Transcript, store_root: String) Bool !TranscriptError -> {
+    actual :: invoke_oracle(oracle, ~expected.argv, project_root, store_root)
+    return transcript_matches(actual, expected)
+}
+pub fn transcript_matches(left: Transcript, right: Transcript) Bool !TranscriptError -> {
+    return Ok(
+        left.argv == right.argv
+            && left.stdout == right.stdout
+            && left.exit_code == right.exit_code
+            && left.store_tree == right.store_tree
+    )
+}
+
+fn phase1_root() String !TranscriptError -> {
+    local :: Path.from("tests").join("fixtures").join("phase1")
+    if fs.exists(~local) -> return Ok(local.to_string())
+    return Ok(Path.from("dogfood").join("jetpack").join("tests").join("fixtures").join("phase1").to_string())
+}
+
+fn phase1_transcript_path() String -> {
+    local :: Path.from("tests").join("transcripts").join("phase1.json")
+    if fs.exists(~local) -> return local.to_string()
+    return Path.from("dogfood").join("jetpack").join("tests").join("transcripts").join("phase1.json").to_string()
+}
+
+
+fn phase1_store(name: String) String -> {
+    return Path.home().join(".cache").join("jet-dogfood").join("jetpack-transcripts").join(name).to_string()
+}
+
+fn dogfood_package() String !TranscriptError -> {
+    local :: Path.from(".")
+    package :: local.join("package.jet")
+    if fs.exists(~package) {
+        return normalized_path(local.to_string())
+    }
+    return normalized_path(Path.from("dogfood").join("jetpack").to_string())
+}
+
+fn checked_in_transcripts() [Transcript] -> {
+    return load_collection(phase1_transcript_path()) ?? panic("checked-in phase1 transcripts are missing")
+}
+
+fn transcript_for(records: [Transcript], expected_argv: [String]) Transcript -> {
+    loop record in records {
+        if record.argv == expected_argv -> return record
+    }
+    panic("checked-in phase1 transcript has no matching argv")
+}
+
+fn prepared_tree(root: String, tree: [String], normalize_list: Bool) [String] -> {
+    if normalize_list {
+        return normalize_list_tree(root, tree) ?? panic("list store tree cannot be normalized")
+    }
+    return tree
+}
+
+fn port_record(argv: [String], project_root: String, store_root: String) Transcript !TranscriptError -> {
+    project :: normalized_path(project_root)
+    package :: dogfood_package()
+    checked :: validate_private_store_root(store_root)
+    home :: Path.home()
+    jet_bin := sys.get("JET_BIN") ?? "jet"
+    path :: sys.get("PATH") ?? ""
+    if jet_bin.trim() == "" -> jet_bin = "jet"
+    if fs.exists(~checked) {
+        fs.remove_all(~checked) ?? return Err(TranscriptError{message: "port store root cannot be cleaned"})
+    }
+    fs.create_dir_all(~checked) ?? return Err(TranscriptError{message: "port store root cannot be created"})
+    command := [String]{~jet_bin, "run", ~package, "--"}
+    loop item in argv {
+        command.push(~item)
+    }
+    result :: process.cmd(command)
+        .cwd(project)
+        .env_clear()
+        .env("HOME", home.to_string())
+        .env("JETPACK_DOGFOOD_ROOT", ~checked)
+        .env("JETPACK_PROJECT_ROOT", ~project)
+        .env("JETPACK_OFFLINE", "1")
+        .env("PATH", ~path)
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .run() ?? return Err(TranscriptError{message: "port executable could not be run"})
+    tree :: store_tree(checked)
+    return Ok(Transcript{
+        argv: argv,
+        stdout: result.output,
+        exit_code: result.code,
+        store_tree: tree,
+    })
+}
+
+fn compare_checked(
+    port_argv: [String],
+    oracle_argv: [String],
+    project_root: String,
+    port_root: String,
+    normalize_list: Bool
+) Bool -> {
+    expected :: transcript_for(checked_in_transcripts(), ~oracle_argv)
+    assert_eq(expected.argv, oracle_argv)
+    raw_actual :: port_record(port_argv, project_root, port_root) ?? panic("port transcript failed")
+    actual :: Transcript{
+        argv: port_argv,
+        stdout: ~raw_actual.stdout,
+        exit_code: raw_actual.exit_code,
+        store_tree: prepared_tree(port_root, ~raw_actual.store_tree, normalize_list),
+    }
+    assert_eq(actual.argv, port_argv)
+    assert_eq(actual.stdout, expected.stdout)
+    assert_eq(actual.exit_code, expected.exit_code)
+    assert_eq(actual.store_tree, expected.store_tree)
+    return true
+}
+
+fn compare_oracle(
+    oracle: String,
+    port_argv: [String],
+    oracle_argv: [String],
+    project_root: String,
+    port_root: String,
+    oracle_root: String,
+    normalize_list: Bool
+) Bool -> {
+    recorded :: invoke_oracle(oracle, ~oracle_argv, ~project_root, oracle_root) ?? panic("oracle transcript failed")
+    assert_eq(recorded.argv, oracle_argv)
+    raw_actual :: port_record(port_argv, project_root, port_root) ?? panic("port transcript failed")
+    actual :: Transcript{
+        argv: port_argv,
+        stdout: ~raw_actual.stdout,
+        exit_code: raw_actual.exit_code,
+        store_tree: prepared_tree(port_root, ~raw_actual.store_tree, normalize_list),
+    }
+    assert_eq(actual.argv, port_argv)
+    assert_eq(actual.stdout, recorded.stdout)
+    assert_eq(actual.exit_code, recorded.exit_code)
+    expected_tree :: prepared_tree(oracle_root, recorded.store_tree, normalize_list)
+    assert_eq(actual.store_tree, expected_tree)
+    return true
+}
+
+fn maybe_compare_oracle(
+    port_argv: [String],
+    oracle_argv: [String],
+    project_root: String,
+    port_root: String,
+    oracle_root: String,
+    normalize_list: Bool
+) Bool !TranscriptError -> {
+    oracle :: sys.get("JETPACK_ORACLE")
+    if oracle == .Val(path) {
+        comparison :: compare_oracle(path, port_argv, oracle_argv, project_root, port_root, oracle_root, normalize_list) ?? panic("live oracle comparison failed")
+        return Ok(comparison)
+    }
+    return Ok(true)
+}
+
+#Test("transcript JSON round trip preserves every field") {
+    before :: Transcript{
+        argv: ["profile", "plan", "dogfood", "--json", "--offline"],
+        stdout: "{{\"packages\":[]}}\n",
+        exit_code: 0,
+        store_tree: ["dir:objects/", "file:objects/item:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    }
+    wire :: json.to_string(before)
+    after :: json.decode<Transcript>(wire) ?? panic("transcript JSON decode failed")
+    assert(transcript_matches(before, after) ?? panic("transcript comparison failed"), "transcript JSON round trip changed data")
+}
+
+#Test("transcript comparison rejects mismatched argv stdout exit and store tree") {
+    expected :: Transcript{
+        argv: ["hangar", "list", "--json", "--offline"],
+        stdout: "[]\n",
+        exit_code: 0,
+        store_tree: ["dir:objects/"],
+    }
+    assert(!(transcript_matches(expected, Transcript{
+        argv: ["hangar", "doctor", "--json", "--offline"],
+        stdout: expected.stdout,
+        exit_code: expected.exit_code,
+        store_tree: expected.store_tree,
+    }) ?? panic("transcript comparison failed")), "argv mismatch was accepted")
+    assert(!(transcript_matches(expected, Transcript{
+        argv: expected.argv,
+        stdout: "[\"different\"]\n",
+        exit_code: expected.exit_code,
+        store_tree: expected.store_tree,
+    }) ?? panic("transcript comparison failed")), "stdout mismatch was accepted")
+    assert(!(transcript_matches(expected, Transcript{
+        argv: expected.argv,
+        stdout: expected.stdout,
+        exit_code: 2,
+        store_tree: expected.store_tree,
+    }) ?? panic("transcript comparison failed")), "exit mismatch was accepted")
+    assert(!(transcript_matches(expected, Transcript{
+        argv: expected.argv,
+        stdout: expected.stdout,
+        exit_code: expected.exit_code,
+        store_tree: ["dir:objects/", "file:objects/other:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+    }) ?? panic("transcript comparison failed")), "store tree mismatch was accepted")
+}
+
+#Test("list tree normalization keeps nonempty and unrelated lock entries") {
+    root :: Path.home().join(".cache").join("jet-dogfood").join("jetpack-transcript-normalize-test").to_string()
+    if fs.exists(~root) -> fs.remove_all(~root) ?? panic("normalization test cleanup failed")
+    locks :: Path.from(root).join(".locks")
+    fs.create_dir_all(~locks) ?? panic("normalization test lock directory failed")
+    marker_path :: locks.join("hangar.lock")
+    fs.write(~marker_path, "held") ?? panic("normalization test marker write failed")
+    nonempty_tree :: store_tree(~root) ?? panic("normalization test tree failed")
+    kept_tree :: normalize_list_tree(~root, ~nonempty_tree) ?? panic("normalization test nonempty normalization failed")
+    assert_eq(kept_tree, nonempty_tree)
+
+    fs.write(~marker_path, "") ?? panic("normalization test empty marker write failed")
+    sole_tree :: store_tree(~root) ?? panic("normalization test sole tree failed")
+    normalized_sole_tree :: normalize_list_tree(~root, ~sole_tree) ?? panic("normalization test sole normalization failed")
+    assert(normalized_sole_tree.len() == 0, "sole list marker was not normalized")
+
+    other_path :: locks.join("other.lock")
+    fs.write(~other_path, "other") ?? panic("normalization test unrelated entry write failed")
+    raw_tree :: store_tree(~root) ?? panic("normalization test second tree failed")
+    normalized_tree :: normalize_list_tree(~root, ~raw_tree) ?? panic("normalization test empty normalization failed")
+    found_other := false
+    loop entry in normalized_tree {
+        if entry.starts_with("file:.locks/hangar.lock:") -> panic("normalization hid a non-target marker")
+        if entry.starts_with("file:.locks/other.lock:") -> found_other = true
+    }
+    assert(found_other, "normalization hid an unrelated lock entry")
+    fs.remove_all(root) ?? panic("normalization test final cleanup failed")
+}
+
+#Test("transcript rejects a store root outside dogfood ownership") {
+    checked :: validate_store_root("/var/empty/jetpack-transcript-store") ?? ""
+    assert_eq(checked, "")
+}
+
+#Test("CLI rejects a symlinked store root before containment") {
+    temp :: fs.temp_dir("jetpack-cli-symlink") ?? panic("symlink test temp directory failed")
+    outside :: Path.from(temp.path).join("outside")
+    fs.create_dir_all(~outside) ?? panic("symlink test target directory failed")
+    link :: Path.from(temp.path).join("cache-link")
+    fs.symlink(outside, link) ?? panic("symlink test link failed")
+    candidate :: link.join("store").to_string()
+
+    result :: cli.execute(["list"], ".", candidate)
+    assert(result.exit_code == 2, "symlinked store root was accepted")
+    assert(result.stdout.contains("symbolic link"), "symlink rejection lost its cause")
+}
+
+#Test("port recording rejects fixture roots before cleanup") {
+    project :: phase1_root() ?? panic("fixture root cannot be resolved")
+    marker_path :: Path.from(project).join("package.jet")
+    before :: fs.read(marker_path) ?? panic("fixture marker cannot be read before rejection")
+    if port_record(["list"], project, project) == {
+        .Ok(_) -> panic("port recording accepted a checked-in fixture root")
+        .Err(error) -> assert(error.message.contains("writable store root"), "fixture rejection lost its cause")
+    }
+    after :: fs.read(marker_path) ?? panic("fixture marker cannot be read after rejection")
+    assert_eq(after, before)
+}
+
+#Test("phase1 plan preserves malformed manifest cause") {
+    temp :: fs.temp_dir("jetpack-plan-manifest-error") ?? panic("manifest test temp directory failed")
+    fixture :: phase1_root() ?? panic("manifest fixture root cannot be resolved")
+    project :: Path.from(temp.path).join("project")
+    fs.copy_dir(fixture, project) ?? panic("manifest fixture copy failed")
+    package_path :: project.join("package.jet")
+    fs.write(~package_path, "name: \"broken\"\n") ?? panic("malformed manifest write failed")
+
+    if plan.render(project.to_string(), "dogfood") == {
+        .Ok(_) -> panic("malformed manifest was accepted")
+        .Err(error) -> {
+            assert(error.message.starts_with("package.jet: "), "manifest path was lost")
+            assert(error.message.contains("manifest field"), "manifest parser cause was lost")
+        }
+    }
+}
+
+#Test("phase1 plan preserves malformed lock cause") {
+    temp :: fs.temp_dir("jetpack-plan-lock-error") ?? panic("lock test temp directory failed")
+    fixture :: phase1_root() ?? panic("lock fixture root cannot be resolved")
+    project :: Path.from(temp.path).join("project")
+    fs.copy_dir(fixture, project) ?? panic("lock fixture copy failed")
+    lock_path :: project.join(".jet").join("lock")
+    fs.write(~lock_path, "version = 2\n") ?? panic("malformed lock write failed")
+
+    if plan.render(project.to_string(), "dogfood") == {
+        .Ok(_) -> panic("malformed lock was accepted")
+        .Err(error) -> {
+            assert(error.message.starts_with(".jet/lock: "), "lock path was lost")
+            assert(error.message.contains("lock field version"), "lock parser cause was lost")
+        }
+    }
+}
+
+#Test("phase1 plan depends on parsed manifest and lock facts") {
+    temp :: fs.temp_dir("jetpack-plan-facts") ?? panic("plan facts temp directory failed")
+    fixture :: phase1_root() ?? panic("plan facts fixture root cannot be resolved")
+    project :: Path.from(temp.path).join("project")
+    fs.copy_dir(fixture, project) ?? panic("plan facts fixture copy failed")
+    package_path :: project.join("package.jet")
+    lock_path :: project.join(".jet").join("lock")
+    baseline :: plan.render(project.to_string(), "dogfood") ?? panic("baseline plan failed")
+    package_source :: fs.read(package_path) ?? panic("plan facts manifest cannot be read")
+    lock_source :: fs.read(lock_path) ?? panic("plan facts lock cannot be read")
+
+    edited_package :: package_source.replace("phase1-fixture", "phase1-edited")
+    fs.write(~package_path, edited_package) ?? panic("edited manifest write failed")
+    manifest_plan :: plan.render(project.to_string(), "dogfood") ?? panic("edited manifest plan failed")
+    assert(baseline.contains("phase1-fixture"), "baseline plan omitted manifest facts")
+    assert(manifest_plan.contains("phase1-edited"), "edited manifest facts were omitted")
+    assert(manifest_plan != baseline, "manifest contents did not affect the plan")
+
+    edited_lock :: lock_source.replace("1.2.3", "1.2.4")
+    fs.write(~lock_path, edited_lock) ?? panic("edited lock write failed")
+    lock_plan :: plan.render(project.to_string(), "dogfood") ?? panic("edited lock plan failed")
+    assert(lock_plan.contains("1.2.4"), "edited lock facts were omitted")
+    assert(lock_plan != manifest_plan, "lock contents did not affect the plan")
+}
+
+#Test("CLI preserves parser causes in structured errors") {
+    parsed :: cli.execute(["unsupported"], ".", phase1_store("cli-cause"))
+    assert(parsed.exit_code == 2, "unsupported command changed the exit contract")
+    assert(parsed.stdout.contains("unsupported command unsupported"), "CLI parse cause was lost")
+
+    temp :: fs.temp_dir("jetpack-cli-cause") ?? panic("CLI cause temp directory failed")
+    fixture :: phase1_root() ?? panic("CLI cause fixture root cannot be resolved")
+    project :: Path.from(temp.path).join("project")
+    fs.copy_dir(fixture, project) ?? panic("CLI cause fixture copy failed")
+    package_path :: project.join("package.jet")
+    fs.write(~package_path, "name: \"broken\"\n") ?? panic("CLI cause malformed manifest write failed")
+    plan_result :: cli.execute(["plan"], project.to_string(), phase1_store("cli-plan-cause"))
+    assert(plan_result.exit_code == 2, "plan error changed the exit contract")
+    assert(plan_result.stdout.contains("package.jet: manifest field"), "CLI plan cause was lost")
+}
+
+#Test("phase1 plan output matches the checked-in transcript") {
+    project :: phase1_root() ?? panic("phase1 plan fixture root cannot be resolved")
+    store :: phase1_store("plan-port") ?? panic("phase1 plan store root cannot be resolved")
+    assert(compare_checked(["plan", "--json", "--offline"], ["profile", "plan", "dogfood", "--json", "--offline"], project, store, false), "phase1 plan transcript comparison failed")
+}
+
+#Test("phase1 list output matches the checked-in transcript") {
+    project :: phase1_root() ?? panic("phase1 list fixture root cannot be resolved")
+    store :: phase1_store("list-port") ?? panic("phase1 list store root cannot be resolved")
+    assert(compare_checked(["list", "--json", "--offline"], ["hangar", "list", "--json", "--offline"], project, store, true), "phase1 list transcript comparison failed")
+}
+
+#Test("phase1 inspect output matches the checked-in transcript") {
+    project :: phase1_root() ?? panic("phase1 inspect fixture root cannot be resolved")
+    store :: phase1_store("inspect-port") ?? panic("phase1 inspect store root cannot be resolved")
+    assert(compare_checked(["inspect", "--json", "--offline"], ["hangar", "doctor", "--json", "--offline"], project, store, false), "phase1 inspect transcript comparison failed")
+}
+
+#Test("phase1 plan matches the live oracle when configured") {
+    project :: phase1_root() ?? panic("phase1 plan live fixture root cannot be resolved")
+    port_store :: phase1_store("plan-live-port") ?? panic("phase1 plan live port store root cannot be resolved")
+    oracle_store :: phase1_store("plan-live-oracle") ?? panic("phase1 plan live oracle store root cannot be resolved")
+    assert(maybe_compare_oracle(["plan", "--json", "--offline"], ["profile", "plan", "dogfood", "--json", "--offline"], project, port_store, oracle_store, false) ?? panic("live oracle comparison failed"))
+}
+
+#Test("phase1 list matches the live oracle when configured") {
+    project :: phase1_root() ?? panic("phase1 list live fixture root cannot be resolved")
+    port_store :: phase1_store("list-live-port") ?? panic("phase1 list live port store root cannot be resolved")
+    oracle_store :: phase1_store("list-live-oracle") ?? panic("phase1 list live oracle store root cannot be resolved")
+    assert(maybe_compare_oracle(["list", "--json", "--offline"], ["hangar", "list", "--json", "--offline"], project, port_store, oracle_store, true) ?? panic("live oracle comparison failed"))
+}
+
+#Test("phase1 inspect matches the live oracle when configured") {
+    project :: phase1_root() ?? panic("phase1 inspect live fixture root cannot be resolved")
+    port_store :: phase1_store("inspect-live-port") ?? panic("phase1 inspect live port store root cannot be resolved")
+    oracle_store :: phase1_store("inspect-live-oracle") ?? panic("phase1 inspect live oracle store root cannot be resolved")
+    assert(maybe_compare_oracle(["inspect", "--json", "--offline"], ["hangar", "doctor", "--json", "--offline"], project, port_store, oracle_store, false) ?? panic("live oracle comparison failed"))
+}

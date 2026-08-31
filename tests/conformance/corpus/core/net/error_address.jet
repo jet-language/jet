@@ -2,8 +2,6 @@
 use core.net as net
 
 fn run() {
-    if net.ip_addr("not-an-ip") == {
-        .Ok(_) -> panic("invalid address accepted")
-        .Err(error) -> print(net.error_address(error))
-    }
+    error :: NetError.DNS(NetDnsError.NotFound("missing.test"))
+    print(net.error_address(error) ?? "none")
 }
