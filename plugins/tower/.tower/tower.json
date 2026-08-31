@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2407,
-    "rev": 47764,
+    "nextNum": 2409,
+    "rev": 47766,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -166433,6 +166433,63 @@
       "created": "2026-08-31T19:08:54.860Z",
       "updated": "2026-08-31T19:08:54.860Z",
       "updatedBy": "fable"
+    },
+    {
+      "id": "c00c16oz",
+      "num": 2407,
+      "title": "P0: field access on declared structs rejected with E0302 in dogfood jetpack",
+      "body": "`target/debug/jet check dogfood/jetpack --json` exits 1 with six E0302 diagnostics, each saying field access only works on a struct or tuple, for fields that ARE declared struct fields.\n\nSites, all in dogfood/jetpack/src/cli/main.jet: .provider line 189 span 6767-6775; .name line 190 span 6826-6830; .version line 191 span 6863-6870; .reference line 193 span 6905-6914; .source line 195 span 6946-6952; .expected_hash line 196 span 6991-7004.\n\nmain.jet:182-207 accesses those fields on ingest_wire(IngestResult) and realize_wire(RealizeResult). Both are declared structs: dogfood/jetpack/src/store/ingest.jet:21-28 and dogfood/jetpack/src/realize/realize.jet:20-30. A plain text run reports 11 problems including L0507, L0520, L0514, and L2510. The check exits 1 before the package is read.\n\nFound by the #2394 hostile closeout pass while the tree was mid-wave with about sixteen concurrent lanes, so confirm it reproduces on the integrated tree before deep investigation. It reproduced twice, in text and JSON modes.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Reproduce on the integrated tree. If it persists, find why the checker does not see IngestResult and RealizeResult as structs at those call sites: likely cross-module type resolution returning an unresolved or opaque type for an imported struct, which would make this far broader than jetpack. Add a non-dogfood regression witness plus a UI snapshot before fixing.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "2394",
+        "2376"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-31T20:13:44.650Z",
+      "updated": "2026-08-31T20:13:44.650Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0iboc37",
+      "num": 2408,
+      "title": "Dogfood 5/5 campaign report contradicts its own evidence in four places",
+      "body": "The #2394 hostile closeout pass, run by a GPT-family agent in fresh context, returned CHECK FAILED with four uncarded findings. Verdict artifact: local://card-2394-gpt-hostile-pass.md (hash 9B66).\n\nF34 MISATTRIBUTION. The ledger row F34 in docs/proposals/dogfood-jet-experience-5-of-5.md:87 assigns the formatter return-arm defect to card #2355, but the report's own bug table at docs/audits/dogfood-jetpack-usage-experience-2026-08-30.md:222 identifies it as #2368. F38 correctly maps the separate read-only oracle lock-mutation defect to #2355. So #2368 has no owning disposition row, and the campaign could be declared clean while that defect owns nothing.\n\nRI-1 GREEN CLAIM. The report executive summary (:3-5) says Jetpack was green through three dogfood phases. Its own bug table (:213-228) lists default and AOT blockers, and dogfood/jetpack/METRICS.md:28-32,83-86 records Phase 1 as blocked and not green with Phases 2 and 3 not reached and not measured.\n\nRI-2 PERFORMANCE EVIDENCE. The report quotes binary size 1,377,432 B, cold 19.695 s, and warm 8.096 s (:78-84,122-130), but every cited metric table in METRICS.md:102-150 is marked not measured. docs/proposals/automatic-build-optimization.md:16-27 repeats those figures citing METRICS:144-161, which contains only error-cascade and finding rows.\n\nRI-3 CROSS-LANGUAGE EVIDENCE. The report states all Rust comparisons use measured repository facts (:24-26) and presents a seeded cascade parity result (:70-76,243-246), while conceding there was no matched Rust agent slice (:62) and METRICS marks the error-cascade rows and Rust LOC/token rows not measured (:60-65,144-150).",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Correct F34 to #2368 and confirm every other ledger row against the report bug table. Then either re-measure the claims or downgrade the report's language to match what was actually measured. Cross-language claims are the campaign's most load-bearing assertions, so RI-3 is the highest priority. #2394 criterion 3 cannot close until each finding is corrected or explicitly dispositioned and the hostile pass reruns clean.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "2394",
+        "2386",
+        "2393"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-31T20:20:08.851Z",
+      "updated": "2026-08-31T20:20:08.851Z",
+      "updatedBy": "fable"
     }
   ],
   "decisions": [
@@ -229429,6 +229486,20 @@
   ],
   "events": [
     {
+      "at": "2026-08-31T20:20:08.851Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0iboc37",
+      "note": "Dogfood 5/5 campaign report contradicts its own evidence in four places"
+    },
+    {
+      "at": "2026-08-31T20:13:44.650Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c00c16oz",
+      "note": "P0: field access on declared structs rejected with E0302 in dogfood jetpack"
+    },
+    {
       "at": "2026-08-31T19:48:42.330Z",
       "by": "owner",
       "action": "done.clear",
@@ -232913,20 +232984,6 @@
       "action": "decision.ratify",
       "ref": "D-CHECKSCOPE1",
       "note": "A"
-    },
-    {
-      "at": "2026-08-30T14:45:29.315Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-UNIT-SCALAR1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-30T14:44:49.148Z",
-      "by": "agent",
-      "action": "decision.add",
-      "ref": "D-FREESTAND-DIAG1",
-      "note": "Target admission diagnostics"
     }
   ],
   "nextNum": 368,

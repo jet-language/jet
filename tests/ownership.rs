@@ -95,12 +95,12 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("usage-sensitive generic bounds should compile");
     assert!(
-        out.rust.contains("fn __jet_inspect<T>"),
+        out.rust.contains("pub fn __jet_inspect<T>(__jet_value: &T) -> JetOutcome<i64, JetErr>"),
         "read-only generic must not require Clone: {}",
         out.rust
     );
     assert!(
-        out.rust.contains("fn __jet_duplicate<T: Clone>"),
+        out.rust.contains("pub fn __jet_duplicate<T: Clone>(__jet_value: &T) -> JetOutcome<T, JetErr>"),
         "explicit copy must require Clone: {}",
         out.rust
     );
@@ -2959,14 +2959,14 @@ fn run() {
     let out = jet::compile(src).expect("owner-backed collection views must compile");
     assert!(
         out.rust.contains(
-            "fn __jet_book_at<'__jet___view>(__jet_lib: &'__jet___view __jet_Library, __jet_i: i64) -> &'__jet___view [__jet_Book]"
+            "fn __jet_book_at<'__jet___view>(__jet_lib: &'__jet___view __jet_Library, __jet_i: i64) -> JetOutcome<&'__jet___view [__jet_Book], JetErr>"
         ),
         "read view must tie to parameter 0: {}",
         out.rust
     );
     assert!(
         out.rust.contains(
-            "fn __jet_edit_at<'__jet___view>(__jet_lib: &'__jet___view mut __jet_Library, __jet_i: i64) -> &'__jet___view mut [__jet_Book]"
+            "fn __jet_edit_at<'__jet___view>(__jet_lib: &'__jet___view mut __jet_Library, __jet_i: i64) -> JetOutcome<&'__jet___view mut [__jet_Book], JetErr>"
         ),
         "write view must tie to parameter 0: {}",
         out.rust
@@ -3309,7 +3309,7 @@ fn run() { print(0) }
     let out = jet::compile(src).expect("parameter-rooted write view return must compile");
     assert!(
         out.rust.contains(
-            "fn __jet_edit_first<'__jet___view>(__jet_xs: &'__jet___view mut Vec<i64>) -> &'__jet___view mut [i64]"
+            "fn __jet_edit_first<'__jet___view>(__jet_xs: &'__jet___view mut Vec<i64>) -> JetOutcome<&'__jet___view mut [i64], JetErr>"
         ),
         "generated lifetime must tie the mutable view to parameter 0: {}",
         out.rust
@@ -3635,7 +3635,7 @@ fn run() {
         out.rust.contains("pub struct __jet_Token<'__jet___view>")
             && out.rust.contains("pub __jet_text: &'__jet___view str")
             && out.rust.contains("pub __jet_rest: &'__jet___view str")
-            && out.rust.contains("-> __jet_Token<'__jet___view>"),
+            && out.rust.contains("-> JetOutcome<__jet_Token<'__jet___view>, JetErr>"),
         "both parser views must share the hidden source lifetime: {}",
         out.rust
     );
@@ -3748,7 +3748,7 @@ fn run() { print(domain("user@example.com")) }
     let out = jet::compile(src).expect("parameter-rooted string view return must compile");
     assert!(
         out.rust.contains(
-            "fn __jet_domain<'__jet___view>(__jet_email: &'__jet___view String) -> &'__jet___view str"
+            "fn __jet_domain<'__jet___view>(__jet_email: &'__jet___view String) -> JetOutcome<&'__jet___view str, JetErr>"
         ),
         "generated lifetime must tie the string view to parameter 0: {}",
         out.rust
@@ -3817,7 +3817,7 @@ fn run() {
     let out = jet::compile(src).expect("constant returned-view aggregate must compile");
     assert!(
         out.rust
-            .contains("let __jet_token: __jet_Token = __jet_scan(&(__jet_source));"),
+            .contains("fn __jet_scan<'__jet___view>(__jet_source: &'__jet___view String) -> JetOutcome<__jet_Token<'__jet___view>, JetErr>"),
         "view-bearing constants must lower through the borrow-preserving call path:\n{}",
         out.rust
     );
@@ -4095,7 +4095,7 @@ fn run() {
     assert!(
         out.rust.contains("pub struct __jet_Window<'__jet___view>")
             && out.rust.contains("pub __jet_values: &'__jet___view [i64]")
-            && out.rust.contains("-> __jet_Window<'__jet___view>"),
+            && out.rust.contains("-> JetOutcome<__jet_Window<'__jet___view>, JetErr>"),
         "aggregate and return must share the hidden owner lifetime: {}",
         out.rust
     );
@@ -4137,7 +4137,7 @@ fn run() {
         out.rust
     );
     assert!(
-        out.rust.contains("-> __jet_Outer<'__jet___view>"),
+        out.rust.contains("-> JetOutcome<__jet_Outer<'__jet___view>, JetErr>"),
         "{}",
         out.rust
     );
@@ -5184,7 +5184,7 @@ fn run() {
     assert!(
         out.rust.contains("__jet_left: &'__jet___view Vec<i64>")
             && out.rust.contains("__jet_right: &'__jet___view Vec<i64>")
-            && out.rust.contains("-> &'__jet___view [i64]"),
+            && out.rust.contains("-> JetOutcome<&'__jet___view [i64], JetErr>"),
         "{}",
         out.rust
     );
@@ -5377,12 +5377,12 @@ fn run() {
         jet::compile(src).expect("a cloneable read parameter materializes at an owned return");
     assert!(
         out.rust
-            .contains("pub fn __jet_identity<T: Clone>(__jet_value: &T) -> T {"),
+            .contains("pub fn __jet_identity<T: Clone>(__jet_value: &T) -> JetOutcome<T, JetErr> {"),
         "the escape must be paid for in the signature, not laundered: {}",
         out.rust
     );
     assert!(
-        out.rust.contains("return ((*__jet_value)).clone();"),
+        out.rust.contains("return Ok(((*__jet_value)).clone());"),
         "the owned return must copy through the borrow, never move out of it: {}",
         out.rust
     );
@@ -5569,7 +5569,7 @@ fn run() {
     // callback returns can only come from the list it was given.
     assert!(
         out.rust.contains(
-            "dyn for<'__jet___fn_view> Fn(&'__jet___fn_view Vec<i64>) -> &'__jet___fn_view [i64]"
+            "dyn for<'__jet___fn_view> Fn(&'__jet___fn_view Vec<i64>) -> JetOutcome<&'__jet___fn_view [i64], JetErr>"
         ),
         "the callback must return a window into its own argument: {}",
         out.rust
@@ -5577,7 +5577,7 @@ fn run() {
     // The wrapper's own return is tied to the wrapper's own parameter.
     assert!(
         out.rust
-            .contains("__jet_values: &'__jet___view Vec<i64>) -> &'__jet___view [i64]"),
+            .contains("__jet_values: &'__jet___view Vec<i64>) -> JetOutcome<&'__jet___view [i64], JetErr>"),
         "the wrapper's returned window must be tied to its list parameter: {}",
         out.rust
     );

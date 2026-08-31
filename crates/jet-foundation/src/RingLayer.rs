@@ -6,6 +6,96 @@
 //! `package.jet` (or explicit migration input).
 
 use crate::Syntax;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+/// Semantic edges in the emitted Prelude closure.
+///
+/// The graph lives beside `RuntimeLayer` so sema, target admission, and every
+/// code-generation tier use one dependency authority. A namespace is not
+/// automatically a dependency: pure URL and calendar helpers stop at their
+/// own semantic part instead of inheriting an unrelated hosted service.
+const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
+    ("core.prelude", &["core"]),
+    ("core.units", &["core.math"]),
+    ("core.mem", &["core"]),
+    ("core.math.random", &["core.math"]),
+    ("core.crypto", &["core"]),
+    ("core.crypto.random", &["core.crypto"]),
+    ("core.crypto.uuid", &["core.crypto", "core.encoding.hex"]),
+    ("core.crypto.vault", &["core.crypto"]),
+    ("core.encoding", &["core"]),
+    ("core.encoding.json", &["core.encoding"]),
+    ("core.encoding.jsonl", &["core.encoding"]),
+    ("core.encoding.csv", &["core.encoding"]),
+    ("core.encoding.toml", &["core.encoding"]),
+    ("core.encoding.yaml", &["core.encoding"]),
+    ("core.encoding.xml", &["core.encoding"]),
+    ("core.encoding.cbor", &["core.encoding"]),
+    ("core.encoding.hex", &["core.encoding"]),
+    ("core.encoding.base64", &["core.encoding"]),
+    ("core.encoding.base32", &["core.encoding"]),
+    ("core.text", &["core"]),
+    ("core.text.fmt", &["core.text"]),
+    ("core.args", &["core.text"]),
+    ("core.reflect", &["core.text"]),
+    ("core.compiler", &["core.text"]),
+    ("core.compiler.lang", &["core.compiler"]),
+    ("core.game", &["core.math", "core.mem"]),
+    ("core.game.raylib", &["core.game"]),
+    ("core.reactive", &["core.mem"]),
+    ("core.reactive.loadable", &["core.reactive"]),
+    ("core.event", &["core.mem"]),
+    ("core.compute", &["core.math", "core.mem"]),
+    ("core.compute.solve", &["core.compute"]),
+    ("core.data", &["core.encoding", "core.text"]),
+    ("core.data.plot", &["core.data"]),
+    ("core.data.sketch.hll", &["core.data"]),
+    ("core.data.sketch.tdigest", &["core.data"]),
+    ("core.data.sketch.reservoir", &["core.data"]),
+    ("core.data.sketch.cms", &["core.data"]),
+    ("core.log", &["core.text"]),
+    ("core.regex", &["core.text"]),
+    ("core.term", &["core.text"]),
+    ("core.sys", &["core.text"]),
+    ("core.process", &["core.args", "core.term"]),
+    ("core.files", &["core.text"]),
+    ("core.watcher", &["core.files", "core.process"]),
+    ("core.net", &["core.text"]),
+    ("core.net.tls", &["core.net", "core.crypto.random"]),
+    ("core.net.ws", &["core.net"]),
+    ("core.http", &["core.net", "core.text"]),
+    ("core.http.client", &["core.http"]),
+    ("core.http.server", &["core.http"]),
+    ("core.time", &["core"]),
+    ("core.tasks", &["core.time"]),
+    ("core.archive", &["core.encoding"]),
+    ("core.archive.gzip", &["core.archive"]),
+    ("core.archive.zstd", &["core.archive"]),
+    ("core.db", &["core.files", "core.net"]),
+    ("core.plugin", &["core.files", "core.process"]),
+    ("core.email", &["core.text", "core.net"]),
+    ("core.testing", &["core.files", "core.time", "core.math.random"]),
+    ("core.mod", &["core.files", "core.compiler"]),
+    ("core.auth", &["core.crypto", "core.net"]),
+    ("core.sync", &["core.data", "core.tasks"]),
+    ("core.service", &["core.tasks", "core.net"]),
+    ("core.ui", &["core.text"]),
+    ("core.web", &["core.http"]),
+    ("core.web.browser", &["core.web"]),
+    ("core.web.storage", &["core.web"]),
+    ("core.web.storage.local", &["core.web.storage"]),
+    ("core.web.storage.session", &["core.web.storage"]),
+    ("core.web.devserver", &["core.web"]),
+    ("app", &["core.web"]),
+];
+
+/// Nested names whose parent is only a namespace, not a semantic dependency.
+const PRELUDE_NAMESPACE_ONLY: &[&str] = &[
+    "core.mem.scope",
+    "core.net.url",
+    "core.net.mime",
+    "core.time.expiring",
+];
 
 /// Minimum runtime capability a package needs: heap-free core, allocator, or hosted OS runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -48,59 +138,222 @@ pub fn core_module_layer(module: &str) -> Option<RuntimeLayer> {
 fn layer_of(module: &str) -> RuntimeLayer {
     match module {
         // ── core: no heap, no OS ─────────────────────────────────────────
-        "core"
-        | "core.math"
-        | "core.units"
-        | "core.perf"
-        | "core.mem.scope"
-        | "core.ui"
-        | "core.web"
-        | "core.web.storage"
-        | "core.web.storage.local"
-        | "core.web.storage.session"
-        | "core.encoding.hex"
-        | "core.encoding.base64"
-        | "core.crypto" => RuntimeLayer::Core,
+        "core" | "core.prelude" | "core.math" | "core.units" | "core.perf"
+        | "core.mem.scope" => RuntimeLayer::Core,
 
-        // ── alloc: heap / growable data, no direct OS I/O ──────────────────
+        // ── alloc: owned values and allocation-backed, non-OS operations ───
         "core.mem"
         | "core.math.random"
+        | "core.crypto"
         | "core.crypto.random"
         | "core.crypto.uuid"
+        | "core.crypto.vault"
         | "core.encoding"
         | "core.encoding.json"
+        | "core.encoding.jsonl"
         | "core.encoding.csv"
         | "core.encoding.toml"
         | "core.encoding.yaml"
+        | "core.encoding.xml"
+        | "core.encoding.cbor"
+        | "core.encoding.hex"
+        | "core.encoding.base64"
+        | "core.encoding.base32"
         | "core.text"
-        | "core.args"
+        | "core.text.fmt"
         | "core.reflect"
         | "core.compiler"
         | "core.game"
         | "core.reactive.loadable"
         | "core.event"
+        | "core.compute"
         | "core.compute.solve"
         | "core.time.expiring"
-        | "core.crypto.vault"
         | "core.reactive"
+        | "core.data"
+        | "core.data.plot"
         | "core.data.sketch.hll"
         | "core.data.sketch.tdigest"
         | "core.data.sketch.cms"
         | "core.data.sketch.reservoir"
         | "core.log"
-        | "core.regex" => RuntimeLayer::Alloc,
+        | "core.regex"
+        | "core.net.url"
+        | "core.net.mime" => RuntimeLayer::Alloc,
 
-        // ── hosted: OS I/O, networking, processes ──────────────────────────
-        "core.term" | "core.sys" | "core.process" | "core.files" | "core.watcher"
-        | "core.net" | "core.net.tls" | "core.time"
-        | "core.tasks" | "core.http" | "core.http.client" | "core.http.server" | "core.archive"
-        | "core.game.raylib" | "core.archive.gzip" | "core.archive.zstd" | "core.db"
-        // D-DEP-WASM1=A (c81): the plugin loader embeds wasmtime.
-        | "core.plugin" => RuntimeLayer::Std,
+        // ── hosted: OS, platform, terminal, and provider adapters ──────────
+        "core.args"
+        | "core.term"
+        | "core.sys"
+        | "core.process"
+        | "core.files"
+        | "core.watcher"
+        | "core.net"
+        | "core.net.tls"
+        | "core.net.ws"
+        | "core.time"
+        | "core.tasks"
+        | "core.http"
+        | "core.http.client"
+        | "core.http.server"
+        | "core.archive"
+        | "core.archive.gzip"
+        | "core.archive.zstd"
+        | "core.game.raylib"
+        | "core.db"
+        | "core.plugin"
+        | "core.testing"
+        | "core.mod"
+        | "core.email"
+        | "core.auth"
+        | "core.sync"
+        | "core.service"
+        | "core.ui"
+        | "core.web"
+        | "core.web.browser"
+        | "core.web.storage"
+        | "core.web.storage.local"
+        | "core.web.storage.session"
+        | "core.web.devserver"
+        | "app" => RuntimeLayer::Std,
 
-        // Unknown modules default to std so new OS-facing modules stay conservative.
+        // Unknown modules default to hosted so new OS-facing modules stay
+        // conservative until their semantic part is entered in this ledger.
         other if Syntax::is_known_core_module(other) => RuntimeLayer::Std,
         _ => RuntimeLayer::Std,
+    }
+}
+
+/// Helper-level exceptions keep pure/fixed operations in Core while a mixed
+/// module remains conservatively classified at its owning module layer.
+fn helper_layer(module: &str, helper: &str) -> Option<RuntimeLayer> {
+    if helper.is_empty() {
+        return None;
+    }
+    match module {
+        "core.math" | "core.units" | "core.perf" | "core.mem.scope" => {
+            Some(RuntimeLayer::Core)
+        }
+        "core.mem" => matches!(
+            helper,
+            "Ptr"
+                | "from_addr"
+                | "volatile_read"
+                | "volatile_write"
+                | "address_of"
+                | "pin"
+                | "Pin"
+        )
+        .then_some(RuntimeLayer::Core),
+        "core.text" => matches!(
+            helper,
+            "Cursor"
+                | "caseless_eq"
+                | "display_width"
+                | "scalar_count"
+                | "byte_count"
+                | "is_alphabetic"
+                | "is_numeric"
+                | "is_whitespace"
+                | "is_ascii"
+                | "starts_any"
+                | "ends_any"
+        )
+        .then_some(RuntimeLayer::Core),
+        "core.time" => matches!(
+            helper,
+            "from_unix_ms"
+                | "from_unix_seconds"
+                | "from_unix_microseconds"
+                | "from_unix_nanoseconds"
+                | "from_timestamp"
+                | "days_in_month"
+                | "is_leap_year"
+                | "period"
+                | "period_days"
+                | "period_months"
+                | "period_years"
+                | "utc"
+        )
+        .then_some(RuntimeLayer::Core),
+        "core.net" => matches!(
+            helper,
+            "ip_addr"
+                | "ip_to_string"
+                | "ip_is_ipv4"
+                | "socket_addr"
+                | "socket_addr_parse"
+                | "socket_host"
+                | "socket_port"
+                | "socket_to_string"
+                | "error_operation"
+                | "error_address"
+                | "error_name"
+                | "error_message"
+                | "error_os_code"
+        )
+        .then_some(RuntimeLayer::Alloc),
+        "core.net.url" | "core.net.mime" => Some(RuntimeLayer::Alloc),
+        "core.files" => matches!(
+            helper,
+            "typed_head"
+                | "path_from"
+                | "path_join"
+                | "path_parent"
+                | "path_extension"
+                | "path_stem"
+                | "path_normalize"
+        )
+        .then_some(RuntimeLayer::Alloc),
+        "core.crypto" => match helper {
+            "__nominal__"
+            | "Secret"
+            | "SigningKey"
+            | "VerifyKey"
+            | "X25519SecretKey"
+            | "X25519PublicKey"
+            | "SharedSecret"
+            | "Signature"
+            | "Digest256"
+            | "Digest512"
+            | "sha256"
+            | "blake3"
+            | "sha512"
+            | "constant_time_equal_bytes"
+            | "constant_time_equal"
+            | "verify"
+            | "sign" => Some(RuntimeLayer::Core),
+            "file_seal" | "file_open" => Some(RuntimeLayer::Std),
+            _ => None,
+        },
+        "core.archive" => matches!(
+            helper,
+            "zip_compress"
+                | "zip_decompress"
+                | "crc32"
+                | "adler32"
+                | "deflate"
+                | "inflate"
+                | "zip_names_json"
+                | "tar_names_json"
+        )
+        .then_some(RuntimeLayer::Alloc),
+        "core.email" => matches!(
+            helper,
+            "Address"
+                | "Message"
+                | "Attachment"
+                | "Envelope"
+                | "RecipientPolicy"
+                | "Limits"
+                | "address"
+                | "attachment"
+                | "message"
+                | "envelope"
+                | "serialize"
+        )
+        .then_some(RuntimeLayer::Alloc),
+        _ => None,
     }
 }
 
@@ -109,15 +362,107 @@ fn layer_of(module: &str) -> RuntimeLayer {
 pub fn core_usage_layer(usage: &str) -> Option<RuntimeLayer> {
     if let Some(rest) = usage.strip_prefix("core::") {
         return Some(match rest {
-            "json" => RuntimeLayer::Alloc,
-            "bytes" => RuntimeLayer::Alloc,
+            "json" | "bytes" => RuntimeLayer::Alloc,
             "from_bytes" | "from_bytes_lossy" => RuntimeLayer::Core,
             "elapsed_millis" => RuntimeLayer::Std,
             _ => RuntimeLayer::Std,
         });
     }
-    let (module, _) = usage.split_once("::").unwrap_or((usage, ""));
-    core_module_layer(module)
+    let (module, helper) = usage
+        .split_once("::")
+        .map_or((usage, ""), |(module, helper)| (module, helper));
+    let module_layer = core_module_layer(module)?;
+    Some(helper_layer(module, helper).unwrap_or(module_layer))
+}
+
+/// Return the complete, deterministic layer map for every semantic Prelude
+/// part reachable from `roots`. Closure markers are provenance metadata and
+/// therefore never become runtime requirements.
+pub fn classify_prelude_closure<I, S>(roots: I) -> BTreeMap<String, RuntimeLayer>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut pending = BTreeSet::new();
+    for root in roots {
+        let root = root.as_ref();
+        if !is_prelude_closure_marker(root) {
+            pending.insert(root.to_owned());
+        }
+    }
+
+    let mut closure = BTreeMap::new();
+    while let Some(current) = pending.iter().next().cloned() {
+        pending.remove(&current);
+        if closure.contains_key(&current) {
+            continue;
+        }
+        let layer = core_usage_layer(&current)
+            .or_else(|| core_module_layer(&current))
+            .unwrap_or(RuntimeLayer::Std);
+        closure.insert(current.clone(), layer);
+        for dependency in prelude_dependencies(&current) {
+            if !closure.contains_key(&dependency) {
+                pending.insert(dependency);
+            }
+        }
+    }
+    closure
+}
+
+/// Expand a sema usage set with every reachable semantic Prelude part.
+pub fn expand_prelude_closure(used: &mut HashSet<String>) {
+    let closure = classify_prelude_closure(used.iter());
+    used.extend(closure.into_keys());
+}
+
+/// Compute the closure identity input in stable order. Callers hash this
+/// canonical list together with target/provider facts for artifact identity.
+pub fn prelude_closure_keys<I, S>(roots: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    classify_prelude_closure(roots).into_keys().collect()
+}
+
+fn is_prelude_closure_marker(usage: &str) -> bool {
+    usage.starts_with("__core_source::") || usage.starts_with("__core_intrinsic::")
+}
+
+fn prelude_dependencies(usage: &str) -> Vec<String> {
+    let (module, _) = usage
+        .split_once("::")
+        .map_or((usage, ""), |(module, helper)| (module, helper));
+    let mut dependencies = PRELUDE_DEPENDENCY_EDGES
+        .iter()
+        .find_map(|(name, dependencies)| (*name == module).then(|| {
+            dependencies
+                .iter()
+                .map(|dependency| (*dependency).to_owned())
+                .collect::<Vec<_>>()
+        }))
+        .unwrap_or_default();
+
+    match usage {
+        "core::json" => dependencies.push("core.encoding.json".to_string()),
+        "core::bytes" => dependencies.push("core.encoding".to_string()),
+        "core.crypto::file_seal" | "core.crypto::file_open" => {
+            dependencies.push("core.files".to_string())
+        }
+        _ => {}
+    }
+
+    if !PRELUDE_NAMESPACE_ONLY.contains(&module) {
+        if let Some((parent, _)) = module.rsplit_once('.') {
+            if parent.starts_with("core") {
+                dependencies.push(parent.to_owned());
+            }
+        }
+    }
+    dependencies.sort_unstable();
+    dependencies.dedup();
+    dependencies
 }
 
 /// E1006 — a `use core.*` import or emitted helper exceeds the package `runtime:` ceiling.
@@ -189,5 +534,30 @@ mod tests {
         );
         assert_eq!(core_usage_layer("core::json"), Some(RuntimeLayer::Alloc));
         assert_eq!(core_usage_layer("core.reactive"), Some(RuntimeLayer::Alloc));
+    }
+
+    #[test]
+    fn prelude_closure_is_transitive_and_ignores_provenance() {
+        let closure = classify_prelude_closure([
+            "core.crypto::file_seal",
+            "__core_intrinsic::core.crypto::file_seal",
+        ]);
+        assert_eq!(
+            closure.get("core.crypto::file_seal"),
+            Some(&RuntimeLayer::Std)
+        );
+        assert_eq!(closure.get("core.files"), Some(&RuntimeLayer::Std));
+        assert_eq!(closure.get("core.crypto"), Some(&RuntimeLayer::Alloc));
+        assert!(!closure.contains_key("__core_intrinsic::core.crypto::file_seal"));
+    }
+
+    #[test]
+    fn pure_nested_parts_do_not_inherit_hosted_namespace() {
+        let closure = classify_prelude_closure(["core.net.url::parse"]);
+        assert_eq!(
+            closure.get("core.net.url::parse"),
+            Some(&RuntimeLayer::Alloc)
+        );
+        assert!(!closure.contains_key("core.net"));
     }
 }

@@ -20,7 +20,7 @@ const jetEnvDefault = path.join(repoDir, "scripts/agent/jet-env");
 const capsuleLimitBytes = 32 * 1024;
 const modelOutputLimitBytes = 2 * 1024 * 1024;
 const processOutputLimitBytes = 2 * 1024 * 1024;
-const defaultTimeoutMs = 120_000;
+const defaultTimeoutMs = 10 * 60_000;
 const serviceReadyTimeoutMs = 60_000;
 const serviceProbeTimeoutMs = 3_000;
 const serviceShutdownTimeoutMs = 5_000;
@@ -1142,7 +1142,10 @@ async function prepareInputs(options) {
     task_file: await fileDescriptor(options.tasks),
     adapter_file: await fileDescriptor(options.config),
   };
-  const harness = await fileDescriptor(fileURLToPath(import.meta.url));
+  const harness = {
+    ...(await fileDescriptor(fileURLToPath(import.meta.url))),
+    adapter_timeout_ms: defaultTimeoutMs,
+  };
   llms.context_sha256 = sha256(Buffer.from(controlText, "utf8"));
   return { capsuleText, controlText, budgetBytes, tasks, adapters, capsule, llms, fixtures, harness };
 }

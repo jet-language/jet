@@ -108,3 +108,24 @@ test('milestone filter narrows to one milestone and sorts unassigned last', () =
   const sorted = sortCards([none, other, inMile], { col: 'milestone', dir: 'asc' });
   assert.deepEqual(sorted.map(c => c.num), [20, 21, 22]);
 });
+
+test('card number search matches exact ids, including a couple at once', () => {
+  const a = card(12, 'building');
+  const b = card(120, 'building');
+  const titled = card(45, 'building', 'building', { title: 'Fix 12' });
+  assert.equal(cardMatches(a, { text: '12' }), true);
+  assert.equal(cardMatches(b, { text: '12' }), false);
+  assert.equal(cardMatches(titled, { text: '12' }), false);
+  assert.equal(cardMatches(a, { text: '#12' }), true);
+  assert.equal(cardMatches(a, { text: '#12 #45' }), true);
+  assert.equal(cardMatches(titled, { text: '12, 45' }), true);
+  assert.equal(cardMatches(b, { text: '#12, #45' }), false);
+  assert.equal(cardMatches(titled, { text: 'Fix' }), true);
+});
+
+test('sort by created uses created timestamps', () => {
+  const older = card(1, 'building', 'building', { created: '2026-01-01T00:00:00.000Z' });
+  const newer = card(2, 'building', 'building', { created: '2026-08-01T00:00:00.000Z' });
+  assert.deepEqual(sortCards([newer, older], { col: 'created', dir: 'asc' }).map(c => c.num), [1, 2]);
+  assert.deepEqual(sortCards([older, newer], { col: 'created', dir: 'desc' }).map(c => c.num), [2, 1]);
+});

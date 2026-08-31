@@ -305,6 +305,15 @@ function isSafeRegular(stat) {
   return !!stat?.isFile() && stat.nlink === 1;
 }
 
+function fileTimes(stat) {
+  const updated = stat.mtime.toISOString();
+  const birthMs = stat.birthtimeMs;
+  const created = Number.isFinite(birthMs) && birthMs > 0
+    ? new Date(birthMs).toISOString()
+    : updated;
+  return { created, updated };
+}
+
 function requireSafeRegular(stat, message = 'docs path is not a single-link regular file') {
   if (!isSafeRegular(stat)) fail('E_INVALID', message);
 }
@@ -529,7 +538,7 @@ export function showScratchPad(dataDir) {
       id: SCRATCH_ID,
       title: title || 'Owner scratch',
       body,
-      updated: entry.stat.mtime.toISOString(),
+      ...fileTimes(entry.stat),
       bytes: entry.stat.size,
     };
   } finally {
@@ -571,7 +580,7 @@ function walkMd(dirFd, prefix, out) {
           const entry = readEntryAt(dirFd, name);
           const { title: front, body } = parseFront(entry.data);
           title = front || titleFromBody(body, title);
-          out.push({ path: rel, title, updated: entry.stat.mtime.toISOString(), bytes: entry.stat.size });
+          out.push({ path: rel, title, ...fileTimes(entry.stat), bytes: entry.stat.size });
         } catch { /* skip raced or unreadable files */ }
       }
     } catch { /* skip */ }
@@ -641,7 +650,7 @@ export function showDoc(dataDir, relPath) {
       path: target.rel,
       title: front || titleFromBody(body, basename(target.rel, '.md')),
       body,
-      updated: target.stat.mtime.toISOString(),
+      ...fileTimes(target.stat),
       bytes: target.stat.size,
     };
   } finally {

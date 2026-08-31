@@ -23,13 +23,27 @@ export function ownerVerifyQueue(cards) {
     .map(c => ({ card: c, ballot: openAcceptanceBallot(c) }));
 }
 
+export function cardNumberQuery(text) {
+  const parts = String(text || '').trim().split(/[\s,]+/).filter(Boolean);
+  if (!parts.length) return null;
+  const nums = [];
+  for (const part of parts) {
+    const m = part.match(/^#?(\d+)$/);
+    if (!m) return null;
+    nums.push(Number(m[1]));
+  }
+  return nums;
+}
+
 export function cardMatches(card, { text = '', workflow = 'all', priority = 'all', showClosed = false, milestone = null } = {}) {
   if (card.phase === 'done' && !showClosed) return false;
   if (milestone && card.milestoneId !== milestone) return false;
   if (priority !== 'all' && card.priority !== priority) return false;
   if (workflow !== 'all' && workflowRank(card) !== Number(workflow)) return false;
-  const needle = text.trim().toLowerCase();
-  return !needle || (`#${card.num}`).includes(needle) || card.title.toLowerCase().includes(needle);
+  const nums = cardNumberQuery(text);
+  if (nums) return nums.includes(Number(card.num));
+  const needle = String(text).trim().toLowerCase();
+  return !needle || (`#${card.num}`).includes(needle) || String(card.title || '').toLowerCase().includes(needle);
 }
 
 const priorityRank = (card, priorities) => {
@@ -42,6 +56,7 @@ const value = (card, col, priorities) => {
   if (col === 'workOrder') return card.workOrder ?? Infinity;
   if (col === 'priority') return priorityRank(card, priorities);
   if (col === 'updated') return card.updated || '';
+  if (col === 'created') return card.created || '';
   if (col === 'milestone') return card.milestoneId || '￿';  // unassigned sorts last
   if (col === 'lane') return card.lane?.label || '';
   if (col === 'num') return card.num ?? 0;

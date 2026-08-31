@@ -1647,7 +1647,7 @@ fn run() {{
         ^options_input, delimiter: "\t", header: true, skip_blank: true
     ) ?? panic("options reader")
     options_first :: options_reader.next() ?? panic("options first")
-    crlf :: String.from_bytes([U8]{"\x0D\x0A"}) ?? panic("crlf")
+    crlf :: String.from_bytes([U8]{{"\x0D\x0A"}}) ?? panic("crlf")
     if options_first == {{
         Val(row) -> {{ print(row.line); print(row.fields[0]); print(row.fields[1].replace(crlf, "|")) }}
         None -> {{ print("options-missing") }}

@@ -308,3 +308,17 @@ test('docs: archive moves to docs/archive and drops from list; delete still remo
   docs.deleteDoc(dataDir, 'docs/proposals/idea.md');
   assert.equal(existsSync(join(proj, 'docs/proposals/idea.md')), false);
 });
+
+test('docs: list and show include created and updated timestamps', () => {
+  const { dataDir } = projectLayout();
+  const index = docs.listDocs(dataDir);
+  const file = index.sections.find(s => s.id === 'proposals').files.find(f => f.path.endsWith('idea.md'));
+  assert.ok(file, 'proposal fixture is listed');
+  assert.match(file.created, /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(file.updated, /^\d{4}-\d{2}-\d{2}T/);
+  const shown = docs.showDoc(dataDir, file.path);
+  assert.match(shown.created, /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(shown.updated, /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(index.scratch.created, /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(index.scratch.updated, /^\d{4}-\d{2}-\d{2}T/);
+});

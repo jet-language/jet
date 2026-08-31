@@ -87,6 +87,7 @@ fn typed_target_machine_accepts_complete_board_facts() {
                 reason: "timer status register".to_string(),
             }),
         }],
+        required_capabilities: Vec::new(),
     };
     assert_eq!(sensor_machine().validate(&usage), Vec::new());
     let review = sensor_machine().safety_review(&usage);

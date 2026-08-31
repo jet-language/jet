@@ -1765,8 +1765,7 @@ impl<'a> Checker<'a> {
         // The fallback is the only branch that scans every module. Cache its
         // exact source spelling for this body checker, including misses and
         // ambiguities, so repeated expression nodes do not repeat the scan.
-        let cache_key = type_name.to_owned();
-        if let Some(owner) = self.nominal_owner_cache.borrow().get(&cache_key) {
+        if let Some(owner) = self.nominal_owner_cache.borrow().get(type_name) {
             return *owner;
         }
         let mut found = None;
@@ -1781,7 +1780,7 @@ impl<'a> Checker<'a> {
         }
         self.nominal_owner_cache
             .borrow_mut()
-            .insert(cache_key, found);
+            .insert(type_name.to_owned(), found);
         found
     }
 

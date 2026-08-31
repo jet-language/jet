@@ -14,18 +14,46 @@ impl<'a> Checker<'a> {
     /// The candidate is keyed by the binding statement so a statement-local
     /// `#allow(complete_ascii_case_ladder)` is already active when it emits.
     pub(crate) fn prepare_stdlib_lint_block(&mut self, stmts: &[Stmt]) {
+        let mut ascii_lower_landed = None;
+        let mut ascii_upper_landed = None;
+        let mut replace_landed = None;
         for index in 0..stmts.len() {
             let Some((binding, lower, last_end)) = ascii_ladder(stmts, index) else {
                 continue;
             };
-            let direction = if lower { "to_ascii_lower" } else { "to_ascii_upper" };
-            if crate::Collections::builtin_method_return(&Type::String, direction, 0, false)
-                != Some(Some(Type::String))
-                || crate::Collections::builtin_method_return(&Type::String, "replace", 2, false)
-                    != Some(Some(Type::String))
-            {
+            let direction_landed = if lower {
+                *ascii_lower_landed.get_or_insert_with(|| {
+                    crate::Collections::builtin_method_return(
+                        &Type::String,
+                        "to_ascii_lower",
+                        0,
+                        false,
+                    ) == Some(Some(Type::String))
+                })
+            } else {
+                *ascii_upper_landed.get_or_insert_with(|| {
+                    crate::Collections::builtin_method_return(
+                        &Type::String,
+                        "to_ascii_upper",
+                        0,
+                        false,
+                    ) == Some(Some(Type::String))
+                })
+            };
+            if !direction_landed {
                 continue;
             }
+            if !*replace_landed.get_or_insert_with(|| {
+                crate::Collections::builtin_method_return(
+                    &Type::String,
+                    "replace",
+                    2,
+                    false,
+                ) == Some(Some(Type::String))
+            }) {
+                continue;
+            }
+            let direction = if lower { "to_ascii_lower" } else { "to_ascii_upper" };
             let Some(prefix) = self
                 .source
                 .get(binding.name_span.start..binding.init.span().start)
@@ -84,35 +112,23 @@ impl<'a> Checker<'a> {
         let Some((receiver, method_span)) = direct_fs_walk(self, collection) else {
             return;
         };
-        let Some(filter_index) = body
-            .iter()
-            .enumerate()
-            .find_map(|(index, stmt)| is_directory_filter(stmt, var).then_some(index))
-        else {
+        let Some(filter) = body.first() else {
             return;
         };
-        // The filter must run before any other loop-visible work. Replacing
-        // the source walk with a file-only walk would otherwise suppress that
-        // earlier work for directory entries.
-        if filter_index != 0 {
-            return;
-        }
-        if body
-            .iter()
-            .enumerate()
-            .any(|(index, stmt)| index != filter_index && stmt_has_control_flow(stmt))
-        {
+        // A matching filter after the first statement was already rejected;
+        // checking only the first statement avoids a second body walk.
+        if !is_directory_filter(filter, var) {
             return;
         }
         let mut path_uses = 0usize;
-        if body.iter().enumerate().any(|(index, stmt)| {
-            index != filter_index && {
-                let (ok, uses) = stmt_uses_only_path(stmt, var);
-                path_uses += uses;
-                !ok
+        for stmt in body.iter().skip(1) {
+            let facts = stmt_lint_facts(stmt, var);
+            if facts.has_control_flow(stmt) || !facts.uses_only_path() {
+                return;
             }
-        }) || path_uses == 0
-        {
+            path_uses += facts.path_uses;
+        }
+        if path_uses == 0 {
             return;
         }
         let Some(edit) = walk_files_edit(self, receiver, method_span) else {
@@ -122,7 +138,6 @@ impl<'a> Checker<'a> {
             .push(Diagnostic::from_row("L0522", &[], Some(edit.span)).with_edit(edit));
     }
 }
-
 fn direct_fs_walk<'a>(checker: &Checker<'_>, expr: &'a Expr) -> Option<(&'a Expr, Span)> {
     match expr.without_parens() {
         Expr::OrFallback { value, .. } | Expr::Try(value, ..) => {
@@ -186,37 +201,222 @@ fn is_directory_filter(stmt: &Stmt, var: &str) -> bool {
         && matches!(arm.body[0], Stmt::Continue(_))
 }
 
-fn stmt_uses_only_path(stmt: &Stmt, var: &str) -> (bool, usize) {
-    let mut allowed = HashSet::new();
-    let mut path_uses = 0usize;
-    stmt.for_each_expr(|expr| {
-        expr.for_each_expr(|nested| {
-            if let Expr::Field(base, field, _) = nested.without_parens() {
-                if field == "path"
-                    && matches!(
-                        base.without_parens(),
-                        Expr::Ident(name, span) if name == var && { allowed.insert(*span); true }
-                    )
-                {
-                    path_uses += 1;
-                }
-            }
-        });
-    });
-    let mut ok = true;
-    stmt.for_each_expr(|expr| {
-        expr.for_each_expr(|nested| {
-            if let Expr::Ident(name, span) = nested.without_parens() {
-                if name == var && !allowed.contains(span) {
-                    ok = false;
-                }
-            }
-        });
-    });
-    (ok, path_uses)
+#[derive(Default)]
+struct StmtLintFacts {
+    path_uses: usize,
+    allowed_path_bases: HashSet<Span>,
+    variable_uses: Vec<Span>,
+    has_fallback_exit: bool,
 }
 
-fn stmt_has_early_exit(stmt: &Stmt) -> bool {
+impl StmtLintFacts {
+    fn uses_only_path(&self) -> bool {
+        self.variable_uses
+            .iter()
+            .all(|span| self.allowed_path_bases.contains(span))
+    }
+
+    fn has_control_flow(&self, stmt: &Stmt) -> bool {
+        self.has_fallback_exit || stmt_has_structural_control_flow(stmt)
+    }
+}
+
+fn stmt_lint_facts(stmt: &Stmt, var: &str) -> StmtLintFacts {
+    let mut copy = stmt.clone();
+    let mut facts = StmtLintFacts::default();
+    scan_stmt_exprs(&mut copy, var, &mut facts);
+    facts
+}
+
+fn scan_expr(expr: &mut Expr, var: &str, facts: &mut StmtLintFacts, check_fallback: bool) {
+    expr.for_each_expr_mut(|nested| {
+        let shape = nested.without_parens();
+        if let Expr::Field(base, field, _) = shape {
+            if field == "path" {
+                if let Expr::Ident(name, span) = base.without_parens() {
+                    if name == var {
+                        facts.allowed_path_bases.insert(*span);
+                        facts.path_uses += 1;
+                    }
+                }
+            }
+        }
+        if let Expr::Ident(name, span) = shape {
+            if name == var {
+                facts.variable_uses.push(*span);
+            }
+        }
+        if check_fallback && is_fallback_exit_expr(nested) {
+            facts.has_fallback_exit = true;
+        }
+    });
+}
+
+fn scan_lvalue(lvalue: &mut LValue, var: &str, facts: &mut StmtLintFacts) {
+    match lvalue {
+        LValue::Local { .. } => {}
+        LValue::Index { base, index, .. } => {
+            scan_expr(base, var, facts, false);
+            scan_expr(index, var, facts, false);
+        }
+        LValue::Field { base, .. } => scan_expr(base, var, facts, false),
+    }
+}
+
+fn scan_for_kind(kind: &mut ForKind, var: &str, facts: &mut StmtLintFacts) {
+    match kind {
+        ForKind::Range {
+            start, end, step, ..
+        } => {
+            scan_expr(start, var, facts, true);
+            scan_expr(end, var, facts, true);
+            if let Some(step) = step {
+                scan_expr(step, var, facts, true);
+            }
+        }
+        ForKind::In { collection, step } => {
+            scan_expr(collection, var, facts, true);
+            if let Some(step) = step {
+                scan_expr(step, var, facts, true);
+            }
+        }
+    }
+}
+
+fn scan_body(body: &mut [Stmt], var: &str, facts: &mut StmtLintFacts) {
+    for stmt in body {
+        scan_stmt_exprs(stmt, var, facts);
+    }
+}
+
+fn scan_stmt_exprs(stmt: &mut Stmt, var: &str, facts: &mut StmtLintFacts) {
+    match stmt {
+        Stmt::Expr(expr) => scan_expr(expr, var, facts, true),
+        Stmt::Val(binding) => scan_expr(&mut binding.init, var, facts, true),
+        Stmt::Assign { target, value, .. } => {
+            scan_lvalue(target, var, facts);
+            scan_expr(value, var, facts, true);
+        }
+        Stmt::Return(value, ..) => {
+            if let Some(value) = value {
+                scan_expr(value, var, facts, true);
+            }
+        }
+        Stmt::While { cond, body, .. } => {
+            scan_expr(cond, var, facts, true);
+            scan_body(body, var, facts);
+        }
+        Stmt::For { kind, body, .. } => {
+            scan_for_kind(kind, var, facts);
+            scan_body(body, var, facts);
+        }
+        Stmt::Switch {
+            subject,
+            arms,
+            else_body,
+            ..
+        }
+        | Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
+            scan_expr(subject, var, facts, false);
+            for arm in arms {
+                scan_expr(&mut arm.cond, var, facts, true);
+                scan_body(&mut arm.body, var, facts);
+            }
+            if let Some(body) = else_body {
+                scan_body(body, var, facts);
+            }
+        }
+        Stmt::BreakValue(value, ..)
+        | Stmt::Yield(value, ..) => scan_expr(value, var, facts, true),
+        Stmt::BreakLabelValue(_, _, value, ..) => scan_expr(value, var, facts, true),
+        Stmt::Loop { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
+        | Stmt::Switched { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::Transact { body, .. } => scan_body(body, var, facts),
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
+            scan_expr(&mut init.init, var, facts, true);
+            scan_expr(cond, var, facts, true);
+            if let Some(step) = step {
+                scan_stmt_exprs(step, var, facts);
+            }
+            scan_body(body, var, facts);
+        }
+        Stmt::Unsafe {
+            audit_expr, body, ..
+        } => {
+            if let Some(audit_expr) = audit_expr {
+                scan_expr(audit_expr, var, facts, false);
+            }
+            scan_body(body, var, facts);
+        }
+        Stmt::Impure {
+            reason_expr, body, ..
+        } => {
+            if let Some(reason_expr) = reason_expr {
+                scan_expr(reason_expr, var, facts, false);
+            }
+            scan_body(body, var, facts);
+        }
+        Stmt::TaskGroup { limit, body, .. } => {
+            if let Some(limit) = limit {
+                scan_expr(limit, var, facts, true);
+            }
+            scan_body(body, var, facts);
+        }
+        Stmt::Layout { body, .. } => scan_body(body, var, facts),
+        Stmt::AuthorityScope { body, .. } => scan_body(body, var, facts),
+        Stmt::ComptimeIf {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            scan_expr(cond, var, facts, true);
+            scan_body(then_body, var, facts);
+            if let Some(body) = else_body {
+                scan_body(body, var, facts);
+            }
+        }
+        Stmt::ContextBlock { fields, body, .. } => {
+            for (_, value, _) in fields {
+                scan_expr(value, var, facts, false);
+            }
+            scan_body(body, var, facts);
+        }
+        Stmt::AssumeDet {
+            reason_expr, body, ..
+        } => {
+            scan_expr(reason_expr, var, facts, false);
+            scan_body(body, var, facts);
+        }
+        Stmt::ScopeMember { args, body, .. } => {
+            for arg in args {
+                scan_expr(arg, var, facts, false);
+            }
+            scan_body(body, var, facts);
+        }
+        Stmt::DeferClose { close, .. } => scan_expr(close, var, facts, true),
+        Stmt::Break(..) | Stmt::Continue(..) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
+    }
+}
+
+fn stmt_has_structural_control_flow(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Return(..)
         | Stmt::Break(..)
@@ -225,66 +425,8 @@ fn stmt_has_early_exit(stmt: &Stmt) -> bool {
         | Stmt::BreakLabel(..)
         | Stmt::BreakLabelValue(..)
         | Stmt::ContinueLabel(..)
-        | Stmt::Yield(..) => true,
-        Stmt::Expr(expr) => expr_has_fallback_exit(expr),
-        Stmt::Val(binding) => expr_has_fallback_exit(&binding.init),
-        Stmt::Assign { value, .. } => expr_has_fallback_exit(value),
-        Stmt::While { .. }
-        | Stmt::For { .. }
-        | Stmt::Loop { .. }
-        | Stmt::CountedLoop { .. } => true,
-        Stmt::Switch {
-            arms, else_body, ..
-        }
-        | Stmt::ComptimeSwitch {
-            arms, else_body, ..
-        } => {
-            arms.iter().any(|arm| {
-                expr_has_fallback_exit(&arm.cond) || body_has_early_exit(&arm.body)
-            }) || else_body
-                .as_deref()
-                .is_some_and(body_has_early_exit)
-        }
-        Stmt::ComptimeIf {
-            cond,
-            then_body,
-            else_body,
-            ..
-        } => {
-            expr_has_fallback_exit(cond)
-                || body_has_early_exit(then_body)
-                || else_body
-                    .as_deref()
-                    .is_some_and(body_has_early_exit)
-        }
-        Stmt::Unsafe { body, .. }
-        | Stmt::Impure { body, .. }
-        | Stmt::Reactive { body, .. }
-        | Stmt::Shield { body, .. }
-        | Stmt::Switched { body, .. }
-        | Stmt::Region { body, .. }
-        | Stmt::Policy { body, .. }
-        | Stmt::ComptimeBlock { body, .. }
-        | Stmt::ContextBlock { body, .. }
-        | Stmt::AuthorityScope { body, .. }
-        | Stmt::Live { body, .. }
-        | Stmt::AssumeDet { body, .. }
-        | Stmt::Transact { body, .. }
-        | Stmt::ScopeMember { body, .. } => body_has_early_exit(body),
-        Stmt::TaskGroup { body, limit, .. } => {
-            limit.as_ref().is_some_and(expr_has_fallback_exit) || body_has_early_exit(body)
-        }
-        Stmt::Layout { body, .. } => body_has_early_exit(body),
-        Stmt::DeferClose { close, .. } => expr_has_fallback_exit(close),
-    }
-}
-
-fn stmt_has_control_flow(stmt: &Stmt) -> bool {
-    if stmt_has_early_exit(stmt) {
-        return true;
-    }
-    match stmt {
-        Stmt::While { .. }
+        | Stmt::Yield(..)
+        | Stmt::While { .. }
         | Stmt::For { .. }
         | Stmt::Loop { .. }
         | Stmt::CountedLoop { .. }
@@ -306,30 +448,20 @@ fn stmt_has_control_flow(stmt: &Stmt) -> bool {
         | Stmt::AssumeDet { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::ScopeMember { body, .. }
-        | Stmt::Layout { body, .. } => body.iter().any(stmt_has_control_flow),
-        _ => false,
+        | Stmt::Layout { body, .. } => body.iter().any(stmt_has_structural_control_flow),
+        Stmt::Expr(..) | Stmt::Val(..) | Stmt::Assign { .. } | Stmt::DeferClose { .. } => false,
     }
 }
 
-fn body_has_early_exit(body: &[Stmt]) -> bool {
-    body.iter().any(stmt_has_early_exit)
+fn is_fallback_exit_expr(expr: &Expr) -> bool {
+    matches!(expr, Expr::OrFallback { .. } | Expr::Try(..) | Expr::Todo { .. })
+        || matches!(
+            expr,
+            Expr::Call(crate::AST::Call { name, .. })
+                if name == crate::Syntax::BUILTIN_PANIC
+        )
 }
 
-fn expr_has_fallback_exit(expr: &Expr) -> bool {
-    let mut found = false;
-    expr.for_each_expr(|nested| {
-        if matches!(nested, Expr::OrFallback { .. } | Expr::Try(..) | Expr::Todo { .. })
-            || matches!(
-                nested,
-                Expr::Call(crate::AST::Call { name, .. })
-                    if name == crate::Syntax::BUILTIN_PANIC
-            )
-        {
-            found = true;
-        }
-    });
-    found
-}
 
 fn ascii_ladder(stmts: &[Stmt], index: usize) -> Option<(&crate::AST::Binding, bool, usize)> {
     let Stmt::Val(binding) = stmts.get(index)? else {

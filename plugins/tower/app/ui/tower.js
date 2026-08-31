@@ -1,5 +1,5 @@
 import {
-  boardEpochs, cardMatches, sortCards, ownerVerifyQueue, openAcceptanceBallot,
+  boardEpochs, cardMatches, cardNumberQuery, sortCards, ownerVerifyQueue, openAcceptanceBallot,
 } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
 import { buildDoneMessageQueue, renderDoneMessageQueue } from './done-messages.js';
@@ -246,6 +246,13 @@ function ageChip(iso) {
   if (h < 6) return '';
   const label = h < 48 ? Math.round(h) + 'h' : Math.round(h / 24) + 'd';
   return `<span class="agechip ${h > 72 ? 'agechip--hot' : ''}" title="waiting ${label}">${label}</span>`;
+}
+function dateDay(iso) {
+  if (!iso) return '—';
+  const raw = String(iso);
+  const d = new Date(raw.length <= 10 ? `${raw}T00:00:00Z` : raw);
+  if (Number.isNaN(d.getTime())) return raw.slice(0, 10) || '—';
+  return d.toISOString().slice(0, 10);
 }
 const ageOf = (it) => ['done', 'message'].includes(it.type)
   ? it.at
@@ -579,6 +586,7 @@ function cardTile(c) {
         ${c.openQ ? `<span class="card__q">✎ ${esc(c.openQ)}</span>` : ''}
       </div>
       <h3 class="card__title">${esc(c.title)}</h3>
+      <span class="card__dates">created ${esc(dateDay(c.created))} · edited ${esc(dateDay(c.updated))}</span>
       <span class="card__lane ${who}"><span class="pip"></span>${esc(c.lane.label)}</span>
     </button>`);
   node.addEventListener('click', () => {
@@ -635,6 +643,7 @@ let radarWorkflow = 'all';
 let radarPriority = 'all';
 let radarShowClosed = false;
 let radarMilestone = null;   // milestone id — drills the board down to one milestone
+let radarRecent = false;     // flatten all cards, newest first
 let radarSort = { col: 'workflow', dir: 'asc' };
 
 const milestoneById = (id) => boardMilestones(radarShowClosed).find(m => m.id === id) || null;
@@ -660,12 +669,13 @@ function viewBoard() {
       <div class="viewhead__actions">
         <button class="btn btn--ghost" id="legend-btn" title="What the colors mean">Key</button>
         <button class="btn btn--ghost" id="radar-mode" title="Switch between table rows and card tiles">${cardsMode ? '☰ Table view' : '⊞ Card view'}</button>
+        <button class="btn btn--ghost" id="radar-recent" title="Show every card in one list, newest first" aria-pressed="${radarRecent}">${radarRecent ? '☰ Epochs' : 'Recent'}</button>
         <button class="btn btn--red" id="new-card">+ New card</button>
       </div></div>
     <div class="capture"><input id="idea-input" placeholder="Capture an idea — it waits in Ideas until you make it a card…">
       <button class="btn" id="idea-btn">Capture</button></div>
     <div class="radar-tools">
-      <input id="radar-filter" aria-label="Filter cards" placeholder="Filter by # or title…" value="${esc(radarFilterText)}">
+      <input id="radar-filter" aria-label="Filter cards" placeholder="Search #12 #45 or a title…" value="${esc(radarFilterText)}">
       <select id="radar-workflow" aria-label="Filter by workflow">
         <option value="all">All work</option>
         <option value="0" ${radarWorkflow === '0' ? 'selected' : ''}>In progress</option>
@@ -680,7 +690,7 @@ function viewBoard() {
       <select id="radar-sort" aria-label="Sort cards">
         ${[
           ['workflow', 'Workflow'], ['workOrder', 'Work order'], ['priority', 'Priority'],
-          ['updated', 'Updated'], ['num', 'Card number'], ['title', 'Title'],
+          ['updated', 'Modified'], ['created', 'Created'], ['num', 'Card number'], ['title', 'Title'],
         ].map(([value, label]) => `<option value="${value}" ${radarSort.col === value ? 'selected' : ''}>Sort: ${label}</option>`).join('')}
       </select>
       <button class="btn btn--ghost" id="radar-direction" aria-label="Reverse sort" title="Reverse sort">${radarSort.dir === 'asc' ? '↑' : '↓'}</button>
@@ -701,6 +711,13 @@ function viewBoard() {
   $('#idea-btn').addEventListener('click', fire);
   $('#idea-input').addEventListener('keydown', e => { if (e.key === 'Enter') fire(); });
   $('#radar-mode').addEventListener('click', () => api('ui/toggle', { key: 'radar-cards' }));
+  $('#radar-recent').addEventListener('click', () => {
+    radarRecent = !radarRecent;
+    if (radarRecent && radarSort.col !== 'created' && radarSort.col !== 'updated') {
+      radarSort = { col: 'updated', dir: 'desc' };
+    }
+    viewBoard();
+  });
   $('#radar-filter').addEventListener('input', (e) => { radarFilterText = e.target.value; renderRadarBody(); });
   $('#radar-workflow').addEventListener('change', (e) => { radarWorkflow = e.target.value; renderRadarBody(); });
   $('#radar-priority').addEventListener('change', (e) => { radarPriority = e.target.value; renderRadarBody(); });
@@ -750,7 +767,7 @@ function renderRadarBody() {
       .catch(() => { if (radarShowClosed) body.innerHTML = '<p class="epoch__goal">Closed cards unavailable.</p>'; });
     return;
   }
-  const needle = radarFilterText.trim().toLowerCase();
+  const needle = radarFilterText.trim();
   const cardsMode = isOpen('radar-cards', false);
   const cards = boardCards(radarShowClosed);
   const radar = boardEpochs(boardRadar(radarShowClosed), S.epochs, cards, boardMilestones(radarShowClosed), radarShowClosed);
@@ -766,6 +783,20 @@ function renderRadarBody() {
     body.appendChild(milestoneFilterBar(drill));
     const hits = cards.filter(c => radarMatches(c, needle));
     body.appendChild(hits.length ? radarList('mile:' + drill.id, hits, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
+    if (focused) $('#radar-filter')?.focus();
+    return;
+  }
+
+  const hits = cards.filter(c => radarMatches(c, needle));
+  if (needle) {
+    body.appendChild(searchFilterBar(needle, hits.length));
+    body.appendChild(hits.length ? radarList('search', hits, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
+    if (focused) $('#radar-filter')?.focus();
+    return;
+  }
+  if (radarRecent) {
+    body.appendChild(recentFilterBar(hits.length));
+    body.appendChild(hits.length ? radarList('recent', hits, cardsMode) : el(`<p class="epoch__goal">no cards</p>`));
     if (focused) $('#radar-filter')?.focus();
     return;
   }
@@ -806,6 +837,36 @@ function milestoneFilterBar(m) {
   return bar;
 }
 
+function searchFilterBar(text, count) {
+  const nums = cardNumberQuery(text);
+  const label = nums ? nums.map(n => `#${n}`).join(' ') : text;
+  const bar = el(`<div class="milefilter">
+      <span class="milefilter__tag">Search</span>
+      <span class="milefilter__t">${esc(label)}</span>
+      <span class="milefilter__n">${count} card${count === 1 ? '' : 's'}</span>
+      <button class="btn btn--sm" data-clear>Clear filter ✕</button>
+    </div>`);
+  $('[data-clear]', bar).addEventListener('click', () => {
+    radarFilterText = '';
+    const input = $('#radar-filter');
+    if (input) input.value = '';
+    renderRadarBody();
+  });
+  return bar;
+}
+
+function recentFilterBar(count) {
+  const by = radarSort.col === 'created' ? 'created' : 'modified';
+  const bar = el(`<div class="milefilter">
+      <span class="milefilter__tag">Recent</span>
+      <span class="milefilter__t">sorted by ${by}</span>
+      <span class="milefilter__n">${count} card${count === 1 ? '' : 's'}</span>
+      <button class="btn btn--sm" data-clear>Epochs ✕</button>
+    </div>`);
+  $('[data-clear]', bar).addEventListener('click', () => { radarRecent = false; viewBoard(); });
+  return bar;
+}
+
 // ---- legend / key ----------------------------------------------------------
 const STAGE_HELP = [
   ['deciding', 'Deciding', 'Blocked on a decision (owner)'],
@@ -833,7 +894,7 @@ function openLegend() {
       <div class="modal__h">Blue = finished</div>
       <p class="prose">A completed card reads <b style="color:var(--blue)">blue</b> on the beacon and in the Now queue. Blue is news, not a duty — nothing blue is waiting on you.</p>
       <div class="modal__h">Milestone tag</div>
-      <p class="prose">The <span class="card__mile">UL4</span>-style chip on a card is its milestone. Click a milestone row — or that chip in the table — to show only its cards. “Count remaining” flips every milestone and epoch tally from done-of-total to work left.</p>
+      <p class="prose">The <span class="card__mile">UL4</span>-style chip on a card is its milestone. Click a milestone row — or that chip in the table — to show only its cards. Typing a card number in Search does the same: matching cards come up in one list. “Count remaining” flips every milestone and epoch tally from done-of-total to work left.</p>
       <div class="modal__h">Priority chips</div>
       <div class="legend">
         <div class="legend__row"><span class="prio prio-P0">P0</span><span class="legend__desc">Urgent — red (glows)</span></div>
@@ -931,16 +992,11 @@ const OPS_COLS = [
   { k: 'lane', label: 'Lane' },
   { k: 'priority', label: 'Priority' },
   { k: 'workOrder', label: 'Order' },
-  { k: 'updated', label: 'Updated' },
+  { k: 'created', label: 'Created' },
+  { k: 'updated', label: 'Modified' },
 ];
 function sortOpsRows(key, cards) {
   return sortCards(cards, radarSort, CFG().priorities);
-}
-function ageAgo(dateStr) {
-  if (!dateStr) return '—';
-  const days = Math.floor((Date.now() - new Date(dateStr + 'T00:00:00Z').getTime()) / 86_400_000);
-  if (days <= 0) return 'today';
-  return `${days}d`;
 }
 
 function opsTable(key, cards) {
@@ -950,7 +1006,7 @@ function opsTable(key, cards) {
     </tr></thead><tbody></tbody></table></div>`);
   wrap.querySelectorAll('th').forEach(th => th.addEventListener('click', () => {
     const col = th.dataset.col;
-    radarSort = radarSort.col === col ? { col, dir: radarSort.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' };
+    radarSort = radarSort.col === col ? { col, dir: radarSort.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: (col === 'created' || col === 'updated') ? 'desc' : 'asc' };
     viewBoard();
   }));
   const tbody = $('tbody', wrap);
@@ -969,7 +1025,8 @@ function opsRow(c) {
       <td><span class="card__lane ${who}"><span class="pip"></span>${esc(c.lane.label)}</span></td>
       <td class="ops__prio"></td>
       <td class="ops__wo"></td>
-      <td class="num">${ageAgo(c.updated)}</td>
+      <td class="num">${esc(dateDay(c.created))}</td>
+      <td class="num">${esc(dateDay(c.updated))}</td>
     </tr>`);
 
   $('[data-mile]', tr)?.addEventListener('click', (ev) => { ev.stopPropagation(); setMilestoneFilter(c.milestoneId); });
@@ -1040,6 +1097,7 @@ function renderDetail(c) {
       <button class="modal__x" title="Close (Esc)">×</button></div>
     <div class="modal__body">
       <h2 class="modal__title" contenteditable="plaintext-only" data-fld="title">${esc(c.title)}</h2>
+      <p class="card__dates">created ${esc(dateDay(c.created))} · edited ${esc(dateDay(c.updated))}</p>
       ${cta ? `<div class="modal__cta">${cta}</div>` : ''}
       <div class="fields">
         <div class="fld"><div class="fld__k">Stage</div><select data-fld="phase">${S.phases.map(p => `<option value="${esc(p.id)}" ${p.id === phase ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>
@@ -1328,11 +1386,29 @@ let docsMode = 'compose'; // 'compose' | 'source'
 let docsOpen = {};      // section id → bool (every section collapsed until opened)
 let docsDraft = null;   // { key, body } preserved across mode toggles
 let docsBrowse = false; // mobile: file browser and reader are separate views
+let docsSort = 'folders'; // 'folders' | 'updated' | 'created'
 const docsKey = (sel) => sel?.kind === 'scratch' ? 'scratch' : (sel?.path || '');
 const setDocsBrowse = (open) => {
   docsBrowse = open;
   $('.docs')?.classList.toggle('docs--browse', open);
 };
+
+function docsDateLine(f) {
+  return `created ${dateDay(f?.created)} · edited ${dateDay(f?.updated)}`;
+}
+function docsFileButton(f, { scratch = false } = {}) {
+  const on = scratch
+    ? docsSel?.kind === 'scratch'
+    : docsSel?.kind === 'doc' && docsSel.path === f.path;
+  const path = scratch ? 'scratchpad' : String(f.path || '').replace(/^docs\//, '');
+  const b = el(`<button class="docs__item${scratch ? ' docs__item--scratch' : ''}${on ? ' on' : ''}" type="button">
+      <b>${esc(f?.title || (scratch ? 'Owner scratch' : ''))}</b>
+      <span>${esc(path)}</span>
+      <span class="docs__dates">${esc(docsDateLine(f))}</span>
+    </button>`);
+  b.addEventListener('click', () => openDocsFile(scratch ? { kind: 'scratch' } : { kind: 'doc', path: f.path }));
+  return b;
+}
 
 const docsGet = async (qs = '') => {
   const r = await fetch('/api/docs' + qs);
@@ -1360,56 +1436,67 @@ async function viewDocs() {
   const sections = docsCache.sections || [];
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Docs</h1>
       <span class="viewhead__sub">scratchpad + durable markdown under docs/</span>
+      <div class="viewhead__actions docs__sort">
+        <button class="btn btn--ghost btn--sm" data-docs-sort="folders" aria-pressed="${docsSort === 'folders'}">Folders</button>
+        <button class="btn btn--ghost btn--sm" data-docs-sort="updated" aria-pressed="${docsSort === 'updated'}">Modified</button>
+        <button class="btn btn--ghost btn--sm" data-docs-sort="created" aria-pressed="${docsSort === 'created'}">Created</button>
+      </div>
     </div>
     <div class="docs${docsBrowse ? ' docs--browse' : ''}">
       <aside class="docs__side" id="docs-side"></aside>
       <section class="docs__main" id="docs-main"><div class="empty"><div class="empty__glyph">✎</div><div>Pick a file to edit.</div></div></section>
     </div>`;
 
-  const side = $('#docs-side');
-  // Scratchpad always first
-  const sc = docsCache.scratch;
-  const scBtn = el(`<button class="docs__item docs__item--scratch${docsSel?.kind === 'scratch' ? ' on' : ''}" type="button">
-      <b>${esc(sc?.title || 'Owner scratch')}</b><span>scratchpad</span></button>`);
-  scBtn.addEventListener('click', () => openDocsFile({ kind: 'scratch' }));
-  side.appendChild(el(`<div class="docs__label">Scratchpad</div>`));
-  side.appendChild(scBtn);
+  v.querySelectorAll('[data-docs-sort]').forEach(btn => {
+    btn.addEventListener('click', () => { docsSort = btn.dataset.docsSort; viewDocs(); });
+  });
 
-  for (const sec of sections) {
-    if (sec.id === 'other' && !sec.files.length) continue;
-    const open = docsOpen[sec.id] ?? false;
-    const head = el(`<button class="docs__sec" type="button" aria-expanded="${open}">
-      <span class="docs__chev">${open ? '▾' : '▸'}</span>
-      <span>${esc(sec.label)}</span>
-      <span class="docs__sec-n">${sec.files.length}</span>
-      ${sec.id !== 'other' ? `<span class="docs__sec-add" data-add="${esc(sec.id)}" title="New file">+</span>` : ''}
-    </button>`);
-    head.addEventListener('click', (ev) => {
-      if (ev.target.closest('[data-add]')) return;
-      docsOpen[sec.id] = !open;
-      viewDocs();
-    });
-    $('[data-add]', head)?.addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      const title = prompt(`New ${sec.label.slice(0, -1).toLowerCase()} title`);
-      if (!title) return;
-      const n = await docsPost('add', { section: sec.id, title, body: `# ${title}\n\n` });
-      await loadDocsIndex();
-      docsSel = { kind: 'doc', path: n.path };
-      await viewDocs();
-      await openDocsFile(docsSel);
-    });
-    side.appendChild(head);
-    if (!open) continue;
+  const side = $('#docs-side');
+  const sc = docsCache.scratch;
+  side.appendChild(el(`<div class="docs__label">Scratchpad</div>`));
+  side.appendChild(docsFileButton(sc || { title: 'Owner scratch' }, { scratch: true }));
+
+  if (docsSort !== 'folders') {
+    const files = sections.flatMap(sec => sec.files || [])
+      .sort((a, b) => String(b[docsSort] || '').localeCompare(String(a[docsSort] || ''))
+        || a.path.localeCompare(b.path));
+    side.appendChild(el(`<div class="docs__label">${docsSort === 'created' ? 'By created' : 'By modified'}</div>`));
     const wrap = el('<div class="docs__files"></div>');
-    if (!sec.files.length) wrap.appendChild(el(`<div class="docs__empty">Empty</div>`));
-    for (const f of sec.files) {
-      const b = el(`<button class="docs__item${docsSel?.kind === 'doc' && docsSel.path === f.path ? ' on' : ''}" type="button">
-        <b>${esc(f.title)}</b><span>${esc(f.path.replace(/^docs\//, ''))}</span></button>`);
-      b.addEventListener('click', () => openDocsFile({ kind: 'doc', path: f.path }));
-      wrap.appendChild(b);
-    }
+    if (!files.length) wrap.appendChild(el(`<div class="docs__empty">Empty</div>`));
+    for (const f of files) wrap.appendChild(docsFileButton(f));
     side.appendChild(wrap);
+  } else {
+    for (const sec of sections) {
+      if (sec.id === 'other' && !sec.files.length) continue;
+      const open = docsOpen[sec.id] ?? false;
+      const head = el(`<button class="docs__sec" type="button" aria-expanded="${open}">
+        <span class="docs__chev">${open ? '▾' : '▸'}</span>
+        <span>${esc(sec.label)}</span>
+        <span class="docs__sec-n">${sec.files.length}</span>
+        ${sec.id !== 'other' ? `<span class="docs__sec-add" data-add="${esc(sec.id)}" title="New file">+</span>` : ''}
+      </button>`);
+      head.addEventListener('click', (ev) => {
+        if (ev.target.closest('[data-add]')) return;
+        docsOpen[sec.id] = !open;
+        viewDocs();
+      });
+      $('[data-add]', head)?.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const title = prompt(`New ${sec.label.slice(0, -1).toLowerCase()} title`);
+        if (!title) return;
+        const n = await docsPost('add', { section: sec.id, title, body: `# ${title}\n\n` });
+        await loadDocsIndex();
+        docsSel = { kind: 'doc', path: n.path };
+        await viewDocs();
+        await openDocsFile(docsSel);
+      });
+      side.appendChild(head);
+      if (!open) continue;
+      const wrap = el('<div class="docs__files"></div>');
+      if (!sec.files.length) wrap.appendChild(el(`<div class="docs__empty">Empty</div>`));
+      for (const f of sec.files) wrap.appendChild(docsFileButton(f));
+      side.appendChild(wrap);
+    }
   }
 
   if (docsSel?.kind === 'scratch') await openDocsFile(docsSel, { keepBrowse: docsBrowse });
@@ -1440,7 +1527,7 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
   main.innerHTML = `<div class="docs__toolbar">
       <button class="btn btn--sm docs__files-btn" id="docs-files">Files</button>
       <div class="docs__title">${esc(n.title)}</div>
-      <span class="docs__meta">${esc(pathLabel)} · ${esc((n.updated || '').slice(0, 19).replace('T', ' '))}</span>
+      <span class="docs__meta">${esc(pathLabel)} · ${esc(docsDateLine(n))}</span>
       <button class="btn btn--sm" id="docs-mode">${docsMode === 'compose' ? 'Source' : 'Compose'}</button>
       <button class="btn btn--sm btn--red" id="docs-save" ${docsDirty ? '' : 'disabled'}>Save</button>
       ${canArchive ? '<button class="btn btn--sm" id="docs-arch" title="Move to docs/archive/ (hidden from this UI)">Archive</button>' : ''}

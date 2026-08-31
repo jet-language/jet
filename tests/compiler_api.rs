@@ -391,8 +391,6 @@ fn compiler_api_failures_are_typed_and_schema_checked() {
         jet::AST::CtValue::Failed(jet::AST::CtReport::Told(_))
     ));
 }
-
-
 #[test]
 fn package_views_read_real_inputs_through_comptime_and_match_goldens() {
     let root = std::env::temp_dir().join(format!(
@@ -530,6 +528,30 @@ fn package_views_remain_compile_time_only() {
         "diagnostic must teach the phase boundary: {diagnostics:?}"
     );
 }
+
+#[test]
+fn package_views_reject_config_paths_outside_the_pinned_root() {
+    let root = std::env::temp_dir().join(format!(
+        "jet_compiler_package_view_escape_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).expect("create package escape fixture");
+    fs::write(
+        root.join("package.jet"),
+        "name: \"escape\"\nversion: \"1.0.0\"\nconfigs: [\"../outside.jet\"]\n",
+    )
+    .expect("write escaping package fixture");
+
+    let error =
+        jet::Compiler::read_package(&root).expect_err("package view must reject escaping config");
+    assert_eq!(error.code, "E0956");
+    assert_eq!(error.file, "package.jet");
+    assert!(
+        error.cause.contains("configs"),
+        "refusal must identify the rejected path declaration: {error:?}"
+    );
+}
+
 #[test]
 fn compiler_cli_unknown_operation_uses_structured_error_object() {
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))

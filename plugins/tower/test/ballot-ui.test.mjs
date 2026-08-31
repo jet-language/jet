@@ -43,3 +43,13 @@ test('Now urgency counts ballots while completed cards use a blue count', () => 
   assert.doesNotMatch(js, /id: 'now'.*count: \(\) => duties\(\)\.length/);
   assert.match(css, /\.queue__done-count \{[^}]*color: var\(--blue\)/);
 });
+
+test('Board search and Recent flatten like a milestone filter', () => {
+  assert.match(js, /function searchFilterBar/);
+  assert.match(js, /function recentFilterBar/);
+  assert.match(js, /id="radar-recent"/);
+  assert.match(js, /data-docs-sort="created"/);
+  assert.match(js, /created \$\{esc\(dateDay\(c\.created\)\)\}/);
+  assert.match(css, /\.card__dates \{/);
+  assert.match(css, /\.docs__dates \{/);
+});

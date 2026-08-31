@@ -1212,6 +1212,15 @@ pub(crate) fn check_declared_rule_facts(
         HashMap::new();
     for application in facts {
         let Some(declaration) = vocabulary.declaration(&application.marker.name) else {
+            // D-ADOPT-GUEST1=A: the guest C-FFI boundary markers
+            // (`#Import(c)` fn, `#Import module`) are sema's guest surface,
+            // not Prelude marker rules, exactly as `check_marker_vocabulary`
+            // already treats them. Without this, the `#Import module` form
+            // that `#Extern` retired in its favor reads as an unregistered
+            // marker here even though its sibling check accepts it.
+            if super::Guest::is_guest_marker_at(&application.marker, application.site) {
+                continue;
+            }
             if crate::Policy::applied_rule(&application.marker.name).is_none()
                 && !matches!(
                     application.site,

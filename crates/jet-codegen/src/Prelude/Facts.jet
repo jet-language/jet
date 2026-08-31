@@ -48,3 +48,20 @@ fact Maturity(@holds: .Value, @safe: .None, @gates: [], @decision: "D-MARK-META1
 fact StructureLiveness(@name: "Structure.Liveness", @holds: .Build, @safe: .Gain, @gates: ["_name"], @decision: "D-STRUCT-PLANE1")
 fact StructureLifecycle(@name: "Structure.Lifecycle", @holds: .Build, @safe: .Shrink, @gates: ["policy allow"], @decision: "D-STRUCT-PLANE1")
 fact StructureImportEdge(@name: "Structure.ImportEdge", @holds: .Build, @safe: .Shrink, @gates: ["manifest rule edit"], @decision: "D-STRUCT-PLANE1")
+// D-FREESTAND-FACTS1=A: target availability is a closed Build fact plane.
+// A present row names a provider and digest; `absent` remains explicit. The
+// semantic effect and Authority planes stay separate from machine provision.
+fact TargetMemory(@name: "Target.Memory", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-FACTS1")
+fact TargetMmio(@name: "Target.MMIO", @holds: .Build, @safe: .Gain, @gates: [provider, digest, Unsafe], @decision: "D-FREESTAND-FACTS1")
+fact TargetAllocator(@name: "Target.Allocator", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-TARGET-ALLOC1")
+fact TargetPanic(@name: "Target.Panic", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-TARGET-ALLOC1")
+fact TargetStartup(@name: "Target.Startup", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-START1")
+fact TargetIoRead(@name: "IO.Read", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SINK1")
+fact TargetIoWrite(@name: "IO.Write", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SINK1")
+fact TargetPanicReport(@name: "Panic.Report", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SINK1")
+fact TargetTimeWall(@name: "Time.Wall", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-TIME1")
+fact TargetTimeMonotonic(@name: "Time.Monotonic", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-TIME1")
+fact TargetTimeZoneData(@name: "Time.ZoneData", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-TIME1")
+fact TargetTimeSleep(@name: "Time.Sleep", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-TIME1")
+fact TargetEntropy(@name: "Rand.Entropy", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-FACTS1")
+fact TargetScheduler(@name: "Target.Scheduler", @holds: .Build, @safe: .Gain, @gates: [provider, digest], @decision: "D-FREESTAND-SCHED1")

@@ -130,7 +130,7 @@ pub fn ast_cache_key(
 ) -> String {
     let mut data = canonical_bytes(bundle);
     data.push(0);
-    data.extend_from_slice(&facts.artifact_identity_bytes());
+    facts.append_artifact_identity_bytes(&mut data);
     data.push(0);
     data.extend_from_slice(profile_tag.as_bytes());
     data.push(0);

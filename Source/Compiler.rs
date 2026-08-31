@@ -26,11 +26,13 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// retain lock-model order. Profile sets and collision maps use key order;
 /// profile `extends`, `packages`, and `sources` retain declaration order.
 /// Optional source fields are `Option<String>` and collections are present as
-/// empty lists when the model has no declarations. Every operation returns a
-/// `Result` whose failure is `PackageReadError { code, file, message, cause }`;
-/// the Jet carrier is `CompilerPackageError` with the same four fields. The
-/// retained model records no per-field source positions, so the views expose
-/// no fabricated position data.
+/// empty lists when the model has no declarations. Dependency source strings
+/// redact Git URL credentials and URL parameters; files are read only through
+/// the pinned package-root authority. Every operation returns a `Result` whose
+/// failure is `PackageReadError { code, file, message, cause }`; the Jet
+/// carrier is `CompilerPackageError` with the same four fields. The retained
+/// model records no per-field source positions, so the views expose no
+/// fabricated position data.
 pub const PACKAGE_MODEL_SCHEMA_VERSION: u32 = 1;
 
 fn compiler_error_value(code: &str, message: impl Into<String>, span: Span) -> CtValue {

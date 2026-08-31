@@ -400,188 +400,584 @@ fn missing_project_context_diagnostic(path: &Path) -> Option<Diagnostic> {
 fn explicit_file_proof_rows() -> Vec<CheckProofRow> {
     vec![
         CheckProofRow {
+            output: "not-applicable".to_string(),
             name: "entry resolution",
             status: "not applicable",
             detail: "explicit-file checks resolve only the named source file".to_string(),
             diagnostic: "E2389",
         },
         CheckProofRow {
+            output: "not-applicable".to_string(),
             name: "module graph",
             status: "not applicable",
-            detail: "explicit-file checks keep semantic scope and do not promise a project graph".to_string(),
+            detail: "explicit-file checks keep semantic scope and do not promise a project graph"
+                .to_string(),
             diagnostic: "E2390",
         },
         CheckProofRow {
+            output: "not-applicable".to_string(),
             name: "Core closure",
             status: "not applicable",
-            detail: "explicit-file checks keep semantic scope and do not promise project Core closure".to_string(),
+            detail: "explicit-file checks keep semantic scope and do not promise project Core closure"
+                .to_string(),
             diagnostic: "E2391",
         },
         CheckProofRow {
+            output: "not-applicable".to_string(),
             name: "tier lowering",
             status: "not applicable",
-            detail: "explicit-file checks keep semantic scope and do not promise project tier lowering".to_string(),
+            detail: "explicit-file checks keep semantic scope and do not promise project tier lowering"
+                .to_string(),
             diagnostic: "E2392",
         },
     ]
 }
 
-fn project_proof_rows(
-    bundle: &jet::AST::ProgramBundle,
-    entry_fn: Option<&str>,
-    target: Option<&str>,
-) -> (Vec<CheckProofRow>, Vec<Diagnostic>) {
-    let mut rows = Vec::new();
-    let mut diagnostics = Vec::new();
-    // Entry overrides are normalized by the driver into the canonical runtime
-    // wrapper. Prove that wrapper in the actual entry module; a same-named
-    // function in an imported module is not the callable the adapters receive.
-    let selected_name = jet::Codegen::ENTRY_FN;
-    let selected = bundle.modules.get(bundle.entry).and_then(|module| {
-        module.items.iter().find_map(|item| match item {
-            jet::AST::Item::Func(function) if function.name == selected_name => {
-                Some((bundle.entry, function))
-            }
-            _ => None,
-        })
-    });
-    let entry_detail = match selected.as_ref() {
-        Some((module, function)) if entry_fn.is_some_and(|name| name != selected_name) => format!(
-            "requested `{}` resolved through selected `{selected_name}` in {} ({})",
-            entry_fn.unwrap_or_default(),
-            bundle.modules[*module].display,
-            function.span.start,
-        ),
-        Some((module, function)) => format!(
-            "selected `{selected_name}` in {} ({})",
-            bundle.modules[*module].display,
-            function.span.start,
-        ),
-        None => format!("selected `{selected_name}` is absent from the checked module graph"),
-    };
-    push_proof_row(
-        &mut rows,
-        &mut diagnostics,
-        "entry resolution",
-        selected.is_some().then_some("proven").unwrap_or("compiler defect"),
-        entry_detail,
-        "E2389",
-    );
+fn is_project_runnable_output(kind: jet::AST::OutputKind) -> bool {
+    matches!(
+        kind,
+        jet::AST::OutputKind::Executable | jet::AST::OutputKind::Service
+    )
+}
 
-    let import_edges = bundle
-        .modules
-        .iter()
-        .map(|module| module.imports.len())
-        .sum::<usize>();
-    push_proof_row(
-        &mut rows,
-        &mut diagnostics,
-        "module graph",
-        (!bundle.modules.is_empty())
+fn normalize_output_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn output_path_key(path: &Path) -> String {
+    normalize_output_path(path).to_string_lossy().into_owned()
+}
+
+fn source_line(source: &str, offset: usize) -> usize {
+    let end = offset.min(source.len());
+    1 + source
+        .get(..end)
+        .unwrap_or_default()
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+}
+
+fn project_output_specs(
+    bundle: &jet::AST::ProgramBundle,
+    package_facts: Option<&jet::Package::PackageFacts>,
+) -> (Vec<ProjectOutputSpec>, Vec<Diagnostic>) {
+    let mut specs = std::collections::BTreeMap::<String, ProjectOutputSpec>::new();
+    let mut diagnostics = Vec::new();
+
+    if let Some(package_facts) = package_facts {
+        for (address, output) in &package_facts.outputs {
+            if !output.kind.is_runnable() {
+                continue;
+            }
+            let path = match package_facts.entry_path(&bundle.project_root, output) {
+                Ok(path) => path.map(|path| normalize_output_path(&path)),
+                Err(error) => {
+                    diagnostics.push(Diagnostic::from_row(
+                        "E2389",
+                        &[(
+                            "detail",
+                            &format!("output `{address}` entry resolution failed: {error}"),
+                        )],
+                        None,
+                    ));
+                    None
+                }
+            };
+            specs.insert(
+                address.clone(),
+                ProjectOutputSpec {
+                    address: address.clone(),
+                    name: output.name.clone(),
+                    path,
+                },
+            );
+        }
+    }
+
+    for module in &bundle.modules {
+        for item in &module.items {
+            let jet::AST::Item::Const(constant) = item else {
+                continue;
+            };
+            let Some(output) = constant
+                .resolved_output
+                .as_ref()
+                .filter(|output| is_project_runnable_output(output.kind))
+            else {
+                continue;
+            };
+            let module_path = normalize_output_path(&module.path);
+            specs
+                .entry(output.address.clone())
+                .and_modify(|spec| {
+                    if spec.path.is_none() {
+                        spec.path = Some(module_path.clone());
+                    }
+                    if spec.name.is_empty() {
+                        spec.name = output.output_name.clone();
+                    }
+                })
+                .or_insert_with(|| ProjectOutputSpec {
+                    address: output.address.clone(),
+                    name: output.output_name.clone(),
+                    path: Some(module_path.clone()),
+                });
+        }
+    }
+
+    if specs.is_empty() {
+        let entry_module = bundle.modules.get(bundle.entry);
+        let entry_path = entry_module.map(|module| normalize_output_path(&module.path));
+        let has_run = entry_module.is_some_and(|module| {
+            module.items.iter().any(|item| {
+                matches!(
+                    item,
+                    jet::AST::Item::Func(function)
+                        if function.name == jet::Codegen::ENTRY_FN
+                )
+            })
+        });
+        specs.insert(
+            if has_run {
+                "run".to_string()
+            } else {
+                "default".to_string()
+            },
+            ProjectOutputSpec {
+                address: if has_run {
+                    "run".to_string()
+                } else {
+                    "default".to_string()
+                },
+                name: jet::Codegen::ENTRY_FN.to_string(),
+                path: entry_path,
+            },
+        );
+    }
+
+    (specs.into_values().collect(), diagnostics)
+}
+
+fn project_output_groups(specs: &[ProjectOutputSpec]) -> Vec<ProjectOutputGroup> {
+    let mut groups = std::collections::BTreeMap::<String, ProjectOutputGroup>::new();
+    for spec in specs {
+        let key = spec
+            .path
+            .as_deref()
+            .map(output_path_key)
+            .unwrap_or_else(|| format!("<unresolved:{}>", spec.address));
+        groups
+            .entry(key.clone())
+            .or_insert_with(|| ProjectOutputGroup {
+                key,
+                path: spec.path.clone(),
+                addresses: Vec::new(),
+            })
+            .addresses
+            .push(spec.address.clone());
+    }
+    groups.into_values().collect()
+}
+
+#[derive(Clone, Debug)]
+struct ProjectBundleProof {
+    module_status: &'static str,
+    module_detail: String,
+    core_status: &'static str,
+    core_detail: String,
+    tier_status: &'static str,
+    tier_detail: String,
+}
+
+impl ProjectBundleProof {
+    fn from_bundle(bundle: &jet::AST::ProgramBundle, target: Option<&str>) -> Self {
+        let import_edges = bundle
+            .modules
+            .iter()
+            .map(|module| module.imports.len())
+            .sum::<usize>();
+        let module_status = (!bundle.modules.is_empty())
             .then_some("proven")
-            .unwrap_or("compiler defect"),
-        format!(
+            .unwrap_or("compiler defect");
+        let module_detail = format!(
             "{} loaded module(s), {} resolved import edge(s); project root {}",
             bundle.modules.len(),
             import_edges,
             bundle.project_root.display(),
-        ),
-        "E2390",
-    );
+        );
 
-    let core = jet::Codegen::core_closure_proof(bundle, false);
-    let used_core = if core.used_calls.is_empty() {
-        "none".to_string()
-    } else {
-        core.used_calls.join(",")
-    };
-    let synthesized_core = if core.synthesized_calls.is_empty() {
-        "none".to_string()
-    } else {
-        core.synthesized_calls.join(",")
-    };
-    push_proof_row(
-        &mut rows,
-        &mut diagnostics,
-        "Core closure",
-        "proven",
-        format!(
+        let core = jet::Codegen::core_closure_proof(bundle, false);
+        let used_core = if core.used_calls.is_empty() {
+            "none".to_string()
+        } else {
+            core.used_calls.join(",")
+        };
+        let synthesized_core = if core.synthesized_calls.is_empty() {
+            "none".to_string()
+        } else {
+            core.synthesized_calls.join(",")
+        };
+        let core_detail = format!(
             "used=[{used_core}] synthesized=[{synthesized_core}] routes=[{}] fingerprint={}",
             core.adapter_routes.join(","),
             core.fingerprint,
-        ),
-        "E2391",
-    );
+        );
 
-    let (tier_status, tier_detail) = if target == Some(jet::Syntax::BUILD_TARGET_WEB) {
-        let misses = jet::Codegen::validate_web_tir_support(bundle, None);
-        if misses.is_empty() {
-            ("proven", "web=proven; structured web-TIR validator".to_string())
-        } else {
+        let (tier_status, tier_detail) = if target == Some(jet::Syntax::BUILD_TARGET_WEB) {
+            let misses = jet::Codegen::validate_web_tir_support(bundle, None);
+            if misses.is_empty() {
+                ("proven", "web=proven; structured web-TIR validator".to_string())
+            } else {
+                (
+                    "compiler defect",
+                    format!(
+                        "web=compiler defect; {}",
+                        misses
+                            .iter()
+                            .map(|miss| format!(
+                                "{} at {}:{}",
+                                miss.func_name,
+                                bundle
+                                    .modules
+                                    .get(bundle.entry)
+                                    .map(|module| module.display.as_str())
+                                    .unwrap_or("<unknown>"),
+                                source_line(
+                                    &bundle
+                                        .modules
+                                        .get(bundle.entry)
+                                        .map(|module| module.source.as_str())
+                                        .unwrap_or_default(),
+                                    miss.span.start,
+                                )
+                            ))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                )
+            }
+        } else if target.is_some() {
             (
-                "compiler defect",
+                "toolchain unavailable",
                 format!(
-                    "web=compiler defect; {}",
-                    misses
-                        .iter()
-                        .map(|miss| format!("{} at {}..{}", miss.func_name, miss.span.start, miss.span.end))
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    "native target `{}` needs the build toolchain; check does not invoke rustc",
+                    target.unwrap_or_default()
                 ),
             )
+        } else {
+            let misses = jet::Codegen::TIR::validate_tir_support(bundle);
+            if misses.is_empty() {
+                (
+                    "proven",
+                    "AOT=proven; JIT=proven; interpreter=shared checked TIR route".to_string(),
+                )
+            } else {
+                (
+                    "compiler defect",
+                    misses
+                        .iter()
+                        .map(|miss| {
+                            format!("{} {}: {}", miss.tier, miss.callable, miss.reason)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; "),
+                )
+            }
+        };
+
+        Self {
+            module_status,
+            module_detail,
+            core_status: "proven",
+            core_detail,
+            tier_status,
+            tier_detail,
         }
-    } else if target.is_some() {
-        (
-            "toolchain unavailable",
-            format!(
-                "native target `{}` needs the build toolchain; check does not invoke rustc",
-                target.unwrap_or_default()
-            ),
-        )
+    }
+}
+
+fn project_output_location(
+    bundle: &jet::AST::ProgramBundle,
+    output: &jet::AST::ResolvedOutput,
+) -> Option<String> {
+    let module = bundle.modules.get(output.module)?;
+    Some(format!(
+        "{}:{}",
+        module.display,
+        source_line(&module.source, output.definition.start)
+    ))
+}
+
+fn legacy_entry_location(bundle: &jet::AST::ProgramBundle) -> Option<String> {
+    let module = bundle.modules.get(bundle.entry)?;
+    let function = module.items.iter().find_map(|item| match item {
+        jet::AST::Item::Func(function) if function.name == jet::Codegen::ENTRY_FN => {
+            Some(function)
+        }
+        _ => None,
+    })?;
+    Some(format!(
+        "{}:{}",
+        module.display,
+        source_line(&module.source, function.span.start)
+    ))
+}
+
+fn output_proof_rows(
+    bundle: &jet::AST::ProgramBundle,
+    spec: &ProjectOutputSpec,
+    entry_fn: Option<&str>,
+    shared: &ProjectBundleProof,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<CheckProofRow> {
+    let resolved = bundle
+        .modules
+        .iter()
+        .flat_map(|module| &module.items)
+        .find_map(|item| {
+            let jet::AST::Item::Const(constant) = item else {
+                return None;
+            };
+            constant
+                .resolved_output
+                .as_ref()
+                .filter(|output| {
+                    output.address == spec.address && is_project_runnable_output(output.kind)
+                })
+        });
+    let location = resolved
+        .and_then(|output| project_output_location(bundle, output))
+        .or_else(|| {
+            if matches!(spec.address.as_str(), "run" | "default") {
+                legacy_entry_location(bundle)
+            } else {
+                None
+            }
+        });
+    let output_name = if spec.name.is_empty() {
+        spec.address.as_str()
     } else {
-        let misses = jet::Codegen::TIR::validate_tir_support(bundle);
-        if misses.is_empty() {
-            (
-                "proven",
-                "AOT=proven; JIT=proven; interpreter=shared checked TIR route".to_string(),
-            )
-        } else {
-            (
-                "compiler defect",
-                format!(
-                    "{}",
-                    misses
-                        .iter()
-                        .map(|miss| format!(
-                            "{} {}: {}",
-                            miss.tier, miss.callable, miss.reason
-                        ))
-                        .collect::<Vec<_>>()
-                        .join("; ")
-                ),
-            )
-        }
+        spec.name.as_str()
     };
+    let output_label = format!("{} `{}`", spec.address, output_name);
+    let entry_detail = match (resolved, location.as_deref()) {
+        (Some(_), Some(location)) => {
+            let requested = entry_fn
+                .filter(|name| *name != jet::Codegen::ENTRY_FN)
+                .map(|name| format!("; requested `{name}`"))
+                .unwrap_or_default();
+            format!("{output_label} resolved at {location}{requested}")
+        }
+        _ => format!(
+            "{output_label} is absent from the checked module graph ({}:1)",
+            spec.path
+                .as_deref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<unknown>".to_string())
+        ),
+    };
+    let mut rows = Vec::new();
+    let Some(location) = location else {
+        for (name, diagnostic, detail) in [
+            (
+                "entry resolution",
+                "E2389",
+                entry_detail.clone(),
+            ),
+            (
+                "module graph",
+                "E2390",
+                format!("{output_label} has no resolved source location"),
+            ),
+            (
+                "Core closure",
+                "E2391",
+                format!("{output_label} has no resolved source location"),
+            ),
+            (
+                "tier lowering",
+                "E2392",
+                format!("{output_label} has no resolved source location"),
+            ),
+        ] {
+            push_proof_row(
+                &mut rows,
+                diagnostics,
+                &spec.address,
+                name,
+                "compiler defect",
+                detail,
+                diagnostic,
+            );
+        }
+        return rows;
+    };
+
     push_proof_row(
         &mut rows,
-        &mut diagnostics,
+        diagnostics,
+        &spec.address,
+        "entry resolution",
+        "proven",
+        entry_detail,
+        "E2389",
+    );
+    push_proof_row(
+        &mut rows,
+        diagnostics,
+        &spec.address,
+        "module graph",
+        shared.module_status,
+        format!("{}; entry={location}", shared.module_detail),
+        "E2390",
+    );
+    push_proof_row(
+        &mut rows,
+        diagnostics,
+        &spec.address,
+        "Core closure",
+        shared.core_status,
+        format!("{}; entry={location}", shared.core_detail),
+        "E2391",
+    );
+    push_proof_row(
+        &mut rows,
+        diagnostics,
+        &spec.address,
         "tier lowering",
-        tier_status,
-        tier_detail,
+        shared.tier_status,
+        format!("{}; entry={location}", shared.tier_detail),
         "E2392",
     );
+    rows
+}
+
+fn failed_output_rows(
+    spec: &ProjectOutputSpec,
+    reason: &str,
+) -> (Vec<CheckProofRow>, Vec<Diagnostic>) {
+    let location = spec
+        .path
+        .as_deref()
+        .map(|path| format!("{}:1", path.display()))
+        .unwrap_or_else(|| "<unknown>:1".to_string());
+    let detail = format!(
+        "output `{}` could not be checked at {location}: {reason}",
+        spec.address
+    );
+    let mut rows = Vec::new();
+    let mut diagnostics = Vec::new();
+    for (name, diagnostic) in [
+        ("entry resolution", "E2389"),
+        ("module graph", "E2390"),
+        ("Core closure", "E2391"),
+        ("tier lowering", "E2392"),
+    ] {
+        push_proof_row(
+            &mut rows,
+            &mut diagnostics,
+            &spec.address,
+            name,
+            "compiler defect",
+            detail.clone(),
+            diagnostic,
+        );
+    }
+    (rows, diagnostics)
+}
+fn project_proof_rows(
+    bundle: &jet::AST::ProgramBundle,
+    package_facts: Option<&jet::Package::PackageFacts>,
+    entry_fn: Option<&str>,
+    target: Option<&str>,
+    profile: &str,
+    setting_overrides: &std::collections::BTreeMap<String, String>,
+) -> (Vec<CheckProofRow>, Vec<Diagnostic>) {
+    let (specs, mut diagnostics) = project_output_specs(bundle, package_facts);
+    let groups = project_output_groups(&specs);
+    let primary_key = bundle
+        .modules
+        .get(bundle.entry)
+        .map(|module| output_path_key(&module.path));
+    let mut rows_by_output = std::collections::BTreeMap::<String, Vec<CheckProofRow>>::new();
+
+    for group in groups {
+        let mut checked_bundle = None;
+        let candidate = if primary_key.as_ref().is_some_and(|key| key == &group.key) {
+            Some(bundle)
+        } else if let Some(path) = group.path.as_deref() {
+            let path_string = path.to_string_lossy().into_owned();
+            let (check_diagnostics, bundle, _) = if setting_overrides.is_empty() {
+                jet::Driver::check_file_with_effect_facts_profile(
+                    &path_string,
+                    None,
+                    false,
+                    profile,
+                )
+            } else {
+                jet::Driver::check_file_with_effect_facts_and_settings(
+                    &path_string,
+                    None,
+                    false,
+                    setting_overrides,
+                )
+            };
+            diagnostics.extend(check_diagnostics);
+            checked_bundle = bundle;
+            checked_bundle.as_ref()
+        } else {
+            None
+        };
+
+        if let Some(candidate) = candidate {
+            let shared = ProjectBundleProof::from_bundle(candidate, target);
+            for address in group.addresses {
+                let Some(spec) = specs.iter().find(|spec| spec.address == address) else {
+                    continue;
+                };
+                rows_by_output.insert(
+                    address,
+                    output_proof_rows(candidate, spec, entry_fn, &shared, &mut diagnostics),
+                );
+            }
+        } else {
+            let reason = if group.path.is_some() {
+                "the output entry check returned no bundle"
+            } else {
+                "the manifest entry could not be resolved"
+            };
+            for address in group.addresses {
+                let Some(spec) = specs.iter().find(|spec| spec.address == address) else {
+                    continue;
+                };
+                let (rows, row_diagnostics) = failed_output_rows(spec, reason);
+                diagnostics.extend(row_diagnostics);
+                rows_by_output.insert(address, rows);
+            }
+        }
+    }
+
+    let mut rows = Vec::new();
+    for spec in specs {
+        if let Some(output_rows) = rows_by_output.remove(&spec.address) {
+            rows.extend(output_rows);
+        }
+    }
     (rows, diagnostics)
 }
 
 fn push_proof_row(
     rows: &mut Vec<CheckProofRow>,
     diagnostics: &mut Vec<Diagnostic>,
+    output: &str,
     name: &'static str,
     status: &'static str,
     detail: String,
     diagnostic: &'static str,
 ) {
     let row = CheckProofRow {
+        output: output.to_string(),
         name,
         status,
         detail,
@@ -603,7 +999,8 @@ pub(crate) fn check_result_json(check: &CheckResult) -> String {
         .iter()
         .map(|row| {
             format!(
-                "{{\"name\":\"{}\",\"status\":\"{}\",\"detail\":\"{}\",\"diagnostic\":\"{}\"}}",
+                "{{\"output\":\"{}\",\"name\":\"{}\",\"status\":\"{}\",\"detail\":\"{}\",\"diagnostic\":\"{}\"}}",
+                json_escape(&row.output),
                 json_escape(row.name),
                 json_escape(row.status),
                 json_escape(&row.detail),
@@ -648,8 +1045,8 @@ pub(crate) fn check_result_text(check: &CheckResult) -> String {
     for row in &check.proof_rows {
         let _ = writeln!(
             text,
-            "proof: {} [{}] {} (diagnostic={})",
-            row.name, row.status, row.detail, row.diagnostic,
+            "proof: output={} {} [{}] {} (diagnostic={})",
+            row.output, row.name, row.status, row.detail, row.diagnostic,
         );
     }
     text

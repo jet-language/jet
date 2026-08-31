@@ -3,9 +3,10 @@
 //! Internal model for embedded/freestanding builds. Validation errors stay data
 //! (not new user diagnostics) until a follow-up surface ballot lands. Hosted
 //! Jet keeps hidden defaults; selecting a no-OS machine exposes memory, linker,
-//! allocator, panic, volatile/MMIO, and audit facts.
+//! allocator, panic, startup, MMIO, clock, entropy, scheduler, byte-sink, and
+//! audit facts.
 
-use crate::RingLayer::{core_module_layer, core_usage_layer, RuntimeLayer};
+use crate::RingLayer::{classify_prelude_closure, RuntimeLayer};
 use std::fmt::Write;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +90,26 @@ impl TargetMachine {
             RuntimeLayer::Core
         }
     }
+    /// Return whether this machine supplies one explicit target capability.
+    /// Hosted defaults are available only on hosted machines; freestanding
+    /// profiles must name a provider for positive capabilities.
+    pub fn provides_capability(&self, capability: TargetCapability) -> bool {
+        let hosted = !self.no_os;
+        match capability {
+            TargetCapability::Mmio => self.mmio.provides(hosted),
+            TargetCapability::TimeWall => self.wall_clock.provides(hosted),
+            TargetCapability::TimeMonotonic => self.monotonic_clock.provides(hosted),
+            TargetCapability::TimeZoneData => self.zone_data.provides(hosted),
+            TargetCapability::TimeSleep => self.sleep.provides(hosted),
+            TargetCapability::Entropy => self.entropy.provides(hosted),
+            TargetCapability::Scheduler => self.scheduler.provides(hosted),
+            TargetCapability::IoRead => self.byte_sink.provides_read(hosted),
+            TargetCapability::IoWrite => self.byte_sink.provides_write(hosted),
+            TargetCapability::PanicReport => self.byte_sink.provides_report(hosted),
+            TargetCapability::Startup => self.startup.provides(hosted),
+        }
+    }
+
 
     pub fn validate(&self, usage: &TargetMachineUse) -> Vec<TargetMachineError> {
         let mut errors = Vec::new();
@@ -792,7 +813,7 @@ impl ProviderContract {
                 .is_some_and(|digest| !digest.trim().is_empty())
     }
 
-    fn audit_json(&self) -> String {
+    pub fn audit_json(&self) -> String {
         format!(
             "{{\"provider\":{},\"sha256\":{}}}",
             json_str(&self.provider),
@@ -834,7 +855,7 @@ impl ClockPolicy {
         hosted && matches!(self, Self::HostedDefault) || self.provider().is_some()
     }
 
-    fn audit_json(&self) -> String {
+    pub fn audit_json(&self) -> String {
         match self {
             Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
             Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
@@ -876,7 +897,7 @@ impl EntropyPolicy {
         hosted && matches!(self, Self::HostedDefault) || self.provider().is_some()
     }
 
-    fn audit_json(&self) -> String {
+    pub fn audit_json(&self) -> String {
         match self {
             Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
             Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
@@ -922,7 +943,7 @@ impl SchedulerPolicy {
         hosted && matches!(self, Self::HostedDefault) || self.provider().is_some()
     }
 
-    fn audit_json(&self) -> String {
+    pub fn audit_json(&self) -> String {
         match self {
             Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
             Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
@@ -971,7 +992,7 @@ impl MmioPolicy {
         hosted && matches!(self, Self::HostedDefault) || self.provider().is_some()
     }
 
-    fn audit_json(&self) -> String {
+    pub fn audit_json(&self) -> String {
         match self {
             Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
             Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
@@ -1030,7 +1051,7 @@ impl ByteSinkPolicy {
         }
     }
 
-    fn audit_json(&self) -> String {
+    pub fn audit_json(&self) -> String {
         match self {
             Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
             Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
@@ -1078,7 +1099,7 @@ impl StartupPolicy {
         hosted && matches!(self, Self::HostedDefault) || self.provider().is_some()
     }
 
-    fn audit_json(&self) -> String {
+    pub fn audit_json(&self) -> String {
         match self {
             Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
             Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
@@ -1124,17 +1145,17 @@ pub enum TargetCapability {
 impl TargetCapability {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Mmio => "MMIO",
+            Self::Mmio => "Target.MMIO",
             Self::TimeWall => "Time.Wall",
             Self::TimeMonotonic => "Time.Monotonic",
             Self::TimeZoneData => "Time.ZoneData",
             Self::TimeSleep => "Time.Sleep",
             Self::Entropy => "Rand.Entropy",
-            Self::Scheduler => "Scheduler",
+            Self::Scheduler => "Target.Scheduler",
             Self::IoRead => "IO.Read",
             Self::IoWrite => "IO.Write",
             Self::PanicReport => "Panic.Report",
-            Self::Startup => "Startup",
+            Self::Startup => "Target.Startup",
         }
     }
 }
@@ -1383,13 +1404,10 @@ fn validate_core_usage(
     }
 
     let available = machine.max_runtime_layer();
-    for api in &usage.core_apis {
-        let Some(required) = core_api_runtime_layer(api) else {
-            continue;
-        };
+    for (api, required) in classify_prelude_closure(usage.core_apis.iter()) {
         if required > available {
             errors.push(TargetMachineError::CoreApiUnavailable {
-                api: api.clone(),
+                api,
                 required,
                 available,
             });
@@ -1475,7 +1493,7 @@ fn validate_target_capabilities(
                 },
             );
         }
-        ByteSinkPolicy::Unspecified if machine.no_os => {
+        ByteSinkPolicy::Unspecified if machine.no_os && !machine.byte_sink.is_declared() => {
             push_unique(
                 errors,
                 TargetMachineError::MissingTargetCapability {
@@ -1584,21 +1602,6 @@ fn push_unique(errors: &mut Vec<TargetMachineError>, error: TargetMachineError) 
         errors.push(error);
     }
 }
-
-/// Sema adds closure markers for Core source/intrinsic reachability. They are
-/// codegen provenance, not additional machine capabilities; their direct API
-/// entries already carry the required runtime layer.
-fn core_api_runtime_layer(api: &str) -> Option<RuntimeLayer> {
-    if api.starts_with("__core_source::") || api.starts_with("__core_intrinsic::") {
-        return None;
-    }
-    Some(
-        core_usage_layer(api)
-            .or_else(|| core_module_layer(api))
-            .unwrap_or(RuntimeLayer::Std),
-    )
-}
-
 fn validate_mmio(
     machine: &TargetMachine,
     usage: &TargetMachineUse,
@@ -1669,15 +1672,11 @@ fn memory_json(regions: &[MemoryRegion]) -> String {
 
 fn unavailable_core_json(machine: &TargetMachine, usage: &TargetMachineUse) -> String {
     let available = machine.max_runtime_layer();
-    let mut unavailable = Vec::new();
-    for api in &usage.core_apis {
-        let Some(required) = core_api_runtime_layer(api) else {
-            continue;
-        };
-        if required > available {
-            unavailable.push(api.as_str());
-        }
-    }
+    let closure = classify_prelude_closure(usage.core_apis.iter());
+    let unavailable: Vec<&str> = closure
+        .iter()
+        .filter_map(|(api, required)| (*required > available).then_some(api.as_str()))
+        .collect();
     string_array_json(&unavailable)
 }
 
@@ -1719,6 +1718,12 @@ fn push_field(out: &mut String, key: &str, value: &str, first: bool) {
         out.push(',');
     }
     let _ = write!(out, "\"{key}\":{value}");
+}
+
+fn optional_contract_json(contract: Option<&ProviderContract>) -> String {
+    contract
+        .map(ProviderContract::audit_json)
+        .unwrap_or_else(|| "null".to_string())
 }
 
 fn json_str(value: &str) -> String {
@@ -1774,7 +1779,55 @@ mod tests {
             size: ByteSize::kib(16),
         };
         machine.panic = PanicPolicy::Abort;
+        machine.mmio = MmioPolicy::Provider {
+            provider: ProviderContract::new("test.mmio", "sha256:test-mmio"),
+        };
+        machine.wall_clock = ClockPolicy::None;
+        machine.monotonic_clock = ClockPolicy::Provider {
+            provider: ProviderContract::new("test.monotonic", "sha256:test-monotonic"),
+        };
+        machine.zone_data = ClockPolicy::None;
+        machine.sleep = ClockPolicy::Provider {
+            provider: ProviderContract::new("test.sleep", "sha256:test-sleep"),
+        };
+        machine.entropy = EntropyPolicy::None;
+        machine.scheduler = SchedulerPolicy::None;
+        machine.byte_sink = ByteSinkPolicy::None;
+        machine.startup = StartupPolicy::Generated {
+            provider: ProviderContract::new("test.startup", "sha256:test-startup"),
+        };
         machine
+    }
+
+    #[test]
+    fn target_capability_facts_validate_provider_contracts() {
+        let mut machine = valid_machine();
+        assert!(machine.provides_capability(TargetCapability::Mmio));
+        assert!(machine.provides_capability(TargetCapability::TimeMonotonic));
+        assert!(!machine.provides_capability(TargetCapability::TimeWall));
+        assert!(!machine.provides_capability(TargetCapability::Entropy));
+
+        let usage = TargetMachineUse {
+            required_capabilities: vec![
+                TargetCapability::TimeMonotonic,
+                TargetCapability::TimeWall,
+            ],
+            ..TargetMachineUse::default()
+        };
+        let errors = machine.validate(&usage);
+        assert!(errors.contains(&TargetMachineError::MissingTargetCapability {
+            capability: "Time.Wall".to_string(),
+        }));
+
+        machine.mmio = MmioPolicy::Provider {
+            provider: ProviderContract::new("", "not-a-digest"),
+        };
+        let errors = machine.validate(&TargetMachineUse::default());
+        assert!(errors.contains(&TargetMachineError::InvalidProviderContract {
+            capability: "MMIO".to_string(),
+            provider: String::new(),
+            sha256: "not-a-digest".to_string(),
+        }));
     }
 
     #[test]
@@ -1824,6 +1877,7 @@ mod tests {
                     reason: "GPIO register write".to_string(),
                 }),
             }],
+            required_capabilities: Vec::new(),
         };
         assert!(valid_machine().validate(&usage).is_empty());
     }
@@ -1857,6 +1911,7 @@ mod tests {
                 size: ByteSize::bytes(4),
                 unsafe_gate: None,
             }],
+            required_capabilities: Vec::new(),
         };
         let errors = machine.validate(&usage);
         assert!(errors.contains(&TargetMachineError::RamOverflow {
@@ -1894,7 +1949,7 @@ mod tests {
         let json = valid_machine().audit_json(&usage);
         assert_eq!(
             json,
-            "{\"name\":\"board.sensor_v1\",\"triple\":\"thumbv7em-none-eabihf\",\"environment\":\"no-os\",\"linker\":{\"kind\":\"generated\"},\"allocator\":{\"kind\":\"fixed\",\"region\":\"ram\",\"size_bytes\":16384},\"panic\":{\"kind\":\"abort\"},\"memory\":[{\"name\":\"flash\",\"origin\":134217728,\"size_bytes\":524288,\"kind\":\"flash\",\"access\":\"rx\"},{\"name\":\"ram\",\"origin\":536870912,\"size_bytes\":131072,\"kind\":\"ram\",\"access\":\"rw\"},{\"name\":\"gpio\",\"origin\":1073872896,\"size_bytes\":1024,\"kind\":\"mmio\",\"access\":\"rw\"}],\"unavailable_core_apis\":[\"core.files\"],\"mmio\":[{\"address\":1073872896,\"size_bytes\":4,\"unsafe_reason\":\"GPIO register write\"}],\"execution\":{\"aot\":true,\"dev\":false,\"jit\":false}}"
+            "{\"name\":\"board.sensor_v1\",\"triple\":\"thumbv7em-none-eabihf\",\"environment\":\"no-os\",\"linker\":{\"kind\":\"generated\"},\"allocator\":{\"kind\":\"fixed\",\"region\":\"ram\",\"size_bytes\":16384},\"panic\":{\"kind\":\"abort\"},\"memory\":[{\"name\":\"flash\",\"origin\":134217728,\"size_bytes\":524288,\"kind\":\"flash\",\"access\":\"rx\"},{\"name\":\"ram\",\"origin\":536870912,\"size_bytes\":131072,\"kind\":\"ram\",\"access\":\"rw\"},{\"name\":\"gpio\",\"origin\":1073872896,\"size_bytes\":1024,\"kind\":\"mmio\",\"access\":\"rw\"}],\"mmio_capability\":{\"kind\":\"provider\",\"contract\":{\"provider\":\"test.mmio\",\"sha256\":\"sha256:test-mmio\"}},\"time_wall\":{\"kind\":\"none\"},\"time_monotonic\":{\"kind\":\"provider\",\"contract\":{\"provider\":\"test.monotonic\",\"sha256\":\"sha256:test-monotonic\"}},\"time_zone_data\":{\"kind\":\"none\"},\"time_sleep\":{\"kind\":\"provider\",\"contract\":{\"provider\":\"test.sleep\",\"sha256\":\"sha256:test-sleep\"}},\"entropy\":{\"kind\":\"none\"},\"scheduler\":{\"kind\":\"none\"},\"byte_sink\":{\"kind\":\"none\"},\"startup\":{\"kind\":\"generated\",\"contract\":{\"provider\":\"test.startup\",\"sha256\":\"sha256:test-startup\"}},\"unavailable_core_apis\":[\"core.files\"],\"mmio\":[{\"address\":1073872896,\"size_bytes\":4,\"unsafe_reason\":\"GPIO register write\"}],\"execution\":{\"aot\":true,\"dev\":false,\"jit\":false}}"
         );
     }
 

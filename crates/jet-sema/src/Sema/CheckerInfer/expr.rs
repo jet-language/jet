@@ -18,11 +18,26 @@ use jet_foundation::Prelude::Target;
 use std::collections::HashSet;
 
 fn field_path(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => Some(name.clone()),
-        Expr::Field(base, field, _) => Some(format!("{}.{}", field_path(base)?, field)),
-        _ => None,
+    fn append_field_path(expr: &Expr, path: &mut String) -> bool {
+        match expr {
+            Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => {
+                path.push_str(name);
+                true
+            }
+            Expr::Field(base, field, _) => {
+                if !append_field_path(base, path) {
+                    return false;
+                }
+                path.push('.');
+                path.push_str(field);
+                true
+            }
+            _ => false,
+        }
     }
+
+    let mut path = String::new();
+    append_field_path(expr, &mut path).then_some(path)
 }
 
 const BARE_MEMBER_SUBJECT: &str = "__jet_subject";

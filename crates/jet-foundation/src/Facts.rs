@@ -65,20 +65,27 @@ impl TargetDossier {
         }
     }
 
-    /// Canonical bytes for the target dossier portion of an artifact key.
+    /// Append canonical bytes for the target dossier portion of an artifact
+    /// key.
     ///
     /// Length framing is intentional: it keeps field boundaries unambiguous,
     /// so identities such as `("ab", "c")` cannot collide with `("a", "bc")`.
-    pub fn cache_bytes(&self, target_triple: &str) -> Vec<u8> {
-        let mut bytes = b"jet-target-dossier-v1\0".to_vec();
+    pub fn append_cache_bytes(&self, target_triple: &str, bytes: &mut Vec<u8>) {
+        bytes.extend_from_slice(b"jet-target-dossier-v1\0");
         for value in [
             target_triple,
             self.layer.as_str(),
             self.provider_identity.as_str(),
             self.closure_identity.as_str(),
         ] {
-            append_cache_frame(&mut bytes, value.as_bytes());
+            append_cache_frame(bytes, value.as_bytes());
         }
+    }
+
+    /// Canonical bytes for the target dossier portion of an artifact key.
+    pub fn cache_bytes(&self, target_triple: &str) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        self.append_cache_bytes(target_triple, &mut bytes);
         bytes
     }
 }
@@ -170,9 +177,17 @@ impl BuildFactSnapshot {
         self
     }
 
+    /// Append the canonical target identity to an existing cache-key buffer.
+    pub fn append_artifact_identity_bytes(&self, bytes: &mut Vec<u8>) {
+        self.target_dossier
+            .append_cache_bytes(&self.target_triple, bytes);
+    }
+
     /// Canonical target identity bytes for artifact and runtime cache keys.
     pub fn artifact_identity_bytes(&self) -> Vec<u8> {
-        self.target_dossier.cache_bytes(&self.target_triple)
+        let mut bytes = Vec::new();
+        self.append_artifact_identity_bytes(&mut bytes);
+        bytes
     }
 
     pub fn contribution(&self, name: &str) -> Option<&crate::Policy::EffectiveFact> {

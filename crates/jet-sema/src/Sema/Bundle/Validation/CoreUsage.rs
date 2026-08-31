@@ -61,6 +61,12 @@ pub(crate) fn expand_core_reachable_closure(used: &mut HashSet<String>) {
             ));
         }
     }
+
+    // D-FREESTAND-PRELUDE1=A: source reachability is the complete semantic
+    // Prelude closure, not only the direct module/helper roots. Keep this
+    // expansion idempotent because completion calls it again after late
+    // compiler-generated roots are added.
+    jet_foundation::RingLayer::expand_prelude_closure(used);
 }
 
 pub(crate) fn collect_used_core(
@@ -800,7 +806,8 @@ fn is_http_nominal_type(name: &str) -> bool {
     )
 }
 
-/// Bump inferred layer from emitted helper usage and enforce ceiling.
+/// Bump inferred layer from the complete emitted Prelude closure and enforce
+/// the optional runtime ceiling before code generation.
 pub(crate) fn apply_helper_layer_inference(
     bundle: &mut ProgramBundle,
     states: &[ModuleState],
@@ -811,27 +818,23 @@ pub(crate) fn apply_helper_layer_inference(
         .iter()
         .flat_map(|st| st.core_imports.iter().map(|(a, m)| (a.clone(), m.clone())))
         .collect();
-    for usage in &bundle.used_core {
-        if is_core_closure_marker(usage) {
-            continue;
-        }
-        let Some(mod_layer) = crate::Syntax::core_usage_layer(usage) else {
-            continue;
-        };
-        if mod_layer > bundle.inferred_layer {
-            bundle.inferred_layer = mod_layer;
+    let closure =
+        jet_foundation::RingLayer::classify_prelude_closure(bundle.used_core.iter());
+    for (usage, required) in closure {
+        if required > bundle.inferred_layer {
+            bundle.inferred_layer = required;
         }
         let Some(ceiling) = bundle.layer_ceiling else {
             continue;
         };
-        if mod_layer <= ceiling {
+        if required <= ceiling {
             continue;
         }
-        let span = usage_spans.get(usage).copied();
-        let chain = helper_import_chain(usage, &core_imports);
+        let span = usage_spans.get(&usage).copied();
+        let chain = helper_import_chain(&usage, &core_imports);
         diags.push(crate::Syntax::layer_ceiling_exceeded(
-            usage,
-            mod_layer,
+            &usage,
+            required,
             ceiling,
             span,
             Some(&chain),
